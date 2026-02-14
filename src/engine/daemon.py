@@ -26,13 +26,14 @@ def load_config(config_path: Optional[str] = None) -> dict:
         path = "config/config.yaml.example"
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
-    # Env overrides
-    if os.environ.get("IB_HOST"):
-        cfg.setdefault("ib", {})["host"] = os.environ["IB_HOST"]
-    if os.environ.get("IB_PORT"):
-        cfg.setdefault("ib", {})["port"] = int(os.environ["IB_PORT"])
-    if os.environ.get("IB_CLIENT_ID"):
-        cfg.setdefault("ib", {})["client_id"] = int(os.environ["IB_CLIENT_ID"])
+    # Env overrides (only when config does not explicitly set the value)
+    ib_cfg = cfg.setdefault("ib", {})
+    if os.environ.get("IB_HOST") and not ib_cfg.get("host"):
+        ib_cfg["host"] = os.environ["IB_HOST"]
+    if os.environ.get("IB_PORT") and ib_cfg.get("port") is None:
+        ib_cfg["port"] = int(os.environ["IB_PORT"])
+    if os.environ.get("IB_CLIENT_ID") and ib_cfg.get("client_id") is None:
+        ib_cfg["client_id"] = int(os.environ["IB_CLIENT_ID"])
     return cfg
 
 

@@ -3,7 +3,7 @@
 # IB connection (env overrides: IB_HOST, IB_PORT, IB_CLIENT_ID)
 ib:
   host: "127.0.0.1"
-  port: 4001
+  port: 4002
   client_id: 1
 
 # Single underlying (MVP: NVDA only)
