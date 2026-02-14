@@ -6,8 +6,10 @@ import logging
 import os
 import sys
 
-# Add project root so "src" and "config" are resolvable
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Project root: always resolve relative to script location, not cwd
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PROJECT_ROOT)
+os.chdir(_PROJECT_ROOT)  # Ensure config paths resolve from project root
 
 # ANSI color codes
 _RESET = "\033[0m"
@@ -36,7 +38,7 @@ class ColoredFormatter(logging.Formatter):
         return super().format(record)
 
 
-def setup_logging() -> None:
+def setup_logging(debug: bool = False) -> None:
     """Configure colorful logging with distinct styles per level."""
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(
@@ -47,13 +49,24 @@ def setup_logging() -> None:
     )
     logging.root.handlers.clear()
     logging.root.addHandler(handler)
-    logging.root.setLevel(logging.INFO)
+    level = logging.DEBUG if debug else logging.INFO
+    logging.root.setLevel(level)
+    if debug:
+        logging.getLogger("ib_insync").setLevel(logging.DEBUG)
 
-
-setup_logging()
-
-from src.engine.daemon import run_daemon
 
 if __name__ == "__main__":
-    config_path = sys.argv[1] if len(sys.argv) > 1 else None
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if "--debug" in sys.argv:
+        setup_logging(debug=True)
+    else:
+        setup_logging(debug=False)
+
+    from src.engine.daemon import run_daemon
+
+    config_path = args[0] if args else None
+    if config_path and not os.path.isabs(config_path):
+        config_path = os.path.join(_PROJECT_ROOT, config_path)
+    elif config_path is None:
+        config_path = os.path.join(_PROJECT_ROOT, "config", "config.yaml")
     asyncio.run(run_daemon(config_path))

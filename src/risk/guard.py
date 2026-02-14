@@ -122,3 +122,32 @@ class RiskGuard:
         self._daily_hedge_count += 1
         import time
         self._last_hedge_time = time.time()
+
+    def update_config(
+        self,
+        cooldown_sec: Optional[int] = None,
+        max_daily_hedge_count: Optional[int] = None,
+        max_position_shares: Optional[int] = None,
+        max_daily_loss_usd: Optional[float] = None,
+        earnings_dates: Optional[List[str]] = None,
+        blackout_days_before: Optional[int] = None,
+        blackout_days_after: Optional[int] = None,
+        trading_hours_only: Optional[bool] = None,
+    ) -> None:
+        """Update config from hot-reload (only non-None values)."""
+        if cooldown_sec is not None:
+            self.cooldown_sec = cooldown_sec
+        if max_daily_hedge_count is not None:
+            self.max_daily_hedge_count = max_daily_hedge_count
+        if max_position_shares is not None:
+            self.max_position_shares = max_position_shares
+        if max_daily_loss_usd is not None:
+            self.max_daily_loss_usd = max_daily_loss_usd
+        if earnings_dates is not None:
+            self.earnings_dates = [d for d in earnings_dates if d]
+        if blackout_days_before is not None:
+            self.blackout_days_before = blackout_days_before
+        if blackout_days_after is not None:
+            self.blackout_days_after = blackout_days_after
+        if trading_hours_only is not None:
+            self.trading_hours_only = trading_hours_only

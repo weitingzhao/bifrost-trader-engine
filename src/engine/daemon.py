@@ -19,11 +19,12 @@ from src.strategy.gamma_scalper import gamma_scalper_hedge
 logger = logging.getLogger(__name__)
 
 
-def load_config(config_path: Optional[str] = None) -> dict:
-    """Load YAML config with env overrides for IB."""
+def load_config(config_path: Optional[str] = None) -> tuple[dict, str]:
+    """Load YAML config with env overrides for IB. Returns (config, resolved_path)."""
     path = config_path or os.environ.get("BIFROST_CONFIG", "config/config.yaml")
     if not Path(path).exists():
         path = "config/config.yaml.example"
+    path = str(Path(path).resolve())
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
     # Env overrides (only when config does not explicitly set the value)
@@ -34,19 +35,21 @@ def load_config(config_path: Optional[str] = None) -> dict:
         ib_cfg["port"] = int(os.environ["IB_PORT"])
     if os.environ.get("IB_CLIENT_ID") and ib_cfg.get("client_id") is None:
         ib_cfg["client_id"] = int(os.environ["IB_CLIENT_ID"])
-    return cfg
+    return cfg, path
 
 
 class TradingDaemon:
     """Single-process event-driven gamma scalping daemon."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, config_path: Optional[str] = None):
         self.config = config
+        self._config_path = config_path
         ib_cfg = config.get("ib", {})
         self.connector = IBConnector(
             host=ib_cfg.get("host", "127.0.0.1"),
             port=ib_cfg.get("port", 4001),
             client_id=ib_cfg.get("client_id", 1),
+            connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
         self.state = TradingState()
         risk_cfg = config.get("risk", {})
@@ -70,6 +73,8 @@ class TradingDaemon:
         self._hedge_lock = asyncio.Lock()
         self._running = False
         self._heartbeat_interval = 10.0
+        self._config_reload_interval = 30.0
+        self._last_config_mtime: Optional[float] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def _on_ticker(self, ticker: Any) -> None:
@@ -174,21 +179,68 @@ class TradingDaemon:
             if self._running:
                 await self._maybe_hedge()
 
+    def _apply_reloaded_config(self, cfg: dict) -> None:
+        """Apply hot-reloadable config (IB host/port require restart)."""
+        self.config = cfg
+        self.structure = cfg.get("structure", self.structure)
+        self.hedge_cfg = cfg.get("hedge", self.hedge_cfg)
+        self.greeks_cfg = cfg.get("greeks", self.greeks_cfg)
+        risk_cfg = cfg.get("risk", {})
+        earn_cfg = cfg.get("earnings", {})
+        if "paper_trade" in risk_cfg:
+            self.paper_trade = risk_cfg["paper_trade"]
+        self.order_type = cfg.get("order", {}).get("order_type", self.order_type)
+        self.guard.update_config(
+            cooldown_sec=cfg.get("hedge", {}).get("cooldown_sec"),
+            max_daily_hedge_count=risk_cfg.get("max_daily_hedge_count"),
+            max_position_shares=risk_cfg.get("max_position_shares"),
+            max_daily_loss_usd=risk_cfg.get("max_daily_loss_usd"),
+            earnings_dates=earn_cfg.get("dates"),
+            blackout_days_before=earn_cfg.get("blackout_days_before"),
+            blackout_days_after=earn_cfg.get("blackout_days_after"),
+            trading_hours_only=risk_cfg.get("trading_hours_only"),
+        )
+
+    async def _config_reload_loop(self) -> None:
+        """Periodically check config file mtime and reload if changed."""
+        if not self._config_path or not Path(self._config_path).exists():
+            return
+        while self._running:
+            await asyncio.sleep(self._config_reload_interval)
+            if not self._running:
+                return
+            try:
+                mtime = Path(self._config_path).stat().st_mtime
+                if self._last_config_mtime is not None and mtime > self._last_config_mtime:
+                    cfg, _ = load_config(self._config_path)
+                    self._apply_reloaded_config(cfg)
+                    self._last_config_mtime = mtime
+                    logger.info("Config reloaded from %s", self._config_path)
+                elif self._last_config_mtime is None:
+                    self._last_config_mtime = mtime
+            except Exception as e:
+                logger.debug("Config reload check failed: %s", e)
+
     async def run(self) -> None:
         """Connect, subscribe, and run until stopped."""
         self._running = True
         self._loop = asyncio.get_running_loop()
+        logger.debug("Step 1: Connecting to IB...")
         ok = await self.connector.connect()
         if not ok:
             logger.error("Could not connect to IB; exiting")
             return
+        logger.debug("Step 2: Fetching positions...")
         await self._refresh_positions()
+        logger.debug("Step 3: Getting underlying price for %s...", self.symbol)
         spot = await self.connector.get_underlying_price(self.symbol)
         self.state.set_underlying_price(spot)
+        logger.debug("Step 4: Subscribing to ticker and positions...")
         self.connector.subscribe_ticker(self.symbol, self._on_ticker)
         self.connector.subscribe_positions(self._on_position_update)
         heartbeat_task = asyncio.create_task(self._heartbeat())
-        logger.info("Daemon running (symbol=%s, paper_trade=%s)", self.symbol, self.paper_trade)
+        config_reload_task = asyncio.create_task(self._config_reload_loop())
+        logger.info("Daemon running (symbol=%s, paper_trade=%s, config=%s)", self.symbol, self.paper_trade, self._config_path or "default")
         try:
             while self._running:
                 await asyncio.sleep(1.0)
@@ -197,8 +249,13 @@ class TradingDaemon:
         finally:
             self._running = False
             heartbeat_task.cancel()
+            config_reload_task.cancel()
             try:
                 await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await config_reload_task
             except asyncio.CancelledError:
                 pass
             await self.connector.disconnect()
@@ -209,6 +266,6 @@ class TradingDaemon:
 
 async def run_daemon(config_path: Optional[str] = None) -> None:
     """Load config and run the daemon."""
-    config = load_config(config_path)
-    daemon = TradingDaemon(config)
+    config, resolved_path = load_config(config_path)
+    daemon = TradingDaemon(config, config_path=resolved_path)
     await daemon.run()

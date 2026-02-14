@@ -3,8 +3,9 @@
 # IB connection (env overrides: IB_HOST, IB_PORT, IB_CLIENT_ID)
 ib:
   host: "127.0.0.1"
-  port: 4002
+  port: 7497
   client_id: 1
+  connect_timeout: 60   # seconds; increase for slow/remote connections (default 4)
 
 # Single underlying (MVP: NVDA only)
 symbol: "NVDA"

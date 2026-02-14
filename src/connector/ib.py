@@ -12,10 +12,17 @@ logger = logging.getLogger(__name__)
 class IBConnector:
     """Minimal IB connector for gamma scalping daemon."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 4001, client_id: int = 1):
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 4001,
+        client_id: int = 1,
+        connect_timeout: float = 60.0,
+    ):
         self.host = host
         self.port = port
         self.client_id = client_id
+        self.connect_timeout = connect_timeout
         self.ib = IB()
         self._connected = False
         self._stock_contract: Optional[Stock] = None
@@ -32,7 +39,13 @@ class IBConnector:
         if self.is_connected:
             return True
         try:
-            await self.ib.connectAsync(self.host, self.port, clientId=self.client_id)
+            logger.debug("Connecting to IB %s:%s clientId=%s timeout=%.0fs", self.host, self.port, self.client_id, self.connect_timeout)
+            await self.ib.connectAsync(
+                self.host,
+                self.port,
+                clientId=self.client_id,
+                timeout=self.connect_timeout,
+            )
             self._connected = True
             logger.info("Connected to IB %s:%s clientId=%s", self.host, self.port, self.client_id)
             return True
