@@ -274,32 +274,37 @@ class TradingDaemon:
                 print("[HEARTBEAT] Woke up, running maybe_hedge()...")
                 await self._maybe_hedge()
 
-    async def run(self) -> None:
-        """Connect, subscribe, and run until stopped."""
-        self._loop = asyncio.get_running_loop()
+    # --- State handlers: each runs its logic and returns the next state ---
 
-        self._state_machine.transition(DaemonState.CONNECTING)
-        logger.debug("Step 1: Connecting to IB...")
+    async def _handle_idle(self) -> DaemonState:
+        """IDLE: ready to start. Transition to CONNECTING."""
+        return DaemonState.CONNECTING
+
+    async def _handle_connecting(self) -> DaemonState:
+        """CONNECTING: connect to IB. Returns CONNECTED or STOPPED."""
+        logger.debug("Connecting to IB...")
         ok = await self.connector.connect()
         if not ok:
             logger.error("Could not connect to IB; exiting")
-            self._state_machine.transition(DaemonState.STOPPED)
-            return
+            return DaemonState.STOPPED
+        return DaemonState.CONNECTED
 
-        self._state_machine.transition(DaemonState.CONNECTED)
-        logger.debug("Step 2: Fetching positions...")
+    async def _handle_connected(self) -> DaemonState:
+        """CONNECTED: fetch positions, get underlying price. Transition to RUNNING."""
+        logger.debug("Fetching positions...")
         await self._refresh_positions()
-
-        logger.debug("Step 3: Getting underlying price for %s...", self.symbol)
+        logger.debug("Getting underlying price for %s...", self.symbol)
         spot = await self.connector.get_underlying_price(self.symbol)
         self.state.set_underlying_price(spot)
+        return DaemonState.RUNNING
 
-        self._state_machine.transition(DaemonState.RUNNING)
-        logger.debug("Step 4: Subscribing to ticker and positions...")
+    async def _handle_running(self) -> DaemonState:
+        """RUNNING: subscribe, start background tasks, loop until stop requested."""
+        logger.debug("Subscribing to ticker and positions...")
         self.connector.subscribe_ticker(self.symbol, self._on_ticker)
         self.connector.subscribe_positions(self._maybe_hedge_threadsafe)
-        heartbeat_task = asyncio.create_task(self._heartbeat())
-        config_reload_task = asyncio.create_task(self._reload_config_loop())
+        self._heartbeat_task = asyncio.create_task(self._heartbeat())
+        self._config_reload_task = asyncio.create_task(self._reload_config_loop())
         logger.info(
             "Daemon running (symbol=%s, paper_trade=%s, config=%s)",
             self.symbol,
@@ -311,20 +316,50 @@ class TradingDaemon:
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             pass
-        finally:
-            self._state_machine.transition(DaemonState.STOPPING)
+        return DaemonState.STOPPING
+
+    async def _handle_stopping(self) -> DaemonState:
+        """STOPPING: cancel tasks, disconnect. Transition to STOPPED."""
+        heartbeat_task = getattr(self, "_heartbeat_task", None)
+        config_reload_task = getattr(self, "_config_reload_task", None)
+        if heartbeat_task is not None:
             heartbeat_task.cancel()
-            config_reload_task.cancel()
             try:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
+        if config_reload_task is not None:
+            config_reload_task.cancel()
             try:
                 await config_reload_task
             except asyncio.CancelledError:
                 pass
-            await self.connector.disconnect()
-            self._state_machine.transition(DaemonState.STOPPED)
+        await self.connector.disconnect()
+        return DaemonState.STOPPED
+
+    def _get_state_handlers(self) -> dict:
+        """Map state -> async handler that returns next state."""
+        return {
+            DaemonState.IDLE: self._handle_idle,
+            DaemonState.CONNECTING: self._handle_connecting,
+            DaemonState.CONNECTED: self._handle_connected,
+            DaemonState.RUNNING: self._handle_running,
+            DaemonState.STOPPING: self._handle_stopping,
+        }
+
+    async def run(self) -> None:
+        """State-driven loop: run handler for current state, transition to returned state."""
+        self._loop = asyncio.get_running_loop()
+        handlers = self._get_state_handlers()
+
+        while self._state_machine.current != DaemonState.STOPPED:
+            current = self._state_machine.current
+            handler = handlers.get(current)
+            if handler is None:
+                logger.warning("No handler for state %s; stopping", current.value)
+                break
+            next_state = await handler()
+            self._state_machine.transition(next_state)
 
     def stop(self) -> None:
         self._state_machine.request_stop()
