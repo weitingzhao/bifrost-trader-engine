@@ -42,8 +42,11 @@ class TradingDaemon:
     """Single-process event-driven gamma scalping daemon."""
 
     def __init__(self, config: dict, config_path: Optional[str] = None):
+        # 1.Init Config
         self.config = config
         self._config_path = config_path
+
+        # 1.a IB Connector
         ib_cfg = config.get("ib", {})
         self.connector = IBConnector(
             host=ib_cfg.get("host", "127.0.0.1"),
@@ -51,36 +54,91 @@ class TradingDaemon:
             client_id=ib_cfg.get("client_id", 1),
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
-        self.state = TradingState()
-        hedge_cfg = config.get("hedge", {})
-        risk_cfg = config.get("risk", {})
-        earn_cfg = config.get("earnings", {})
-        self.guard = RiskGuard(
-            cooldown_sec=hedge_cfg.get("cooldown_sec", 60),
-            max_daily_hedge_count=risk_cfg.get("max_daily_hedge_count", 50),
-            max_position_shares=risk_cfg.get("max_position_shares", 2000),
-            max_daily_loss_usd=risk_cfg.get("max_daily_loss_usd", 5000.0),
-            max_net_delta_shares=risk_cfg.get("max_net_delta_shares"),
-            max_spread_pct=risk_cfg.get("max_spread_pct"),
-            min_price_move_pct=hedge_cfg.get("min_price_move_pct", 0.0),
-            earnings_dates=earn_cfg.get("dates", []),
-            blackout_days_before=earn_cfg.get("blackout_days_before", 3),
-            blackout_days_after=earn_cfg.get("blackout_days_after", 1),
-            trading_hours_only=risk_cfg.get("trading_hours_only", True),
-        )
-        self.hedge_cfg = hedge_cfg
-        self.symbol = config.get("symbol", "NVDA")
+
+        # 1.b Dynamic Config
         self.structure = config.get("structure", {})
+        self.hedge_cfg = config.get("hedge", {})
+        self.risk_cfg = config.get("risk", {})
         self.greeks_cfg = config.get("greeks", {})
-        self.paper_trade = risk_cfg.get("paper_trade", True)
+        self.earnings_cfg = config.get("earnings", {})
+        self.symbol = config.get("symbol", "NVDA")
+        self.paper_trade = self.risk_cfg.get("paper_trade", True)
         self.order_type = config.get("order", {}).get("order_type", "market")
+        self.guard = RiskGuard(
+            cooldown_sec=self.hedge_cfg.get("cooldown_sec", 60),
+            max_daily_hedge_count=self.risk_cfg.get("max_daily_hedge_count", 50),
+            max_position_shares=self.risk_cfg.get("max_position_shares", 2000),
+            max_daily_loss_usd=self.risk_cfg.get("max_daily_loss_usd", 5000.0),
+            max_net_delta_shares=self.risk_cfg.get("max_net_delta_shares"),
+            max_spread_pct=self.risk_cfg.get("max_spread_pct"),
+            min_price_move_pct=self.hedge_cfg.get("min_price_move_pct", 0.0),
+            earnings_dates=self.earnings_cfg.get("dates", []),
+            blackout_days_before=self.earnings_cfg.get("blackout_days_before", 3),
+            blackout_days_after=self.earnings_cfg.get("blackout_days_after", 1),
+            trading_hours_only=self.risk_cfg.get("trading_hours_only", True),
+        )
+
+        # 2. Object References
+        self.state = TradingState()
+        self._hedge_lock = asyncio.Lock()
+        self._last_config_mtime: Optional[float] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # 3. Static Defaults
+        self._running = False
         self._heartbeat_interval = 10.0
         self._config_reload_interval = 30.0
 
-        self._hedge_lock = asyncio.Lock()
-        self._running = False
-        self._last_config_mtime: Optional[float] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+    def _apply_reloaded_config(self, config: dict) -> None:
+        """Apply hot-reloadable config (IB host/port require restart)."""
+        self.config = config
+
+        self.structure = config.get("structure", self.structure)
+        self.hedge_cfg = config.get("hedge", self.hedge_cfg)
+        self.greeks_cfg = config.get("greeks", self.greeks_cfg)
+        self.risk_cfg = config.get("risk", self.risk_cfg)
+        self.earnings_cfg = config.get("earnings", self.earnings_cfg)
+        if "paper_trade" in self.risk_cfg:
+            self.paper_trade = self.risk_cfg["paper_trade"]
+        self.order_type = config.get("order", {}).get("order_type", self.order_type)
+        self.guard.update_config(
+            cooldown_sec=self.hedge_cfg.get("cooldown_sec"),
+            max_daily_hedge_count=self.risk_cfg.get("max_daily_hedge_count"),
+            max_position_shares=self.risk_cfg.get("max_position_shares"),
+            max_daily_loss_usd=self.risk_cfg.get("max_daily_loss_usd"),
+            max_net_delta_shares=self.risk_cfg.get("max_net_delta_shares"),
+            max_spread_pct=self.risk_cfg.get("max_spread_pct"),
+            min_price_move_pct=self.hedge_cfg.get("hedge", {}).get(
+                "min_price_move_pct"
+            ),
+            earnings_dates=self.earnings_cfg.get("dates"),
+            blackout_days_before=self.earnings_cfg.get("blackout_days_before"),
+            blackout_days_after=self.earnings_cfg.get("blackout_days_after"),
+            trading_hours_only=self.risk_cfg.get("trading_hours_only"),
+        )
+
+    async def _config_reload_loop(self) -> None:
+        """Periodically check config file mtime and reload if changed."""
+        if not self._config_path or not Path(self._config_path).exists():
+            return
+        while self._running:
+            await asyncio.sleep(self._config_reload_interval)
+            if not self._running:
+                return
+            try:
+                mtime = Path(self._config_path).stat().st_mtime
+                if (
+                    self._last_config_mtime is not None
+                    and mtime > self._last_config_mtime
+                ):
+                    cfg, _ = load_config(self._config_path)
+                    self._apply_reloaded_config(cfg)
+                    self._last_config_mtime = mtime
+                    logger.info("Config reloaded from %s", self._config_path)
+                elif self._last_config_mtime is None:
+                    self._last_config_mtime = mtime
+            except Exception as e:
+                logger.debug("Config reload check failed: %s", e)
 
     async def _refresh_positions(self) -> None:
         """Fetch positions from IB and update state."""
@@ -224,53 +282,6 @@ class TradingDaemon:
             if self._running:
                 print("[HEARTBEAT] Woke up, running maybe_hedge()...")
                 await self._maybe_hedge()
-    def _apply_reloaded_config(self, cfg: dict) -> None:
-        """Apply hot-reloadable config (IB host/port require restart)."""
-        self.config = cfg
-        self.structure = cfg.get("structure", self.structure)
-        self.hedge_cfg = cfg.get("hedge", self.hedge_cfg)
-        self.greeks_cfg = cfg.get("greeks", self.greeks_cfg)
-        risk_cfg = cfg.get("risk", {})
-        earn_cfg = cfg.get("earnings", {})
-        if "paper_trade" in risk_cfg:
-            self.paper_trade = risk_cfg["paper_trade"]
-        self.order_type = cfg.get("order", {}).get("order_type", self.order_type)
-        self.guard.update_config(
-            cooldown_sec=cfg.get("hedge", {}).get("cooldown_sec"),
-            max_daily_hedge_count=risk_cfg.get("max_daily_hedge_count"),
-            max_position_shares=risk_cfg.get("max_position_shares"),
-            max_daily_loss_usd=risk_cfg.get("max_daily_loss_usd"),
-            max_net_delta_shares=risk_cfg.get("max_net_delta_shares"),
-            max_spread_pct=risk_cfg.get("max_spread_pct"),
-            min_price_move_pct=cfg.get("hedge", {}).get("min_price_move_pct"),
-            earnings_dates=earn_cfg.get("dates"),
-            blackout_days_before=earn_cfg.get("blackout_days_before"),
-            blackout_days_after=earn_cfg.get("blackout_days_after"),
-            trading_hours_only=risk_cfg.get("trading_hours_only"),
-        )
-
-    async def _config_reload_loop(self) -> None:
-        """Periodically check config file mtime and reload if changed."""
-        if not self._config_path or not Path(self._config_path).exists():
-            return
-        while self._running:
-            await asyncio.sleep(self._config_reload_interval)
-            if not self._running:
-                return
-            try:
-                mtime = Path(self._config_path).stat().st_mtime
-                if (
-                    self._last_config_mtime is not None
-                    and mtime > self._last_config_mtime
-                ):
-                    cfg, _ = load_config(self._config_path)
-                    self._apply_reloaded_config(cfg)
-                    self._last_config_mtime = mtime
-                    logger.info("Config reloaded from %s", self._config_path)
-                elif self._last_config_mtime is None:
-                    self._last_config_mtime = mtime
-            except Exception as e:
-                logger.debug("Config reload check failed: %s", e)
 
     async def run(self) -> None:
         """Connect, subscribe, and run until stopped."""
