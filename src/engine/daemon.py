@@ -11,6 +11,7 @@ import yaml
 
 from src.connector.ib import IBConnector
 from src.engine.state import TradingState
+from src.engine.state_machine import DaemonState, DaemonStateMachine
 from src.positions.portfolio import parse_positions, portfolio_delta
 from src.pricing.black_scholes import delta as bs_delta
 from src.risk.guard import RiskGuard
@@ -19,23 +20,15 @@ from src.strategy.gamma_scalper import gamma_scalper_hedge
 logger = logging.getLogger(__name__)
 
 
-def load_config(config_path: Optional[str] = None) -> tuple[dict, str]:
+def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
     """Load YAML config with env overrides for IB. Returns (config, resolved_path)."""
-    path = config_path or os.environ.get("BIFROST_CONFIG", "config/config.yaml")
-    if not Path(path).exists():
-        path = "config/config.yaml.example"
-    path = str(Path(path).resolve())
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
-    # Env overrides (only when config does not explicitly set the value)
-    ib_cfg = cfg.setdefault("ib", {})
-    if os.environ.get("IB_HOST") and not ib_cfg.get("host"):
-        ib_cfg["host"] = os.environ["IB_HOST"]
-    if os.environ.get("IB_PORT") and ib_cfg.get("port") is None:
-        ib_cfg["port"] = int(os.environ["IB_PORT"])
-    if os.environ.get("IB_CLIENT_ID") and ib_cfg.get("client_id") is None:
-        ib_cfg["client_id"] = int(os.environ["IB_CLIENT_ID"])
-    return cfg, path
+    config_path = config_path or os.environ.get("BIFROST_CONFIG", "config/config.yaml")
+    if not Path(config_path).exists():
+        config_path = "config/config.yaml.example"
+    config_path = str(Path(config_path).resolve())
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+    return config, config_path
 
 
 class TradingDaemon:
@@ -80,16 +73,16 @@ class TradingDaemon:
 
         # 2. Object References
         self.state = TradingState()
+        self._state_machine = DaemonStateMachine()
         self._hedge_lock = asyncio.Lock()
         self._last_config_mtime: Optional[float] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         # 3. Static Defaults
-        self._running = False
         self._heartbeat_interval = 10.0
         self._config_reload_interval = 30.0
 
-    def _apply_reloaded_config(self, config: dict) -> None:
+    def _reload_config(self, config: dict) -> None:
         """Apply hot-reloadable config (IB host/port require restart)."""
         self.config = config
 
@@ -108,22 +101,20 @@ class TradingDaemon:
             max_daily_loss_usd=self.risk_cfg.get("max_daily_loss_usd"),
             max_net_delta_shares=self.risk_cfg.get("max_net_delta_shares"),
             max_spread_pct=self.risk_cfg.get("max_spread_pct"),
-            min_price_move_pct=self.hedge_cfg.get("hedge", {}).get(
-                "min_price_move_pct"
-            ),
+            min_price_move_pct=self.hedge_cfg.get("hedge", {}).get("min_price_move_pct"),
             earnings_dates=self.earnings_cfg.get("dates"),
             blackout_days_before=self.earnings_cfg.get("blackout_days_before"),
             blackout_days_after=self.earnings_cfg.get("blackout_days_after"),
             trading_hours_only=self.risk_cfg.get("trading_hours_only"),
         )
 
-    async def _config_reload_loop(self) -> None:
+    async def _reload_config_loop(self) -> None:
         """Periodically check config file mtime and reload if changed."""
         if not self._config_path or not Path(self._config_path).exists():
             return
-        while self._running:
+        while self._state_machine.is_running():
             await asyncio.sleep(self._config_reload_interval)
-            if not self._running:
+            if not self._state_machine.is_running():
                 return
             try:
                 mtime = Path(self._config_path).stat().st_mtime
@@ -131,8 +122,8 @@ class TradingDaemon:
                     self._last_config_mtime is not None
                     and mtime > self._last_config_mtime
                 ):
-                    cfg, _ = load_config(self._config_path)
-                    self._apply_reloaded_config(cfg)
+                    config, _ = read_config(self._config_path)
+                    self._reload_config(config)
                     self._last_config_mtime = mtime
                     logger.info("Config reloaded from %s", self._config_path)
                 elif self._last_config_mtime is None:
@@ -174,14 +165,14 @@ class TradingDaemon:
 
     def _maybe_hedge_threadsafe(self) -> None:
         """Threadsafe: schedule maybe_hedge to be run safely from any thread using call_soon_threadsafe."""
-        if self._loop and self._loop.is_running():
+        if self._state_machine.is_running() and self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(
                 lambda: asyncio.ensure_future(self._maybe_hedge(), loop=self._loop)
             )
 
     def _maybe_hedge_in_loop(self) -> None:
         """Schedule maybe_hedge on the event loop (must be called from within the event loop)."""
-        if self._loop and self._loop.is_running():
+        if self._state_machine.is_running() and self._loop and self._loop.is_running():
             asyncio.ensure_future(self._maybe_hedge(), loop=self._loop)
 
     async def _compute_hedge_decision(self) -> Optional[tuple]:
@@ -276,32 +267,39 @@ class TradingDaemon:
 
     async def _heartbeat(self) -> None:
         """Periodic heartbeat to run maybe_hedge even without tick updates."""
-        while self._running:
+        while self._state_machine.is_running():
             print(f"[HEARTBEAT] Sleeping for {self._heartbeat_interval} seconds...")
             await asyncio.sleep(self._heartbeat_interval)
-            if self._running:
+            if self._state_machine.is_running():
                 print("[HEARTBEAT] Woke up, running maybe_hedge()...")
                 await self._maybe_hedge()
 
     async def run(self) -> None:
         """Connect, subscribe, and run until stopped."""
-        self._running = True
         self._loop = asyncio.get_running_loop()
+
+        self._state_machine.transition(DaemonState.CONNECTING)
         logger.debug("Step 1: Connecting to IB...")
         ok = await self.connector.connect()
         if not ok:
             logger.error("Could not connect to IB; exiting")
+            self._state_machine.transition(DaemonState.STOPPED)
             return
+
+        self._state_machine.transition(DaemonState.CONNECTED)
         logger.debug("Step 2: Fetching positions...")
         await self._refresh_positions()
+
         logger.debug("Step 3: Getting underlying price for %s...", self.symbol)
         spot = await self.connector.get_underlying_price(self.symbol)
         self.state.set_underlying_price(spot)
+
+        self._state_machine.transition(DaemonState.RUNNING)
         logger.debug("Step 4: Subscribing to ticker and positions...")
         self.connector.subscribe_ticker(self.symbol, self._on_ticker)
         self.connector.subscribe_positions(self._maybe_hedge_threadsafe)
         heartbeat_task = asyncio.create_task(self._heartbeat())
-        config_reload_task = asyncio.create_task(self._config_reload_loop())
+        config_reload_task = asyncio.create_task(self._reload_config_loop())
         logger.info(
             "Daemon running (symbol=%s, paper_trade=%s, config=%s)",
             self.symbol,
@@ -309,12 +307,12 @@ class TradingDaemon:
             self._config_path or "default",
         )
         try:
-            while self._running:
+            while self._state_machine.is_running():
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             pass
         finally:
-            self._running = False
+            self._state_machine.transition(DaemonState.STOPPING)
             heartbeat_task.cancel()
             config_reload_task.cancel()
             try:
@@ -326,13 +324,14 @@ class TradingDaemon:
             except asyncio.CancelledError:
                 pass
             await self.connector.disconnect()
+            self._state_machine.transition(DaemonState.STOPPED)
 
     def stop(self) -> None:
-        self._running = False
+        self._state_machine.request_stop()
 
 
 async def run_daemon(config_path: Optional[str] = None) -> None:
     """Load config and run the daemon."""
-    config, resolved_path = load_config(config_path)
+    config, resolved_path = read_config(config_path)
     daemon = TradingDaemon(config, config_path=resolved_path)
     await daemon.run()
