@@ -22,11 +22,11 @@ class DaemonState(str, enum.Enum):
 
 # Valid transitions: from_state -> set of allowed to_states
 _TRANSITIONS: dict[DaemonState, set[DaemonState]] = {
-    DaemonState.IDLE: {DaemonState.CONNECTING},
+    DaemonState.IDLE: {DaemonState.CONNECTING, DaemonState.STOPPED},
 
-    DaemonState.CONNECTING: {DaemonState.CONNECTED, DaemonState.STOPPED},
+    DaemonState.CONNECTING: {DaemonState.CONNECTED, DaemonState.STOPPED, DaemonState.STOPPING},
 
-    DaemonState.CONNECTED: {DaemonState.RUNNING, DaemonState.STOPPED},
+    DaemonState.CONNECTED: {DaemonState.RUNNING, DaemonState.STOPPED, DaemonState.STOPPING},
 
     DaemonState.RUNNING: {DaemonState.STOPPING},
 
@@ -87,9 +87,9 @@ class DaemonStateMachine:
         return self._current in (DaemonState.CONNECTED, DaemonState.RUNNING)
 
     def request_stop(self) -> bool:
-        """Request transition to STOPPING from RUNNING. Returns True if transition applied."""
-        if self._current == DaemonState.RUNNING:
+        """Request stop: transition to STOPPING (for cleanup) or STOPPED (IDLE only)."""
+        if self._current in (DaemonState.RUNNING, DaemonState.CONNECTING, DaemonState.CONNECTED):
             return self.transition(DaemonState.STOPPING)
-        if self._current in (DaemonState.IDLE, DaemonState.CONNECTING, DaemonState.CONNECTED):
+        if self._current == DaemonState.IDLE:
             return self.transition(DaemonState.STOPPED)
         return False

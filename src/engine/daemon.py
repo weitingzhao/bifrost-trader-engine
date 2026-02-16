@@ -328,12 +328,16 @@ class TradingDaemon:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                logger.debug("Heartbeat task raised before cancel: %s", e)
         if config_reload_task is not None:
             config_reload_task.cancel()
             try:
                 await config_reload_task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                logger.debug("Config reload task raised before cancel: %s", e)
         await self.connector.disconnect()
         return DaemonState.STOPPED
 
@@ -351,15 +355,31 @@ class TradingDaemon:
         """State-driven loop: run handler for current state, transition to returned state."""
         self._loop = asyncio.get_running_loop()
         handlers = self._get_state_handlers()
-
-        while self._state_machine.current != DaemonState.STOPPED:
-            current = self._state_machine.current
-            handler = handlers.get(current)
-            if handler is None:
-                logger.warning("No handler for state %s; stopping", current.value)
-                break
-            next_state = await handler()
-            self._state_machine.transition(next_state)
+        try:
+            while self._state_machine.current != DaemonState.STOPPED:
+                current = self._state_machine.current
+                handler = handlers.get(current)
+                if handler is None:
+                    logger.warning("No handler for state %s; stopping", current.value)
+                    break
+                try:
+                    next_state = await handler()
+                    self._state_machine.transition(next_state)
+                except Exception as e:
+                    logger.exception("Handler %s raised: %s", current.value, e)
+                    if self._state_machine.can_transition_to(DaemonState.STOPPING):
+                        self._state_machine.transition(DaemonState.STOPPING)
+                    else:
+                        self._state_machine.transition(DaemonState.STOPPED)
+        finally:
+            if self._state_machine.current != DaemonState.STOPPED:
+                if self._state_machine.current != DaemonState.STOPPING:
+                    self._state_machine.transition(DaemonState.STOPPING)
+                try:
+                    await self._handle_stopping()
+                except Exception as e:
+                    logger.exception("Cleanup (_handle_stopping) failed: %s", e)
+                self._state_machine.transition(DaemonState.STOPPED)
 
     def stop(self) -> None:
         self._state_machine.request_stop()
