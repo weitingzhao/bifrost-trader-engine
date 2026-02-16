@@ -16,6 +16,9 @@ class RiskGuard:
         max_daily_hedge_count: int = 50,
         max_position_shares: int = 2000,
         max_daily_loss_usd: float = 5000.0,
+        max_net_delta_shares: Optional[float] = None,
+        max_spread_pct: Optional[float] = None,
+        min_price_move_pct: float = 0.0,
         earnings_dates: Optional[List[str]] = None,
         blackout_days_before: int = 3,
         blackout_days_after: int = 1,
@@ -25,6 +28,9 @@ class RiskGuard:
         self.max_daily_hedge_count = max_daily_hedge_count
         self.max_position_shares = max_position_shares
         self.max_daily_loss_usd = max_daily_loss_usd
+        self.max_net_delta_shares = max_net_delta_shares
+        self.max_spread_pct = max_spread_pct
+        self.min_price_move_pct = min_price_move_pct
         self.earnings_dates = [d for d in (earnings_dates or []) if d]
         self.blackout_days_before = blackout_days_before
         self.blackout_days_after = blackout_days_after
@@ -88,10 +94,14 @@ class RiskGuard:
         current_stock_position: int,
         hedge_side: str,
         hedge_quantity: int,
+        portfolio_delta: Optional[float] = None,
+        spot: Optional[float] = None,
+        last_hedge_price: Optional[float] = None,
+        spread_pct: Optional[float] = None,
     ) -> tuple[bool, str]:
         """
         Returns (allowed: bool, reason: str).
-        If not allowed, reason explains why.
+        Three gates: delta threshold (caller), cooldown, min_price_move, spread.
         """
         self._reset_daily_if_new_day()
 
@@ -114,6 +124,15 @@ class RiskGuard:
         if abs(after_position) > self.max_position_shares:
             return False, "max_position"
 
+        if self.max_spread_pct is not None and spread_pct is not None:
+            if spread_pct > self.max_spread_pct:
+                return False, "spread_too_wide"
+
+        if self.min_price_move_pct > 0 and spot is not None and last_hedge_price is not None and last_hedge_price > 0:
+            move_pct = 100.0 * abs(spot - last_hedge_price) / last_hedge_price
+            if move_pct < self.min_price_move_pct:
+                return False, "min_price_move"
+
         return True, "ok"
 
     def record_hedge_sent(self) -> None:
@@ -129,6 +148,9 @@ class RiskGuard:
         max_daily_hedge_count: Optional[int] = None,
         max_position_shares: Optional[int] = None,
         max_daily_loss_usd: Optional[float] = None,
+        max_net_delta_shares: Optional[float] = None,
+        max_spread_pct: Optional[float] = None,
+        min_price_move_pct: Optional[float] = None,
         earnings_dates: Optional[List[str]] = None,
         blackout_days_before: Optional[int] = None,
         blackout_days_after: Optional[int] = None,
@@ -143,6 +165,12 @@ class RiskGuard:
             self.max_position_shares = max_position_shares
         if max_daily_loss_usd is not None:
             self.max_daily_loss_usd = max_daily_loss_usd
+        if max_net_delta_shares is not None:
+            self.max_net_delta_shares = max_net_delta_shares
+        if max_spread_pct is not None:
+            self.max_spread_pct = max_spread_pct
+        if min_price_move_pct is not None:
+            self.min_price_move_pct = min_price_move_pct
         if earnings_dates is not None:
             self.earnings_dates = [d for d in earnings_dates if d]
         if blackout_days_before is not None:

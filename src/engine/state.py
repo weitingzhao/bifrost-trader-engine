@@ -12,13 +12,20 @@ class TradingState:
 
     def __init__(self):
         self._lock = threading.Lock()
+
         self._positions: List[Any] = []
+        self._stock_position = 0  # net shares of underlying
+
+        self._underlying_bid: Optional[float] = None
+        self._underlying_ask: Optional[float] = None
         self._underlying_price: Optional[float] = None
+
         self._last_hedge_time: Optional[float] = None
+        self._last_hedge_price: Optional[float] = None
+
         self._daily_hedge_count = 0
         self._daily_hedge_date: Optional[str] = None  # YYYY-MM-DD
         self._daily_pnl_usd = 0.0
-        self._stock_position = 0  # net shares of underlying
 
     def set_positions(self, positions: List[Any], stock_position: int = 0) -> None:
         with self._lock:
@@ -33,6 +40,13 @@ class TradingState:
         with self._lock:
             return self._stock_position
 
+    def set_underlying_quote(self, bid: Optional[float], ask: Optional[float]) -> None:
+        with self._lock:
+            self._underlying_bid = bid
+            self._underlying_ask = ask
+            if bid is not None and ask is not None:
+                self._underlying_price = (bid + ask) / 2.0
+
     def set_underlying_price(self, price: Optional[float]) -> None:
         with self._lock:
             self._underlying_price = price
@@ -41,6 +55,20 @@ class TradingState:
         with self._lock:
             return self._underlying_price
 
+    def get_spread_pct(self) -> Optional[float]:
+        """Bid-ask spread as pct of mid. None if no quote."""
+        with self._lock:
+            if (
+                self._underlying_bid is None
+                or self._underlying_ask is None
+                or self._underlying_bid <= 0
+            ):
+                return None
+            mid = (self._underlying_bid + self._underlying_ask) / 2.0
+            if mid <= 0:
+                return None
+            return 100.0 * (self._underlying_ask - self._underlying_bid) / mid
+
     def set_last_hedge_time(self, t: Optional[float]) -> None:
         with self._lock:
             self._last_hedge_time = t
@@ -48,6 +76,14 @@ class TradingState:
     def get_last_hedge_time(self) -> Optional[float]:
         with self._lock:
             return self._last_hedge_time
+
+    def set_last_hedge_price(self, price: Optional[float]) -> None:
+        with self._lock:
+            self._last_hedge_price = price
+
+    def get_last_hedge_price(self) -> Optional[float]:
+        with self._lock:
+            return self._last_hedge_price
 
     def set_daily_hedge_count(self, n: int, as_of_date: Optional[str] = None) -> None:
         with self._lock:

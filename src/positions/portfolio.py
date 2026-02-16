@@ -13,10 +13,11 @@ logger = logging.getLogger(__name__)
 @dataclass
 class OptionLeg:
     """Single option position leg."""
+
     symbol: str
-    expiry: str   # YYYYMMDD
+    expiry: str  # YYYYMMDD
     strike: float
-    right: str     # 'C' or 'P'
+    right: str  # 'C' or 'P'
     quantity: int  # signed: positive = long
     multiplier: int = 100
 
@@ -73,11 +74,15 @@ def parse_positions(
         if contract is None:
             continue
 
-        sym = getattr(contract, "symbol", None) or (contract.get("symbol") if isinstance(contract, dict) else None)
+        sym = getattr(contract, "symbol", None) or (
+            contract.get("symbol") if isinstance(contract, dict) else None
+        )
         if not sym:
             continue
 
-        sec_type = getattr(contract, "secType", None) or (contract.get("secType", "STK") if isinstance(contract, dict) else "STK")
+        sec_type = getattr(contract, "secType", None) or (
+            contract.get("secType", "STK") if isinstance(contract, dict) else "STK"
+        )
 
         if sec_type == "STK" and sym == symbol:
             stock_shares = int(pos)
@@ -88,10 +93,20 @@ def parse_positions(
         if sym != symbol:
             continue
 
-        expiry = getattr(contract, "lastTradeDateOrContractMonth", None) or (contract.get("lastTradeDateOrContractMonth") if isinstance(contract, dict) else "")
-        strike_val = getattr(contract, "strike", None) or (contract.get("strike") if isinstance(contract, dict) else None)
-        right = getattr(contract, "right", None) or (contract.get("right", "C") if isinstance(contract, dict) else "C")
-        mult = getattr(contract, "multiplier", None) or (contract.get("multiplier", 100) if isinstance(contract, dict) else 100)
+        expiry = getattr(contract, "lastTradeDateOrContractMonth", None) or (
+            contract.get("lastTradeDateOrContractMonth")
+            if isinstance(contract, dict)
+            else ""
+        )
+        strike_val = getattr(contract, "strike", None) or (
+            contract.get("strike") if isinstance(contract, dict) else None
+        )
+        right = getattr(contract, "right", None) or (
+            contract.get("right", "C") if isinstance(contract, dict) else "C"
+        )
+        mult = getattr(contract, "multiplier", None) or (
+            contract.get("multiplier", 100) if isinstance(contract, dict) else 100
+        )
         if isinstance(mult, str):
             mult = int(mult) if mult.isdigit() else 100
 
@@ -102,10 +117,24 @@ def parse_positions(
         if dte < 0:
             continue
         if dte < min_dte or dte > max_dte:
-            logger.debug("Skip option %s %s %s: DTE %s outside %s-%s", sym, expiry, strike_val, dte, min_dte, max_dte)
+            logger.debug(
+                "Skip option %s %s %s: DTE %s outside %s-%s",
+                sym,
+                expiry,
+                strike_val,
+                dte,
+                min_dte,
+                max_dte,
+            )
             continue
         if spot is not None and not _is_near_atm(float(strike_val), spot, atm_band_pct):
-            logger.debug("Skip option %s %s %s: not near ATM vs spot %s", sym, expiry, strike_val, spot)
+            logger.debug(
+                "Skip option %s %s %s: not near ATM vs spot %s",
+                sym,
+                expiry,
+                strike_val,
+                spot,
+            )
             continue
 
         option_legs.append(

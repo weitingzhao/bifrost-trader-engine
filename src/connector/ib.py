@@ -4,7 +4,17 @@ import asyncio
 import logging
 from typing import Any, Callable, List, Optional
 
-from ib_insync import IB, Stock, MarketOrder, LimitOrder, Order, Trade, Fill, Position, Ticker
+from ib_insync import (
+    IB,
+    Stock,
+    MarketOrder,
+    LimitOrder,
+    Order,
+    Trade,
+    Fill,
+    Position,
+    Ticker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +49,13 @@ class IBConnector:
         if self.is_connected:
             return True
         try:
-            logger.debug("Connecting to IB %s:%s clientId=%s timeout=%.0fs", self.host, self.port, self.client_id, self.connect_timeout)
+            logger.debug(
+                "Connecting to IB %s:%s clientId=%s timeout=%.0fs",
+                self.host,
+                self.port,
+                self.client_id,
+                self.connect_timeout,
+            )
             await self.ib.connectAsync(
                 self.host,
                 self.port,
@@ -47,7 +63,12 @@ class IBConnector:
                 timeout=self.connect_timeout,
             )
             self._connected = True
-            logger.info("Connected to IB %s:%s clientId=%s", self.host, self.port, self.client_id)
+            logger.info(
+                "Connected to IB %s:%s clientId=%s",
+                self.host,
+                self.port,
+                self.client_id,
+            )
             return True
         except Exception as e:
             logger.error("IB connect failed: %s", e)
@@ -89,7 +110,11 @@ class IBConnector:
             await asyncio.sleep(0.5)
             if tickers:
                 t = tickers[0]
-                mid = (t.bid + t.ask) / 2.0 if (t.bid and t.ask) else (t.last if t.last else None)
+                mid = (
+                    (t.bid + t.ask) / 2.0
+                    if (t.bid and t.ask)
+                    else (t.last if t.last else None)
+                )
                 return float(mid) if mid is not None else None
         except Exception as e:
             logger.error("get_underlying_price %s: %s", symbol, e)
@@ -125,8 +150,7 @@ class IBConnector:
         """Subscribe to fill/trade updates."""
         if not self.is_connected:
             return
-        self.ib.execDetailsEvent += lambda _: None
-        self.ib.tradeEvent += lambda t: on_fill(t)
+        self.ib.execDetailsEvent += lambda trade, fill: on_fill(trade)
 
     async def place_order(
         self,
@@ -149,11 +173,19 @@ class IBConnector:
                 order = MarketOrder(side.upper(), quantity)
             else:
                 price = limit_price or 0.0
-                order = LimitOrder(price, quantity)
+                order = LimitOrder(side.upper(), quantity, price)
                 order.action = side.upper()
             trade = self.ib.placeOrder(stock, order)
-            logger.info("Order placed: %s %s %s @ %s", side, quantity, symbol, order_type)
+            logger.info(
+                "Order placed: %s %s %s @ %s", side, quantity, symbol, order_type
+            )
             return trade
-        except Exception as e:
+        except (
+            ConnectionError,
+            BrokenPipeError,
+            ValueError,
+            TimeoutError,
+            asyncio.TimeoutError,
+        ) as e:
             logger.error("place_order failed: %s", e)
             return None

@@ -20,3 +20,10 @@ dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*", "config*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "-v"
+markers = [
+    "ib: mark test as requiring live IB connection (deselect with -m 'not ib')",
+]
