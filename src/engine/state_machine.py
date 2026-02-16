@@ -1,4 +1,6 @@
-"""State machine for daemon lifecycle: IDLE -> CONNECTING -> CONNECTED -> RUNNING -> STOPPING -> STOPPED."""
+"""State machine for daemon lifecycle: 
+IDLE -> CONNECTING -> CONNECTED -> RUNNING -> STOPPING -> STOPPED.
+"""
 
 import enum
 import logging
@@ -21,10 +23,15 @@ class DaemonState(str, enum.Enum):
 # Valid transitions: from_state -> set of allowed to_states
 _TRANSITIONS: dict[DaemonState, set[DaemonState]] = {
     DaemonState.IDLE: {DaemonState.CONNECTING},
+
     DaemonState.CONNECTING: {DaemonState.CONNECTED, DaemonState.STOPPED},
+
     DaemonState.CONNECTED: {DaemonState.RUNNING, DaemonState.STOPPED},
+
     DaemonState.RUNNING: {DaemonState.STOPPING},
+
     DaemonState.STOPPING: {DaemonState.STOPPED},
+    
     DaemonState.STOPPED: set(),
 }
 
