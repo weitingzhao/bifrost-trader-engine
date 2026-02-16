@@ -47,3 +47,22 @@ risk:
 # Order
 order:
   order_type: "market"   # or "limit"
+
+# State space (O,D,M,L,E,S) thresholds
+state_space:
+  delta:
+    epsilon_band: 10
+    hedge_threshold: 25
+    max_delta_limit: 500
+  market:
+    vol_window_min: 5
+    stale_ts_threshold_ms: 5000
+  liquidity:
+    wide_spread_pct: 0.1
+    extreme_spread_pct: 0.5
+  system:
+    data_lag_threshold_ms: 1000
+  hedge:
+    min_hedge_shares: 10
+    min_price_move_pct: 0.2
+    cooldown_seconds: 60

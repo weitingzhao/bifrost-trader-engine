@@ -98,10 +98,11 @@ class RiskGuard:
         spot: Optional[float] = None,
         last_hedge_price: Optional[float] = None,
         spread_pct: Optional[float] = None,
+        force_hedge: bool = False,
     ) -> tuple[bool, str]:
         """
         Returns (allowed: bool, reason: str).
-        Three gates: delta threshold (caller), cooldown, min_price_move, spread.
+        Three gates: delta threshold (caller), cooldown (skipped if force_hedge), min_price_move, spread.
         """
         self._reset_daily_if_new_day()
 
@@ -114,7 +115,7 @@ class RiskGuard:
         if self._in_earnings_blackout():
             return False, "earnings_blackout"
 
-        if self._last_hedge_time is not None and (now_ts - self._last_hedge_time) < self.cooldown_sec:
+        if not force_hedge and self._last_hedge_time is not None and (now_ts - self._last_hedge_time) < self.cooldown_sec:
             return False, "cooldown"
 
         if self._daily_hedge_count >= self.max_daily_hedge_count:

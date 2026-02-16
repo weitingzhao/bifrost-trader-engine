@@ -55,6 +55,14 @@ class TradingState:
         with self._lock:
             return self._underlying_price
 
+    def get_bid(self) -> Optional[float]:
+        with self._lock:
+            return self._underlying_bid
+
+    def get_ask(self) -> Optional[float]:
+        with self._lock:
+            return self._underlying_ask
+
     def get_spread_pct(self) -> Optional[float]:
         """Bid-ask spread as pct of mid. None if no quote."""
         with self._lock:

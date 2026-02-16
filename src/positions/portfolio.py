@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Tuple
 
-from src.pricing.black_scholes import delta as bs_delta
+from src.pricing.black_scholes import delta as bs_delta, gamma as bs_gamma
 
 logger = logging.getLogger(__name__)
 
@@ -167,4 +167,23 @@ def portfolio_delta(
         t = _years_to_expiry(leg.expiry)
         d = bs_delta(spot, leg.strike, t, risk_free_rate, volatility, leg.option_type)
         total += leg.quantity * leg.multiplier * d
+    return total
+
+
+def portfolio_gamma(
+    option_legs: List[OptionLeg],
+    spot: float,
+    risk_free_rate: float,
+    volatility: float,
+) -> float:
+    """
+    Portfolio gamma (per-share equivalent).
+    Sum of leg.quantity * leg.multiplier * bs_gamma for each option leg.
+    Stock contributes 0 gamma.
+    """
+    total = 0.0
+    for leg in option_legs:
+        t = _years_to_expiry(leg.expiry)
+        g = bs_gamma(spot, leg.strike, t, risk_free_rate, volatility, leg.option_type)
+        total += leg.quantity * leg.multiplier * g
     return total

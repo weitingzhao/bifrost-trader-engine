@@ -57,6 +57,10 @@ Run as a daemon via systemd, supervisor, or Docker (single process, long-running
 - **Risk Guard**: cooldown, max daily hedges, max position, earnings blackout, circuit breaker
 - **Daemon**: event-driven loop; on ticker/position update or heartbeat (10s), run maybe_hedge
 
+## State space (O,D,M,L,E,S)
+
+The engine uses a six-dimensional state space for hedge gating. See [docs/STATE_SPACE_MAPPING.md](docs/STATE_SPACE_MAPPING.md) for the state space table → code mapping, threshold config and defaults, and when TargetPosition is output vs SAFE_MODE.
+
 ## License
 
 Private / use at your own risk.

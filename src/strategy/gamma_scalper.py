@@ -1,7 +1,7 @@
 """Gamma scalper: target-position-based hedge (target delta 0)."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -10,6 +10,29 @@ class HedgeOrder:
 
     side: str  # 'BUY' or 'SELL'
     quantity: int
+
+
+@dataclass
+class TargetPosition:
+    """Target stock position in shares (delta-neutral target)."""
+
+    target_shares: int
+
+
+@dataclass
+class HedgeIntent:
+    """Hedge intent: target, side, quantity, and whether to force (e.g. D3)."""
+
+    target_shares: int
+    side: str  # 'BUY' or 'SELL'
+    quantity: int
+    force_hedge: bool = False
+
+
+def compute_target_position(portfolio_delta: float, stock_shares: int) -> int:
+    """Target stock position for delta 0: target = -option_delta_shares."""
+    opt_delta_shares = portfolio_delta - stock_shares
+    return int(round(-opt_delta_shares))
 
 
 def compute_target_and_need(
@@ -51,4 +74,33 @@ def gamma_scalper_hedge(
         if qty <= 0:
             return None
         return HedgeOrder(side="SELL", quantity=qty)
+    return None
+
+
+def gamma_scalper_intent(
+    portfolio_delta: float,
+    stock_shares: int,
+    delta_threshold_shares: float = 25.0,
+    max_hedge_shares_per_order: int = 500,
+    config: Optional[Any] = None,
+) -> Optional[HedgeIntent]:
+    """
+    Intent-only: returns HedgeIntent when |need| >= threshold; no direct order.
+    config can provide delta_threshold_shares / max_hedge_shares_per_order overrides.
+    """
+    cfg = config or {}
+    threshold = cfg.get("delta_threshold_shares", delta_threshold_shares)
+    max_qty = cfg.get("max_hedge_shares_per_order", max_hedge_shares_per_order)
+    _, need = compute_target_and_need(portfolio_delta, stock_shares)
+    target = compute_target_position(portfolio_delta, stock_shares)
+    if need > threshold:
+        qty = min(int(round(need)), max_qty)
+        if qty <= 0:
+            return None
+        return HedgeIntent(target_shares=target, side="BUY", quantity=qty, force_hedge=False)
+    if need < -threshold:
+        qty = min(int(round(-need)), max_qty)
+        if qty <= 0:
+            return None
+        return HedgeIntent(target_shares=target, side="SELL", quantity=qty, force_hedge=False)
     return None
