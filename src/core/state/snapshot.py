@@ -38,7 +38,7 @@ class GreeksSnapshot:
 class StateSnapshot:
     """
     Immutable world state for guard evaluation and FSM transitions.
-    O/D/M/L/E/S from state space; E can be from hedge_fsm (HedgeExecutionFSM) or legacy ExecutionState.
+    O/D/M/L/E/S from state space; E can be from hedge_fsm (HedgeFSM) or legacy ExecutionState.
     """
 
     # State space dimensions

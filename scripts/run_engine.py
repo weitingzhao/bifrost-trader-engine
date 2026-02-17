@@ -62,7 +62,7 @@ if __name__ == "__main__":
     else:
         setup_logging(debug=False)
 
-    from src.app.daemon import run_daemon
+    from src.app.gs_trading import run_daemon
 
     config_path = args[0] if args else None
     if config_path and not os.path.isabs(config_path):

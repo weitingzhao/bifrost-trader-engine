@@ -48,7 +48,7 @@ class HedgeEvent(str, Enum):
 
 @dataclass
 class TargetPositionEvent:
-    """Emitted by strategy; consumed by HedgeExecutionFSM."""
+    """Emitted by strategy; consumed by HedgeFSM."""
 
     target_shares: int
     reason: str = ""

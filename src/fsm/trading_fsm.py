@@ -20,6 +20,108 @@ def _eval_guards(
     return TradingGuard(snapshot, config, guard).eval_all()
 
 
+def _handle_sync(
+    fire: Callable,
+    s: TradingState,
+    event: TradingEvent,
+    g: Dict[str, bool],
+) -> Optional[TradingState]:
+    """SYNC -> IDLE or SAFE."""
+    if g["positions_ok"] and g["data_ok"]:
+        fire(s, TradingState.IDLE, event, g)
+        return TradingState.IDLE
+    if not g["data_ok"] or g["broker_down"]:
+        fire(s, TradingState.SAFE, event, g)
+        return TradingState.SAFE
+    return None
+
+
+def _handle_idle(
+    fire: Callable,
+    s: TradingState,
+    event: TradingEvent,
+    g: Dict[str, bool],
+) -> Optional[TradingState]:
+    """IDLE -> SAFE or ARMED."""
+    if g["data_stale"] or g["greeks_bad"] or g["broker_down"]:
+        fire(s, TradingState.SAFE, event, g)
+        return TradingState.SAFE
+    if g["have_option_position"] and g["strategy_enabled"]:
+        fire(s, TradingState.ARMED, event, g)
+        return TradingState.ARMED
+    return None
+
+
+def _handle_armed(
+    fire: Callable,
+    s: TradingState,
+    event: TradingEvent,
+    g: Dict[str, bool],
+) -> Optional[TradingState]:
+    """ARMED -> MONITOR."""
+    if g["delta_band_ready"]:
+        fire(s, TradingState.MONITOR, event, g)
+        return TradingState.MONITOR
+    return None
+
+
+def _handle_monitor(
+    fire: Callable,
+    s: TradingState,
+    event: TradingEvent,
+    g: Dict[str, bool],
+) -> Optional[TradingState]:
+    """MONITOR -> NO_TRADE, NEED_HEDGE, PAUSE_COST, PAUSE_LIQ."""
+    if g["in_no_trade_band"]:
+        fire(s, TradingState.NO_TRADE, event, g)
+        return TradingState.NO_TRADE
+    if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
+        fire(s, TradingState.NEED_HEDGE, event, g)
+        return TradingState.NEED_HEDGE
+    if g["out_of_band"] and not g["cost_ok"]:
+        fire(s, TradingState.PAUSE_COST, event, g)
+        return TradingState.PAUSE_COST
+    if g["out_of_band"] and not g["liquidity_ok"]:
+        fire(s, TradingState.PAUSE_LIQ, event, g)
+        return TradingState.PAUSE_LIQ
+    return None
+
+
+def _handle_no_trade(
+    fire: Callable,
+    s: TradingState,
+    event: TradingEvent,
+    g: Dict[str, bool],
+) -> Optional[TradingState]:
+    """NO_TRADE -> NEED_HEDGE, PAUSE_COST, PAUSE_LIQ."""
+    if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
+        fire(s, TradingState.NEED_HEDGE, event, g)
+        return TradingState.NEED_HEDGE
+    if g["out_of_band"] and not g["cost_ok"]:
+        fire(s, TradingState.PAUSE_COST, event, g)
+        return TradingState.PAUSE_COST
+    if g["out_of_band"] and not g["liquidity_ok"]:
+        fire(s, TradingState.PAUSE_LIQ, event, g)
+        return TradingState.PAUSE_LIQ
+    return None
+
+
+def _handle_pause(
+    fire: Callable,
+    s: TradingState,
+    event: TradingEvent,
+    g: Dict[str, bool],
+) -> Optional[TradingState]:
+    """PAUSE_COST/PAUSE_LIQ -> NO_TRADE or NEED_HEDGE."""
+    if g["in_no_trade_band"]:
+        fire(s, TradingState.NO_TRADE, event, g)
+        return TradingState.NO_TRADE
+    if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
+        fire(s, TradingState.NEED_HEDGE, event, g)
+        return TradingState.NEED_HEDGE
+    return None
+
+
 class TradingFSM:
     """
     Top-level Trading FSM. Transition table driven by events and guards.
@@ -59,11 +161,12 @@ class TradingFSM:
         """
         s = self._state
         g = _eval_guards(snapshot, self._config, self._guard)
+        fire = self._fire_transition
 
         # Any -> SAFE on broker_down || data_stale || greeks_bad || exec_fault
         if g["broker_down"] or g["data_stale"] or g["greeks_bad"] or g["exec_fault"]:
             if s != TradingState.SAFE:
-                self._fire_transition(s, TradingState.SAFE, event, g)
+                fire(s, TradingState.SAFE, event, g)
                 return TradingState.SAFE
             return None
 
@@ -71,87 +174,51 @@ class TradingFSM:
             return None  # caller handles shutdown
 
         if event == TradingEvent.START and s == TradingState.BOOT:
-            self._fire_transition(s, TradingState.SYNC, event, g)
+            fire(s, TradingState.SYNC, event, g)
             return TradingState.SYNC
 
-        if event in (TradingEvent.SYNCED, TradingEvent.QUOTE, TradingEvent.TICK, TradingEvent.GREEKS_UPDATE):
+        if event in (
+            TradingEvent.SYNCED,
+            TradingEvent.QUOTE,
+            TradingEvent.TICK,
+            TradingEvent.GREEKS_UPDATE,
+        ):
             if s == TradingState.SYNC:
-                if g["positions_ok"] and g["data_ok"]:
-                    self._fire_transition(s, TradingState.IDLE, event, g)
-                    return TradingState.IDLE
-                if not g["data_ok"] or g["broker_down"]:
-                    self._fire_transition(s, TradingState.SAFE, event, g)
-                    return TradingState.SAFE
-
+                return _handle_sync(fire, s, event, g)
             if s == TradingState.IDLE:
-                if g["data_stale"] or g["greeks_bad"] or g["broker_down"]:
-                    self._fire_transition(s, TradingState.SAFE, event, g)
-                    return TradingState.SAFE
-                if g["have_option_position"] and g["strategy_enabled"]:
-                    self._fire_transition(s, TradingState.ARMED, event, g)
-                    return TradingState.ARMED
-
+                return _handle_idle(fire, s, event, g)
             if s == TradingState.ARMED:
-                if g["delta_band_ready"]:
-                    self._fire_transition(s, TradingState.MONITOR, event, g)
-                    return TradingState.MONITOR
-
+                return _handle_armed(fire, s, event, g)
             if s == TradingState.MONITOR:
-                if g["in_no_trade_band"]:
-                    self._fire_transition(s, TradingState.NO_TRADE, event, g)
-                    return TradingState.NO_TRADE
-                if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
-                    self._fire_transition(s, TradingState.NEED_HEDGE, event, g)
-                    return TradingState.NEED_HEDGE
-                if g["out_of_band"] and not g["cost_ok"]:
-                    self._fire_transition(s, TradingState.PAUSE_COST, event, g)
-                    return TradingState.PAUSE_COST
-                if g["out_of_band"] and not g["liquidity_ok"]:
-                    self._fire_transition(s, TradingState.PAUSE_LIQ, event, g)
-                    return TradingState.PAUSE_LIQ
-
+                return _handle_monitor(fire, s, event, g)
             if s == TradingState.NO_TRADE:
-                if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
-                    self._fire_transition(s, TradingState.NEED_HEDGE, event, g)
-                    return TradingState.NEED_HEDGE
-                if g["out_of_band"] and not g["cost_ok"]:
-                    self._fire_transition(s, TradingState.PAUSE_COST, event, g)
-                    return TradingState.PAUSE_COST
-                if g["out_of_band"] and not g["liquidity_ok"]:
-                    self._fire_transition(s, TradingState.PAUSE_LIQ, event, g)
-                    return TradingState.PAUSE_LIQ
-
+                return _handle_no_trade(fire, s, event, g)
             if s in (TradingState.PAUSE_COST, TradingState.PAUSE_LIQ):
-                if g["in_no_trade_band"]:
-                    self._fire_transition(s, TradingState.NO_TRADE, event, g)
-                    return TradingState.NO_TRADE
-                if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
-                    self._fire_transition(s, TradingState.NEED_HEDGE, event, g)
-                    return TradingState.NEED_HEDGE
+                return _handle_pause(fire, s, event, g)
 
         if event == TradingEvent.TARGET_EMITTED and s == TradingState.NEED_HEDGE:
-            self._fire_transition(s, TradingState.HEDGING, event, g)
+            fire(s, TradingState.HEDGING, event, g)
             return TradingState.HEDGING
 
         if event == TradingEvent.HEDGE_DONE and s == TradingState.HEDGING:
-            self._fire_transition(s, TradingState.MONITOR, event, g)
+            fire(s, TradingState.MONITOR, event, g)
             return TradingState.MONITOR
 
         if event == TradingEvent.HEDGE_FAILED and s == TradingState.HEDGING:
             if g["retry_allowed"]:
-                self._fire_transition(s, TradingState.NEED_HEDGE, event, g)
+                fire(s, TradingState.NEED_HEDGE, event, g)
                 return TradingState.NEED_HEDGE
-            self._fire_transition(s, TradingState.SAFE, event, g)
+            fire(s, TradingState.SAFE, event, g)
             return TradingState.SAFE
 
         if event == TradingEvent.MANUAL_RESUME and s == TradingState.SAFE:
             if g["broker_up"] and g["data_ok"]:
-                self._fire_transition(s, TradingState.SYNC, event, g)
+                fire(s, TradingState.SYNC, event, g)
                 return TradingState.SYNC
 
         if event == TradingEvent.BROKER_UP and s == TradingState.SAFE:
             if g["data_ok"]:
-                self._fire_transition(s, TradingState.SYNC, event, g)
+                fire(s, TradingState.SYNC, event, g)
                 return TradingState.SYNC
 
         return None

@@ -1,7 +1,7 @@
 """FSM package: daemon lifecycle, Trading FSM, Hedge Execution FSM. Guards live in src.guards."""
 
 from src.core.state.enums import HedgeState, TradingState
-from src.fsm.daemon_fsm import DaemonState, DaemonStateMachine
+from src.fsm.daemon_fsm import DaemonFSM, DaemonState
 from src.fsm.events import (
     HedgeEvent,
     TradingEvent,
@@ -13,12 +13,12 @@ from src.fsm.events import (
     AckEvent,
 )
 from src.guards.execution_guard import ExecutionGuard
-from src.fsm.hedge_fsm import HedgeExecutionFSM
+from src.fsm.hedge_fsm import HedgeFSM
 from src.fsm.trading_fsm import TradingFSM
 
 __all__ = [
     "DaemonState",
-    "DaemonStateMachine",
+    "DaemonFSM",
     "TradingState",
     "HedgeState",
     "TradingEvent",
@@ -30,6 +30,6 @@ __all__ = [
     "FillEvent",
     "AckEvent",
     "ExecutionGuard",
-    "HedgeExecutionFSM",
+    "HedgeFSM",
     "TradingFSM",
 ]

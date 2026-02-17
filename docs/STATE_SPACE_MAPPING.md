@@ -32,7 +32,7 @@ Config follows **O,D,M,L,E,S**: all six dimensions live under `state_space` in `
 - **state_space.system** (S): data_lag_threshold_ms
 - **state_space.execution** (E): min_hedge_shares, cooldown_seconds, max_hedge_shares_per_order, min_price_move_pct
 
-(O has no config; it is derived from positions.) The daemon uses `get_hedge_config(config)` which reads from `state_space.delta` and `state_space.execution` (with fallback to top-level `execution` or legacy `state_space.hedge` if present).
+(O has no config; it is derived from positions.) The daemon uses `get_hedge_config(config)` which reads from `state_space.delta` and `state_space.execution` (with fallback to top-level `execution`).
 
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
@@ -105,7 +105,7 @@ stateDiagram-v2
 
 ## Trading FSM (Macro) and Hedge Execution FSM
 
-The engine uses a **Trading FSM** (macro states) and a **Hedge Execution FSM** (execution sub-states). E (ExecutionState) is derived from HedgeExecutionFSM output.
+The engine uses a **Trading FSM** (macro states) and a **Hedge Execution FSM** (execution sub-states). E (ExecutionState) is derived from HedgeFSM output.
 
 ### Trading FSM States and Events
 
@@ -174,5 +174,4 @@ stateDiagram-v2
 - **Hedge gate**: `src/strategy/hedge_gate.py` — `should_output_target(cs)`, `apply_hedge_gates(intent, cs, guard)`.
 - **Trading FSM**: `src/fsm/trading_fsm.py` — macro state machine; transition table driven by events and guards.
 - **Hedge FSM**: `src/fsm/hedge_fsm.py` — execution sub-FSM; receives TargetPosition, outputs E state.
-- **Execution FSM** (legacy): `src/execution/execution_fsm.py` — E transitions when HedgeExecutionFSM not used; `can_place_order()` blocks duplicate orders when E1/E2.
-- **OrderManager**: `src/execution/order_manager.py` — when `set_hedge_execution_fsm()` is set, `effective_e_state()` delegates to `HedgeExecutionFSM` (from `hedge_fsm`).
+- **OrderManager**: `src/execution/order_manager.py` — when `set_hedge_fsm()` is set, `effective_e_state()` delegates to `HedgeFSM` (from `hedge_fsm`).

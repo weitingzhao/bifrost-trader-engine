@@ -34,8 +34,6 @@ _TRANSITIONS: dict[tuple[HedgeState, HedgeEvent], HedgeState] = {
     (HedgeState.FAIL, HedgeEvent.TRY_RESYNC): HedgeState.RECOVER,
     (HedgeState.FILLED, HedgeEvent.RECV_TARGET): HedgeState.PLAN,
 }
-# FILLED and EXEC_IDLE both allow RECV_TARGET -> PLAN; EXEC_IDLE is terminal for a cycle
-_TRANSITIONS[(HedgeState.FILLED, HedgeEvent.RECV_TARGET)] = HedgeState.PLAN
 
 
 def _to_execution_state(h: HedgeState, connected: bool) -> ExecutionState:
@@ -61,7 +59,7 @@ def _to_execution_state(h: HedgeState, connected: bool) -> ExecutionState:
     return ExecutionState.IDLE
 
 
-class HedgeExecutionFSM:
+class HedgeFSM:
     """
     Execution sub-FSM: receives TargetPosition, plans, sends order, waits ack/fill,
     handles partial/reprice/cancel/recover.
@@ -70,7 +68,9 @@ class HedgeExecutionFSM:
     def __init__(
         self,
         min_hedge_shares: int = 10,
-        on_transition: Optional[Callable[[HedgeState, HedgeState, HedgeEvent], None]] = None,
+        on_transition: Optional[
+            Callable[[HedgeState, HedgeState, HedgeEvent], None]
+        ] = None,
     ):
         self._state = HedgeState.EXEC_IDLE
         self._min_hedge_shares = min_hedge_shares
@@ -102,14 +102,19 @@ class HedgeExecutionFSM:
         """True when in EXEC_IDLE or FILLED (ready to accept new target)."""
         return self._state in (HedgeState.EXEC_IDLE, HedgeState.FILLED)
 
+    def _lookup_and_apply(self, event: HedgeEvent) -> bool:
+        """Look up (state, event) in _TRANSITIONS and apply if valid. Returns True if applied."""
+        to_state = _TRANSITIONS.get((self._state, event))
+        if to_state is not None:
+            self._transition(to_state, event)
+            return True
+        return False
+
     def _transition(self, to_state: HedgeState, event: HedgeEvent) -> bool:
         from_state = self._state
         self._state = to_state
         logger.debug(
-            "HedgeExecFSM %s -> %s on %s",
-            from_state.value,
-            to_state.value,
-            event.value,
+            "HedgeExecFSM %s -> %s on %s", from_state.value, to_state.value, event.value
         )
         if self._on_transition:
             try:
@@ -123,11 +128,13 @@ class HedgeExecutionFSM:
         Receive TargetPosition: transition to PLAN. Stores need_shares = target_shares - current_stock_pos.
         """
         if not self.can_place_order():
-            logger.warning("HedgeExecFSM received target in state %s", self._state.value)
+            logger.warning(
+                "HedgeExecFSM received target in state %s", self._state.value
+            )
             return False
         self._current_target = target
         self._need_shares = target.target_shares - current_stock_pos
-        return self._transition(HedgeState.PLAN, HedgeEvent.RECV_TARGET)
+        return self._lookup_and_apply(HedgeEvent.RECV_TARGET)
 
     def on_plan_decide(self, send_order: bool) -> bool:
         """
@@ -136,39 +143,49 @@ class HedgeExecutionFSM:
         if self._state != HedgeState.PLAN:
             return False
         if send_order:
-            return self._transition(HedgeState.SEND, HedgeEvent.PLAN_SEND)
+            return self._lookup_and_apply(HedgeEvent.PLAN_SEND)
         self._current_target = None
-        return self._transition(HedgeState.EXEC_IDLE, HedgeEvent.PLAN_SKIP)
+        return self._lookup_and_apply(HedgeEvent.PLAN_SKIP)
+
+    def on_partial_replan(self, send_order: bool) -> bool:
+        """After PARTIAL: replan -> SEND or EXEC_IDLE."""
+        if self._state != HedgeState.PARTIAL:
+            return False
+        if send_order:
+            return self._lookup_and_apply(HedgeEvent.PLAN_SEND)
+        self._current_target = None
+        self._need_shares = 0
+        return self._lookup_and_apply(HedgeEvent.PLAN_SKIP)
 
     def on_order_placed(self) -> bool:
         """After place_order called: SEND or REPRICE -> WAIT_ACK."""
         if self._state not in (HedgeState.SEND, HedgeState.REPRICE):
             return False
-        return self._transition(HedgeState.WAIT_ACK, HedgeEvent.PLACE_ORDER)
+        return self._lookup_and_apply(HedgeEvent.PLACE_ORDER)
 
     def on_ack_ok(self) -> bool:
         """Broker ack ok: WAIT_ACK -> WORKING."""
         if self._state != HedgeState.WAIT_ACK:
             return False
-        return self._transition(HedgeState.WORKING, HedgeEvent.ACK_OK)
+        return self._lookup_and_apply(HedgeEvent.ACK_OK)
 
     def on_ack_reject(self) -> bool:
         """Broker ack reject: WAIT_ACK -> FAIL."""
         if self._state != HedgeState.WAIT_ACK:
             return False
-        return self._transition(HedgeState.FAIL, HedgeEvent.ACK_REJECT)
+        return self._lookup_and_apply(HedgeEvent.ACK_REJECT)
 
     def on_timeout_ack(self) -> bool:
         """Ack timeout: WAIT_ACK -> FAIL."""
         if self._state != HedgeState.WAIT_ACK:
             return False
-        return self._transition(HedgeState.FAIL, HedgeEvent.TIMEOUT_ACK)
+        return self._lookup_and_apply(HedgeEvent.TIMEOUT_ACK)
 
     def on_partial_fill(self) -> bool:
         """Partial fill: WORKING -> PARTIAL."""
         if self._state != HedgeState.WORKING:
             return False
-        return self._transition(HedgeState.PARTIAL, HedgeEvent.PARTIAL_FILL)
+        return self._lookup_and_apply(HedgeEvent.PARTIAL_FILL)
 
     def on_full_fill(self) -> bool:
         """Full fill: WORKING -> FILLED; clear target."""
@@ -176,32 +193,30 @@ class HedgeExecutionFSM:
             return False
         self._current_target = None
         self._need_shares = 0
-        return self._transition(HedgeState.FILLED, HedgeEvent.FULL_FILL)
+        return self._lookup_and_apply(HedgeEvent.FULL_FILL)
 
     def on_timeout_working(self) -> bool:
         """Working timeout (reprice): WORKING -> REPRICE."""
         if self._state != HedgeState.WORKING:
             return False
-        return self._transition(HedgeState.REPRICE, HedgeEvent.TIMEOUT_WORKING)
+        return self._lookup_and_apply(HedgeEvent.TIMEOUT_WORKING)
 
     def on_risk_trip(self) -> bool:
         """Risk trip: WORKING -> CANCEL."""
         if self._state != HedgeState.WORKING:
             return False
-        return self._transition(HedgeState.CANCEL, HedgeEvent.RISK_TRIP)
+        return self._lookup_and_apply(HedgeEvent.RISK_TRIP)
 
     def on_manual_cancel(self) -> bool:
         """Manual cancel: WORKING -> CANCEL."""
         if self._state != HedgeState.WORKING:
             return False
-        return self._transition(HedgeState.CANCEL, HedgeEvent.MANUAL_CANCEL)
+        return self._lookup_and_apply(HedgeEvent.MANUAL_CANCEL)
 
     def on_broker_down(self) -> bool:
         """Broker down: WAIT_ACK -> FAIL, WORKING -> CANCEL."""
-        if self._state == HedgeState.WAIT_ACK:
-            return self._transition(HedgeState.FAIL, HedgeEvent.BROKER_DOWN)
-        if self._state == HedgeState.WORKING:
-            return self._transition(HedgeState.CANCEL, HedgeEvent.BROKER_DOWN)
+        if self._state in (HedgeState.WAIT_ACK, HedgeState.WORKING):
+            return self._lookup_and_apply(HedgeEvent.BROKER_DOWN)
         self._connected = False
         return True
 
@@ -209,7 +224,7 @@ class HedgeExecutionFSM:
         """Cancel sent: CANCEL -> RECOVER."""
         if self._state != HedgeState.CANCEL:
             return False
-        return self._transition(HedgeState.RECOVER, HedgeEvent.CANCEL_SENT)
+        return self._lookup_and_apply(HedgeEvent.CANCEL_SENT)
 
     def on_positions_resynced(self) -> bool:
         """Positions resynced: RECOVER -> EXEC_IDLE."""
@@ -217,26 +232,16 @@ class HedgeExecutionFSM:
             return False
         self._current_target = None
         self._need_shares = 0
-        return self._transition(HedgeState.EXEC_IDLE, HedgeEvent.POSITIONS_RESYNCED)
+        return self._lookup_and_apply(HedgeEvent.POSITIONS_RESYNCED)
 
     def on_cannot_recover(self) -> bool:
         """Cannot recover: RECOVER -> FAIL."""
         if self._state != HedgeState.RECOVER:
             return False
-        return self._transition(HedgeState.FAIL, HedgeEvent.CANNOT_RECOVER)
+        return self._lookup_and_apply(HedgeEvent.CANNOT_RECOVER)
 
     def on_try_resync(self) -> bool:
         """Try resync: FAIL -> RECOVER."""
         if self._state != HedgeState.FAIL:
             return False
-        return self._transition(HedgeState.RECOVER, HedgeEvent.TRY_RESYNC)
-
-    def on_partial_replan(self, send_order: bool) -> bool:
-        """After PARTIAL: replan -> SEND or EXEC_IDLE."""
-        if self._state != HedgeState.PARTIAL:
-            return False
-        if send_order:
-            return self._transition(HedgeState.SEND, HedgeEvent.PLAN_SEND)
-        self._current_target = None
-        self._need_shares = 0
-        return self._transition(HedgeState.EXEC_IDLE, HedgeEvent.PLAN_SKIP)
+        return self._lookup_and_apply(HedgeEvent.TRY_RESYNC)

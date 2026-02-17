@@ -1,4 +1,4 @@
-"""Event-driven daemon: connector -> state -> greeks -> scalper -> guard -> order."""
+"""Gamma scalping strategy: connector -> state -> greeks -> scalper -> guard -> order."""
 
 import asyncio
 import logging
@@ -15,13 +15,16 @@ from src.core.metrics import get_metrics
 from src.core.state.classifier import StateClassifier
 from src.core.state.composite import CompositeState
 from src.core.state.enums import HedgeState
-from src.core.logging_utils import log_composite_state, log_target_position, log_order_status
+from src.core.logging_utils import (
+    log_composite_state,
+    log_target_position,
+    log_order_status,
+)
 from src.core.store import RuntimeStore
-from src.fsm.daemon_fsm import DaemonState, DaemonStateMachine
-from src.execution.execution_fsm import ExecutionFSM
+from src.fsm.daemon_fsm import DaemonFSM, DaemonState
 from src.execution.order_manager import OrderManager
 from src.fsm.events import TargetPositionEvent
-from src.fsm.hedge_fsm import HedgeExecutionFSM
+from src.fsm.hedge_fsm import HedgeFSM
 from src.market.market_data import MarketData
 from src.positions.portfolio import parse_positions, portfolio_delta
 from src.positions.position_book import PositionBook
@@ -44,8 +47,8 @@ def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
     return config, config_path
 
 
-class TradingDaemon:
-    """Single-process event-driven gamma scalping daemon."""
+class GsTrading:
+    """Single-process event-driven gamma scalping strategy."""
 
     def __init__(self, config: dict, config_path: Optional[str] = None):
         # 1.Init Config
@@ -86,7 +89,7 @@ class TradingDaemon:
 
         # 2. Object References
         self.state = RuntimeStore()
-        self._state_machine = DaemonStateMachine()
+        self._fsm_daemon = DaemonFSM()
         self._hedge_lock = asyncio.Lock()
         self._last_config_mtime: Optional[float] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -94,14 +97,17 @@ class TradingDaemon:
         max_dte = self.structure.get("max_dte", 35)
         atm_band = self.structure.get("atm_band_pct", 0.03)
         self._position_book = PositionBook(
-            self.state, self.symbol, min_dte=min_dte, max_dte=max_dte, atm_band_pct=atm_band
+            self.state,
+            self.symbol,
+            min_dte=min_dte,
+            max_dte=max_dte,
+            atm_band_pct=atm_band,
         )
         self._market_data = MarketData(self.state)
         self._order_manager = OrderManager()
-        self._execution_fsm = ExecutionFSM(self._order_manager)
         min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
-        self._hedge_execution_fsm = HedgeExecutionFSM(min_hedge_shares=min_hedge_shares)
-        self._order_manager.set_hedge_execution_fsm(self._hedge_execution_fsm)
+        self._hedge_fsm = HedgeFSM(min_hedge_shares=min_hedge_shares)
+        self._order_manager.set_hedge_fsm(self._hedge_fsm)
         self._metrics = get_metrics()
 
         # 3. Static Defaults
@@ -138,9 +144,9 @@ class TradingDaemon:
         """Periodically check config file mtime and reload if changed."""
         if not self._config_path or not Path(self._config_path).exists():
             return
-        while self._state_machine.is_running():
+        while self._fsm_daemon.is_running():
             await asyncio.sleep(self._config_reload_interval)
-            if not self._state_machine.is_running():
+            if not self._fsm_daemon.is_running():
                 return
             try:
                 mtime = Path(self._config_path).stat().st_mtime
@@ -192,14 +198,14 @@ class TradingDaemon:
 
     def _maybe_hedge_threadsafe(self) -> None:
         """Threadsafe: schedule maybe_hedge to be run safely from any thread using call_soon_threadsafe."""
-        if self._state_machine.is_running() and self._loop and self._loop.is_running():
+        if self._fsm_daemon.is_running() and self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(
                 lambda: asyncio.ensure_future(self._maybe_hedge(), loop=self._loop)
             )
 
     def _maybe_hedge_in_loop(self) -> None:
         """Schedule maybe_hedge on the event loop (must be called from within the event loop)."""
-        if self._state_machine.is_running() and self._loop and self._loop.is_running():
+        if self._fsm_daemon.is_running() and self._loop and self._loop.is_running():
             asyncio.ensure_future(self._maybe_hedge(), loop=self._loop)
 
     async def _compute_hedge_decision(self) -> Optional[tuple]:
@@ -245,13 +251,22 @@ class TradingDaemon:
         self._metrics.set_delta_abs(abs(cs.net_delta))
         self._metrics.set_spread_bucket(cs.L.value if cs.L else None)
         if not should_output_target(cs):
-            logger.debug("State gate: no target (O=%s D=%s L=%s E=%s S=%s)", cs.O.value, cs.D.value, cs.L.value, cs.E.value, cs.S.value)
+            logger.debug(
+                "State gate: no target (O=%s D=%s L=%s E=%s S=%s)",
+                cs.O.value,
+                cs.D.value,
+                cs.L.value,
+                cs.E.value,
+                cs.S.value,
+            )
             return None
         intent = gamma_scalper_intent(
             greeks.delta,
             stock_shares,
             delta_threshold_shares=self._hedge_cfg.get("delta_threshold_shares", 25),
-            max_hedge_shares_per_order=self._hedge_cfg.get("max_hedge_shares_per_order", 500),
+            max_hedge_shares_per_order=self._hedge_cfg.get(
+                "max_hedge_shares_per_order", 500
+            ),
             config=self._hedge_cfg,
         )
         if intent is None:
@@ -269,16 +284,24 @@ class TradingDaemon:
             min_hedge_shares=min_hedge_shares,
         )
         if approved is None:
-            logger.info("Hedge blocked by gates (delta=%.1f would %s %s)", cs.net_delta, intent.side, intent.quantity)
+            logger.info(
+                "Hedge blocked by gates (delta=%.1f would %s %s)",
+                cs.net_delta,
+                intent.side,
+                intent.quantity,
+            )
             return None
-        if not self._hedge_execution_fsm.can_place_order():
-            logger.warning("Execution not IDLE (E=%s), skip order", self._order_manager.effective_e_state().value)
+        if not self._hedge_fsm.can_place_order():
+            logger.warning(
+                "Execution not IDLE (E=%s), skip order",
+                self._order_manager.effective_e_state().value,
+            )
             return None
         log_target_position(target_shares=intent.target_shares, cs=cs)
         return (approved, cs, spot)
 
     async def _maybe_hedge(self) -> None:
-        """Run hedge logic once: state space -> intent -> gates -> HedgeExecutionFSM -> order."""
+        """Run hedge logic once: state space -> intent -> gates -> HedgeFSM -> order."""
         async with self._hedge_lock:
             pass
         result = await self._compute_hedge_decision()
@@ -295,29 +318,33 @@ class TradingDaemon:
             side=intent.side,
             quantity=intent.quantity,
         )
-        self._hedge_execution_fsm.on_target(target_ev, cs.stock_pos)
-        self._hedge_execution_fsm.on_plan_decide(send_order=intent.quantity >= min_hedge_shares)
-        if self._hedge_execution_fsm.state != HedgeState.SEND:
+        self._hedge_fsm.on_target(target_ev, cs.stock_pos)
+        self._hedge_fsm.on_plan_decide(send_order=intent.quantity >= min_hedge_shares)
+        if self._hedge_fsm.state != HedgeState.SEND:
             return
         if self.paper_trade:
-            log_order_status(order_status="paper_send", side=intent.side, quantity=intent.quantity)
+            log_order_status(
+                order_status="paper_send", side=intent.side, quantity=intent.quantity
+            )
             logger.info(
                 "PAPER: would %s %s shares (delta=%.1f)",
                 intent.side,
                 intent.quantity,
                 cs.net_delta,
             )
-            self._hedge_execution_fsm.on_order_placed()
-            self._hedge_execution_fsm.on_ack_ok()
+            self._hedge_fsm.on_order_placed()
+            self._hedge_fsm.on_ack_ok()
             self.guard.record_hedge_sent()
             self.state.set_last_hedge_time(now_ts)
             self.state.set_last_hedge_price(spot)
             self.state.inc_daily_hedge_count()
             self._metrics.inc_hedge_count()
-            self._hedge_execution_fsm.on_full_fill()
+            self._hedge_fsm.on_full_fill()
             return
-        self._hedge_execution_fsm.on_order_placed()
-        log_order_status(order_status="sent", side=intent.side, quantity=intent.quantity)
+        self._hedge_fsm.on_order_placed()
+        log_order_status(
+            order_status="sent", side=intent.side, quantity=intent.quantity
+        )
         trade = await self.connector.place_order(
             self.symbol,
             intent.side,
@@ -325,26 +352,28 @@ class TradingDaemon:
             order_type=self.order_type,
         )
         if trade is not None:
-            self._hedge_execution_fsm.on_ack_ok()
+            self._hedge_fsm.on_ack_ok()
             self.guard.record_hedge_sent()
             self.state.set_last_hedge_time(now_ts)
             self.state.set_last_hedge_price(spot)
             self.state.inc_daily_hedge_count()
             self._metrics.inc_hedge_count()
-            logger.info("Hedge sent: %s %s %s", intent.side, intent.quantity, self.symbol)
-            self._hedge_execution_fsm.on_full_fill()
+            logger.info(
+                "Hedge sent: %s %s %s", intent.side, intent.quantity, self.symbol
+            )
+            self._hedge_fsm.on_full_fill()
         else:
             logger.warning("Order failed (trade is None)")
-            self._hedge_execution_fsm.on_ack_reject()
-            self._hedge_execution_fsm.on_try_resync()
-            self._hedge_execution_fsm.on_positions_resynced()
+            self._hedge_fsm.on_ack_reject()
+            self._hedge_fsm.on_try_resync()
+            self._hedge_fsm.on_positions_resynced()
 
     async def _heartbeat(self) -> None:
         """Periodic heartbeat to run maybe_hedge even without tick updates."""
-        while self._state_machine.is_running():
+        while self._fsm_daemon.is_running():
             print(f"[HEARTBEAT] Sleeping for {self._heartbeat_interval} seconds...")
             await asyncio.sleep(self._heartbeat_interval)
-            if self._state_machine.is_running():
+            if self._fsm_daemon.is_running():
                 print("[HEARTBEAT] Woke up, running maybe_hedge()...")
                 await self._maybe_hedge()
 
@@ -386,7 +415,7 @@ class TradingDaemon:
             self._config_path or "default",
         )
         try:
-            while self._state_machine.is_running():
+            while self._fsm_daemon.is_running():
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             pass
@@ -430,37 +459,37 @@ class TradingDaemon:
         self._loop = asyncio.get_running_loop()
         handlers = self._get_state_handlers()
         try:
-            while self._state_machine.current != DaemonState.STOPPED:
-                current = self._state_machine.current
+            while self._fsm_daemon.current != DaemonState.STOPPED:
+                current = self._fsm_daemon.current
                 handler = handlers.get(current)
                 if handler is None:
                     logger.warning("No handler for state %s; stopping", current.value)
                     break
                 try:
                     next_state = await handler()
-                    self._state_machine.transition(next_state)
+                    self._fsm_daemon.transition(next_state)
                 except Exception as e:
                     logger.exception("Handler %s raised: %s", current.value, e)
-                    if self._state_machine.can_transition_to(DaemonState.STOPPING):
-                        self._state_machine.transition(DaemonState.STOPPING)
+                    if self._fsm_daemon.can_transition_to(DaemonState.STOPPING):
+                        self._fsm_daemon.transition(DaemonState.STOPPING)
                     else:
-                        self._state_machine.transition(DaemonState.STOPPED)
+                        self._fsm_daemon.transition(DaemonState.STOPPED)
         finally:
-            if self._state_machine.current != DaemonState.STOPPED:
-                if self._state_machine.current != DaemonState.STOPPING:
-                    self._state_machine.transition(DaemonState.STOPPING)
+            if self._fsm_daemon.current != DaemonState.STOPPED:
+                if self._fsm_daemon.current != DaemonState.STOPPING:
+                    self._fsm_daemon.transition(DaemonState.STOPPING)
                 try:
                     await self._handle_stopping()
                 except Exception as e:
                     logger.exception("Cleanup (_handle_stopping) failed: %s", e)
-                self._state_machine.transition(DaemonState.STOPPED)
+                self._fsm_daemon.transition(DaemonState.STOPPED)
 
     def stop(self) -> None:
-        self._state_machine.request_stop()
+        self._fsm_daemon.request_stop()
 
 
 async def run_daemon(config_path: Optional[str] = None) -> None:
-    """Load config and run the daemon."""
+    """Load config and run the gamma scalping strategy."""
     config, resolved_path = read_config(config_path)
-    daemon = TradingDaemon(config, config_path=resolved_path)
-    await daemon.run()
+    app = GsTrading(config, config_path=resolved_path)
+    await app.run()

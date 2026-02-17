@@ -54,7 +54,9 @@ def get_hedge_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "min_hedge_shares": 10,
     }
     merged = {**defaults}
-    merged["delta_threshold_shares"] = delta.get("hedge_threshold", merged["delta_threshold_shares"])
+    merged["delta_threshold_shares"] = delta.get(
+        "hedge_threshold", merged["delta_threshold_shares"]
+    )
     for key, cfg_key in [
         ("min_hedge_shares", "min_hedge_shares"),
         ("min_price_move_pct", "min_price_move_pct"),
@@ -71,7 +73,12 @@ def get_hedge_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if cooldown is not None:
         merged["cooldown_sec"] = int(cooldown)
     for k, v in (cfg.get("hedge") or {}).items():
-        if v is not None and k in ("delta_threshold_shares", "max_hedge_shares_per_order", "min_hedge_shares", "min_price_move_pct"):
+        if v is not None and k in (
+            "delta_threshold_shares",
+            "max_hedge_shares_per_order",
+            "min_hedge_shares",
+            "min_price_move_pct",
+        ):
             merged[k] = v
         if v is not None and k == "cooldown_sec":
             merged["cooldown_sec"] = int(v)

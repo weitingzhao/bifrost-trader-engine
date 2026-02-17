@@ -1,6 +1,5 @@
-"""Execution layer: order manager and execution FSM."""
+"""Execution layer: order manager."""
 
 from .order_manager import OrderManager
-from .execution_fsm import ExecutionFSM
 
-__all__ = ["OrderManager", "ExecutionFSM"]
+__all__ = ["OrderManager"]

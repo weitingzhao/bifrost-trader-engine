@@ -4,7 +4,7 @@ import pytest
 
 from src.core.state.enums import ExecutionState, HedgeState
 from src.fsm.events import TargetPositionEvent
-from src.fsm.hedge_fsm import HedgeExecutionFSM
+from src.fsm.hedge_fsm import HedgeFSM
 
 
 def _target(target_shares: int, side: str = "BUY", quantity: int = 0) -> TargetPositionEvent:
@@ -14,7 +14,7 @@ def _target(target_shares: int, side: str = "BUY", quantity: int = 0) -> TargetP
 
 class TestFullFill:
     def test_exec_idle_to_plan_on_target(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         assert fsm.state == HedgeState.EXEC_IDLE
         assert fsm.can_place_order() is True
         ok = fsm.on_target(_target(100, "BUY", 100), current_stock_pos=0)
@@ -23,7 +23,7 @@ class TestFullFill:
         assert fsm.need_shares == 100
 
     def test_plan_to_send_then_working_then_filled(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         assert fsm.state == HedgeState.PLAN
         fsm.on_plan_decide(send_order=True)
@@ -43,7 +43,7 @@ class TestFullFill:
 
 class TestPartialFill:
     def test_working_to_partial_then_replan_send(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(100, "BUY", 100), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -60,7 +60,7 @@ class TestPartialFill:
         assert fsm.state == HedgeState.FILLED
 
     def test_partial_replan_skip_to_idle(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(100, "BUY", 100), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -73,7 +73,7 @@ class TestPartialFill:
 
 class TestPlanSkip:
     def test_plan_to_idle_when_need_below_min_size(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(5, "BUY", 5), current_stock_pos=0)
         assert fsm.state == HedgeState.PLAN
         fsm.on_plan_decide(send_order=False)
@@ -83,7 +83,7 @@ class TestPlanSkip:
 
 class TestTimeoutReprice:
     def test_working_to_reprice_then_send(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "SELL", 50), current_stock_pos=50)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -100,7 +100,7 @@ class TestTimeoutReprice:
 
 class TestBrokerDownCancelRecover:
     def test_working_to_cancel_on_broker_down(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -110,7 +110,7 @@ class TestBrokerDownCancelRecover:
         assert fsm.state == HedgeState.CANCEL
 
     def test_cancel_to_recover_on_cancel_sent(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -121,7 +121,7 @@ class TestBrokerDownCancelRecover:
         assert fsm.state == HedgeState.RECOVER
 
     def test_recover_to_idle_on_positions_resynced(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -134,7 +134,7 @@ class TestBrokerDownCancelRecover:
         assert fsm.can_place_order() is True
 
     def test_recover_to_fail_on_cannot_recover(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -146,7 +146,7 @@ class TestBrokerDownCancelRecover:
         assert fsm.effective_execution_state() == ExecutionState.BROKER_ERROR
 
     def test_fail_to_recover_on_try_resync(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -160,7 +160,7 @@ class TestBrokerDownCancelRecover:
 
 class TestWaitAckFail:
     def test_wait_ack_to_fail_on_reject(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -168,7 +168,7 @@ class TestWaitAckFail:
         assert fsm.state == HedgeState.FAIL
 
     def test_wait_ack_to_fail_on_timeout(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()
@@ -178,7 +178,7 @@ class TestWaitAckFail:
 
 class TestManualCancel:
     def test_working_to_cancel_on_manual_cancel(self):
-        fsm = HedgeExecutionFSM(min_hedge_shares=10)
+        fsm = HedgeFSM(min_hedge_shares=10)
         fsm.on_target(_target(50, "BUY", 50), current_stock_pos=0)
         fsm.on_plan_decide(send_order=True)
         fsm.on_order_placed()

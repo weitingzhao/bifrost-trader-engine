@@ -21,20 +21,23 @@ class DaemonState(str, enum.Enum):
 # Valid transitions: from_state -> set of allowed to_states
 _TRANSITIONS: dict[DaemonState, set[DaemonState]] = {
     DaemonState.IDLE: {DaemonState.CONNECTING, DaemonState.STOPPED},
-
-    DaemonState.CONNECTING: {DaemonState.CONNECTED, DaemonState.STOPPED, DaemonState.STOPPING},
-
-    DaemonState.CONNECTED: {DaemonState.RUNNING, DaemonState.STOPPED, DaemonState.STOPPING},
-
+    DaemonState.CONNECTING: {
+        DaemonState.CONNECTED,
+        DaemonState.STOPPED,
+        DaemonState.STOPPING,
+    },
+    DaemonState.CONNECTED: {
+        DaemonState.RUNNING,
+        DaemonState.STOPPED,
+        DaemonState.STOPPING,
+    },
     DaemonState.RUNNING: {DaemonState.STOPPING},
-
     DaemonState.STOPPING: {DaemonState.STOPPED},
-
     DaemonState.STOPPED: set(),
 }
 
 
-class DaemonStateMachine:
+class DaemonFSM:
     """Manages daemon lifecycle state and transitions."""
 
     def __init__(
@@ -86,7 +89,11 @@ class DaemonStateMachine:
 
     def request_stop(self) -> bool:
         """Request stop: transition to STOPPING (for cleanup) or STOPPED (IDLE only)."""
-        if self._current in (DaemonState.RUNNING, DaemonState.CONNECTING, DaemonState.CONNECTED):
+        if self._current in (
+            DaemonState.RUNNING,
+            DaemonState.CONNECTING,
+            DaemonState.CONNECTED,
+        ):
             return self.transition(DaemonState.STOPPING)
         if self._current == DaemonState.IDLE:
             return self.transition(DaemonState.STOPPED)
