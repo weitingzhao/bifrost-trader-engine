@@ -22,9 +22,9 @@ This document maps the Gamma Scalping **state space** (six dimensions O, D, M, L
 - **E**: `IDLE` (E0), `ORDER_WORKING` (E1), `PARTIAL_FILL` (E2), `DISCONNECTED` (E3), `BROKER_ERROR` (E4)
 - **S**: `OK` (S0), `GREEKS_BAD` (S1), `DATA_LAG` (S2), `RISK_HALT` (S3)
 
-## Threshold Config and Defaults
+## Threshold Config and Defaults (single source: state_space)
 
-Config section: `state_space` in `config/config.yaml`. Typed defaults in `src/config/settings.py`.
+All delta and hedge thresholds live under `state_space` in `config/config.yaml` to avoid duplication. Typed defaults in `src/config/settings.py`. The daemon uses `get_hedge_config(config)` which reads from `state_space.delta` and `state_space.hedge` (with optional top-level `hedge` override).
 
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|

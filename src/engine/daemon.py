@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 import yaml
 
+from src.config.settings import get_hedge_config
 from src.connector.ib import IBConnector
 from src.core.metrics import get_metrics
 from src.core.state.classifier import StateClassifier
@@ -60,9 +61,9 @@ class TradingDaemon:
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
 
-        # 1.b Dynamic Config
+        # 1.b Dynamic Config (hedge from state_space via get_hedge_config)
         self.structure = config.get("structure", {})
-        self.hedge_cfg = config.get("hedge", {})
+        self._hedge_cfg = get_hedge_config(config)
         self.risk_cfg = config.get("risk", {})
         self.greeks_cfg = config.get("greeks", {})
         self.earnings_cfg = config.get("earnings", {})
@@ -70,13 +71,13 @@ class TradingDaemon:
         self.paper_trade = self.risk_cfg.get("paper_trade", True)
         self.order_type = config.get("order", {}).get("order_type", "market")
         self.guard = RiskGuard(
-            cooldown_sec=self.hedge_cfg.get("cooldown_sec", 60),
+            cooldown_sec=self._hedge_cfg.get("cooldown_sec", 60),
             max_daily_hedge_count=self.risk_cfg.get("max_daily_hedge_count", 50),
             max_position_shares=self.risk_cfg.get("max_position_shares", 2000),
             max_daily_loss_usd=self.risk_cfg.get("max_daily_loss_usd", 5000.0),
             max_net_delta_shares=self.risk_cfg.get("max_net_delta_shares"),
             max_spread_pct=self.risk_cfg.get("max_spread_pct"),
-            min_price_move_pct=self.hedge_cfg.get("min_price_move_pct", 0.0),
+            min_price_move_pct=self._hedge_cfg.get("min_price_move_pct", 0.0),
             earnings_dates=self.earnings_cfg.get("dates", []),
             blackout_days_before=self.earnings_cfg.get("blackout_days_before", 3),
             blackout_days_after=self.earnings_cfg.get("blackout_days_after", 1),
@@ -98,9 +99,7 @@ class TradingDaemon:
         self._market_data = MarketData(self.state)
         self._order_manager = OrderManager()
         self._execution_fsm = ExecutionFSM(self._order_manager)
-        min_hedge_shares = self.hedge_cfg.get("min_hedge_shares", 10)
-        state_space_hedge = (self.config.get("state_space") or {}).get("hedge") or {}
-        min_hedge_shares = state_space_hedge.get("min_hedge_shares", min_hedge_shares)
+        min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
         self._hedge_execution_fsm = HedgeExecutionFSM(min_hedge_shares=min_hedge_shares)
         self._order_manager.set_hedge_execution_fsm(self._hedge_execution_fsm)
         self._metrics = get_metrics()
@@ -114,7 +113,7 @@ class TradingDaemon:
         self.config = config
 
         self.structure = config.get("structure", self.structure)
-        self.hedge_cfg = config.get("hedge", self.hedge_cfg)
+        self._hedge_cfg = get_hedge_config(config)
         self.greeks_cfg = config.get("greeks", self.greeks_cfg)
         self.risk_cfg = config.get("risk", self.risk_cfg)
         self.earnings_cfg = config.get("earnings", self.earnings_cfg)
@@ -122,13 +121,13 @@ class TradingDaemon:
             self.paper_trade = self.risk_cfg["paper_trade"]
         self.order_type = config.get("order", {}).get("order_type", self.order_type)
         self.guard.update_config(
-            cooldown_sec=self.hedge_cfg.get("cooldown_sec"),
+            cooldown_sec=self._hedge_cfg.get("cooldown_sec"),
             max_daily_hedge_count=self.risk_cfg.get("max_daily_hedge_count"),
             max_position_shares=self.risk_cfg.get("max_position_shares"),
             max_daily_loss_usd=self.risk_cfg.get("max_daily_loss_usd"),
             max_net_delta_shares=self.risk_cfg.get("max_net_delta_shares"),
             max_spread_pct=self.risk_cfg.get("max_spread_pct"),
-            min_price_move_pct=self.hedge_cfg.get("hedge", {}).get("min_price_move_pct"),
+            min_price_move_pct=self._hedge_cfg.get("min_price_move_pct"),
             earnings_dates=self.earnings_cfg.get("dates"),
             blackout_days_before=self.earnings_cfg.get("blackout_days_before"),
             blackout_days_after=self.earnings_cfg.get("blackout_days_after"),
@@ -248,18 +247,17 @@ class TradingDaemon:
         if not should_output_target(cs):
             logger.debug("State gate: no target (O=%s D=%s L=%s E=%s S=%s)", cs.O.value, cs.D.value, cs.L.value, cs.E.value, cs.S.value)
             return None
-        hedge_cfg = {**self.hedge_cfg, **(state_space_cfg.get("hedge") or {})}
         intent = gamma_scalper_intent(
             greeks.delta,
             stock_shares,
-            delta_threshold_shares=hedge_cfg.get("delta_threshold_shares", 25),
-            max_hedge_shares_per_order=hedge_cfg.get("max_hedge_shares_per_order", 500),
-            config=hedge_cfg,
+            delta_threshold_shares=self._hedge_cfg.get("delta_threshold_shares", 25),
+            max_hedge_shares_per_order=self._hedge_cfg.get("max_hedge_shares_per_order", 500),
+            config=self._hedge_cfg,
         )
         if intent is None:
             logger.debug("No hedge intent (delta within threshold)")
             return None
-        min_hedge_shares = hedge_cfg.get("min_hedge_shares", 10)
+        min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
         approved = apply_hedge_gates(
             intent,
             cs,
@@ -288,9 +286,7 @@ class TradingDaemon:
             return
         intent, cs, spot = result
         now_ts = time.time()
-        min_hedge_shares = self.hedge_cfg.get("min_hedge_shares", 10)
-        state_space_hedge = (self.config.get("state_space") or {}).get("hedge") or {}
-        min_hedge_shares = state_space_hedge.get("min_hedge_shares", min_hedge_shares)
+        min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
         target_ev = target_position_event_from_intent(
             intent.target_shares, intent.side, intent.quantity,
             reason="delta_hedge", ts=now_ts,
