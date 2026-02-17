@@ -14,14 +14,14 @@ from src.connector.ib import IBConnector
 from src.core.metrics import get_metrics
 from src.core.state.classifier import StateClassifier
 from src.core.state.composite import CompositeState
-from src.core.state.enums import HedgeExecState
+from src.core.state.enums import HedgeState
 from src.core.logging_utils import log_composite_state, log_target_position, log_order_status
 from src.core.store import RuntimeStore
 from src.fsm.daemon_fsm import DaemonState, DaemonStateMachine
 from src.execution.execution_fsm import ExecutionFSM
 from src.execution.order_manager import OrderManager
-from src.fsm.adapters import target_position_event_from_intent
-from src.fsm.hedge_execution_fsm import HedgeExecutionFSM
+from src.fsm.events import TargetPositionEvent
+from src.fsm.hedge_fsm import HedgeExecutionFSM
 from src.market.market_data import MarketData
 from src.positions.portfolio import parse_positions, portfolio_delta
 from src.positions.position_book import PositionBook
@@ -287,13 +287,17 @@ class TradingDaemon:
         intent, cs, spot = result
         now_ts = time.time()
         min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
-        target_ev = target_position_event_from_intent(
-            intent.target_shares, intent.side, intent.quantity,
-            reason="delta_hedge", ts=now_ts,
+        target_ev = TargetPositionEvent(
+            target_shares=intent.target_shares,
+            reason="delta_hedge",
+            ts=now_ts,
+            trace_id=None,
+            side=intent.side,
+            quantity=intent.quantity,
         )
         self._hedge_execution_fsm.on_target(target_ev, cs.stock_pos)
         self._hedge_execution_fsm.on_plan_decide(send_order=intent.quantity >= min_hedge_shares)
-        if self._hedge_execution_fsm.state != HedgeExecState.SEND:
+        if self._hedge_execution_fsm.state != HedgeState.SEND:
             return
         if self.paper_trade:
             log_order_status(order_status="paper_send", side=intent.side, quantity=intent.quantity)

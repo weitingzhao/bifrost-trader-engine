@@ -3,7 +3,7 @@
 from .enums import (
     DeltaDeviationState,
     ExecutionState,
-    HedgeExecState,
+    HedgeState,
     LiquidityState,
     MarketRegimeState,
     OptionPositionState,
@@ -22,7 +22,7 @@ __all__ = [
     "ExecutionState",
     "SystemHealthState",
     "TradingState",
-    "HedgeExecState",
+    "HedgeState",
     "CompositeState",
     "StateClassifier",
     "StateSnapshot",

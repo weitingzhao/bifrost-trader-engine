@@ -24,8 +24,8 @@ class TradingEvent(str, Enum):
     SHUTDOWN = "shutdown"
 
 
-class ExecEvent(str, Enum):
-    """Hedge Execution FSM events."""
+class HedgeEvent(str, Enum):
+    """Hedge FSM events."""
 
     RECV_TARGET = "recv_target"
     PLAN_SKIP = "plan_skip"

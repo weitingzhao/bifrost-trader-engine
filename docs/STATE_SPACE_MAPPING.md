@@ -173,6 +173,6 @@ stateDiagram-v2
 - **Guards**: `src/guards/trading_guard.py` — pure guards for Trading FSM; `src/guards/execution_guard.py` — ExecutionGuard for Hedge Execution FSM (order-send gate).
 - **Hedge gate**: `src/strategy/hedge_gate.py` — `should_output_target(cs)`, `apply_hedge_gates(intent, cs, guard)`.
 - **Trading FSM**: `src/fsm/trading_fsm.py` — macro state machine; transition table driven by events and guards.
-- **Hedge Execution FSM**: `src/fsm/hedge_execution_fsm.py` — execution sub-FSM; receives TargetPosition, outputs E state.
+- **Hedge FSM**: `src/fsm/hedge_fsm.py` — execution sub-FSM; receives TargetPosition, outputs E state.
 - **Execution FSM** (legacy): `src/execution/execution_fsm.py` — E transitions when HedgeExecutionFSM not used; `can_place_order()` blocks duplicate orders when E1/E2.
-- **OrderManager**: `src/execution/order_manager.py` — when `set_hedge_execution_fsm()` is set, `effective_e_state()` delegates to HedgeExecutionFSM.
+- **OrderManager**: `src/execution/order_manager.py` — when `set_hedge_execution_fsm()` is set, `effective_e_state()` delegates to `HedgeExecutionFSM` (from `hedge_fsm`).

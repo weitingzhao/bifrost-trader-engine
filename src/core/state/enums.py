@@ -76,8 +76,8 @@ class TradingState(str, enum.Enum):
     SAFE = "SAFE"
 
 
-class HedgeExecState(str, enum.Enum):
-    """Hedge Execution FSM states (E mapping for detailed execution)."""
+class HedgeState(str, enum.Enum):
+    """Hedge FSM states (E mapping for detailed execution)."""
 
     EXEC_IDLE = "EXEC_IDLE"
     PLAN = "PLAN"

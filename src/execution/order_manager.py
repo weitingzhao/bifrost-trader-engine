@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional
 from src.core.state.enums import ExecutionState
 
 if TYPE_CHECKING:
-    from src.fsm.hedge_execution_fsm import HedgeExecutionFSM
+    from src.fsm.hedge_fsm import HedgeExecutionFSM
 
 
 class OrderManager:

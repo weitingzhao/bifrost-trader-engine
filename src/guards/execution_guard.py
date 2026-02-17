@@ -1,6 +1,6 @@
 """Hedge Execution FSM guard: order-level risk gate before sending a hedge.
 
-Used when transitioning toward SEND in HedgeExecutionFSM (fsm/hedge_execution_fsm.py).
+Used when transitioning toward SEND in HedgeExecutionFSM (fsm/hedge_fsm.py).
 apply_hedge_gates() in strategy/hedge_gate.py calls allow_hedge() to decide whether
 the order may be sent. Stateful: cooldown, daily count, circuit breaker, earnings blackout.
 For Trading FSM transition guards (pure predicates), see trading_guard.py in this package.
