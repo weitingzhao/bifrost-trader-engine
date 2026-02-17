@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import yaml
 
-from src.config.settings import get_hedge_config
+from src.config.settings import get_hedge_config, get_state_space_config, get_structure_config, get_risk_config
 from src.connector.ib import IBConnector
 from src.core.metrics import get_metrics
 from src.core.state.classifier import StateClassifier
@@ -64,27 +64,26 @@ class GsTrading:
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
 
-        # 1.b Dynamic Config (hedge from state_space via get_hedge_config)
-        self.structure = config.get("structure", {})
-        self._hedge_cfg = get_hedge_config(config)
-        self.risk_cfg = config.get("risk", {})
+        # 1.b Unified config (hedge + guard from get_hedge_config)
+        self.structure = get_structure_config(config)
+        self._cfg = get_hedge_config(config)
+        self.risk_cfg = get_risk_config(config)
         self.greeks_cfg = config.get("greeks", {})
-        self.earnings_cfg = config.get("earnings", {})
         self.symbol = config.get("symbol", "NVDA")
         self.paper_trade = self.risk_cfg.get("paper_trade", True)
         self.order_type = config.get("order", {}).get("order_type", "market")
         self.guard = ExecutionGuard(
-            cooldown_sec=self._hedge_cfg.get("cooldown_sec", 60),
-            max_daily_hedge_count=self.risk_cfg.get("max_daily_hedge_count", 50),
-            max_position_shares=self.risk_cfg.get("max_position_shares", 2000),
-            max_daily_loss_usd=self.risk_cfg.get("max_daily_loss_usd", 5000.0),
-            max_net_delta_shares=self.risk_cfg.get("max_net_delta_shares"),
-            max_spread_pct=self.risk_cfg.get("max_spread_pct"),
-            min_price_move_pct=self._hedge_cfg.get("min_price_move_pct", 0.0),
-            earnings_dates=self.earnings_cfg.get("dates", []),
-            blackout_days_before=self.earnings_cfg.get("blackout_days_before", 3),
-            blackout_days_after=self.earnings_cfg.get("blackout_days_after", 1),
-            trading_hours_only=self.risk_cfg.get("trading_hours_only", True),
+            cooldown_sec=self._cfg["cooldown_sec"],
+            max_daily_hedge_count=self._cfg["max_daily_hedge_count"],
+            max_position_shares=self._cfg["max_position_shares"],
+            max_daily_loss_usd=self._cfg["max_daily_loss_usd"],
+            max_net_delta_shares=self._cfg["max_net_delta_shares"],
+            max_spread_pct=self._cfg["max_spread_pct"],
+            min_price_move_pct=self._cfg["min_price_move_pct"],
+            earnings_dates=self._cfg["earnings_dates"],
+            blackout_days_before=self._cfg["blackout_days_before"],
+            blackout_days_after=self._cfg["blackout_days_after"],
+            trading_hours_only=self._cfg["trading_hours_only"],
         )
 
         # 2. Object References
@@ -105,8 +104,7 @@ class GsTrading:
         )
         self._market_data = MarketData(self.state)
         self._order_manager = OrderManager()
-        min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
-        self._hedge_fsm = HedgeFSM(min_hedge_shares=min_hedge_shares)
+        self._hedge_fsm = HedgeFSM(min_hedge_shares=self._cfg["min_hedge_shares"])
         self._order_manager.set_hedge_fsm(self._hedge_fsm)
         self._metrics = get_metrics()
 
@@ -118,26 +116,25 @@ class GsTrading:
         """Apply hot-reloadable config (IB host/port require restart)."""
         self.config = config
 
-        self.structure = config.get("structure", self.structure)
-        self._hedge_cfg = get_hedge_config(config)
+        self.structure = get_structure_config(config)
+        self._cfg = get_hedge_config(config)
         self.greeks_cfg = config.get("greeks", self.greeks_cfg)
-        self.risk_cfg = config.get("risk", self.risk_cfg)
-        self.earnings_cfg = config.get("earnings", self.earnings_cfg)
+        self.risk_cfg = get_risk_config(config)
         if "paper_trade" in self.risk_cfg:
             self.paper_trade = self.risk_cfg["paper_trade"]
         self.order_type = config.get("order", {}).get("order_type", self.order_type)
         self.guard.update_config(
-            cooldown_sec=self._hedge_cfg.get("cooldown_sec"),
-            max_daily_hedge_count=self.risk_cfg.get("max_daily_hedge_count"),
-            max_position_shares=self.risk_cfg.get("max_position_shares"),
-            max_daily_loss_usd=self.risk_cfg.get("max_daily_loss_usd"),
-            max_net_delta_shares=self.risk_cfg.get("max_net_delta_shares"),
-            max_spread_pct=self.risk_cfg.get("max_spread_pct"),
-            min_price_move_pct=self._hedge_cfg.get("min_price_move_pct"),
-            earnings_dates=self.earnings_cfg.get("dates"),
-            blackout_days_before=self.earnings_cfg.get("blackout_days_before"),
-            blackout_days_after=self.earnings_cfg.get("blackout_days_after"),
-            trading_hours_only=self.risk_cfg.get("trading_hours_only"),
+            cooldown_sec=self._cfg["cooldown_sec"],
+            max_daily_hedge_count=self._cfg["max_daily_hedge_count"],
+            max_position_shares=self._cfg["max_position_shares"],
+            max_daily_loss_usd=self._cfg["max_daily_loss_usd"],
+            max_net_delta_shares=self._cfg["max_net_delta_shares"],
+            max_spread_pct=self._cfg["max_spread_pct"],
+            min_price_move_pct=self._cfg["min_price_move_pct"],
+            earnings_dates=self._cfg["earnings_dates"],
+            blackout_days_before=self._cfg["blackout_days_before"],
+            blackout_days_after=self._cfg["blackout_days_after"],
+            trading_hours_only=self._cfg["trading_hours_only"],
         )
 
     async def _reload_config_loop(self) -> None:
@@ -230,7 +227,7 @@ class GsTrading:
         r = self.greeks_cfg.get("risk_free_rate", 0.05)
         vol = self.greeks_cfg.get("volatility", 0.35)
         greeks = Greeks(legs, stock_shares, spot, r, vol)
-        state_space_cfg = self.config.get("state_space", {})
+        state_space_cfg = get_state_space_config(self.config)
         risk_halt = getattr(self.guard, "_circuit_breaker", False)
         data_lag_ms = None
         if self._market_data.last_ts is not None:
@@ -263,16 +260,13 @@ class GsTrading:
         intent = gamma_scalper_intent(
             greeks.delta,
             stock_shares,
-            delta_threshold_shares=self._hedge_cfg.get("delta_threshold_shares", 25),
-            max_hedge_shares_per_order=self._hedge_cfg.get(
-                "max_hedge_shares_per_order", 500
-            ),
-            config=self._hedge_cfg,
+            delta_threshold_shares=self._cfg["delta_threshold_shares"],
+            max_hedge_shares_per_order=self._cfg["max_hedge_shares_per_order"],
+            config=self._cfg,
         )
         if intent is None:
             logger.debug("No hedge intent (delta within threshold)")
             return None
-        min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
         approved = apply_hedge_gates(
             intent,
             cs,
@@ -281,7 +275,7 @@ class GsTrading:
             spot=spot,
             last_hedge_price=self.state.get_last_hedge_price(),
             spread_pct=self.state.get_spread_pct(),
-            min_hedge_shares=min_hedge_shares,
+            min_hedge_shares=self._cfg["min_hedge_shares"],
         )
         if approved is None:
             logger.info(
@@ -309,7 +303,6 @@ class GsTrading:
             return
         intent, cs, spot = result
         now_ts = time.time()
-        min_hedge_shares = self._hedge_cfg.get("min_hedge_shares", 10)
         target_ev = TargetPositionEvent(
             target_shares=intent.target_shares,
             reason="delta_hedge",
@@ -319,7 +312,9 @@ class GsTrading:
             quantity=intent.quantity,
         )
         self._hedge_fsm.on_target(target_ev, cs.stock_pos)
-        self._hedge_fsm.on_plan_decide(send_order=intent.quantity >= min_hedge_shares)
+        self._hedge_fsm.on_plan_decide(
+            send_order=intent.quantity >= self._cfg["min_hedge_shares"]
+        )
         if self._hedge_fsm.state != HedgeState.SEND:
             return
         if self.paper_trade:

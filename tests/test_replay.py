@@ -91,7 +91,7 @@ class TestReplayFSM:
         md = SimpleNamespace(spread_pct=0.05, last_ts=None)
         g = SimpleNamespace(valid=True, delta=0.0, gamma=0.02, _legs=[1])
         om = SimpleNamespace(effective_e_state=lambda: ExecutionState.IDLE)
-        config = {"state_space": {"delta": {"epsilon_band": 10.0, "hedge_threshold": 25.0}}}
+        config = {"delta": {"epsilon_band": 10.0, "hedge_threshold": 25.0}}
         last_cs = None
         target_emitted = False
         for ev in feed:

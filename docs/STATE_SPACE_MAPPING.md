@@ -24,15 +24,14 @@ This document maps the Gamma Scalping **state space** (six dimensions O, D, M, L
 
 ## Threshold Config and Defaults
 
-Config follows **O,D,M,L,E,S**: all six dimensions live under `state_space` in `config/config.yaml`.
+Config uses **Option 2 (gates)**: pipeline-aligned structure under `gates` in `config/config.yaml`.
 
-- **state_space.delta** (D): epsilon_band, hedge_threshold, max_delta_limit
-- **state_space.market** (M): vol_window_min, stale_ts_threshold_ms
-- **state_space.liquidity** (L): wide_spread_pct, extreme_spread_pct
-- **state_space.system** (S): data_lag_threshold_ms
-- **state_space.execution** (E): min_hedge_shares, cooldown_seconds, max_hedge_shares_per_order, min_price_move_pct
+- **gates.strategy**: structure, earnings, trading_hours_only
+- **gates.state**: delta (D), market (M), liquidity (L), system (S)
+- **gates.intent**: hedge (sizing, cooldown, min_price_move_pct)
+- **gates.guard**: risk (circuit breakers)
 
-(O has no config; it is derived from positions.) The daemon uses `get_hedge_config(config)` which reads from `state_space.delta` and `state_space.execution` (with fallback to top-level `execution`).
+(O has no config; it is derived from positions.) The daemon uses `get_hedge_config(config)` which reads from gates (strategy, state, intent, guard) — returning a unified flat dict for GsTrading, ExecutionGuard, and gamma_scalper_intent. Backward compat: top-level `delta`, `hedge`, `risk`, `earnings`, and legacy `state_space.*` are still supported.
 
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
@@ -44,10 +43,10 @@ Config follows **O,D,M,L,E,S**: all six dimensions live under `state_space` in `
 | liquidity | wide_spread_pct | 0.1 | spread_pct ≥ this → L1 WIDE |
 | liquidity | extreme_spread_pct | 0.5 | spread_pct ≥ this → L2 EXTREME_WIDE |
 | system | data_lag_threshold_ms | 1000 | Lag > this → S2 DATA_LAG |
-| execution (E) | min_hedge_shares | 10 | Minimum order size to allow |
-| execution (E) | min_price_move_pct | 0.2 | Min price move % (gate) |
-| execution (E) | cooldown_seconds | 60 | Cooldown between hedges (bypassed on D3) |
-| execution (E) | max_hedge_shares_per_order | 500 | Max shares per hedge order |
+| hedge | min_hedge_shares | 10 | Minimum order size to allow |
+| hedge | min_price_move_pct | 0.2 | Min price move % (gate) |
+| hedge | cooldown_seconds | 60 | Cooldown between hedges (bypassed on D3) |
+| hedge | max_hedge_shares_per_order | 500 | Max shares per hedge order |
 
 ## When TargetPosition Is Output vs SAFE_MODE
 

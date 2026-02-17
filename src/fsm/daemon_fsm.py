@@ -1,4 +1,16 @@
-"""Daemon lifecycle FSM: IDLE -> CONNECTING -> CONNECTED -> RUNNING -> STOPPING -> STOPPED."""
+"""Daemon lifecycle FSM: IDLE -> CONNECTING -> CONNECTED -> RUNNING -> STOPPING -> STOPPED.
+
+Transition implementation (gs_trading.py):
+- IDLE -> CONNECTING: _handle_idle
+- IDLE -> STOPPED: request_stop() when IDLE
+- CONNECTING -> CONNECTED: _handle_connecting (connect success)
+- CONNECTING -> STOPPED: _handle_connecting (connect fail)
+- CONNECTING -> STOPPING: request_stop() during connect
+- CONNECTED -> RUNNING: _handle_connected
+- CONNECTED -> STOPPED/STOPPING: request_stop()
+- RUNNING -> STOPPING: _handle_running (loop exit) or request_stop()
+- STOPPING -> STOPPED: _handle_stopping
+"""
 
 import enum
 import logging

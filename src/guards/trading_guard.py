@@ -7,6 +7,7 @@ For the order-send gate used by the Hedge Execution FSM, see execution_guard.py 
 
 from typing import Any, Dict, Optional
 
+from src.config.settings import get_config_for_guards
 from src.core.state.enums import (
     ExecutionState,
     LiquidityState,
@@ -19,9 +20,10 @@ from src.core.state.snapshot import StateSnapshot
 def _get_cfg(
     config: Optional[Dict[str, Any]], section: str, key: str, default: Any
 ) -> Any:
+    """Read section from gates, top-level, or state_space (backward compat)."""
     cfg = config or {}
-    ss = cfg.get("state_space", cfg)
-    sec = cfg.get(section, ss.get(section, {}))
+    resolved = get_config_for_guards(cfg) if cfg.get("gates") else cfg
+    sec = resolved.get(section) or {}
     if isinstance(sec, dict):
         return sec.get(key, default)
     return default
@@ -118,7 +120,7 @@ class TradingGuard:
     def is_cost_ok(self, min_price_move_pct: Optional[float] = None) -> bool:
         """
         True when expected benefit > cost; spread not extreme and (optional) price moved enough.
-        Reads min_price_move_pct from state_space.execution (fallback: hedge).
+        Reads min_price_move_pct from hedge section (top-level or state_space).
         """
         max_spread = _get_cfg(self._config, "liquidity", "extreme_spread_pct", 0.5)
         if (
@@ -127,10 +129,7 @@ class TradingGuard:
         ):
             return False
         move_pct = min_price_move_pct or _get_cfg(
-            self._config,
-            "execution",
-            "min_price_move_pct",
-            _get_cfg(self._config, "hedge", "min_price_move_pct", 0.2),
+            self._config, "hedge", "min_price_move_pct", 0.2
         )
         if move_pct <= 0:
             return True

@@ -61,14 +61,14 @@ def _make_snap(
 class TestDataStale:
     def test_data_ok_when_lag_under_threshold(self):
         snap = _make_snap(event_lag_ms=500, spot=100.0)
-        cfg = {"state_space": {"system": {"data_lag_threshold_ms": 1000}}}
+        cfg = {"system": {"data_lag_threshold_ms": 1000}}
         tg = TradingGuard(snap, cfg)
         assert tg.is_data_ok() is True
         assert tg.is_data_stale() is False
 
     def test_data_stale_when_lag_over_threshold(self):
         snap = _make_snap(event_lag_ms=2000, spot=100.0)
-        cfg = {"state_space": {"system": {"data_lag_threshold_ms": 1000}}}
+        cfg = {"system": {"data_lag_threshold_ms": 1000}}
         tg = TradingGuard(snap, cfg)
         assert tg.is_data_ok() is False
         assert tg.is_data_stale() is True
@@ -84,6 +84,22 @@ class TestDataStale:
         assert TradingGuard(snap).is_data_ok() is True
         snap2 = _make_snap(event_lag_ms=2000)
         assert TradingGuard(snap2).is_data_ok() is False
+
+    def test_backward_compat_state_space_still_works(self):
+        """Legacy state_space.delta, state_space.system etc. still supported."""
+        snap = _make_snap(event_lag_ms=500)
+        cfg = {"state_space": {"system": {"data_lag_threshold_ms": 1000}}}
+        assert TradingGuard(snap, cfg).is_data_ok() is True
+
+    def test_gates_structure_resolved(self):
+        """Option 2 gates structure: gates.state.system etc. resolved by get_config_for_guards."""
+        snap = _make_snap(event_lag_ms=500)
+        cfg = {
+            "gates": {
+                "state": {"system": {"data_lag_threshold_ms": 1000}},
+            }
+        }
+        assert TradingGuard(snap, cfg).is_data_ok() is True
 
 
 class TestGreeksBad:
@@ -131,21 +147,21 @@ class TestGreeksBad:
 class TestInNoTradeBand:
     def test_in_band_when_delta_within_epsilon(self):
         snap = _make_snap(net_delta=5.0)
-        cfg = {"state_space": {"delta": {"epsilon_band": 10.0}}}
+        cfg = {"delta": {"epsilon_band": 10.0}}
         tg = TradingGuard(snap, cfg)
         assert tg.is_in_no_trade_band() is True
         assert tg.is_out_of_band() is False
 
     def test_out_of_band_when_delta_above_epsilon(self):
         snap = _make_snap(net_delta=25.0)
-        cfg = {"state_space": {"delta": {"epsilon_band": 10.0}}}
+        cfg = {"delta": {"epsilon_band": 10.0}}
         tg = TradingGuard(snap, cfg)
         assert tg.is_in_no_trade_band() is False
         assert tg.is_out_of_band() is True
 
     def test_boundary_epsilon(self):
         snap = _make_snap(net_delta=10.0)
-        cfg = {"state_space": {"delta": {"epsilon_band": 10.0}}}
+        cfg = {"delta": {"epsilon_band": 10.0}}
         assert TradingGuard(snap, cfg).is_in_no_trade_band() is True
 
 
@@ -156,17 +172,17 @@ class TestCostOk:
 
     def test_cost_ok_when_spread_extreme_fails(self):
         snap = _make_snap(spread_pct=0.6)
-        cfg = {"state_space": {"liquidity": {"extreme_spread_pct": 0.5}}}
+        cfg = {"liquidity": {"extreme_spread_pct": 0.5}}
         assert TradingGuard(snap, cfg).is_cost_ok() is False
 
     def test_cost_ok_when_price_moved_enough(self):
         snap = _make_snap(spot=101.0, last_hedge_price=100.0)
-        cfg = {"state_space": {"hedge": {"min_price_move_pct": 0.2}}}
+        cfg = {"hedge": {"min_price_move_pct": 0.2}}
         assert TradingGuard(snap, cfg).is_cost_ok() is True
 
     def test_cost_ok_when_price_not_moved_enough(self):
         snap = _make_snap(spot=100.1, last_hedge_price=100.0)
-        cfg = {"state_space": {"hedge": {"min_price_move_pct": 1.0}}}
+        cfg = {"hedge": {"min_price_move_pct": 1.0}}
         assert TradingGuard(snap, cfg).is_cost_ok() is False
 
 

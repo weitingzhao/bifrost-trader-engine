@@ -68,7 +68,7 @@ class TestSyncToIdleOrSafe:
         assert fsm.state == TradingState.IDLE
 
     def test_sync_to_safe_when_data_stale(self):
-        fsm = TradingFSM(config={"state_space": {"system": {"data_lag_threshold_ms": 1000}}})
+        fsm = TradingFSM(config={"system": {"data_lag_threshold_ms": 1000}})
         fsm.apply_transition(TradingEvent.START, _snap())
         snap = _snap(event_lag_ms=2000, spot=100.0)
         ok = fsm.apply_transition(TradingEvent.SYNCED, snap)
@@ -118,7 +118,7 @@ class TestArmedToMonitor:
 
 class TestMonitorToNoTradeOrNeedHedgeOrPause:
     def test_monitor_to_no_trade_when_in_band(self):
-        fsm = TradingFSM(config={"state_space": {"delta": {"epsilon_band": 10.0}}})
+        fsm = TradingFSM(config={"delta": {"epsilon_band": 10.0}})
         fsm.apply_transition(TradingEvent.START, _snap())
         fsm.apply_transition(TradingEvent.SYNCED, _snap(O=OptionPositionState.LONG_GAMMA))
         fsm.apply_transition(TradingEvent.TICK, _snap(O=OptionPositionState.LONG_GAMMA))
@@ -129,7 +129,7 @@ class TestMonitorToNoTradeOrNeedHedgeOrPause:
         assert fsm.state == TradingState.NO_TRADE
 
     def test_monitor_to_need_hedge_when_out_of_band_and_cost_and_liquidity_ok(self):
-        fsm = TradingFSM(config={"state_space": {"delta": {"epsilon_band": 10.0}}})
+        fsm = TradingFSM(config={"delta": {"epsilon_band": 10.0}})
         fsm.apply_transition(TradingEvent.START, _snap())
         fsm.apply_transition(TradingEvent.SYNCED, _snap(O=OptionPositionState.LONG_GAMMA))
         fsm.apply_transition(TradingEvent.TICK, _snap(O=OptionPositionState.LONG_GAMMA))
@@ -144,10 +144,8 @@ class TestMonitorToNoTradeOrNeedHedgeOrPause:
 
     def test_monitor_to_pause_cost_when_out_of_band_and_not_cost_ok(self):
         fsm = TradingFSM(config={
-            "state_space": {
-                "delta": {"epsilon_band": 10.0},
-                "hedge": {"min_price_move_pct": 10.0},
-            },
+            "delta": {"epsilon_band": 10.0},
+            "hedge": {"min_price_move_pct": 10.0},
         })
         fsm.apply_transition(TradingEvent.START, _snap())
         fsm.apply_transition(TradingEvent.SYNCED, _snap(O=OptionPositionState.LONG_GAMMA))
@@ -159,7 +157,7 @@ class TestMonitorToNoTradeOrNeedHedgeOrPause:
         assert fsm.state == TradingState.PAUSE_COST
 
     def test_monitor_to_pause_liq_when_out_of_band_and_not_liquidity_ok(self):
-        fsm = TradingFSM(config={"state_space": {"delta": {"epsilon_band": 10.0}}, "risk": {"max_spread_pct": 0.02}})
+        fsm = TradingFSM(config={"delta": {"epsilon_band": 10.0}, "risk": {"max_spread_pct": 0.02}})
         fsm.apply_transition(TradingEvent.START, _snap())
         fsm.apply_transition(TradingEvent.SYNCED, _snap(O=OptionPositionState.LONG_GAMMA))
         fsm.apply_transition(TradingEvent.TICK, _snap(O=OptionPositionState.LONG_GAMMA))

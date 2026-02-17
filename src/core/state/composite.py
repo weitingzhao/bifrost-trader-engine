@@ -115,24 +115,3 @@ class CompositeState:
             kwargs["S"] = event["S"]
         kwargs["ts"] = kwargs.get("ts", time.time())
         return replace(self, **kwargs)
-
-
-def _default_composite() -> CompositeState:
-    """Default composite state (all safe/none)."""
-    return CompositeState(
-        O=OptionPositionState.NONE,
-        D=DeltaDeviationState.IN_BAND,
-        M=MarketRegimeState.NORMAL,
-        L=LiquidityState.NO_QUOTE,
-        E=ExecutionState.IDLE,
-        S=SystemHealthState.OK,
-        net_delta=0.0,
-        option_delta=0.0,
-        stock_pos=0,
-        last_hedge_price=None,
-        last_hedge_ts=None,
-        spread=None,
-        data_lag_ms=None,
-        greeks_valid=False,
-        ts=time.time(),
-    )

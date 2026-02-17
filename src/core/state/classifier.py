@@ -36,7 +36,8 @@ _DEFAULT = {
 
 
 def _get_cfg(config: Dict[str, Any], section: str, key: str, default: Any) -> Any:
-    sec = config.get(section, config.get("state_space", {}).get(section, {}))
+    """Read section from top-level or state_space (backward compat)."""
+    sec = config.get(section) or (config.get("state_space") or {}).get(section, {})
     if isinstance(sec, dict):
         return sec.get(key, _DEFAULT.get(section, {}).get(key, default))
     return default

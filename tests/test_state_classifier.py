@@ -61,7 +61,7 @@ class TestClassifyD:
         assert StateClassifier._classify_d(-8.0, True, {"delta": {"epsilon_band": 10}}) == DeltaDeviationState.IN_BAND
 
     def test_d0_boundary_epsilon(self):
-        cfg = {"state_space": {"delta": {"epsilon_band": 10.0}}}
+        cfg = {"delta": {"epsilon_band": 10.0}}
         assert StateClassifier._classify_d(10.0, True, cfg) == DeltaDeviationState.IN_BAND
         assert StateClassifier._classify_d(-10.0, True, cfg) == DeltaDeviationState.IN_BAND
 
