@@ -16,7 +16,7 @@ class TestGatesConfig:
     def test_get_hedge_config_from_gates(self):
         cfg = {
             "gates": {
-                "state": {"delta": {"hedge_threshold": 30}},
+                "state": {"delta": {"threshold_hedge_shares": 30}},
                 "intent": {"hedge": {"min_hedge_shares": 15, "cooldown_seconds": 120}},
                 "guard": {"risk": {"max_daily_hedge_count": 25, "max_position_shares": 1000}},
                 "strategy": {
@@ -26,7 +26,7 @@ class TestGatesConfig:
             }
         }
         out = get_hedge_config(cfg)
-        assert out["delta_threshold_shares"] == 30
+        assert out["threshold_hedge_shares"] == 30
         assert out["min_hedge_shares"] == 15
         assert out["cooldown_sec"] == 120
         assert out["max_daily_hedge_count"] == 25
@@ -54,15 +54,21 @@ class TestGatesConfig:
         assert out["paper_trade"] is False
         assert out["max_spread_pct"] == 0.02
 
+    def test_backward_compat_hedge_threshold(self):
+        """Legacy hedge_threshold in config still supported."""
+        cfg = {"delta": {"hedge_threshold": 40}}
+        out = get_hedge_config(cfg)
+        assert out["threshold_hedge_shares"] == 40
+
     def test_backward_compat_top_level(self):
         cfg = {
-            "delta": {"hedge_threshold": 40},
+            "delta": {"threshold_hedge_shares": 40},
             "hedge": {"min_hedge_shares": 20},
             "risk": {"max_daily_hedge_count": 10},
             "earnings": {"blackout_days_after": 2},
         }
         out = get_hedge_config(cfg)
-        assert out["delta_threshold_shares"] == 40
+        assert out["threshold_hedge_shares"] == 40
         assert out["min_hedge_shares"] == 20
         assert out["max_daily_hedge_count"] == 10
         assert out["blackout_days_after"] == 2
@@ -71,7 +77,7 @@ class TestGatesConfig:
         cfg = {
             "gates": {
                 "state": {
-                    "delta": {"epsilon_band": 15, "hedge_threshold": 35},
+                    "delta": {"epsilon_band": 15, "threshold_hedge_shares": 35},
                     "system": {"data_lag_threshold_ms": 2000},
                 },
                 "intent": {"hedge": {"min_price_move_pct": 0.5}},
@@ -79,6 +85,6 @@ class TestGatesConfig:
         }
         out = get_state_space_config(cfg)
         assert out["delta"]["epsilon_band"] == 15
-        assert out["delta"]["hedge_threshold"] == 35
+        assert out["delta"]["threshold_hedge_shares"] == 35
         assert out["system"]["data_lag_threshold_ms"] == 2000
         assert out["hedge"]["min_price_move_pct"] == 0.5

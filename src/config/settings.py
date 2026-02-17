@@ -1,36 +1,42 @@
 """Unified config: gates (strategy, state, intent, guard) for hedge logic and ExecutionGuard.
 
 Option 2 (gates): pipeline-aligned structure. Backward compat: top-level and state_space.
+Defaults: loaded from config/config.yaml.example (single source of truth, no code-level defaults).
 """
 
+from pathlib import Path
 from typing import Any, Dict, Optional
 
+import yaml
 
-# Defaults per section (match gates structure)
-_DEFAULTS = {
-    "structure": {"min_dte": 21, "max_dte": 35, "atm_band_pct": 0.03},
-    "earnings": {
-        "blackout_days_before": 3,
-        "blackout_days_after": 1,
-        "dates": [],
-    },
-    "delta": {"hedge_threshold": 25},
-    "hedge": {
-        "min_hedge_shares": 10,
-        "cooldown_seconds": 60,
-        "max_hedge_shares_per_order": 500,
-        "min_price_move_pct": 0.2,
-    },
-    "risk": {
-        "max_daily_hedge_count": 50,
-        "max_position_shares": 2000,
-        "max_daily_loss_usd": 5000.0,
-        "max_net_delta_shares": None,
-        "max_spread_pct": None,
-        "trading_hours_only": True,
-        "paper_trade": True,
-    },
-}
+# Lazy-loaded example config (single source of truth for defaults)
+_EXAMPLE_CONFIG: Optional[Dict[str, Any]] = None
+
+
+def _load_example_config() -> Dict[str, Any]:
+    """Load config.yaml.example as defaults. No code-level defaults."""
+    global _EXAMPLE_CONFIG
+    if _EXAMPLE_CONFIG is None:
+        path = Path(__file__).resolve().parent.parent.parent / "config" / "config.yaml.example"
+        with open(path, encoding="utf-8") as f:
+            _EXAMPLE_CONFIG = yaml.safe_load(f) or {}
+    return _EXAMPLE_CONFIG
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge override into base. Override values take precedence."""
+    out = dict(base)
+    for k, v in override.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _merged_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge config with example so missing keys come from config file."""
+    return _deep_merge(_load_example_config(), cfg)
 
 
 def _gates_section(cfg: Dict[str, Any], gate: str, section: str) -> Dict[str, Any]:
@@ -41,44 +47,40 @@ def _gates_section(cfg: Dict[str, Any], gate: str, section: str) -> Dict[str, An
 
 
 def _section(cfg: Dict[str, Any], section: str) -> Dict[str, Any]:
-    """Get section with fallback order: gates → top-level → state_space."""
-    # gates mapping: delta,market,liquidity,system -> state; hedge -> intent; risk,earnings,structure -> strategy/guard
+    """Get section, merging gates → top-level → state_space (later overrides earlier)."""
+    result: Dict[str, Any] = {}
     if section in ("delta", "market", "liquidity", "system"):
-        out = _gates_section(cfg, "state", section)
-        if out:
-            return out
+        result = dict(_gates_section(cfg, "state", section) or {})
     elif section == "hedge":
-        out = _gates_section(cfg, "intent", "hedge")
-        if out:
-            return out
+        result = dict(_gates_section(cfg, "intent", "hedge") or {})
     elif section == "risk":
-        out = _gates_section(cfg, "guard", "risk")
-        if out:
-            return out
+        result = dict(_gates_section(cfg, "guard", "risk") or {})
     elif section == "earnings":
-        out = _gates_section(cfg, "strategy", "earnings")
-        if out:
-            return out
+        result = dict(_gates_section(cfg, "strategy", "earnings") or {})
     elif section == "structure":
-        out = _gates_section(cfg, "strategy", "structure")
-        if out:
-            return out
+        result = dict(_gates_section(cfg, "strategy", "structure") or {})
 
-    return cfg.get(section) or (cfg.get("state_space") or {}).get(section) or {}
+    top = cfg.get(section) or (cfg.get("state_space") or {}).get(section) or {}
+    return {**result, **top}
 
 
 def get_structure_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Return structure config (min_dte, max_dte, atm_band_pct). From gates.strategy.structure or top-level."""
     cfg = config or {}
-    s = _section(cfg, "structure")
-    d = _DEFAULTS["structure"]
-    return {k: s.get(k, d.get(k)) for k in d}
+    merged = _merged_config(cfg)
+    s = _section(merged, "structure")
+    return {
+        "min_dte": s.get("min_dte"),
+        "max_dte": s.get("max_dte"),
+        "atm_band_pct": s.get("atm_band_pct"),
+    }
 
 
 def get_risk_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Return risk config (paper_trade, etc.). From gates.guard.risk or top-level risk."""
     cfg = config or {}
-    return _section(cfg, "risk")
+    merged = _merged_config(cfg)
+    return _section(merged, "risk")
 
 
 def get_hedge_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -86,121 +88,59 @@ def get_hedge_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     Return unified hedge + guard config from config.yaml.
 
     Reads from gates (strategy, state, intent, guard); fallback: top-level, state_space.
-    Returns flat dict for GsTrading, ExecutionGuard, gamma_scalper_intent.
+    Missing values from config/config.yaml.example. Returns flat dict for GsTrading, ExecutionGuard.
     """
     cfg = config or {}
-    delta = _section(cfg, "delta")
-    hedge = _section(cfg, "hedge")
-    risk = _section(cfg, "risk")
-    earnings = _section(cfg, "earnings")
+    merged = _merged_config(cfg)
+    delta = _section(merged, "delta")
+    hedge = _section(merged, "hedge")
+    risk = _section(merged, "risk")
+    earnings = _section(merged, "earnings")
 
-    # trading_hours_only: strategy or risk
-    strategy = (cfg.get("gates") or {}).get("strategy") or {}
+    strategy = (merged.get("gates") or {}).get("strategy") or {}
     trading_hours = strategy.get("trading_hours_only")
     if trading_hours is None:
-        trading_hours = risk.get("trading_hours_only", _DEFAULTS["risk"]["trading_hours_only"])
+        trading_hours = risk.get("trading_hours_only")
 
     cooldown = hedge.get("cooldown_seconds")
-    if cooldown is None:
-        cooldown = _DEFAULTS["hedge"]["cooldown_seconds"]
-    else:
-        cooldown = int(cooldown)
+    cooldown = int(cooldown) if cooldown is not None else None
+
+    # Prefer legacy hedge_threshold when user provided it (backward compat)
+    thresh = delta.get("hedge_threshold") or delta.get("threshold_hedge_shares")
 
     return {
-        # Hedge params (delta + hedge)
-        "delta_threshold_shares": delta.get(
-            "hedge_threshold",
-            _DEFAULTS["delta"]["hedge_threshold"],
-        ),
-        "min_hedge_shares": hedge.get(
-            "min_hedge_shares",
-            _DEFAULTS["hedge"]["min_hedge_shares"],
-        ),
+        "threshold_hedge_shares": thresh,
+        "min_hedge_shares": hedge.get("min_hedge_shares"),
         "cooldown_sec": cooldown,
-        "max_hedge_shares_per_order": hedge.get(
-            "max_hedge_shares_per_order",
-            _DEFAULTS["hedge"]["max_hedge_shares_per_order"],
-        ),
-        "min_price_move_pct": hedge.get(
-            "min_price_move_pct",
-            _DEFAULTS["hedge"]["min_price_move_pct"],
-        ),
-        # Guard params (risk)
-        "max_daily_hedge_count": risk.get(
-            "max_daily_hedge_count",
-            _DEFAULTS["risk"]["max_daily_hedge_count"],
-        ),
-        "max_position_shares": risk.get(
-            "max_position_shares",
-            _DEFAULTS["risk"]["max_position_shares"],
-        ),
-        "max_daily_loss_usd": risk.get(
-            "max_daily_loss_usd",
-            _DEFAULTS["risk"]["max_daily_loss_usd"],
-        ),
-        "max_net_delta_shares": risk.get(
-            "max_net_delta_shares",
-            _DEFAULTS["risk"]["max_net_delta_shares"],
-        ),
-        "max_spread_pct": risk.get(
-            "max_spread_pct",
-            _DEFAULTS["risk"]["max_spread_pct"],
-        ),
+        "max_hedge_shares_per_order": hedge.get("max_hedge_shares_per_order"),
+        "min_price_move_pct": hedge.get("min_price_move_pct"),
+        "max_daily_hedge_count": risk.get("max_daily_hedge_count"),
+        "max_position_shares": risk.get("max_position_shares"),
+        "max_daily_loss_usd": risk.get("max_daily_loss_usd"),
+        "max_net_delta_shares": risk.get("max_net_delta_shares"),
+        "max_spread_pct": risk.get("max_spread_pct"),
         "trading_hours_only": trading_hours,
-        # Guard params (earnings)
         "earnings_dates": [d for d in (earnings.get("dates") or []) if d],
-        "blackout_days_before": earnings.get(
-            "blackout_days_before",
-            _DEFAULTS["earnings"]["blackout_days_before"],
-        ),
-        "blackout_days_after": earnings.get(
-            "blackout_days_after",
-            _DEFAULTS["earnings"]["blackout_days_after"],
-        ),
+        "blackout_days_before": earnings.get("blackout_days_before"),
+        "blackout_days_after": earnings.get("blackout_days_after"),
     }
 
 
 def get_state_space_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Return state space config with defaults. Sections: delta, market, liquidity, system, hedge.
-    Reads from gates.state, gates.intent; falls back to top-level, state_space."""
-    defaults: Dict[str, Any] = {
-        "delta": {
-            "epsilon_band": 10.0,
-            "hedge_threshold": 25.0,
-            "max_delta_limit": 500.0,
-        },
-        "market": {
-            "vol_window_min": 5,
-            "stale_ts_threshold_ms": 5000.0,
-        },
-        "liquidity": {
-            "wide_spread_pct": 0.1,
-            "extreme_spread_pct": 0.5,
-        },
-        "system": {
-            "data_lag_threshold_ms": 1000.0,
-        },
-        "hedge": {
-            "min_hedge_shares": 10,
-            "cooldown_seconds": 60,
-            "max_hedge_shares_per_order": 500,
-            "min_price_move_pct": 0.2,
-        },
-    }
+    """Return state space config. Sections: delta, market, liquidity, system, hedge.
+    Reads from gates.state, gates.intent; missing values from config.yaml.example."""
     cfg = config or {}
+    merged = _merged_config(cfg)
     out: Dict[str, Any] = {}
-    for section, keys in defaults.items():
-        sec = _section(cfg, section)
-        out[section] = {**keys, **sec}
+    for section in ["delta", "market", "liquidity", "system", "hedge"]:
+        out[section] = _section(merged, section)
     return out
 
 
 def get_config_for_guards(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Return config dict suitable for TradingGuard and StateClassifier.
-    Merges gates.state, gates.intent into flat sections; adds risk for max_spread_pct."""
+    """Return config dict suitable for TradingGuard and StateClassifier."""
     cfg = config or {}
     state_cfg = get_state_space_config(cfg)
-    # TradingGuard also needs risk for is_liquidity_ok (max_spread_pct)
-    risk = _section(cfg, "risk")
-    state_cfg["risk"] = risk
+    merged = _merged_config(cfg)
+    state_cfg["risk"] = _section(merged, "risk")
     return state_cfg

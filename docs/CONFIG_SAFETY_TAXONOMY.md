@@ -19,7 +19,7 @@ This document analyzes how all config sections define **safety boundaries** and 
 
 | Section   | Keys | Purpose |
 |----------|------|---------|
-| **delta**     | epsilon_band, hedge_threshold, max_delta_limit | Map net_delta → D state |
+| **delta**     | epsilon_band, threshold_hedge_shares, max_delta_limit | Map net_delta → D state |
 | **market**    | vol_window_min, stale_ts_threshold_ms | Map data freshness → M state |
 | **liquidity** | wide_spread_pct, extreme_spread_pct | Map spread → L state |
 | **hedge**     | min_hedge_shares, cooldown_seconds, max_hedge_shares_per_order, min_price_move_pct | Order sizing, cost gate |
@@ -59,7 +59,7 @@ safety:
     calendar:      # earnings blackout
     trading_hours: # risk.trading_hours_only
   observation:     # State classification (continuous → discrete)
-    delta:         # epsilon_band, hedge_threshold, max_delta_limit
+    delta:         # epsilon_band, threshold_hedge_shares, max_delta_limit
     market:        # vol_window_min, stale_ts_threshold_ms
     liquidity:     # wide_spread_pct, extreme_spread_pct
     system:        # data_lag_threshold_ms
@@ -88,7 +88,7 @@ gates:
     earnings:  { blackout_days_before, blackout_days_after, dates }
     trading_hours: true
   state:       # Classification thresholds (O,D,M,L,E,S)
-    delta:     { epsilon_band, hedge_threshold, max_delta_limit }
+    delta:     { epsilon_band, threshold_hedge_shares, max_delta_limit }
     market:    { vol_window_min, stale_ts_threshold_ms }
     liquidity: { wide_spread_pct, extreme_spread_pct }
     system:    { data_lag_threshold_ms }
@@ -111,7 +111,7 @@ Organize by **what** is being bounded:
 boundaries:
   position:     # Portfolio / delta
     structure:  { min_dte, max_dte, atm_band_pct }
-    delta:      { epsilon_band, hedge_threshold, max_delta_limit }
+    delta:      { epsilon_band, threshold_hedge_shares, max_delta_limit }
     limits:     { max_position_shares, max_net_delta_shares }  # from risk
   market:       # Market conditions
     regime:     { vol_window_min, stale_ts_threshold_ms }
@@ -190,7 +190,7 @@ gates:
     earnings:  { blackout_days_before: 3, blackout_days_after: 1, dates: [] }
     trading_hours_only: true
   state:
-    delta:     { epsilon_band: 10, hedge_threshold: 25, max_delta_limit: 500 }
+    delta:     { epsilon_band: 10, threshold_hedge_shares: 25, max_delta_limit: 500 }
     market:    { vol_window_min: 5, stale_ts_threshold_ms: 5000 }
     liquidity: { wide_spread_pct: 0.1, extreme_spread_pct: 0.5 }
     system:    { data_lag_threshold_ms: 1000 }

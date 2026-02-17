@@ -18,7 +18,7 @@ from src.core.state.enums import (
 _DEFAULT = {
     "delta": {
         "epsilon_band": 10.0,
-        "hedge_threshold": 25.0,
+        "threshold_hedge_shares": 25.0,
         "max_delta_limit": 500.0,
     },
     "market": {
@@ -70,14 +70,16 @@ class StateClassifier:
         if not greeks_valid:
             return DeltaDeviationState.INVALID
         epsilon = _get_cfg(config, "delta", "epsilon_band", 10.0)
-        hedge_threshold = _get_cfg(config, "delta", "hedge_threshold", 25.0)
+        # threshold_hedge_shares (backward compat: hedge_threshold)
+        sec = config.get("delta") or (config.get("state_space") or {}).get("delta", {})
+        threshold = sec.get("threshold_hedge_shares", sec.get("hedge_threshold", 25.0))
         max_limit = _get_cfg(config, "delta", "max_delta_limit", 500.0)
         abs_d = abs(net_delta)
         if abs_d <= epsilon:
             return DeltaDeviationState.IN_BAND
         if abs_d >= max_limit:
             return DeltaDeviationState.FORCE_HEDGE
-        if abs_d >= hedge_threshold:
+        if abs_d >= threshold:
             return DeltaDeviationState.HEDGE_NEEDED
         return DeltaDeviationState.MINOR
 

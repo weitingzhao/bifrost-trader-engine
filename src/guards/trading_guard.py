@@ -101,11 +101,14 @@ class TradingGuard:
         if not self._snapshot.greeks_valid:
             return False
         epsilon = _get_cfg(self._config, "delta", "epsilon_band", 10.0)
-        hedge_threshold = _get_cfg(self._config, "delta", "hedge_threshold", 25.0)
+        # threshold_hedge_shares (backward compat: hedge_threshold)
+        resolved = get_config_for_guards(self._config) if self._config.get("gates") else self._config
+        sec = resolved.get("delta") or {}
+        threshold = sec.get("threshold_hedge_shares", sec.get("hedge_threshold", 25.0))
         return (
             isinstance(epsilon, (int, float))
-            and isinstance(hedge_threshold, (int, float))
-            and hedge_threshold >= epsilon
+            and isinstance(threshold, (int, float))
+            and threshold >= epsilon
         )
 
     def is_in_no_trade_band(self) -> bool:

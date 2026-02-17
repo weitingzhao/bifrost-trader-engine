@@ -35,7 +35,7 @@ gates:
   state:
     delta:
       epsilon_band: 10
-      hedge_threshold: 25
+      threshold_hedge_shares: 25
       max_delta_limit: 500
     market:
       vol_window_min: 5

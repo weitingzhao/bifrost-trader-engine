@@ -36,7 +36,7 @@ Config uses **Option 2 (gates)**: pipeline-aligned structure under `gates` in `c
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
 | delta | epsilon_band | 10 | \|net_delta\| ≤ this → D0 IN_BAND |
-| delta | hedge_threshold | 25 | \|net_delta\| ≥ this → D2 HEDGE_NEEDED |
+| delta | threshold_hedge_shares | 25 | \|net_delta\| ≥ this → D2 HEDGE_NEEDED |
 | delta | max_delta_limit | 500 | \|net_delta\| ≥ this → D3 FORCE_HEDGE |
 | market | vol_window_min | 5 | Min bars for vol/trend (simplified) |
 | market | stale_ts_threshold_ms | 5000 | Data older than this → M5 STALE |
@@ -94,10 +94,10 @@ stateDiagram-v2
   D3: D3 FORCE_HEDGE
   D4: D4 INVALID
   D0 --> D1: abs_delta > epsilon
-  D1 --> D2: abs_delta >= hedge_threshold
+  D1 --> D2: abs_delta >= threshold_hedge_shares
   D2 --> D3: abs_delta >= max_limit
   D1 --> D0: abs_delta <= epsilon
-  D2 --> D1: abs_delta < hedge_threshold
+  D2 --> D1: abs_delta < threshold_hedge_shares
   D3 --> D2: abs_delta < max_limit
   Any --> D4: greeks invalid
 ```

@@ -66,21 +66,21 @@ class TestClassifyD:
         assert StateClassifier._classify_d(-10.0, True, cfg) == DeltaDeviationState.IN_BAND
 
     def test_d1_minor(self):
-        cfg = {"delta": {"epsilon_band": 10, "hedge_threshold": 25}}
+        cfg = {"delta": {"epsilon_band": 10, "threshold_hedge_shares": 25}}
         assert StateClassifier._classify_d(15.0, True, cfg) == DeltaDeviationState.MINOR
         assert StateClassifier._classify_d(-20.0, True, cfg) == DeltaDeviationState.MINOR
 
     def test_d2_hedge_needed(self):
-        cfg = {"delta": {"epsilon_band": 10, "hedge_threshold": 25, "max_delta_limit": 500}}
+        cfg = {"delta": {"epsilon_band": 10, "threshold_hedge_shares": 25, "max_delta_limit": 500}}
         assert StateClassifier._classify_d(30.0, True, cfg) == DeltaDeviationState.HEDGE_NEEDED
         assert StateClassifier._classify_d(-25.0, True, cfg) == DeltaDeviationState.HEDGE_NEEDED
 
-    def test_d2_boundary_hedge_threshold(self):
-        cfg = {"delta": {"epsilon_band": 10, "hedge_threshold": 25, "max_delta_limit": 500}}
+    def test_d2_boundary_threshold_hedge_shares(self):
+        cfg = {"delta": {"epsilon_band": 10, "threshold_hedge_shares": 25, "max_delta_limit": 500}}
         assert StateClassifier._classify_d(25.0, True, cfg) == DeltaDeviationState.HEDGE_NEEDED
 
     def test_d3_force_hedge(self):
-        cfg = {"delta": {"epsilon_band": 10, "hedge_threshold": 25, "max_delta_limit": 500}}
+        cfg = {"delta": {"epsilon_band": 10, "threshold_hedge_shares": 25, "max_delta_limit": 500}}
         assert StateClassifier._classify_d(500.0, True, cfg) == DeltaDeviationState.FORCE_HEDGE
         assert StateClassifier._classify_d(-600.0, True, cfg) == DeltaDeviationState.FORCE_HEDGE
 

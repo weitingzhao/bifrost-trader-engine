@@ -34,7 +34,7 @@ Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 
 - **ib**: host, port, client_id (or use env `IB_HOST`, `IB_PORT`, `IB_CLIENT_ID`)
 - **symbol**: `NVDA`
-- **hedge**: delta_threshold_shares (25), cooldown_sec (60), max_hedge_shares_per_order
+- **hedge**: threshold_hedge_shares (25), cooldown_sec (60), max_hedge_shares_per_order
 - **earnings.dates**: list of `YYYY-MM-DD` earnings dates for blackout
 - **risk**: max_daily_hedge_count, max_position_shares, max_daily_loss_usd, trading_hours_only, **paper_trade** (set `false` for live)
 

@@ -23,7 +23,7 @@ class TestHedgeFlowIntegration:
 
         port_delta = 50.0
         stock_shares = 0
-        hedge = gamma_scalper_hedge(port_delta, stock_shares, delta_threshold_shares=25)
+        hedge = gamma_scalper_hedge(port_delta, stock_shares, threshold_hedge_shares=25)
         assert hedge is not None
         assert hedge.side == "SELL"
         assert hedge.quantity == 50
@@ -53,7 +53,7 @@ class TestHedgeFlowIntegration:
         )
         guard.set_last_hedge_time(time.time() - 100)
 
-        hedge = gamma_scalper_hedge(50.0, 0, delta_threshold_shares=25)
+        hedge = gamma_scalper_hedge(50.0, 0, threshold_hedge_shares=25)
         assert hedge is not None
 
         allowed, reason = guard.allow_hedge(
@@ -78,7 +78,7 @@ class TestHedgeFlowIntegration:
         )
         guard.set_last_hedge_time(time.time() - 100)
 
-        hedge = gamma_scalper_hedge(50.0, 0, delta_threshold_shares=25)
+        hedge = gamma_scalper_hedge(50.0, 0, threshold_hedge_shares=25)
         assert hedge is not None
 
         allowed, reason = guard.allow_hedge(
@@ -94,7 +94,7 @@ class TestHedgeFlowIntegration:
     def test_target_position_framing(self):
         port_delta = 30.0
         stock_shares = 10
-        hedge = gamma_scalper_hedge(port_delta, stock_shares, delta_threshold_shares=25)
+        hedge = gamma_scalper_hedge(port_delta, stock_shares, threshold_hedge_shares=25)
         assert hedge is not None
         assert hedge.side == "SELL"
         assert hedge.quantity == 30
