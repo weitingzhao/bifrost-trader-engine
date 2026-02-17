@@ -1,6 +1,4 @@
-"""State machine for daemon lifecycle: 
-IDLE -> CONNECTING -> CONNECTED -> RUNNING -> STOPPING -> STOPPED.
-"""
+"""Daemon lifecycle FSM: IDLE -> CONNECTING -> CONNECTED -> RUNNING -> STOPPING -> STOPPED."""
 
 import enum
 import logging
@@ -31,7 +29,7 @@ _TRANSITIONS: dict[DaemonState, set[DaemonState]] = {
     DaemonState.RUNNING: {DaemonState.STOPPING},
 
     DaemonState.STOPPING: {DaemonState.STOPPED},
-    
+
     DaemonState.STOPPED: set(),
 }
 

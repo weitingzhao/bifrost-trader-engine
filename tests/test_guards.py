@@ -63,41 +63,41 @@ class TestDataStale:
         snap = _make_snap(event_lag_ms=500, spot=100.0)
         cfg = {"state_space": {"system": {"data_lag_threshold_ms": 1000}}}
         tg = TradingGuard(snap, cfg)
-        assert tg.data_ok() is True
-        assert tg.data_stale() is False
+        assert tg.is_data_ok() is True
+        assert tg.is_data_stale() is False
 
     def test_data_stale_when_lag_over_threshold(self):
         snap = _make_snap(event_lag_ms=2000, spot=100.0)
         cfg = {"state_space": {"system": {"data_lag_threshold_ms": 1000}}}
         tg = TradingGuard(snap, cfg)
-        assert tg.data_ok() is False
-        assert tg.data_stale() is True
+        assert tg.is_data_ok() is False
+        assert tg.is_data_stale() is True
 
     def test_data_stale_when_no_quote(self):
         snap = _make_snap(L=LiquidityState.NO_QUOTE, spot=None)
         tg = TradingGuard(snap)
-        assert tg.data_ok() is False
-        assert tg.data_stale() is True
+        assert tg.is_data_ok() is False
+        assert tg.is_data_stale() is True
 
     def test_data_ok_when_no_config_uses_default_threshold(self):
         snap = _make_snap(event_lag_ms=500)
-        assert TradingGuard(snap).data_ok() is True
+        assert TradingGuard(snap).is_data_ok() is True
         snap2 = _make_snap(event_lag_ms=2000)
-        assert TradingGuard(snap2).data_ok() is False
+        assert TradingGuard(snap2).is_data_ok() is False
 
 
 class TestGreeksBad:
     def test_greeks_bad_when_invalid(self):
         snap = _make_snap(greeks_valid=False)
         tg = TradingGuard(snap)
-        assert tg.greeks_bad() is True
-        assert tg.greeks_ok() is False
+        assert tg.is_greeks_bad() is True
+        assert tg.is_greeks_ok() is False
 
     def test_greeks_ok_when_valid_finite(self):
         snap = _make_snap(greeks_valid=True, net_delta=10.0)
         tg = TradingGuard(snap)
-        assert tg.greeks_bad() is False
-        assert tg.greeks_ok() is True
+        assert tg.is_greeks_bad() is False
+        assert tg.is_greeks_ok() is True
 
     def test_greeks_bad_when_nan(self):
         g = GreeksSnapshot(delta=float("nan"), gamma=0.02, valid=True)
@@ -125,7 +125,7 @@ class TestGreeksBad:
             ts=snap.ts,
         )
         assert not g.is_finite()
-        assert TradingGuard(snap).greeks_bad() is True
+        assert TradingGuard(snap).is_greeks_bad() is True
 
 
 class TestInNoTradeBand:
@@ -133,64 +133,64 @@ class TestInNoTradeBand:
         snap = _make_snap(net_delta=5.0)
         cfg = {"state_space": {"delta": {"epsilon_band": 10.0}}}
         tg = TradingGuard(snap, cfg)
-        assert tg.in_no_trade_band() is True
-        assert tg.out_of_band() is False
+        assert tg.is_in_no_trade_band() is True
+        assert tg.is_out_of_band() is False
 
     def test_out_of_band_when_delta_above_epsilon(self):
         snap = _make_snap(net_delta=25.0)
         cfg = {"state_space": {"delta": {"epsilon_band": 10.0}}}
         tg = TradingGuard(snap, cfg)
-        assert tg.in_no_trade_band() is False
-        assert tg.out_of_band() is True
+        assert tg.is_in_no_trade_band() is False
+        assert tg.is_out_of_band() is True
 
     def test_boundary_epsilon(self):
         snap = _make_snap(net_delta=10.0)
         cfg = {"state_space": {"delta": {"epsilon_band": 10.0}}}
-        assert TradingGuard(snap, cfg).in_no_trade_band() is True
+        assert TradingGuard(snap, cfg).is_in_no_trade_band() is True
 
 
 class TestCostOk:
     def test_cost_ok_when_no_last_hedge(self):
         snap = _make_snap(spot=100.0, last_hedge_price=None)
-        assert TradingGuard(snap).cost_ok() is True
+        assert TradingGuard(snap).is_cost_ok() is True
 
     def test_cost_ok_when_spread_extreme_fails(self):
         snap = _make_snap(spread_pct=0.6)
         cfg = {"state_space": {"liquidity": {"extreme_spread_pct": 0.5}}}
-        assert TradingGuard(snap, cfg).cost_ok() is False
+        assert TradingGuard(snap, cfg).is_cost_ok() is False
 
     def test_cost_ok_when_price_moved_enough(self):
         snap = _make_snap(spot=101.0, last_hedge_price=100.0)
         cfg = {"state_space": {"hedge": {"min_price_move_pct": 0.2}}}
-        assert TradingGuard(snap, cfg).cost_ok() is True
+        assert TradingGuard(snap, cfg).is_cost_ok() is True
 
     def test_cost_ok_when_price_not_moved_enough(self):
         snap = _make_snap(spot=100.1, last_hedge_price=100.0)
         cfg = {"state_space": {"hedge": {"min_price_move_pct": 1.0}}}
-        assert TradingGuard(snap, cfg).cost_ok() is False
+        assert TradingGuard(snap, cfg).is_cost_ok() is False
 
 
 class TestLiquidityOk:
     def test_liquidity_ok_when_normal_spread(self):
         snap = _make_snap(L=LiquidityState.NORMAL, spread_pct=0.05)
-        assert TradingGuard(snap).liquidity_ok() is True
+        assert TradingGuard(snap).is_liquidity_ok() is True
 
     def test_liquidity_not_ok_when_no_quote(self):
         snap = _make_snap(L=LiquidityState.NO_QUOTE)
-        assert TradingGuard(snap).liquidity_ok() is False
+        assert TradingGuard(snap).is_liquidity_ok() is False
 
     def test_liquidity_not_ok_when_extreme_wide(self):
         snap = _make_snap(L=LiquidityState.EXTREME_WIDE)
-        assert TradingGuard(snap).liquidity_ok() is False
+        assert TradingGuard(snap).is_liquidity_ok() is False
 
     def test_liquidity_ok_respects_max_spread_pct(self):
         snap = _make_snap(spread_pct=0.10)
         assert (
-            TradingGuard(snap, {"risk": {"max_spread_pct": 0.05}}).liquidity_ok()
+            TradingGuard(snap, {"risk": {"max_spread_pct": 0.05}}).is_liquidity_ok()
             is False
         )
         assert (
-            TradingGuard(snap, {"risk": {"max_spread_pct": 0.15}}).liquidity_ok()
+            TradingGuard(snap, {"risk": {"max_spread_pct": 0.15}}).is_liquidity_ok()
             is True
         )
 
@@ -199,53 +199,53 @@ class TestBrokerAndExec:
     def test_broker_down_when_disconnected(self):
         snap = _make_snap(E=ExecutionState.DISCONNECTED)
         tg = TradingGuard(snap)
-        assert tg.broker_down() is True
-        assert tg.broker_up() is False
+        assert tg.is_broker_down() is True
+        assert tg.is_broker_up() is False
 
     def test_broker_down_when_broker_error(self):
         snap = _make_snap(E=ExecutionState.BROKER_ERROR)
         tg = TradingGuard(snap)
-        assert tg.broker_down() is True
-        assert tg.exec_fault() is True
+        assert tg.is_broker_down() is True
+        assert tg.is_exec_fault() is True
 
     def test_broker_up_when_idle(self):
         snap = _make_snap(E=ExecutionState.IDLE)
         tg = TradingGuard(snap)
-        assert tg.broker_up() is True
-        assert tg.exec_fault() is False
+        assert tg.is_broker_up() is True
+        assert tg.is_exec_fault() is False
 
 
 class TestOptionPosition:
     def test_have_option_position_long_gamma(self):
         snap = _make_snap(O=OptionPositionState.LONG_GAMMA)
         tg = TradingGuard(snap)
-        assert tg.have_option_position() is True
-        assert tg.no_option_position() is False
+        assert tg.is_option_position() is True
+        assert tg.is_no_option_position() is False
 
     def test_no_option_position(self):
         snap = _make_snap(O=OptionPositionState.NONE)
         tg = TradingGuard(snap)
-        assert tg.no_option_position() is True
-        assert tg.have_option_position() is False
+        assert tg.is_no_option_position() is True
+        assert tg.is_option_position() is False
 
 
 class TestDeltaBandReady:
     def test_delta_band_ready_when_greeks_valid(self):
         snap = _make_snap(greeks_valid=True)
-        assert TradingGuard(snap).delta_band_ready() is True
+        assert TradingGuard(snap).is_delta_band_ready() is True
 
     def test_delta_band_not_ready_when_greeks_invalid(self):
         snap = _make_snap(greeks_valid=False)
-        assert TradingGuard(snap).delta_band_ready() is False
+        assert TradingGuard(snap).is_delta_band_ready() is False
 
 
 class TestRetryAllowed:
     def test_retry_allowed_when_under_limit(self):
         snap = _make_snap()
         exec_guard = SimpleNamespace(max_daily_hedge_count=50, _daily_hedge_count=10)
-        assert TradingGuard(snap, execution_guard=exec_guard).retry_allowed() is True
+        assert TradingGuard(snap, execution_guard=exec_guard).is_retry_allowed() is True
 
     def test_retry_not_allowed_when_at_limit(self):
         snap = _make_snap()
         exec_guard = SimpleNamespace(max_daily_hedge_count=50, _daily_hedge_count=50)
-        assert TradingGuard(snap, execution_guard=exec_guard).retry_allowed() is False
+        assert TradingGuard(snap, execution_guard=exec_guard).is_retry_allowed() is False
