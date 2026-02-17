@@ -13,11 +13,14 @@ from src.connector.ib import IBConnector
 from src.core.metrics import get_metrics
 from src.core.state.classifier import StateClassifier
 from src.core.state.composite import CompositeState
+from src.core.state.enums import HedgeExecState
 from src.core.logging_utils import log_composite_state, log_target_position, log_order_status
 from src.engine.state import TradingState
 from src.engine.state_machine import DaemonState, DaemonStateMachine
 from src.execution.execution_fsm import ExecutionFSM
 from src.execution.order_manager import OrderManager
+from src.fsm.adapters import target_position_event_from_intent
+from src.fsm.hedge_execution_fsm import HedgeExecutionFSM
 from src.market.market_data import MarketData
 from src.positions.portfolio import parse_positions, portfolio_delta
 from src.positions.position_book import PositionBook
@@ -95,6 +98,11 @@ class TradingDaemon:
         self._market_data = MarketData(self.state)
         self._order_manager = OrderManager()
         self._execution_fsm = ExecutionFSM(self._order_manager)
+        min_hedge_shares = self.hedge_cfg.get("min_hedge_shares", 10)
+        state_space_hedge = (self.config.get("state_space") or {}).get("hedge") or {}
+        min_hedge_shares = state_space_hedge.get("min_hedge_shares", min_hedge_shares)
+        self._hedge_execution_fsm = HedgeExecutionFSM(min_hedge_shares=min_hedge_shares)
+        self._order_manager.set_hedge_execution_fsm(self._hedge_execution_fsm)
         self._metrics = get_metrics()
 
         # 3. Static Defaults
@@ -265,14 +273,14 @@ class TradingDaemon:
         if approved is None:
             logger.info("Hedge blocked by gates (delta=%.1f would %s %s)", cs.net_delta, intent.side, intent.quantity)
             return None
-        if not self._execution_fsm.can_place_order():
+        if not self._hedge_execution_fsm.can_place_order():
             logger.warning("Execution not IDLE (E=%s), skip order", self._order_manager.effective_e_state().value)
             return None
         log_target_position(target_shares=intent.target_shares, cs=cs)
         return (approved, cs, spot)
 
     async def _maybe_hedge(self) -> None:
-        """Run hedge logic once: state space -> intent -> gates -> execution FSM -> order."""
+        """Run hedge logic once: state space -> intent -> gates -> HedgeExecutionFSM -> order."""
         async with self._hedge_lock:
             pass
         result = await self._compute_hedge_decision()
@@ -280,6 +288,17 @@ class TradingDaemon:
             return
         intent, cs, spot = result
         now_ts = time.time()
+        min_hedge_shares = self.hedge_cfg.get("min_hedge_shares", 10)
+        state_space_hedge = (self.config.get("state_space") or {}).get("hedge") or {}
+        min_hedge_shares = state_space_hedge.get("min_hedge_shares", min_hedge_shares)
+        target_ev = target_position_event_from_intent(
+            intent.target_shares, intent.side, intent.quantity,
+            reason="delta_hedge", ts=now_ts,
+        )
+        self._hedge_execution_fsm.on_target(target_ev, cs.stock_pos)
+        self._hedge_execution_fsm.on_plan_decide(send_order=intent.quantity >= min_hedge_shares)
+        if self._hedge_execution_fsm.state != HedgeExecState.SEND:
+            return
         if self.paper_trade:
             log_order_status(order_status="paper_send", side=intent.side, quantity=intent.quantity)
             logger.info(
@@ -288,15 +307,16 @@ class TradingDaemon:
                 intent.quantity,
                 cs.net_delta,
             )
-            self._execution_fsm.on_order_sent()
+            self._hedge_execution_fsm.on_order_placed()
+            self._hedge_execution_fsm.on_ack_ok()
             self.guard.record_hedge_sent()
             self.state.set_last_hedge_time(now_ts)
             self.state.set_last_hedge_price(spot)
             self.state.inc_daily_hedge_count()
             self._metrics.inc_hedge_count()
-            self._execution_fsm.on_fill_complete()
+            self._hedge_execution_fsm.on_full_fill()
             return
-        self._execution_fsm.on_order_sent()
+        self._hedge_execution_fsm.on_order_placed()
         log_order_status(order_status="sent", side=intent.side, quantity=intent.quantity)
         trade = await self.connector.place_order(
             self.symbol,
@@ -305,19 +325,19 @@ class TradingDaemon:
             order_type=self.order_type,
         )
         if trade is not None:
+            self._hedge_execution_fsm.on_ack_ok()
             self.guard.record_hedge_sent()
             self.state.set_last_hedge_time(now_ts)
             self.state.set_last_hedge_price(spot)
             self.state.inc_daily_hedge_count()
             self._metrics.inc_hedge_count()
             logger.info("Hedge sent: %s %s %s", intent.side, intent.quantity, self.symbol)
-            # When IB reports fill/cancel, daemon should call _execution_fsm.on_fill_complete() or on_order_cancelled()
-            # For now we optimistically transition to IDLE after place (order may still be working)
-            self._execution_fsm.on_fill_complete()
+            self._hedge_execution_fsm.on_full_fill()
         else:
             logger.warning("Order failed (trade is None)")
-            self._execution_fsm.on_broker_error("place_order returned None")
-            self._execution_fsm.on_broker_recovery()
+            self._hedge_execution_fsm.on_ack_reject()
+            self._hedge_execution_fsm.on_try_resync()
+            self._hedge_execution_fsm.on_positions_resynced()
 
     async def _heartbeat(self) -> None:
         """Periodic heartbeat to run maybe_hedge even without tick updates."""

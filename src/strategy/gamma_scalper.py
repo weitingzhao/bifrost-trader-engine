@@ -14,9 +14,12 @@ class HedgeOrder:
 
 @dataclass
 class TargetPosition:
-    """Target stock position in shares (delta-neutral target)."""
+    """Target stock position in shares (delta-neutral target). Emitted by strategy only; execution subscribes."""
 
     target_shares: int
+    reason: str = ""
+    ts: float = 0.0
+    trace_id: Optional[str] = None
 
 
 @dataclass

@@ -1,0 +1,7 @@
+{"ts": 1000.0, "event_type": "tick", "bid": 99.0, "ask": 99.1, "mid": 99.05}
+{"ts": 1001.0, "event_type": "position", "stock_shares": 0, "option_delta": 30.0, "net_delta": 30.0}
+{"ts": 1002.0, "event_type": "greeks", "delta": 30.0, "gamma": 0.02, "valid": true}
+{"ts": 1003.0, "event_type": "tick", "bid": 99.1, "ask": 99.2, "mid": 99.15}
+{"ts": 1004.0, "event_type": "position", "stock_shares": -30, "option_delta": 30.0, "net_delta": 0.0}
+{"ts": 1005.0, "event_type": "greeks", "delta": 0.0, "gamma": 0.02, "valid": true}
+{"ts": 1006.0, "event_type": "tick", "bid": 99.2, "ask": 99.3, "mid": 99.25}

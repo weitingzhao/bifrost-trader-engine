@@ -1,8 +1,11 @@
 """Order manager: tracks active order state for execution state (E)."""
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from src.core.state.enums import ExecutionState
+
+if TYPE_CHECKING:
+    from src.fsm.hedge_execution_fsm import HedgeExecutionFSM
 
 
 class OrderManager:
@@ -12,6 +15,7 @@ class OrderManager:
         self._execution_state = ExecutionState.IDLE
         self._connected = True
         self._broker_error: Optional[str] = None
+        self._hedge_execution_fsm: Optional["HedgeExecutionFSM"] = None
 
     @property
     def execution_state(self) -> ExecutionState:
@@ -20,12 +24,18 @@ class OrderManager:
     def set_execution_state(self, state: ExecutionState) -> None:
         self._execution_state = state
 
+    def set_hedge_execution_fsm(self, fsm: Optional["HedgeExecutionFSM"]) -> None:
+        """When set, effective_e_state() delegates to HedgeExecutionFSM."""
+        self._hedge_execution_fsm = fsm
+
     @property
     def connected(self) -> bool:
         return self._connected
 
     def set_connected(self, connected: bool) -> None:
         self._connected = connected
+        if self._hedge_execution_fsm is not None:
+            self._hedge_execution_fsm.set_connected(connected)
 
     @property
     def broker_error(self) -> Optional[str]:
@@ -35,7 +45,9 @@ class OrderManager:
         self._broker_error = msg
 
     def effective_e_state(self) -> ExecutionState:
-        """E state: DISCONNECTED/BROKER_ERROR override internal order state."""
+        """E state: when HedgeExecutionFSM is set, use its mapping; else legacy internal state."""
+        if self._hedge_execution_fsm is not None:
+            return self._hedge_execution_fsm.effective_execution_state()
         if not self._connected:
             return ExecutionState.DISCONNECTED
         if self._broker_error:

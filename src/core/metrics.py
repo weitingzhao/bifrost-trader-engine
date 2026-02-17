@@ -18,6 +18,10 @@ class Metrics:
         self._last_data_lag_ms: Optional[float] = None
         self._last_spread_bucket: Optional[str] = None
         self._last_delta_abs: Optional[float] = None
+        self._current_state: Optional[str] = None
+        self._last_gamma: Optional[float] = None
+        self._reprice_count = 0
+        self._safe_mode_count = 0
 
     def inc_hedge_count(self) -> int:
         with self._lock:
@@ -58,6 +62,44 @@ class Metrics:
         with self._lock:
             self._last_delta_abs = delta_abs
 
+    def set_current_state(self, state: Optional[str]) -> None:
+        with self._lock:
+            self._current_state = state
+
+    @property
+    def current_state(self) -> Optional[str]:
+        with self._lock:
+            return self._current_state
+
+    def set_gamma(self, gamma: Optional[float]) -> None:
+        with self._lock:
+            self._last_gamma = gamma
+
+    @property
+    def gamma(self) -> Optional[float]:
+        with self._lock:
+            return self._last_gamma
+
+    def inc_reprice_count(self) -> int:
+        with self._lock:
+            self._reprice_count += 1
+            return self._reprice_count
+
+    @property
+    def reprice_count(self) -> int:
+        with self._lock:
+            return self._reprice_count
+
+    def inc_safe_mode_count(self) -> int:
+        with self._lock:
+            self._safe_mode_count += 1
+            return self._safe_mode_count
+
+    @property
+    def safe_mode_count(self) -> int:
+        with self._lock:
+            return self._safe_mode_count
+
     def log_snapshot(self) -> None:
         """Log current metrics snapshot."""
         with self._lock:
@@ -70,6 +112,12 @@ class Metrics:
                 parts.append(f"spread_bucket={self._last_spread_bucket}")
             if self._last_delta_abs is not None:
                 parts.append(f"delta_abs={self._last_delta_abs:.1f}")
+            if self._current_state:
+                parts.append(f"current_state={self._current_state}")
+            if self._last_gamma is not None:
+                parts.append(f"gamma={self._last_gamma:.4f}")
+            parts.append(f"reprice_count={self._reprice_count}")
+            parts.append(f"safe_mode_count={self._safe_mode_count}")
         logger.info("metrics " + " ".join(parts))
 
 

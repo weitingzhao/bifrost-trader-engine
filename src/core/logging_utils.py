@@ -1,8 +1,8 @@
-"""Structured logging for composite state, target position, order status."""
+"""Structured logging for composite state, target position, order status, FSM transitions."""
 
 import logging
 import uuid
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from src.core.state.composite import CompositeState
 
@@ -92,4 +92,24 @@ def log_order_status(
     if quantity is not None:
         extra["quantity"] = quantity
     msg = "order_status " + " ".join(f"{k}={v}" for k, v in sorted(extra.items()))
+    logger.info(msg)
+
+
+def log_fsm_transition(
+    from_state: str,
+    to_state: str,
+    event: str,
+    trace_id: Optional[str] = None,
+    guards_evaluated: Optional[Dict[str, bool]] = None,
+    extra: Optional[dict] = None,
+) -> None:
+    """Log FSM state transition: trace_id, from_state, to_state, event, guards_evaluated."""
+    extra = extra or {}
+    _ensure_trace_id(extra)
+    extra["from_state"] = from_state
+    extra["to_state"] = to_state
+    extra["event"] = event
+    if guards_evaluated is not None:
+        extra["guards_evaluated"] = {k: v for k, v in guards_evaluated.items() if v}
+    msg = "fsm_transition " + " ".join(f"{k}={v}" for k, v in sorted(extra.items()))
     logger.info(msg)

@@ -58,3 +58,35 @@ class SystemHealthState(str, enum.Enum):
     GREEKS_BAD = "S1"
     DATA_LAG = "S2"
     RISK_HALT = "S3"
+
+
+class TradingState(str, enum.Enum):
+    """Top-level Trading FSM macro states."""
+
+    BOOT = "BOOT"
+    SYNC = "SYNC"
+    IDLE = "IDLE"
+    ARMED = "ARMED"
+    MONITOR = "MONITOR"
+    NO_TRADE = "NO_TRADE"
+    PAUSE_COST = "PAUSE_COST"
+    PAUSE_LIQ = "PAUSE_LIQ"
+    NEED_HEDGE = "NEED_HEDGE"
+    HEDGING = "HEDGING"
+    SAFE = "SAFE"
+
+
+class HedgeExecState(str, enum.Enum):
+    """Hedge Execution FSM states (E mapping for detailed execution)."""
+
+    EXEC_IDLE = "EXEC_IDLE"
+    PLAN = "PLAN"
+    SEND = "SEND"
+    WAIT_ACK = "WAIT_ACK"
+    WORKING = "WORKING"
+    PARTIAL = "PARTIAL"
+    REPRICE = "REPRICE"
+    CANCEL = "CANCEL"
+    RECOVER = "RECOVER"
+    FILLED = "FILLED"
+    FAIL = "FAIL"
