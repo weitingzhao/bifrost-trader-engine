@@ -197,7 +197,7 @@ class TestNeedHedgeToHedgingAndBack:
         assert fsm.state == TradingState.MONITOR
 
     def test_hedging_to_need_hedge_on_hedge_failed_when_retry_allowed(self):
-        fsm = TradingFSM(guard=type("G", (), {"max_daily_hedge_count": 50, "_daily_hedge_count": 5})())
+        fsm = TradingFSM(guard=type("G", (), {"max_daily_hedge_count": 50, "_daily_hedge_count": 5})())  # execution guard for retry_allowed
         fsm.apply_transition(TradingEvent.START, _snap())
         fsm.apply_transition(TradingEvent.SYNCED, _snap(O=OptionPositionState.LONG_GAMMA))
         fsm.apply_transition(TradingEvent.TICK, _snap(O=OptionPositionState.LONG_GAMMA))

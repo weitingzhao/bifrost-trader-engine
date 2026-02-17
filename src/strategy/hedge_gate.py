@@ -11,7 +11,7 @@ from src.core.state.enums import (
     OptionPositionState,
     SystemHealthState,
 )
-from src.risk.guard import RiskGuard
+from src.core.guards.execution_guard import RiskGuard
 from src.strategy.gamma_scalper import HedgeIntent
 
 

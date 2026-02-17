@@ -26,7 +26,7 @@ from src.market.market_data import MarketData
 from src.positions.portfolio import parse_positions, portfolio_delta
 from src.positions.position_book import PositionBook
 from src.pricing.greeks import Greeks
-from src.risk.guard import RiskGuard
+from src.core.guards.execution_guard import RiskGuard
 from src.strategy.gamma_scalper import gamma_scalper_intent
 from src.strategy.hedge_gate import apply_hedge_gates, should_output_target
 

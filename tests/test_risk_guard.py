@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from src.risk.guard import RiskGuard
+from src.core.guards.execution_guard import RiskGuard
 
 
 class TestRiskGuard:

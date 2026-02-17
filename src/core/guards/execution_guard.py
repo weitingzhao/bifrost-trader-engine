@@ -1,4 +1,10 @@
-"""Risk guard: cooldown, max daily hedges, max position, max loss, earnings blackout."""
+"""Hedge Execution FSM guard: order-level risk gate before sending a hedge.
+
+Used when transitioning toward SEND in HedgeExecutionFSM (fsm/hedge_execution_fsm.py).
+apply_hedge_gates() in strategy/hedge_gate.py calls allow_hedge() to decide whether
+the order may be sent. Stateful: cooldown, daily count, circuit breaker, earnings blackout.
+For Trading FSM transition guards (pure predicates), see trading_guard.py in this package.
+"""
 
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -8,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class RiskGuard:
-    """Enforce MVP risk rules before sending a hedge order."""
+    """Order-send gate for the Hedge Execution FSM: cooldown, max daily hedges, position/earnings/circuit breaker, RTH, spread, min price move."""
 
     def __init__(
         self,
@@ -84,7 +90,7 @@ class RiskGuard:
         try:
             from zoneinfo import ZoneInfo
             et = datetime.now(ZoneInfo("America/New_York"))
-        except Exception:
+        except (ImportError, OSError):
             et = datetime.now(timezone.utc)
         return (et.hour, et.minute) >= (9, 30) and (et.hour, et.minute) < (16, 0)
 
@@ -94,7 +100,7 @@ class RiskGuard:
         current_stock_position: int,
         hedge_side: str,
         hedge_quantity: int,
-        portfolio_delta: Optional[float] = None,
+        portfolio_delta: Optional[float] = None,  # pylint: disable=unused-argument
         spot: Optional[float] = None,
         last_hedge_price: Optional[float] = None,
         spread_pct: Optional[float] = None,
@@ -102,7 +108,8 @@ class RiskGuard:
     ) -> tuple[bool, str]:
         """
         Returns (allowed: bool, reason: str).
-        Three gates: delta threshold (caller), cooldown (skipped if force_hedge), min_price_move, spread.
+        Gates: circuit breaker, RTH, earnings blackout, cooldown (skipped if force_hedge),
+        max daily count, max position, spread, min price move.
         """
         self._reset_daily_if_new_day()
 

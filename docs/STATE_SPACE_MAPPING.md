@@ -22,9 +22,17 @@ This document maps the Gamma Scalping **state space** (six dimensions O, D, M, L
 - **E**: `IDLE` (E0), `ORDER_WORKING` (E1), `PARTIAL_FILL` (E2), `DISCONNECTED` (E3), `BROKER_ERROR` (E4)
 - **S**: `OK` (S0), `GREEKS_BAD` (S1), `DATA_LAG` (S2), `RISK_HALT` (S3)
 
-## Threshold Config and Defaults (single source: state_space)
+## Threshold Config and Defaults
 
-All delta and hedge thresholds live under `state_space` in `config/config.yaml` to avoid duplication. Typed defaults in `src/config/settings.py`. The daemon uses `get_hedge_config(config)` which reads from `state_space.delta` and `state_space.hedge` (with optional top-level `hedge` override).
+Config follows **O,D,M,L,E,S**: all six dimensions live under `state_space` in `config/config.yaml`.
+
+- **state_space.delta** (D): epsilon_band, hedge_threshold, max_delta_limit
+- **state_space.market** (M): vol_window_min, stale_ts_threshold_ms
+- **state_space.liquidity** (L): wide_spread_pct, extreme_spread_pct
+- **state_space.system** (S): data_lag_threshold_ms
+- **state_space.execution** (E): min_hedge_shares, cooldown_seconds, max_hedge_shares_per_order, min_price_move_pct
+
+(O has no config; it is derived from positions.) The daemon uses `get_hedge_config(config)` which reads from `state_space.delta` and `state_space.execution` (with fallback to top-level `execution` or legacy `state_space.hedge` if present).
 
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
@@ -36,9 +44,10 @@ All delta and hedge thresholds live under `state_space` in `config/config.yaml` 
 | liquidity | wide_spread_pct | 0.1 | spread_pct ≥ this → L1 WIDE |
 | liquidity | extreme_spread_pct | 0.5 | spread_pct ≥ this → L2 EXTREME_WIDE |
 | system | data_lag_threshold_ms | 1000 | Lag > this → S2 DATA_LAG |
-| hedge | min_hedge_shares | 10 | Minimum order size to allow |
-| hedge | min_price_move_pct | 0.2 | Min price move % (gate) |
-| hedge | cooldown_seconds | 60 | Cooldown between hedges (bypassed on D3) |
+| execution (E) | min_hedge_shares | 10 | Minimum order size to allow |
+| execution (E) | min_price_move_pct | 0.2 | Min price move % (gate) |
+| execution (E) | cooldown_seconds | 60 | Cooldown between hedges (bypassed on D3) |
+| execution (E) | max_hedge_shares_per_order | 500 | Max shares per hedge order |
 
 ## When TargetPosition Is Output vs SAFE_MODE
 
@@ -102,7 +111,7 @@ The engine uses a **Trading FSM** (macro states) and a **Hedge Execution FSM** (
 
 - **States**: `BOOT`, `SYNC`, `IDLE`, `ARMED`, `MONITOR`, `NO_TRADE`, `PAUSE_COST`, `PAUSE_LIQ`, `NEED_HEDGE`, `HEDGING`, `SAFE`
 - **Events**: `start`, `synced`, `tick`, `quote`, `greeks_update`, `target_emitted`, `hedge_done`, `hedge_failed`, `data_stale`, `greeks_bad`, `broker_down`, `broker_up`, `manual_resume`, `shutdown`
-- **Guards** (pure functions in `src/core/state/guards.py`): `data_ok`, `data_stale`, `greeks_bad`, `broker_down`, `have_option_position`, `delta_band_ready`, `in_no_trade_band`, `out_of_band`, `cost_ok`, `liquidity_ok`, `retry_allowed`, `exec_fault`
+- **Trading FSM guards** (pure functions in `src/core/guards/trading_guard.py`): `data_ok`, `data_stale`, `greeks_bad`, `broker_down`, `have_option_position`, `delta_band_ready`, `in_no_trade_band`, `out_of_band`, `cost_ok`, `liquidity_ok`, `retry_allowed`, `exec_fault`
 
 ```mermaid
 stateDiagram-v2
@@ -154,14 +163,14 @@ stateDiagram-v2
 ### StateSnapshot and Guards
 
 - **StateSnapshot** (`src/core/state/snapshot.py`): Immutable world state with O,D,M,L,E,S plus spot, spread_pct, event_lag_ms, greeks, last_hedge_ts/price. Built from CompositeState via `StateSnapshot.from_composite_state(cs, ...)`.
-- **Guards** (`src/core/state/guards.py`): Pure functions used by TradingFSM transition logic; all testable in isolation.
+- **Trading FSM guards** (`src/core/guards/trading_guard.py`): Pure functions used by TradingFSM transition logic; all testable in isolation. **Hedge Execution FSM guard** (`src/core/guards/execution_guard.py`, `RiskGuard`): order-send gate used by `apply_hedge_gates()`.
 
 ## Code References
 
 - **CompositeState**: `src/core/state/composite.py` — holds O,D,M,L,E,S and numeric snapshots; `from_runtime()`, `update(event)`.
 - **StateSnapshot**: `src/core/state/snapshot.py` — immutable snapshot for guards; `from_composite_state()`, `update(event)`.
 - **StateClassifier**: `src/core/state/classifier.py` — `classify(...)` maps position_book, market_data, greeks, execution → CompositeState.
-- **Guards**: `src/core/state/guards.py` — pure guard functions for FSM transitions.
+- **Guards**: `src/core/guards/trading_guard.py` — pure guards for Trading FSM; `src/core/guards/execution_guard.py` — RiskGuard for Hedge Execution FSM (order-send gate).
 - **Hedge gate**: `src/strategy/hedge_gate.py` — `should_output_target(cs)`, `apply_hedge_gates(intent, cs, guard)`.
 - **Trading FSM**: `src/fsm/trading_fsm.py` — macro state machine; transition table driven by events and guards.
 - **Hedge Execution FSM**: `src/fsm/hedge_execution_fsm.py` — execution sub-FSM; receives TargetPosition, outputs E state.

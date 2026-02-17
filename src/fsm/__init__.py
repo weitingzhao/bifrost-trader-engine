@@ -1,4 +1,4 @@
-"""FSM package: Trading FSM and Hedge Execution FSM."""
+"""FSM package: Trading FSM and Hedge Execution FSM. Guards live in src.core.guards."""
 
 from src.core.state.enums import HedgeExecState, TradingState
 from src.fsm.events import (
@@ -11,6 +11,7 @@ from src.fsm.events import (
     FillEvent,
     AckEvent,
 )
+from src.core.guards.execution_guard import RiskGuard
 from src.fsm.hedge_execution_fsm import HedgeExecutionFSM
 from src.fsm.trading_fsm import TradingFSM
 
@@ -25,6 +26,7 @@ __all__ = [
     "PositionEvent",
     "FillEvent",
     "AckEvent",
+    "RiskGuard",
     "HedgeExecutionFSM",
     "TradingFSM",
 ]

@@ -5,7 +5,7 @@ import time
 import pytest
 
 from src.engine.state import TradingState
-from src.risk.guard import RiskGuard
+from src.core.guards.execution_guard import RiskGuard
 from src.strategy.gamma_scalper import gamma_scalper_hedge
 
 

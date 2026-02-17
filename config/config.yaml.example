@@ -16,9 +16,6 @@ structure:
   max_dte: 35
   atm_band_pct: 0.03   # |strike - spot| / spot < 3% for "near ATM"
 
-# Hedge params: see state_space.delta and state_space.hedge below (single source).
-# Optional top-level override: hedge: { cooldown_sec: 60 } etc.
-
 # Earnings blackout: no new hedge X days before/after (manual list in YYYY-MM-DD)
 earnings:
   blackout_days_before: 3
@@ -44,7 +41,7 @@ risk:
 order:
   order_type: "market"   # or "limit"
 
-# State space (O,D,M,L,E,S) — single source for delta and hedge
+# State space (O,D,M,L,E,S) — one section per dimension
 state_space:
   delta:
     epsilon_band: 10
@@ -56,10 +53,10 @@ state_space:
   liquidity:
     wide_spread_pct: 0.1
     extreme_spread_pct: 0.5
-  system:
-    data_lag_threshold_ms: 1000
-  hedge:
+  execution:
     min_hedge_shares: 10
-    min_price_move_pct: 0.2
     cooldown_seconds: 60
     max_hedge_shares_per_order: 500
+    min_price_move_pct: 0.2
+  system:
+    data_lag_threshold_ms: 1000

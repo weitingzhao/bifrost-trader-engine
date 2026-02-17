@@ -1,6 +1,10 @@
-"""Pure guard functions for Trading FSM transitions (testable, no side effects)."""
+"""Pure guard functions for Trading FSM transitions (stateless, testable).
 
-import math
+Used only by TradingFSM in fsm/trading_fsm.py. Each guard is a predicate over
+StateSnapshot + optional config; no side effects. For the order-send gate
+used by the Hedge Execution FSM, see execution_guard.py (RiskGuard) in this package.
+"""
+
 from typing import Any, Dict, Optional
 
 from src.core.state.enums import (
@@ -47,7 +51,6 @@ def greeks_bad(snapshot: StateSnapshot) -> bool:
     g = snapshot.greeks
     if not g.valid or not g.is_finite():
         return True
-    # Extreme values (e.g. delta in shares > 1e6)
     if abs(g.delta) > 1e6 or abs(g.gamma) > 1e6:
         return True
     return False
@@ -84,7 +87,6 @@ def delta_band_ready(
         return False
     epsilon = _get_cfg(config, "delta", "epsilon_band", 10.0)
     hedge_threshold = _get_cfg(config, "delta", "hedge_threshold", 25.0)
-    # Must have valid thresholds and greeks
     return (
         isinstance(epsilon, (int, float))
         and isinstance(hedge_threshold, (int, float))
@@ -115,14 +117,15 @@ def cost_ok(
     min_price_move_pct: Optional[float] = None,
 ) -> bool:
     """
-    True when expected benefit > cost; at least spread+fee threshold.
-    Simplified: spread not extreme and (optional) price moved enough since last hedge.
+    True when expected benefit > cost; spread not extreme and (optional) price moved enough.
+    Reads min_price_move_pct from state_space.execution (fallback: hedge).
     """
     max_spread = _get_cfg(config, "liquidity", "extreme_spread_pct", 0.5)
     if snapshot.spread_pct is not None and snapshot.spread_pct >= max_spread:
         return False
     move_pct = min_price_move_pct or _get_cfg(
-        config, "hedge", "min_price_move_pct", 0.2
+        config, "execution", "min_price_move_pct",
+        _get_cfg(config, "hedge", "min_price_move_pct", 0.2),
     )
     if move_pct <= 0:
         return True
@@ -145,26 +148,27 @@ def liquidity_ok(
         return False
     if snapshot.L == LiquidityState.EXTREME_WIDE:
         return False
-    max_spread_pct = None
     if config:
         risk = config.get("risk", {})
         max_spread_pct = risk.get("max_spread_pct")
-    if max_spread_pct is not None and snapshot.spread_pct is not None:
-        if snapshot.spread_pct > max_spread_pct:
-            return False
+        if max_spread_pct is not None and snapshot.spread_pct is not None:
+            if snapshot.spread_pct > max_spread_pct:
+                return False
     return True
 
 
 def retry_allowed(
-    snapshot: StateSnapshot,
-    guard: Any,
-    config: Optional[Dict[str, Any]] = None,
+    _snapshot: StateSnapshot,
+    execution_guard: Any,
+    _config: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """True when daily retry/cancel-replace limits not exceeded."""
-    if guard is None:
+    """True when daily retry/cancel-replace limits not exceeded.
+    execution_guard is the Hedge Execution FSM guard (RiskGuard) which holds _daily_hedge_count.
+    """
+    if execution_guard is None:
         return True
-    max_daily = getattr(guard, "max_daily_hedge_count", 50)
-    daily_count = getattr(guard, "_daily_hedge_count", 0)
+    max_daily = getattr(execution_guard, "max_daily_hedge_count", 50)
+    daily_count = getattr(execution_guard, "_daily_hedge_count", 0)
     return daily_count < max_daily
 
 
