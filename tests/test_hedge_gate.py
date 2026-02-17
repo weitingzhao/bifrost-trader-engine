@@ -15,7 +15,7 @@ from src.core.state.enums import (
 )
 from src.strategy.gamma_scalper import HedgeIntent, compute_target_position
 from src.strategy.hedge_gate import apply_hedge_gates, should_output_target
-from src.core.guards.execution_guard import RiskGuard
+from src.guards.execution_guard import RiskGuard
 
 
 def _cs(

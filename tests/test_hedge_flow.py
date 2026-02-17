@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from src.engine.state import TradingState
-from src.core.guards.execution_guard import RiskGuard
+from src.engine.store import RuntimeStore
+from src.guards.execution_guard import RiskGuard
 from src.strategy.gamma_scalper import gamma_scalper_hedge
 
 
@@ -13,7 +13,7 @@ class TestHedgeFlowIntegration:
     """Test hedge decision flow: delta -> target -> guard gates -> allowed/blocked."""
 
     def test_full_hedge_flow_allowed(self):
-        state = TradingState()
+        state = RuntimeStore()
         state.set_underlying_quote(100.0, 100.1)
         state.set_positions([], stock_position=0)
         state.set_last_hedge_price(99.0)
@@ -42,7 +42,7 @@ class TestHedgeFlowIntegration:
         assert reason == "ok"
 
     def test_min_price_move_blocks_hedge(self):
-        state = TradingState()
+        state = RuntimeStore()
         state.set_underlying_quote(100.0, 100.1)
         state.set_last_hedge_price(100.05)
 
@@ -68,7 +68,7 @@ class TestHedgeFlowIntegration:
         assert reason == "min_price_move"
 
     def test_spread_blocks_hedge(self):
-        state = TradingState()
+        state = RuntimeStore()
         state.set_underlying_quote(100.0, 101.5)
 
         guard = RiskGuard(

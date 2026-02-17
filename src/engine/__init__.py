@@ -1,7 +1,7 @@
-"""Trading daemon: state store, state machine, and event-driven loop."""
+"""Trading daemon: runtime store, state machine, and event-driven loop."""
 
-from .state import TradingState
+from .store import RuntimeStore
 from .state_machine import DaemonState, DaemonStateMachine
 from .daemon import run_daemon
 
-__all__ = ["TradingState", "DaemonState", "DaemonStateMachine", "run_daemon"]
+__all__ = ["RuntimeStore", "DaemonState", "DaemonStateMachine", "run_daemon"]

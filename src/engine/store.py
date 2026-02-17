@@ -1,4 +1,4 @@
-"""In-memory state store: positions, spot, last_hedge_time, daily_hedge_count, daily_pnl."""
+"""In-memory runtime store: positions, spot, last_hedge_time, daily_hedge_count, daily_pnl."""
 
 import logging
 import threading
@@ -7,8 +7,8 @@ from typing import Any, List, Optional
 logger = logging.getLogger(__name__)
 
 
-class TradingState:
-    """Thread-safe state updated by connector callbacks and daemon."""
+class RuntimeStore:
+    """Thread-safe runtime state updated by connector callbacks and daemon."""
 
     def __init__(self):
         self._lock = threading.Lock()

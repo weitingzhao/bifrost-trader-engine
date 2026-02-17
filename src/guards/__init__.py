@@ -1,7 +1,7 @@
 """Guards for FSMs: Trading FSM (pure predicates) and Hedge Execution FSM (order-send gate)."""
 
-from src.core.guards.execution_guard import RiskGuard
-from src.core.guards.trading_guard import (
+from src.guards.execution_guard import RiskGuard
+from src.guards.trading_guard import (
     broker_down,
     broker_up,
     cost_ok,

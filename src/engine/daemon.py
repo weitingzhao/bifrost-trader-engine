@@ -16,7 +16,7 @@ from src.core.state.classifier import StateClassifier
 from src.core.state.composite import CompositeState
 from src.core.state.enums import HedgeExecState
 from src.core.logging_utils import log_composite_state, log_target_position, log_order_status
-from src.engine.state import TradingState
+from src.engine.store import RuntimeStore
 from src.engine.state_machine import DaemonState, DaemonStateMachine
 from src.execution.execution_fsm import ExecutionFSM
 from src.execution.order_manager import OrderManager
@@ -26,7 +26,7 @@ from src.market.market_data import MarketData
 from src.positions.portfolio import parse_positions, portfolio_delta
 from src.positions.position_book import PositionBook
 from src.pricing.greeks import Greeks
-from src.core.guards.execution_guard import RiskGuard
+from src.guards.execution_guard import RiskGuard
 from src.strategy.gamma_scalper import gamma_scalper_intent
 from src.strategy.hedge_gate import apply_hedge_gates, should_output_target
 
@@ -85,7 +85,7 @@ class TradingDaemon:
         )
 
         # 2. Object References
-        self.state = TradingState()
+        self.state = RuntimeStore()
         self._state_machine = DaemonStateMachine()
         self._hedge_lock = asyncio.Lock()
         self._last_config_mtime: Optional[float] = None

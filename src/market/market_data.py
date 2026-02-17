@@ -1,15 +1,15 @@
-"""Market data stub: wraps TradingState for bid, ask, spread, last_ts."""
+"""Market data stub: wraps RuntimeStore for bid, ask, spread, last_ts."""
 
 import time
 from typing import Optional
 
-from src.engine.state import TradingState
+from src.engine.store import RuntimeStore
 
 
 class MarketData:
     """Exposes bid, ask, spread_pct, last_ts from state. last_ts set on tick."""
 
-    def __init__(self, state: TradingState, last_ts: Optional[float] = None):
+    def __init__(self, state: RuntimeStore, last_ts: Optional[float] = None):
         self._state = state
         self._last_ts: Optional[float] = last_ts
 

@@ -1,8 +1,8 @@
-"""Position book: wraps TradingState + parse_positions for state space."""
+"""Position book: wraps RuntimeStore + parse_positions for state space."""
 
 from typing import Any, List
 
-from src.engine.state import TradingState
+from src.engine.store import RuntimeStore
 from src.positions.portfolio import OptionLeg, parse_positions
 
 
@@ -11,7 +11,7 @@ class PositionBook:
 
     def __init__(
         self,
-        state: TradingState,
+        state: RuntimeStore,
         symbol: str,
         min_dte: int = 21,
         max_dte: int = 35,
