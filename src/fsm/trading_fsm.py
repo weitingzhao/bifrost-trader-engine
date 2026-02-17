@@ -4,23 +4,7 @@ import logging
 from typing import Any, Callable, Dict, Optional
 
 from src.core.state.enums import TradingState
-from src.guards.trading_guard import (
-    broker_down,
-    broker_up,
-    cost_ok,
-    data_ok,
-    data_stale,
-    delta_band_ready,
-    exec_fault,
-    greeks_bad,
-    have_option_position,
-    in_no_trade_band,
-    liquidity_ok,
-    out_of_band,
-    positions_ok,
-    retry_allowed,
-    strategy_enabled,
-)
+from src.guards.trading_guard import TradingGuard
 from src.core.state.snapshot import StateSnapshot
 from src.fsm.events import TradingEvent
 
@@ -33,23 +17,7 @@ def _eval_guards(
     guard: Any,
 ) -> Dict[str, bool]:
     """Evaluate all guards used by TradingFSM; return dict of guard_name -> bool."""
-    return {
-        "data_ok": data_ok(snapshot, config),
-        "data_stale": data_stale(snapshot, config),
-        "greeks_bad": greeks_bad(snapshot),
-        "broker_down": broker_down(snapshot),
-        "broker_up": broker_up(snapshot),
-        "have_option_position": have_option_position(snapshot),
-        "delta_band_ready": delta_band_ready(snapshot, config),
-        "in_no_trade_band": in_no_trade_band(snapshot, config),
-        "out_of_band": out_of_band(snapshot, config),
-        "cost_ok": cost_ok(snapshot, config),
-        "liquidity_ok": liquidity_ok(snapshot, config),
-        "retry_allowed": retry_allowed(snapshot, guard, config),
-        "exec_fault": exec_fault(snapshot),
-        "positions_ok": positions_ok(snapshot),
-        "strategy_enabled": strategy_enabled(snapshot, config),
-    }
+    return TradingGuard(snapshot, config, guard).eval_all()
 
 
 class TradingFSM:

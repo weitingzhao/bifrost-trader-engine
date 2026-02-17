@@ -11,7 +11,7 @@ from src.fsm.events import (
     FillEvent,
     AckEvent,
 )
-from src.guards.execution_guard import RiskGuard
+from src.guards.execution_guard import ExecutionGuard
 from src.fsm.hedge_execution_fsm import HedgeExecutionFSM
 from src.fsm.trading_fsm import TradingFSM
 
@@ -26,7 +26,7 @@ __all__ = [
     "PositionEvent",
     "FillEvent",
     "AckEvent",
-    "RiskGuard",
+    "ExecutionGuard",
     "HedgeExecutionFSM",
     "TradingFSM",
 ]

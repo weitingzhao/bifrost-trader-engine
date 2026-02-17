@@ -5,7 +5,7 @@ import time
 import pytest
 
 from src.engine.store import RuntimeStore
-from src.guards.execution_guard import RiskGuard
+from src.guards.execution_guard import ExecutionGuard
 from src.strategy.gamma_scalper import gamma_scalper_hedge
 
 
@@ -18,7 +18,7 @@ class TestHedgeFlowIntegration:
         state.set_positions([], stock_position=0)
         state.set_last_hedge_price(99.0)
 
-        guard = RiskGuard(cooldown_sec=1, trading_hours_only=False)
+        guard = ExecutionGuard(cooldown_sec=1, trading_hours_only=False)
         guard.set_last_hedge_time(time.time() - 10)
 
         port_delta = 50.0
@@ -46,7 +46,7 @@ class TestHedgeFlowIntegration:
         state.set_underlying_quote(100.0, 100.1)
         state.set_last_hedge_price(100.05)
 
-        guard = RiskGuard(
+        guard = ExecutionGuard(
             min_price_move_pct=0.5,
             cooldown_sec=1,
             trading_hours_only=False,
@@ -71,7 +71,7 @@ class TestHedgeFlowIntegration:
         state = RuntimeStore()
         state.set_underlying_quote(100.0, 101.5)
 
-        guard = RiskGuard(
+        guard = ExecutionGuard(
             max_spread_pct=0.5,
             cooldown_sec=1,
             trading_hours_only=False,

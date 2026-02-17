@@ -11,7 +11,7 @@ from src.core.state.enums import (
     OptionPositionState,
     SystemHealthState,
 )
-from src.guards.execution_guard import RiskGuard
+from src.guards.execution_guard import ExecutionGuard
 from src.strategy.gamma_scalper import HedgeIntent
 
 
@@ -37,7 +37,7 @@ def should_output_target(cs: CompositeState) -> bool:
 def apply_hedge_gates(
     intent: HedgeIntent,
     cs: CompositeState,
-    guard: RiskGuard,
+    guard: ExecutionGuard,
     now_ts: Optional[float] = None,
     spot: Optional[float] = None,
     last_hedge_price: Optional[float] = None,

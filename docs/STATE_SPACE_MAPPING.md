@@ -60,7 +60,7 @@ Config follows **O,D,M,L,E,S**: all six dimensions live under `state_space` in `
   Only risk-reduction allowed in SAFE_MODE if implemented.
 
 - **D3 FORCE_HEDGE**: Cooldown is bypassed; `min_hedge_shares` and protective limit logic still apply.  
-  Applied in `apply_hedge_gates()` via `force_hedge` passed to `RiskGuard.allow_hedge(..., force_hedge=True)`.
+  Applied in `apply_hedge_gates()` via `force_hedge` passed to `ExecutionGuard.allow_hedge(..., force_hedge=True)`.
 
 ## State Transition Diagrams (Mermaid)
 
@@ -163,14 +163,14 @@ stateDiagram-v2
 ### StateSnapshot and Guards
 
 - **StateSnapshot** (`src/core/state/snapshot.py`): Immutable world state with O,D,M,L,E,S plus spot, spread_pct, event_lag_ms, greeks, last_hedge_ts/price. Built from CompositeState via `StateSnapshot.from_composite_state(cs, ...)`.
-- **Trading FSM guards** (`src/guards/trading_guard.py`): Pure functions used by TradingFSM transition logic; all testable in isolation. **Hedge Execution FSM guard** (`src/guards/execution_guard.py`, `RiskGuard`): order-send gate used by `apply_hedge_gates()`.
+- **Trading FSM guards** (`src/guards/trading_guard.py`): Pure functions used by TradingFSM transition logic; all testable in isolation. **Hedge Execution FSM guard** (`src/guards/execution_guard.py`, `ExecutionGuard`): order-send gate used by `apply_hedge_gates()`.
 
 ## Code References
 
 - **CompositeState**: `src/core/state/composite.py` — holds O,D,M,L,E,S and numeric snapshots; `from_runtime()`, `update(event)`.
 - **StateSnapshot**: `src/core/state/snapshot.py` — immutable snapshot for guards; `from_composite_state()`, `update(event)`.
 - **StateClassifier**: `src/core/state/classifier.py` — `classify(...)` maps position_book, market_data, greeks, execution → CompositeState.
-- **Guards**: `src/guards/trading_guard.py` — pure guards for Trading FSM; `src/guards/execution_guard.py` — RiskGuard for Hedge Execution FSM (order-send gate).
+- **Guards**: `src/guards/trading_guard.py` — pure guards for Trading FSM; `src/guards/execution_guard.py` — ExecutionGuard for Hedge Execution FSM (order-send gate).
 - **Hedge gate**: `src/strategy/hedge_gate.py` — `should_output_target(cs)`, `apply_hedge_gates(intent, cs, guard)`.
 - **Trading FSM**: `src/fsm/trading_fsm.py` — macro state machine; transition table driven by events and guards.
 - **Hedge Execution FSM**: `src/fsm/hedge_execution_fsm.py` — execution sub-FSM; receives TargetPosition, outputs E state.

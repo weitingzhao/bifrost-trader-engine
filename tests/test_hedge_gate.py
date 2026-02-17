@@ -15,7 +15,7 @@ from src.core.state.enums import (
 )
 from src.strategy.gamma_scalper import HedgeIntent, compute_target_position
 from src.strategy.hedge_gate import apply_hedge_gates, should_output_target
-from src.guards.execution_guard import RiskGuard
+from src.guards.execution_guard import ExecutionGuard
 
 
 def _cs(
@@ -86,7 +86,7 @@ class TestApplyHedgeGates:
     """D3 bypasses cooldown; min_hedge_shares enforced."""
 
     def test_a4_d3_bypass_cooldown(self):
-        guard = RiskGuard(cooldown_sec=60, trading_hours_only=False)
+        guard = ExecutionGuard(cooldown_sec=60, trading_hours_only=False)
         guard.record_hedge_sent()
         cs = _cs(D=DeltaDeviationState.FORCE_HEDGE, net_delta=100.0, stock_pos=0)
         intent = HedgeIntent(target_shares=-100, side="SELL", quantity=100, force_hedge=False)
@@ -95,7 +95,7 @@ class TestApplyHedgeGates:
         assert approved.quantity == 100
 
     def test_blocked_min_hedge_shares(self):
-        guard = RiskGuard(cooldown_sec=1, trading_hours_only=False)
+        guard = ExecutionGuard(cooldown_sec=1, trading_hours_only=False)
         guard.set_last_hedge_time(time.time() - 10)
         cs = _cs(net_delta=15.0, stock_pos=0)
         intent = HedgeIntent(target_shares=-15, side="SELL", quantity=5, force_hedge=False)
@@ -103,7 +103,7 @@ class TestApplyHedgeGates:
         assert approved is None
 
     def test_allowed_after_cooldown(self):
-        guard = RiskGuard(cooldown_sec=1, trading_hours_only=False)
+        guard = ExecutionGuard(cooldown_sec=1, trading_hours_only=False)
         guard.set_last_hedge_time(time.time() - 10)
         cs = _cs()
         intent = HedgeIntent(target_shares=-50, side="SELL", quantity=50, force_hedge=False)

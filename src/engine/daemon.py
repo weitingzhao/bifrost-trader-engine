@@ -26,7 +26,7 @@ from src.market.market_data import MarketData
 from src.positions.portfolio import parse_positions, portfolio_delta
 from src.positions.position_book import PositionBook
 from src.pricing.greeks import Greeks
-from src.guards.execution_guard import RiskGuard
+from src.guards.execution_guard import ExecutionGuard
 from src.strategy.gamma_scalper import gamma_scalper_intent
 from src.strategy.hedge_gate import apply_hedge_gates, should_output_target
 
@@ -70,7 +70,7 @@ class TradingDaemon:
         self.symbol = config.get("symbol", "NVDA")
         self.paper_trade = self.risk_cfg.get("paper_trade", True)
         self.order_type = config.get("order", {}).get("order_type", "market")
-        self.guard = RiskGuard(
+        self.guard = ExecutionGuard(
             cooldown_sec=self._hedge_cfg.get("cooldown_sec", 60),
             max_daily_hedge_count=self.risk_cfg.get("max_daily_hedge_count", 50),
             max_position_shares=self.risk_cfg.get("max_position_shares", 2000),

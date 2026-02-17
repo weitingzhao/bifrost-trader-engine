@@ -13,7 +13,7 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 
-class RiskGuard:
+class ExecutionGuard:
     """Order-send gate for the Hedge Execution FSM: cooldown, max daily hedges, position/earnings/circuit breaker, RTH, spread, min price move."""
 
     def __init__(
