@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Hedge FSM Diagram</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <h1>Hedge FSM: HedgeState &rarr; HedgeEvent &rarr; on_method</h1>
+  <div class="mermaid">
+stateDiagram-v2
+    direction TB
+
+    EXEC_IDLE
+    PLAN
+    SEND
+    WAIT_ACK
+    WORKING
+    PARTIAL
+    REPRICE
+    CANCEL
+    RECOVER
+    FILLED
+    FAIL
+
+    EXEC_IDLE --&gt; PLAN : recv_target [on_target (HedgeFSM, hedge_fsm.py)]
+    PLAN --&gt; EXEC_IDLE : plan_skip [on_plan_decide, on_partial_replan (HedgeFSM, hedge_fsm.py)]
+    PLAN --&gt; SEND : plan_send [on_plan_decide, on_partial_replan (HedgeFSM, hedge_fsm.py)]
+    SEND --&gt; WAIT_ACK : place_order [on_order_placed (HedgeFSM, hedge_fsm.py)]
+    WAIT_ACK --&gt; WORKING : ack_ok [on_ack_ok (HedgeFSM, hedge_fsm.py)]
+    WAIT_ACK --&gt; FAIL : ack_reject [on_ack_reject (HedgeFSM, hedge_fsm.py)]
+    WAIT_ACK --&gt; FAIL : timeout_ack [on_timeout_ack (HedgeFSM, hedge_fsm.py)]
+    WAIT_ACK --&gt; FAIL : broker_down [on_broker_down (HedgeFSM, hedge_fsm.py)]
+    WORKING --&gt; PARTIAL : partial_fill [on_partial_fill (HedgeFSM, hedge_fsm.py)]
+    WORKING --&gt; FILLED : full_fill [on_full_fill (HedgeFSM, hedge_fsm.py)]
+    WORKING --&gt; REPRICE : timeout_working [on_timeout_working (HedgeFSM, hedge_fsm.py)]
+    WORKING --&gt; CANCEL : risk_trip [on_risk_trip (HedgeFSM, hedge_fsm.py)]
+    WORKING --&gt; CANCEL : manual_cancel [on_manual_cancel (HedgeFSM, hedge_fsm.py)]
+    WORKING --&gt; CANCEL : broker_down [on_broker_down (HedgeFSM, hedge_fsm.py)]
+    PARTIAL --&gt; SEND : plan_send [on_plan_decide, on_partial_replan (HedgeFSM, hedge_fsm.py)]
+    PARTIAL --&gt; EXEC_IDLE : plan_skip [on_plan_decide, on_partial_replan (HedgeFSM, hedge_fsm.py)]
+    REPRICE --&gt; WAIT_ACK : place_order [on_order_placed (HedgeFSM, hedge_fsm.py)]
+    CANCEL --&gt; RECOVER : cancel_sent [on_cancel_sent (HedgeFSM, hedge_fsm.py)]
+    RECOVER --&gt; EXEC_IDLE : positions_resynced [on_positions_resynced (HedgeFSM, hedge_fsm.py)]
+    RECOVER --&gt; FAIL : cannot_recover [on_cannot_recover (HedgeFSM, hedge_fsm.py)]
+    FAIL --&gt; RECOVER : try_resync [on_try_resync (HedgeFSM, hedge_fsm.py)]
+    FILLED --&gt; PLAN : recv_target [on_target (HedgeFSM, hedge_fsm.py)]
+  </div>
+</body>
+</html>

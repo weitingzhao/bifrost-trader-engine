@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Trading FSM Diagram</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <h1>Trading FSM: TradingState &rarr; TradingEvent &rarr; apply_transition + caller</h1>
+  <p><b>apply_transition</b> in TradingFSM (src/fsm/trading_fsm.py). <b>Callers</b> in GsTrading (src/app/gs_trading.py).</p>
+  <p><i>Note: Any state &rarr; SAFE when broker_down | data_stale | greeks_bad | exec_fault.</i></p>
+  <div class="mermaid">
+stateDiagram-v2
+    direction TB
+
+    BOOT
+    SYNC
+    IDLE
+    ARMED
+    MONITOR
+    NO_TRADE
+    PAUSE_COST
+    PAUSE_LIQ
+    NEED_HEDGE
+    HEDGING
+    SAFE
+
+    ARMED --&gt; MONITOR : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    BOOT --&gt; SYNC : "start [_handle_connected (GsTrading, gs_trading.py)]"
+    HEDGING --&gt; MONITOR : "hedge_done [_hedge (GsTrading, gs_trading.py)]"
+    HEDGING --&gt; NEED_HEDGE : "hedge_failed [_hedge (GsTrading, gs_trading.py)]"
+    HEDGING --&gt; SAFE : "hedge_failed [_hedge (GsTrading, gs_trading.py)]"
+    IDLE --&gt; ARMED : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    IDLE --&gt; SAFE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    MONITOR --&gt; NEED_HEDGE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    MONITOR --&gt; NO_TRADE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    MONITOR --&gt; PAUSE_COST : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    MONITOR --&gt; PAUSE_LIQ : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    NEED_HEDGE --&gt; HEDGING : "target_emitted [_eval_hedge (GsTrading, gs_trading.py)]"
+    NO_TRADE --&gt; NEED_HEDGE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    NO_TRADE --&gt; PAUSE_COST : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    NO_TRADE --&gt; PAUSE_LIQ : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    PAUSE_COST --&gt; NEED_HEDGE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    PAUSE_COST --&gt; NO_TRADE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    PAUSE_LIQ --&gt; NEED_HEDGE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    PAUSE_LIQ --&gt; NO_TRADE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    SAFE --&gt; SYNC : "manual_resume, broker_up [(manual) (GsTrading, gs_trading.py)]"
+    SYNC --&gt; IDLE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+    SYNC --&gt; SAFE : "synced, tick, quote... [_handle_connected (GsTrading, gs_trading.py)]"
+  </div>
+</body>
+</html>

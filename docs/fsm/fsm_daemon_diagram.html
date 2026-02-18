@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Daemon FSM Diagram</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <h1>Daemon FSM: DaemonState &rarr; transition + caller</h1>
+  <p><b>transition</b> in DaemonFSM (src/fsm/daemon_fsm.py). <b>Callers</b> in GsTrading (src/app/gs_trading.py).</p>
+  <div class="mermaid">
+stateDiagram-v2
+    direction LR
+
+    idle
+    connecting
+    connected
+    running
+    stopping
+    stopped
+
+    idle --&gt; connecting : "_handle_idle (GsTrading, gs_trading.py)"
+    idle --&gt; stopped : "request_stop (GsTrading, gs_trading.py) [when IDLE]"
+    connecting --&gt; connected : "_handle_connecting (GsTrading, gs_trading.py) [connect ok]"
+    connecting --&gt; stopped : "_handle_connecting (GsTrading, gs_trading.py) [connect fail]"
+    connecting --&gt; stopping : "request_stop (GsTrading, gs_trading.py) [during connect]"
+    connected --&gt; running : "_handle_connected (GsTrading, gs_trading.py)"
+    connected --&gt; stopping : "request_stop (GsTrading, gs_trading.py) [stop()]"
+    running --&gt; stopping : "_handle_running (GsTrading, gs_trading.py) [loop exit]"
+    running --&gt; stopping : "request_stop (GsTrading, gs_trading.py) [stop()]"
+    stopping --&gt; stopped : "_handle_stopping (GsTrading, gs_trading.py)"
+  </div>
+</body>
+</html>
