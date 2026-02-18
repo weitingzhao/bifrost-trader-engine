@@ -94,12 +94,44 @@ def emit_html(out_path: str | None = None) -> str:
     return out_path
 
 
+def emit_md(out_path: str | None = None) -> str:
+    """Generate Markdown for MkDocs: title, Mermaid diagram, table."""
+    if out_path is None:
+        out_path = str(_project_root / "docs" / "fsm" / "daemon.md")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    mermaid_code = emit_mermaid()
+    table = emit_markdown_table()
+    md = f"""# Daemon FSM
+
+DaemonState and `transition` + caller in `DaemonFSM` (src/fsm/daemon_fsm.py).
+Callers in `GsTrading` (src/app/gs_trading.py).
+
+## State Diagram
+
+[Open in browser](../fsm_daemon_diagram.html) — zoomable standalone HTML
+
+```mermaid
+{mermaid_code}
+```
+
+## Transition Table
+
+{table}
+"""
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(md)
+    return out_path
+
+
 def main() -> None:
     mode = "mermaid" if len(sys.argv) <= 1 else sys.argv[1]
     if mode == "mermaid":
         print(emit_mermaid())
     elif mode == "table":
         print(emit_markdown_table())
+    elif mode == "md":
+        out = emit_md()
+        print(f"Wrote {out}")
     elif mode == "html":
         out = emit_html()
         print(f"Wrote {out} - open in browser")
@@ -107,6 +139,7 @@ def main() -> None:
         print("Usage: python scripts/fsm_daemon_diagram.py [mode]")
         print("  mermaid - state diagram (paste into https://mermaid.live)")
         print("  table   - markdown table")
+        print("  md      - generate docs/fsm/daemon.md for MkDocs")
         print("  html    - generate docs/fsm/fsm_daemon_diagram.html")
 
 

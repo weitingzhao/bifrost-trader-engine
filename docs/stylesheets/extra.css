@@ -1,0 +1,24 @@
+/* Mermaid diagram: scrollable + larger for readability */
+.mermaid {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 1rem;
+  margin: 1rem 0;
+  border: 1px solid var(--md-default-fg-color--lightest, #eee);
+  border-radius: 0.2rem;
+  background: var(--md-default-bg-color, #fff);
+}
+
+.mermaid svg {
+  min-width: 1000px;
+  min-height: 400px;
+}
+
+/* Hint: scroll to pan, Ctrl/Cmd + scroll to zoom page */
+.mermaid::after {
+  content: "💡 Scroll to pan • Ctrl/Cmd + scroll to zoom page";
+  display: block;
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light, #999);
+  margin-top: 0.5rem;
+}

@@ -132,8 +132,8 @@ def emit_html(out_path: str | None = None) -> str:
     """Generate standalone HTML with Mermaid diagram (open in browser)."""
     if out_path is None:
         out_path = str(_project_root / "docs" / "fsm" / "fsm_hedge_diagram.html")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     mermaid_code = emit_mermaid_with_on_methods()
-    # Escape for HTML
     escaped = mermaid_code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     html = f"""<!DOCTYPE html>
 <html>
@@ -149,9 +149,36 @@ def emit_html(out_path: str | None = None) -> str:
   </div>
 </body>
 </html>"""
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
+    return out_path
+
+
+def emit_md(out_path: str | None = None) -> str:
+    """Generate Markdown for MkDocs: title, Mermaid diagram, table."""
+    if out_path is None:
+        out_path = str(_project_root / "docs" / "fsm" / "hedge.md")
+    mermaid_code = emit_mermaid_with_on_methods()
+    table = emit_markdown_table()
+    md = f"""# Hedge FSM
+
+HedgeState, HedgeEvent, and `on_*` methods in `HedgeFSM` (src/fsm/hedge_fsm.py).
+
+## State Diagram
+
+[Open in browser](../fsm_hedge_diagram.html) — zoomable standalone HTML
+
+```mermaid
+{mermaid_code}
+```
+
+## Transition Table
+
+{table}
+"""
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(md)
     return out_path
 
 
@@ -165,6 +192,9 @@ def main() -> None:
         print(emit_mermaid_with_on_methods())
     elif mode == "table":
         print(emit_markdown_table())
+    elif mode == "md":
+        out = emit_md()
+        print(f"Wrote {out}")
     elif mode == "html":
         out = emit_html()
         print(f"Wrote {out} - open in browser")
@@ -173,6 +203,7 @@ def main() -> None:
         print("  mermaid     - state diagram (paste into https://mermaid.live)")
         print("  mermaid_on  - state diagram with on_method labels")
         print("  table       - markdown table")
+        print("  md          - generate docs/fsm/hedge.md for MkDocs")
         print("  html        - generate docs/fsm/fsm_hedge_diagram.html")
 
 

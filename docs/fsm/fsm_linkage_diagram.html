@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FSM Linkage Diagram</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <h1>FSM Linkage: Daemon &harr; Trading &harr; Hedge</h1>
+  <p>Sequence diagram showing how the three FSMs interact.</p>
+  <div class="mermaid">
+sequenceDiagram
+    participant D as DaemonFSM
+    participant T as TradingFSM
+    participant H as HedgeFSM
+    participant G as GsTrading
+
+    Note over D: run() loop
+    G-&gt;&gt;D: _handle_idle()
+    D-&gt;&gt;D: IDLE → CONNECTING
+    G-&gt;&gt;D: _handle_connecting()
+    D-&gt;&gt;D: CONNECTING → CONNECTED
+    G-&gt;&gt;D: _handle_connected()
+    G-&gt;&gt;T: apply_transition(START)
+    T-&gt;&gt;T: BOOT → SYNC
+    G-&gt;&gt;T: apply_transition(SYNCED)
+    T-&gt;&gt;T: SYNC → IDLE/SAFE
+    G-&gt;&gt;D: transition(RUNNING)
+    D-&gt;&gt;D: CONNECTED → RUNNING
+
+    Note over G: subscribe_ticker, _on_ticker
+    G-&gt;&gt;G: _eval_hedge_threadsafe (only if D.is_running())
+    G-&gt;&gt;G: _eval_hedge()
+    G-&gt;&gt;T: apply_transition(TICK)
+    T-&gt;&gt;T: ... → MONITOR/NO_TRADE/NEED_HEDGE
+
+    alt T.state == NEED_HEDGE
+        G-&gt;&gt;T: apply_transition(TARGET_EMITTED)
+        T-&gt;&gt;T: NEED_HEDGE → HEDGING
+        G-&gt;&gt;H: on_target(target, stock_pos)
+        H-&gt;&gt;H: EXEC_IDLE → PLAN
+        G-&gt;&gt;H: on_plan_decide(send_order)
+        H-&gt;&gt;H: PLAN → SEND
+        G-&gt;&gt;H: on_order_placed()
+        H-&gt;&gt;H: SEND → WAIT_ACK
+        G-&gt;&gt;H: on_ack_ok()
+        H-&gt;&gt;H: WAIT_ACK → WORKING
+        G-&gt;&gt;H: on_full_fill()
+        H-&gt;&gt;H: WORKING → FILLED
+        G-&gt;&gt;T: apply_transition(HEDGE_DONE)
+        T-&gt;&gt;T: HEDGING → MONITOR
+    end
+
+    Note over D: stop() or loop exit
+    G-&gt;&gt;D: request_stop()
+    D-&gt;&gt;D: RUNNING → STOPPING
+    G-&gt;&gt;D: _handle_stopping()
+    D-&gt;&gt;D: STOPPING → STOPPED
+
+  </div>
+</body>
+</html>

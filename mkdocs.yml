@@ -1,0 +1,35 @@
+site_name: Bifrost Trader Engine
+site_description: Gamma scalping trading daemon documentation
+site_url: https://github.com/weitingzhao/bifrost-trader-engine
+
+theme:
+  name: material
+
+extra_css:
+  - stylesheets/extra.css
+extra_javascript:
+  - javascripts/diagram-zoom.js
+
+plugins:
+  - search
+  - mermaid2:
+      javascript: https://unpkg.com/mermaid@10.4.0/dist/mermaid.esm.min.mjs
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
+
+nav:
+  - Home: index.md
+  - FSM:
+    - Linkage (sequence): fsm/linkage.md
+    - Linkage (detailed): fsm/FSM_LINKAGE.md
+    - Hedge FSM: fsm/hedge.md
+    - Trading FSM: fsm/trading.md
+    - Daemon FSM: fsm/daemon.md
+  - Config:
+    - State Space: STATE_SPACE_MAPPING.md
+    - Config Safety: CONFIG_SAFETY_TAXONOMY.md
