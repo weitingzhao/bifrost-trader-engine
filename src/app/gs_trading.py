@@ -34,7 +34,7 @@ from src.fsm.events import TargetPositionEvent, TradingEvent
 from src.fsm.hedge_fsm import HedgeFSM
 from src.fsm.trading_fsm import TradingFSM
 from src.market.market_data import MarketData
-from src.positions.portfolio import parse_positions, portfolio_delta
+from src.positions.portfolio import get_option_legs, get_stock_shares
 from src.positions.position_book import PositionBook
 from src.pricing.greeks import Greeks
 from src.guards.execution_guard import ExecutionGuard
@@ -177,20 +177,9 @@ class GsTrading:
                 logger.debug("Config reload check failed: %s", e)
 
     async def _refresh_positions(self) -> None:
-        """Fetch positions from IB and update state."""
+        """Fetch positions from IB and update store (raw positions + stock_shares only). No option parse."""
         positions = await self.connector.get_positions()
-        min_dte = self._structure_cfg.get("min_dte", 21)
-        max_dte = self._structure_cfg.get("max_dte", 35)
-        atm_band = self._structure_cfg.get("atm_band_pct", 0.03)
-        spot = self.store.get_underlying_price()
-        _, stock_shares = parse_positions(
-            positions,
-            self.symbol,
-            min_dte=min_dte,
-            max_dte=max_dte,
-            atm_band_pct=atm_band,
-            spot=spot,
-        )
+        stock_shares = get_stock_shares(positions, self.symbol)
         self.store.set_positions(positions, stock_shares)
 
     def _build_snapshot(
@@ -227,28 +216,138 @@ class GsTrading:
                 last = getattr(ticker, "last", None)
                 if last is not None:
                     self.store.set_underlying_price(float(last))
-            self._maybe_hedge_threadsafe()
+            self._eval_hedge_threadsafe()
         except Exception as e:
             logger.debug("ticker callback error: %s", e)
 
-    async def _maybe_hedge(self) -> None:
+    async def _eval_hedge_sync(self) -> None:
         """Run FSM-driven tick once (under lock)."""
         async with self._hedge_lock:
-            await self._on_tick()
+            await self._eval_hedge()
 
-    def _maybe_hedge_threadsafe(self) -> None:
+    def _eval_hedge_threadsafe(self) -> None:
         """Threadsafe: schedule _on_tick to be run safely from any thread using call_soon_threadsafe."""
         if self._fsm_daemon.is_running() and self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(
-                lambda: asyncio.ensure_future(self._maybe_hedge(), loop=self._loop)
+                lambda: asyncio.ensure_future(self._eval_hedge_sync(), loop=self._loop)
             )
 
-    def _maybe_hedge_in_loop(self) -> None:
+    def _eval_hedge_in_loop(self) -> None:
         """Schedule _on_tick on the event loop (must be called from within the event loop)."""
         if self._fsm_daemon.is_running() and self._loop and self._loop.is_running():
-            asyncio.ensure_future(self._maybe_hedge(), loop=self._loop)
+            asyncio.ensure_future(self._eval_hedge_sync(), loop=self._loop)
 
-    async def _execute_hedge(
+    async def _eval_hedge(self) -> None:
+        """FSM-driven tick: refresh positions + spot -> parse option legs once -> classify -> TradingFSM -> maybe _hedge."""
+        # 1. ***Fetch data***
+        # 1.a. refresh stock shares
+        await self._refresh_positions()
+        stock_shares = self.store.get_stock_position()
+        # 1.b. refresh spot price
+        spot = self.store.get_underlying_price()
+        if spot is None or spot <= 0:
+            spot = await self.connector.get_underlying_price(self.symbol)
+            if spot is not None and spot > 0:
+                self.store.set_underlying_price(spot)
+        if spot is None or spot <= 0:
+            logger.debug("No spot price, skip hedge")
+            return
+        # 1.c. refresh option legs
+        positions = self.store.get_positions()
+        min_dte = self._structure_cfg.get("min_dte", 21)
+        max_dte = self._structure_cfg.get("max_dte", 35)
+        atm_band = self._structure_cfg.get("atm_band_pct", 0.03)
+        legs = get_option_legs(
+            positions,
+            self.symbol,
+            min_dte=min_dte,
+            max_dte=max_dte,
+            atm_band_pct=atm_band,
+            spot=spot,
+        )
+        # 1.d. calculate greeks
+        r = self._greeks_cfg.get("risk_free_rate", 0.05)
+        vol = self._greeks_cfg.get("volatility", 0.35)
+        greeks = Greeks(legs, stock_shares, spot, r, vol)
+
+        # 1.e. calculate data lag
+        data_lag_ms = None
+        if self._market_data.last_ts is not None:
+            data_lag_ms = (time.time() - self._market_data.last_ts) * 1000.0
+
+        # 2. ***Calculations***
+        # 2.a. classify state
+        state_space_cfg = get_state_space_config(self.config)
+        risk_halt = getattr(self.guard, "_circuit_breaker", False)
+        cs = StateClassifier.classify(
+            self._position_book,
+            self._market_data,
+            greeks,
+            self._order_manager,
+            last_hedge_price=self.store.get_last_hedge_price(),
+            last_hedge_ts=self.store.get_last_hedge_time(),
+            data_lag_ms=data_lag_ms,
+            risk_halt=risk_halt,
+            config=state_space_cfg,
+        )
+        log_composite_state(cs=cs)
+
+        # 2.b. update metrics
+        self._metrics.set_data_lag_ms(data_lag_ms)
+        self._metrics.set_delta_abs(abs(cs.net_delta))
+        self._metrics.set_spread_bucket(cs.L.value if cs.L else None)
+
+        # 2.c. build snapshot
+        snapshot = self._build_snapshot(cs, spot, greeks, option_legs_count=len(legs))
+
+        # 3. ***Apply***
+        # 3.a. FSM apply transition
+        self._fsm_trading.apply_transition(TradingEvent.TICK, snapshot)
+        if self._fsm_trading.state != TradingState.NEED_HEDGE:
+            return
+
+        # 3.b. calculate hedge intent
+        intent = gamma_scalper_intent(
+            greeks.delta,
+            stock_shares,
+            threshold_hedge_shares=self._hedge_cfg["threshold_hedge_shares"],
+            max_hedge_shares_per_order=self._hedge_cfg["max_hedge_shares_per_order"],
+            config=self._hedge_cfg,
+        )
+        if intent is None:
+            logger.debug("No hedge intent (delta within threshold)")
+            return
+        approved = apply_hedge_gates(
+            intent,
+            cs,
+            self.guard,
+            now_ts=time.time(),
+            spot=spot,
+            last_hedge_price=self.store.get_last_hedge_price(),
+            spread_pct=self.store.get_spread_pct(),
+            min_hedge_shares=self._hedge_cfg["min_hedge_shares"],
+        )
+        if approved is None:
+            logger.info(
+                "Hedge blocked by gates (delta=%.1f would %s %s)",
+                cs.net_delta,
+                intent.side,
+                intent.quantity,
+            )
+            return
+        if not self._fsm_hedge.can_place_order():
+            logger.warning(
+                "Execution not IDLE (E=%s), skip order",
+                self._order_manager.effective_e_state().value,
+            )
+            return
+        log_target_position(target_shares=intent.target_shares, cs=cs)
+
+        # 3.c. FSM apply transition to target emitted and start hedge
+        self._fsm_trading.apply_transition(TradingEvent.TARGET_EMITTED, snapshot)
+        await self._hedge(approved, cs, spot, snapshot)
+
+    async def _hedge(
         self,
         intent: Any,
         cs: CompositeState,
@@ -321,90 +420,6 @@ class GsTrading:
             self._fsm_hedge.on_positions_resynced()
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_FAILED, snapshot)
 
-    async def _on_tick(self) -> None:
-        """FSM-driven tick: refresh -> classify -> TradingFSM.transition(TICK) -> if NEED_HEDGE, intent + gates -> _execute_hedge."""
-        await self._refresh_positions()
-        spot = self.store.get_underlying_price()
-        if spot is None or spot <= 0:
-            logger.debug("No spot price, skip hedge")
-            return
-        positions = self.store.get_positions()
-        min_dte = self._structure_cfg.get("min_dte", 21)
-        max_dte = self._structure_cfg.get("max_dte", 35)
-        atm_band = self._structure_cfg.get("atm_band_pct", 0.03)
-        legs, stock_shares = parse_positions(
-            positions,
-            self.symbol,
-            min_dte=min_dte,
-            max_dte=max_dte,
-            atm_band_pct=atm_band,
-            spot=spot,
-        )
-        r = self._greeks_cfg.get("risk_free_rate", 0.05)
-        vol = self._greeks_cfg.get("volatility", 0.35)
-        greeks = Greeks(legs, stock_shares, spot, r, vol)
-        state_space_cfg = get_state_space_config(self.config)
-        risk_halt = getattr(self.guard, "_circuit_breaker", False)
-        data_lag_ms = None
-        if self._market_data.last_ts is not None:
-            data_lag_ms = (time.time() - self._market_data.last_ts) * 1000.0
-        cs = StateClassifier.classify(
-            self._position_book,
-            self._market_data,
-            greeks,
-            self._order_manager,
-            last_hedge_price=self.store.get_last_hedge_price(),
-            last_hedge_ts=self.store.get_last_hedge_time(),
-            data_lag_ms=data_lag_ms,
-            risk_halt=risk_halt,
-            config=state_space_cfg,
-        )
-        log_composite_state(cs=cs)
-        self._metrics.set_data_lag_ms(data_lag_ms)
-        self._metrics.set_delta_abs(abs(cs.net_delta))
-        self._metrics.set_spread_bucket(cs.L.value if cs.L else None)
-        snapshot = self._build_snapshot(cs, spot, greeks, option_legs_count=len(legs))
-        self._fsm_trading.apply_transition(TradingEvent.TICK, snapshot)
-        if self._fsm_trading.state != TradingState.NEED_HEDGE:
-            return
-        intent = gamma_scalper_intent(
-            greeks.delta,
-            stock_shares,
-            threshold_hedge_shares=self._hedge_cfg["threshold_hedge_shares"],
-            max_hedge_shares_per_order=self._hedge_cfg["max_hedge_shares_per_order"],
-            config=self._hedge_cfg,
-        )
-        if intent is None:
-            logger.debug("No hedge intent (delta within threshold)")
-            return
-        approved = apply_hedge_gates(
-            intent,
-            cs,
-            self.guard,
-            now_ts=time.time(),
-            spot=spot,
-            last_hedge_price=self.store.get_last_hedge_price(),
-            spread_pct=self.store.get_spread_pct(),
-            min_hedge_shares=self._hedge_cfg["min_hedge_shares"],
-        )
-        if approved is None:
-            logger.info(
-                "Hedge blocked by gates (delta=%.1f would %s %s)",
-                cs.net_delta,
-                intent.side,
-                intent.quantity,
-            )
-            return
-        if not self._fsm_hedge.can_place_order():
-            logger.warning(
-                "Execution not IDLE (E=%s), skip order",
-                self._order_manager.effective_e_state().value,
-            )
-            return
-        log_target_position(target_shares=intent.target_shares, cs=cs)
-        self._fsm_trading.apply_transition(TradingEvent.TARGET_EMITTED, snapshot)
-        await self._execute_hedge(approved, cs, spot, snapshot)
-
     async def _heartbeat(self) -> None:
         """Periodic heartbeat to run maybe_hedge even without tick updates."""
         while self._fsm_daemon.is_running():
@@ -412,7 +427,7 @@ class GsTrading:
             await asyncio.sleep(self._heartbeat_interval)
             if self._fsm_daemon.is_running():
                 print("[HEARTBEAT] Woke up, running maybe_hedge()...")
-                await self._maybe_hedge()
+                await self._eval_hedge_sync()
 
     # --- State handlers: each runs its logic and returns the next state ---
 
@@ -441,7 +456,7 @@ class GsTrading:
             min_dte = self._structure_cfg.get("min_dte", 21)
             max_dte = self._structure_cfg.get("max_dte", 35)
             atm_band = self._structure_cfg.get("atm_band_pct", 0.03)
-            legs, stock_shares = parse_positions(
+            legs = get_option_legs(
                 positions,
                 self.symbol,
                 min_dte=min_dte,
@@ -449,6 +464,7 @@ class GsTrading:
                 atm_band_pct=atm_band,
                 spot=spot,
             )
+            stock_shares = self.store.get_stock_position()
             r = self._greeks_cfg.get("risk_free_rate", 0.05)
             vol = self._greeks_cfg.get("volatility", 0.35)
             greeks = Greeks(legs, stock_shares, spot, r, vol)
@@ -479,7 +495,7 @@ class GsTrading:
         """RUNNING: subscribe, start background tasks, loop until stop requested."""
         logger.debug("Subscribing to ticker and positions...")
         self.connector.subscribe_ticker(self.symbol, self._on_ticker)
-        self.connector.subscribe_positions(self._maybe_hedge_threadsafe)
+        self.connector.subscribe_positions(self._eval_hedge_threadsafe)
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
         self._config_reload_task = asyncio.create_task(self._reload_config_loop())
         logger.info(

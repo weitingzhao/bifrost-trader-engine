@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from src.pricing.black_scholes import delta as bs_delta, gamma as bs_gamma
 
@@ -49,22 +49,53 @@ def _is_near_atm(strike: float, spot: float, atm_band_pct: float) -> bool:
     return abs(strike - spot) / spot <= atm_band_pct
 
 
-def parse_positions(
+def get_stock_shares(positions: List[Any], symbol: str) -> int:
+    """
+    Extract stock position (shares) for symbol from raw positions.
+    Lightweight: no option parsing, no DTE/ATM. Use when only stock_shares is needed (e.g. refresh).
+    """
+    for item in positions:
+        # 1. check item is a contract and position
+        if hasattr(item, "contract") and hasattr(item, "position"):
+            contract, pos = item.contract, item.position
+        elif isinstance(item, dict):
+            contract, pos = item.get("contract"), item.get("position", 0)
+        else:
+            continue
+        if contract is None:
+            continue
+        # 2. check symbol is the one we want
+        sym = getattr(contract, "symbol", None) or (
+            contract.get("symbol") if isinstance(contract, dict) else None
+        )
+        if not sym or sym != symbol:
+            continue
+        # 3. check sec type is STK
+        sec_type = getattr(contract, "secType", None) or (
+            contract.get("secType", "STK") if isinstance(contract, dict) else "STK"
+        )
+        # 4. return position if sec type is STK
+        if sec_type == "STK":
+            return int(pos)
+    return 0
+
+
+def get_option_legs(
     positions: List[Any],
     symbol: str,
     min_dte: int = 21,
     max_dte: int = 35,
     atm_band_pct: float = 0.03,
     spot: Optional[float] = None,
-) -> Tuple[List[OptionLeg], int]:
+) -> List[OptionLeg]:
     """
-    Parse raw positions (IB-style: items with .contract and .position or .position).
-    Returns (option_legs for symbol in 21-35 DTE near ATM, stock_shares).
+    Extract option legs for symbol from raw positions (DTE range, near ATM).
+    For stock position use get_stock_shares(positions, symbol).
     """
     option_legs: List[OptionLeg] = []
-    stock_shares = 0
 
     for item in positions:
+        # 1.a. Get contract and position
         if hasattr(item, "contract") and hasattr(item, "position"):
             contract, pos = item.contract, item.position
         elif isinstance(item, dict):
@@ -74,25 +105,19 @@ def parse_positions(
         if contract is None:
             continue
 
+        # 1.b. Get symbol and sec type (skip STK; use get_stock_shares for stock)
         sym = getattr(contract, "symbol", None) or (
             contract.get("symbol") if isinstance(contract, dict) else None
         )
-        if not sym:
+        if not sym or sym != symbol:
             continue
-
         sec_type = getattr(contract, "secType", None) or (
             contract.get("secType", "STK") if isinstance(contract, dict) else "STK"
         )
-
-        if sec_type == "STK" and sym == symbol:
-            stock_shares = int(pos)
-            continue
-
         if sec_type != "OPT":
             continue
-        if sym != symbol:
-            continue
 
+        # 1.c. Get expiry, strike, right and multiplier
         expiry = getattr(contract, "lastTradeDateOrContractMonth", None) or (
             contract.get("lastTradeDateOrContractMonth")
             if isinstance(contract, dict)
@@ -109,10 +134,10 @@ def parse_positions(
         )
         if isinstance(mult, str):
             mult = int(mult) if mult.isdigit() else 100
-
         if not expiry or strike_val is None:
             continue
 
+        # 2. Check DTE
         dte = _dte(expiry)
         if dte < 0:
             continue
@@ -137,6 +162,7 @@ def parse_positions(
             )
             continue
 
+        # 3. Add option leg
         option_legs.append(
             OptionLeg(
                 symbol=sym,
@@ -148,7 +174,7 @@ def parse_positions(
             )
         )
 
-    return option_legs, stock_shares
+    return option_legs
 
 
 def portfolio_delta(

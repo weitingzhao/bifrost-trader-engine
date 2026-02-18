@@ -1,9 +1,9 @@
-"""Position book: wraps Store + parse_positions for state space."""
+"""Position book: wraps Store + get_option_legs for state space."""
 
 from typing import Any, List
 
 from src.core.store import Store
-from src.positions.portfolio import OptionLeg, parse_positions
+from src.positions.portfolio import OptionLeg, get_option_legs
 
 
 class PositionBook:
@@ -27,7 +27,7 @@ class PositionBook:
     def option_legs(self) -> List[OptionLeg]:
         positions = self._store.get_positions()
         spot = self._store.get_underlying_price()
-        legs, _ = parse_positions(
+        legs = get_option_legs(
             positions,
             self._symbol,
             min_dte=self._min_dte,

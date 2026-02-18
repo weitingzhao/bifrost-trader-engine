@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.positions.portfolio import OptionLeg, parse_positions, portfolio_delta
+from src.positions.portfolio import OptionLeg, get_option_legs, get_stock_shares, portfolio_delta
 
 
 def _make_mock_position(symbol: str, sec_type: str, expiry: str, strike: float, right: str, position: int, multiplier: int = 100):
@@ -28,19 +28,38 @@ def _future_yyyymmdd(days_ahead: int) -> str:
     return d.strftime("%Y%m%d")
 
 
-class TestParsePositions:
-    def test_empty_positions(self):
-        legs, stock = parse_positions([], "NVDA")
-        assert legs == []
-        assert stock == 0
+class TestGetStockShares:
+    """Lightweight stock-only extraction (no option parse)."""
+
+    def test_empty_returns_zero(self):
+        assert get_stock_shares([], "NVDA") == 0
 
     def test_stock_only(self):
         positions = [
             {"contract": {"symbol": "NVDA", "secType": "STK"}, "position": 50},
         ]
-        legs, stock = parse_positions(positions, "NVDA", min_dte=0, max_dte=999)
+        assert get_stock_shares(positions, "NVDA") == 50
+
+    def test_wrong_symbol_returns_zero(self):
+        positions = [
+            {"contract": {"symbol": "NVDA", "secType": "STK"}, "position": 50},
+        ]
+        assert get_stock_shares(positions, "AAPL") == 0
+
+
+class TestGetOptionLegs:
+    def test_empty_positions(self):
+        legs = get_option_legs([], "NVDA")
         assert legs == []
-        assert stock == 50
+        assert get_stock_shares([], "NVDA") == 0
+
+    def test_stock_only(self):
+        positions = [
+            {"contract": {"symbol": "NVDA", "secType": "STK"}, "position": 50},
+        ]
+        legs = get_option_legs(positions, "NVDA", min_dte=0, max_dte=999)
+        assert legs == []
+        assert get_stock_shares(positions, "NVDA") == 50
 
     def test_option_in_dte_range(self):
         expiry = _future_yyyymmdd(28)
@@ -48,20 +67,20 @@ class TestParsePositions:
             _make_mock_position("NVDA", "OPT", expiry, 500.0, "C", 1),
         ]
         spot = 500.0
-        legs, stock = parse_positions(positions, "NVDA", min_dte=21, max_dte=35, spot=spot)
+        legs = get_option_legs(positions, "NVDA", min_dte=21, max_dte=35, spot=spot)
         assert len(legs) == 1
         assert legs[0].symbol == "NVDA"
         assert legs[0].strike == 500.0
         assert legs[0].right == "C"
         assert legs[0].quantity == 1
-        assert stock == 0
+        assert get_stock_shares(positions, "NVDA") == 0
 
     def test_option_outside_dte_skipped(self):
         expiry = _future_yyyymmdd(10)
         positions = [
             _make_mock_position("NVDA", "OPT", expiry, 500.0, "C", 1),
         ]
-        legs, _ = parse_positions(positions, "NVDA", min_dte=21, max_dte=35)
+        legs = get_option_legs(positions, "NVDA", min_dte=21, max_dte=35)
         assert len(legs) == 0
 
     def test_option_not_near_atm_skipped(self):
@@ -70,7 +89,7 @@ class TestParsePositions:
             _make_mock_position("NVDA", "OPT", expiry, 400.0, "C", 1),
         ]
         spot = 500.0
-        legs, _ = parse_positions(positions, "NVDA", min_dte=21, max_dte=35, atm_band_pct=0.03, spot=spot)
+        legs = get_option_legs(positions, "NVDA", min_dte=21, max_dte=35, atm_band_pct=0.03, spot=spot)
         assert len(legs) == 0
 
 

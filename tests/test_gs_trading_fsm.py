@@ -55,8 +55,8 @@ async def test_handle_connected_bootstraps_trading_fsm(minimal_config):
 
 
 @pytest.mark.asyncio
-async def test_on_tick_runs_without_error(minimal_config):
-    """_on_tick runs without exception and applies TICK to TradingFSM."""
+async def test_eval_hedge_runs_without_error(minimal_config):
+    """_eval_hedge runs without exception and applies TICK to TradingFSM."""
     app = GsTrading(minimal_config)
     app.connector = AsyncMock()
     app.connector.get_positions = AsyncMock(return_value=[])
@@ -65,7 +65,7 @@ async def test_on_tick_runs_without_error(minimal_config):
     app.store.set_positions([], 0)
 
     await app._handle_connected()
-    await app._on_tick()
+    await app._eval_hedge()
     assert app._fsm_trading.state in (
         TradingState.IDLE,
         TradingState.SAFE,
