@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from src.core.store import RuntimeStore
+from src.core.store import Store
 from src.guards.execution_guard import ExecutionGuard
 from src.strategy.gamma_scalper import gamma_scalper_hedge
 
@@ -13,10 +13,10 @@ class TestHedgeFlowIntegration:
     """Test hedge decision flow: delta -> target -> guard gates -> allowed/blocked."""
 
     def test_full_hedge_flow_allowed(self):
-        state = RuntimeStore()
-        state.set_underlying_quote(100.0, 100.1)
-        state.set_positions([], stock_position=0)
-        state.set_last_hedge_price(99.0)
+        store = Store()
+        store.set_underlying_quote(100.0, 100.1)
+        store.set_positions([], stock_position=0)
+        store.set_last_hedge_price(99.0)
 
         guard = ExecutionGuard(cooldown_sec=1, trading_hours_only=False)
         guard.set_last_hedge_time(time.time() - 10)
@@ -35,16 +35,16 @@ class TestHedgeFlowIntegration:
             hedge.quantity,
             portfolio_delta=port_delta,
             spot=100.05,
-            last_hedge_price=state.get_last_hedge_price(),
-            spread_pct=state.get_spread_pct(),
+            last_hedge_price=store.get_last_hedge_price(),
+            spread_pct=store.get_spread_pct(),
         )
         assert allowed is True
         assert reason == "ok"
 
     def test_min_price_move_blocks_hedge(self):
-        state = RuntimeStore()
-        state.set_underlying_quote(100.0, 100.1)
-        state.set_last_hedge_price(100.05)
+        store = Store()
+        store.set_underlying_quote(100.0, 100.1)
+        store.set_last_hedge_price(100.05)
 
         guard = ExecutionGuard(
             min_price_move_pct=0.5,
@@ -68,8 +68,8 @@ class TestHedgeFlowIntegration:
         assert reason == "min_price_move"
 
     def test_spread_blocks_hedge(self):
-        state = RuntimeStore()
-        state.set_underlying_quote(100.0, 101.5)
+        store = Store()
+        store.set_underlying_quote(100.0, 101.5)
 
         guard = ExecutionGuard(
             max_spread_pct=0.5,
@@ -86,7 +86,7 @@ class TestHedgeFlowIntegration:
             0,
             hedge.side,
             hedge.quantity,
-            spread_pct=state.get_spread_pct(),
+            spread_pct=store.get_spread_pct(),
         )
         assert allowed is False
         assert reason == "spread_too_wide"

@@ -1,5 +1,5 @@
-"""Core state space, runtime store, and utilities for gamma scalping FSM."""
+"""Core state space, runtime Store, and utilities for gamma scalping FSM."""
 
-from src.core.store import RuntimeStore
+from src.core.store import Store
 
-__all__ = ["RuntimeStore"]
+__all__ = ["Store"]

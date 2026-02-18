@@ -51,7 +51,7 @@ Run as a daemon via systemd, supervisor, or Docker (single process, long-running
 ## Architecture
 
 - **IB Connector**: connect, positions, underlying ticker, place stock orders; optional subscriptions for ticker and position updates
-- **State**: in-memory positions, spot, last_hedge_time, daily_hedge_count, daily_pnl
+- **Store**: in-memory positions, spot, last_hedge_time, daily_hedge_count, daily_pnl
 - **Portfolio**: parse IB positions → filter 21–35 DTE near ATM → portfolio delta (Black–Scholes)
 - **Gamma Scalper**: |Δ| > 25 → propose BUY/SELL quantity
 - **Risk Guard**: cooldown, max daily hedges, max position, earnings blackout, circuit breaker

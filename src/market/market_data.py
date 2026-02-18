@@ -1,16 +1,16 @@
-"""Market data stub: wraps RuntimeStore for bid, ask, spread, last_ts."""
+"""Market data stub: wraps Store for bid, ask, spread, last_ts."""
 
 import time
 from typing import Optional
 
-from src.core.store import RuntimeStore
+from src.core.store import Store
 
 
 class MarketData:
-    """Exposes bid, ask, spread_pct, last_ts from state. last_ts set on tick."""
+    """Exposes bid, ask, spread_pct, last_ts from store. last_ts set on tick."""
 
-    def __init__(self, state: RuntimeStore, last_ts: Optional[float] = None):
-        self._state = state
+    def __init__(self, store: Store, last_ts: Optional[float] = None):
+        self._store = store
         self._last_ts: Optional[float] = last_ts
 
     def set_last_ts(self, ts: Optional[float]) -> None:
@@ -22,15 +22,15 @@ class MarketData:
 
     @property
     def bid(self) -> Optional[float]:
-        return self._state.get_bid()
+        return self._store.get_bid()
 
     @property
     def ask(self) -> Optional[float]:
-        return self._state.get_ask()
+        return self._store.get_ask()
 
     @property
     def spread_pct(self) -> Optional[float]:
-        return self._state.get_spread_pct()
+        return self._store.get_spread_pct()
 
     @property
     def last_ts(self) -> Optional[float]:
@@ -38,4 +38,4 @@ class MarketData:
 
     @property
     def mid(self) -> Optional[float]:
-        return self._state.get_underlying_price()
+        return self._store.get_underlying_price()

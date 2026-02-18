@@ -7,7 +7,7 @@ from typing import Any, List, Optional
 logger = logging.getLogger(__name__)
 
 
-class RuntimeStore:
+class Store:
     """Thread-safe runtime state updated by connector callbacks and daemon."""
 
     def __init__(self):
