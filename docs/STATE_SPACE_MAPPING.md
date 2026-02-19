@@ -110,7 +110,7 @@ The engine uses a **Trading FSM** (macro states) and a **Hedge Execution FSM** (
 
 - **States**: `BOOT`, `SYNC`, `IDLE`, `ARMED`, `MONITOR`, `NO_TRADE`, `PAUSE_COST`, `PAUSE_LIQ`, `NEED_HEDGE`, `HEDGING`, `SAFE`
 - **Events**: `start`, `synced`, `tick`, `quote`, `greeks_update`, `target_emitted`, `hedge_done`, `hedge_failed`, `data_stale`, `greeks_bad`, `broker_down`, `broker_up`, `manual_resume`, `shutdown`
-- **Trading FSM guards** (pure functions in `src/guards/trading_guard.py`): `data_ok`, `data_stale`, `greeks_bad`, `broker_down`, `have_option_position`, `delta_band_ready`, `in_no_trade_band`, `out_of_band`, `cost_ok`, `liquidity_ok`, `retry_allowed`, `exec_fault`
+- **Trading FSM guards** (pure functions in `src/guards/trading_guard.py`): `data_ok`, `data_stale`, `greeks_bad`, `broker_down`, `have_option_position`, `delta_band_ready`, `in_no_trade_band`, `cost_ok`, `liquidity_ok`, `retry_allowed`, `exec_fault`
 
 ```mermaid
 stateDiagram-v2
@@ -121,9 +121,9 @@ stateDiagram-v2
   IDLE --> SAFE: data_stale or greeks_bad or broker_down
   ARMED --> MONITOR: delta_band_ready
   MONITOR --> NO_TRADE: in_no_trade_band
-  MONITOR --> NEED_HEDGE: out_of_band and cost_ok and liquidity_ok
-  MONITOR --> PAUSE_COST: out_of_band and not cost_ok
-  MONITOR --> PAUSE_LIQ: out_of_band and not liquidity_ok
+  MONITOR --> NEED_HEDGE: not in_no_trade_band and cost_ok and liquidity_ok
+  MONITOR --> PAUSE_COST: not in_no_trade_band and not cost_ok
+  MONITOR --> PAUSE_LIQ: not in_no_trade_band and not liquidity_ok
   NEED_HEDGE --> HEDGING: target_emitted
   HEDGING --> MONITOR: hedge_done
   HEDGING --> NEED_HEDGE: hedge_failed and retry_allowed

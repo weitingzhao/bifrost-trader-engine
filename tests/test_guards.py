@@ -150,14 +150,12 @@ class TestInNoTradeBand:
         cfg = {"delta": {"epsilon_band": 10.0}}
         tg = TradingGuard(snap, cfg)
         assert tg.is_in_no_trade_band() is True
-        assert tg.is_out_of_band() is False
 
-    def test_out_of_band_when_delta_above_epsilon(self):
+    def test_not_in_no_trade_band_when_delta_above_epsilon(self):
         snap = _make_snap(net_delta=25.0)
         cfg = {"delta": {"epsilon_band": 10.0}}
         tg = TradingGuard(snap, cfg)
         assert tg.is_in_no_trade_band() is False
-        assert tg.is_out_of_band() is True
 
     def test_boundary_epsilon(self):
         snap = _make_snap(net_delta=10.0)

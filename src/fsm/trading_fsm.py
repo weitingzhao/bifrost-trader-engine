@@ -75,13 +75,13 @@ def _handle_monitor(
     if g["in_no_trade_band"]:
         fire(s, TradingState.NO_TRADE, event, g)
         return TradingState.NO_TRADE
-    if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
+    if g["cost_ok"] and g["liquidity_ok"]:
         fire(s, TradingState.NEED_HEDGE, event, g)
         return TradingState.NEED_HEDGE
-    if g["out_of_band"] and not g["cost_ok"]:
+    if not g["cost_ok"]:
         fire(s, TradingState.PAUSE_COST, event, g)
         return TradingState.PAUSE_COST
-    if g["out_of_band"] and not g["liquidity_ok"]:
+    if not g["liquidity_ok"]:
         fire(s, TradingState.PAUSE_LIQ, event, g)
         return TradingState.PAUSE_LIQ
     return None
@@ -93,14 +93,16 @@ def _handle_no_trade(
     event: TradingEvent,
     g: Dict[str, bool],
 ) -> Optional[TradingState]:
-    """NO_TRADE -> NEED_HEDGE, PAUSE_COST, PAUSE_LIQ."""
-    if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
+    """NO_TRADE -> NEED_HEDGE, PAUSE_COST, PAUSE_LIQ (only when !in_no_trade_band)."""
+    if g["in_no_trade_band"]:
+        return None  # stay in NO_TRADE
+    if g["cost_ok"] and g["liquidity_ok"]:
         fire(s, TradingState.NEED_HEDGE, event, g)
         return TradingState.NEED_HEDGE
-    if g["out_of_band"] and not g["cost_ok"]:
+    if not g["cost_ok"]:
         fire(s, TradingState.PAUSE_COST, event, g)
         return TradingState.PAUSE_COST
-    if g["out_of_band"] and not g["liquidity_ok"]:
+    if not g["liquidity_ok"]:
         fire(s, TradingState.PAUSE_LIQ, event, g)
         return TradingState.PAUSE_LIQ
     return None
@@ -116,7 +118,7 @@ def _handle_pause(
     if g["in_no_trade_band"]:
         fire(s, TradingState.NO_TRADE, event, g)
         return TradingState.NO_TRADE
-    if g["out_of_band"] and g["cost_ok"] and g["liquidity_ok"]:
+    if g["cost_ok"] and g["liquidity_ok"]:
         fire(s, TradingState.NEED_HEDGE, event, g)
         return TradingState.NEED_HEDGE
     return None

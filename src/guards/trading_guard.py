@@ -116,10 +116,6 @@ class TradingGuard:
         epsilon = _get_cfg(self._config, "delta", "epsilon_band", 10.0)
         return abs(self._snapshot.net_delta) <= epsilon
 
-    def is_out_of_band(self) -> bool:
-        """True when |net_delta| > epsilon_band (potential hedge)."""
-        return not self.is_in_no_trade_band()
-
     def is_cost_ok(self, min_price_move_pct: Optional[float] = None) -> bool:
         """
         True when expected benefit > cost; spread not extreme and (optional) price moved enough.
@@ -198,7 +194,6 @@ class TradingGuard:
             "have_option_position": self.is_option_position(),
             "delta_band_ready": self.is_delta_band_ready(),
             "in_no_trade_band": self.is_in_no_trade_band(),
-            "out_of_band": self.is_out_of_band(),
             "cost_ok": self.is_cost_ok(),
             "liquidity_ok": self.is_liquidity_ok(),
             "retry_allowed": self.is_retry_allowed(),

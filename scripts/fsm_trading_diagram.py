@@ -43,52 +43,52 @@ TRADING_TRANSITIONS: list[tuple[TradingState, TradingEvent, TradingState, str]] 
     (TradingState.ARMED, TradingEvent.GREEKS_UPDATE, TradingState.MONITOR, "delta_band_ready"),
     # MONITOR
     (TradingState.MONITOR, TradingEvent.SYNCED, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.MONITOR, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.MONITOR, TradingEvent.SYNCED, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.MONITOR, TradingEvent.SYNCED, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
+    (TradingState.MONITOR, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.MONITOR, TradingEvent.SYNCED, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.MONITOR, TradingEvent.SYNCED, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
     (TradingState.MONITOR, TradingEvent.TICK, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.MONITOR, TradingEvent.TICK, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.MONITOR, TradingEvent.TICK, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.MONITOR, TradingEvent.TICK, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
+    (TradingState.MONITOR, TradingEvent.TICK, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.MONITOR, TradingEvent.TICK, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.MONITOR, TradingEvent.TICK, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
     (TradingState.MONITOR, TradingEvent.QUOTE, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.MONITOR, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.MONITOR, TradingEvent.QUOTE, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.MONITOR, TradingEvent.QUOTE, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
+    (TradingState.MONITOR, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.MONITOR, TradingEvent.QUOTE, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.MONITOR, TradingEvent.QUOTE, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
     (TradingState.MONITOR, TradingEvent.GREEKS_UPDATE, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.MONITOR, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.MONITOR, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.MONITOR, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
+    (TradingState.MONITOR, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.MONITOR, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.MONITOR, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
     # NO_TRADE
-    (TradingState.NO_TRADE, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.NO_TRADE, TradingEvent.SYNCED, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.NO_TRADE, TradingEvent.SYNCED, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
-    (TradingState.NO_TRADE, TradingEvent.TICK, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.NO_TRADE, TradingEvent.TICK, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.NO_TRADE, TradingEvent.TICK, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
-    (TradingState.NO_TRADE, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.NO_TRADE, TradingEvent.QUOTE, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.NO_TRADE, TradingEvent.QUOTE, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
-    (TradingState.NO_TRADE, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
-    (TradingState.NO_TRADE, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_COST, "out_of_band & !cost_ok"),
-    (TradingState.NO_TRADE, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_LIQ, "out_of_band & !liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.SYNCED, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.NO_TRADE, TradingEvent.SYNCED, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.TICK, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.TICK, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.NO_TRADE, TradingEvent.TICK, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.QUOTE, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.NO_TRADE, TradingEvent.QUOTE, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
+    (TradingState.NO_TRADE, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_COST, "!in_no_trade_band & !cost_ok"),
+    (TradingState.NO_TRADE, TradingEvent.GREEKS_UPDATE, TradingState.PAUSE_LIQ, "!in_no_trade_band & !liq_ok"),
     # PAUSE_COST
     (TradingState.PAUSE_COST, TradingEvent.SYNCED, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_COST, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_COST, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     (TradingState.PAUSE_COST, TradingEvent.TICK, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_COST, TradingEvent.TICK, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_COST, TradingEvent.TICK, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     (TradingState.PAUSE_COST, TradingEvent.QUOTE, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_COST, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_COST, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     (TradingState.PAUSE_COST, TradingEvent.GREEKS_UPDATE, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_COST, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_COST, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     # PAUSE_LIQ
     (TradingState.PAUSE_LIQ, TradingEvent.SYNCED, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_LIQ, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_LIQ, TradingEvent.SYNCED, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     (TradingState.PAUSE_LIQ, TradingEvent.TICK, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_LIQ, TradingEvent.TICK, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_LIQ, TradingEvent.TICK, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     (TradingState.PAUSE_LIQ, TradingEvent.QUOTE, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_LIQ, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_LIQ, TradingEvent.QUOTE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     (TradingState.PAUSE_LIQ, TradingEvent.GREEKS_UPDATE, TradingState.NO_TRADE, "in_no_trade_band"),
-    (TradingState.PAUSE_LIQ, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "out_of_band & cost_ok & liq_ok"),
+    (TradingState.PAUSE_LIQ, TradingEvent.GREEKS_UPDATE, TradingState.NEED_HEDGE, "!in_no_trade_band & cost_ok & liq_ok"),
     # NEED_HEDGE -> HEDGING
     (TradingState.NEED_HEDGE, TradingEvent.TARGET_EMITTED, TradingState.HEDGING, ""),
     # HEDGING
@@ -186,8 +186,13 @@ def emit_mermaid_simple() -> str:
     return "\n".join(lines)
 
 
+def _safe_cell(s: str) -> str:
+    """Escape pipe for Markdown table (| is column delimiter)."""
+    return s.replace(" | ", " or ").replace("|", " or ")
+
+
 def emit_markdown_table() -> str:
-    """Emit markdown table: from | event | to | guard | caller | class | file."""
+    """Emit markdown table: from_state | event | to_state | guard | caller | class | file."""
     rows: list[tuple[str, str, str, str, str, str, str]] = []
     for from_s, ev, to_s, guard in TRADING_TRANSITIONS:
         caller = EVENT_CALLER.get(ev, ("?", "?", "?"))
@@ -200,7 +205,8 @@ def emit_markdown_table() -> str:
         "|------------|-------|----------|-------|--------|-------|------|",
     ]
     for fr, ev, to, guard, caller_m, cls, path in rows:
-        lines.append(f"| {fr} | {ev} | {to} | {guard} | {caller_m} | {cls} | {path} |")
+        line = f"| {fr} | {ev} | {to} | {_safe_cell(guard)} | {caller_m} | {cls} | {path} |"
+        lines.append(line)
     return "\n".join(lines)
 
 

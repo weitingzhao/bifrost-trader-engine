@@ -62,66 +62,66 @@ stateDiagram-v2
 | HEDGING | hedge_done | MONITOR |  | _hedge | GsTrading | src/app/gs_trading.py |
 | HEDGING | hedge_failed | NEED_HEDGE | retry_allowed | _hedge | GsTrading | src/app/gs_trading.py |
 | HEDGING | hedge_failed | SAFE | !retry_allowed | _hedge | GsTrading | src/app/gs_trading.py |
-| IDLE | greeks_update | ARMED | have_option|strategy_enabled | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| IDLE | greeks_update | SAFE | data_stale|greeks_bad|broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| IDLE | quote | ARMED | have_option|strategy_enabled | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| IDLE | quote | SAFE | data_stale|greeks_bad|broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| IDLE | synced | ARMED | have_option|strategy_enabled | _handle_connected | GsTrading | src/app/gs_trading.py |
-| IDLE | synced | SAFE | data_stale|greeks_bad|broker_down | _handle_connected | GsTrading | src/app/gs_trading.py |
-| IDLE | tick | ARMED | have_option|strategy_enabled | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| IDLE | tick | SAFE | data_stale|greeks_bad|broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | greeks_update | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| IDLE | greeks_update | ARMED | have_option or strategy_enabled | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| IDLE | greeks_update | SAFE | data_stale or greeks_bad or broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| IDLE | quote | ARMED | have_option or strategy_enabled | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| IDLE | quote | SAFE | data_stale or greeks_bad or broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| IDLE | synced | ARMED | have_option or strategy_enabled | _handle_connected | GsTrading | src/app/gs_trading.py |
+| IDLE | synced | SAFE | data_stale or greeks_bad or broker_down | _handle_connected | GsTrading | src/app/gs_trading.py |
+| IDLE | tick | ARMED | have_option or strategy_enabled | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| IDLE | tick | SAFE | data_stale or greeks_bad or broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | greeks_update | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | MONITOR | greeks_update | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | greeks_update | PAUSE_COST | out_of_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | greeks_update | PAUSE_LIQ | out_of_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | quote | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | greeks_update | PAUSE_COST | !in_no_trade_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | greeks_update | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | quote | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | MONITOR | quote | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | quote | PAUSE_COST | out_of_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | quote | PAUSE_LIQ | out_of_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | synced | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| MONITOR | quote | PAUSE_COST | !in_no_trade_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | quote | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | synced | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
 | MONITOR | synced | NO_TRADE | in_no_trade_band | _handle_connected | GsTrading | src/app/gs_trading.py |
-| MONITOR | synced | PAUSE_COST | out_of_band & !cost_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
-| MONITOR | synced | PAUSE_LIQ | out_of_band & !liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
-| MONITOR | tick | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | synced | PAUSE_COST | !in_no_trade_band & !cost_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| MONITOR | synced | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| MONITOR | tick | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | MONITOR | tick | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | tick | PAUSE_COST | out_of_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| MONITOR | tick | PAUSE_LIQ | out_of_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | tick | PAUSE_COST | !in_no_trade_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| MONITOR | tick | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | NEED_HEDGE | target_emitted | HEDGING |  | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | greeks_update | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | greeks_update | PAUSE_COST | out_of_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | greeks_update | PAUSE_LIQ | out_of_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | quote | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | quote | PAUSE_COST | out_of_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | quote | PAUSE_LIQ | out_of_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | synced | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | synced | PAUSE_COST | out_of_band & !cost_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | synced | PAUSE_LIQ | out_of_band & !liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | tick | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | tick | PAUSE_COST | out_of_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| NO_TRADE | tick | PAUSE_LIQ | out_of_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| PAUSE_COST | greeks_update | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | greeks_update | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | greeks_update | PAUSE_COST | !in_no_trade_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | greeks_update | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | quote | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | quote | PAUSE_COST | !in_no_trade_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | quote | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | synced | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | synced | PAUSE_COST | !in_no_trade_band & !cost_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | synced | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | tick | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | tick | PAUSE_COST | !in_no_trade_band & !cost_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| NO_TRADE | tick | PAUSE_LIQ | !in_no_trade_band & !liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| PAUSE_COST | greeks_update | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | PAUSE_COST | greeks_update | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| PAUSE_COST | quote | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| PAUSE_COST | quote | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | PAUSE_COST | quote | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| PAUSE_COST | synced | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| PAUSE_COST | synced | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
 | PAUSE_COST | synced | NO_TRADE | in_no_trade_band | _handle_connected | GsTrading | src/app/gs_trading.py |
-| PAUSE_COST | tick | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| PAUSE_COST | tick | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | PAUSE_COST | tick | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| PAUSE_LIQ | greeks_update | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| PAUSE_LIQ | greeks_update | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | PAUSE_LIQ | greeks_update | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| PAUSE_LIQ | quote | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| PAUSE_LIQ | quote | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | PAUSE_LIQ | quote | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| PAUSE_LIQ | synced | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
+| PAUSE_LIQ | synced | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
 | PAUSE_LIQ | synced | NO_TRADE | in_no_trade_band | _handle_connected | GsTrading | src/app/gs_trading.py |
-| PAUSE_LIQ | tick | NEED_HEDGE | out_of_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| PAUSE_LIQ | tick | NEED_HEDGE | !in_no_trade_band & cost_ok & liq_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | PAUSE_LIQ | tick | NO_TRADE | in_no_trade_band | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | SAFE | broker_up | SYNC | data_ok | (broker_cb) | GsTrading | src/app/gs_trading.py |
 | SAFE | manual_resume | SYNC | broker_up & data_ok | (manual) | GsTrading | src/app/gs_trading.py |
 | SYNC | greeks_update | IDLE | positions_ok & data_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| SYNC | greeks_update | SAFE | !data_ok | broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| SYNC | greeks_update | SAFE | !data_ok or broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | SYNC | quote | IDLE | positions_ok & data_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| SYNC | quote | SAFE | !data_ok | broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| SYNC | quote | SAFE | !data_ok or broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
 | SYNC | synced | IDLE | positions_ok & data_ok | _handle_connected | GsTrading | src/app/gs_trading.py |
-| SYNC | synced | SAFE | !data_ok | broker_down | _handle_connected | GsTrading | src/app/gs_trading.py |
+| SYNC | synced | SAFE | !data_ok or broker_down | _handle_connected | GsTrading | src/app/gs_trading.py |
 | SYNC | tick | IDLE | positions_ok & data_ok | _eval_hedge | GsTrading | src/app/gs_trading.py |
-| SYNC | tick | SAFE | !data_ok | broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
+| SYNC | tick | SAFE | !data_ok or broker_down | _eval_hedge | GsTrading | src/app/gs_trading.py |
