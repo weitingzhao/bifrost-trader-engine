@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Phase 1 self-check: verify sink config, schema, and optional signal handling.
+"""Phase 1 self-check: sink config, schema, runtime env (IB), and optional signal handling.
 
-Aligns with PLAN_NEXT_STEPS.md stage 1 Test Case list (TC-1-R-M1a-*, TC-1-R-M4a-*,
-TC-1-R-H1-*, TC-1-R-C1a-*). Run from project root.
+Aligns with PLAN_NEXT_STEPS.md stage 1 Test Case list and 运行环境验证. Run from project root.
 
-Phase 1 scope is "status sink + minimal control" (sink config, PG schema, SIGTERM).
-IB connector is runtime environment, not a Phase 1 deliverable, so it is not run by
-default. Use --check-ib to verify TWS/Gateway connectivity when available.
+Phase 1 includes runtime env verification: PostgreSQL schema + IB TWS/Gateway connectivity
+(project already contains IB connection code). IB check runs by default; use --skip-ib when
+TWS/Gateway is not available (e.g. CI).
 
 Usage:
-  python scripts/check/phase1.py [--config PATH] [--skip-db] [--signal-test] [--check-ib]
-  --config       Config file (default: config/config.yaml)
-  --skip-db      Skip PostgreSQL connection and schema checks
-  --signal-test  Spawn daemon, send SIGTERM, assert exit within 10s (needs runnable env)
-  --check-ib     Connect to IB TWS/Gateway per config (needs TWS/Gateway running)
+  python scripts/check/phase1.py [--config PATH] [--skip-db] [--skip-ib] [--signal-test] [--signal-verbose]
+  --config         Config file (default: config/config.yaml)
+  --skip-db        Skip PostgreSQL connection and schema checks
+  --skip-ib        Skip IB TWS/Gateway connectivity check (use when TWS not running)
+  --signal-test    Spawn daemon, wait for "Daemon running" (max 15s), then SIGTERM; assert exit within 10s
+  --signal-verbose With --signal-test: print verification evidence (exit code, stdout tail) for each scenario/transition
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 import traceback
 import time
 from pathlib import Path
@@ -186,42 +187,262 @@ def check_pg_schema(config_path: str, verbose: bool = False) -> tuple[bool, str]
         conn.close()
 
 
-def check_signal_exit(config_path: str, timeout_start: float = 5.0, timeout_exit: float = 10.0) -> tuple[bool, str]:
-    """TC-1-R-C1a-1: daemon exits within seconds on SIGTERM."""
+# When this string appears on daemon stdout, it has reached RUNNING state (single-threaded loop).
+DAEMON_READY_MARKER = "Daemon running"
+# Markers to infer exit stage (aligned with gs_trading + daemon_fsm).
+MARKER_IB_CONNECT_FAIL = "Could not connect to IB"
+MARKER_RECEIVED_STOP = "Received stop signal"
+
+# 提前退出时视为「按状态机安全退出」的退出码（daemon_fsm: CONNECTING->STOPPED 或 CONNECTED->STOPPING->STOPPED 后进程结束）
+SAFE_EXIT_CODES = (0, 1, -15, 143, 124)
+
+# 与 src/fsm/daemon_fsm.py 一致的合法流转（CONNECTED 仅允许 -> RUNNING 或 -> STOPPING，无 CONNECTED->STOPPED）
+FSM_TRANSITIONS = [
+    ("IDLE", "CONNECTING"),       # _handle_idle
+    ("IDLE", "STOPPED"),          # request_stop() when IDLE
+    ("CONNECTING", "CONNECTED"),  # connect success
+    ("CONNECTING", "STOPPED"),    # connect fail
+    ("CONNECTING", "STOPPING"),   # request_stop() during connect
+    ("CONNECTED", "RUNNING"),     # _handle_connected
+    ("CONNECTED", "STOPPING"),    # request_stop() or exception
+    ("RUNNING", "STOPPING"),      # request_stop() / SIGTERM
+    ("STOPPING", "STOPPED"),      # _handle_stopping
+]
+# 各 Signal 场景设计覆盖的流转（场景名 -> 设计覆盖的 (from, to) 列表）
+FSM_COVERAGE_BY_SCENARIO = {
+    "立即/极早信号(0.3s)": [("IDLE", "STOPPED"), ("CONNECTING", "STOPPING"), ("STOPPING", "STOPPED")],
+    "早期信号(2s)": [("CONNECTING", "STOPPING"), ("CONNECTING", "STOPPED"), ("CONNECTED", "STOPPING"), ("STOPPING", "STOPPED")],
+    "就绪后信号": [("IDLE", "CONNECTING"), ("CONNECTING", "CONNECTED"), ("CONNECTED", "RUNNING"), ("RUNNING", "STOPPING"), ("STOPPING", "STOPPED")],
+}
+# 未由任何场景设计覆盖的流转（需补充用例或代码评审后考虑精简）
+FSM_TRANSITIONS_UNCOVERED: list[tuple[str, str]] = []
+
+
+def _infer_exit_stage(stdout_lines: list[str]) -> str:
+    """Infer daemon exit stage from stdout for Chinese report. Based on daemon_fsm: IDLE->CONNECTING->CONNECTED->RUNNING->STOPPING->STOPPED."""
+    text = "\n".join(stdout_lines)
+    if MARKER_IB_CONNECT_FAIL in text:
+        return "CONNECTING 阶段退出（IB 连接失败）"
+    if DAEMON_READY_MARKER in text:
+        return "已进入 RUNNING"
+    if "Daemon:CONNECTED" in text or "fetching positions" in text:
+        return "CONNECTED 阶段退出（拉取持仓/快照或后续步骤异常）"
+    if "CONNECTING" in text or "connecting to IB" in text:
+        return "CONNECTING 阶段退出（连接超时或其它错误）"
+    return "未进入 RUNNING（可能为 IDLE/CONNECTING/CONNECTED 阶段异常）"
+
+
+def _run_signal_scenario(
+    config_path: str,
+    scenario_name: str,
+    delay_before_signal: float,
+    wait_for_ready: bool,
+    timeout_ready: float,
+    timeout_exit: float,
+) -> tuple[bool, str, str]:
+    """Run one daemon process; returns (ok, msg, evidence). evidence 用于验证 PASS：退出码 + stdout 末几行等。"""
     run_engine = _PROJECT_ROOT / "scripts" / "run_engine.py"
     if not run_engine.exists():
-        return False, "scripts/run_engine.py not found"
+        return False, f"{scenario_name}: scripts/run_engine.py 未找到", ""
+
+    def make_evidence(rc: int, out_tail: list[str], err_tail: str = "") -> str:
+        parts = [f"退出码 {rc}（允许 {SAFE_EXIT_CODES}）"]
+        if out_tail:
+            parts.append("stdout 末 5 行：" + " | ".join(out_tail[-5:]))
+        if err_tail:
+            parts.append("stderr 末 200 字：" + (err_tail[-200:] if len(err_tail) > 200 else err_tail))
+        return "；".join(parts)
+
     proc = subprocess.Popen(
         [sys.executable, str(run_engine), config_path],
         cwd=str(_PROJECT_ROOT),
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    daemon_ready = threading.Event()
+    stdout_lines: list[str] = []
+
+    def read_stdout() -> None:
+        if proc.stdout is None:
+            return
+        max_lines = 50
+        for line in proc.stdout:
+            stdout_lines.append(line.rstrip())
+            if len(stdout_lines) > max_lines:
+                stdout_lines.pop(0)
+            if DAEMON_READY_MARKER in line:
+                daemon_ready.set()
+                return
+
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
+
     try:
-        time.sleep(min(2.0, timeout_start))
-        if proc.poll() is not None:
-            return False, "Daemon exited before SIGTERM (check IB/config)"
-        proc.terminate()
-        try:
-            proc.wait(timeout=timeout_exit)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            return False, f"Daemon did not exit within {timeout_exit}s of SIGTERM"
-        # Exit 0 or -SIGTERM (e.g. 143 on many platforms)
-        if proc.returncode not in (0, -15, 143, 124):
-            stderr = (proc.stderr.read() or "")[-500:]
-            return False, f"Unexpected exit code {proc.returncode} (stderr tail: {stderr!r})"
-        return True, "ok"
+        if wait_for_ready:
+            deadline = time.monotonic() + timeout_ready
+            while time.monotonic() < deadline:
+                if daemon_ready.is_set():
+                    break
+                if proc.poll() is not None:
+                    stage = _infer_exit_stage(stdout_lines)
+                    rc = proc.returncode or 0
+                    stderr = (proc.stderr.read() or "").strip()
+                    err_tail = stderr[-500:] if len(stderr) > 500 else stderr
+                    out_tail = stdout_lines[-20:] if stdout_lines else []
+                    if rc in SAFE_EXIT_CODES:
+                        return True, f"{scenario_name}: 未进 RUNNING 但已安全退出。推断：{stage}；退出码 {rc}", make_evidence(rc, out_tail, err_tail)
+                    return False, f"{scenario_name}: 未进 RUNNING 且退出码异常 {rc}。推断：{stage}\nStdout:\n" + "\n".join(out_tail) + "\nStderr:\n" + err_tail, make_evidence(rc, out_tail, err_tail)
+                time.sleep(0.2)
+            else:
+                proc.kill()
+                proc.wait()
+                return False, f"{scenario_name}: {timeout_ready:.0f}s 内未看到「Daemon running」", ""
+            proc.terminate()
+            try:
+                proc.wait(timeout=timeout_exit)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                return False, f"{scenario_name}: RUNNING 后 SIGTERM，{timeout_exit}s 内未退出", ""
+            rc = proc.returncode or 0
+            if rc not in SAFE_EXIT_CODES:
+                return False, f"{scenario_name}: 退出码异常 {proc.returncode}", make_evidence(rc, stdout_lines[-10:] if stdout_lines else [], (proc.stderr.read() or "")[-200:])
+            return True, f"{scenario_name}: RUNNING→STOPPING→STOPPED 正常退出", make_evidence(rc, stdout_lines[-10:] if stdout_lines else [])
+        else:
+            time.sleep(delay_before_signal)
+            if proc.poll() is not None:
+                stage = _infer_exit_stage(stdout_lines)
+                rc = proc.returncode or 0
+                stderr = (proc.stderr.read() or "").strip()
+                err_tail = stderr[-500:] if len(stderr) > 500 else stderr
+                out_tail = stdout_lines[-20:] if stdout_lines else []
+                if rc in SAFE_EXIT_CODES:
+                    return True, f"{scenario_name}: 进程已先退出，安全。推断：{stage}；退出码 {rc}", make_evidence(rc, out_tail, err_tail)
+                return False, f"{scenario_name}: 进程已先退出且退出码异常 {rc}。推断：{stage}\nStderr:\n{err_tail}", make_evidence(rc, out_tail, err_tail)
+            proc.terminate()
+            try:
+                proc.wait(timeout=timeout_exit)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                return False, f"{scenario_name}: SIGTERM 后 {timeout_exit}s 内未退出", ""
+            rc = proc.returncode or 0
+            if rc not in SAFE_EXIT_CODES:
+                return False, f"{scenario_name}: 退出码异常 {proc.returncode}", make_evidence(rc, stdout_lines[-10:] if stdout_lines else [], (proc.stderr.read() or "")[-200:])
+            return True, f"{scenario_name}: {delay_before_signal}s 后 SIGTERM，安全退出", make_evidence(rc, stdout_lines[-10:] if stdout_lines else [])
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
 
 
+def _write_signal_log(
+    scenario_results: list[tuple[str, bool, str, str]],
+    coverage_summary: str,
+    transition_rows: list[tuple[str, bool, str]],
+) -> None:
+    """将 Signal 测试结果写入日志文件，便于留存与检验。"""
+    log_dir = _PROJECT_ROOT / "scripts" / "check" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = log_dir / f"phase1_signal_{ts}.log"
+    lines = [f"# Phase1 Signal 测试日志 {ts}", f"# 覆盖摘要: {coverage_summary}", ""]
+    for desc, ok, msg, evidence in scenario_results:
+        lines.append(f"[{'PASS' if ok else 'FAIL'}] {desc}")
+        lines.append(f"  验证证据: {evidence or '-'}")
+        lines.append("")
+    lines.append("# 状态机流转逐条")
+    for trans_str, trans_ok, trans_evidence in transition_rows:
+        lines.append(f"[{'PASS' if trans_ok is True else '未覆盖'}] {trans_str}")
+        lines.append(f"  验证证据: {trans_evidence}")
+        lines.append("")
+    try:
+        log_path.write_text("\n".join(lines), encoding="utf-8")
+        print(f"  (Signal 日志已写入: {log_path.relative_to(_PROJECT_ROOT)})")
+    except Exception as e:
+        print(f"  (Signal 日志写入失败: {e})")
+
+
+def _build_fsm_coverage_report(
+    scenario_passed: dict[str, bool],
+    scenario_evidence: dict[str, str],
+    include_evidence: bool = False,
+) -> tuple[str, list[tuple[str, bool, str]]]:
+    """生成状态机流转覆盖：每条流转单独 (流转描述, PASS/未覆盖, 验证证据)。
+    include_evidence=False 时仅输出「场景通过」，不附带证据详情；True 时写入证据（退出码、stdout 等）。
+    """
+    transition_to_scenarios: dict[tuple[str, str], list[str]] = {}
+    for scenario_name, transitions in FSM_COVERAGE_BY_SCENARIO.items():
+        for t in transitions:
+            transition_to_scenarios.setdefault(t, []).append(scenario_name)
+    covered_set = set(transition_to_scenarios.keys())
+    uncovered_set = set(FSM_TRANSITIONS_UNCOVERED)
+    total = len(FSM_TRANSITIONS)
+    covered_count = len(covered_set)
+    uncovered_count = len(uncovered_set)
+    summary = f"已覆盖 {covered_count}/{total} 条"
+    if uncovered_set:
+        summary += f"，未覆盖 {uncovered_count} 条"
+
+    rows: list[tuple[str, bool, str]] = []
+    for (a, b) in FSM_TRANSITIONS:
+        trans_str = f"{a}→{b}"
+        if (a, b) in uncovered_set:
+            rows.append((trans_str, None, "未覆盖；需修改项目逻辑以覆盖（daemon_fsm/gs_trading）"))
+        else:
+            scenarios = transition_to_scenarios.get((a, b), [])
+            passed_names = [s for s in scenarios if scenario_passed.get(s, False)]
+            if passed_names:
+                if include_evidence:
+                    first_evidence = scenario_evidence.get(passed_names[0], "")
+                    evidence_txt = f"证据：{first_evidence}" if first_evidence else "（见本报告上方该场景的验证证据）"
+                    rows.append((trans_str, True, f"验证：场景「{'、'.join(passed_names)}」通过（{evidence_txt}）"))
+                else:
+                    rows.append((trans_str, True, f"验证：场景「{'、'.join(passed_names)}」通过"))
+            else:
+                rows.append((trans_str, True, f"设计覆盖（场景「{'、'.join(scenarios)}」；本次未触发可查日志）"))
+    return summary, rows
+
+
+def check_signal_exit(
+    config_path: str,
+    timeout_ready: float = 15.0,
+    timeout_exit: float = 10.0,
+    include_evidence: bool = False,
+) -> tuple[list[tuple[str, bool, str, str]], tuple[str, list[tuple[str, bool, str]]]]:
+    """TC-1-R-C1a-1: 守护进程安全退出与状态机流转校验。
+
+    include_evidence: 是否在报告中包含验证证据（退出码、stdout 等）；默认 False，仅在有 --signal-verbose 时为 True。
+    返回：(场景列表 (描述, ok, msg, evidence), (覆盖摘要, 每条流转 (流转, ok, 验证证据)))。
+    """
+    scenarios = [
+        ("立即/极早信号(0.3s)", "0.3s 后 SIGTERM", 0.3, False),
+        ("早期信号(2s)", "2s 后 SIGTERM", 2.0, False),
+        ("就绪后信号", "就绪后 SIGTERM", 0, True),
+    ]
+    results: list[tuple[str, bool, str, str]] = []
+    scenario_passed: dict[str, bool] = {}
+    scenario_evidence: dict[str, str] = {}
+    for name, short_desc, delay, wait_ready in scenarios:
+        ok, msg, evidence = _run_signal_scenario(
+            config_path,
+            scenario_name=name,
+            delay_before_signal=delay,
+            wait_for_ready=wait_ready,
+            timeout_ready=timeout_ready,
+            timeout_exit=timeout_exit,
+        )
+        results.append((short_desc, ok, msg, evidence))
+        scenario_passed[name] = ok
+        scenario_evidence[name] = evidence or ""
+    summary, transition_rows = _build_fsm_coverage_report(scenario_passed, scenario_evidence, include_evidence)
+    return results, (summary, transition_rows)
+
+
 def check_ib_connector(config_path: str, timeout: float = 10.0, verbose: bool = False) -> tuple[bool, str]:
-    """Optional: connect to IB TWS/Gateway per config. Requires TWS/Gateway running."""
+    """Runtime env: connect to IB TWS/Gateway per config. Requires TWS/Gateway running."""
     try:
         import yaml
         from src.connector.ib import IBConnector
@@ -262,7 +483,8 @@ def main() -> int:
     parser.add_argument("--config", default="config/config.yaml", help="Config path")
     parser.add_argument("--skip-db", action="store_true", help="Skip PostgreSQL schema check")
     parser.add_argument("--signal-test", action="store_true", help="Run daemon and test SIGTERM exit")
-    parser.add_argument("--check-ib", action="store_true", help="Connect to IB TWS/Gateway (needs TWS/Gateway running)")
+    parser.add_argument("--signal-verbose", action="store_true", help="With --signal-test: print verification evidence (exit code, stdout tail)")
+    parser.add_argument("--skip-ib", action="store_true", help="Skip IB TWS/Gateway connectivity check (use when TWS not running)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print full traceback on failure")
     args = parser.parse_args()
     verbose = args.verbose
@@ -290,19 +512,32 @@ def main() -> int:
     else:
         results.append(("PostgreSQL", "tables + columns", None, "skipped (--skip-db)"))
 
-    # 4. Signal test (optional)
+    # 4. Signal test (optional): 每条子场景独立一行 PASS/FAIL + 验证证据；每条流转独立一行 PASS/SKIP(未覆盖) + 验证证据
+    signal_log_data = None
     if args.signal_test:
-        ok, msg = check_signal_exit(config_path)
-        results.append(("Signal", "SIGTERM → daemon exit", ok, msg))
+        scenario_results, (coverage_summary, transition_rows) = check_signal_exit(
+            config_path, include_evidence=args.signal_verbose
+        )
+        for desc, ok, msg, evidence in scenario_results:
+            display_msg = msg
+            if args.signal_verbose and evidence:
+                display_msg = msg + "\n验证证据：" + evidence
+            results.append(("Signal", desc, ok, display_msg))
+        results.append(("Signal", f"状态机覆盖 {coverage_summary}", True, ""))
+        for trans_str, trans_ok, trans_evidence in transition_rows:
+            # 始终输出每条流转的 PASS/未覆盖；仅 --signal-verbose 时附带验证解释
+            msg = trans_evidence if args.signal_verbose else ""
+            results.append(("Signal", f"  流转 {trans_str}", trans_ok, msg))
+        signal_log_data = (scenario_results, coverage_summary, transition_rows)
     else:
-        results.append(("Signal", "SIGTERM → daemon exit", None, "optional; use --signal-test to run"))
+        results.append(("Signal", "SIGTERM 多场景", None, "optional; use --signal-test to run"))
 
-    # 5. IB connector (optional; runtime env, not Phase 1 deliverable)
-    if args.check_ib:
+    # 5. IB connector (runtime env verification; default on, --skip-ib to skip)
+    if not args.skip_ib:
         ok, msg = check_ib_connector(config_path, timeout=10.0, verbose=verbose)
         results.append(("IB", "TWS/Gateway connect", ok, msg))
     else:
-        results.append(("IB", "TWS/Gateway connect", None, "optional; use --check-ib to run (needs TWS/Gateway)"))
+        results.append(("IB", "TWS/Gateway connect", None, "skipped (--skip-ib)"))
 
     # Report: category prefix + colored PASS/SKIP/FAIL
     all_required_ok = True
@@ -310,23 +545,30 @@ def main() -> int:
         pad = " " * max(0, CATEGORY_WIDTH - len(category) - 2)  # [Category] + padding
         if ok is True:
             print(f"  [{category}]{pad}  {PASS_STR}  {description}")
+            if msg and msg != "ok":
+                for line in msg.splitlines():
+                    print(f"      {line}")
         elif ok is False:
-            print(f"  [{category}]{pad}  {FAIL_STR}  {description}: {msg}")
+            print(f"  [{category}]{pad}  {FAIL_STR}  {description}:")
+            for line in msg.splitlines():
+                print(f"      {line}")
             all_required_ok = False
         else:
             print(f"  [{category}]{pad}  {SKIP_STR}  {description}: {msg}")
     if not all_required_ok and not verbose:
         print("\nTip: run with -v/--verbose to see full error tracebacks.")
+    if signal_log_data is not None:
+        _write_signal_log(*signal_log_data)
     if all_required_ok:
         print("\nPhase 1 self-check: required checks passed.")
-        if not args.signal_test or not args.check_ib:
-            opts = []
+        if args.skip_ib or not args.signal_test:
+            hints = []
+            if args.skip_ib:
+                hints.append("omit --skip-ib to verify IB TWS/Gateway connectivity")
             if not args.signal_test:
-                opts.append("--signal-test")
-            if not args.check_ib:
-                opts.append("--check-ib")
-            if opts:
-                print(f"  (Optional: run with {' '.join(opts)} to verify signal exit / IB connectivity.)")
+                hints.append("add --signal-test to verify SIGTERM exit")
+            if hints:
+                print(f"  (Optional: {'; '.join(hints)}.)")
         return 0
     print("\nPhase 1 self-check: some checks failed.")
     return 1

@@ -143,12 +143,15 @@
 - StatusSink 抽象落地，默认 SQLiteSink 写入当前状态（及可选历史）与操作记录；守护进程可配置 sink 类型与路径。
 - SIGTERM/SIGINT 触发优雅停止；若实现 1.3，控制文件可触发停止。
 
+**运行环境验证**（本阶段引入并验收）：项目已包含 IB 连接代码，阶段 1 验收时除 sink 与信号外，需确认运行环境可用：**(1) PostgreSQL** 表结构（自检脚本检查）；**(2) IB TWS/Gateway 连通性**（自检脚本默认执行 IB 连接测试）。无 TWS 时可用 `python scripts/check/phase1.py --skip-ib` 跳过 IB 项；具备 TWS 时执行完整自检以通过 IB 检查。详见 [阶段 1 执行计划](plans/phase1-execution-plan.md)#阶段-1-自检脚本。
+
 **检查方式**
 
-1. 启动守护进程（配置 `status.sink: sqlite` 及路径），运行一段时间。
-2. 用 sqlite3 或脚本查 SQLite 当前表，确认有最新 daemon_state、trading_state、spot、ts 等；若有操作发生，查操作表有对应记录。
-3. 对本机进程发 SIGTERM/SIGINT，确认进程在数秒内退出且无异常栈。
-4. 若实现 1.3：写控制文件，确认守护进程在下一 heartbeat 内停止。
+1. 运行自检脚本 `python scripts/check/phase1.py`（默认含 IB 检查）；无 TWS 时加 `--skip-ib`。必检项（Config、Sink、PostgreSQL）及运行环境项（IB）通过后再进行下述 2–5。
+2. 启动守护进程（配置 `status.sink` 及 PostgreSQL/路径），运行一段时间。
+3. 从 sink（PostgreSQL 或 SQLite）查当前表，确认有最新 daemon_state、trading_state、spot、ts 等；若有操作发生，查操作表有对应记录。
+4. 对本机进程发 SIGTERM/SIGINT，确认进程在数秒内退出且无异常栈。
+5. 若实现 1.3：写控制文件，确认守护进程在下一 heartbeat 内停止。
 
 **验证标准（测试标准）**：与「需求与阶段一一对应及详细验收标准」表中本阶段各需求一致；以下为阶段 1 的逐条核对清单。
 
@@ -417,7 +420,7 @@
 
 ### 6.4 可选：Test Case 自动化
 
-- 阶段 1：已提供 **`scripts/check/phase1.py`**，可检查配置、Sink 接口、PostgreSQL 表结构与可选信号退出；详见 [阶段 1 执行计划](plans/phase1-execution-plan.md)#阶段-1-自检脚本。  
+- 阶段 1：已提供 **`scripts/check/phase1.py`**，可检查配置、Sink 接口、PostgreSQL 表结构、**IB TWS/Gateway 连通性**（默认执行）与可选信号退出；无 TWS 时加 `--skip-ib`。详见 [阶段 1 执行计划](plans/phase1-execution-plan.md)#阶段-1-自检脚本。  
 - 阶段 2：可对独立应用做 HTTP 测试（如 `curl` 或 pytest-requests）：GET /status 含 status_lamp、GET /operations 返回列表、POST /control/stop 后守护进程退出。  
 - 自动化不必一次做完；先用手动执行 Test Case 清单，通过后再逐步把关键步骤固化为脚本或用例，便于回归。
 

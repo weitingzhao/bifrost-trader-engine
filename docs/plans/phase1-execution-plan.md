@@ -60,37 +60,38 @@
 
 ## 阶段 1 自检脚本
 
-运行自检可验证配置、Sink 接口与（可选）PostgreSQL 表结构、信号停止是否满足阶段 1 验收要求。与 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md) 阶段 1 Test Case 清单对应。
+运行自检可验证配置、Sink 接口、PostgreSQL 表结构、**运行环境（IB 连通性）**与可选信号停止，满足阶段 1 验收要求。与 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md) 阶段 1 Test Case 清单及「运行环境验证」对应。
 
 **脚本**：[scripts/check/phase1.py](../../scripts/check/phase1.py)
 
 **用法**（在项目根目录执行）：
 
 ```bash
-# 仅检查配置与 Sink 接口（无需 PostgreSQL）
-python scripts/check/phase1.py --skip-db
-
-# 含 PostgreSQL：检查三张表及必填列是否存在（需本机或可达 PG）
+# 完整自检（含 Config、Sink、PostgreSQL、IB、可选 Signal）
+# 默认执行 IB 连接检查，需 TWS/Gateway 已启动
 python scripts/check/phase1.py
+
+# 无 TWS 时跳过 IB 检查（如 CI 或仅验配置）
+python scripts/check/phase1.py --skip-ib
+
+# 仅检查配置与 Sink 接口（无需 PostgreSQL）
+python scripts/check/phase1.py --skip-db --skip-ib
 
 # 含信号测试：启动守护进程、发 SIGTERM、断言数秒内退出（需可运行环境）
 python scripts/check/phase1.py --signal-test
-
-# 含 IB 连接：连接 config 中的 TWS/Gateway（需 TWS/Gateway 已启动）
-python scripts/check/phase1.py --check-ib
 ```
 
 **检查项与 TC 对应**：
 
-| 自检项 | 对应 Test Case |
-|--------|----------------|
+| 自检项 | 对应 Test Case / 说明 |
+|--------|------------------------|
 | Config (status.sink + postgres) | TC-1-R-H1-3 |
 | Sink interface (SNAPSHOT/OPERATION keys) | TC-1-R-M1a-3、TC-1-R-M4a-2 |
 | PostgreSQL schema (tables + columns) | TC-1-R-M1a-2、TC-1-R-M4a-3、TC-1-R-H1-1 |
-| SIGTERM → daemon exit | TC-1-R-C1a-1 |
-| IB TWS/Gateway connect | 可选（运行环境，非阶段 1 交付物）；`--check-ib` 时执行 |
+| IB TWS/Gateway connect | **运行环境验证**（阶段 1 引入）；默认执行，`--skip-ib` 可跳过 |
+| SIGTERM → daemon exit | TC-1-R-C1a-1；可选，`--signal-test` 时执行 |
 
-阶段 1 范围仅为「状态 sink + 最小控制」，IB 连接属于运行环境而非本阶段交付项，故默认不测；需验证 TWS/Gateway 连通性时使用 `--check-ib`。无 PostgreSQL 或未启动守护进程时，可使用 `--skip-db` 或省略 `--signal-test`，仅跑不依赖环境的检查。阶段验收时建议在具备 PG 与可运行守护进程的环境下执行完整自检。
+**运行环境验证**：阶段 1 在「状态 sink + 最小控制」之外，于本环节正式引入并验收运行环境——PostgreSQL 表结构 + **IB TWS/Gateway 连通性**（项目已包含 IB 连接代码）。自检脚本默认执行 IB 检查，建议在具备 TWS 的环境下执行完整自检；无 TWS 或 CI 时使用 `--skip-ib`。无 PostgreSQL 时使用 `--skip-db`；不测信号退出时省略 `--signal-test`。
 
 ---
 

@@ -7,7 +7,7 @@ Transition implementation (gs_trading.py):
 - CONNECTING -> STOPPED: _handle_connecting (connect fail)
 - CONNECTING -> STOPPING: request_stop() during connect
 - CONNECTED -> RUNNING: _handle_connected
-- CONNECTED -> STOPPED/STOPPING: request_stop()
+- CONNECTED -> STOPPING: request_stop() or exception in _handle_connected
 - RUNNING -> STOPPING: _handle_running (loop exit) or request_stop()
 - STOPPING -> STOPPED: _handle_stopping
 """
@@ -40,7 +40,6 @@ _TRANSITIONS: dict[DaemonState, set[DaemonState]] = {
     },
     DaemonState.CONNECTED: {
         DaemonState.RUNNING,
-        DaemonState.STOPPED,
         DaemonState.STOPPING,
     },
     DaemonState.RUNNING: {DaemonState.STOPPING},
