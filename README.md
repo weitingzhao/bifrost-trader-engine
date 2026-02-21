@@ -48,14 +48,19 @@ python scripts/run_engine.py config/config.yaml
 
 Run as a daemon via systemd, supervisor, or Docker (single process, long-running).
 
+## Run environment and operations
+
+- **Single account**: TWS with one account; auto-trading (this daemon) and manual trading share the account (different API `client_id`).
+- **Daemon**: Single-process, single-thread; runs on the same machine as TWS. Monitoring and control are done by **separate app(s)** (see [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md)).
+- **Deployment**: Mac (all-in-one) or Linux server (TWS + daemon on server; manual trading via remote desktop). See the doc above for details.
+
 ## Architecture
 
-- **IB Connector**: connect, positions, underlying ticker, place stock orders; optional subscriptions for ticker and position updates
-- **Store**: in-memory positions, spot, last_hedge_time, daily_hedge_count, daily_pnl
-- **Portfolio**: parse IB positions → filter 21–35 DTE near ATM → portfolio delta (Black–Scholes)
-- **Gamma Scalper**: |Δ| > 25 → propose BUY/SELL quantity
-- **Risk Guard**: cooldown, max daily hedges, max position, earnings blackout, circuit breaker
-- **Daemon**: event-driven loop; on ticker/position update or heartbeat (10s), run maybe_hedge
+The system has **three parts**: (1) **auto-trading** daemon, (2) **monitoring & control** (separate app), (3) **backtest-based safety boundary tuning** (reuse FSM/Guard on historical replay). Full system architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Requirements: [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md) §2.
+
+- **Auto-trading**: IB Connector, Store, Portfolio (parse 21–35 DTE near ATM → delta), Gamma Scalper (|Δ| > threshold → hedge), Risk Guard (cooldown, daily limits, earnings blackout), Daemon (single process, single asyncio loop; on ticker/heartbeat run maybe_hedge).
+- **Monitoring & control**: Daemon writes state via a sink (e.g. SQLite); a **separate** app reads it and exposes HTTP/CLI and sends stop/pause (see run environment doc).
+- **Backtest**: Same StateClassifier + FSM + Guard, fed by historical replay; no live orders; used primarily to **optimize strategy PnL** (theory P&L, curve, drawdown) and to validate/tune Guard/boundary parameters (see docs/PLAN_NEXT_STEPS.md).
 
 ## State space (O,D,M,L,E,S)
 

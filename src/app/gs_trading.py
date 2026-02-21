@@ -5,7 +5,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 import yaml
 
@@ -204,6 +204,68 @@ class GsTrading:
             option_legs_count=option_legs_count,
         )
 
+    async def _refresh_and_build_snapshot(
+        self,
+    ) -> Optional[Tuple[StateSnapshot, float, CompositeState, Optional[float]]]:
+        """
+        Refresh positions and spot, parse legs, greeks, classify, build snapshot.
+        Returns (snapshot, spot, cs, data_lag_ms) or None if no valid spot.
+        Shared by _handle_connected (bootstrap) and _eval_hedge (tick).
+        """
+        # 1.a. Refresh positions and spot
+        await self._refresh_positions()
+        # 1.b. Get stock shares and spot price
+        stock_shares = self.store.get_stock_position()
+        spot = self.store.get_underlying_price()
+        if spot is None or spot <= 0:
+            spot = await self.connector.get_underlying_price(self.symbol)
+            if spot is not None and spot > 0:
+                self.store.set_underlying_price(spot)
+        if spot is None or spot <= 0:
+            return None
+        # 1.c. Get option legs
+        positions = self.store.get_positions()
+        min_dte = self._structure_cfg.get("min_dte", 21)
+        max_dte = self._structure_cfg.get("max_dte", 35)
+        atm_band = self._structure_cfg.get("atm_band_pct", 0.03)
+        legs = get_option_legs(
+            positions,
+            self.symbol,
+            min_dte=min_dte,
+            max_dte=max_dte,
+            atm_band_pct=atm_band,
+            spot=spot,
+        )
+        # 1.d. Get greeks
+        r = self._greeks_cfg.get("risk_free_rate", 0.05)
+        vol = self._greeks_cfg.get("volatility", 0.35)
+        greeks = Greeks(legs, stock_shares, spot, r, vol)
+
+        # 2.a. Build data lag
+        data_lag_ms: Optional[float] = None
+        if self._market_data.last_ts is not None:
+            data_lag_ms = (time.time() - self._market_data.last_ts) * 1000.0
+        
+        # 2.b. Build Classify
+        state_space_cfg = get_state_space_config(self.config)
+        risk_halt = getattr(self.guard, "_circuit_breaker", False)
+        cs = StateClassifier.classify(
+            self._position_book,
+            self._market_data,
+            greeks,
+            self._order_manager,
+            last_hedge_price=self.store.get_last_hedge_price(),
+            last_hedge_ts=self.store.get_last_hedge_time(),
+            data_lag_ms=data_lag_ms,
+            risk_halt=risk_halt,
+            config=state_space_cfg,
+        )
+        # 2.c. Build snapshot
+        snapshot = self._build_snapshot(cs, spot, greeks, option_legs_count=len(legs))
+        
+        # 3. Return snapshot, spot, cs, data_lag_ms
+        return (snapshot, spot, cs, data_lag_ms)
+
     def _on_ticker(self, ticker: Any) -> None:
         """Called on each ticker update from IB (may be from IB thread)."""
         try:
@@ -220,11 +282,6 @@ class GsTrading:
         except Exception as e:
             logger.debug("ticker callback error: %s", e)
 
-    async def _eval_hedge_sync(self) -> None:
-        """Run FSM-driven tick once (under lock)."""
-        async with self._hedge_lock:
-            await self._eval_hedge()
-
     def _eval_hedge_threadsafe(self) -> None:
         """Threadsafe: schedule _on_tick to be run safely from any thread using call_soon_threadsafe."""
         if self._fsm_daemon.is_running() and self._loop and self._loop.is_running():
@@ -232,83 +289,30 @@ class GsTrading:
                 lambda: asyncio.ensure_future(self._eval_hedge_sync(), loop=self._loop)
             )
 
-    def _eval_hedge_in_loop(self) -> None:
-        """Schedule _on_tick on the event loop (must be called from within the event loop)."""
-        if self._fsm_daemon.is_running() and self._loop and self._loop.is_running():
-            asyncio.ensure_future(self._eval_hedge_sync(), loop=self._loop)
+    async def _eval_hedge_sync(self) -> None:
+        """Run FSM-driven tick once (under lock)."""
+        async with self._hedge_lock:
+            await self._eval_hedge()
 
     async def _eval_hedge(self) -> None:
-        """FSM-driven tick: refresh positions + spot -> parse option legs once -> classify -> TradingFSM -> maybe _hedge."""
-        # 1. ***Fetch data***
-        # 1.a. refresh stock shares
-        await self._refresh_positions()
-        stock_shares = self.store.get_stock_position()
-        # 1.b. refresh spot price
-        spot = self.store.get_underlying_price()
-        if spot is None or spot <= 0:
-            spot = await self.connector.get_underlying_price(self.symbol)
-            if spot is not None and spot > 0:
-                self.store.set_underlying_price(spot)
-        if spot is None or spot <= 0:
+        """FSM-driven tick: refresh + snapshot -> TradingFSM (TICK) -> maybe _hedge."""
+        result = await self._refresh_and_build_snapshot()
+        if result is None:
             logger.debug("No spot price, skip hedge")
             return
-        # 1.c. refresh option legs
-        positions = self.store.get_positions()
-        min_dte = self._structure_cfg.get("min_dte", 21)
-        max_dte = self._structure_cfg.get("max_dte", 35)
-        atm_band = self._structure_cfg.get("atm_band_pct", 0.03)
-        legs = get_option_legs(
-            positions,
-            self.symbol,
-            min_dte=min_dte,
-            max_dte=max_dte,
-            atm_band_pct=atm_band,
-            spot=spot,
-        )
-        # 1.d. calculate greeks
-        r = self._greeks_cfg.get("risk_free_rate", 0.05)
-        vol = self._greeks_cfg.get("volatility", 0.35)
-        greeks = Greeks(legs, stock_shares, spot, r, vol)
-
-        # 1.e. calculate data lag
-        data_lag_ms = None
-        if self._market_data.last_ts is not None:
-            data_lag_ms = (time.time() - self._market_data.last_ts) * 1000.0
-
-        # 2. ***Calculations***
-        # 2.a. classify state
-        state_space_cfg = get_state_space_config(self.config)
-        risk_halt = getattr(self.guard, "_circuit_breaker", False)
-        cs = StateClassifier.classify(
-            self._position_book,
-            self._market_data,
-            greeks,
-            self._order_manager,
-            last_hedge_price=self.store.get_last_hedge_price(),
-            last_hedge_ts=self.store.get_last_hedge_time(),
-            data_lag_ms=data_lag_ms,
-            risk_halt=risk_halt,
-            config=state_space_cfg,
-        )
+        snapshot, spot, cs, data_lag_ms = result
         log_composite_state(cs=cs)
-
-        # 2.b. update metrics
         self._metrics.set_data_lag_ms(data_lag_ms)
         self._metrics.set_delta_abs(abs(cs.net_delta))
         self._metrics.set_spread_bucket(cs.L.value if cs.L else None)
 
-        # 2.c. build snapshot
-        snapshot = self._build_snapshot(cs, spot, greeks, option_legs_count=len(legs))
-
-        # 3. ***Apply***
-        # 3.a. FSM apply transition
         self._fsm_trading.apply_transition(TradingEvent.TICK, snapshot)
         if self._fsm_trading.state != TradingState.NEED_HEDGE:
             return
 
-        # 3.b. calculate hedge intent
+        stock_shares = self.store.get_stock_position()
         intent = gamma_scalper_intent(
-            greeks.delta,
+            cs.net_delta,
             stock_shares,
             threshold_hedge_shares=self._hedge_cfg["threshold_hedge_shares"],
             max_hedge_shares_per_order=self._hedge_cfg["max_hedge_shares_per_order"],
@@ -433,11 +437,12 @@ class GsTrading:
 
     async def _handle_idle(self) -> DaemonState:
         """IDLE: ready to start. Transition to CONNECTING."""
+        logger.debug("Daemon:IDLE: ready to start. Transition to CONNECTING.")
         return DaemonState.CONNECTING
 
     async def _handle_connecting(self) -> DaemonState:
         """CONNECTING: connect to IB. Returns CONNECTED or STOPPED."""
-        logger.debug("Connecting to IB...")
+        logger.debug("Daemon:CONNECTING: connecting to IB...")
         ok = await self.connector.connect()
         if not ok:
             logger.error("Could not connect to IB; exiting")
@@ -445,55 +450,18 @@ class GsTrading:
         return DaemonState.CONNECTED
 
     async def _handle_connected(self) -> DaemonState:
-        """CONNECTED: fetch positions, get underlying price, bootstrap TradingFSM (START/SYNCED). Transition to RUNNING."""
-        logger.debug("Fetching positions...")
-        await self._refresh_positions()
-        logger.debug("Getting underlying price for %s...", self.symbol)
-        spot = await self.connector.get_underlying_price(self.symbol)
-        self.store.set_underlying_price(spot)
-        if spot is not None and spot > 0:
-            positions = self.store.get_positions()
-            min_dte = self._structure_cfg.get("min_dte", 21)
-            max_dte = self._structure_cfg.get("max_dte", 35)
-            atm_band = self._structure_cfg.get("atm_band_pct", 0.03)
-            legs = get_option_legs(
-                positions,
-                self.symbol,
-                min_dte=min_dte,
-                max_dte=max_dte,
-                atm_band_pct=atm_band,
-                spot=spot,
-            )
-            stock_shares = self.store.get_stock_position()
-            r = self._greeks_cfg.get("risk_free_rate", 0.05)
-            vol = self._greeks_cfg.get("volatility", 0.35)
-            greeks = Greeks(legs, stock_shares, spot, r, vol)
-            state_space_cfg = get_state_space_config(self.config)
-            risk_halt = getattr(self.guard, "_circuit_breaker", False)
-            data_lag_ms = None
-            if self._market_data.last_ts is not None:
-                data_lag_ms = (time.time() - self._market_data.last_ts) * 1000.0
-            cs = StateClassifier.classify(
-                self._position_book,
-                self._market_data,
-                greeks,
-                self._order_manager,
-                last_hedge_price=self.store.get_last_hedge_price(),
-                last_hedge_ts=self.store.get_last_hedge_time(),
-                data_lag_ms=data_lag_ms,
-                risk_halt=risk_halt,
-                config=state_space_cfg,
-            )
-            snapshot = self._build_snapshot(
-                cs, spot, greeks, option_legs_count=len(legs)
-            )
+        """CONNECTED: fetch positions + spot, bootstrap TradingFSM (START/SYNCED). Transition to RUNNING."""
+        logger.debug("Daemon:CONNECTED: fetching positions...")
+        result = await self._refresh_and_build_snapshot()
+        if result is not None:
+            snapshot, _spot, _cs, _data_lag_ms = result
             self._fsm_trading.apply_transition(TradingEvent.START, snapshot)
             self._fsm_trading.apply_transition(TradingEvent.SYNCED, snapshot)
         return DaemonState.RUNNING
 
     async def _handle_running(self) -> DaemonState:
         """RUNNING: subscribe, start background tasks, loop until stop requested."""
-        logger.debug("Subscribing to ticker and positions...")
+        logger.debug("Daemon:RUNNING: subscribing to ticker and positions...")
         self.connector.subscribe_ticker(self.symbol, self._on_ticker)
         self.connector.subscribe_positions(self._eval_hedge_threadsafe)
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
@@ -513,6 +481,7 @@ class GsTrading:
 
     async def _handle_stopping(self) -> DaemonState:
         """STOPPING: cancel tasks, disconnect. Transition to STOPPED."""
+        logger.debug("Daemon:STOPPING: cancel tasks, disconnect...")
         heartbeat_task = getattr(self, "_heartbeat_task", None)
         config_reload_task = getattr(self, "_config_reload_task", None)
         if heartbeat_task is not None:
@@ -553,11 +522,19 @@ class GsTrading:
                 current = self._fsm_daemon.current
                 handler = handlers.get(current)
                 if handler is None:
-                    logger.warning("No handler for state %s; stopping", current.value)
+                    logger.warning("Daemon: No handler for state %s; stopping", current.value)
                     break
                 try:
                     next_state = await handler()
-                    self._fsm_daemon.transition(next_state)
+                    if not self._fsm_daemon.transition(next_state):
+                        logger.error(
+                            "Daemon: invalid transition from %s to %s; stopping",
+                            current.value,
+                            next_state.value,
+                        )
+                        if self._fsm_daemon.can_transition_to(DaemonState.STOPPING):
+                            self._fsm_daemon.transition(DaemonState.STOPPING)
+                        break
                 except Exception as e:
                     logger.exception("Handler %s raised: %s", current.value, e)
                     if self._fsm_daemon.can_transition_to(DaemonState.STOPPING):

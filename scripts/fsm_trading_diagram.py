@@ -262,6 +262,12 @@ Callers in `GsTrading` (src/app/gs_trading.py).
 
 ## Transition Table
 
+The table below lists **every possible transition** the Trading FSM can take. It is **manually authored** in `scripts/fsm_trading_diagram.py` as `TRADING_TRANSITIONS` and kept in sync with the runtime logic in `src/fsm/trading_fsm.py`.
+
+- **One row** = one (from_state, event, to_state) with the **guard** that selects that outcome.
+- The same (from_state, event) can appear in **multiple rows** with different (to_state, guard), because the handler evaluates guards in order and picks one next state (e.g. from MONITOR, event TICK → NO_TRADE if `in_no_trade_band`, else NEED_HEDGE if cost and liquidity OK, else PAUSE_COST or PAUSE_LIQ).
+- **Why so many rows?** States like MONITOR, NO_TRADE, PAUSE_COST, PAUSE_LIQ all react to the same four events (SYNCED, TICK, QUOTE, GREEKS_UPDATE), and each (state, event) can lead to several next states depending on guards — so we get 4 events × 4 outcomes per state, plus IDLE/SYNC/ARMED/NEED_HEDGE/HEDGING/SAFE transitions.
+
 {table}
 """
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
