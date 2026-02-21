@@ -125,6 +125,8 @@
 
 ### 阶段 1：状态 sink + 最小控制（必须先做）
 
+**详细执行计划**：[阶段 1 执行计划](plans/phase1-execution-plan.md)（实施步骤、代码锚点、文件变更、数据流与验收）。
+
 **本阶段实现并验收的需求**：**R-M1a**、**R-M4a**、**R-C1a**、**R-H1**（均仅在本阶段完成，验收边界清晰）。  
 **各需求详细验收标准**：见上文「需求与阶段一一对应及详细验收标准」表中 R-M1a、R-M4a、R-C1a、R-H1 对应行。
 
@@ -382,6 +384,42 @@
 3. **控制文件**：阶段 1 是否做 1.3（控制文件停止），还是仅 1.2（信号停止）、由阶段 2 独立应用写控制文件时再实现轮询。
 4. **R-C3 阶段**：一键平敞口放在阶段 2 还是 3.2，与独立应用控制接口一并设计即可。
 5. **阶段 3 优先级**：3.1（R-H2）、3.5（R-B1/R-B2）为已规划需求，建议排期；3.2–3.4 按需。
+
+---
+
+## 六、分阶段实施方法（推荐）
+
+按阶段写代码时，建议采用以下方式，便于验收与回溯。
+
+### 6.1 原则
+
+| 原则 | 说明 |
+|------|------|
+| **一阶段一验收** | 只在一个阶段内开发，完成该阶段**全部 Test Case 通过**后再进入下一阶段；不跨阶段混做。 |
+| **以 Test Case 为检查清单** | 每完成一个步骤（如 1.1、1.2），立刻对照本阶段「本阶段 Test Case 清单」执行一遍；阶段结束前再完整跑一遍全部 TC。 |
+| **小步提交** | 按步骤或按需求提交（如 `feat(sink): StatusSink 接口 + SQLiteSink`、`feat(sink): GsTrading 写入 snapshot`、`feat(ctrl): run_engine 注册 SIGTERM/SIGINT`），便于回滚与 code review。 |
+| **先接口后实现** | 阶段 1：先定 `StatusSink` 接口与 snapshot/operations 数据结构，再实现 SQLiteSink，最后在 GsTrading 中挂接；阶段 2：先定独立应用 API（GET /status、GET /operations、POST /control/stop），再实现读 sink 与写控制文件。 |
+
+### 6.2 阶段内推荐顺序（以阶段 1 为例）
+
+1. **接口与配置**：定义 `StatusSink` 抽象（如 `write_snapshot(snapshot: dict)`、`write_operation(record: dict)`）；在 config 中增加 `status.sink`、`status.path`（及可选 `control.file`）。  
+2. **SQLiteSink 实现**：建表（当前视图表 + 历史表 + 操作表）；实现写入与可选“当前行 upsert + 历史 append”。  
+3. **守护程序挂接**：在 GsTrading 的 heartbeat / _eval_hedge 后调用 sink 写 snapshot；在对冲意图、下单、成交、撤单处写操作记录。  
+4. **信号停止**：在 `run_engine.py` 中注册 SIGTERM/SIGINT，通过 `loop.call_soon_threadsafe` 或等效方式安全调用 `app.stop()`。  
+5. **（可选）控制文件**：heartbeat 中轮询控制文件，若为 `stop` 则 `request_stop()`。  
+6. **验收**：按「检查方式」与「本阶段 Test Case 清单」逐条执行，全部通过后打 tag 或合并分支，再进入阶段 2。
+
+### 6.3 分支与发布建议
+
+- **分支**：可按阶段开分支（如 `phase-1-sink-and-signals`），阶段验收通过后合并到 `main`；或直接在 `main` 上小步提交。  
+- **Tag**：阶段验收通过后打 tag（如 `phase-1-done`），便于与「阶段 1 已完成」对应。  
+- **文档**：每阶段完成后更新 README/docs（如阶段 1 完成后说明如何配置 sink、如何用 sqlite3 查看状态；阶段 2 完成后说明如何启动独立应用与调用 API）。
+
+### 6.4 可选：Test Case 自动化
+
+- 阶段 1：已提供 **`scripts/check/phase1.py`**，可检查配置、Sink 接口、PostgreSQL 表结构与可选信号退出；详见 [阶段 1 执行计划](plans/phase1-execution-plan.md)#阶段-1-自检脚本。  
+- 阶段 2：可对独立应用做 HTTP 测试（如 `curl` 或 pytest-requests）：GET /status 含 status_lamp、GET /operations 返回列表、POST /control/stop 后守护进程退出。  
+- 自动化不必一次做完；先用手动执行 Test Case 清单，通过后再逐步把关键步骤固化为脚本或用例，便于回归。
 
 ---
 

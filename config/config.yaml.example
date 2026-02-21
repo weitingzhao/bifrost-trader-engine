@@ -1,5 +1,15 @@
 # Gamma Scalping Engine MVP - copy to config.yaml and adjust
 
+# Status sink (Phase 1: PostgreSQL). Optional; omit to disable. See docs/DATABASE.md.
+# status:
+#   sink: "postgres"
+#   postgres:
+#     host: "127.0.0.1"
+#     port: 5432
+#     database: "bifrost"
+#     user: "bifrost"
+#     password: ""   # or PGPASSWORD env
+
 # IB connection (env overrides: IB_HOST, IB_PORT, IB_CLIENT_ID)
 ib:
   host: "127.0.0.1"

@@ -7,6 +7,7 @@
 - **[系统架构设计](ARCHITECTURE.md)** – 全盘架构：三大组成部分、组件划分、数据流、部署视图、需求→组件→阶段映射（基于产品需求与分步计划）
 - **[运行环境与需求](RUN_ENVIRONMENT_AND_REQUIREMENTS.md)** – 引擎如何运行、TWS/账户、部署（Mac vs Linux）、监控/控制设计；**产品需求分类**（RE-*/R-M*/R-C*/R-H*/R-B*）与分步计划阶段对应（运行与 Cursor Agent 的唯一定义）
 - **[分步推进计划](PLAN_NEXT_STEPS.md)** – 当前进展与需求差距、分阶段计划（状态 sink、独立监控应用、历史与回测）、每阶段里程碑与验收标准
+- **[数据库设计（PostgreSQL）](DATABASE.md)** – 与 PostgreSQL 交互的唯一设计说明：连接配置、表结构（status_current、status_history、operations）、写入策略、后续阶段预留与变更记录；所有阶段数据库相关设计与改动均引用本文档
 - **[FSM](fsm/linkage.md)** – 状态机图示与串联说明（Daemon、Trading、Hedge）
 - **[状态空间](STATE_SPACE_MAPPING.md)** – O、D、M、L、E、S 与代码/配置的对应关系
 - **[配置安全分类](CONFIG_SAFETY_TAXONOMY.md)** – 配置中的安全边界分类

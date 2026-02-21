@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import signal
 import time
 from pathlib import Path
 from typing import Any, Optional, Tuple
@@ -38,6 +39,8 @@ from src.positions.portfolio import get_option_legs, get_stock_shares
 from src.positions.position_book import PositionBook
 from src.pricing.greeks import Greeks
 from src.guards.execution_guard import ExecutionGuard
+from src.sink import StatusSink
+from src.sink.postgres_sink import PostgreSQLSink
 from src.strategy.gamma_scalper import gamma_scalper_intent
 from src.strategy.hedge_gate import apply_hedge_gates
 
@@ -121,6 +124,14 @@ class GsTrading:
         )
         self._market_data = MarketData(self.store)
         self._order_manager = OrderManager()
+        # Status sink (Phase 1: PostgreSQL). None if not configured.
+        status_cfg = config.get("status", {}) or {}
+        self._status_sink: Optional[StatusSink] = None
+        if status_cfg.get("sink") == "postgres" and (status_cfg.get("postgres") or os.environ.get("PGHOST")):
+            try:
+                self._status_sink = PostgreSQLSink(status_cfg)
+            except Exception as e:
+                logger.warning("Status sink (postgres) init failed: %s", e)
         self._order_manager.set_hedge_fsm(self._fsm_hedge)
         self._metrics = get_metrics()
 
@@ -203,6 +214,31 @@ class GsTrading:
             greeks_snapshot=gs,
             option_legs_count=option_legs_count,
         )
+
+    def _build_snapshot_dict(
+        self,
+        snapshot: StateSnapshot,
+        spot: float,
+        cs: CompositeState,
+        data_lag_ms: Optional[float],
+    ) -> dict:
+        """Build dict for StatusSink (status_current / status_history). Keys per docs/DATABASE.md §2.1."""
+        return {
+            "daemon_state": self._fsm_daemon.current.value,
+            "trading_state": self._fsm_trading.state.value,
+            "symbol": self.symbol,
+            "spot": float(spot),
+            "bid": self.store.get_bid(),
+            "ask": self.store.get_ask(),
+            "net_delta": float(cs.net_delta),
+            "stock_position": int(cs.stock_pos),
+            "option_legs_count": int(getattr(snapshot, "option_legs_count", 0)),
+            "daily_hedge_count": self.store.get_daily_hedge_count(),
+            "daily_pnl": float(self.store.get_daily_pnl()),
+            "data_lag_ms": float(data_lag_ms) if data_lag_ms is not None else None,
+            "config_summary": f"paper_trade={self.paper_trade}",
+            "ts": time.time(),
+        }
 
     async def _refresh_and_build_snapshot(
         self,
@@ -347,7 +383,20 @@ class GsTrading:
             return
         log_target_position(target_shares=intent.target_shares, cs=cs)
 
-        # 3.c. FSM apply transition to target emitted and start hedge
+        # 3.c. Status sink: hedge_intent operation (and optional history row)
+        if self._status_sink:
+            self._status_sink.write_operation({
+                "ts": time.time(),
+                "type": "hedge_intent",
+                "side": approved.side,
+                "quantity": approved.quantity,
+                "price": spot,
+                "state_reason": cs.D.value if cs.D else None,
+            })
+            snap_dict = self._build_snapshot_dict(snapshot, spot, cs, data_lag_ms)
+            self._status_sink.write_snapshot(snap_dict, append_history=True)
+
+        # 3.d. FSM apply transition to target emitted and start hedge
         self._fsm_trading.apply_transition(TradingEvent.TARGET_EMITTED, snapshot)
         await self._hedge(approved, cs, spot, snapshot)
 
@@ -375,7 +424,19 @@ class GsTrading:
         if self._fsm_hedge.state != HedgeState.SEND:
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
             return
+        def _write_op(op_type: str, state_reason: Optional[str] = None) -> None:
+            if self._status_sink:
+                self._status_sink.write_operation({
+                    "ts": time.time(),
+                    "type": op_type,
+                    "side": intent.side,
+                    "quantity": intent.quantity,
+                    "price": spot,
+                    "state_reason": state_reason or (cs.D.value if cs.D else None),
+                })
+
         if self.paper_trade:
+            _write_op("order_sent")
             log_order_status(
                 order_status="paper_send", side=intent.side, quantity=intent.quantity
             )
@@ -393,9 +454,14 @@ class GsTrading:
             self.store.inc_daily_hedge_count()
             self._metrics.inc_hedge_count()
             self._fsm_hedge.on_full_fill()
+            _write_op("fill")
+            if self._status_sink:
+                snap_dict = self._build_snapshot_dict(snapshot, spot, cs, snapshot.data_lag_ms)
+                self._status_sink.write_snapshot(snap_dict, append_history=True)
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
             return
         self._fsm_hedge.on_order_placed()
+        _write_op("order_sent")
         log_order_status(
             order_status="sent", side=intent.side, quantity=intent.quantity
         )
@@ -416,8 +482,16 @@ class GsTrading:
                 "Hedge sent: %s %s %s", intent.side, intent.quantity, self.symbol
             )
             self._fsm_hedge.on_full_fill()
+            _write_op("fill")
+            if self._status_sink:
+                snap_dict = self._build_snapshot_dict(snapshot, spot, cs, snapshot.data_lag_ms)
+                self._status_sink.write_snapshot(snap_dict, append_history=True)
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
         else:
+            _write_op("reject", "order_failed")
+            if self._status_sink:
+                snap_dict = self._build_snapshot_dict(snapshot, spot, cs, snapshot.data_lag_ms)
+                self._status_sink.write_snapshot(snap_dict, append_history=True)
             logger.warning("Order failed (trade is None)")
             self._fsm_hedge.on_ack_reject()
             self._fsm_hedge.on_try_resync()
@@ -425,13 +499,20 @@ class GsTrading:
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_FAILED, snapshot)
 
     async def _heartbeat(self) -> None:
-        """Periodic heartbeat to run maybe_hedge even without tick updates."""
+        """Periodic heartbeat to run maybe_hedge even without tick updates; write status snapshot if sink configured."""
         while self._fsm_daemon.is_running():
             print(f"[HEARTBEAT] Sleeping for {self._heartbeat_interval} seconds...")
             await asyncio.sleep(self._heartbeat_interval)
-            if self._fsm_daemon.is_running():
-                print("[HEARTBEAT] Woke up, running maybe_hedge()...")
-                await self._eval_hedge_sync()
+            if not self._fsm_daemon.is_running():
+                return
+            if self._status_sink:
+                result = await self._refresh_and_build_snapshot()
+                if result is not None:
+                    snapshot, spot, cs, data_lag_ms = result
+                    snap_dict = self._build_snapshot_dict(snapshot, spot, cs, data_lag_ms)
+                    self._status_sink.write_snapshot(snap_dict, append_history=False)
+            print("[HEARTBEAT] Woke up, running maybe_hedge()...")
+            await self._eval_hedge_sync()
 
     # --- State handlers: each runs its logic and returns the next state ---
 
@@ -500,6 +581,11 @@ class GsTrading:
                 pass
             except Exception as e:
                 logger.debug("Config reload task raised before cancel: %s", e)
+        if getattr(self._status_sink, "close", None):
+            try:
+                self._status_sink.close()
+            except Exception as e:
+                logger.debug("Status sink close: %s", e)
         await self.connector.disconnect()
         return DaemonState.STOPPED
 
@@ -555,8 +641,27 @@ class GsTrading:
         self._fsm_daemon.request_stop()
 
 
-async def run_daemon(config_path: Optional[str] = None) -> None:
-    """Load config and run the gamma scalping strategy."""
+async def _run_daemon_main(config_path: Optional[str] = None) -> None:
+    """Load config, register signals, run GsTrading. SIGTERM/SIGINT call app.stop() on main loop."""
     config, resolved_path = read_config(config_path)
     app = GsTrading(config, config_path=resolved_path)
+    loop = asyncio.get_running_loop()
+
+    def _on_stop_signal(*_args: Any) -> None:
+        logger.info("Received stop signal, requesting daemon stop")
+        loop.call_soon_threadsafe(app.stop)
+
+    try:
+        loop.add_signal_handler(signal.SIGTERM, _on_stop_signal)
+    except (NotImplementedError, OSError):
+        pass  # add_signal_handler not supported on Windows
+    try:
+        loop.add_signal_handler(signal.SIGINT, _on_stop_signal)
+    except (NotImplementedError, OSError):
+        pass
     await app.run()
+
+
+def run_daemon(config_path: Optional[str] = None) -> None:
+    """Entry: run the gamma scalping daemon (SIGTERM/SIGINT stop)."""
+    asyncio.run(_run_daemon_main(config_path))

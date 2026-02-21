@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Entry point: run the gamma scalping daemon."""
 
-import asyncio
 import logging
 import os
 import sys
@@ -69,4 +68,4 @@ if __name__ == "__main__":
         config_path = os.path.join(_PROJECT_ROOT, config_path)
     elif config_path is None:
         config_path = os.path.join(_PROJECT_ROOT, "config", "config.yaml")
-    asyncio.run(run_daemon(config_path))
+    run_daemon(config_path)
