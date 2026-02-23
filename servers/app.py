@@ -9,8 +9,8 @@ from typing import Any, Dict, Optional
 from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 
-from src.status_server.reader import StatusReader, write_control_command, write_run_status, write_heartbeat_interval, write_ib_config
-from src.status_server.self_check import derive_daemon_self_check, derive_self_check
+from servers.reader import StatusReader, write_control_command, write_run_status, write_heartbeat_interval, write_ib_config
+from servers.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +21,15 @@ def create_app(
     data_lag_threshold_ms: Optional[float],
 ) -> FastAPI:
     """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). API only; no built-in Web UI. No start: daemon is started on trading host only."""
-    app = FastAPI(title="Bifrost Status API", description="Phase 2: status and control API (frontend is separate)")
+    app = FastAPI(title="Bifrost Trader API", description="Phase 2: status and control API (frontend is separate)")
 
     @app.get("/", response_class=HTMLResponse)
     def get_root() -> str:
         """API only: link to docs and main endpoints. Use project frontend (e.g. npm run dev) for the monitoring UI."""
         return """<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><title>Bifrost Status API</title></head>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>Bifrost Trader API</title></head>
 <body style="font-family:system-ui;padding:1rem;">
-  <p><strong>Bifrost Status API</strong> — 本端口仅提供 API，监控页面请使用项目内 frontend（如 <code>cd frontend && npm run dev</code>）。</p>
+  <p><strong>Bifrost Trader API</strong> — 本端口仅提供 API，监控页面请使用项目内 frontend（如 <code>cd frontend && npm run dev</code>）。</p>
   <p><a href="/docs">/docs</a> · <a href="/status">/status</a> · <a href="/operations">/operations</a></p>
 </body></html>"""
 

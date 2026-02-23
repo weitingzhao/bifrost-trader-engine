@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 2: Standalone status/control server. Reads PostgreSQL sink; GET /status, GET /operations, POST /control/stop.
 
-On startup, reads status_server.port from config and frees the port if already in use (kills existing process), then starts the server."""
+On startup, reads status_server.port (or server.port) from config and frees the port if already in use (kills existing process), then starts the server (servers.app)."""
 
 import logging
 import os
@@ -23,7 +23,7 @@ logging.basicConfig(
 
 
 def _port_from_config(config: dict) -> int:
-    """Port from config (same as status_server.app.run_server)."""
+    """Port from config (same as servers.app.run_server)."""
     port = (
         config.get("status_server", {}).get("port")
         or config.get("server", {}).get("port")
@@ -89,7 +89,7 @@ def main() -> None:
     if not _free_port(port):
         print(f"Could not free port {port}. Run: lsof -i :{port}", file=sys.stderr)
         sys.exit(1)
-    from src.status_server.app import run_server
+    from servers.app import run_server
     run_server(config)
 
 

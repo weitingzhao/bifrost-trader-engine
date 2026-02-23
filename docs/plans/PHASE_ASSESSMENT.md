@@ -79,7 +79,7 @@
 
 ### 2.4 阶段 2 实现说明（已落地）
 
-- **独立应用**：`scripts/run_server.py`；`src/status_server/`（reader、self_check、app）。GET /status 含 status_lamp、self_check、block_reasons；GET /operations 支持 since_ts、until_ts、type、limit；POST /control/stop、POST /control/flatten 写控制文件。
+- **独立应用**：`scripts/run_server.py`；`servers/`（reader、self_check、app）。GET /status 含 status_lamp、self_check、block_reasons；GET /operations 支持 since_ts、until_ts、type、limit；POST /control/stop、POST /control/flatten 写控制文件。
 - **守护进程**：heartbeat 内轮询 `control.file`，读到 `stop` 即 `request_stop()`；`flatten` 暂仅打日志（R-C3 未实现）。
 - **配置与文档**：README 含 Phase 2 配置、启动命令与 curl 示例；PLAN_NEXT_STEPS 含控制文件格式说明。
 

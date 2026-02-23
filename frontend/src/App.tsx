@@ -82,11 +82,13 @@ export default function App() {
   const [heartbeatIntervalInput, setHeartbeatIntervalInput] = useState<string>('10')
   const [ibHostInput, setIbHostInput] = useState<string>('127.0.0.1')
   const [ibPortTypeInput, setIbPortTypeInput] = useState<'tws_live' | 'tws_paper' | 'gateway'>('tws_paper')
+  const [apiReachable, setApiReachable] = useState<boolean>(false)
 
   const loadStatus = useCallback(async () => {
     try {
       const j = await fetchStatus()
       setStatus(j)
+      setApiReachable(true)
       if (j?.daemon_heartbeat?.heartbeat_interval_sec != null)
         setHeartbeatIntervalInput(String(j.daemon_heartbeat.heartbeat_interval_sec))
       if (j?.ib_config?.ib_host != null) setIbHostInput(j.ib_config.ib_host)
@@ -94,6 +96,7 @@ export default function App() {
       return j
     } catch {
       setStatus(null)
+      setApiReachable(false)
       return null
     }
   }, [])
@@ -295,9 +298,16 @@ export default function App() {
     if (res.ok) loadStatus()
   }
 
+  const apiLamp = apiReachable ? 'green' : 'red'
+
   return (
     <div className="app">
       <h1>Bifrost 自动交易监控</h1>
+      <div className="api-status-bar">
+        <div className={`lamp lamp-sm ${apiLamp}`} title="Trader API 是否可达" />
+        <span className="api-status-label">Trader API: {apiReachable ? '正常' : '异常'}</span>
+        <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">API 文档</a>
+      </div>
 
       <div className="card process-section">
         <h2>

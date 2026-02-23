@@ -6,7 +6,7 @@
 
 - **配置**：`status.postgres`（与 Phase 1 共用）、`status_server.port`（config/config.yaml 及示例）。控制通道为 PostgreSQL 表 `daemon_control`（见 DATABASE.md §2.4），无需 `control.file`。
 - **守护进程**：heartbeat 内轮询表 `daemon_control`（poll_and_consume_control）；消费到 `stop` 即 `request_stop()`；消费到 `flatten` 仅打日志（R-C3 未实现）。
-- **独立应用**：`scripts/run_server.py`；`src/status_server/`（reader、self_check、app）。FastAPI：GET /status（含 status_lamp、self_check、block_reasons）、GET /operations（since_ts、until_ts、type、limit）、POST /control/stop、POST /control/flatten（均向 `daemon_control` 表 INSERT）。
+- **独立应用**：`scripts/run_server.py`；`servers/`（reader、self_check、app）。FastAPI：GET /status（含 status_lamp、self_check、block_reasons）、GET /operations（since_ts、until_ts、type、limit）、POST /control/stop、POST /control/flatten（均向 `daemon_control` 表 INSERT）。
 - **文档**：README Phase 2 配置与 curl 示例；PLAN_NEXT_STEPS、DATABASE.md 控制通道说明；本文件验收记录。
 
 ## 验收清单（阶段 2 Test Case）
