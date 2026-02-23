@@ -66,12 +66,14 @@ class GsTrading:
         self.config = config
         self._config_path = config_path
 
-        # 1.a IB Connector
+        # 1.a IB Connector (when run as hedge subprocess, BIFROST_HEDGE_CLIENT_ID overrides so daemon keeps primary ID)
         ib_cfg = config.get("ib", {})
+        raw_id = os.environ.get("BIFROST_HEDGE_CLIENT_ID") or ib_cfg.get("hedge_client_id") or ib_cfg.get("client_id") or 1
+        client_id = int(raw_id)
         self.connector = IBConnector(
             host=ib_cfg.get("host", "127.0.0.1"),
             port=ib_cfg.get("port", 4001),
-            client_id=ib_cfg.get("client_id", 1),
+            client_id=client_id,
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
 
@@ -132,11 +134,14 @@ class GsTrading:
                 self._status_sink = PostgreSQLSink(status_cfg)
             except Exception as e:
                 logger.warning("Status sink (postgres) init failed: %s", e)
+        # Phase 2: control via PostgreSQL daemon_control table when sink is postgres (RE-5: monitoring can run on another host)
         self._order_manager.set_hedge_fsm(self._fsm_hedge)
         self._metrics = get_metrics()
 
-        # 3. Static Defaults
-        self._heartbeat_interval = 10.0
+        # 3. Static Defaults (RE-7: IB retry when not connected)
+        daemon_cfg = config.get("daemon") or {}
+        self._heartbeat_interval = float(daemon_cfg.get("heartbeat_interval", 10.0))
+        self._ib_retry_interval = float(daemon_cfg.get("ib_retry_interval_sec", 30.0))
         self._config_reload_interval = 30.0
 
     def _reload_config(self, config: dict) -> None:
@@ -240,6 +245,25 @@ class GsTrading:
             "ts": time.time(),
         }
 
+    def _build_heartbeat_minimal_dict(self) -> dict:
+        """Minimal snapshot dict when spot is unavailable (e.g. outside market hours). Ensures status_current always has a row while daemon is running."""
+        return {
+            "daemon_state": self._fsm_daemon.current.value,
+            "trading_state": self._fsm_trading.state.value,
+            "symbol": self.symbol,
+            "spot": None,
+            "bid": self.store.get_bid(),
+            "ask": self.store.get_ask(),
+            "net_delta": None,
+            "stock_position": self.store.get_stock_position() or None,
+            "option_legs_count": 0,
+            "daily_hedge_count": self.store.get_daily_hedge_count(),
+            "daily_pnl": self.store.get_daily_pnl() if self.store.get_daily_pnl() is not None else None,
+            "data_lag_ms": None,
+            "config_summary": f"paper_trade={self.paper_trade}",
+            "ts": time.time(),
+        }
+
     async def _refresh_and_build_snapshot(
         self,
     ) -> Optional[Tuple[StateSnapshot, float, CompositeState, Optional[float]]]:
@@ -331,7 +355,10 @@ class GsTrading:
             await self._eval_hedge()
 
     async def _eval_hedge(self) -> None:
-        """FSM-driven tick: refresh + snapshot -> TradingFSM (TICK) -> maybe _hedge."""
+        """FSM-driven tick: refresh + snapshot -> TradingFSM (TICK) -> maybe _hedge. Skips hedge when daemon_run_status.suspended (monitoring-set)."""
+        if self._poll_run_status():
+            logger.debug("Trading suspended (daemon_run_status), skip hedge")
+            return
         result = await self._refresh_and_build_snapshot()
         if result is None:
             logger.debug("No spot price, skip hedge")
@@ -498,12 +525,85 @@ class GsTrading:
             self._fsm_hedge.on_positions_resynced()
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_FAILED, snapshot)
 
+    def _poll_control(self) -> Optional[str]:
+        """Poll control command from sink (PostgreSQL daemon_control table when sink is postgres). Return stop/flatten or None.
+        When running under stable daemon (BIFROST_UNDER_DAEMON), parent handles stop/suspend; we do not consume control here."""
+        if os.environ.get("BIFROST_UNDER_DAEMON"):
+            return None
+        if self._status_sink is None:
+            return None
+        if hasattr(self._status_sink, "poll_and_consume_control"):
+            return self._status_sink.poll_and_consume_control()
+        return None
+
+    def _poll_run_status(self) -> bool:
+        """Poll daemon_run_status.suspended from sink (PostgreSQL). True = trading suspended (skip hedge); False = run normally.
+        When running under stable daemon (BIFROST_UNDER_DAEMON), parent starts/stops us on resume/suspend; we always run (return False)."""
+        if os.environ.get("BIFROST_UNDER_DAEMON"):
+            return False
+        if self._status_sink is None:
+            return False
+        if hasattr(self._status_sink, "poll_run_status"):
+            return self._status_sink.poll_run_status()
+        return False
+
+    def _apply_run_status_transition(self) -> bool:
+        """Sync Daemon FSM with daemon_run_status: RUNNING <-> RUNNING_SUSPENDED. Returns True if suspended (skip hedge)."""
+        suspended = self._poll_run_status()
+        cur = self._fsm_daemon.current
+        if suspended and cur == DaemonState.RUNNING:
+            self._fsm_daemon.transition(DaemonState.RUNNING_SUSPENDED)
+            logger.info("[Daemon] state=RUNNING → RUNNING_SUSPENDED (daemon_run_status.suspended=true)")
+        elif not suspended and cur == DaemonState.RUNNING_SUSPENDED:
+            self._fsm_daemon.transition(DaemonState.RUNNING)
+            logger.info("[Daemon] state=RUNNING_SUSPENDED → RUNNING (daemon_run_status.suspended=false)")
+        return suspended
+
     async def _heartbeat(self) -> None:
-        """Periodic heartbeat to run maybe_hedge even without tick updates; write status snapshot if sink configured."""
+        """Periodic heartbeat to run maybe_hedge even without tick updates; write status snapshot if sink configured. FSM RUNNING <-> RUNNING_SUSPENDED per daemon_run_status."""
         while self._fsm_daemon.is_running():
-            print(f"[HEARTBEAT] Sleeping for {self._heartbeat_interval} seconds...")
+            # Phase 2: poll control from DB first (so we react quickly to stop already in table)
+            cmd = self._poll_control()
+            if cmd == "stop":
+                logger.info("[Daemon] control (db): stop → requesting stop")
+                self._fsm_daemon.request_stop()
+                return
+            if cmd == "flatten":
+                logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+            suspended = self._apply_run_status_transition()
+            state_label = self._fsm_daemon.current.value
+            logger.info(
+                "[Daemon] state=%s | heartbeat: sleep %.0fs, then maybe_hedge (suspended=%s)",
+                state_label,
+                self._heartbeat_interval,
+                suspended,
+            )
             await asyncio.sleep(self._heartbeat_interval)
             if not self._fsm_daemon.is_running():
+                return
+            cmd = self._poll_control()
+            if cmd == "stop":
+                logger.info("[Daemon] control (db): stop → requesting stop")
+                self._fsm_daemon.request_stop()
+                return
+            if cmd == "flatten":
+                logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+            suspended = self._apply_run_status_transition()
+            # Detect IB disconnect during RUNNING/RUNNING_SUSPENDED: write DB then transition to WAITING_IB (RE-7)
+            if not self.connector.is_connected:
+                now_t = time.time()
+                next_retry_ts = now_t + self._ib_retry_interval
+                sec_until = max(0, min(self._ib_retry_interval + 5, int(round(next_retry_ts - now_t))))
+                if self._status_sink and hasattr(self._status_sink, "write_daemon_heartbeat"):
+                    self._status_sink.write_daemon_heartbeat(
+                        hedge_running=True,
+                        ib_connected=False,
+                        ib_client_id=None,
+                        next_retry_ts=next_retry_ts,
+                        seconds_until_retry=sec_until,
+                    )
+                logger.warning("[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)", self._fsm_daemon.current.value)
+                self._ib_disconnected_during_run = True
                 return
             if self._status_sink:
                 result = await self._refresh_and_build_snapshot()
@@ -511,58 +611,145 @@ class GsTrading:
                     snapshot, spot, cs, data_lag_ms = result
                     snap_dict = self._build_snapshot_dict(snapshot, spot, cs, data_lag_ms)
                     self._status_sink.write_snapshot(snap_dict, append_history=False)
-            print("[HEARTBEAT] Woke up, running maybe_hedge()...")
-            await self._eval_hedge_sync()
+                else:
+                    logger.debug("Heartbeat: no full snapshot (spot unavailable), writing minimal status")
+                    minimal = self._build_heartbeat_minimal_dict()
+                    self._status_sink.write_snapshot(minimal, append_history=False)
+                # Single-process (run_engine.py): write daemon_heartbeat so monitor shows daemon as running
+                if not os.environ.get("BIFROST_UNDER_DAEMON") and hasattr(
+                    self._status_sink, "write_daemon_heartbeat"
+                ):
+                    self._status_sink.write_daemon_heartbeat(
+                        hedge_running=True,
+                        ib_connected=self.connector.is_connected,
+                        ib_client_id=getattr(self.connector, "client_id", None),
+                    )
+            if suspended:
+                logger.info("[Daemon] state=RUNNING_SUSPENDED | heartbeat: skip maybe_hedge")
+            else:
+                logger.info("[Daemon] state=RUNNING | heartbeat: tick, running maybe_hedge")
+                await self._eval_hedge_sync()
 
     # --- State handlers: each runs its logic and returns the next state ---
 
     async def _handle_idle(self) -> DaemonState:
         """IDLE: ready to start. Transition to CONNECTING."""
-        logger.debug("Daemon:IDLE: ready to start. Transition to CONNECTING.")
+        logger.info("[Daemon] state=IDLE → CONNECTING (connecting to IB)")
         return DaemonState.CONNECTING
 
     async def _handle_connecting(self) -> DaemonState:
-        """CONNECTING: connect to IB. Returns CONNECTED or STOPPED."""
-        logger.debug("Daemon:CONNECTING: connecting to IB...")
-        ok = await self.connector.connect()
+        """CONNECTING: try IB once; if fail → WAITING_IB (RE-7). Retries happen in WAITING_IB at heartbeat interval."""
+        logger.info("[Daemon] state=CONNECTING | connecting to IB (single attempt)...")
+        ok = await self.connector.connect(max_attempts=1)
         if not ok:
-            logger.error("Could not connect to IB; exiting")
-            return DaemonState.STOPPED
+            logger.warning("[Daemon] state=CONNECTING | IB connect failed → WAITING_IB (daemon stays up, will retry)")
+            return DaemonState.WAITING_IB
+        logger.info("[Daemon] state=CONNECTING → CONNECTED (IB connected)")
         return DaemonState.CONNECTED
+
+    async def _handle_waiting_ib(self) -> DaemonState:
+        """WAITING_IB (RE-7): daemon running, IB not connected. Write heartbeat with next_retry_ts + seconds_until_retry; poll stop/retry_ib; auto-retry at interval."""
+        now_t = time.time()
+        next_retry_ts = now_t + self._ib_retry_interval
+        sec_until = max(0, min(self._ib_retry_interval + 5, int(round(next_retry_ts - now_t))))
+        if self._status_sink and hasattr(self._status_sink, "write_daemon_heartbeat"):
+            self._status_sink.write_daemon_heartbeat(
+                hedge_running=False,
+                ib_connected=False,
+                ib_client_id=None,
+                next_retry_ts=next_retry_ts,
+                seconds_until_retry=sec_until,
+            )
+        logger.info(
+            "[Daemon] state=WAITING_IB | IB not connected; next retry in %ss (interval=%.0fs)",
+            sec_until,
+            self._ib_retry_interval,
+        )
+        while True:
+            cmd = self._poll_control()
+            if cmd == "stop":
+                logger.info("[Daemon] state=WAITING_IB | control stop → STOPPING")
+                return DaemonState.STOPPING
+            if cmd == "retry_ib" or time.time() >= next_retry_ts:
+                logger.info("[Daemon] state=WAITING_IB | %s → connecting to IB (one attempt)...", "retry_ib" if cmd == "retry_ib" else "retry timer")
+                ok = await self.connector.connect(max_attempts=1)
+                if ok:
+                    logger.info("[Daemon] state=WAITING_IB → CONNECTED (IB connected)")
+                    return DaemonState.CONNECTED
+                now_t = time.time()
+                next_retry_ts = now_t + self._ib_retry_interval
+                sec_until = max(0, min(self._ib_retry_interval + 5, int(round(next_retry_ts - now_t))))
+                if self._status_sink and hasattr(self._status_sink, "write_daemon_heartbeat"):
+                    self._status_sink.write_daemon_heartbeat(
+                        hedge_running=False,
+                        ib_connected=False,
+                        ib_client_id=None,
+                        next_retry_ts=next_retry_ts,
+                        seconds_until_retry=sec_until,
+                    )
+                logger.debug("[Daemon] state=WAITING_IB | connect failed; next retry in %ss", sec_until)
+            await asyncio.sleep(1.0)
 
     async def _handle_connected(self) -> DaemonState:
         """CONNECTED: fetch positions + spot, bootstrap TradingFSM (START/SYNCED). Transition to RUNNING."""
-        logger.debug("Daemon:CONNECTED: fetching positions...")
+        logger.info("[Daemon] state=CONNECTED | fetching positions and building snapshot...")
         result = await self._refresh_and_build_snapshot()
         if result is not None:
             snapshot, _spot, _cs, _data_lag_ms = result
             self._fsm_trading.apply_transition(TradingEvent.START, snapshot)
             self._fsm_trading.apply_transition(TradingEvent.SYNCED, snapshot)
+        logger.info("[Daemon] state=CONNECTED → RUNNING (bootstrap done)")
         return DaemonState.RUNNING
 
     async def _handle_running(self) -> DaemonState:
-        """RUNNING: subscribe, start background tasks, loop until stop requested."""
-        logger.debug("Daemon:RUNNING: subscribing to ticker and positions...")
-        self.connector.subscribe_ticker(self.symbol, self._on_ticker)
+        """RUNNING: subscribe, start background tasks, loop until stop requested. May transition to RUNNING_SUSPENDED if daemon_run_status.suspended."""
+        logger.info("[Daemon] state=RUNNING | subscribing to ticker and positions...")
+        await self.connector.subscribe_ticker(self.symbol, self._on_ticker)
         self.connector.subscribe_positions(self._eval_hedge_threadsafe)
+        # Sync FSM with daemon_run_status so first snapshot reflects RUNNING_SUSPENDED if already set
+        self._apply_run_status_transition()
+        if self._status_sink:
+            self._status_sink.write_snapshot(
+                self._build_heartbeat_minimal_dict(), append_history=False
+            )
+            # Single-process: so monitor shows daemon alive immediately
+            if not os.environ.get("BIFROST_UNDER_DAEMON") and hasattr(
+                self._status_sink, "write_daemon_heartbeat"
+            ):
+                self._status_sink.write_daemon_heartbeat(
+                    hedge_running=True,
+                    ib_connected=self.connector.is_connected,
+                    ib_client_id=getattr(self.connector, "client_id", None),
+                )
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
         self._config_reload_task = asyncio.create_task(self._reload_config_loop())
+        control_available = (
+            self._status_sink is not None and hasattr(self._status_sink, "poll_and_consume_control")
+        )
         logger.info(
-            "Daemon running (symbol=%s, paper_trade=%s, config=%s)",
+            "[Daemon] state=%s | Daemon running (symbol=%s, paper_trade=%s, config=%s); control via daemon_control=%s",
+            self._fsm_daemon.current.value,
             self.symbol,
             self.paper_trade,
             self._config_path or "default",
+            "enabled" if control_available else "disabled (no postgres sink)",
         )
+        self._ib_disconnected_during_run = False
         try:
             while self._fsm_daemon.is_running():
                 await asyncio.sleep(1.0)
+                if getattr(self, "_ib_disconnected_during_run", False):
+                    self._ib_disconnected_during_run = False
+                    if self.connector.is_connected:
+                        await self.connector.disconnect()
+                    return DaemonState.WAITING_IB
         except asyncio.CancelledError:
             pass
         return DaemonState.STOPPING
 
     async def _handle_stopping(self) -> DaemonState:
         """STOPPING: cancel tasks, disconnect. Transition to STOPPED."""
-        logger.debug("Daemon:STOPPING: cancel tasks, disconnect...")
+        logger.info("[Daemon] state=STOPPING | cancelling tasks, disconnecting IB...")
         heartbeat_task = getattr(self, "_heartbeat_task", None)
         config_reload_task = getattr(self, "_config_reload_task", None)
         if heartbeat_task is not None:
@@ -587,6 +774,7 @@ class GsTrading:
             except Exception as e:
                 logger.debug("Status sink close: %s", e)
         await self.connector.disconnect()
+        logger.info("[Daemon] state=STOPPING → STOPPED (exit)")
         return DaemonState.STOPPED
 
     def _get_state_handlers(self) -> dict:
@@ -594,6 +782,7 @@ class GsTrading:
         return {
             DaemonState.IDLE: self._handle_idle,
             DaemonState.CONNECTING: self._handle_connecting,
+            DaemonState.WAITING_IB: self._handle_waiting_ib,
             DaemonState.CONNECTED: self._handle_connected,
             DaemonState.RUNNING: self._handle_running,
             DaemonState.STOPPING: self._handle_stopping,
@@ -603,18 +792,19 @@ class GsTrading:
         """State-driven loop: run handler for current state, transition to returned state."""
         self._loop = asyncio.get_running_loop()
         handlers = self._get_state_handlers()
+        logger.info("[Daemon] started (state loop: IDLE → CONNECTING → CONNECTED → RUNNING → STOPPING → STOPPED)")
         try:
             while self._fsm_daemon.current != DaemonState.STOPPED:
                 current = self._fsm_daemon.current
                 handler = handlers.get(current)
                 if handler is None:
-                    logger.warning("Daemon: No handler for state %s; stopping", current.value)
+                    logger.warning("[Daemon] state=%s | no handler; stopping", current.value)
                     break
                 try:
                     next_state = await handler()
                     if not self._fsm_daemon.transition(next_state):
                         logger.error(
-                            "Daemon: invalid transition from %s to %s; stopping",
+                            "[Daemon] invalid transition %s → %s; stopping",
                             current.value,
                             next_state.value,
                         )
@@ -622,7 +812,7 @@ class GsTrading:
                             self._fsm_daemon.transition(DaemonState.STOPPING)
                         break
                 except Exception as e:
-                    logger.exception("Handler %s raised: %s", current.value, e)
+                    logger.exception("[Daemon] state=%s handler raised: %s", current.value, e)
                     if self._fsm_daemon.can_transition_to(DaemonState.STOPPING):
                         self._fsm_daemon.transition(DaemonState.STOPPING)
                     else:
@@ -648,7 +838,7 @@ async def _run_daemon_main(config_path: Optional[str] = None) -> None:
     loop = asyncio.get_running_loop()
 
     def _on_stop_signal(*_args: Any) -> None:
-        logger.info("Received stop signal, requesting daemon stop")
+        logger.info("[Daemon] received SIGTERM/SIGINT → requesting stop (RUNNING → STOPPING)")
         loop.call_soon_threadsafe(app.stop)
 
     try:
@@ -659,7 +849,12 @@ async def _run_daemon_main(config_path: Optional[str] = None) -> None:
         loop.add_signal_handler(signal.SIGINT, _on_stop_signal)
     except (NotImplementedError, OSError):
         pass
-    await app.run()
+    try:
+        await app.run()
+    finally:
+        # So monitoring can show "Stopped at ..." (SIGTERM/SIGINT or consumed stop); no-op on SIGKILL
+        if getattr(app, "_status_sink", None) and hasattr(app._status_sink, "write_daemon_graceful_shutdown"):
+            app._status_sink.write_daemon_graceful_shutdown()
 
 
 def run_daemon(config_path: Optional[str] = None) -> None:

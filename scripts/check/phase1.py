@@ -56,6 +56,9 @@ STATUS_CURRENT_COLS = {
 }
 STATUS_HISTORY_COLS = STATUS_CURRENT_COLS  # same as status_current per DATABASE.md §2.2
 OPERATIONS_COLS = {"id", "ts", "type", "side", "quantity", "price", "state_reason"}
+DAEMON_CONTROL_COLS = {"id", "command", "created_at", "consumed_at"}  # Phase 2, DATABASE.md §2.4
+DAEMON_RUN_STATUS_COLS = {"id", "suspended", "updated_at"}  # Phase 2, DATABASE.md §2.5
+DAEMON_HEARTBEAT_COLS = {"id", "last_ts", "hedge_running", "ib_connected", "ib_client_id", "next_retry_ts", "seconds_until_retry", "graceful_shutdown_at"}  # Phase 2, DATABASE.md §2.6 (RE-7)
 
 SCHEMA_FIX_TIP = " Run: python scripts/init_phase1_db.py to create/repair tables (see docs/DATABASE.md)."
 
@@ -168,6 +171,9 @@ def check_pg_schema(config_path: str, verbose: bool = False) -> tuple[bool, str]
                 ("status_current", STATUS_CURRENT_COLS),
                 ("status_history", STATUS_HISTORY_COLS),
                 ("operations", OPERATIONS_COLS),
+                ("daemon_control", DAEMON_CONTROL_COLS),
+                ("daemon_run_status", DAEMON_RUN_STATUS_COLS),
+                ("daemon_heartbeat", DAEMON_HEARTBEAT_COLS),
             ):
                 cur.execute(
                     """
@@ -196,17 +202,25 @@ MARKER_RECEIVED_STOP = "Received stop signal"
 # 提前退出时视为「按状态机安全退出」的退出码（daemon_fsm: CONNECTING->STOPPED 或 CONNECTED->STOPPING->STOPPED 后进程结束）
 SAFE_EXIT_CODES = (0, 1, -15, 143, 124)
 
-# 与 src/fsm/daemon_fsm.py 一致的合法流转（CONNECTED 仅允许 -> RUNNING 或 -> STOPPING，无 CONNECTED->STOPPED）
+# 与 src/fsm/daemon_fsm.py 一致的合法流转（含 RUNNING <-> RUNNING_SUSPENDED，daemon_run_status；RE-7 WAITING_IB）
 FSM_TRANSITIONS = [
-    ("IDLE", "CONNECTING"),       # _handle_idle
-    ("IDLE", "STOPPED"),          # request_stop() when IDLE
-    ("CONNECTING", "CONNECTED"),  # connect success
-    ("CONNECTING", "STOPPED"),    # connect fail
-    ("CONNECTING", "STOPPING"),   # request_stop() during connect
-    ("CONNECTED", "RUNNING"),     # _handle_connected
-    ("CONNECTED", "STOPPING"),    # request_stop() or exception
-    ("RUNNING", "STOPPING"),      # request_stop() / SIGTERM
-    ("STOPPING", "STOPPED"),      # _handle_stopping
+    ("IDLE", "CONNECTING"),           # _handle_idle
+    ("IDLE", "STOPPED"),              # request_stop() when IDLE
+    ("CONNECTING", "CONNECTED"),      # connect success
+    ("CONNECTING", "WAITING_IB"),     # connect fail (RE-7: daemon stays up)
+    ("CONNECTING", "STOPPING"),       # request_stop() during connect
+    ("WAITING_IB", "CONNECTING"),     # retry (then success -> CONNECTED)
+    ("WAITING_IB", "CONNECTED"),      # retry success from _handle_waiting_ib
+    ("WAITING_IB", "STOPPING"),       # request_stop() or control stop
+    ("CONNECTED", "RUNNING"),         # _handle_connected
+    ("CONNECTED", "STOPPING"),        # request_stop() or exception
+    ("RUNNING", "STOPPING"),          # request_stop() / SIGTERM
+    ("RUNNING", "RUNNING_SUSPENDED"), # daemon_run_status.suspended=true (heartbeat poll)
+    ("RUNNING", "WAITING_IB"),        # IB disconnected during RUNNING (heartbeat writes DB)
+    ("RUNNING_SUSPENDED", "RUNNING"), # daemon_run_status.suspended=false (heartbeat poll)
+    ("RUNNING_SUSPENDED", "STOPPING"),  # request_stop()
+    ("RUNNING_SUSPENDED", "WAITING_IB"),  # IB disconnected during RUNNING_SUSPENDED
+    ("STOPPING", "STOPPED"),          # _handle_stopping
 ]
 # 各 Signal 场景设计覆盖的流转（场景名 -> 设计覆盖的 (from, to) 列表）
 FSM_COVERAGE_BY_SCENARIO = {

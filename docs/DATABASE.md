@@ -77,6 +77,54 @@
 | price | double precision | 价格（可选，成交时有） |
 | state_reason | text | 状态/原因，如 D2、D3、block_reason |
 
+### 2.4 表 `daemon_control`（阶段 2：控制通道，替代本地文件）
+
+- **用途**：供监控服务（可运行在另一台主机，RE-5）向守护进程发送控制指令（stop/flatten），替代本地控制文件，无需共享文件系统（如 NFS）。
+- **写入**：监控应用（如 status server）在 POST /control/stop、POST /control/flatten 或 POST /control/retry_ib（RE-7）时 **INSERT** 一行；守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| command | text NOT NULL | 指令：`stop`、`flatten` 或 `retry_ib`（RE-7：守护程序立即尝试连接 IB） |
+| created_at | timestamptz | 创建时间（默认 now()） |
+| consumed_at | timestamptz | 守护进程消费时间；NULL 表示待处理 |
+
+- **消费语义**：守护进程 `SELECT` 一条 `consumed_at IS NULL` 且 `id` 最小的行，执行对应 command 后 `UPDATE consumed_at = now()`，避免重复触发。监控与守护进程使用同一 PostgreSQL（status.postgres），故无跨机文件依赖。
+
+### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
+
+- **用途**：供监控机设置「挂起/恢复」交易流程（不下新对冲），交易机在每次 heartbeat 及 tick 时**只读**该表并据此决定是否执行 maybe_hedge；与 daemon_control 配合实现 RE-5（监控与交易分离）。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
+- **写入**：监控应用在 POST /control/suspend 时 **UPDATE** `suspended = true`，POST /control/resume 时 **UPDATE** `suspended = false`（单行 id=1）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | integer | 主键，固定为 1（单行表） |
+| suspended | boolean NOT NULL | true=挂起（不执行新对冲），false=运行 |
+| updated_at | timestamptz | 最后更新时间 |
+
+- **语义**：守护进程轮询 `SELECT suspended FROM daemon_run_status WHERE id = 1`，不消费、不修改；为 true 时跳过 _eval_hedge（heartbeat 仍写 status_current，但不调用 maybe_hedge）。
+
+### 2.6 表 `daemon_heartbeat`（阶段 2：守护进程心跳，监控区分守护/对冲与 IB 连接）
+
+- **用途**：交易机采用双进程（RE-6）时，**稳定守护进程**（`run_daemon.py`）每心跳更新此行，供监控端区分「守护进程是否存活」与「对冲程序是否在跑」，以及**与 IB 连接状态与 Client ID**（RE-7）。
+- **写入**：仅**稳定守护进程**在每次 heartbeat 循环中调用 sink 的 `write_daemon_heartbeat(hedge_running, ib_connected, ib_client_id)`；单进程模式或对冲应用不写此表。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | integer | 主键，固定为 1（单行表） |
+| last_ts | timestamptz NOT NULL | 最后心跳时间 |
+| hedge_running | boolean NOT NULL | 对冲子进程是否在运行 |
+| ib_connected | boolean | 守护进程是否与 IB 保持连接（RE-7）；现有库通过 ALTER 追加，默认 false |
+| ib_client_id | integer | 连接成功时占用的 Client ID；未连接时为 NULL（RE-7） |
+| next_retry_ts | timestamptz | IB 未连接时，下次计划重试连接的时刻（RE-7）；已连接时为 NULL |
+| seconds_until_retry | smallint | 守护进程写入的「距下次重试的秒数」（0～间隔+5），用于 UI 倒计时，避免守护机与监控机时钟不同步导致显示异常 |
+| graceful_shutdown_at | timestamptz | 优雅退出时写入（SIGTERM/SIGINT 或消费 stop 后）；NULL 表示运行中或未优雅退出（如 kill -9）。监控可区分「已于某时停止」与「心跳超时/可能被强杀」 |
+
+- **语义**：监控端读取 `last_ts`、`hedge_running`、`ib_connected`、`ib_client_id`、`next_retry_ts`、`seconds_until_retry`、`graceful_shutdown_at`（如 GET /status 的 `daemon_heartbeat`）；若 `last_ts` 在最近约 30 秒内则视为守护进程存活；若 `graceful_shutdown_at` 非空则表示守护进程已优雅退出，监控可显示「已于 … 停止」；`ib_connected` 为 true 时显示「已连接」及 `ib_client_id`；为 false 时显示「未连接」及 **下次重试时间**（优先用 `seconds_until_retry` 显示「约 N 秒后」），并支持监控端触发立即重试（`daemon_control` 写入 `retry_ib`）。
+
 ---
 
 ## 3. 阶段 1 写入策略
@@ -93,10 +141,13 @@
 
 - **Python 依赖**：阶段 1 使用 **psycopg2-binary** 连接 PostgreSQL，已在 `pyproject.toml` 中声明。安装环境后执行 `pip install -e .` 即可。
 - **PostgreSQL 实例**：需本地或 Docker 提供 PostgreSQL；创建数据库与用户后，在 `config/config.yaml` 中配置 `status.sink: "postgres"` 与 `status.postgres`（或使用环境变量 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`）。不配置或未连接时守护程序照常运行，仅不写入状态与操作。
-- **用 psql 查看**：连接后可直接查询三张表，例如：
+- **用 psql 查看**：连接后可直接查询各表，例如：
   - 当前状态：`SELECT * FROM status_current;`
   - 最近历史：`SELECT * FROM status_history ORDER BY ts DESC LIMIT 20;`
   - 操作记录：`SELECT * FROM operations ORDER BY ts DESC LIMIT 20;`
+  - 控制指令（阶段 2）：`SELECT * FROM daemon_control ORDER BY id DESC LIMIT 10;`
+  - 挂起/恢复状态（阶段 2）：`SELECT * FROM daemon_run_status WHERE id = 1;`
+  - 守护进程心跳（阶段 2，双进程）：`SELECT * FROM daemon_heartbeat WHERE id = 1;`
 
 ### 4.1 连接失败：`no pg_hba.conf entry for host ...`
 
@@ -123,16 +174,57 @@
 
 ### 4.2 表不存在或自检报 "Table 'status_current' missing or empty columns"
 
-若数据库已能连接，但 `python scripts/check/phase1.py` 报 **PostgreSQL schema (tables + columns)** 失败，说明当前库中尚未创建阶段 1 所需的三张表（或列不一致）。在项目根目录执行：
+若数据库已能连接，但 `python scripts/check/phase1.py` 报 **PostgreSQL schema (tables + columns)** 失败，说明当前库中尚未创建阶段 1/2 所需的表（或列不一致）。在项目根目录执行：
 
 ```bash
 python scripts/init_phase1_db.py
 ```
 
-脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/校验 `status_current`、`status_history`、`operations` 三张表（与 `PostgreSQLSink` 使用的 DDL 一致）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。
+脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/校验 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat` 表（与 `PostgreSQLSink` 使用的 DDL 一致）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
+
+### 4.3 `daemon_heartbeat` 被锁：原因与避免
+
+**现象**：对 `daemon_heartbeat` 的 UPDATE 或 SELECT 长时间阻塞，或 psql 执行 `UPDATE daemon_heartbeat SET ...` 一直等待。
+
+**常见原因**：
+
+1. **多个写入进程同时写同一行**：`daemon_heartbeat` 只有一行（id=1），若**同时**运行 `run_daemon.py` 与 `run_engine.py`（或两个守护进程实例），两个连接都会对同一行做 UPDATE，后执行的会等待前行释放行锁。若前一个事务一直未提交（例如进程卡死、崩溃前未 commit），锁会一直占用。
+2. **连接未正常关闭且事务未结束**：进程被 kill -9 或崩溃时，若在 UPDATE 之后、COMMIT 之前，服务端可能仍认为该连接存活，行锁会保留到 TCP 超时或服务端检测到连接断开。
+3. **长事务**：某连接在未提交的事务里对 `daemon_heartbeat` 做过写入或加锁（如 SELECT ... FOR UPDATE），会阻塞其他会话的 UPDATE。
+
+**如何排查**（在能连上 PostgreSQL 的机器上）：
+
+```sql
+-- 查看当前谁在等待锁、谁持锁（PostgreSQL 9.6+）
+SELECT pid, usename, state, query, wait_event_type, wait_event
+FROM pg_stat_activity
+WHERE datname = current_database()
+  AND (query ILIKE '%daemon_heartbeat%' OR state = 'active');
+
+-- 查看锁（锁类型与 relation）
+SELECT l.pid, l.mode, l.granted, a.query
+FROM pg_locks l
+JOIN pg_stat_activity a ON l.pid = a.pid
+JOIN pg_class c ON l.relation = c.oid
+WHERE c.relname = 'daemon_heartbeat';
+```
+
+若发现某 `pid` 长时间占用锁且已无实际请求，可在确认安全后在该库执行 `SELECT pg_terminate_backend(<pid>);` 终止该后端（会断开对应连接并释放锁）。也可在项目根目录运行**强制释放锁脚本**（会列出并终止持有/等待上述表锁的其他后端）：
+
+```bash
+python scripts/release_pg_locks.py              # 列出并询问确认后终止
+python scripts/release_pg_locks.py --dry-run     # 仅列出，不终止
+python scripts/release_pg_locks.py --yes         # 不确认，直接终止
+```
+
+**如何避免**：
+
+- **只保留一个写入者**：同一时间只运行 **一种** 守护进程——要么 `run_daemon.py`，要么单进程 `run_engine.py`，不要同时跑两个会写 `daemon_heartbeat` 的进程。
+- **短事务**：本仓库的 sink 已做到每次写心跳后立即 `commit()`，不长时间持锁；若自研或改代码，请勿在未提交事务中长时间持有对 `daemon_heartbeat` 的写入或显式锁。
+- **锁等待超时**：PostgreSQLSink 连接后已设置 `lock_timeout = '5s'`，若 5 秒内拿不到行锁会报错并 rollback，不会无限阻塞；可根据需要调整超时或重试策略。
 
 ---
 
@@ -140,7 +232,7 @@ python scripts/init_phase1_db.py
 
 以下为占位说明，具体表结构或字段在对应阶段实现时在本文档中补充。
 
-- **阶段 2**：独立应用**只读** `status_current`、`operations`（GET /status、GET /operations）；若自检结果（self_check、status_lamp）由守护程序写入，可能增加列或单独表，届时在本文档 §5 增加。
+- **阶段 2**：独立应用**只读** `status_current`、`operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
 - **阶段 3.1（历史统计）**：只读 `status_history`、`operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
 - **阶段 3.5（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
 - **其他**：控制指令、告警、用户配置等若未来落库，均在本文档中新增章节并注明引入阶段。
@@ -153,6 +245,10 @@ python scripts/init_phase1_db.py
 |------|----------|----------|
 | （初版） | 新增 §1–§4：连接配置、阶段 1 三表（status_current、status_history、operations）、写入策略；§5 后续阶段预留。 | 阶段 1 |
 | 阶段 1 落地 | 新增 §4：依赖（psycopg2-binary）、配置说明、psql 查看示例；§5/§6 章节号顺延。 | 阶段 1 |
+| 控制通道改 DB | 新增 §2.4 表 daemon_control；控制指令由本地文件改为 PostgreSQL，支持监控与守护进程分离部署（RE-5）。 | 阶段 2 |
+| 挂起/恢复状态 | 新增 §2.5 表 daemon_run_status；监控机写入、交易机轮询，实现挂起/恢复对冲；监控机移除 subprocess/start。 | 阶段 2 |
+| 守护进程心跳 | 新增 §2.6 表 daemon_heartbeat；稳定守护进程每心跳写入，监控端区分守护/对冲并分开显示（RE-6）。 | 阶段 2 |
+| IB 连接状态（RE-7） | daemon_heartbeat 增加 ib_connected、ib_client_id；daemon_control 支持 command=retry_ib；守护程序不假定 IB 已运行，可观测与重试。 | 阶段 2 |
 
 ---
 

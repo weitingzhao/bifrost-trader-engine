@@ -40,18 +40,63 @@ Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 
 ## Run
 
+**Recommended on trading machine (RE-6, two-process)**:
+
 ```bash
-python scripts/run_engine.py
-# or with config path
-python scripts/run_engine.py config/config.yaml
+python scripts/run_daemon.py config/config.yaml
 ```
 
-Run as a daemon via systemd, supervisor, or Docker (single process, long-running).
+The **stable daemon** holds the IB Client ID and polls PostgreSQL; on **resume** it starts the **hedge app** (`run_hedge_app.py`) as a subprocess; on **suspend** it stops the subprocess. Upgrading hedging logic only restarts the subprocess, not the daemon.
+
+**Single-process (optional)**:
+
+```bash
+python scripts/run_engine.py config/config.yaml
+# or
+python scripts/run_hedge_app.py config/config.yaml
+```
+
+Run as a daemon via systemd, supervisor, or Docker (single or two process).
+
+### Phase 2: Status server (monitoring and control)
+
+The **status server** (monitoring and control) is a **separate process** from the trading daemon (RE-5). **Default deployment** is **cross-host**: status server on one machine (monitoring host), **stable daemon** (and optional hedge subprocess) on another (trading host, same machine as IB). The daemon must run on the same machine as IB; the status server can run anywhere that can reach PostgreSQL. Control (stop/flatten/suspend/resume) uses **PostgreSQL** (`daemon_control`, `daemon_run_status`); no shared filesystem is required. Run the status server; it reads PostgreSQL (`status_current`, `operations`) and exposes HTTP API.
+
+**Config** (in `config/config.yaml`):
+
+- `status.sink: "postgres"` and `status.postgres`: same as Phase 1; control uses the same DB and tables (see [docs/DATABASE.md](docs/DATABASE.md) §2.4–2.5).
+- `status_server.port`: HTTP port (default 8765).
+- **Web UI**: Open `http://<host>:8765/` in a browser to see status lamp, self-check, status summary, operations list, **Suspend** / **Resume** (pause/resume hedging via `daemon_run_status`), and **Stop** / **Flatten** buttons (R-M5). **Start** on the **trading machine**: run `python scripts/run_daemon.py config/config.yaml` (recommended) or single-process `run_engine.py`; the status server does not start the daemon. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §5.1 and [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md) §3.1–3.2.
+
+**Start**:
+
+```bash
+python scripts/run_status_server.py
+# or
+python scripts/run_status_server.py config/config.yaml
+```
+
+**Examples** (replace `<host>` with `localhost` or the server IP):
+
+```bash
+# Current status and lamp (green/yellow/red)
+curl http://<host>:8765/status
+
+# Operations list (optional: ?since_ts=...&until_ts=...&type=fill&limit=50)
+curl http://<host>:8765/operations?limit=10
+
+# Request daemon stop (inserts into daemon_control; daemon exits on next heartbeat)
+curl -X POST http://<host>:8765/control/stop
+
+# Suspend/resume hedging (updates daemon_run_status; daemon skips maybe_hedge when suspended)
+curl -X POST http://<host>:8765/control/suspend
+curl -X POST http://<host>:8765/control/resume
+```
 
 ## Run environment and operations
 
 - **Single account**: TWS with one account; auto-trading (this daemon) and manual trading share the account (different API `client_id`).
-- **Daemon**: Single-process, single-thread; runs on the same machine as TWS. Monitoring and control are done by **separate app(s)** (see [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md)).
+- **Daemon**: On the trading machine, **recommended** is the **stable daemon** (`run_daemon.py`) plus **hedge app** subprocess (`run_hedge_app.py`); or single-process `run_engine.py`. Monitoring and control are done by **separate app(s)** (see [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md)).
 - **Deployment**: Mac (all-in-one) or Linux server (TWS + daemon on server; manual trading via remote desktop). See the doc above for details.
 
 ## Architecture

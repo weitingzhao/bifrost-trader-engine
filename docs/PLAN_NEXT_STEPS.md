@@ -197,6 +197,8 @@
 | **2.2** | **配置与文档**：sink 路径、控制文件路径、监控应用端口等写入 config 与 README/docs。 | 配置示例与文档更新 | — |
 | **2.3** | **（若本阶段交付 R-C3）守护进程支持 flatten**：控制通道支持 `flatten`。守护进程收到后：停新对冲 → 按当前持仓与目标计算平仓量 → 下单平仓 → 写操作记录；可选平敞口后自动 stop。 | 守护进程执行平敞口；独立应用 POST /control/flatten 生效 | R-C3 |
 
+**控制通道（阶段 2）**：采用 **PostgreSQL 表 `daemon_control`**（见 [DATABASE.md](DATABASE.md) §2.4），替代本地控制文件，以支持**监控与交易分离（RE-5）**（监控可运行在另一台主机，无需 NFS）。格式：表列 `command` 取值为 `stop` 或 `flatten`。守护进程在**每次 heartbeat** 轮询该表，取一条 `consumed_at IS NULL` 且 id 最小的行，执行对应指令后 `UPDATE consumed_at = now()`。独立应用通过 POST /control/stop 或 POST /control/flatten 向该表 **INSERT** 一行。状态、操作与控制均经同一 PostgreSQL，监控与守护进程仅需能连同一数据库即可。
+
 **里程碑**
 
 - 独立应用可读 sink 当前视图与操作表；GET /status 含 status_lamp（green/yellow/red）；GET /operations 可查询执行操作；POST /control/stop 可停止守护进程；若实现 R-C3，POST /control/flatten 可平掉本策略对冲敞口。

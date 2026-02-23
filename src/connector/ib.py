@@ -44,36 +44,95 @@ class IBConnector:
     def _stock(self, symbol: str, exchange: str = "SMART") -> Stock:
         return Stock(symbol, exchange, "USD")
 
-    async def connect(self) -> bool:
-        """Connect to TWS/Gateway."""
+    # Per-attempt timeout when retrying client IDs; avoid waiting full connect_timeout (e.g. 60s) after 326
+    _CONNECT_ATTEMPT_TIMEOUT = 15.0
+
+    async def connect(self, max_attempts: Optional[int] = None) -> bool:
+        """Connect to TWS/Gateway.
+
+        When max_attempts is 1 (e.g. daemon heartbeat retry): try once with current client_id and return.
+        When max_attempts is None or >1: try up to max_attempts (default 10) with client_id, client_id+1, ...
+        so that "client_id in use" (326) can be worked around. No delay between attempts when >1.
+        """
         if self.is_connected:
             return True
-        try:
-            logger.debug(
-                "Connecting to IB %s:%s clientId=%s timeout=%.0fs",
-                self.host,
-                self.port,
-                self.client_id,
-                self.connect_timeout,
-            )
-            await self.ib.connectAsync(
-                self.host,
-                self.port,
-                clientId=self.client_id,
-                timeout=self.connect_timeout,
-            )
-            self._connected = True
+        base_id = self.client_id
+        limit = max_attempts if max_attempts is not None else 10
+        last_exc = None
+        attempt_timeout = min(self.connect_timeout, self._CONNECT_ATTEMPT_TIMEOUT)
+        wait_secs = int(attempt_timeout) + 5
+        for attempt in range(limit):
+            try_id = base_id + attempt
             logger.info(
-                "Connected to IB %s:%s clientId=%s",
-                self.host,
-                self.port,
-                self.client_id,
+                "IB connect attempt %s/%s (clientId=%s): may take up to %s–%ss%s",
+                attempt + 1,
+                limit,
+                try_id,
+                int(attempt_timeout),
+                wait_secs,
+                " (single attempt per heartbeat)" if limit == 1 else "; if client_id in use will retry with next ID",
             )
-            return True
-        except Exception as e:
-            logger.error("IB connect failed: %s", e)
-            self._connected = False
-            return False
+            try:
+                logger.debug(
+                    "Connecting to IB %s:%s clientId=%s timeout=%.0fs",
+                    self.host,
+                    self.port,
+                    try_id,
+                    attempt_timeout,
+                )
+                await asyncio.wait_for(
+                    self.ib.connectAsync(
+                        self.host,
+                        self.port,
+                        clientId=try_id,
+                        timeout=attempt_timeout,
+                    ),
+                    timeout=attempt_timeout + 5.0,
+                )
+                self.client_id = try_id
+                self._connected = True
+                if try_id != base_id:
+                    logger.info(
+                        "Connected to IB %s:%s clientId=%s (base %s was in use)",
+                        self.host,
+                        self.port,
+                        try_id,
+                        base_id,
+                    )
+                else:
+                    logger.info(
+                        "Connected to IB %s:%s clientId=%s",
+                        self.host,
+                        self.port,
+                        self.client_id,
+                    )
+                return True
+            except Exception as e:
+                last_exc = e
+                if self.ib.isConnected():
+                    try:
+                        self.ib.disconnect()
+                    except Exception:
+                        pass
+                if attempt < limit - 1:
+                    logger.warning(
+                        "IB clientId=%s failed (%s), retrying with clientId=%s (next attempt may take up to %ss)",
+                        try_id,
+                        e,
+                        try_id + 1,
+                        wait_secs,
+                    )
+                else:
+                    if limit == 1:
+                        logger.debug("IB connect attempt failed (will retry on next heartbeat): %s", last_exc)
+                    else:
+                        logger.error("IB connect failed after %s attempts: %s", limit, last_exc)
+                    self._connected = False
+                    return False
+        self._connected = False
+        if last_exc:
+            logger.error("IB connect failed after %s attempts: %s", limit, last_exc)
+        return False
 
     async def disconnect(self) -> None:
         """Disconnect from IB."""
@@ -90,8 +149,8 @@ class IBConnector:
         """Return list of IB Position objects. If account is None, use first account."""
         if not self.is_connected:
             await self.connect()
-        self.ib.reqPositions()
-        await asyncio.sleep(0.2)
+        # Use async API to avoid "event loop is already running" when called from asyncio.
+        await self.ib.reqPositionsAsync()
         positions = self.ib.positions(account)
         return list(positions)
 
@@ -105,22 +164,21 @@ class IBConnector:
             await self.connect()
         stock = self._stock(symbol)
         try:
-            self.ib.qualifyContracts(stock)
-            tickers = self.ib.reqTickers(stock)
+            await self.ib.qualifyContractsAsync(stock)
+            # reqTickers() uses run_until_complete internally; use reqMktData + wait for update.
+            ticker = self.ib.reqMktData(stock, "", False, False)
             await asyncio.sleep(0.5)
-            if tickers:
-                t = tickers[0]
-                mid = (
-                    (t.bid + t.ask) / 2.0
-                    if (t.bid and t.ask)
-                    else (t.last if t.last else None)
-                )
-                return float(mid) if mid is not None else None
+            mid = (
+                (ticker.bid + ticker.ask) / 2.0
+                if (ticker.bid and ticker.ask)
+                else (ticker.last if ticker.last else None)
+            )
+            return float(mid) if mid is not None else None
         except Exception as e:
             logger.error("get_underlying_price %s: %s", symbol, e)
         return None
 
-    def subscribe_ticker(
+    async def subscribe_ticker(
         self,
         symbol: str,
         on_update: Callable[[Ticker], None],
@@ -131,7 +189,7 @@ class IBConnector:
             return None
         stock = self._stock(symbol)
         try:
-            self.ib.qualifyContracts(stock)
+            await self.ib.qualifyContractsAsync(stock)
             ticker = self.ib.reqMktData(stock, "", False, False)
             ticker.updateEvent += lambda t: on_update(t)
             self._stock_contract = stock
@@ -168,14 +226,18 @@ class IBConnector:
             return None
         stock = self._stock(symbol)
         try:
-            self.ib.qualifyContracts(stock)
+            await self.ib.qualifyContractsAsync(stock)
             if order_type == "market":
                 order = MarketOrder(side.upper(), quantity)
             else:
                 price = limit_price or 0.0
                 order = LimitOrder(side.upper(), quantity, price)
                 order.action = side.upper()
-            trade = self.ib.placeOrder(stock, order)
+            # placeOrder() blocks with run_until_complete; run in executor to avoid nesting event loop.
+            loop = asyncio.get_running_loop()
+            trade = await loop.run_in_executor(
+                None, lambda: self.ib.placeOrder(stock, order)
+            )
             logger.info(
                 "Order placed: %s %s %s @ %s", side, quantity, symbol, order_type
             )

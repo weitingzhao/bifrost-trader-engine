@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bifrost 监控</title>
+  <style>
+    :root { --green: #22c55e; --yellow: #eab308; --red: #ef4444; --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --muted: #94a3b8; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1rem; line-height: 1.5; }
+    h1 { font-size: 1.5rem; margin: 0 0 1rem 0; }
+    .lamp { width: 48px; height: 48px; border-radius: 50%; margin-right: 0.75rem; flex-shrink: 0; }
+    .lamp.green { background: var(--green); box-shadow: 0 0 12px var(--green); }
+    .lamp.yellow { background: var(--yellow); box-shadow: 0 0 12px var(--yellow); }
+    .lamp.red { background: var(--red); box-shadow: 0 0 12px var(--red); }
+    .lamp.none { background: var(--muted); }
+    .row { display: flex; align-items: center; margin-bottom: 0.5rem; }
+    .card { background: var(--card); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 1rem; margin: 0 0 0.5rem 0; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #334155; }
+    th { color: var(--muted); font-weight: 500; }
+    .controls { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    button { padding: 0.5rem 1rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-stop { background: var(--red); color: white; }
+    .btn-suspend { background: var(--yellow); color: #1e293b; }
+    .btn-resume { background: var(--green); color: white; }
+    .btn-flatten { background: #64748b; color: white; }
+    .btn-retry-ib { background: #0ea5e9; color: white; }
+    .msg { font-size: 0.875rem; margin-top: 0.5rem; }
+    .msg.err { color: #f87171; }
+    .msg.ok { color: var(--green); }
+    #statusSummary { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem; font-size: 0.875rem; }
+    #statusSummary span { color: var(--muted); }
+    .section-desc { font-weight: normal; color: var(--muted); font-size: 0.85rem; }
+    .process-summary { font-size: 0.875rem; }
+    .section-hint { font-size: 0.8rem; color: var(--muted); margin: 0.25rem 0 0 0; }
+  </style>
+</head>
+<body>
+  <h1>Bifrost 自动交易监控</h1>
+  <div class="card process-section">
+    <h2>守护程序 <span class="section-desc">（业务无关，有且仅有一个）</span></h2>
+    <div class="row" style="margin-bottom:0.5rem;">
+      <div id="daemonLamp" class="lamp none" title="守护程序状态灯"></div>
+      <div>
+        <strong id="daemonSelfCheck">--</strong>
+        <div id="daemonBlockReasons" style="font-size:0.8rem;color:var(--muted);"></div>
+      </div>
+    </div>
+    <div id="daemonSummary" class="process-summary"></div>
+    <p id="daemonIbStatus" class="section-hint"></p>
+    <p id="daemonHint" class="section-hint"></p>
+    <div class="controls" style="margin-top:0.25rem;">
+      <button id="btnRetryIb" class="btn-retry-ib" type="button" title="通知守护程序立即尝试连接 IB">重试连接 IB</button>
+    </div>
+  </div>
+  <div class="card process-section">
+    <h2>对冲程序 <span class="section-desc">（业务相关，未来可多策略）</span></h2>
+    <div class="row" style="margin-bottom:0.5rem;">
+      <div id="hedgeLamp" class="lamp none" title="对冲程序状态灯"></div>
+      <div>
+        <strong id="hedgeSelfCheck">--</strong>
+        <div id="hedgeBlockReasons" style="font-size:0.8rem;color:var(--muted);"></div>
+      </div>
+    </div>
+    <div id="hedgeSummary" class="process-summary"></div>
+    <p id="hedgeHint" class="section-hint"></p>
+    <div id="statusSummary" style="margin-top:0.5rem;"></div>
+  </div>
+  <div class="card">
+    <h2>控制</h2>
+    <p id="runStatusHint" style="font-size:0.8rem;color:var(--muted);margin:0 0 0.5rem 0;">交易流程：<span id="runStatusLabel">--</span>（由监控机设置，交易机轮询 PostgreSQL 同步）</p>
+    <div class="controls">
+      <button id="btnSuspend" class="btn-suspend">挂起对冲</button>
+      <button id="btnResume" class="btn-resume">恢复对冲</button>
+      <button id="btnStop" class="btn-stop">停止守护程序</button>
+      <button id="btnFlatten" class="btn-flatten">一键平敞口</button>
+    </div>
+    <p id="startHint" style="font-size:0.8rem;color:var(--muted);margin-top:0.5rem;">启动守护程序请在交易机执行：python scripts/run_engine.py config/config.yaml</p>
+    <div id="ctrlMsg" class="msg"></div>
+  </div>
+  <div class="card">
+    <h2>近期操作</h2>
+    <table>
+      <thead><tr><th>时间</th><th>类型</th><th>方向</th><th>数量</th><th>价格</th><th>原因</th></tr></thead>
+      <tbody id="opsBody"></tbody>
+    </table>
+  </div>
+  <script>
+    const API = '';
+    function setMsg(el, text, isErr) { el.textContent = text; el.className = 'msg ' + (isErr ? 'err' : 'ok'); }
+    function fmtTs(ts) { if (ts == null) return '--'; const d = new Date(ts * 1000); return d.toLocaleString(); }
+    async function fetchStatus() {
+      try {
+        const r = await fetch(API + '/status');
+        const j = await r.json();
+        const hedgeLampEl = document.getElementById('hedgeLamp');
+        hedgeLampEl.className = 'lamp ' + (j.status_lamp || 'none');
+        const suspendedInReasons = j.block_reasons && j.block_reasons.includes('trading_suspended');
+        document.getElementById('hedgeSelfCheck').textContent = '自检: ' + (j.self_check || '--') + (suspendedInReasons ? '（对冲已挂起）' : '');
+        const hedgeReasonLabels = { trading_suspended: '对冲已挂起', no_status: '无状态数据', daemon_not_running: '守护进程未运行', data_stale: '数据滞后', trading_state_pause_cost: '交易状态: 暂停成本', trading_state_risk_halt: '交易状态: 风控暂停', trading_state_stale: '交易状态: 陈旧', trading_state_force_hedge: '交易状态: 强制对冲' };
+        const hedgeBr = j.block_reasons && j.block_reasons.length
+          ? j.block_reasons.map(r => hedgeReasonLabels[r] || r).join('；')
+          : '';
+        document.getElementById('hedgeBlockReasons').textContent = hedgeBr || '无';
+        const daemonLampEl = document.getElementById('daemonLamp');
+        const daemonLamp = (j.daemon_lamp || 'none');
+        daemonLampEl.className = 'lamp ' + daemonLamp;
+        const daemonSelfCheckLabels = { ok: '正常', degraded: '降级', blocked: '异常' };
+        document.getElementById('daemonSelfCheck').textContent = '自检: ' + (daemonSelfCheckLabels[j.daemon_self_check] || j.daemon_self_check || '--');
+        const daemonReasonLabels = { no_heartbeat: '无心跳数据', daemon_not_running: '守护进程未运行', ib_not_connected: 'IB 未连接' };
+        const dbr = (j.daemon_block_reasons || []).map(r => daemonReasonLabels[r] || r).join('；');
+        document.getElementById('daemonBlockReasons').textContent = dbr || '无';
+        const hb = j.daemon_heartbeat;
+        const nowSec = Date.now() / 1000;
+        const hasRecentStatus = j.status && j.status.ts != null && (nowSec - j.status.ts) < 90;
+        let daemonLabel, daemonHint, hedgeLabel, hedgeHint;
+        const ibConnected = hb && hb.ib_connected === true;
+        const ibClientId = hb && hb.ib_client_id != null ? hb.ib_client_id : null;
+        const nextRetryTs = hb && hb.next_retry_ts != null ? hb.next_retry_ts : null;
+        const secondsUntilRetry = hb && hb.seconds_until_retry != null ? hb.seconds_until_retry : null;
+        let daemonIbLine = '';
+        if (hb && hb.daemon_alive) {
+          daemonIbLine = 'IB: ' + (ibConnected ? ('已连接 (Client ID ' + ibClientId + ')') : '未连接');
+          if (!ibConnected && (nextRetryTs != null || secondsUntilRetry != null)) {
+            const useRelative = secondsUntilRetry != null && secondsUntilRetry >= 0 && secondsUntilRetry <= 120;
+            const countdown = useRelative ? secondsUntilRetry : (nextRetryTs != null ? Math.max(0, Math.ceil(nextRetryTs - nowSec)) : 0);
+            const countdownHint = countdown > 120 ? '（时钟可能不同步，请检查守护进程与监控端 NTP）' : (countdown > 0 ? '（约 ' + countdown + ' 秒后）' : '（即将重试）');
+            daemonIbLine += '；下次重试: ' + (nextRetryTs != null ? fmtTs(nextRetryTs) : '--') + countdownHint;
+          }
+          const btnRetry = document.getElementById('btnRetryIb');
+          if (btnRetry) { btnRetry.style.display = ibConnected ? 'none' : 'inline-block'; }
+        } else {
+          const btnRetry = document.getElementById('btnRetryIb');
+          if (btnRetry) { btnRetry.style.display = (hb && hb.last_ts != null && (nowSec - hb.last_ts) < 90) ? 'inline-block' : 'none'; }
+        }
+        document.getElementById('daemonIbStatus').textContent = daemonIbLine;
+        if (hb && hb.daemon_alive) {
+          daemonLabel = '运行中';
+          daemonHint = hb.last_ts != null ? '最后心跳: ' + fmtTs(hb.last_ts) : '';
+          hedgeLabel = hb.hedge_running ? '运行中' : '已挂起（或未启动）';
+          hedgeHint = hb.hedge_running ? '由守护进程以子进程启动' : '监控端可点击「恢复对冲」由守护进程拉起';
+        } else if (hb) {
+          daemonLabel = '未运行';
+          if (hb.graceful_shutdown_at != null) {
+            daemonHint = '已于 ' + fmtTs(hb.graceful_shutdown_at) + ' 优雅停止（SIGTERM/Stop）';
+          } else {
+            daemonHint = hb.last_ts != null ? '最后心跳: ' + fmtTs(hb.last_ts) + '（已超时，可能被 kill -9 或崩溃）' : '';
+          }
+          hedgeLabel = '未运行';
+          hedgeHint = '双进程模式下守护进程未运行则对冲程序不会运行';
+        } else {
+          daemonLabel = '未运行（或单进程模式）';
+          daemonHint = '双进程时在交易机执行 run_daemon.py 后此处会显示运行中';
+          hedgeLabel = hasRecentStatus ? '运行中（单进程）' : '未运行';
+          hedgeHint = hasRecentStatus ? '当前为单进程模式（run_engine.py），状态由对冲逻辑写入' : '';
+        }
+        document.getElementById('daemonSummary').textContent = '状态: ' + daemonLabel;
+        document.getElementById('daemonHint').textContent = daemonHint;
+        document.getElementById('hedgeSummary').textContent = '状态: ' + hedgeLabel;
+        document.getElementById('hedgeHint').textContent = hedgeHint;
+        const s = j.status || {};
+        const fields = [
+          ['daemon_state', '守护进程状态'], ['trading_state', '交易状态'], ['symbol', '标的'],
+          ['spot', '标的价格'], ['stock_position', '股票持仓'], ['daily_hedge_count', '当日对冲次数'],
+          ['ts', '更新时间']
+        ];
+        const daemonStateLabels = { running: '运行中', running_suspended: '运行中（对冲已挂起）', connecting: '连接中', waiting_ib: '等待 IB 连接（自动重试）', connected: '已连接', stopping: '停止中', stopped: '已停止', idle: '空闲' };
+        document.getElementById('statusSummary').innerHTML = fields.map(([k, l]) => {
+          let v = s[k];
+          if (v != null) v = k === 'ts' ? fmtTs(v) : (k === 'daemon_state' ? (daemonStateLabels[v] || v) : v);
+          else v = '--';
+          return '<div><span>' + l + '</span> ' + v + '</div>';
+        }).join('');
+        const suspended = j.trading_suspended === true;
+        const runStatusLabel = document.getElementById('runStatusLabel');
+        if (runStatusLabel) runStatusLabel.textContent = suspended ? '已挂起（不执行新对冲）' : '运行中';
+        const btnSuspend = document.getElementById('btnSuspend');
+        const btnResume = document.getElementById('btnResume');
+        if (btnSuspend) { btnSuspend.disabled = suspended; btnSuspend.title = suspended ? '当前已挂起' : '由监控机设置，交易机下一心跳起暂停新对冲'; }
+        if (btnResume) { btnResume.disabled = !suspended; btnResume.title = !suspended ? '当前已运行' : '由监控机设置，交易机下一心跳起恢复对冲'; }
+        return j;
+      } catch (e) {
+        const hl = document.getElementById('hedgeLamp');
+        if (hl) hl.className = 'lamp none';
+        const hsc = document.getElementById('hedgeSelfCheck');
+        if (hsc) hsc.textContent = '自检: 获取失败';
+        const hbr = document.getElementById('hedgeBlockReasons');
+        if (hbr) hbr.textContent = e.message || '';
+        const daemonLampEl = document.getElementById('daemonLamp');
+        if (daemonLampEl) daemonLampEl.className = 'lamp none';
+        const daemonSc = document.getElementById('daemonSelfCheck');
+        if (daemonSc) daemonSc.textContent = '自检: 获取失败';
+        const dbrEl = document.getElementById('daemonBlockReasons');
+        if (dbrEl) dbrEl.textContent = '';
+        return null;
+      }
+    }
+    async function fetchOperations() {
+      try {
+        const r = await fetch(API + '/operations?limit=20');
+        const j = await r.json();
+        const rows = (j.operations || []).map(op =>
+          '<tr><td>' + fmtTs(op.ts) + '</td><td>' + (op.type || '') + '</td><td>' + (op.side || '') + '</td><td>' + (op.quantity ?? '') + '</td><td>' + (op.price ?? '') + '</td><td>' + (op.state_reason || '') + '</td></tr>'
+        ).join('');
+        document.getElementById('opsBody').innerHTML = rows || '<tr><td colspan="6">无</td></tr>';
+      } catch (e) {
+        document.getElementById('opsBody').innerHTML = '<tr><td colspan="6">加载失败</td></tr>';
+      }
+    }
+    document.getElementById('btnSuspend').onclick = async () => {
+      const msg = document.getElementById('ctrlMsg');
+      setMsg(msg, '设置挂起中…', false);
+      try {
+        const r = await fetch(API + '/control/suspend', { method: 'POST' });
+        const j = await r.json().catch(() => ({}));
+        setMsg(msg, r.ok ? '已设置挂起，交易机下一心跳起暂停新对冲。' : (j.error || r.statusText), !r.ok);
+        if (r.ok) fetchStatus();
+      } catch (e) { setMsg(msg, e.message, true); }
+    };
+    document.getElementById('btnResume').onclick = async () => {
+      const msg = document.getElementById('ctrlMsg');
+      setMsg(msg, '设置恢复中…', false);
+      try {
+        const r = await fetch(API + '/control/resume', { method: 'POST' });
+        const j = await r.json().catch(() => ({}));
+        setMsg(msg, r.ok ? '已设置恢复，交易机下一心跳起恢复对冲。' : (j.error || r.statusText), !r.ok);
+        if (r.ok) fetchStatus();
+      } catch (e) { setMsg(msg, e.message, true); }
+    };
+    document.getElementById('btnStop').onclick = async () => {
+      const btn = document.getElementById('btnStop');
+      const msg = document.getElementById('ctrlMsg');
+      btn.disabled = true;
+      setMsg(msg, '请求停止中…', false);
+      try {
+        const r = await fetch(API + '/control/stop', { method: 'POST' });
+        const j = await r.json().catch(() => ({}));
+        setMsg(msg, r.ok ? '已发送停止指令，守护进程将在下一心跳退出。' : (j.error || r.statusText), !r.ok);
+      } catch (e) { setMsg(msg, e.message, true); }
+      btn.disabled = false;
+    };
+    document.getElementById('btnFlatten').onclick = async () => {
+      const btn = document.getElementById('btnFlatten');
+      const msg = document.getElementById('ctrlMsg');
+      btn.disabled = true;
+      setMsg(msg, '请求平敞口中…', false);
+      try {
+        const r = await fetch(API + '/control/flatten', { method: 'POST' });
+        const j = await r.json().catch(() => ({}));
+        setMsg(msg, r.ok ? '已发送平敞口指令。' : (j.error || r.statusText), !r.ok);
+      } catch (e) { setMsg(msg, e.message, true); }
+      btn.disabled = false;
+    };
+    const btnRetryIbEl = document.getElementById('btnRetryIb');
+    if (btnRetryIbEl) {
+      btnRetryIbEl.onclick = async () => {
+        const msg = document.getElementById('ctrlMsg');
+        setMsg(msg, '请求重试连接 IB…', false);
+        try {
+          const r = await fetch(API + '/control/retry_ib', { method: 'POST' });
+          const j = await r.json().catch(() => ({}));
+          setMsg(msg, r.ok ? '已发送重试指令，守护进程将立即尝试连接 IB。' : (j.error || r.statusText), !r.ok);
+          if (r.ok) fetchStatus();
+        } catch (e) { setMsg(msg, e.message, true); }
+      };
+      btnRetryIbEl.style.display = 'none';
+    }
+    fetchStatus();
+    fetchOperations();
+    setInterval(fetchStatus, 5000);
+    setInterval(fetchOperations, 10000);
+  </script>
+</body>
+</html>

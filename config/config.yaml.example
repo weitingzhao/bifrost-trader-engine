@@ -10,12 +10,25 @@
 #     user: "bifrost"
 #     password: ""   # or PGPASSWORD env
 
+# Phase 2: control via PostgreSQL (daemon_control + daemon_run_status); Web UI at GET /
+# Status server runs on monitoring host; daemon on trading host (RE-5). Start daemon only on trading machine: python scripts/run_engine.py
+# status_server:
+#   port: 8765
+
 # IB connection (env overrides: IB_HOST, IB_PORT, IB_CLIENT_ID)
+# When using stable daemon (run_daemon.py): daemon uses client_id; hedge app uses hedge_client_id (or client_id+1).
 ib:
   host: "127.0.0.1"
   port: 7497
-  client_id: 1
+  client_id: 1          # stable daemon holds this ID
+  hedge_client_id: 2     # optional; hedge app (run_hedge_app.py) uses this when started by daemon
   connect_timeout: 60   # seconds; increase for slow/remote connections (default 4)
+
+# Stable daemon (run_daemon.py) on trading machine: IB keepalive + start/stop hedge app on resume/suspend (RE-7: does not assume IB is up; retries and writes ib_connected/ib_client_id)
+# daemon:
+#   hedge_command: "python scripts/run_hedge_app.py"   # optional; default above
+#   heartbeat_interval: 10   # seconds between DB polls (default 10)
+#   ib_retry_interval_sec: 30   # seconds between IB connect retries when not connected (default 30)
 
 # Single underlying (MVP: NVDA only)
 symbol: "NVDA"

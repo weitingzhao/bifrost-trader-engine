@@ -13,6 +13,12 @@
 - **[配置安全分类](CONFIG_SAFETY_TAXONOMY.md)** – 配置中的安全边界分类
 - **[Guard 微调与影响](GUARD_TUNING_AND_IMPACT.md)** – 安全 Guard 与边界的微调方法及后果分析（热重载、block reason 日志等）
 
+### 计划与执行
+
+- **[阶段评估与下一步](plans/PHASE_ASSESSMENT.md)** – 基于分步计划的阶段完成度评估、阶段 1/2 实现说明与建议下一步
+- **[阶段 1 执行计划](plans/phase1-execution-plan.md)** – 阶段 1 详细 Todo、检查方式与 Test Case 清单
+- **[阶段 2 执行计划](plans/phase2-execution-plan.md)** – 阶段 2 实现说明、验收清单与执行说明
+
 ## 构建文档
 
 在**项目根目录**（存在 `mkdocs.yml` 的目录）下执行：
