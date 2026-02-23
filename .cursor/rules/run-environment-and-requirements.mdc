@@ -1,0 +1,10 @@
+---
+description: Run environment, deployment, monitoring and control — source of truth for operations
+alwaysApply: true
+---
+
+# Run Environment and Product Requirements
+
+When discussing or implementing **run environment**, **deployment** (Mac vs Linux), **monitoring**, or **control** of the daemon, read and follow **docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md**.
+
+That document defines: single-thread only for auto-trading; control/monitoring via separate app(s); single TWS/account with manual + auto; deployment options; LAN-only monitoring; phased control (start/stop first, then finer control).
