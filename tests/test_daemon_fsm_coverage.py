@@ -31,8 +31,14 @@ def test_all_non_terminal_states_have_handlers_in_gs_trading():
     app = GsTrading(config)
     handlers = app._get_state_handlers()
 
-    # STOPPED is terminal - no handler needed
-    states_needing_handlers = [s for s in DaemonState if s != DaemonState.STOPPED]
+    # STOPPED is terminal - no handler needed.
+    # RUNNING_SUSPENDED is never dispatched: we stay inside _handle_running() and the FSM
+    # flips to RUNNING_SUSPENDED in heartbeat (_apply_run_status_transition); we only return
+    # from _handle_running when going to STOPPING or WAITING_IB.
+    states_needing_handlers = [
+        s for s in DaemonState
+        if s not in (DaemonState.STOPPED, DaemonState.RUNNING_SUSPENDED)
+    ]
     for state in states_needing_handlers:
         assert state in handlers, f"Missing handler for state {state.value}"
 
@@ -44,17 +50,25 @@ def test_every_valid_transition_has_implementation_path():
     we have a known implementation path for each.
     """
     # Map: (from, to) -> "how it's implemented"
-    # Handlers return next_state; request_stop() triggers STOPPING; run() finally triggers STOPPED
+    # Handlers return next_state; request_stop() triggers STOPPING; run() finally triggers STOPPED.
+    # RUNNING <-> RUNNING_SUSPENDED and RUNNING->WAITING_IB happen inside _handle_running (heartbeat).
     implementation_paths = {
         (DaemonState.IDLE, DaemonState.CONNECTING): "_handle_idle returns CONNECTING",
         (DaemonState.IDLE, DaemonState.STOPPED): "request_stop() when IDLE",
         (DaemonState.CONNECTING, DaemonState.CONNECTED): "_handle_connecting returns CONNECTED on success",
-        (DaemonState.CONNECTING, DaemonState.STOPPED): "_handle_connecting returns STOPPED on connect fail",
+        (DaemonState.CONNECTING, DaemonState.WAITING_IB): "_handle_connecting returns WAITING_IB on connect fail (RE-7)",
         (DaemonState.CONNECTING, DaemonState.STOPPING): "request_stop() during connect",
+        (DaemonState.WAITING_IB, DaemonState.CONNECTING): "retry timer or retry_ib control; then _handle_waiting_ib",
+        (DaemonState.WAITING_IB, DaemonState.CONNECTED): "_handle_waiting_ib reconnect success returns CONNECTED",
+        (DaemonState.WAITING_IB, DaemonState.STOPPING): "request_stop() when WAITING_IB",
         (DaemonState.CONNECTED, DaemonState.RUNNING): "_handle_connected returns RUNNING",
-        (DaemonState.CONNECTED, DaemonState.STOPPED): "request_stop() then run() exception path",
         (DaemonState.CONNECTED, DaemonState.STOPPING): "request_stop() when CONNECTED",
         (DaemonState.RUNNING, DaemonState.STOPPING): "_handle_running returns STOPPING when loop exits, or request_stop()",
+        (DaemonState.RUNNING, DaemonState.RUNNING_SUSPENDED): "heartbeat _apply_run_status_transition when daemon_run_status.suspended=true",
+        (DaemonState.RUNNING, DaemonState.WAITING_IB): "IB disconnect in heartbeat; _handle_running returns WAITING_IB",
+        (DaemonState.RUNNING_SUSPENDED, DaemonState.RUNNING): "heartbeat _apply_run_status_transition when suspended=false",
+        (DaemonState.RUNNING_SUSPENDED, DaemonState.STOPPING): "request_stop() during RUNNING_SUSPENDED",
+        (DaemonState.RUNNING_SUSPENDED, DaemonState.WAITING_IB): "IB disconnect in heartbeat during RUNNING_SUSPENDED",
         (DaemonState.STOPPING, DaemonState.STOPPED): "_handle_stopping returns STOPPED",
     }
 
