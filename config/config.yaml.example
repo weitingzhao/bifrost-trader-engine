@@ -15,20 +15,16 @@
 # status_server:
 #   port: 8765
 
+# Frontend dev server (scripts/run_frontend.sh dev). Port for Vite; script kills process on this port before starting.
+# frontend:
+#   port: 5173
+
 # IB connection (env overrides: IB_HOST, IB_PORT, IB_CLIENT_ID)
-# When using stable daemon (run_daemon.py): daemon uses client_id; hedge app uses hedge_client_id (or client_id+1).
 ib:
   host: "127.0.0.1"
   port: 7497
-  client_id: 1          # stable daemon holds this ID
-  hedge_client_id: 2     # optional; hedge app (run_hedge_app.py) uses this when started by daemon
+  client_id: 1          # daemon (run_engine.py) uses this to connect to TWS
   connect_timeout: 60   # seconds; increase for slow/remote connections (default 4)
-
-# Stable daemon (run_daemon.py) on trading machine: IB keepalive + start/stop hedge app on resume/suspend (RE-7: does not assume IB is up; retries and writes ib_connected/ib_client_id)
-# daemon:
-#   hedge_command: "python scripts/run_hedge_app.py"   # optional; default above
-#   heartbeat_interval: 10   # seconds between DB polls (default 10)
-#   ib_retry_interval_sec: 30   # seconds between IB connect retries when not connected (default 30)
 
 # Single underlying (MVP: NVDA only)
 symbol: "NVDA"

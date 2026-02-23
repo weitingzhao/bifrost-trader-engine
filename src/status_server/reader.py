@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
-    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at)."""
-    return {
+    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at[, heartbeat_interval_sec])."""
+    out = {
         "last_ts": float(row[0]) if row[0] is not None else None,
         "hedge_running": bool(row[1]),
         "ib_connected": bool(row[2]) if row[2] is not None else False,
@@ -22,6 +22,8 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
         "seconds_until_retry": int(row[5]) if row[5] is not None else None,
         "graceful_shutdown_at": float(row[6]) if len(row) > 6 and row[6] is not None else None,
     }
+    out["heartbeat_interval_sec"] = int(row[7]) if len(row) > 7 and row[7] is not None else None
+    return out
 
 
 class StatusReader:
@@ -41,6 +43,9 @@ class StatusReader:
         try:
             params = _get_conn_params(self._config)
             self._conn = psycopg2.connect(**params)
+            with self._conn.cursor() as cur:
+                cur.execute("SET lock_timeout = '5s'")
+            self._conn.commit()
             return True
         except Exception as e:
             logger.warning("StatusReader connect failed: %s", e)
@@ -60,6 +65,7 @@ class StatusReader:
             return dict(row)
         except Exception as e:
             logger.warning("get_status_current failed: %s", e)
+            self._conn = None
             return None
 
     def get_run_status(self) -> Optional[bool]:
@@ -75,6 +81,7 @@ class StatusReader:
             return bool(row[0])
         except Exception as e:
             logger.debug("get_run_status failed: %s", e)
+            self._conn = None
             return None
 
     def get_daemon_heartbeat(self) -> Optional[Dict[str, Any]]:
@@ -89,7 +96,8 @@ class StatusReader:
                            ib_connected, ib_client_id,
                            extract(epoch from next_retry_ts) AS next_retry_ts,
                            seconds_until_retry,
-                           extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at
+                           extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                           heartbeat_interval_sec
                     FROM daemon_heartbeat WHERE id = 1
                     """
                 )
@@ -115,10 +123,12 @@ class StatusReader:
                         row = cur.fetchone()
                     if row is None:
                         return None
-                    return _row_to_heartbeat(row + (None,))  # graceful_shutdown_at = None
+                    return _row_to_heartbeat(row + (None, None))  # graceful_shutdown_at, heartbeat_interval_sec = None
                 except Exception as e2:
                     logger.debug("get_daemon_heartbeat (fallback) failed: %s", e2)
+                    self._conn = None
             logger.debug("get_daemon_heartbeat failed: %s", e)
+            self._conn = None
             return None
 
     def get_operations(
@@ -155,6 +165,22 @@ class StatusReader:
         except Exception as e:
             logger.warning("get_operations failed: %s", e)
             return []
+
+    def get_ib_config(self) -> Optional[Dict[str, Any]]:
+        """Return settings row id=1: ib_host, ib_port_type (for GET /status and UI). None if table missing."""
+        if not self._connect():
+            return None
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT ib_host, ib_port_type FROM settings WHERE id = 1")
+                row = cur.fetchone()
+            if row is None:
+                return None
+            return {"ib_host": (row.get("ib_host") or "127.0.0.1").strip(), "ib_port_type": (row.get("ib_port_type") or "tws_paper").strip().lower()}
+        except Exception as e:
+            logger.debug("get_ib_config failed: %s", e)
+            self._conn = None
+            return None
 
     def close(self) -> None:
         if self._conn:
@@ -207,4 +233,59 @@ def write_run_status(status_config: dict, suspended: bool) -> bool:
             conn.close()
     except Exception as e:
         logger.warning("write_run_status failed: %s", e)
+        return False
+
+
+def write_heartbeat_interval(status_config: dict, heartbeat_interval_sec: int) -> bool:
+    """Update daemon_run_status.heartbeat_interval_sec for row id=1. Daemon polls and uses this (clamped 5–120). Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    sec = max(5, min(120, heartbeat_interval_sec))
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE daemon_run_status SET heartbeat_interval_sec = %s, updated_at = now() WHERE id = 1",
+                    (sec,),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_heartbeat_interval failed: %s", e)
+        return False
+
+
+_VALID_IB_PORT_TYPES = frozenset(("tws_live", "tws_paper", "gateway"))
+
+
+def write_ib_config(status_config: dict, ib_host: str, ib_port_type: str) -> bool:
+    """Update settings (id=1): ib_host and ib_port_type (tws_live|tws_paper|gateway). Daemon loads this on next start. Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    host = (ib_host or "").strip() or "127.0.0.1"
+    port_type = (ib_port_type or "").strip().lower() or "tws_paper"
+    if port_type not in _VALID_IB_PORT_TYPES:
+        port_type = "tws_paper"
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO settings (id, ib_host, ib_port_type) VALUES (1, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET ib_host = EXCLUDED.ib_host, ib_port_type = EXCLUDED.ib_port_type
+                    """,
+                    (host, port_type),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_ib_config failed: %s", e)
         return False

@@ -6,7 +6,7 @@
 
 - **配置**：`status.postgres`（与 Phase 1 共用）、`status_server.port`（config/config.yaml 及示例）。控制通道为 PostgreSQL 表 `daemon_control`（见 DATABASE.md §2.4），无需 `control.file`。
 - **守护进程**：heartbeat 内轮询表 `daemon_control`（poll_and_consume_control）；消费到 `stop` 即 `request_stop()`；消费到 `flatten` 仅打日志（R-C3 未实现）。
-- **独立应用**：`scripts/run_status_server.py`；`src/status_server/`（reader、self_check、app）。FastAPI：GET /status（含 status_lamp、self_check、block_reasons）、GET /operations（since_ts、until_ts、type、limit）、POST /control/stop、POST /control/flatten（均向 `daemon_control` 表 INSERT）。
+- **独立应用**：`scripts/run_server.py`；`src/status_server/`（reader、self_check、app）。FastAPI：GET /status（含 status_lamp、self_check、block_reasons）、GET /operations（since_ts、until_ts、type、limit）、POST /control/stop、POST /control/flatten（均向 `daemon_control` 表 INSERT）。
 - **文档**：README Phase 2 配置与 curl 示例；PLAN_NEXT_STEPS、DATABASE.md 控制通道说明；本文件验收记录。
 
 ## 验收清单（阶段 2 Test Case）
@@ -24,7 +24,7 @@
 
 **R-C3**：本阶段未实现守护进程 flatten 逻辑；POST /control/flatten 向 daemon_control 表 INSERT 并返回 200，守护进程消费后打日志。
 
-验收执行说明：在项目根目录启动 `python scripts/run_status_server.py`，使用 `curl http://localhost:8765/status`、`curl http://localhost:8765/operations?limit=10`、`curl -X POST http://localhost:8765/control/stop` 验证；需配置 `status.sink: postgres` 与 `status.postgres`，并已运行 `scripts/init_phase1_db.py` 创建 daemon_control 表；守护进程运行中验证 stop 生效。
+验收执行说明：在项目根目录启动 `python scripts/run_server.py`，使用 `curl http://localhost:8765/status`、`curl http://localhost:8765/operations?limit=10`、`curl -X POST http://localhost:8765/control/stop` 验证；需配置 `status.sink: postgres` 与 `status.postgres`，并已运行 `scripts/init_phase1_db.py` 创建 daemon_control 表；守护进程运行中验证 stop 生效。
 
 ---
 
@@ -40,7 +40,7 @@
 ### 1. 单进程：不启动 TWS 时守护进程不退出、黄灯与下次重试时间
 
 1. **不启动 TWS/IB Gateway**（确保 127.0.0.1:7497 无服务）。
-2. 启动 status server：`python scripts/run_status_server.py config/config.yaml`。
+2. 启动 status server：`python scripts/run_server.py config/config.yaml`。
 3. 启动守护进程（单进程）：`python scripts/run_engine.py config/config.yaml`。
 4. **预期**：
    - 进程**不退出**；日志出现 `state=CONNECTING | IB connect failed → WAITING_IB`，随后 `state=WAITING_IB | IB not connected; next retry at ...`。
@@ -80,9 +80,9 @@
 1. 在 WAITING_IB 状态下，监控页点击「**停止守护程序**」（或 `curl -X POST http://localhost:8765/control/stop`）。
 2. **预期**：守护进程消费 stop 后 request_stop()，优雅退出（STOPPING → STOPPED），进程结束。
 
-### 6. 双进程（run_daemon.py）下 WAITING_IB 与 next_retry_ts
+### 6. WAITING_IB 与 next_retry_ts
 
-1. 不启动 TWS；启动 status server；启动稳定守护进程：`python scripts/run_daemon.py config/config.yaml`。
+1. 不启动 TWS；启动 status server；启动守护进程：`python scripts/run_engine.py config/config.yaml`。
 2. **预期**：守护进程不退出；日志显示连接失败与重试间隔；写 daemon_heartbeat（ib_connected=false，next_retry_ts 有值）。
 3. 打开监控页：黄灯、「IB: 未连接」、下次重试时间、「重试连接 IB」按钮可见。
 4. 启动 TWS 后等待或点击重试：应连上并变绿，显示 Client ID。

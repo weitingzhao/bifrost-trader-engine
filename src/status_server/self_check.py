@@ -82,7 +82,7 @@ def derive_daemon_self_check(daemon_heartbeat: Optional[Dict[str, Any]]) -> Dict
     """Compute daemon self_check, status_lamp and block_reasons from daemon_heartbeat (RE-6/RE-7).
 
     Used for the 守护程序 status lamp on the monitoring UI. Heartbeat is written by the stable
-    daemon (run_daemon.py); when absent or stale, daemon is considered not running.
+    daemon (run_engine.py); when absent or stale, daemon is considered not running.
 
     Args:
         daemon_heartbeat: Dict with daemon_alive (bool), ib_connected (bool); or None if no heartbeat.
@@ -100,10 +100,13 @@ def derive_daemon_self_check(daemon_heartbeat: Optional[Dict[str, Any]]) -> Dict
     ib_connected = daemon_heartbeat.get("ib_connected", False)
 
     if not daemon_alive:
+        # 有心跳行但 last_ts 超时：标明为心跳未持续更新，便于与「无心跳数据」区分
+        last_ts = daemon_heartbeat.get("last_ts")
+        reason = "heartbeat_stale" if last_ts is not None else "daemon_not_running"
         return {
             "daemon_self_check": "blocked",
             "daemon_lamp": "red",
-            "daemon_block_reasons": ["daemon_not_running"],
+            "daemon_block_reasons": [reason],
         }
     if not ib_connected:
         return {

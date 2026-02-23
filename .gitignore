@@ -25,3 +25,7 @@ logs/
 
 # MkDocs build output
 site/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

@@ -1,0 +1,261 @@
+:root {
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+  --bg: #0f172a;
+  --card: #1e293b;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 1rem;
+  line-height: 1.5;
+}
+
+.app h1 {
+  font-size: 1.5rem;
+  margin: 0 0 1rem 0;
+}
+
+.lamp {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  margin-right: 0.75rem;
+  flex-shrink: 0;
+}
+.lamp.green {
+  background: var(--green);
+  box-shadow: 0 0 12px var(--green);
+}
+.lamp.yellow {
+  background: var(--yellow);
+  box-shadow: 0 0 12px var(--yellow);
+}
+.lamp.red {
+  background: var(--red);
+  box-shadow: 0 0 12px var(--red);
+}
+.lamp.none {
+  background: var(--muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.card h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem 0;
+  color: var(--muted);
+}
+
+.daemon-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #334155;
+  margin-bottom: 0.75rem;
+}
+.daemon-header-main {
+  flex: 1;
+  min-width: 0;
+}
+.daemon-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.35rem;
+}
+.daemon-header-meta .process-summary {
+  margin: 0;
+}
+.daemon-start-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.daemon-header .btn-stop {
+  flex-shrink: 0;
+}
+
+.daemon-groups {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0;
+}
+.daemon-group {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  background: rgba(15, 23, 42, 0.4);
+}
+.daemon-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+.daemon-group-header .daemon-group-title {
+  margin-bottom: 0;
+}
+.lamp-sm {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.lamp-sm.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.lamp-sm.yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+.lamp-sm.red { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.lamp-sm.none { background: var(--muted); }
+.daemon-group-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.35rem;
+}
+.daemon-group-body {
+  font-size: 0.9rem;
+}
+.daemon-group-body .section-hint {
+  margin: 0.25rem 0 0 0;
+}
+.daemon-group-body .controls {
+  margin-top: 0.4rem;
+}
+.countdown-line {
+  margin-top: 0.2rem;
+}
+.countdown-num {
+  display: inline-block;
+  min-width: 2rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #38bdf8;
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+.daemon-group-body .countdown-line .countdown-num {
+  margin: 0 0.15rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #334155;
+}
+th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-suspend {
+  background: var(--yellow);
+  color: #1e293b;
+}
+.btn-resume {
+  background: var(--green);
+  color: white;
+}
+.btn-flatten {
+  background: #64748b;
+  color: white;
+}
+.btn-retry-ib {
+  background: #0ea5e9;
+  color: white;
+}
+.btn-stop {
+  background: var(--red);
+  color: white;
+}
+
+.msg {
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+.msg.err {
+  color: #f87171;
+}
+.msg.ok {
+  color: var(--green);
+}
+
+.statusSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+.statusSummary span {
+  color: var(--muted);
+}
+
+.section-desc {
+  font-weight: normal;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.process-summary {
+  font-size: 0.875rem;
+}
+
+.section-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0.25rem 0 0 0;
+}
+
+.block-reasons {
+  font-size: 0.8rem;
+  color: var(--muted);
+}

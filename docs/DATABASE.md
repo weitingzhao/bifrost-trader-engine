@@ -108,7 +108,7 @@
 
 ### 2.6 表 `daemon_heartbeat`（阶段 2：守护进程心跳，监控区分守护/对冲与 IB 连接）
 
-- **用途**：交易机采用双进程（RE-6）时，**稳定守护进程**（`run_daemon.py`）每心跳更新此行，供监控端区分「守护进程是否存活」与「对冲程序是否在跑」，以及**与 IB 连接状态与 Client ID**（RE-7）。
+- **用途**：守护进程（`run_engine.py`）每心跳更新此行，供监控端区分「守护进程是否存活」与**与 IB 连接状态与 Client ID**（RE-7）。
 - **写入**：仅**稳定守护进程**在每次 heartbeat 循环中调用 sink 的 `write_daemon_heartbeat(hedge_running, ib_connected, ib_client_id)`；单进程模式或对冲应用不写此表。
 - **列**：
 
@@ -124,6 +124,20 @@
 | graceful_shutdown_at | timestamptz | 优雅退出时写入（SIGTERM/SIGINT 或消费 stop 后）；NULL 表示运行中或未优雅退出（如 kill -9）。监控可区分「已于某时停止」与「心跳超时/可能被强杀」 |
 
 - **语义**：监控端读取 `last_ts`、`hedge_running`、`ib_connected`、`ib_client_id`、`next_retry_ts`、`seconds_until_retry`、`graceful_shutdown_at`（如 GET /status 的 `daemon_heartbeat`）；若 `last_ts` 在最近约 30 秒内则视为守护进程存活；若 `graceful_shutdown_at` 非空则表示守护进程已优雅退出，监控可显示「已于 … 停止」；`ib_connected` 为 true 时显示「已连接」及 `ib_client_id`；为 false 时显示「未连接」及 **下次重试时间**（优先用 `seconds_until_retry` 显示「约 N 秒后」），并支持监控端触发立即重试（`daemon_control` 写入 `retry_ib`）。
+
+### 2.7 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
+
+- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。当前包含 IB 连接配置（主机与端口类型），供监控页「IB 连接」区编辑；守护进程**每次启动时**从该表读取并连接 IB。后续新增设置时在此表**增加列**即可。
+- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入 `ib_host`、`ib_port_type`；StatusReader 的 `write_ib_config(status_config, ib_host, ib_port_type)` 执行 UPDATE。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | integer | 主键，固定为 1（单行表） |
+| ib_host | text NOT NULL | 连接 IB 的主机（IP 或主机名），默认 '127.0.0.1' |
+| ib_port_type | text NOT NULL | 端口类型：`tws_live`（7496）、`tws_paper`（7497）、`gateway`（4002）；默认 `tws_paper` |
+
+- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置；否则使用 config 中的 `ib.host` 与 `ib.port`。修改后**需重启守护程序**生效。将来其他设置（如告警阈值、显示偏好等）可在此表新增列并写入，无需再建新表。
 
 ---
 
@@ -147,7 +161,8 @@
   - 操作记录：`SELECT * FROM operations ORDER BY ts DESC LIMIT 20;`
   - 控制指令（阶段 2）：`SELECT * FROM daemon_control ORDER BY id DESC LIMIT 10;`
   - 挂起/恢复状态（阶段 2）：`SELECT * FROM daemon_run_status WHERE id = 1;`
-  - 守护进程心跳（阶段 2，双进程）：`SELECT * FROM daemon_heartbeat WHERE id = 1;`
+  - 守护进程心跳（阶段 2）：`SELECT * FROM daemon_heartbeat WHERE id = 1;`
+  - 统一设置（阶段 2）：`SELECT * FROM settings WHERE id = 1;`
 
 ### 4.1 连接失败：`no pg_hba.conf entry for host ...`
 
@@ -191,7 +206,7 @@ python scripts/init_phase1_db.py
 
 **常见原因**：
 
-1. **多个写入进程同时写同一行**：`daemon_heartbeat` 只有一行（id=1），若**同时**运行 `run_daemon.py` 与 `run_engine.py`（或两个守护进程实例），两个连接都会对同一行做 UPDATE，后执行的会等待前行释放行锁。若前一个事务一直未提交（例如进程卡死、崩溃前未 commit），锁会一直占用。
+1. **多个写入进程同时写同一行**：`daemon_heartbeat` 只有一行（id=1），若**同时**运行两个守护进程实例（如两个 `run_engine.py`），两个连接都会对同一行做 UPDATE，后执行的会等待前行释放行锁。若前一个事务一直未提交（例如进程卡死、崩溃前未 commit），锁会一直占用。
 2. **连接未正常关闭且事务未结束**：进程被 kill -9 或崩溃时，若在 UPDATE 之后、COMMIT 之前，服务端可能仍认为该连接存活，行锁会保留到 TCP 超时或服务端检测到连接断开。
 3. **长事务**：某连接在未提交的事务里对 `daemon_heartbeat` 做过写入或加锁（如 SELECT ... FOR UPDATE），会阻塞其他会话的 UPDATE。
 
@@ -222,9 +237,10 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 
 **如何避免**：
 
-- **只保留一个写入者**：同一时间只运行 **一种** 守护进程——要么 `run_daemon.py`，要么单进程 `run_engine.py`，不要同时跑两个会写 `daemon_heartbeat` 的进程。
+- **只保留一个写入者**：同一时间只运行 **一个** 守护进程（`run_engine.py`），不要同时跑两个会写 `daemon_heartbeat` 的进程。
 - **短事务**：本仓库的 sink 已做到每次写心跳后立即 `commit()`，不长时间持锁；若自研或改代码，请勿在未提交事务中长时间持有对 `daemon_heartbeat` 的写入或显式锁。
 - **锁等待超时**：PostgreSQLSink 连接后已设置 `lock_timeout = '5s'`，若 5 秒内拿不到行锁会报错并 rollback，不会无限阻塞；可根据需要调整超时或重试策略。
+- **自动释放锁并重试**：若因上次守护进程异常退出导致 `daemon_heartbeat` 或 `daemon_run_status` 被锁，再次启动时若遇到 lock timeout，sink 会**自动**查询并终止持有/等待这两张表锁的其他后端（逻辑同 `scripts/release_pg_locks.py`，仅针对 `daemon_heartbeat` 与 `daemon_run_status`），然后重试连接或写入一次，无需手动执行 release 脚本。
 
 ---
 

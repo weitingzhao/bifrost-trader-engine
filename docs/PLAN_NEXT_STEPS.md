@@ -193,7 +193,7 @@
 
 | 步骤 | 内容 | 可交付物 | 对应需求 |
 |------|------|----------|----------|
-| **2.1** | **独立应用**：新建入口（如 `scripts/run_status_server.py`），读阶段 1 sink（优先 SQLite 当前视图）。`GET /status` 返回 JSON，**须含 status_lamp**（基于 self_check 的 ok/degraded/blocked → green/yellow/red）；`GET /operations`（或等效）按时间/类型筛选，从 sink 操作表返回列表；`POST /control/stop`（写控制文件或调本地 API）；`POST /control/flatten`（R-C3，若本阶段实现）。 | 独立进程：读 SQLite/文件；GET /status（含红绿灯）、GET /operations、POST /control/stop、可选 POST /control/flatten | R-M1b、R-M2、R-M3、R-M4b、R-C1b、R-C3 |
+| **2.1** | **独立应用**：新建入口（如 `scripts/run_server.py`），读阶段 1 sink（优先 SQLite 当前视图）。`GET /status` 返回 JSON，**须含 status_lamp**（基于 self_check 的 ok/degraded/blocked → green/yellow/red）；`GET /operations`（或等效）按时间/类型筛选，从 sink 操作表返回列表；`POST /control/stop`（写控制文件或调本地 API）；`POST /control/flatten`（R-C3，若本阶段实现）。 | 独立进程：读 SQLite/文件；GET /status（含红绿灯）、GET /operations、POST /control/stop、可选 POST /control/flatten | R-M1b、R-M2、R-M3、R-M4b、R-C1b、R-C3 |
 | **2.2** | **配置与文档**：sink 路径、控制文件路径、监控应用端口等写入 config 与 README/docs。 | 配置示例与文档更新 | — |
 | **2.3** | **（若本阶段交付 R-C3）守护进程支持 flatten**：控制通道支持 `flatten`。守护进程收到后：停新对冲 → 按当前持仓与目标计算平仓量 → 下单平仓 → 写操作记录；可选平敞口后自动 stop。 | 守护进程执行平敞口；独立应用 POST /control/flatten 生效 | R-C3 |
 

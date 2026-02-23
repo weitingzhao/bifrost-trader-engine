@@ -73,7 +73,7 @@ def main() -> int:
 
     try:
         _ensure_tables(conn)
-        print(f"Created/verified tables in database {dbname!r}: status_current, status_history, operations, daemon_control, daemon_run_status, daemon_heartbeat")
+        print(f"Created/verified tables in database {dbname!r}: status_current, status_history, operations, daemon_control, daemon_run_status, daemon_heartbeat, settings")
         return 0
     except Exception as e:
         print(f"Schema creation failed: {e}", file=sys.stderr)

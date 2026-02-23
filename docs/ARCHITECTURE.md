@@ -81,7 +81,7 @@
 
 | 组件 | 说明 | 交付 |
 |------|------|------|
-| **独立应用入口** | 如 scripts/run_status_server.py；与守护进程分离进程。 | 阶段 2.1 |
+| **独立应用入口** | 如 scripts/run_server.py；与守护进程分离进程。 | 阶段 2.1 |
 | **读 sink** | 优先读 SQLite 当前视图（或文件），GET /status → JSON；可含 **自检结果**（self_check），供控制台展示与告警。 | 阶段 2.1 |
 | **控制** | POST /control/stop（一键停止，R-C1）；POST /control/flatten（一键平敞口，R-C3）；可选 pause/resume（R-C2）；可选触发自检（守护进程写回 sink）。 | 阶段 2.1（stop、flatten）；细粒度 3.2（pause） |
 
@@ -144,33 +144,32 @@
 
 ## 5. 部署视图
 
-- **交易机（与 IB 同机）**：TWS（或 IB Gateway）与**稳定守护进程**（及可选对冲子进程）**必须同机**（RE-3）；手动交易与该机共享账户（不同 client_id）。
-- **监控与交易分离（RE-5）**：**默认**为**交易机与监控机不在同一台计算机上**；status server 在监控机，交易机运行稳定守护进程（及由它启停的对冲子进程），经 PostgreSQL 通信。同机部署为可选变体。
-- **交易机进程解耦（RE-6，见 RUN_ENVIRONMENT §3.2）**：交易机上**推荐**运行 **稳定守护进程**（`run_daemon.py`）与 **对冲应用**（`run_hedge_app.py`，由守护进程按监控端 resume/suspend 以子进程方式启动/关闭）。守护进程仅维护 IB 连接（占用一个 Client ID）、轮询 DB，不包含易变对冲逻辑，便于升级对冲代码时只重启对冲子进程而保留守护进程的 Client ID。
+- **交易机（与 IB 同机）**：TWS（或 IB Gateway）与**守护进程**（`run_engine.py`）**必须同机**（RE-3）；手动交易与该机共享账户（不同 client_id）。
+- **监控与交易分离（RE-5）**：**默认**为**交易机与监控机不在同一台计算机上**；status server 在监控机，交易机运行守护进程，经 PostgreSQL 通信。同机部署为可选变体。
+- **交易机单进程（RE-6，见 RUN_ENVIRONMENT §3.2）**：交易机仅运行 **单进程**（`run_engine.py`）：同一进程连 IB、执行对冲逻辑（Daemon FSM + Hedge/Trading FSM）、轮询 DB（stop/suspend/resume），并写心跳与状态；升级对冲逻辑需重启整个进程。
 - **回测与统计**：与守护程序同仓库、同 Python 环境；回测不连 TWS，统计只读 DB，可在本机或能访问 DB 的环境运行。
 
 ### 5.1 部署拓扑与启停边界（便于 Agent / 实现参考）
 
-**默认拓扑**：**跨机**——监控机与交易机分离；**交易机双进程**——稳定守护进程 + 对冲子进程（由守护进程按 DB 状态启停）。
+**默认拓扑**：**跨机**——监控机与交易机分离；**交易机单进程**——守护进程（`run_engine.py`）连 IB 并执行对冲逻辑。
 
 - **交易机（Trading Host）**：
-  - **稳定守护进程**（`run_daemon.py`）：连接 IB（占用 `ib.client_id`，如 1），**不包含对冲逻辑**；轮询 PostgreSQL（`daemon_control`、`daemon_run_status`）。**运行不依赖 IB**（RE-7）：守护进程本身**不因 IB 连接失败而退出**；若 IB 不可用则进入“等待 IB”状态（如 WAITING_IB），持续写心跳（`ib_connected=false`、`next_retry_ts`）、轮询 stop/retry_ib，并按配置间隔**自动重试**连接；监控端显示**黄灯**（degraded）表示“守护在工作但启动对冲条件不满足”，并展示**下次重试时间**；连接成功后正常 RUNNING、更新 Client ID。收到 **stop** 则消费并退出（并结束子进程）；收到 **resume**（suspended=false）则启动 **对冲应用** 子进程；收到 **suspend**（suspended=true）则安全结束子进程。该进程保持稳定、极少重启，从而长期占用同一 Client ID。
-  - **对冲应用**（`run_hedge_app.py`）：由稳定守护进程在 resume 时以子进程启动；连接 IB 使用 `ib.hedge_client_id`（如 2），执行全部对冲逻辑（Gamma Scalping、FSM、写 status/operations）。升级对冲逻辑时只需重启此子进程（或由守护进程在下次 resume 时拉起新版本），无需重启稳定守护进程。
-- **监控机（Monitoring Host）**：运行 **status server**（`run_status_server.py`），读 PostgreSQL，提供 GET /status、GET /operations、POST /control/stop、POST /control/flatten、POST /control/suspend、POST /control/resume。不提供「启动」；稳定守护进程在交易机执行 `run_daemon.py`（SSH/systemd/手动）。
-- **PostgreSQL**：可与交易机或监控机同机或独立；稳定守护进程、对冲子进程与 status server 均需能连同一实例。
+  - **守护进程**（`run_engine.py`）：连接 IB（`ib.client_id`，如 1），执行全部对冲逻辑（Gamma Scalping、FSM、写 status/operations）；轮询 PostgreSQL（`daemon_control`、`daemon_run_status`）。**运行不依赖 IB**（RE-7）：若 IB 不可用则进入 WAITING_IB，持续写心跳（`ib_connected=false`、`next_retry_ts`）、轮询 stop/retry_ib，并按配置间隔**自动重试**连接；监控端显示**黄灯**（degraded）。收到 **stop** 则消费并退出；**suspend**/ **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED，同一进程内不再执行 maybe_hedge 或恢复执行。
+- **监控机（Monitoring Host）**：运行 **status server**（`run_server.py`），读 PostgreSQL，提供 GET /status、GET /operations、POST /control/stop、POST /control/flatten、POST /control/suspend、POST /control/resume。不提供「启动」；守护进程在交易机执行 `run_engine.py`（SSH/systemd/手动）。
+- **PostgreSQL**：可与交易机或监控机同机或独立；守护进程与 status server 均需能连同一实例。
 
 **启停语义**：
 
 | 操作 | 谁处理 | 说明 |
 |------|--------|------|
-| **Stop** | 稳定守护进程轮询并**仅消费** `daemon_control` 中的 stop 后退出 | 监控端 POST /control/stop → 写 DB → 守护进程消费 stop，结束子进程并退出。 |
-| **Flatten** | 对冲应用（子进程）轮询并消费 flatten | 守护进程不消费 flatten，由运行中的对冲子进程消费并执行。 |
-| **Suspend** | 稳定守护进程根据 `daemon_run_status.suspended=true` 结束子进程 | 监控端 POST /control/suspend → 写 DB → 守护进程轮询后对子进程发 SIGTERM 等安全退出。 |
-| **Resume** | 稳定守护进程根据 `daemon_run_status.suspended=false` 启动子进程 | 监控端 POST /control/resume → 写 DB → 守护进程轮询后 subprocess 启动 `run_hedge_app.py`。 |
-| **Retry IB**（RE-7） | 稳定守护进程立即尝试连接 IB | 监控端 POST /control/retry_ib（或 daemon_control 写入 retry_ib）→ 守护进程消费后执行一次连接尝试；恢复后写回连接状态与 Client ID。 |
-| **Start** | 不通过 status server | 在交易机执行 `run_daemon.py`（SSH/systemd/手动）。 |
+| **Stop** | 守护进程轮询并消费 `daemon_control` 中的 stop 后退出 | 监控端 POST /control/stop → 写 DB → 守护进程消费 stop 并退出。 |
+| **Flatten** | 守护进程轮询并消费 flatten | 监控端 POST /control/flatten → 写 DB → 守护进程消费并执行。 |
+| **Suspend** | 守护进程根据 `daemon_run_status.suspended=true` 进入 RUNNING_SUSPENDED | 监控端 POST /control/suspend → 写 DB → 守护进程轮询后不再执行 maybe_hedge。 |
+| **Resume** | 守护进程根据 `daemon_run_status.suspended=false` 回到 RUNNING | 监控端 POST /control/resume → 写 DB → 守护进程轮询后恢复执行 maybe_hedge。 |
+| **Retry IB**（RE-7） | 守护进程立即尝试连接 IB | 监控端 POST /control/retry_ib → 写 DB → 守护进程消费后执行一次连接尝试；恢复后写回连接状态与 Client ID。 |
+| **Start** | 不通过 status server | 在交易机执行 `run_engine.py`（SSH/systemd/手动）。 |
 
-**拓扑示意（默认：交易机与监控机分离；交易机双进程）**：
+**拓扑示意（默认：交易机与监控机分离；交易机单进程）**：
 
 ```
 [ 操作者：浏览器 → 监控机 status server :8765 ]
@@ -181,7 +180,7 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  监控机 (Monitoring Host)                                                │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  Status Server (run_status_server.py)                             │   │
+│  │  Status Server (run_server.py)                             │   │
 │  │  读/写 PostgreSQL ←───────────────────────────────────────────────┼───┼──→ 同一 PostgreSQL
 │  └─────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -191,21 +190,13 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  交易机 (Trading Host) — 与 IB 同机                                       │
 │  ┌─────────────┐   ┌─────────────────────────────────────────────────┐   │
-│  │ TWS/Gateway │   │ 稳定守护进程 (run_daemon.py)                      │   │
-│  │             │◄──│  IB client_id=1（仅占连接，无对冲逻辑）             │   │
-│  └─────────────┘   │  轮询 DB：stop→退出；suspend→结束子进程；resume→   │   │
-│         ▲          │  启动 run_hedge_app.py 子进程                       │   │
-│         │          └───────────────────────┬─────────────────────────┘   │
-│         │ client_id=2                     │ subprocess 启停              │
-│         │          ┌───────────────────────▼─────────────────────────┐   │
-│         └──────────│ 对冲应用 (run_hedge_app.py，子进程)                │   │
-│                    │  StatusSink 写 PostgreSQL；消费 flatten            │   │
-│                    └────────────────────────────────────────────────┘   │
-│  启动：本机执行 run_daemon.py（SSH/systemd/手动）                          │
+│  │ TWS/Gateway │◄──│ 守护进程 (run_engine.py)                           │   │
+│  └─────────────┘   │  IB client_id=1；Daemon FSM + Hedge/Trading FSM   │   │
+│                    │  轮询 DB：stop→退出；suspend/resume→RUNNING_SUSPENDED/RUNNING │   │
+│                    └─────────────────────────────────────────────────┘   │
+│  启动：本机执行 run_engine.py（SSH/systemd/手动）                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
-
-**单进程模式（可选）**：在交易机直接运行 `run_engine.py`（或 `run_hedge_app.py` 且不设 BIFROST_UNDER_DAEMON）时，为单进程：同一进程既连 IB 又执行对冲逻辑，并自行轮询 stop/suspend/resume。适用于试跑或不需要长期占用固定 Client ID 的场景。
 
 ---
 

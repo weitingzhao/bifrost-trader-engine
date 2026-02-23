@@ -66,7 +66,7 @@
 
 | 步骤 | 内容 | 交付物 |
 |------|------|--------|
-| 2.1 | 独立应用入口 | 如 `scripts/run_status_server.py`：读 sink（PostgreSQL 当前视图 + 操作表）；GET /status（含 status_lamp）；GET /operations；POST /control/stop（控制文件或本地 API）；可选 POST /control/flatten |
+| 2.1 | 独立应用入口 | 如 `scripts/run_server.py`：读 sink（PostgreSQL 当前视图 + 操作表）；GET /status（含 status_lamp）；GET /operations；POST /control/stop（控制文件或本地 API）；可选 POST /control/flatten |
 | 2.2 | 配置与文档 | sink 路径、控制文件路径、监控端口等入 config 与 README/docs |
 | 2.3 | R-C3（若本阶段做） | 守护进程支持 flatten 指令；独立应用 POST /control/flatten |
 
@@ -79,7 +79,7 @@
 
 ### 2.4 阶段 2 实现说明（已落地）
 
-- **独立应用**：`scripts/run_status_server.py`；`src/status_server/`（reader、self_check、app）。GET /status 含 status_lamp、self_check、block_reasons；GET /operations 支持 since_ts、until_ts、type、limit；POST /control/stop、POST /control/flatten 写控制文件。
+- **独立应用**：`scripts/run_server.py`；`src/status_server/`（reader、self_check、app）。GET /status 含 status_lamp、self_check、block_reasons；GET /operations 支持 since_ts、until_ts、type、limit；POST /control/stop、POST /control/flatten 写控制文件。
 - **守护进程**：heartbeat 内轮询 `control.file`，读到 `stop` 即 `request_stop()`；`flatten` 暂仅打日志（R-C3 未实现）。
 - **配置与文档**：README 含 Phase 2 配置、启动命令与 curl 示例；PLAN_NEXT_STEPS 含控制文件格式说明。
 

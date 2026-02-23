@@ -17,7 +17,7 @@
 | **RE-3** | 部署与运行位置 | 守护程序与 TWS 同机；方案 A（Mac 单机）或 B（Linux 服务器 + 远程桌面）。 | §3 |
 | **RE-4** | 监控范围 | 仅操作者本人、家庭局域网；不要求公网或手机。 | §4 |
 | **RE-5** | 监控服务与交易服务分离 | **交易守护进程**必须与 IB/TWS 同机（无其他选择）；**监控服务**（独立应用）可运行在局域网内任意主机，可与交易机同机或不同机。 | §3.1 |
-| **RE-6** | 交易机进程解耦 | **稳定守护进程**（`run_daemon.py`）仅维护 IB 连接（占 Client ID）、轮询 DB 并按 resume/suspend 启停**对冲子进程**（`run_hedge_app.py`）；对冲逻辑独立于守护进程，升级时仅重启子进程，不废弃 Client ID。 | §3.2 |
+| **RE-6** | 交易机单进程 | 交易机仅运行 **单进程**（`run_engine.py`）：同一进程连 IB、执行对冲逻辑并轮询 DB；升级对冲逻辑需重启整个进程。 | §3.2 |
 | **RE-7** | 守护程序与 IB 连接 | **不假定 IB（TWS/Gateway）已运行**。启动时若 IB 不可用，守护程序应**等待/自动重试**而非阻塞卡死；连接状态与当前 **Client ID** 须在监控端可观测；支持**监控端点击重试**或**守护程序自动重试**恢复连接，恢复后在监控端显示 Client ID。 | §3.3 |
 
 ### 产品功能需求（按领域分类）
@@ -29,7 +29,7 @@
 | **监控** | **R-M3** | 红绿灯监控：监控界面须提供 **红/黄/绿** 式状态指示，通过颜色 **一目了然** 识别运行是否正常。 | 待实现 | 阶段 2 | §4、§6 | 同上：R-M3 验收标准 + 阶段 2 Test Case 清单 |
 | **监控** | **R-M4** | 操作可查：能 **查询** 执行过的操作，尤其 **涉及持仓变化** 的操作（对冲下单、成交、撤单等）。 | 待实现 | 阶段 1（R-M4a 写出）+ 阶段 2（R-M4b 读与查询） | §4.2、§6 | 同上：R-M4a/R-M4b 验收标准 + 阶段 1/2 Test Case 清单 |
 | **监控** | **R-M5** | 监控 Web 界面：操作者通过 **浏览器** 访问监控应用，**直观查看** 守护进程运行状态（红绿灯、自检、状态摘要、操作列表），并通过界面 **发起停止**。启动守护程序在交易机执行，不在 Web 提供。 | 待实现 | 阶段 2 | §4.3、§6 | 同上：阶段 2 验收 + Web UI 可访问、红绿灯可见、停止按钮可用 |
-| **控制** | **R-C1** | 一键停止：能在局域网内 **停止** 守护程序（含优雅退出）；停止后 **不再下发任何新单**；须支持通过 **监控 Web 界面** 发起停止。启动在交易机执行 `run_daemon.py`（推荐）或单进程 `run_engine.py`。 | 待实现 | 阶段 1（R-C1a 信号/控制文件）+ 阶段 2（R-C1b 独立应用发停止 + Web UI） | §5.1、§6 | 同上：R-C1a/R-C1b 验收标准 + 阶段 1/2 Test Case 清单 |
+| **控制** | **R-C1** | 一键停止：能在局域网内 **停止** 守护程序（含优雅退出）；停止后 **不再下发任何新单**；须支持通过 **监控 Web 界面** 发起停止。启动在交易机执行 `run_engine.py`。 | 待实现 | 阶段 1（R-C1a 信号/控制文件）+ 阶段 2（R-C1b 独立应用发停止 + Web UI） | §5.1、§6 | 同上：R-C1a/R-C1b 验收标准 + 阶段 1/2 Test Case 清单 |
 | **控制** | **R-C2** | 细粒度控制：**暂停/恢复** 自动对冲；暂停期间不下新单，监控与自检仍可用。 | 待实现 | 阶段 3.2（按需） | §5.2、§6 | 同上：R-C2 验收标准 + 阶段 3.2 Test Case 清单 |
 | **控制** | **R-C3** | 一键平敞口（安全兜底）：红时可 **一键平掉本策略管理的对冲敞口**；仅针对本守护程序负责的对冲仓位。 | 待实现 | 阶段 2 或 3.2 | §5.1、§6 | 同上：R-C3 验收标准 + 阶段 2 或 3.2 Test Case 清单 |
 | **历史与统计** | **R-H1** | 状态可扩展为带历史：写入接口支持“当前 + 历史”，避免先文件后迁库。 | 待实现 | 阶段 1 | §7、§6 | 同上：R-H1 验收标准 + 阶段 1 Test Case 清单 |
@@ -90,36 +90,19 @@
 **默认部署**：**交易机与监控机不在同一台计算机上**（跨机部署为默认需求）。即：守护进程与 TWS/IB 运行在**交易机**，status server（监控应用）运行在**监控机**，二者通过同一 PostgreSQL 通信；同机部署为可选变体。
 
 - **交易守护进程**：因需直连 TWS/IB API，**只能与 IB（TWS 或 Gateway）运行在同一台机器**（交易机），无其他选择。
-- **监控服务**（阶段 2 的独立应用，如 `run_status_server.py`）：与守护进程**物理解耦**，**默认运行在局域网内另一台主机**（监控机）：
+- **监控服务**（阶段 2 的独立应用，如 `run_server.py`）：与守护进程**物理解耦**，**默认运行在局域网内另一台主机**（监控机）：
   - **控制通道**：采用 **PostgreSQL 表 `daemon_control`**（见 [DATABASE.md](DATABASE.md) §2.4）。监控端 POST /control/stop 或 /control/flatten 时向该表 **INSERT** 一行；守护进程在每次 heartbeat 轮询并消费（标记 `consumed_at`）后执行。跨机与同机均只需监控与守护进程能连**同一 PostgreSQL**，无需共享文件系统（如 NFS）。
   - **跨机部署（默认）**：status server 在监控机，守护进程在交易机；状态、操作与控制均经同一数据库完成。
   - **同机部署（可选）**：status server 与守护进程均在交易机时，Stop/Flatten 仍经 DB；启动守护进程仍在交易机执行 `run_engine.py`。
 
 **启停边界（R-C1）**：
 
-- **停止（Stop）**：监控端 POST /control/stop → 写入 `daemon_control` → 稳定守护进程轮询消费后退出（并结束对冲子进程）。
-- **启动（Start）**：status server 不提供启动；须在**交易机**上执行 `run_daemon.py`（推荐）或单进程 `run_engine.py`（SSH/systemd/手动）。
+- **停止（Stop）**：监控端 POST /control/stop → 写入 `daemon_control` → 守护进程轮询消费后退出。
+- **启动（Start）**：status server 不提供启动；须在**交易机**上执行 `run_engine.py`（SSH/systemd/手动）。
 
-### 3.2 交易机进程解耦（RE-6）：稳定守护进程 + 对冲子进程
+### 3.2 交易机单进程（RE-6）
 
-**需求**：守护程序因逻辑升级需频繁变更；每次重启会废弃当前 IB Client ID。希望将**长期占用 Client ID** 的进程与**易变对冲逻辑**分离，使升级对冲代码时仅重启对冲子进程，不重启占用 Client ID 的进程。
-
-**设计**：
-
-- **稳定守护进程**（`run_daemon.py`）：
-  - 连接 IB 并**仅维护连接**（占用 `ib.client_id`，如 1），**不包含任何对冲/策略逻辑**；逻辑简单稳定，极少修改。
-  - 轮询 PostgreSQL：`daemon_control`（仅消费 **stop**）、`daemon_run_status`（suspended）。
-  - 收到 **stop**：消费后退出，并安全结束子进程。
-  - 收到 **resume**（suspended=false）：若子进程未运行，则以 **subprocess** 启动对冲应用（`run_hedge_app.py`）。
-  - 收到 **suspend**（suspended=true）：对已运行的对冲子进程执行安全退出（SIGTERM，超时后 SIGKILL）并关闭。
-- **对冲应用**（`run_hedge_app.py`）：
-  - 包含全部对冲交易逻辑（Gamma Scalping、FSM、Guard、下单、写 status/operations）；由稳定守护进程在「恢复对冲」时以子进程启动。
-  - 连接 IB 使用 **另一 Client ID**（`ib.hedge_client_id`，如 2），与稳定守护进程的 client_id 不同。
-  - 升级对冲逻辑后，只需重启此子进程（或由守护进程在下次 resume 时自动拉起新版本），稳定守护进程不重启，其 Client ID 不废弃。
-
-**配置**：`config.yaml` 中 `ib.client_id`（守护进程）、`ib.hedge_client_id`（对冲子进程，可选，默认 client_id+1）；`daemon.hedge_command`（启动子进程的命令，可选）、`daemon.heartbeat_interval`（轮询间隔，可选）。
-
-**单进程模式**：仍可在交易机直接运行 `run_engine.py`（或单独运行 `run_hedge_app.py` 且不通过稳定守护进程），此时为单进程：同一进程既连 IB 又执行对冲逻辑，适用于试跑或不需要长期固定 Client ID 的场景。
+交易机仅运行 **单进程**（`run_engine.py`）：同一进程连接 IB、执行对冲逻辑（Daemon FSM + Hedge/Trading FSM）、轮询 `daemon_control` 与 `daemon_run_status`（stop/suspend/resume），并写心跳与状态。升级对冲逻辑需重启整个进程。
 
 ### 3.3 守护程序与 IB 连接（RE-7）：不假定 IB 已运行、运行不依赖 IB、黄灯与可观测重试
 
@@ -141,7 +124,7 @@
 
 - 守护程序 FSM：增加 **WAITING_IB** 状态；CONNECTING 失败时转入 WAITING_IB（而非 STOPPED）。WAITING_IB 下：写心跳（`ib_connected=false`、`next_retry_ts`）、轮询 stop/retry_ib、到点自动重试连接；成功则 CONNECTED → RUNNING，失败则更新 next_retry_ts 并保持 WAITING_IB。
 - 数据与 API：`daemon_heartbeat` 表含 `ib_connected`、`ib_client_id`、**`next_retry_ts`**（timestamptz，未连接时下一计划重试时刻）；GET /status 返回上述字段；控制通道支持 `retry_ib`。
-- 单进程（run_engine.py）与双进程（run_daemon.py）均遵循上述行为：运行不依赖 IB，未连接时黄灯与周期重试。
+- 守护进程（run_engine.py）遵循上述行为：运行不依赖 IB，未连接时黄灯与周期重试。
 
 ---
 
@@ -184,7 +167,7 @@
 - **目标**：操作者通过 **浏览器** 打开监控应用提供的 Web 页面，**直观看到** 自动交易守护程序的运行状态，无需依赖 curl 或命令行。界面须包含：
   - **红绿灯**（R-M3）：当前状态一目了然（绿/黄/红）；
   - **自检结论**（R-M2）：ok / degraded / blocked 及 block_reasons；
-  - **守护程序 / 对冲程序分区**（RE-6）：守护程序与对冲程序分块展示；守护程序区须包含 **与 IB 连接状态**（已连接 / 未连接 / 连接中）及连接成功时的 **Client ID**（RE-7）；若断开，可点击「重试连接 IB」或依赖守护程序自动重试，恢复后在界面显示 Client ID；
+  - **守护程序区**：须包含 **与 IB 连接状态**（已连接 / 未连接 / 连接中）及连接成功时的 **Client ID**（RE-7）；若断开，可点击「重试连接 IB」或依赖守护程序自动重试，恢复后在界面显示 Client ID；
   - **状态摘要**：daemon_state、trading_state、标的、持仓、当日对冲次数等（来自 GET /status）；
   - **操作列表**（R-M4）：近期涉及持仓变化的操作，可刷新或自动更新；
   - **控制**（R-C1）：**停止**、**一键平敞口** 按钮（POST /control/stop、POST /control/flatten）；**重试连接 IB**（POST /control/retry_ib 或等效，RE-7）。启动守护程序在交易机执行，不在 Web 界面提供。
@@ -228,7 +211,7 @@
 | 部署选择 | 24/7 + 远程桌面优先选 Linux 服务器（B）；单机桌面场景可选 Mac（A）。 | RE-3 |
 | 监控使用者 | 仅操作者本人，家庭局域网。 | RE-4 |
 | 监控与交易分离 | 交易守护进程必须与 IB 同机；监控服务可运行在局域网内任意主机（同机或不同机）；不同机时控制需共享存储（如 NFS）或后续 DB 通道。 | RE-5 |
-| 交易机进程解耦 | 稳定守护进程（run_daemon.py）持 IB Client ID；对冲逻辑在子进程（run_hedge_app.py），由守护进程按 resume/suspend 启停；升级对冲仅重启子进程。 | RE-6 |
+| 交易机单进程 | 仅 run_engine.py 单进程：同进程连 IB + 对冲逻辑 + 轮询控制；升级需重启整个进程。 | RE-6 |
 | 守护程序与 IB 连接 | 不假定 IB 已运行；启动时若 IB 不可用则等待/自动重试而非卡死；监控端展示连接状态与 Client ID；支持监控端重试或守护程序自动重试，恢复后显示 Client ID。 | RE-7 |
 | 状态可观测 | 运行状态可不依赖控制台查看（经 sink → 独立应用）。 | R-M1 |
 | 状态自检 | 守护程序支持状态自检，供监控控制台调用；结论（ok/degraded/blocked）+ block_reasons（见 §4.1）。 | R-M2 |
