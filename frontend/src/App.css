@@ -280,3 +280,91 @@ button:disabled {
   font-size: 0.8rem;
   color: var(--muted);
 }
+
+/* IB 账户模块：深色主题、标签切换、紧凑布局 */
+.ib-accounts-wrap {
+  margin-top: 0.5rem;
+}
+.ib-accounts-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 0.5rem;
+}
+.ib-accounts-tab {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: rgba(15, 23, 42, 0.5);
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.ib-accounts-tab:hover {
+  background: rgba(51, 65, 85, 0.6);
+  color: var(--text);
+}
+.ib-accounts-tab.active {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+.ib-accounts-content {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+.ib-summary-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+}
+.ib-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.ib-summary-item .label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.ib-summary-item .value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ib-positions-title {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0.5rem 0 0.35rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.ib-positions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.ib-positions-table th,
+.ib-positions-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #334155;
+}
+.ib-positions-table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.ib-positions-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.25rem 0 0 0;
+  padding: 0.5rem 0;
+}

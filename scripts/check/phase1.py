@@ -60,7 +60,7 @@ DAEMON_CONTROL_COLS = {"id", "command", "created_at", "consumed_at"}  # Phase 2,
 DAEMON_RUN_STATUS_COLS = {"id", "suspended", "updated_at"}  # Phase 2, DATABASE.md §2.5
 DAEMON_HEARTBEAT_COLS = {"id", "last_ts", "hedge_running", "ib_connected", "ib_client_id", "next_retry_ts", "seconds_until_retry", "graceful_shutdown_at"}  # Phase 2, DATABASE.md §2.6 (RE-7)
 
-SCHEMA_FIX_TIP = " Run: python scripts/init_phase1_db.py to create/repair tables (see docs/DATABASE.md)."
+SCHEMA_FIX_TIP = " Run: python scripts/refresh_db_schema.py to create/repair tables (see docs/DATABASE.md)."
 
 
 def _fail_msg(exc: BaseException, prefix: str = "") -> str:

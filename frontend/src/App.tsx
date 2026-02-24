@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import type { StatusResponse, Operation } from './types'
+import type { IbAccountSnapshot, StatusResponse, Operation } from './types'
 import {
   fetchStatus,
   fetchOperations,
@@ -83,6 +83,7 @@ export default function App() {
   const [ibHostInput, setIbHostInput] = useState<string>('127.0.0.1')
   const [ibPortTypeInput, setIbPortTypeInput] = useState<'tws_live' | 'tws_paper' | 'gateway'>('tws_paper')
   const [apiReachable, setApiReachable] = useState<boolean>(false)
+  const [ibAccountIndex, setIbAccountIndex] = useState(0)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -476,6 +477,140 @@ export default function App() {
         <div className={`msg ${ctrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
           {ctrlMsg.text}
         </div>
+      </div>
+
+      <div className="card process-section">
+        <h2>
+          IB 账户{' '}
+          <span className="section-desc">
+            （多账户摘要与持仓，来自 DB）
+          </span>
+        </h2>
+        {(() => {
+          const rawAccounts = j?.accounts as IbAccountSnapshot[] | undefined
+          const hasAccounts = Array.isArray(rawAccounts) && rawAccounts.length > 0
+          const fmtUsd = (n: number | null | undefined) =>
+            n != null && Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'
+          /** 到期日原始格式为 YYYYMM 或 YYYYMMDD，格式化为 YYYY-MM 或 YYYY-MM-DD */
+          const fmtExpiry = (raw: string | undefined): string => {
+            if (!raw || typeof raw !== 'string') return '—'
+            const s = String(raw).trim().replace(/\D/g, '')
+            if (s.length === 8) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+            if (s.length === 6) return `${s.slice(0, 4)}-${s.slice(4, 6)}`
+            return raw
+          }
+          const secTypeLabel = (t: string | undefined): string => {
+            if (!t) return '—'
+            if (t === 'STK') return '股票'
+            if (t === 'OPT') return '期权'
+            return t
+          }
+          if (!hasAccounts) {
+            return (
+              <p className="section-hint">
+                无账户数据（IB 未连接或守护进程尚未写入；连接后按心跳拉取并写入 accounts / account_positions）
+              </p>
+            )
+          }
+          const getNetLiq = (a: IbAccountSnapshot) => {
+            const v = a.summary?.NetLiquidation
+            if (v == null) return 0
+            const n = parseFloat(String(v))
+            return Number.isFinite(n) ? n : 0
+          }
+          const accounts = [...rawAccounts!].sort((a, b) => getNetLiq(b) - getNetLiq(a))
+          const selectedIndex = Math.min(ibAccountIndex, accounts.length - 1)
+          const acc = accounts[selectedIndex]
+          const aid = acc.account_id ?? `账户-${selectedIndex + 1}`
+          const sum = acc.summary ?? {}
+          const netLiq = sum.NetLiquidation != null ? parseFloat(String(sum.NetLiquidation)) : undefined
+          const totalCash = sum.TotalCashValue != null ? parseFloat(String(sum.TotalCashValue)) : undefined
+          const buyingPower = sum.BuyingPower != null ? parseFloat(String(sum.BuyingPower)) : undefined
+          const positions = acc.positions ?? []
+          return (
+            <div className="ib-accounts-wrap">
+              {accounts.length > 1 && (
+                <div className="ib-accounts-tabs">
+                  {accounts.map((a, idx) => (
+                    <button
+                      key={a.account_id ?? idx}
+                      type="button"
+                      className={`ib-accounts-tab ${idx === selectedIndex ? 'active' : ''}`}
+                      onClick={() => setIbAccountIndex(idx)}
+                    >
+                      {a.account_id ?? `账户-${idx + 1}`}
+                      {(a.positions?.length ?? 0) > 0 && (
+                        <span className="section-hint" style={{ marginLeft: '0.35rem', fontWeight: 'normal' }}>
+                          ({a.positions!.length})
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="ib-accounts-content">
+                <div className="ib-summary-row">
+                  <div className="ib-summary-item">
+                    <span className="label">账户</span>
+                    <span className="value">{aid}</span>
+                  </div>
+                  {netLiq != null && Number.isFinite(netLiq) && (
+                    <div className="ib-summary-item">
+                      <span className="label">净资产</span>
+                      <span className="value">{fmtUsd(netLiq)}</span>
+                    </div>
+                  )}
+                  {totalCash != null && Number.isFinite(totalCash) && (
+                    <div className="ib-summary-item">
+                      <span className="label">总现金</span>
+                      <span className="value">{fmtUsd(totalCash)}</span>
+                    </div>
+                  )}
+                  {buyingPower != null && Number.isFinite(buyingPower) && (
+                    <div className="ib-summary-item">
+                      <span className="label">购买力</span>
+                      <span className="value">{fmtUsd(buyingPower)}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="ib-positions-title">持仓（美元）</div>
+                {positions.length === 0 ? (
+                  <p className="ib-positions-empty">无</p>
+                ) : (
+                  <table className="ib-positions-table">
+                    <thead>
+                      <tr>
+                        <th>标的</th>
+                        <th>类型</th>
+                        <th>到期日</th>
+                        <th>Strike</th>
+                        <th>数量</th>
+                        <th>成本</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {positions.map((pos, i) => {
+                        const isOpt = (pos.secType ?? '').toUpperCase() === 'OPT'
+                        const expiryRaw = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
+                        const strike = pos.strike
+                        return (
+                          <tr key={`${pos.symbol}-${i}`}>
+                            <td>{pos.symbol ?? '—'}</td>
+                            <td>{secTypeLabel(pos.secType)}</td>
+                            <td>{isOpt && expiryRaw ? fmtExpiry(expiryRaw) : '—'}</td>
+                            <td>{isOpt && strike != null && Number.isFinite(strike) ? fmtUsd(strike) : '—'}</td>
+                            <td>{pos.position != null ? pos.position : '—'}</td>
+                            <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       <div className="card process-section">

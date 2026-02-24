@@ -27,6 +27,12 @@ class Store:
         self._daily_hedge_date: Optional[str] = None  # YYYY-MM-DD
         self._daily_pnl_usd = 0.0
 
+        # R-A1: account summary (account id + key values from IB); trading uses first account
+        self._account_id: Optional[str] = None
+        self._account_summary: Optional[dict] = None  # e.g. {"NetLiquidation": "123", "TotalCashValue": "456"}
+        # R-A1 multi-account: list of { account_id, summary: {}, positions: [] } for monitoring
+        self._accounts_data: List[dict] = []
+
     def set_positions(self, positions: List[Any], stock_position: int = 0) -> None:
         with self._lock:
             self._positions = list(positions)
@@ -119,3 +125,29 @@ class Store:
     def add_fill_pnl(self, pnl_delta: float) -> None:
         with self._lock:
             self._daily_pnl_usd += pnl_delta
+
+    def set_account_summary(self, account_id: Optional[str], summary: Optional[dict]) -> None:
+        """R-A1: store account id and key values (NetLiquidation, TotalCashValue, BuyingPower, etc.)."""
+        with self._lock:
+            self._account_id = account_id
+            self._account_summary = dict(summary) if summary else None
+
+    def get_account_id(self) -> Optional[str]:
+        """R-A1: current account id from last account summary."""
+        with self._lock:
+            return self._account_id
+
+    def get_account_summary(self) -> Optional[dict]:
+        """R-A1: last account summary dict (tag -> value)."""
+        with self._lock:
+            return dict(self._account_summary) if self._account_summary else None
+
+    def set_accounts_data(self, accounts: List[dict]) -> None:
+        """R-A1 multi-account: set list of { account_id, summary: {}, positions: [] } for monitoring."""
+        with self._lock:
+            self._accounts_data = [dict(a) for a in accounts]
+
+    def get_accounts_data(self) -> List[dict]:
+        """R-A1 multi-account: get list of account dicts (account_id, summary, positions) for monitoring."""
+        with self._lock:
+            return [dict(a) for a in self._accounts_data]

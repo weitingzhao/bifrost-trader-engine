@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ib_insync import (
     IB,
@@ -14,6 +14,7 @@ from ib_insync import (
     Fill,
     Position,
     Ticker,
+    AccountValue,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,8 +146,67 @@ class IBConnector:
         self._connected = False
         logger.info("Disconnected from IB")
 
+    def get_managed_accounts(self) -> List[str]:
+        """Return list of managed account IDs (e.g. ['U17113214', 'DU456']). Empty when not connected. R-A1.
+        IB API returns comma-separated string; we normalize to list of non-empty IDs."""
+        if not self.is_connected:
+            return []
+        try:
+            raw = self.ib.managedAccounts()
+            logger.info("[R-A1] get_managed_accounts raw=%r (type=%s)", raw, type(raw).__name__)
+            if not raw:
+                return []
+            # TWS API returns comma-separated string (e.g. "U17113214,DU123"); some wrappers return list
+            if isinstance(raw, str):
+                parts = raw.split(",")
+            else:
+                parts = [str(s) for s in raw]
+            out = [s.strip() for s in parts if s.strip()]
+            logger.info("[R-A1] get_managed_accounts parsed=%s", out)
+            return out
+        except Exception as e:
+            logger.warning("get_managed_accounts: %s", e, exc_info=True)
+            return []
+
+    async def get_account_summary(self, account: Optional[str] = None) -> List[AccountValue]:
+        """Request and return account summary (NetLiquidation, TotalCashValue, BuyingPower, etc.). R-A1.
+        If account is None, returns values for all accounts (ib_insync convention).
+        """
+        if not self.is_connected:
+            return []
+        try:
+            # accountSummaryAsync calls reqAccountSummaryAsync on first run, then returns cached values
+            values = await self.ib.accountSummaryAsync(account or "")
+            return list(values) if values else []
+        except Exception as e:
+            logger.warning("get_account_summary: %s", e)
+            return []
+
+    @staticmethod
+    def position_to_dict(pos: Position) -> Dict[str, Any]:
+        """Convert IB Position to a JSON-serializable dict for monitoring (R-A1 multi-account).
+        For OPT: includes lastTradeDateOrContractMonth (expiry), strike, right (C/P) so options are distinguishable."""
+        c = pos.contract
+        sec_type = getattr(c, "secType", "") or ""
+        out: Dict[str, Any] = {
+            "account": pos.account,
+            "symbol": getattr(c, "symbol", "") or "",
+            "secType": sec_type,
+            "exchange": getattr(c, "exchange", "") or "",
+            "currency": getattr(c, "currency", "") or "",
+            "position": float(pos.position),
+            "avgCost": float(pos.avgCost) if pos.avgCost is not None else None,
+        }
+        if sec_type == "OPT":
+            # IB Option contract: lastTradeDateOrContractMonth (YYYYMM or YYYYMMDD), strike, right ('C'/'P' or 'CALL'/'PUT')
+            out["lastTradeDateOrContractMonth"] = getattr(c, "lastTradeDateOrContractMonth", None) or ""
+            out["strike"] = getattr(c, "strike", None)
+            out["right"] = getattr(c, "right", None) or ""
+            out["multiplier"] = getattr(c, "multiplier", None)
+        return out
+
     async def get_positions(self, account: Optional[str] = None) -> List[Position]:
-        """Return list of IB Position objects. If account is None, use first account."""
+        """Return list of IB Position objects. If account is None, returns all positions (all accounts)."""
         if not self.is_connected:
             await self.connect()
         # Use async API to avoid "event loop is already running" when called from asyncio.

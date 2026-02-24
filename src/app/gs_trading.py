@@ -209,9 +209,51 @@ class GsTrading:
             except Exception as e:
                 logger.debug("Config reload check failed: %s", e)
 
+    async def _refresh_accounts_data(self) -> None:
+        """R-A1: fetch all managed accounts' summary + positions from IB; store for monitoring and set primary account for trading.
+        IB managedAccounts is comma-separated; we get each account's summary and filter positions by account from one reqPositions."""
+        if not self.connector.is_connected:
+            return
+        try:
+            account_ids = self.connector.get_managed_accounts()
+            if not account_ids:
+                logger.warning("[R-A1] get_managed_accounts returned 0 accounts (IB may use comma-separated string)")
+                return
+            logger.info("[R-A1] managed accounts: %s", account_ids)
+            # Request all positions once, then filter by account (avoids N reqPositionsAsync and ensures same snapshot)
+            all_positions = await self.connector.get_positions(account=None)
+            accounts_list: list = []
+            primary_id: Optional[str] = None
+            primary_summary: Optional[dict] = None
+            for account_id in account_ids:
+                values = await self.connector.get_account_summary(account=account_id)
+                summary = {}
+                for v in values:
+                    if getattr(v, "tag", None) and getattr(v, "value", None) is not None:
+                        summary[v.tag] = v.value
+                if account_id:
+                    summary["account"] = account_id
+                # Filter positions for this account (Position.account matches account_id)
+                acct_positions = [p for p in all_positions if getattr(p, "account", None) == account_id]
+                pos_dicts = [self.connector.position_to_dict(p) for p in acct_positions]
+                accounts_list.append({
+                    "account_id": account_id,
+                    "summary": summary,
+                    "positions": pos_dicts,
+                })
+                if primary_id is None and account_id:
+                    primary_id = account_id
+                    primary_summary = summary if summary else None
+            self.store.set_accounts_data(accounts_list)
+            self.store.set_account_summary(primary_id, primary_summary)
+            logger.info("[R-A1] accounts_data count=%s (primary=%s)", len(accounts_list), primary_id)
+        except Exception as e:
+            logger.warning("_refresh_accounts_data: %s", e, exc_info=True)
+
     async def _refresh_positions(self) -> None:
-        """Fetch positions from IB and update store (raw positions + stock_shares only). No option parse."""
-        positions = await self.connector.get_positions()
+        """Fetch positions from IB and update store (raw positions + stock_shares only). No option parse. R-A1: use account_id when available."""
+        account = self.store.get_account_id()
+        positions = await self.connector.get_positions(account=account)
         stock_shares = get_stock_shares(positions, self.symbol)
         self.store.set_positions(positions, stock_shares)
 
@@ -244,8 +286,8 @@ class GsTrading:
         cs: CompositeState,
         data_lag_ms: Optional[float],
     ) -> dict:
-        """Build dict for StatusSink (status_current / status_history). Keys per docs/DATABASE.md §2.1."""
-        return {
+        """Build dict for StatusSink (status_current / status_history). Keys per docs/DATABASE.md §2.1. R-A1: optional account_* keys when available."""
+        d = {
             "daemon_state": self._fsm_daemon.current.value,
             "trading_state": self._fsm_trading.state.value,
             "symbol": self.symbol,
@@ -261,10 +303,37 @@ class GsTrading:
             "config_summary": f"paper_trade={self.paper_trade}",
             "ts": time.time(),
         }
+        # R-A1 optional: account summary
+        acc = self.store.get_account_summary()
+        if acc:
+            d["account_id"] = self.store.get_account_id()
+            try:
+                d["account_net_liquidation"] = float(acc.get("NetLiquidation")) if acc.get("NetLiquidation") else None
+            except (TypeError, ValueError):
+                d["account_net_liquidation"] = None
+            try:
+                d["account_total_cash"] = float(acc.get("TotalCashValue")) if acc.get("TotalCashValue") else None
+            except (TypeError, ValueError):
+                d["account_total_cash"] = None
+            try:
+                d["account_buying_power"] = float(acc.get("BuyingPower")) if acc.get("BuyingPower") else None
+            except (TypeError, ValueError):
+                d["account_buying_power"] = None
+        else:
+            d["account_id"] = None
+            d["account_net_liquidation"] = None
+            d["account_total_cash"] = None
+            d["account_buying_power"] = None
+        # R-A1 multi-account: full list for monitoring (same level as 守护/对冲)
+        accounts_data = self.store.get_accounts_data()
+        d["accounts_snapshot"] = accounts_data if accounts_data else None
+        if accounts_data:
+            logger.debug("[R-A1] _build_snapshot_dict accounts_snapshot len=%s", len(accounts_data))
+        return d
 
     def _build_heartbeat_minimal_dict(self) -> dict:
-        """Minimal snapshot dict when spot is unavailable (e.g. outside market hours). Ensures status_current always has a row while daemon is running."""
-        return {
+        """Minimal snapshot dict when spot is unavailable (e.g. outside market hours). Ensures status_current always has a row while daemon is running. R-A1: include account_* when available."""
+        d = {
             "daemon_state": self._fsm_daemon.current.value,
             "trading_state": self._fsm_trading.state.value,
             "symbol": self.symbol,
@@ -280,6 +349,29 @@ class GsTrading:
             "config_summary": f"paper_trade={self.paper_trade}",
             "ts": time.time(),
         }
+        acc = self.store.get_account_summary()
+        if acc:
+            d["account_id"] = self.store.get_account_id()
+            try:
+                d["account_net_liquidation"] = float(acc.get("NetLiquidation")) if acc.get("NetLiquidation") else None
+            except (TypeError, ValueError):
+                d["account_net_liquidation"] = None
+            try:
+                d["account_total_cash"] = float(acc.get("TotalCashValue")) if acc.get("TotalCashValue") else None
+            except (TypeError, ValueError):
+                d["account_total_cash"] = None
+            try:
+                d["account_buying_power"] = float(acc.get("BuyingPower")) if acc.get("BuyingPower") else None
+            except (TypeError, ValueError):
+                d["account_buying_power"] = None
+        else:
+            d["account_id"] = None
+            d["account_net_liquidation"] = None
+            d["account_total_cash"] = None
+            d["account_buying_power"] = None
+        accounts_data = self.store.get_accounts_data()
+        d["accounts_snapshot"] = accounts_data if accounts_data else None
+        return d
 
     async def _refresh_and_build_snapshot(
         self,
@@ -631,6 +723,7 @@ class GsTrading:
                 logger.warning("[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)", self._fsm_daemon.current.value)
                 self._ib_disconnected_during_run = True
                 return
+            await self._refresh_accounts_data()
             if self._status_sink:
                 result = await self._refresh_and_build_snapshot()
                 if result is not None:
@@ -734,12 +827,23 @@ class GsTrading:
                 ib_client_id=getattr(self.connector, "client_id", None),
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
             )
-        logger.info("[Daemon] state=CONNECTED | fetching positions and building snapshot...")
+        logger.info("[Daemon] state=CONNECTED | fetching account summary and positions, building snapshot...")
+        await self._refresh_accounts_data()
         result = await self._refresh_and_build_snapshot()
         if result is not None:
-            snapshot, _spot, _cs, _data_lag_ms = result
+            snapshot, spot, cs, data_lag_ms = result
             self._fsm_trading.apply_transition(TradingEvent.START, snapshot)
             self._fsm_trading.apply_transition(TradingEvent.SYNCED, snapshot)
+            # Write snapshot (incl. R-A1 account_*) to DB immediately so monitor shows account after reconnection
+            if self._status_sink:
+                snap_dict = self._build_snapshot_dict(snapshot, spot, cs, data_lag_ms)
+                self._status_sink.write_snapshot(snap_dict, append_history=False)
+        else:
+            # No full snapshot (e.g. no spot); still write minimal + account so monitor sees IB account
+            if self._status_sink:
+                self._status_sink.write_snapshot(
+                    self._build_heartbeat_minimal_dict(), append_history=False
+                )
         logger.info("[Daemon] state=CONNECTED → RUNNING (bootstrap done)")
         return DaemonState.RUNNING
 

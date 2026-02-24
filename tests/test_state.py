@@ -42,6 +42,39 @@ class TestStore:
         assert len(store.get_positions()) == 1
         assert store.get_stock_position() == 50
 
+    def test_account_summary_r_a1(self):
+        """R-A1: account id and summary stored and retrieved."""
+        store = Store()
+        assert store.get_account_id() is None
+        assert store.get_account_summary() is None
+        store.set_account_summary("DU123", {"NetLiquidation": "100000", "TotalCashValue": "50000", "BuyingPower": "80000"})
+        assert store.get_account_id() == "DU123"
+        summary = store.get_account_summary()
+        assert summary is not None
+        assert summary.get("NetLiquidation") == "100000"
+        assert summary.get("BuyingPower") == "80000"
+        store.set_account_summary(None, None)
+        assert store.get_account_id() is None
+        assert store.get_account_summary() is None
+
+    def test_accounts_data_multi_account(self):
+        """R-A1 multi-account: list of account_id + summary + positions for monitoring."""
+        store = Store()
+        assert store.get_accounts_data() == []
+        store.set_accounts_data([
+            {"account_id": "DU1", "summary": {"NetLiquidation": "100000"}, "positions": [{"symbol": "AAPL", "position": 100}]},
+            {"account_id": "DU2", "summary": {"NetLiquidation": "200000"}, "positions": []},
+        ])
+        data = store.get_accounts_data()
+        assert len(data) == 2
+        assert data[0]["account_id"] == "DU1"
+        assert data[0]["summary"]["NetLiquidation"] == "100000"
+        assert len(data[0]["positions"]) == 1
+        assert data[0]["positions"][0]["symbol"] == "AAPL"
+        assert data[1]["account_id"] == "DU2"
+        store.set_accounts_data([])
+        assert store.get_accounts_data() == []
+
     def test_thread_safety(self):
         store = Store()
 

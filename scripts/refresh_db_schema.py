@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Create Phase 1 PostgreSQL tables (status_current, status_history, operations) in the configured database.
+"""刷新 status 用 PostgreSQL 库表结构（与 PostgreSQLSink._ensure_tables 一致，见 docs/DATABASE.md）。
 
-Uses the same config and DDL as scripts/check/phase1.py and PostgreSQLSink. Run from project root.
+创建或补齐表：status_current、status_history、operations、daemon_control、daemon_run_status、
+daemon_heartbeat、settings、accounts、account_positions。账户数据仅存于 accounts / account_positions，
+status_current、status_history 不含 account 相关列。从项目根目录执行。
 
 Usage:
-  python scripts/init_phase1_db.py [--config PATH]
-  --config   Config file (default: config/config.yaml)
+  python scripts/refresh_db_schema.py [--config PATH]
+  --config  配置文件路径（默认 config/config.yaml）
 """
 
 from __future__ import annotations
@@ -22,8 +24,8 @@ os.chdir(_PROJECT_ROOT)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Create Phase 1 tables in PostgreSQL.")
-    parser.add_argument("--config", default="config/config.yaml", help="Config path")
+    parser = argparse.ArgumentParser(description="刷新 status 用 PostgreSQL 库表结构（与 DATABASE.md 一致）。")
+    parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
     args = parser.parse_args()
     config_path = args.config
     if not os.path.isabs(config_path):
@@ -73,10 +75,16 @@ def main() -> int:
 
     try:
         _ensure_tables(conn)
-        print(f"Created/verified tables in database {dbname!r}: status_current, status_history, operations, daemon_control, daemon_run_status, daemon_heartbeat, settings")
+        conn.commit()
+        tables_list = (
+            "status_current, status_history, operations, daemon_control, "
+            "daemon_run_status, daemon_heartbeat, settings, accounts, account_positions"
+        )
+        print(f"Schema refreshed in database {dbname!r}.")
+        print(f"  Tables: {tables_list}")
         return 0
     except Exception as e:
-        print(f"Schema creation failed: {e}", file=sys.stderr)
+        print(f"Schema refresh failed: {e}", file=sys.stderr)
         return 1
     finally:
         conn.close()

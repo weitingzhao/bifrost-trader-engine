@@ -4,6 +4,29 @@ export interface IbConfig {
   ib_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
 }
 
+/** One position row from IB (R-A1 multi-account) */
+export interface IbPositionRow {
+  account?: string
+  symbol?: string
+  secType?: string
+  exchange?: string
+  currency?: string
+  position?: number
+  avgCost?: number | null
+  /** 期权到期 YYYYMM/YYYYMMDD (lastTradeDateOrContractMonth) */
+  lastTradeDateOrContractMonth?: string
+  expiry?: string
+  strike?: number
+  right?: string
+}
+
+/** One account in GET /status accounts (R-A1 multi-account) */
+export interface IbAccountSnapshot {
+  account_id?: string
+  summary?: Record<string, string>
+  positions?: IbPositionRow[]
+}
+
 /** Response from GET /status */
 export interface StatusResponse {
   self_check?: string
@@ -15,6 +38,8 @@ export interface StatusResponse {
   daemon_lamp?: 'green' | 'yellow' | 'red'
   daemon_block_reasons?: string[]
   status?: StatusRow | null
+  /** R-A1 multi-account: 与守护/对冲同级，交易账户与持仓基础数据 */
+  accounts?: IbAccountSnapshot[] | null
   ib_config?: IbConfig | null
 }
 
@@ -39,6 +64,11 @@ export interface StatusRow {
   stock_position?: number
   daily_hedge_count?: number
   ts?: number
+  /** R-A1: 主账户标识与摘要（连接后由守护进程写入） */
+  account_id?: string | null
+  account_net_liquidation?: number | null
+  account_total_cash?: number | null
+  account_buying_power?: number | null
   [key: string]: unknown
 }
 

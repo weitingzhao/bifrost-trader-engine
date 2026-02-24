@@ -1,15 +1,163 @@
 """PostgreSQL implementation of StatusSink. See docs/DATABASE.md."""
 
+import math
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
+from psycopg2.extras import Json
 
-from src.sink.base import OPERATION_KEYS, SNAPSHOT_KEYS, StatusSink
+from src.sink.base import (
+    ACCOUNTS_SNAPSHOT_KEY,
+    OPERATION_KEYS,
+    SNAPSHOT_KEYS,
+    StatusSink,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _json_safe(obj: Any) -> Any:
+    """Return a JSON-serializable copy (nan/inf -> None) so psycopg2 Json() and jsonb never fail."""
+    if obj is None:
+        return None
+    if isinstance(obj, (bool, int, str)):
+        return obj
+    if isinstance(obj, float):
+        if math.isfinite(obj):
+            return obj
+        return None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    return str(obj)
+
+
+def _parse_summary_floats(summary: Dict[str, Any]) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Any]]:
+    """Extract net_liquidation, total_cash, buying_power from IB summary; return (nl, tc, bp, summary_extra)."""
+    if not summary or not isinstance(summary, dict):
+        return None, None, None, {}
+    extra = dict(summary)
+    nl = tc = bp = None
+    for key, val in list(extra.items()):
+        if val is None or val == "":
+            continue
+        try:
+            f = float(val) if not isinstance(val, (int, float)) else float(val)
+            if not math.isfinite(f):
+                continue
+            if key == "NetLiquidation":
+                nl = f
+                del extra[key]
+            elif key == "TotalCashValue":
+                tc = f
+                del extra[key]
+            elif key == "BuyingPower":
+                bp = f
+                del extra[key]
+        except (TypeError, ValueError):
+            pass
+    return nl, tc, bp, extra
+
+
+def _sync_accounts_snapshot_to_tables(conn, accounts_list: Optional[List[Dict[str, Any]]]) -> None:
+    """Write normalized accounts_snapshot into accounts + account_positions.
+    accounts: upsert by account_id. account_positions: upsert by (account_id, symbol, sec_type);
+    only delete rows for an account that are no longer in the snapshot (position closed)."""
+    if not accounts_list or not isinstance(accounts_list, list):
+        return
+    with conn.cursor() as cur:
+        for acc in accounts_list:
+            if not isinstance(acc, dict):
+                continue
+            account_id = acc.get("account_id") or acc.get("account")
+            if not account_id:
+                continue
+            account_id = str(account_id).strip()
+            summary = acc.get("summary") or {}
+            if not isinstance(summary, dict):
+                summary = {}
+            net_liq, total_cash, buying_power, summary_extra = _parse_summary_floats(summary)
+            summary_extra_json = _json_safe(summary_extra) if summary_extra else None
+            # accounts: upsert by account_id (no delete)
+            cur.execute(
+                """
+                INSERT INTO accounts (account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra)
+                VALUES (%s, now(), %s, %s, %s, %s)
+                ON CONFLICT (account_id) DO UPDATE SET
+                    updated_at = now(),
+                    net_liquidation = EXCLUDED.net_liquidation,
+                    total_cash = EXCLUDED.total_cash,
+                    buying_power = EXCLUDED.buying_power,
+                    summary_extra = EXCLUDED.summary_extra
+                """,
+                (account_id, net_liq, total_cash, buying_power, Json(summary_extra_json) if summary_extra_json is not None else None),
+            )
+            # account_positions: upsert by (account_id, contract_key); contract_key distinguishes OPT by expiry/strike/right
+            positions = acc.get("positions") or []
+            seen_keys: List[str] = []
+            if isinstance(positions, list):
+                for p in positions:
+                    if not isinstance(p, dict):
+                        continue
+                    sym = p.get("symbol") or ""
+                    sec = p.get("secType") or p.get("sec_type") or ""
+                    ex = p.get("exchange") or ""
+                    curr = p.get("currency") or ""
+                    pos_val = p.get("position")
+                    try:
+                        pos_f = float(pos_val) if pos_val is not None else None
+                    except (TypeError, ValueError):
+                        pos_f = None
+                    avg = p.get("avgCost") or p.get("avg_cost")
+                    try:
+                        avg_f = float(avg) if avg is not None else None
+                    except (TypeError, ValueError):
+                        avg_f = None
+                    exp = p.get("lastTradeDateOrContractMonth") or p.get("expiry") or ""
+                    strike_raw = p.get("strike")
+                    try:
+                        strike_f = float(strike_raw) if strike_raw is not None else None
+                    except (TypeError, ValueError):
+                        strike_f = None
+                    rt = p.get("right") or ""
+                    if sec == "OPT":
+                        contract_key = f"{sym}|{sec}|{exp}|{strike_f}|{rt}"
+                    else:
+                        contract_key = f"{sym}|{sec}|||"
+                    cur.execute(
+                        """
+                        INSERT INTO account_positions (account_id, symbol, sec_type, exchange, currency, position, avg_cost, expiry, strike, option_right, contract_key, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        ON CONFLICT (account_id, contract_key) DO UPDATE SET
+                            exchange = EXCLUDED.exchange,
+                            currency = EXCLUDED.currency,
+                            position = EXCLUDED.position,
+                            avg_cost = EXCLUDED.avg_cost,
+                            expiry = EXCLUDED.expiry,
+                            strike = EXCLUDED.strike,
+                            option_right = EXCLUDED.option_right,
+                            updated_at = now()
+                        """,
+                        (account_id, sym, sec, ex, curr, pos_f, avg_f, exp or None, strike_f, rt or None, contract_key),
+                    )
+                    seen_keys.append(contract_key)
+            # Remove positions for this account that are no longer in snapshot (closed)
+            if seen_keys:
+                cur.execute(
+                    """
+                    DELETE FROM account_positions
+                    WHERE account_id = %s AND (contract_key IS NULL OR contract_key != ALL(%s::text[]))
+                    """,
+                    (account_id, seen_keys),
+                )
+            else:
+                cur.execute("DELETE FROM account_positions WHERE account_id = %s", (account_id,))
+
 
 # Table(s) to auto-release locks on when daemon hits lock timeout (e.g. after crash restart)
 _DAEMON_LOCK_TABLES: Tuple[str, ...] = ("daemon_heartbeat", "daemon_run_status")
@@ -195,6 +343,56 @@ def _ensure_tables(conn) -> None:
             INSERT INTO settings (id, ib_host, ib_port_type) VALUES (1, '127.0.0.1', 'tws_paper')
             ON CONFLICT (id) DO NOTHING
         """)
+        # R-A1 normalized account tables (replacing raw jsonb for future account operations)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS accounts (
+                account_id text PRIMARY KEY,
+                updated_at timestamptz DEFAULT now(),
+                net_liquidation double precision,
+                total_cash double precision,
+                buying_power double precision,
+                summary_extra jsonb
+            )
+        """)
+        # account_positions: (account_id, contract_key) 为主键，无 id；天然按主键 INSERT/UPDATE，仅删除已平仓行
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS account_positions (
+                account_id text NOT NULL,
+                contract_key text NOT NULL,
+                symbol text,
+                sec_type text,
+                exchange text,
+                currency text,
+                position double precision,
+                avg_cost double precision,
+                expiry text,
+                strike double precision,
+                option_right text,
+                updated_at timestamptz DEFAULT now(),
+                PRIMARY KEY (account_id, contract_key)
+            )
+        """)
+        for col_def in (
+            "expiry text",
+            "strike double precision",
+            "option_right text",
+            "contract_key text",
+        ):
+            name, typ = col_def.split(None, 1)
+            cur.execute(
+                f"ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS {name} {typ}"
+            )
+        cur.execute("""
+            UPDATE account_positions SET contract_key = symbol || '|' || COALESCE(sec_type,'') || '|' || COALESCE(expiry,'') || '|' || COALESCE(strike::text,'') || '|' || COALESCE(option_right,'')
+            WHERE contract_key IS NULL OR contract_key = ''
+        """)
+        cur.execute("""
+            DROP INDEX IF EXISTS account_positions_account_symbol_sectype_key
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS account_positions_account_contract_key
+            ON account_positions (account_id, contract_key)
+        """)
         conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
@@ -271,13 +469,16 @@ class PostgreSQLSink(StatusSink):
     def write_snapshot(self, snapshot: Dict[str, Any], append_history: bool = False) -> None:
         if not self._ensure_conn():
             return
-        cols = ", ".join(SNAPSHOT_KEYS)
-        placeholders = ", ".join("%s" for _ in SNAPSHOT_KEYS)
-        values = [snapshot.get(k) for k in SNAPSHOT_KEYS]
+        # status_current / status_history: only SNAPSHOT_KEYS (no account_* or accounts_snapshot; those live in accounts + account_positions)
+        keys = tuple(SNAPSHOT_KEYS)
+        cols = ", ".join(keys)
+        placeholders = ", ".join("%s" for _ in keys)
+        values = [snapshot.get(k) for k in keys]
+        raw_accounts = snapshot.get(ACCOUNTS_SNAPSHOT_KEY) if ACCOUNTS_SNAPSHOT_KEY in snapshot else None
         try:
             with self._conn.cursor() as cur:
                 # Upsert single row (id=1) for status_current
-                updates = ", ".join(f"{k} = EXCLUDED.{k}" for k in SNAPSHOT_KEYS if k != "id")
+                updates = ", ".join(f"{k} = EXCLUDED.{k}" for k in keys if k != "id")
                 cur.execute(
                     f"""
                     INSERT INTO status_current (id, {cols})
@@ -291,10 +492,13 @@ class PostgreSQLSink(StatusSink):
                         f"INSERT INTO status_history ({cols}) VALUES ({placeholders})",
                         values,
                     )
+            # R-A1: sync multi-account snapshot into normalized tables (accounts + account_positions)
+            if isinstance(raw_accounts, list) and raw_accounts:
+                _sync_accounts_snapshot_to_tables(self._conn, raw_accounts)
             self._conn.commit()
         except Exception as e:
             self._conn.rollback()
-            logger.warning("PostgreSQL write_snapshot failed: %s", e)
+            logger.warning("PostgreSQL write_snapshot failed: %s", e, exc_info=True)
 
     def write_operation(self, record: Dict[str, Any]) -> None:
         if not self._ensure_conn():
@@ -313,29 +517,55 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.warning("PostgreSQL write_operation failed: %s", e)
 
+    # Control commands older than this are ignored (consumed but not executed), to avoid executing
+    # a stop from a previous run when the daemon restarts and immediately polls (e.g. after IB timeout → WAITING_IB).
+    CONTROL_CMD_MAX_AGE_SEC = 60
+
     def poll_and_consume_control(
         self,
         consume_only: Optional[tuple] = None,
     ) -> Optional[str]:
         """Poll oldest unconsumed control command; optionally only consume certain commands (e.g. consume_only=('stop',)).
-        Mark consumed and return command (stop/flatten) or None. Phase 2: DB-based control channel."""
+        Mark consumed and return command (stop/flatten/retry_ib) or None. Phase 2: DB-based control channel.
+        Commands older than CONTROL_CMD_MAX_AGE_SEC are still consumed (so they are cleared) but not returned,
+        so the daemon does not execute a stale stop from a previous run."""
         if not self._ensure_conn():
             logger.debug("poll_and_consume_control: no DB connection")
             return None
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, command FROM daemon_control WHERE consumed_at IS NULL ORDER BY id ASC LIMIT 1"
+                    "SELECT id, command, created_at FROM daemon_control WHERE consumed_at IS NULL ORDER BY id ASC LIMIT 1"
                 )
                 row = cur.fetchone()
                 if row is None:
                     return None
-                row_id, command = row
+                row_id, command, created_at = row
                 cmd = (command or "").strip().lower()
                 if cmd not in ("stop", "flatten", "retry_ib"):
                     cmd = "stop"  # treat unknown as stop for safety
                 if consume_only is not None and cmd not in consume_only:
                     return None  # do not consume this command (caller may leave flatten for same process to consume)
+                # Ignore stale commands (e.g. stop from previous run): still consume so queue is cleared, but don't execute
+                now_utc = datetime.now(timezone.utc)
+                if created_at is None:
+                    age_sec = float("inf")  # treat NULL as stale
+                else:
+                    created_utc = created_at
+                    if created_utc.tzinfo is None:
+                        created_utc = created_utc.replace(tzinfo=timezone.utc)
+                    age_sec = (now_utc - created_utc).total_seconds()
+                if age_sec > self.CONTROL_CMD_MAX_AGE_SEC:
+                    cur.execute("UPDATE daemon_control SET consumed_at = now() WHERE id = %s", (row_id,))
+                    self._conn.commit()
+                    logger.info(
+                        "Consumed stale control command from daemon_control (id=%s): %s (age %.0fs > %s s, not executed)",
+                        row_id,
+                        cmd,
+                        age_sec,
+                        self.CONTROL_CMD_MAX_AGE_SEC,
+                    )
+                    return None
                 cur.execute("UPDATE daemon_control SET consumed_at = now() WHERE id = %s", (row_id,))
             self._conn.commit()
             logger.info("Consumed control command from daemon_control (id=%s): %s", row_id, cmd)

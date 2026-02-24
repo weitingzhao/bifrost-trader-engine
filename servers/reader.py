@@ -166,6 +166,66 @@ class StatusReader:
             logger.warning("get_operations failed: %s", e)
             return []
 
+    def get_accounts_from_tables(self) -> Optional[List[Dict[str, Any]]]:
+        """Build R-A1 accounts list from normalized accounts + account_positions (same shape as [{ account_id, summary, positions }]).
+        Returns None on error or missing tables; caller typically uses [] in that case."""
+        if not self._connect():
+            return None
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra FROM accounts ORDER BY account_id"
+                )
+                acc_rows = cur.fetchall()
+            if not acc_rows:
+                return []
+            out: List[Dict[str, Any]] = []
+            for row in acc_rows:
+                acc_id = row.get("account_id") or ""
+                summary: Dict[str, Any] = {}
+                if row.get("net_liquidation") is not None:
+                    summary["NetLiquidation"] = str(row["net_liquidation"])
+                if row.get("total_cash") is not None:
+                    summary["TotalCashValue"] = str(row["total_cash"])
+                if row.get("buying_power") is not None:
+                    summary["BuyingPower"] = str(row["buying_power"])
+                if acc_id:
+                    summary["account"] = acc_id
+                extra = row.get("summary_extra")
+                if isinstance(extra, dict):
+                    for k, v in extra.items():
+                        summary[k] = v if isinstance(v, str) else str(v)
+                with self._conn.cursor(cursor_factory=RealDictCursor) as cur2:
+                    cur2.execute(
+                        "SELECT account_id, symbol, sec_type, exchange, currency, position, avg_cost, expiry, strike, option_right FROM account_positions WHERE account_id = %s ORDER BY contract_key",
+                        (acc_id,),
+                    )
+                    pos_rows = cur2.fetchall()
+                positions = []
+                for p in pos_rows:
+                    pos_dict: Dict[str, Any] = {
+                        "account": p.get("account_id"),
+                        "symbol": p.get("symbol") or "",
+                        "secType": p.get("sec_type") or "",
+                        "exchange": p.get("exchange") or "",
+                        "currency": p.get("currency") or "",
+                        "position": p.get("position"),
+                        "avgCost": p.get("avg_cost"),
+                    }
+                    if p.get("expiry") is not None:
+                        pos_dict["lastTradeDateOrContractMonth"] = p.get("expiry")
+                    if p.get("strike") is not None:
+                        pos_dict["strike"] = p.get("strike")
+                    if p.get("option_right") is not None:
+                        pos_dict["right"] = p.get("option_right")
+                    positions.append(pos_dict)
+                out.append({"account_id": acc_id, "summary": summary, "positions": positions})
+            return out
+        except Exception as e:
+            logger.debug("get_accounts_from_tables failed: %s", e)
+            self._conn = None
+            return None
+
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
         """Return settings row id=1: ib_host, ib_port_type (for GET /status and UI). None if table missing."""
         if not self._connect():

@@ -24,7 +24,7 @@
 
 **R-C3**：本阶段未实现守护进程 flatten 逻辑；POST /control/flatten 向 daemon_control 表 INSERT 并返回 200，守护进程消费后打日志。
 
-验收执行说明：在项目根目录启动 `python scripts/run_server.py`，使用 `curl http://localhost:8765/status`、`curl http://localhost:8765/operations?limit=10`、`curl -X POST http://localhost:8765/control/stop` 验证；需配置 `status.sink: postgres` 与 `status.postgres`，并已运行 `scripts/init_phase1_db.py` 创建 daemon_control 表；守护进程运行中验证 stop 生效。
+验收执行说明：在项目根目录启动 `python scripts/run_server.py`，使用 `curl http://localhost:8765/status`、`curl http://localhost:8765/operations?limit=10`、`curl -X POST http://localhost:8765/control/stop` 验证；需配置 `status.sink: postgres` 与 `status.postgres`，并已运行 `scripts/refresh_db_schema.py` 创建 daemon_control 表；守护进程运行中验证 stop 生效。
 
 ---
 
@@ -34,7 +34,7 @@
 
 ### 前置条件
 
-- 已配置 `status.sink: postgres`、`status.postgres`，并执行过 `python scripts/init_phase1_db.py`（含 daemon_heartbeat 及 next_retry_ts 列）。
+- 已配置 `status.sink: postgres`、`status.postgres`，并执行过 `python scripts/refresh_db_schema.py`（含 daemon_heartbeat 及 next_retry_ts 列）。
 - 可选：`config/config.yaml` 中 `daemon.ib_retry_interval_sec: 30`（默认 30 秒）。
 
 ### 1. 单进程：不启动 TWS 时守护进程不退出、黄灯与下次重试时间

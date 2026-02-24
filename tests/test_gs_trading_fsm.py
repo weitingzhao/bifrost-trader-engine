@@ -1,6 +1,6 @@
 """Integration tests: GsTrading with TradingFSM-driven flow and mock connector."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -43,8 +43,11 @@ async def test_handle_connected_bootstraps_trading_fsm(minimal_config):
     """After _handle_connected, TradingFSM has left BOOT (START/SYNCED applied)."""
     app = GsTrading(minimal_config)
     app.connector = AsyncMock()
+    app.connector.is_connected = True
     app.connector.get_positions = AsyncMock(return_value=[])
     app.connector.get_underlying_price = AsyncMock(return_value=100.0)
+    app.connector.get_managed_accounts = MagicMock(return_value=[])
+    app.connector.get_account_summary = AsyncMock(return_value=[])
 
     from src.fsm.daemon_fsm import DaemonState
 
@@ -59,8 +62,11 @@ async def test_eval_hedge_runs_without_error(minimal_config):
     """_eval_hedge runs without exception and applies TICK to TradingFSM."""
     app = GsTrading(minimal_config)
     app.connector = AsyncMock()
+    app.connector.is_connected = True
     app.connector.get_positions = AsyncMock(return_value=[])
     app.connector.get_underlying_price = AsyncMock(return_value=100.0)
+    app.connector.get_managed_accounts = MagicMock(return_value=[])
+    app.connector.get_account_summary = AsyncMock(return_value=[])
     app.store.set_underlying_price(100.0)
     app.store.set_positions([], 0)
 

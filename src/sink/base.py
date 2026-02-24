@@ -25,6 +25,16 @@ SNAPSHOT_KEYS = (
     "ts",
 )
 
+# R-A1 optional snapshot keys (account summary). Written when present.
+OPTIONAL_SNAPSHOT_KEYS = (
+    "account_id",
+    "account_net_liquidation",
+    "account_total_cash",
+    "account_buying_power",
+)
+# R-A1 multi-account: JSON column for list of { account_id, summary, positions }
+ACCOUNTS_SNAPSHOT_KEY = "accounts_snapshot"
+
 # Operation record dict keys (R-M4a). Must match docs/DATABASE.md §2.3.
 OPERATION_KEYS = ("ts", "type", "side", "quantity", "price", "state_reason")
 

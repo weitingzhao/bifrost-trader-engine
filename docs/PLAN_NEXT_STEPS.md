@@ -58,7 +58,7 @@
 |------|----------|----------|------|
 | **阶段 1** | ✅ **已完成实现** | ⏳ 待正式验收 | sink（PostgreSQL）、信号停止、操作写入、历史表已落地；执行 TC-1-* 并记录通过即通过 |
 | **阶段 2** | ✅ **已完成实现** | ⏳ 待正式验收 | 独立应用（servers/）、GET /status、红绿灯、GET /operations、POST /control/stop 已落地；R-C3 不在本阶段 |
-| **阶段 3.0** | 未开始 | — | R-A1 账户与持仓可获取 |
+| **阶段 3.0** | ✅ **已完成实现** | ⏳ 待正式验收 | R-A1 账户与持仓可获取 |
 | **阶段 3.1** | 未开始 | — | R-H2 历史统计 |
 | **阶段 3.2** | 未开始 | — | R-C2 暂停/恢复 |
 | **阶段 3.3–3.5** | 未开始 | — | 可选 sink、部署、回测 |
@@ -305,6 +305,12 @@
 **阶段通过条件**：R-A1 验收条 ①②③ 全部通过，即上述 Test Case 全部通过。通过后可进入阶段 3.1 或 3.2 等。
 
 **阶段 3.0 完成后**：自动交易对冲所需“账户与持仓”数据就绪，为下一步细化对冲逻辑（如基于 NetLiquidation 的风控、基于持仓的平/开量计算）奠定基础。
+
+**阶段 3.0 实现说明（已落地）**：  
+- **3.0.1**：`IBConnector.get_managed_accounts()`（解析 IB 逗号分隔字符串为账户列表）、`get_account_summary(account)`；`Store.set_account_summary` / `get_account_id` / `get_account_summary`、`set_accounts_data` / `get_accounts_data`；CONNECTED 与每次 heartbeat 调用 `_refresh_accounts_data()`。  
+- **3.0.2**：`_refresh_positions(account=store.get_account_id())` 已用账户过滤；持仓在 `_refresh_and_build_snapshot` 中持续更新，供对冲与风控使用。  
+- **3.0.3**：断连时进入 WAITING_IB，不拉取账户/持仓；重连后 CONNECTED 与 heartbeat 再次拉取。  
+- **可选**：snapshot 与 sink 写入 `account_id`、`account_net_liquidation`、`account_total_cash`、`account_buying_power`、`accounts_snapshot`（jsonb）；GET /status 返回这些字段（SELECT * 自动包含）。
 
 ---
 

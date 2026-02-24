@@ -45,7 +45,9 @@
 | config_summary | text | 配置摘要（如 gates 的 hash 或关键键） |
 | ts | double precision 或 timestamptz | 快照时间戳 |
 
-- **主键/唯一**：单行表可无主键，或使用固定行 id（如 `id SERIAL PRIMARY KEY`），upsert 时更新该行。
+- **主键/唯一**：单行表使用固定行 id=1，upsert 时更新该行。
+
+- **涉及库表**：上述列所在数据库与表为：配置中的 **status 用 PostgreSQL**（`config.status.postgres` 或环境变量 `PGHOST` 等，见 RUN_ENVIRONMENT_AND_REQUIREMENTS.md）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），status_current/status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
 
 ### 2.2 表 `status_history`（状态历史）
 
@@ -91,6 +93,47 @@
 | consumed_at | timestamptz | 守护进程消费时间；NULL 表示待处理 |
 
 - **消费语义**：守护进程 `SELECT` 一条 `consumed_at IS NULL` 且 `id` 最小的行，执行对应 command 后 `UPDATE consumed_at = now()`，避免重复触发。监控与守护进程使用同一 PostgreSQL（status.postgres），故无跨机文件依赖。
+- **过期不执行**：若指令的 `created_at` 早于当前时间超过约 60 秒（如上次运行遗留的 stop），守护进程仍会**消费**该行（标记 `consumed_at`）以清空队列，但**不执行**该指令，避免新启动的守护进程误执行“上一次”的停止。
+
+### 2.7 表 `accounts`（阶段 3.0 R-A1：多账户摘要，由 accounts_snapshot 规范化）
+
+- **用途**：存 IB 多账户摘要，便于按账户查询、更新与后续账户操作；由守护进程在写入 snapshot 时从内存中的 accounts_snapshot 同步写入（每账户一行）。
+- **写入**：按 **account_id** 唯一键 upsert（`ON CONFLICT (account_id) DO UPDATE`），不删整表、不整表重插；仅更新该账户行。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| account_id | text PRIMARY KEY | 账户标识（如 U17113214） |
+| updated_at | timestamptz | 最后更新时间 |
+| net_liquidation | double precision | 净资产（来自 IB NetLiquidation） |
+| total_cash | double precision | 总现金（TotalCashValue） |
+| buying_power | double precision | 购买力（BuyingPower） |
+| summary_extra | jsonb | 其他 IB summary 键值（未单独列出的 tag） |
+
+### 2.8 表 `account_positions`（阶段 3.0 R-A1：多账户持仓，由 accounts_snapshot 规范化）
+
+- **用途**：存每个账户的持仓明细，便于按账户/标的查询与后续风控、对冲逻辑。
+- **主键**：**(account_id, contract_key)**，无自增 id；据此判断插入新行或更新现有行。
+- **contract_key** 格式为 `symbol|sec_type|expiry|strike|right`，期权（OPT）用到期/行权价/权利区分合约，股票（STK）为 `symbol|STK|||`。
+- **写入**：与 `accounts` 同步；对 snapshot 中每条持仓计算 contract_key 后 `INSERT ... ON CONFLICT (account_id, contract_key) DO UPDATE`；仅删除该账户下**不在当前 snapshot** 的行（平仓或移除的持仓），不整表清空。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| account_id | text NOT NULL | 所属账户（主键之一） |
+| contract_key | text NOT NULL | 合约唯一键（主键之一）：symbol\|sec_type\|expiry\|strike\|right |
+| symbol | text | 标的代码 |
+| sec_type | text | 类型（STK/OPT 等） |
+| exchange | text | 交易所 |
+| currency | text | 币种 |
+| position | double precision | 持仓数量 |
+| avg_cost | double precision | 平均成本 |
+| expiry | text | 期权到期（lastTradeDateOrContractMonth，YYYYMM/YYYYMMDD） |
+| strike | double precision | 期权行权价 |
+| option_right | text | 期权权利（C/P 或 CALL/PUT）；列名不用 right 因系 PostgreSQL 保留字 |
+| updated_at | timestamptz | 最后更新时间 |
+
+- **语义**：GET /status 的 `accounts` 从 **accounts** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
@@ -125,7 +168,7 @@
 
 - **语义**：监控端读取 `last_ts`、`hedge_running`、`ib_connected`、`ib_client_id`、`next_retry_ts`、`seconds_until_retry`、`graceful_shutdown_at`（如 GET /status 的 `daemon_heartbeat`）；若 `last_ts` 在最近约 30 秒内则视为守护进程存活；若 `graceful_shutdown_at` 非空则表示守护进程已优雅退出，监控可显示「已于 … 停止」；`ib_connected` 为 true 时显示「已连接」及 `ib_client_id`；为 false 时显示「未连接」及 **下次重试时间**（优先用 `seconds_until_retry` 显示「约 N 秒后」），并支持监控端触发立即重试（`daemon_control` 写入 `retry_ib`）。
 
-### 2.7 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
+### 2.9 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
 
 - **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。当前包含 IB 连接配置（主机与端口类型），供监控页「IB 连接」区编辑；守护进程**每次启动时**从该表读取并连接 IB。后续新增设置时在此表**增加列**即可。
 - **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入 `ib_host`、`ib_port_type`；StatusReader 的 `write_ib_config(status_config, ib_host, ib_port_type)` 执行 UPDATE。
@@ -192,10 +235,10 @@
 若数据库已能连接，但 `python scripts/check/phase1.py` 报 **PostgreSQL schema (tables + columns)** 失败，说明当前库中尚未创建阶段 1/2 所需的表（或列不一致）。在项目根目录执行：
 
 ```bash
-python scripts/init_phase1_db.py
+python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/校验 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat` 表（与 `PostgreSQLSink` 使用的 DDL 一致）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。
+脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions** 等表（与 `PostgreSQLSink._ensure_tables` 一致；status_current/status_history 不含 account 相关列）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。

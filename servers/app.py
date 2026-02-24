@@ -75,6 +75,10 @@ def create_app(
                 payload["status"] = row
             else:
                 payload["status"] = None
+            # R-A1: 始终从 DB (accounts + account_positions) 读账户并返回，便于自动交易页 IB 账户区展示
+            payload["accounts"] = reader.get_accounts_from_tables()
+            if payload["accounts"] is None:
+                payload["accounts"] = []
             ib_cfg = reader.get_ib_config()
             payload["ib_config"] = ib_cfg if ib_cfg else {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
             return payload
@@ -90,6 +94,7 @@ def create_app(
                 "daemon_lamp": "red",
                 "daemon_block_reasons": ["status_read_error"],
                 "status": None,
+                "accounts": None,
                 "ib_config": {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"},
             }
 
