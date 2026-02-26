@@ -40,6 +40,8 @@ export interface StatusResponse {
   status?: StatusRow | null
   /** R-A1 multi-account: 与守护/对冲同级，交易账户与持仓基础数据 */
   accounts?: IbAccountSnapshot[] | null
+  /** 账户/持仓数据最后从 IB 拉取并写入 DB 的时间（Unix 秒），供监控页显示数据新鲜度 */
+  accounts_fetched_at?: number | null
   ib_config?: IbConfig | null
 }
 

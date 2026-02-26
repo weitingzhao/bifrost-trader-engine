@@ -362,6 +362,18 @@ button:disabled {
   color: var(--muted);
   font-weight: 500;
 }
+.ib-positions-table tr.ib-pos-stock {
+  background: rgba(34, 197, 94, 0.08);
+}
+.ib-positions-table tr.ib-pos-stock:hover {
+  background: rgba(34, 197, 94, 0.12);
+}
+.ib-positions-table tr.ib-pos-opt {
+  background: rgba(56, 189, 248, 0.08);
+}
+.ib-positions-table tr.ib-pos-opt:hover {
+  background: rgba(56, 189, 248, 0.12);
+}
 .ib-positions-empty {
   font-size: 0.85rem;
   color: var(--muted);

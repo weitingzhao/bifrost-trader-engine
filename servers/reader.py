@@ -226,6 +226,23 @@ class StatusReader:
             self._conn = None
             return None
 
+    def get_accounts_fetched_at(self) -> Optional[float]:
+        """Return max(updated_at) from accounts as Unix timestamp (seconds), or None if no rows/error. For UI to show when IB accounts data was last synced."""
+        if not self._connect():
+            return None
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute("SELECT max(updated_at) AS t FROM accounts")
+                row = cur.fetchone()
+            if row and row[0] is not None:
+                ts = row[0]
+                return ts.timestamp() if hasattr(ts, "timestamp") else float(ts)
+            return None
+        except Exception as e:
+            logger.debug("get_accounts_fetched_at failed: %s", e)
+            self._conn = None
+            return None
+
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
         """Return settings row id=1: ib_host, ib_port_type (for GET /status and UI). None if table missing."""
         if not self._connect():

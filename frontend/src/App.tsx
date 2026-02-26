@@ -7,6 +7,7 @@ import {
   postResume,
   postFlatten,
   postRetryIb,
+  postRefreshAccounts,
   postSetHeartbeatInterval,
   postStop,
   postIbConfig,
@@ -84,6 +85,9 @@ export default function App() {
   const [ibPortTypeInput, setIbPortTypeInput] = useState<'tws_live' | 'tws_paper' | 'gateway'>('tws_paper')
   const [apiReachable, setApiReachable] = useState<boolean>(false)
   const [ibAccountIndex, setIbAccountIndex] = useState(0)
+  /** IB 账户区块数据：仅在手点刷新或 1 小时自动刷新时更新，不随 5s 轮询更新 */
+  const [accountsDisplay, setAccountsDisplay] = useState<IbAccountSnapshot[] | null>(null)
+  const [ibAccountsRefreshing, setIbAccountsRefreshing] = useState(false)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -121,6 +125,20 @@ export default function App() {
       clearInterval(t2)
     }
   }, [loadStatus, loadOperations])
+
+  // IB 账户区块：首次有数据时写入 display；之后仅手点刷新或 1 小时自动刷新更新
+  useEffect(() => {
+    if (status?.accounts != null && accountsDisplay === null)
+      setAccountsDisplay(status.accounts ? [...status.accounts] : [])
+  }, [status?.accounts, accountsDisplay])
+
+  const IB_ACCOUNTS_AUTO_REFRESH_MS = 60 * 60 * 1000 // 1 小时
+  useEffect(() => {
+    const t = setInterval(() => {
+      loadStatus().then((j) => setAccountsDisplay(j?.accounts ? [...j.accounts] : []))
+    }, IB_ACCOUNTS_AUTO_REFRESH_MS)
+    return () => clearInterval(t)
+  }, [loadStatus])
 
   // 心跳与 IB 重试倒计时：每秒更新
   const hbForCountdown = status?.daemon_heartbeat
@@ -480,14 +498,65 @@ export default function App() {
       </div>
 
       <div className="card process-section">
-        <h2>
-          IB 账户{' '}
-          <span className="section-desc">
-            （多账户摘要与持仓，来自 DB）
-          </span>
-        </h2>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <h2 style={{ margin: 0 }}>
+            IB 账户{' '}
+            <span className="section-desc">
+              （多账户摘要与持仓，来自 DB；自动刷新每 1 小时）
+            </span>
+          </h2>
+          <button
+            type="button"
+            className="btn-resume"
+            disabled={ibAccountsRefreshing}
+            onClick={async () => {
+              setIbAccountsRefreshing(true)
+              const requestedAt = Date.now() / 1000
+              try {
+                await postRefreshAccounts()
+                const deadline = Date.now() + 30000
+                while (Date.now() < deadline) {
+                  const j = await loadStatus()
+                  if (j?.accounts != null) setAccountsDisplay(j.accounts ? [...j.accounts] : [])
+                  if (j?.accounts_fetched_at != null && j.accounts_fetched_at > requestedAt) break
+                  await new Promise((r) => setTimeout(r, 2000))
+                }
+              } finally {
+                setIbAccountsRefreshing(false)
+              }
+            }}
+            title="请求守护进程从 IB 拉取账户与持仓并写入 DB，然后更新展示"
+          >
+            {ibAccountsRefreshing ? '刷新中…' : '刷新'}
+          </button>
+        </div>
         {(() => {
-          const rawAccounts = j?.accounts as IbAccountSnapshot[] | undefined
+          const fetchedAt = j?.accounts_fetched_at
+          const hasAnyAccounts = Array.isArray(accountsDisplay ?? j?.accounts) && (accountsDisplay ?? j?.accounts)!.length > 0
+          if (fetchedAt != null && Number.isFinite(fetchedAt)) {
+            return (
+              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+                数据来自 {new Date(fetchedAt * 1000).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'medium' })}
+                ，已过 {(() => {
+                  const sec = Math.floor(Date.now() / 1000 - fetchedAt)
+                  if (sec < 60) return `${sec} 秒`
+                  if (sec < 3600) return `${Math.floor(sec / 60)} 分钟`
+                  return `${(sec / 3600).toFixed(1)} 小时`
+                })()}
+              </p>
+            )
+          }
+          if (hasAnyAccounts) {
+            return (
+              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+                数据时间未知（点击「刷新」由守护进程从 IB 拉取并写库后此处会显示拉取时间）
+              </p>
+            )
+          }
+          return null
+        })()}
+        {(() => {
+          const rawAccounts = (accountsDisplay ?? j?.accounts) as IbAccountSnapshot[] | undefined
           const hasAccounts = Array.isArray(rawAccounts) && rawAccounts.length > 0
           const fmtUsd = (n: number | null | undefined) =>
             n != null && Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'
@@ -498,12 +567,6 @@ export default function App() {
             if (s.length === 8) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
             if (s.length === 6) return `${s.slice(0, 4)}-${s.slice(4, 6)}`
             return raw
-          }
-          const secTypeLabel = (t: string | undefined): string => {
-            if (!t) return '—'
-            if (t === 'STK') return '股票'
-            if (t === 'OPT') return '期权'
-            return t
           }
           if (!hasAccounts) {
             return (
@@ -527,6 +590,24 @@ export default function App() {
           const totalCash = sum.TotalCashValue != null ? parseFloat(String(sum.TotalCashValue)) : undefined
           const buyingPower = sum.BuyingPower != null ? parseFloat(String(sum.BuyingPower)) : undefined
           const positions = acc.positions ?? []
+          const stockPositions = positions.filter((p) => (p.secType ?? '').toUpperCase() !== 'OPT')
+          const optionPositions = positions.filter((p) => (p.secType ?? '').toUpperCase() === 'OPT')
+          const spot = status?.status?.spot != null && Number.isFinite(Number(status.status.spot)) ? Number(status.status.spot) : null
+          const rightLabel = (r: string | undefined): string => {
+            if (!r) return '—'
+            const u = String(r).toUpperCase()
+            if (u === 'C' || u === 'CALL') return 'Call'
+            if (u === 'P' || u === 'PUT') return 'Put'
+            return r
+          }
+          const optionIntrinsic = (isCall: boolean, k: number, s: number) =>
+            isCall ? Math.max(0, s - k) : Math.max(0, k - s)
+          const optionMoneyness = (isCall: boolean, k: number, s: number): string => {
+            if (!Number.isFinite(k) || !Number.isFinite(s)) return '—'
+            if (Math.abs(s - k) < 0.01) return 'ATM'
+            if (isCall) return s > k ? 'ITM' : 'OTM'
+            return s < k ? 'ITM' : 'OTM'
+          }
           return (
             <div className="ib-accounts-wrap">
               {accounts.length > 1 && (
@@ -573,39 +654,125 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div className="ib-positions-title">持仓（美元）</div>
-                {positions.length === 0 ? (
+
+                {/* 股票持仓：数量即股数，总成本=数量×成本 */}
+                <div className="ib-positions-title">股票持仓</div>
+                {stockPositions.length === 0 ? (
                   <p className="ib-positions-empty">无</p>
                 ) : (
-                  <table className="ib-positions-table">
-                    <thead>
-                      <tr>
-                        <th>标的</th>
-                        <th>类型</th>
-                        <th>到期日</th>
-                        <th>Strike</th>
-                        <th>数量</th>
-                        <th>成本</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {positions.map((pos, i) => {
-                        const isOpt = (pos.secType ?? '').toUpperCase() === 'OPT'
-                        const expiryRaw = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
-                        const strike = pos.strike
-                        return (
-                          <tr key={`${pos.symbol}-${i}`}>
-                            <td>{pos.symbol ?? '—'}</td>
-                            <td>{secTypeLabel(pos.secType)}</td>
-                            <td>{isOpt && expiryRaw ? fmtExpiry(expiryRaw) : '—'}</td>
-                            <td>{isOpt && strike != null && Number.isFinite(strike) ? fmtUsd(strike) : '—'}</td>
-                            <td>{pos.position != null ? pos.position : '—'}</td>
-                            <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                  <>
+                    <table className="ib-positions-table">
+                      <thead>
+                        <tr>
+                          <th>标的</th>
+                          <th>数量</th>
+                          <th>成本</th>
+                          <th>总成本</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockPositions.map((pos, i) => {
+                          const qty = pos.position != null ? Number(pos.position) : NaN
+                          const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
+                          const totalCost = Number.isFinite(qty) && Number.isFinite(cost) ? qty * cost : null
+                          return (
+                            <tr key={`stk-${pos.symbol}-${i}`} className="ib-pos-stock">
+                              <td>{pos.symbol ?? '—'}</td>
+                              <td>{pos.position != null ? pos.position : '—'}</td>
+                              <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
+                              <td>{totalCost != null ? fmtUsd(totalCost) : '—'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    {(() => {
+                      const sumTotal = stockPositions.reduce((acc, pos) => {
+                        const qty = pos.position != null ? Number(pos.position) : NaN
+                        const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
+                        if (Number.isFinite(qty) && Number.isFinite(cost)) return acc + qty * cost
+                        return acc
+                      }, 0)
+                      if (!Number.isFinite(sumTotal)) return null
+                      return (
+                        <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+                          股票总成本：{fmtUsd(sumTotal)}
+                        </p>
+                      )
+                    })()}
+                  </>
+                )}
+
+                {/* 期权持仓：数量负=卖空；权利金=-(数量×成本)，成本已含每手(100)，卖空为正(收入)、买入为负(支出) */}
+                <div className="ib-positions-title" style={{ marginTop: '1rem' }}>期权持仓</div>
+                {optionPositions.length === 0 ? (
+                  <p className="ib-positions-empty">无</p>
+                ) : (
+                  <>
+                    <table className="ib-positions-table">
+                      <thead>
+                        <tr>
+                          <th>标的</th>
+                          <th>权利</th>
+                          <th>到期</th>
+                          <th>Strike</th>
+                          <th>数量</th>
+                          <th>多/空</th>
+                          <th>成本</th>
+                          <th>权利金</th>
+                          <th>内在价值</th>
+                          <th>虚实</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {optionPositions.map((pos, i) => {
+                          const expiryRaw = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
+                          const strike = pos.strike != null ? Number(pos.strike) : NaN
+                          const qty = pos.position != null ? Number(pos.position) : NaN
+                          const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
+                          const right = (pos.right ?? '').toUpperCase()
+                          const isCall = right === 'C' || right === 'CALL'
+                          const premium = Number.isFinite(qty) && Number.isFinite(cost) ? -(qty * cost) : null
+                          const intrinsic = spot != null && Number.isFinite(strike) ? optionIntrinsic(isCall, strike, spot) : null
+                          const moneyness = spot != null && Number.isFinite(strike) ? optionMoneyness(isCall, strike, spot) : '—'
+                          const sideLabel = Number.isFinite(qty) ? (qty > 0 ? '多' : qty < 0 ? '空' : '—') : '—'
+                          return (
+                            <tr key={`opt-${pos.symbol}-${i}`} className="ib-pos-opt">
+                              <td>{pos.symbol ?? '—'}</td>
+                              <td>{rightLabel(pos.right)}</td>
+                              <td>{expiryRaw ? fmtExpiry(expiryRaw) : '—'}</td>
+                              <td>{Number.isFinite(strike) ? fmtUsd(strike) : '—'}</td>
+                              <td>{pos.position != null ? pos.position : '—'}</td>
+                              <td>{sideLabel}</td>
+                              <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
+                              <td>{premium != null ? fmtUsd(premium) : '—'}</td>
+                              <td>{intrinsic != null ? fmtUsd(intrinsic) : '—'}</td>
+                              <td>{moneyness}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    {(() => {
+                      const sumPremium = optionPositions.reduce((acc, pos) => {
+                        const qty = pos.position != null ? Number(pos.position) : NaN
+                        const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
+                        if (Number.isFinite(qty) && Number.isFinite(cost)) return acc - qty * cost
+                        return acc
+                      }, 0)
+                      if (!Number.isFinite(sumPremium)) return null
+                      return (
+                        <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+                          期权权利金合计：{fmtUsd(sumPremium)}
+                          {spot != null && (
+                            <span className="section-desc" style={{ marginLeft: '0.5rem' }}>
+                              （标的现价 {fmtUsd(spot)}）
+                            </span>
+                          )}
+                        </p>
+                      )
+                    })()}
+                  </>
                 )}
               </div>
             </div>

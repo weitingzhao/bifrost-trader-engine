@@ -79,6 +79,7 @@ def create_app(
             payload["accounts"] = reader.get_accounts_from_tables()
             if payload["accounts"] is None:
                 payload["accounts"] = []
+            payload["accounts_fetched_at"] = reader.get_accounts_fetched_at()
             ib_cfg = reader.get_ib_config()
             payload["ib_config"] = ib_cfg if ib_cfg else {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
             return payload
@@ -95,6 +96,7 @@ def create_app(
                 "daemon_block_reasons": ["status_read_error"],
                 "status": None,
                 "accounts": None,
+                "accounts_fetched_at": None,
                 "ib_config": {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"},
             }
 
@@ -152,6 +154,15 @@ def create_app(
             return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
         if write_control_command(control_via_db, "retry_ib"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "retry_ib written to daemon_control"})
+        return JSONResponse(status_code=500, content={"error": "failed to write control command"})
+
+    @app.post("/control/refresh_accounts")
+    def post_control_refresh_accounts() -> JSONResponse:
+        """Insert 'refresh_accounts' into daemon_control; daemon will fetch accounts/positions from IB and sync to DB on next poll."""
+        if not control_via_db:
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+        if write_control_command(control_via_db, "refresh_accounts"):
+            return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_accounts written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
     @app.post("/control/set_heartbeat_interval")

@@ -25,7 +25,7 @@
 ### 2.1 表 `status_current`（当前视图）
 
 - **用途**：仅保留一行“最新”运行状态快照，供监控（阶段 2 GET /status）与运维查看，无需查历史表。
-- **写入**：由守护程序在**每次 heartbeat** 时 upsert（或 replace）一行；列与 snapshot 字典一致。
+- **写入**：由守护程序在**每次 heartbeat** 时 upsert（或 replace）一行；列与 snapshot 字典一致。**每次心跳**会向 IB 拉取标的现价并更新 `spot`，供监控页计算持仓盈亏与期权内在价值/虚实（ITM/OTM）。
 - **列**（与 R-M1a 一致）：
 
 | 列名 | 类型 | 说明 |
@@ -33,7 +33,7 @@
 | daemon_state | text | DaemonFSM 状态，如 RUNNING |
 | trading_state | text | TradingFSM 状态，如 MONITOR |
 | symbol | text | 标的，如 NVDA |
-| spot | double precision | 当前标的价格 |
+| spot | double precision | 当前标的价格（每心跳从 IB 拉取并写入） |
 | bid | double precision | 买一 |
 | ask | double precision | 卖一 |
 | net_delta | double precision | 净 delta |
@@ -82,13 +82,13 @@
 ### 2.4 表 `daemon_control`（阶段 2：控制通道，替代本地文件）
 
 - **用途**：供监控服务（可运行在另一台主机，RE-5）向守护进程发送控制指令（stop/flatten），替代本地控制文件，无需共享文件系统（如 NFS）。
-- **写入**：监控应用（如 status server）在 POST /control/stop、POST /control/flatten 或 POST /control/retry_ib（RE-7）时 **INSERT** 一行；守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
+- **写入**：监控应用（如 status server）在 POST /control/stop、POST /control/flatten、POST /control/retry_ib（RE-7）或 **POST /control/refresh_accounts** 时 **INSERT** 一行；守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | bigserial | 自增主键 |
-| command | text NOT NULL | 指令：`stop`、`flatten` 或 `retry_ib`（RE-7：守护程序立即尝试连接 IB） |
+| command | text NOT NULL | 指令：`stop`、`flatten`、`retry_ib`（RE-7）或 `refresh_accounts`（请求守护进程从 IB 拉取账户/持仓并写 DB） |
 | created_at | timestamptz | 创建时间（默认 now()） |
 | consumed_at | timestamptz | 守护进程消费时间；NULL 表示待处理 |
 
@@ -133,7 +133,7 @@
 | option_right | text | 期权权利（C/P 或 CALL/PUT）；列名不用 right 因系 PostgreSQL 保留字 |
 | updated_at | timestamptz | 最后更新时间 |
 
-- **语义**：GET /status 的 `accounts` 从 **accounts** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。
+- **语义**：GET /status 的 `accounts` 从 **accounts** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 accounts 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**按钮写入 `daemon_control` 的 **refresh_accounts**，守护进程消费后从 IB 拉取账户/持仓并写 DB，再轮询 GET /status 直至 accounts_fetched_at 更新；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 

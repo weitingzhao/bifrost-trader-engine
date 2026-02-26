@@ -542,7 +542,7 @@ class PostgreSQLSink(StatusSink):
                     return None
                 row_id, command, created_at = row
                 cmd = (command or "").strip().lower()
-                if cmd not in ("stop", "flatten", "retry_ib"):
+                if cmd not in ("stop", "flatten", "retry_ib", "refresh_accounts"):
                     cmd = "stop"  # treat unknown as stop for safety
                 if consume_only is not None and cmd not in consume_only:
                     return None  # do not consume this command (caller may leave flatten for same process to consume)

@@ -38,6 +38,12 @@ export async function postRetryIb(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
+export async function postRefreshAccounts(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/refresh_accounts`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
 export async function postStop(): Promise<ControlResponse> {
   const r = await fetch(`${API}/control/stop`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))

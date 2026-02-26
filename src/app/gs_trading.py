@@ -160,6 +160,10 @@ class GsTrading:
         # IB retry timing: actually uses _effective_heartbeat_interval() (retry at next heartbeat); kept for optional future use
         self._ib_retry_interval = float(daemon_cfg.get("ib_retry_interval_sec", 30.0))
         self._config_reload_interval = 30.0
+        # R-A1: 账户/持仓拉取（监控与对冲）不需每心跳拉取；每小时拉一次即可
+        self._accounts_refresh_interval_sec = 3600.0
+        self._last_accounts_refresh_ts = 0.0
+        self._last_positions_refresh_ts = 0.0  # 对冲用持仓也按同一间隔，避免每心跳请求 IB positions
 
     def _reload_config(self, config: dict) -> None:
         """Apply hot-reloadable config (IB host/port require restart)."""
@@ -380,9 +384,12 @@ class GsTrading:
         Refresh positions and spot, parse legs, greeks, classify, build snapshot.
         Returns (snapshot, spot, cs, data_lag_ms) or None if no valid spot.
         Shared by _handle_connected (bootstrap) and _eval_hedge (tick).
+        Positions 与账户一样按 1 小时间隔拉取，避免每心跳请求 IB。
         """
-        # 1.a. Refresh positions and spot
-        await self._refresh_positions()
+        now_ts = time.time()
+        if now_ts - self._last_positions_refresh_ts >= self._accounts_refresh_interval_sec:
+            await self._refresh_positions()
+            self._last_positions_refresh_ts = now_ts
         # 1.b. Get stock shares and spot price
         stock_shares = self.store.get_stock_position()
         spot = self.store.get_underlying_price()
@@ -680,6 +687,12 @@ class GsTrading:
                 return
             if cmd == "flatten":
                 logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+            if cmd == "refresh_accounts" and self.connector.is_connected and self._status_sink:
+                logger.info("[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB")
+                await self._refresh_accounts_data()
+                self._last_accounts_refresh_ts = time.time()
+                minimal = self._build_heartbeat_minimal_dict()
+                self._status_sink.write_snapshot(minimal, append_history=False)
             suspended = self._apply_run_status_transition()
             interval_sec = self._effective_heartbeat_interval()
             state_label = self._fsm_daemon.current.value
@@ -705,6 +718,12 @@ class GsTrading:
                 return
             if cmd == "flatten":
                 logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+            if cmd == "refresh_accounts" and self.connector.is_connected and self._status_sink:
+                logger.info("[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB")
+                await self._refresh_accounts_data()
+                self._last_accounts_refresh_ts = time.time()
+                minimal = self._build_heartbeat_minimal_dict()
+                self._status_sink.write_snapshot(minimal, append_history=False)
             suspended = self._apply_run_status_transition()
             # Detect IB disconnect during RUNNING/RUNNING_SUSPENDED: write DB then transition to WAITING_IB (RE-7)
             if not self.connector.is_connected:
@@ -723,7 +742,14 @@ class GsTrading:
                 logger.warning("[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)", self._fsm_daemon.current.value)
                 self._ib_disconnected_during_run = True
                 return
-            await self._refresh_accounts_data()
+            now_ts = time.time()
+            if now_ts - self._last_accounts_refresh_ts >= self._accounts_refresh_interval_sec:
+                await self._refresh_accounts_data()
+                self._last_accounts_refresh_ts = now_ts
+            # 每次心跳拉取标的现价，写入 status_current.spot，供监控页计算盈亏与期权内在价值/虚实
+            spot_fresh = await self.connector.get_underlying_price(self.symbol)
+            if spot_fresh is not None and spot_fresh > 0:
+                self.store.set_underlying_price(spot_fresh)
             if self._status_sink:
                 result = await self._refresh_and_build_snapshot()
                 if result is not None:
@@ -829,6 +855,7 @@ class GsTrading:
             )
         logger.info("[Daemon] state=CONNECTED | fetching account summary and positions, building snapshot...")
         await self._refresh_accounts_data()
+        self._last_accounts_refresh_ts = time.time()
         result = await self._refresh_and_build_snapshot()
         if result is not None:
             snapshot, spot, cs, data_lag_ms = result

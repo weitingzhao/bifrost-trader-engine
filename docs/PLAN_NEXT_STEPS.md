@@ -307,10 +307,12 @@
 **阶段 3.0 完成后**：自动交易对冲所需“账户与持仓”数据就绪，为下一步细化对冲逻辑（如基于 NetLiquidation 的风控、基于持仓的平/开量计算）奠定基础。
 
 **阶段 3.0 实现说明（已落地）**：  
-- **3.0.1**：`IBConnector.get_managed_accounts()`（解析 IB 逗号分隔字符串为账户列表）、`get_account_summary(account)`；`Store.set_account_summary` / `get_account_id` / `get_account_summary`、`set_accounts_data` / `get_accounts_data`；CONNECTED 与每次 heartbeat 调用 `_refresh_accounts_data()`。  
-- **3.0.2**：`_refresh_positions(account=store.get_account_id())` 已用账户过滤；持仓在 `_refresh_and_build_snapshot` 中持续更新，供对冲与风控使用。  
+- **3.0.1**：`IBConnector.get_managed_accounts()`（解析 IB 逗号分隔字符串为账户列表）、`get_account_summary(account)`；`Store.set_account_summary` / `get_account_id` / `get_account_summary`、`set_accounts_data` / `get_accounts_data`；CONNECTED 时调用 `_refresh_accounts_data()`，进入 RUNNING 后改为**每 1 小时**拉取一次账户/持仓（不再每心跳拉取），以减轻 IB 请求量。  
+- **3.0.2**：`_refresh_positions(account=store.get_account_id())` 已用账户过滤；持仓在 `_refresh_and_build_snapshot` 中更新，但**与账户一样按 1 小时间隔**拉取（不再每心跳请求 IB positions），供对冲与风控使用。  
 - **3.0.3**：断连时进入 WAITING_IB，不拉取账户/持仓；重连后 CONNECTED 与 heartbeat 再次拉取。  
 - **可选**：snapshot 与 sink 写入 `account_id`、`account_net_liquidation`、`account_total_cash`、`account_buying_power`、`accounts_snapshot`（jsonb）；GET /status 返回这些字段（SELECT * 自动包含）。
+- **监控页 IB 账户模块**：交易监控页「IB 账户」区块提供**刷新**按钮：点击后 POST /control/refresh_accounts 写入 `daemon_control`，**守护进程**在下一心跳消费后从 IB 拉取账户/持仓并写 DB，监控端轮询 GET /status 直至 `accounts_fetched_at` 更新并刷新展示；该区块另设 **1 小时** 自动刷新（仅读 DB）。页面显示「数据来自 …，已过 N 分钟」来源于 GET /status 的 `accounts_fetched_at`（accounts 表 max(updated_at)）。
+- **标的现价与 status_current.spot**：**每次心跳**守护进程向 IB 拉取标的现价并写入 `status_current.spot`，供监控页计算持仓盈亏及期权内在价值、虚实（ITM/OTM）等；GET /status 的 `status.spot` 即来源于此。
 
 ---
 
