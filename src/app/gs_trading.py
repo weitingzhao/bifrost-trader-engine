@@ -69,7 +69,9 @@ class GsTrading:
         # 1.a Status sink early (so we can read last ib_client_id before connecting to IB)
         status_cfg = config.get("status", {}) or {}
         self._status_sink: Optional[StatusSink] = None
-        if status_cfg.get("sink") == "postgres" and (status_cfg.get("postgres") or os.environ.get("PGHOST")):
+        if status_cfg.get("sink") == "postgres" and (
+            status_cfg.get("postgres") or os.environ.get("PGHOST")
+        ):
             try:
                 self._status_sink = PostgreSQLSink(status_cfg)
             except Exception as e:
@@ -83,7 +85,11 @@ class GsTrading:
             last_ib = self._status_sink.get_last_ib_client_id()
         client_id = (last_ib + 1) if last_ib is not None else config_client_id
         if last_ib is not None:
-            logger.info("IB client_id from DB last_ib_client_id=%s → using %s (avoid in-use after crash)", last_ib, client_id)
+            logger.info(
+                "IB client_id from DB last_ib_client_id=%s → using %s (avoid in-use after crash)",
+                last_ib,
+                client_id,
+            )
         host = ib_cfg.get("host", "127.0.0.1")
         port = int(ib_cfg.get("port", 4001))
         if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
@@ -91,7 +97,12 @@ class GsTrading:
             if db_ib:
                 host = db_ib.get("host", host)
                 port = int(db_ib.get("port", port))
-                logger.info("IB connection from DB: host=%s port=%s (port_type=%s)", host, port, db_ib.get("port_type", ""))
+                logger.info(
+                    "IB connection from DB: host=%s port=%s (port_type=%s)",
+                    host,
+                    port,
+                    db_ib.get("port_type", ""),
+                )
         self.connector = IBConnector(
             host=host,
             port=port,
@@ -156,14 +167,18 @@ class GsTrading:
         # 3. Static Defaults (RE-7: IB retry when not connected)
         daemon_cfg = config.get("daemon") or {}
         self._heartbeat_interval = float(daemon_cfg.get("heartbeat_interval", 10.0))
-        self._heartbeat_interval_from_db: Optional[float] = None  # overrides when set via monitoring
+        self._heartbeat_interval_from_db: Optional[float] = (
+            None  # overrides when set via monitoring
+        )
         # IB retry timing: actually uses _effective_heartbeat_interval() (retry at next heartbeat); kept for optional future use
         self._ib_retry_interval = float(daemon_cfg.get("ib_retry_interval_sec", 30.0))
         self._config_reload_interval = 30.0
         # R-A1: 账户/持仓拉取（监控与对冲）不需每心跳拉取；每小时拉一次即可
         self._accounts_refresh_interval_sec = 3600.0
         self._last_accounts_refresh_ts = 0.0
-        self._last_positions_refresh_ts = 0.0  # 对冲用持仓也按同一间隔，避免每心跳请求 IB positions
+        self._last_positions_refresh_ts = (
+            0.0  # 对冲用持仓也按同一间隔，避免每心跳请求 IB positions
+        )
 
     def _reload_config(self, config: dict) -> None:
         """Apply hot-reloadable config (IB host/port require restart)."""
@@ -215,13 +230,16 @@ class GsTrading:
 
     async def _refresh_accounts_data(self) -> None:
         """R-A1: fetch all managed accounts' summary + positions from IB; store for monitoring and set primary account for trading.
-        IB managedAccounts is comma-separated; we get each account's summary and filter positions by account from one reqPositions."""
+        IB managedAccounts is comma-separated; we get each account's summary and filter positions by account from one reqPositions.
+        """
         if not self.connector.is_connected:
             return
         try:
             account_ids = self.connector.get_managed_accounts()
             if not account_ids:
-                logger.warning("[R-A1] get_managed_accounts returned 0 accounts (IB may use comma-separated string)")
+                logger.warning(
+                    "[R-A1] get_managed_accounts returned 0 accounts (IB may use comma-separated string)"
+                )
                 return
             logger.info("[R-A1] managed accounts: %s", account_ids)
             # Request all positions once, then filter by account (avoids N reqPositionsAsync and ensures same snapshot)
@@ -233,24 +251,37 @@ class GsTrading:
                 values = await self.connector.get_account_summary(account=account_id)
                 summary = {}
                 for v in values:
-                    if getattr(v, "tag", None) and getattr(v, "value", None) is not None:
+                    if (
+                        getattr(v, "tag", None)
+                        and getattr(v, "value", None) is not None
+                    ):
                         summary[v.tag] = v.value
                 if account_id:
                     summary["account"] = account_id
                 # Filter positions for this account (Position.account matches account_id)
-                acct_positions = [p for p in all_positions if getattr(p, "account", None) == account_id]
+                acct_positions = [
+                    p
+                    for p in all_positions
+                    if getattr(p, "account", None) == account_id
+                ]
                 pos_dicts = [self.connector.position_to_dict(p) for p in acct_positions]
-                accounts_list.append({
-                    "account_id": account_id,
-                    "summary": summary,
-                    "positions": pos_dicts,
-                })
+                accounts_list.append(
+                    {
+                        "account_id": account_id,
+                        "summary": summary,
+                        "positions": pos_dicts,
+                    }
+                )
                 if primary_id is None and account_id:
                     primary_id = account_id
                     primary_summary = summary if summary else None
             self.store.set_accounts_data(accounts_list)
             self.store.set_account_summary(primary_id, primary_summary)
-            logger.info("[R-A1] accounts_data count=%s (primary=%s)", len(accounts_list), primary_id)
+            logger.info(
+                "[R-A1] accounts_data count=%s (primary=%s)",
+                len(accounts_list),
+                primary_id,
+            )
         except Exception as e:
             logger.warning("_refresh_accounts_data: %s", e, exc_info=True)
 
@@ -312,15 +343,25 @@ class GsTrading:
         if acc:
             d["account_id"] = self.store.get_account_id()
             try:
-                d["account_net_liquidation"] = float(acc.get("NetLiquidation")) if acc.get("NetLiquidation") else None
+                d["account_net_liquidation"] = (
+                    float(acc.get("NetLiquidation"))
+                    if acc.get("NetLiquidation")
+                    else None
+                )
             except (TypeError, ValueError):
                 d["account_net_liquidation"] = None
             try:
-                d["account_total_cash"] = float(acc.get("TotalCashValue")) if acc.get("TotalCashValue") else None
+                d["account_total_cash"] = (
+                    float(acc.get("TotalCashValue"))
+                    if acc.get("TotalCashValue")
+                    else None
+                )
             except (TypeError, ValueError):
                 d["account_total_cash"] = None
             try:
-                d["account_buying_power"] = float(acc.get("BuyingPower")) if acc.get("BuyingPower") else None
+                d["account_buying_power"] = (
+                    float(acc.get("BuyingPower")) if acc.get("BuyingPower") else None
+                )
             except (TypeError, ValueError):
                 d["account_buying_power"] = None
         else:
@@ -332,7 +373,10 @@ class GsTrading:
         accounts_data = self.store.get_accounts_data()
         d["accounts_snapshot"] = accounts_data if accounts_data else None
         if accounts_data:
-            logger.debug("[R-A1] _build_snapshot_dict accounts_snapshot len=%s", len(accounts_data))
+            logger.debug(
+                "[R-A1] _build_snapshot_dict accounts_snapshot len=%s",
+                len(accounts_data),
+            )
         return d
 
     def _build_heartbeat_minimal_dict(self) -> dict:
@@ -348,7 +392,11 @@ class GsTrading:
             "stock_position": self.store.get_stock_position() or None,
             "option_legs_count": 0,
             "daily_hedge_count": self.store.get_daily_hedge_count(),
-            "daily_pnl": self.store.get_daily_pnl() if self.store.get_daily_pnl() is not None else None,
+            "daily_pnl": (
+                self.store.get_daily_pnl()
+                if self.store.get_daily_pnl() is not None
+                else None
+            ),
             "data_lag_ms": None,
             "config_summary": f"paper_trade={self.paper_trade}",
             "ts": time.time(),
@@ -357,15 +405,25 @@ class GsTrading:
         if acc:
             d["account_id"] = self.store.get_account_id()
             try:
-                d["account_net_liquidation"] = float(acc.get("NetLiquidation")) if acc.get("NetLiquidation") else None
+                d["account_net_liquidation"] = (
+                    float(acc.get("NetLiquidation"))
+                    if acc.get("NetLiquidation")
+                    else None
+                )
             except (TypeError, ValueError):
                 d["account_net_liquidation"] = None
             try:
-                d["account_total_cash"] = float(acc.get("TotalCashValue")) if acc.get("TotalCashValue") else None
+                d["account_total_cash"] = (
+                    float(acc.get("TotalCashValue"))
+                    if acc.get("TotalCashValue")
+                    else None
+                )
             except (TypeError, ValueError):
                 d["account_total_cash"] = None
             try:
-                d["account_buying_power"] = float(acc.get("BuyingPower")) if acc.get("BuyingPower") else None
+                d["account_buying_power"] = (
+                    float(acc.get("BuyingPower")) if acc.get("BuyingPower") else None
+                )
             except (TypeError, ValueError):
                 d["account_buying_power"] = None
         else:
@@ -387,7 +445,10 @@ class GsTrading:
         Positions 与账户一样按 1 小时间隔拉取，避免每心跳请求 IB。
         """
         now_ts = time.time()
-        if now_ts - self._last_positions_refresh_ts >= self._accounts_refresh_interval_sec:
+        if (
+            now_ts - self._last_positions_refresh_ts
+            >= self._accounts_refresh_interval_sec
+        ):
             await self._refresh_positions()
             self._last_positions_refresh_ts = now_ts
         # 1.b. Get stock shares and spot price
@@ -421,7 +482,7 @@ class GsTrading:
         data_lag_ms: Optional[float] = None
         if self._market_data.last_ts is not None:
             data_lag_ms = (time.time() - self._market_data.last_ts) * 1000.0
-        
+
         # 2.b. Build Classify
         state_space_cfg = get_state_space_config(self.config)
         risk_halt = getattr(self.guard, "_circuit_breaker", False)
@@ -438,7 +499,7 @@ class GsTrading:
         )
         # 2.c. Build snapshot
         snapshot = self._build_snapshot(cs, spot, greeks, option_legs_count=len(legs))
-        
+
         # 3. Return snapshot, spot, cs, data_lag_ms
         return (snapshot, spot, cs, data_lag_ms)
 
@@ -528,14 +589,16 @@ class GsTrading:
 
         # 3.c. Status sink: hedge_intent operation (and optional history row)
         if self._status_sink:
-            self._status_sink.write_operation({
-                "ts": time.time(),
-                "type": "hedge_intent",
-                "side": approved.side,
-                "quantity": approved.quantity,
-                "price": spot,
-                "state_reason": cs.D.value if cs.D else None,
-            })
+            self._status_sink.write_operation(
+                {
+                    "ts": time.time(),
+                    "type": "hedge_intent",
+                    "side": approved.side,
+                    "quantity": approved.quantity,
+                    "price": spot,
+                    "state_reason": cs.D.value if cs.D else None,
+                }
+            )
             snap_dict = self._build_snapshot_dict(snapshot, spot, cs, data_lag_ms)
             self._status_sink.write_snapshot(snap_dict, append_history=True)
 
@@ -567,16 +630,19 @@ class GsTrading:
         if self._fsm_hedge.state != HedgeState.SEND:
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
             return
+
         def _write_op(op_type: str, state_reason: Optional[str] = None) -> None:
             if self._status_sink:
-                self._status_sink.write_operation({
-                    "ts": time.time(),
-                    "type": op_type,
-                    "side": intent.side,
-                    "quantity": intent.quantity,
-                    "price": spot,
-                    "state_reason": state_reason or (cs.D.value if cs.D else None),
-                })
+                self._status_sink.write_operation(
+                    {
+                        "ts": time.time(),
+                        "type": op_type,
+                        "side": intent.side,
+                        "quantity": intent.quantity,
+                        "price": spot,
+                        "state_reason": state_reason or (cs.D.value if cs.D else None),
+                    }
+                )
 
         if self.paper_trade:
             _write_op("order_sent")
@@ -599,7 +665,9 @@ class GsTrading:
             self._fsm_hedge.on_full_fill()
             _write_op("fill")
             if self._status_sink:
-                snap_dict = self._build_snapshot_dict(snapshot, spot, cs, snapshot.data_lag_ms)
+                snap_dict = self._build_snapshot_dict(
+                    snapshot, spot, cs, snapshot.data_lag_ms
+                )
                 self._status_sink.write_snapshot(snap_dict, append_history=True)
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
             return
@@ -627,13 +695,17 @@ class GsTrading:
             self._fsm_hedge.on_full_fill()
             _write_op("fill")
             if self._status_sink:
-                snap_dict = self._build_snapshot_dict(snapshot, spot, cs, snapshot.data_lag_ms)
+                snap_dict = self._build_snapshot_dict(
+                    snapshot, spot, cs, snapshot.data_lag_ms
+                )
                 self._status_sink.write_snapshot(snap_dict, append_history=True)
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
         else:
             _write_op("reject", "order_failed")
             if self._status_sink:
-                snap_dict = self._build_snapshot_dict(snapshot, spot, cs, snapshot.data_lag_ms)
+                snap_dict = self._build_snapshot_dict(
+                    snapshot, spot, cs, snapshot.data_lag_ms
+                )
                 self._status_sink.write_snapshot(snap_dict, append_history=True)
             logger.warning("Order failed (trade is None)")
             self._fsm_hedge.on_ack_reject()
@@ -642,8 +714,7 @@ class GsTrading:
             self._fsm_trading.apply_transition(TradingEvent.HEDGE_FAILED, snapshot)
 
     def _poll_control(self) -> Optional[str]:
-        """Poll control command from sink (PostgreSQL daemon_control table when sink is postgres). Return stop/flatten or None.
-        """
+        """Poll control command from sink (PostgreSQL daemon_control table when sink is postgres). Return stop/flatten or None."""
         if self._status_sink is None:
             return None
         if hasattr(self._status_sink, "poll_and_consume_control"):
@@ -660,7 +731,11 @@ class GsTrading:
 
     def _effective_heartbeat_interval(self) -> float:
         """Heartbeat interval in seconds (from DB if set via monitoring, else config); clamped to [5, 120]."""
-        raw = self._heartbeat_interval_from_db if self._heartbeat_interval_from_db is not None else self._heartbeat_interval
+        raw = (
+            self._heartbeat_interval_from_db
+            if self._heartbeat_interval_from_db is not None
+            else self._heartbeat_interval
+        )
         return max(5.0, min(120.0, float(raw)))
 
     def _apply_run_status_transition(self) -> bool:
@@ -670,10 +745,14 @@ class GsTrading:
         cur = self._fsm_daemon.current
         if suspended and cur == DaemonState.RUNNING:
             self._fsm_daemon.transition(DaemonState.RUNNING_SUSPENDED)
-            logger.info("[Daemon] state=RUNNING → RUNNING_SUSPENDED (daemon_run_status.suspended=true)")
+            logger.info(
+                "[Daemon] state=RUNNING → RUNNING_SUSPENDED (daemon_run_status.suspended=true)"
+            )
         elif not suspended and cur == DaemonState.RUNNING_SUSPENDED:
             self._fsm_daemon.transition(DaemonState.RUNNING)
-            logger.info("[Daemon] state=RUNNING_SUSPENDED → RUNNING (daemon_run_status.suspended=false)")
+            logger.info(
+                "[Daemon] state=RUNNING_SUSPENDED → RUNNING (daemon_run_status.suspended=false)"
+            )
         return suspended
 
     async def _heartbeat(self) -> None:
@@ -687,8 +766,14 @@ class GsTrading:
                 return
             if cmd == "flatten":
                 logger.warning("[Daemon] control (db): flatten (not implemented yet)")
-            if cmd == "refresh_accounts" and self.connector.is_connected and self._status_sink:
-                logger.info("[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB")
+            if (
+                cmd == "refresh_accounts"
+                and self.connector.is_connected
+                and self._status_sink
+            ):
+                logger.info(
+                    "[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB"
+                )
                 await self._refresh_accounts_data()
                 self._last_accounts_refresh_ts = time.time()
                 minimal = self._build_heartbeat_minimal_dict()
@@ -718,8 +803,14 @@ class GsTrading:
                 return
             if cmd == "flatten":
                 logger.warning("[Daemon] control (db): flatten (not implemented yet)")
-            if cmd == "refresh_accounts" and self.connector.is_connected and self._status_sink:
-                logger.info("[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB")
+            if (
+                cmd == "refresh_accounts"
+                and self.connector.is_connected
+                and self._status_sink
+            ):
+                logger.info(
+                    "[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB"
+                )
                 await self._refresh_accounts_data()
                 self._last_accounts_refresh_ts = time.time()
                 minimal = self._build_heartbeat_minimal_dict()
@@ -731,7 +822,9 @@ class GsTrading:
                 interval = self._effective_heartbeat_interval()
                 next_retry_ts = now_t + interval
                 sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
-                if self._status_sink and hasattr(self._status_sink, "write_daemon_heartbeat"):
+                if self._status_sink and hasattr(
+                    self._status_sink, "write_daemon_heartbeat"
+                ):
                     self._status_sink.write_daemon_heartbeat(
                         hedge_running=True,
                         ib_connected=False,
@@ -739,11 +832,17 @@ class GsTrading:
                         next_retry_ts=next_retry_ts,
                         seconds_until_retry=sec_until,
                     )
-                logger.warning("[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)", self._fsm_daemon.current.value)
+                logger.warning(
+                    "[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)",
+                    self._fsm_daemon.current.value,
+                )
                 self._ib_disconnected_during_run = True
                 return
             now_ts = time.time()
-            if now_ts - self._last_accounts_refresh_ts >= self._accounts_refresh_interval_sec:
+            if (
+                now_ts - self._last_accounts_refresh_ts
+                >= self._accounts_refresh_interval_sec
+            ):
                 await self._refresh_accounts_data()
                 self._last_accounts_refresh_ts = now_ts
             # 每次心跳拉取标的现价，写入 status_current.spot，供监控页计算盈亏与期权内在价值/虚实
@@ -754,12 +853,21 @@ class GsTrading:
                 result = await self._refresh_and_build_snapshot()
                 if result is not None:
                     snapshot, spot, cs, data_lag_ms = result
-                    snap_dict = self._build_snapshot_dict(snapshot, spot, cs, data_lag_ms)
+                    snap_dict = self._build_snapshot_dict(
+                        snapshot, spot, cs, data_lag_ms
+                    )
                     self._status_sink.write_snapshot(snap_dict, append_history=False)
                 else:
-                    logger.debug("Heartbeat: no full snapshot (spot unavailable), writing minimal status")
+                    logger.debug(
+                        "Heartbeat: no full snapshot (spot unavailable), writing minimal status"
+                    )
                     minimal = self._build_heartbeat_minimal_dict()
                     self._status_sink.write_snapshot(minimal, append_history=False)
+                # 阶段 3 R-M6：按 account_positions 逐标的拉价 + 写库（低频：按心跳刷新一次）
+                try:
+                    await self._refresh_position_prices()
+                except Exception as e:
+                    logger.debug("refresh_position_prices failed: %s", e, exc_info=True)
                 if hasattr(self._status_sink, "write_daemon_heartbeat"):
                     self._status_sink.write_daemon_heartbeat(
                         hedge_running=True,
@@ -768,8 +876,99 @@ class GsTrading:
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
                     )
             if not suspended:
-                logger.info("[Daemon] state=RUNNING | heartbeat: tick, running maybe_hedge")
+                logger.info(
+                    "[Daemon] state=RUNNING | heartbeat: tick, running maybe_hedge"
+                )
                 await self._eval_hedge_sync()
+
+    async def _refresh_position_prices(self) -> None:
+        """R-M6：根据当前 accounts_data 按 contract_key 聚合标的，逐标的拉价并写入 instrument_prices。
+
+        刷新频率：随 heartbeat，一次性覆盖当前所有持仓标的；与高频 status_current.spot 解耦。
+        """
+        if not self._status_sink or not hasattr(
+            self._status_sink, "write_instrument_prices"
+        ):
+            return
+        if not self.connector.is_connected:
+            return
+        accounts = self.store.get_accounts_data()
+        if not accounts:
+            return
+        instruments = {}
+        for acc in accounts:
+            positions = acc.get("positions") or []
+            if not isinstance(positions, list):
+                continue
+            for p in positions:
+                if not isinstance(p, dict):
+                    continue
+                sym = (p.get("symbol") or "").strip()
+                if not sym:
+                    continue
+                sec = (p.get("secType") or p.get("sec_type") or "").strip()
+                sec_u = sec.upper()
+                # 先只对股票逐标的拉价 + 写库；期权后续单独按 IB 的完整合约信息处理
+                if sec_u != "STK":
+                    continue
+                ex = (p.get("exchange") or "").strip() or "SMART"
+                curr = (p.get("currency") or "").strip() or "USD"
+                contract_key = f"{sym}|{sec_u}|||"
+                if contract_key in instruments:
+                    continue
+                instruments[contract_key] = {
+                    "symbol": sym,
+                    "sec_type": sec_u,
+                    "expiry": None,
+                    "strike": None,
+                    "option_right": None,
+                    "exchange": ex,
+                    "currency": curr,
+                }
+        if not instruments:
+            logger.info(
+                "[R-M6] refresh_position_prices: no stock instruments in accounts_data; skip"
+            )
+            return
+        rows = []
+        for ck, meta in instruments.items():
+            price = await self.connector.get_instrument_price(
+                symbol=meta["symbol"],
+                sec_type=meta["sec_type"],
+                expiry=meta["expiry"],
+                strike=meta["strike"],
+                right=meta["option_right"],
+                exchange=meta["exchange"],
+                currency=meta["currency"],
+            )
+            if not price:
+                logger.debug(
+                    "[R-M6] get_instrument_price returned no data for %s (%s)",
+                    ck,
+                    meta["symbol"],
+                )
+                continue
+            rows.append(
+                {
+                    "contract_key": ck,
+                    "symbol": meta["symbol"],
+                    "sec_type": meta["sec_type"],
+                    "expiry": meta["expiry"],
+                    "strike": meta["strike"],
+                    "option_right": meta["option_right"],
+                    "last": price.get("last"),
+                    "bid": price.get("bid"),
+                    "ask": price.get("ask"),
+                    "mid": price.get("mid"),
+                }
+            )
+        logger.info(
+            "[R-M6] refresh_position_prices: %s stock instruments, %s rows to write",
+            len(instruments),
+            len(rows),
+        )
+        if rows:
+            self._status_sink.write_instrument_prices(rows)
 
     # --- State handlers: each runs its logic and returns the next state ---
 
@@ -783,7 +982,9 @@ class GsTrading:
         logger.info("[Daemon] state=CONNECTING | connecting to IB (single attempt)...")
         ok = await self.connector.connect(max_attempts=1)
         if not ok:
-            logger.warning("[Daemon] state=CONNECTING | IB connect failed → WAITING_IB (daemon stays up, will retry)")
+            logger.warning(
+                "[Daemon] state=CONNECTING | IB connect failed → WAITING_IB (daemon stays up, will retry)"
+            )
             return DaemonState.WAITING_IB
         logger.info("[Daemon] state=CONNECTING → CONNECTED (IB connected)")
         return DaemonState.CONNECTED
@@ -814,11 +1015,16 @@ class GsTrading:
                 logger.info("[Daemon] state=WAITING_IB | control stop → STOPPING")
                 return DaemonState.STOPPING
             if cmd == "retry_ib" or time.time() >= next_retry_ts:
-                logger.info("[Daemon] state=WAITING_IB | %s → connecting to IB (one attempt)...", "retry_ib" if cmd == "retry_ib" else "retry timer")
+                logger.info(
+                    "[Daemon] state=WAITING_IB | %s → connecting to IB (one attempt)...",
+                    "retry_ib" if cmd == "retry_ib" else "retry timer",
+                )
                 ok = await self.connector.connect(max_attempts=1)
                 if ok:
                     # 立即写心跳，避免进入 CONNECTED/RUNNING 前 last_ts 过期导致监控端误判为异常（CONNECTED 阶段 _refresh_and_build_snapshot 可能较慢）
-                    if self._status_sink and hasattr(self._status_sink, "write_daemon_heartbeat"):
+                    if self._status_sink and hasattr(
+                        self._status_sink, "write_daemon_heartbeat"
+                    ):
                         self._status_sink.write_daemon_heartbeat(
                             hedge_running=False,
                             ib_connected=True,
@@ -831,7 +1037,9 @@ class GsTrading:
                 interval = self._effective_heartbeat_interval()
                 next_retry_ts = now_t + interval
                 sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
-                if self._status_sink and hasattr(self._status_sink, "write_daemon_heartbeat"):
+                if self._status_sink and hasattr(
+                    self._status_sink, "write_daemon_heartbeat"
+                ):
                     self._status_sink.write_daemon_heartbeat(
                         hedge_running=False,
                         ib_connected=False,
@@ -840,7 +1048,10 @@ class GsTrading:
                         seconds_until_retry=sec_until,
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
                     )
-                logger.debug("[Daemon] state=WAITING_IB | connect failed; next retry in %ss", sec_until)
+                logger.debug(
+                    "[Daemon] state=WAITING_IB | connect failed; next retry in %ss",
+                    sec_until,
+                )
             await asyncio.sleep(1.0)
 
     async def _handle_connected(self) -> DaemonState:
@@ -853,7 +1064,9 @@ class GsTrading:
                 ib_client_id=getattr(self.connector, "client_id", None),
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
             )
-        logger.info("[Daemon] state=CONNECTED | fetching account summary and positions, building snapshot...")
+        logger.info(
+            "[Daemon] state=CONNECTED | fetching account summary and positions, building snapshot..."
+        )
         await self._refresh_accounts_data()
         self._last_accounts_refresh_ts = time.time()
         result = await self._refresh_and_build_snapshot()
@@ -894,8 +1107,8 @@ class GsTrading:
                 )
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
         self._config_reload_task = asyncio.create_task(self._reload_config_loop())
-        control_available = (
-            self._status_sink is not None and hasattr(self._status_sink, "poll_and_consume_control")
+        control_available = self._status_sink is not None and hasattr(
+            self._status_sink, "poll_and_consume_control"
         )
         logger.info(
             "[Daemon] state=%s | Daemon running (symbol=%s, paper_trade=%s, config=%s); control via daemon_control=%s",
@@ -963,13 +1176,17 @@ class GsTrading:
         """State-driven loop: run handler for current state, transition to returned state."""
         self._loop = asyncio.get_running_loop()
         handlers = self._get_state_handlers()
-        logger.info("[Daemon] started (state loop: IDLE → CONNECTING → CONNECTED → RUNNING → STOPPING → STOPPED)")
+        logger.info(
+            "[Daemon] started (state loop: IDLE → CONNECTING → CONNECTED → RUNNING → STOPPING → STOPPED)"
+        )
         try:
             while self._fsm_daemon.current != DaemonState.STOPPED:
                 current = self._fsm_daemon.current
                 handler = handlers.get(current)
                 if handler is None:
-                    logger.warning("[Daemon] state=%s | no handler; stopping", current.value)
+                    logger.warning(
+                        "[Daemon] state=%s | no handler; stopping", current.value
+                    )
                     break
                 try:
                     next_state = await handler()
@@ -983,7 +1200,9 @@ class GsTrading:
                             self._fsm_daemon.transition(DaemonState.STOPPING)
                         break
                 except Exception as e:
-                    logger.exception("[Daemon] state=%s handler raised: %s", current.value, e)
+                    logger.exception(
+                        "[Daemon] state=%s handler raised: %s", current.value, e
+                    )
                     if self._fsm_daemon.can_transition_to(DaemonState.STOPPING):
                         self._fsm_daemon.transition(DaemonState.STOPPING)
                     else:
@@ -1009,7 +1228,9 @@ async def _run_daemon_main(config_path: Optional[str] = None) -> None:
     loop = asyncio.get_running_loop()
 
     def _on_stop_signal(*_args: Any) -> None:
-        logger.info("[Daemon] received SIGTERM/SIGINT → requesting stop (RUNNING → STOPPING)")
+        logger.info(
+            "[Daemon] received SIGTERM/SIGINT → requesting stop (RUNNING → STOPPING)"
+        )
         loop.call_soon_threadsafe(app.stop)
 
     try:
@@ -1024,7 +1245,9 @@ async def _run_daemon_main(config_path: Optional[str] = None) -> None:
         await app.run()
     finally:
         # So monitoring can show "Stopped at ..." (SIGTERM/SIGINT or consumed stop); no-op on SIGKILL
-        if getattr(app, "_status_sink", None) and hasattr(app._status_sink, "write_daemon_graceful_shutdown"):
+        if getattr(app, "_status_sink", None) and hasattr(
+            app._status_sink, "write_daemon_graceful_shutdown"
+        ):
             app._status_sink.write_daemon_graceful_shutdown()
 
 

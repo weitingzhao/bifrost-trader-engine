@@ -62,3 +62,8 @@ class StatusSink(ABC):
         record: dict with keys from OPERATION_KEYS (ts, type, side, quantity, price, state_reason).
         """
         ...
+
+    # 可选：按合约写入持仓标的当前价（R-M6，多标的按 contract_key 逐标的拉价 + 写库）
+    # 默认实现为空，具体 sink（如 PostgreSQLSink）可选择性实现。
+    def write_instrument_prices(self, rows: Any) -> None:  # rows: Iterable[Dict[str, Any]]
+        return

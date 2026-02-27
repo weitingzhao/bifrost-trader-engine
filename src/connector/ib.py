@@ -15,6 +15,7 @@ from ib_insync import (
     Position,
     Ticker,
     AccountValue,
+    Option,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,11 @@ class IBConnector:
                 try_id,
                 int(attempt_timeout),
                 wait_secs,
-                " (single attempt per heartbeat)" if limit == 1 else "; if client_id in use will retry with next ID",
+                (
+                    " (single attempt per heartbeat)"
+                    if limit == 1
+                    else "; if client_id in use will retry with next ID"
+                ),
             )
             try:
                 logger.debug(
@@ -125,9 +130,14 @@ class IBConnector:
                     )
                 else:
                     if limit == 1:
-                        logger.debug("IB connect attempt failed (will retry on next heartbeat): %s", last_exc)
+                        logger.debug(
+                            "IB connect attempt failed (will retry on next heartbeat): %s",
+                            last_exc,
+                        )
                     else:
-                        logger.error("IB connect failed after %s attempts: %s", limit, last_exc)
+                        logger.error(
+                            "IB connect failed after %s attempts: %s", limit, last_exc
+                        )
                     self._connected = False
                     return False
         self._connected = False
@@ -153,7 +163,9 @@ class IBConnector:
             return []
         try:
             raw = self.ib.managedAccounts()
-            logger.info("[R-A1] get_managed_accounts raw=%r (type=%s)", raw, type(raw).__name__)
+            logger.info(
+                "[R-A1] get_managed_accounts raw=%r (type=%s)", raw, type(raw).__name__
+            )
             if not raw:
                 return []
             # TWS API returns comma-separated string (e.g. "U17113214,DU123"); some wrappers return list
@@ -168,7 +180,9 @@ class IBConnector:
             logger.warning("get_managed_accounts: %s", e, exc_info=True)
             return []
 
-    async def get_account_summary(self, account: Optional[str] = None) -> List[AccountValue]:
+    async def get_account_summary(
+        self, account: Optional[str] = None
+    ) -> List[AccountValue]:
         """Request and return account summary (NetLiquidation, TotalCashValue, BuyingPower, etc.). R-A1.
         If account is None, returns values for all accounts (ib_insync convention).
         """
@@ -185,7 +199,8 @@ class IBConnector:
     @staticmethod
     def position_to_dict(pos: Position) -> Dict[str, Any]:
         """Convert IB Position to a JSON-serializable dict for monitoring (R-A1 multi-account).
-        For OPT: includes lastTradeDateOrContractMonth (expiry), strike, right (C/P) so options are distinguishable."""
+        For OPT: includes lastTradeDateOrContractMonth (expiry), strike, right (C/P) so options are distinguishable.
+        """
         c = pos.contract
         sec_type = getattr(c, "secType", "") or ""
         out: Dict[str, Any] = {
@@ -199,7 +214,9 @@ class IBConnector:
         }
         if sec_type == "OPT":
             # IB Option contract: lastTradeDateOrContractMonth (YYYYMM or YYYYMMDD), strike, right ('C'/'P' or 'CALL'/'PUT')
-            out["lastTradeDateOrContractMonth"] = getattr(c, "lastTradeDateOrContractMonth", None) or ""
+            out["lastTradeDateOrContractMonth"] = (
+                getattr(c, "lastTradeDateOrContractMonth", None) or ""
+            )
             out["strike"] = getattr(c, "strike", None)
             out["right"] = getattr(c, "right", None) or ""
             out["multiplier"] = getattr(c, "multiplier", None)
@@ -237,6 +254,78 @@ class IBConnector:
         except Exception as e:
             logger.error("get_underlying_price %s: %s", symbol, e)
         return None
+
+    async def get_instrument_price(
+        self,
+        symbol: str,
+        sec_type: str,
+        expiry: Optional[str] = None,
+        strike: Optional[float] = None,
+        right: Optional[str] = None,
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ) -> Optional[Dict[str, Optional[float]]]:
+        """Get price for a generic instrument (stock/option). Returns dict with bid/ask/last/mid or None.
+
+        用于阶段 3 R-M6：按 account_positions 逐标的拉价。
+        """
+        if not self.is_connected:
+            await self.connect()
+        sec = (sec_type or "").upper()
+        if not symbol:
+            return None
+        contract = None
+        try:
+            if sec == "OPT":
+                exp = (expiry or "").strip()
+                if not exp or strike is None or right is None:
+                    return None
+                rt = str(right).upper()
+                contract = Option(symbol, exp, float(strike), rt, exchange, currency)
+            else:
+                contract = self._stock(symbol, exchange)
+            await self.ib.qualifyContractsAsync(contract)
+            ticker = self.ib.reqMktData(contract, "", False, False)
+            # 给行情一点时间刷新，多等几次，避免总是拿到全 0 而导致不写库
+            bid = ask = last = mid = None
+            for _ in range(3):
+                await asyncio.sleep(0.5)
+                tbid = getattr(ticker, "bid", None)
+                task = getattr(ticker, "ask", None)
+                tlast = getattr(ticker, "last", None)
+                # IB 有时用 0 或 -1 表示“暂无有效报价”，这里统一过滤掉非正数
+                try:
+                    if tbid is not None:
+                        fb = float(tbid)
+                        if fb > 0:
+                            bid = fb
+                    if task is not None:
+                        fa = float(task)
+                        if fa > 0:
+                            ask = fa
+                    if tlast is not None:
+                        fl = float(tlast)
+                        if fl > 0:
+                            last = fl
+                except (TypeError, ValueError):
+                    pass
+                if bid is not None and ask is not None:
+                    mid = (bid + ask) / 2.0
+                elif last is not None:
+                    mid = last
+                if (
+                    bid is not None
+                    or ask is not None
+                    or last is not None
+                    or mid is not None
+                ):
+                    break
+            if bid is None and ask is None and last is None and mid is None:
+                return None
+            return {"bid": bid, "ask": ask, "last": last, "mid": mid}
+        except Exception as e:
+            logger.error("get_instrument_price %s %s: %s", sec_type, symbol, e)
+            return None
 
     async def subscribe_ticker(
         self,

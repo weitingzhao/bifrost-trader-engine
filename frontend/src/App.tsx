@@ -592,7 +592,10 @@ export default function App() {
           const positions = acc.positions ?? []
           const stockPositions = positions.filter((p) => (p.secType ?? '').toUpperCase() !== 'OPT')
           const optionPositions = positions.filter((p) => (p.secType ?? '').toUpperCase() === 'OPT')
-          const spot = status?.status?.spot != null && Number.isFinite(Number(status.status.spot)) ? Number(status.status.spot) : null
+          const spot =
+            status?.status?.spot != null && Number.isFinite(Number(status.status.spot))
+              ? Number(status.status.spot)
+              : null
           const rightLabel = (r: string | undefined): string => {
             if (!r) return '—'
             const u = String(r).toUpperCase()
@@ -655,7 +658,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* 股票持仓：数量即股数，总成本=数量×成本 */}
+                {/* 股票持仓：数量即股数，总成本=数量×成本，浮动盈亏=（当前价-成本）×数量（仅对主标的 symbol 使用 spot） */}
                 <div className="ib-positions-title">股票持仓</div>
                 {stockPositions.length === 0 ? (
                   <p className="ib-positions-empty">无</p>
@@ -668,6 +671,8 @@ export default function App() {
                           <th>数量</th>
                           <th>成本</th>
                           <th>总成本</th>
+                          <th>当前价</th>
+                          <th>浮动盈亏</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -675,12 +680,33 @@ export default function App() {
                           const qty = pos.position != null ? Number(pos.position) : NaN
                           const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
                           const totalCost = Number.isFinite(qty) && Number.isFinite(cost) ? qty * cost : null
+                          const sym = (pos.symbol ?? '').toString().toUpperCase()
+                          const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                          const perPrice =
+                            pos.price != null && Number.isFinite(Number(pos.price))
+                              ? Number(pos.price)
+                              : NaN
+                          const showSpotForRow =
+                            spot != null &&
+                            Number.isFinite(spot) &&
+                            sym !== '' &&
+                            mainSym !== '' &&
+                            sym === mainSym
+                          const fallbackSpot = showSpotForRow ? spot : null
+                          const currPrice =
+                            Number.isFinite(perPrice) && perPrice > 0 ? perPrice : fallbackSpot
+                          const pnl =
+                            currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)
+                              ? (currPrice - cost) * qty
+                              : null
                           return (
                             <tr key={`stk-${pos.symbol}-${i}`} className="ib-pos-stock">
                               <td>{pos.symbol ?? '—'}</td>
                               <td>{pos.position != null ? pos.position : '—'}</td>
                               <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
                               <td>{totalCost != null ? fmtUsd(totalCost) : '—'}</td>
+                              <td>{currPrice != null ? fmtUsd(currPrice) : '—'}</td>
+                              <td>{pnl != null ? fmtUsd(pnl) : '—'}</td>
                             </tr>
                           )
                         })}

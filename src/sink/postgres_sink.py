@@ -37,7 +37,9 @@ def _json_safe(obj: Any) -> Any:
     return str(obj)
 
 
-def _parse_summary_floats(summary: Dict[str, Any]) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Any]]:
+def _parse_summary_floats(
+    summary: Dict[str, Any],
+) -> Tuple[Optional[float], Optional[float], Optional[float], Dict[str, Any]]:
     """Extract net_liquidation, total_cash, buying_power from IB summary; return (nl, tc, bp, summary_extra)."""
     if not summary or not isinstance(summary, dict):
         return None, None, None, {}
@@ -64,10 +66,13 @@ def _parse_summary_floats(summary: Dict[str, Any]) -> Tuple[Optional[float], Opt
     return nl, tc, bp, extra
 
 
-def _sync_accounts_snapshot_to_tables(conn, accounts_list: Optional[List[Dict[str, Any]]]) -> None:
+def _sync_accounts_snapshot_to_tables(
+    conn, accounts_list: Optional[List[Dict[str, Any]]]
+) -> None:
     """Write normalized accounts_snapshot into accounts + account_positions.
     accounts: upsert by account_id. account_positions: upsert by (account_id, symbol, sec_type);
-    only delete rows for an account that are no longer in the snapshot (position closed)."""
+    only delete rows for an account that are no longer in the snapshot (position closed).
+    """
     if not accounts_list or not isinstance(accounts_list, list):
         return
     with conn.cursor() as cur:
@@ -81,7 +86,9 @@ def _sync_accounts_snapshot_to_tables(conn, accounts_list: Optional[List[Dict[st
             summary = acc.get("summary") or {}
             if not isinstance(summary, dict):
                 summary = {}
-            net_liq, total_cash, buying_power, summary_extra = _parse_summary_floats(summary)
+            net_liq, total_cash, buying_power, summary_extra = _parse_summary_floats(
+                summary
+            )
             summary_extra_json = _json_safe(summary_extra) if summary_extra else None
             # accounts: upsert by account_id (no delete)
             cur.execute(
@@ -95,7 +102,17 @@ def _sync_accounts_snapshot_to_tables(conn, accounts_list: Optional[List[Dict[st
                     buying_power = EXCLUDED.buying_power,
                     summary_extra = EXCLUDED.summary_extra
                 """,
-                (account_id, net_liq, total_cash, buying_power, Json(summary_extra_json) if summary_extra_json is not None else None),
+                (
+                    account_id,
+                    net_liq,
+                    total_cash,
+                    buying_power,
+                    (
+                        Json(summary_extra_json)
+                        if summary_extra_json is not None
+                        else None
+                    ),
+                ),
             )
             # account_positions: upsert by (account_id, contract_key); contract_key distinguishes OPT by expiry/strike/right
             positions = acc.get("positions") or []
@@ -143,7 +160,19 @@ def _sync_accounts_snapshot_to_tables(conn, accounts_list: Optional[List[Dict[st
                             option_right = EXCLUDED.option_right,
                             updated_at = now()
                         """,
-                        (account_id, sym, sec, ex, curr, pos_f, avg_f, exp or None, strike_f, rt or None, contract_key),
+                        (
+                            account_id,
+                            sym,
+                            sec,
+                            ex,
+                            curr,
+                            pos_f,
+                            avg_f,
+                            exp or None,
+                            strike_f,
+                            rt or None,
+                            contract_key,
+                        ),
                     )
                     seen_keys.append(contract_key)
             # Remove positions for this account that are no longer in snapshot (closed)
@@ -156,7 +185,9 @@ def _sync_accounts_snapshot_to_tables(conn, accounts_list: Optional[List[Dict[st
                     (account_id, seen_keys),
                 )
             else:
-                cur.execute("DELETE FROM account_positions WHERE account_id = %s", (account_id,))
+                cur.execute(
+                    "DELETE FROM account_positions WHERE account_id = %s", (account_id,)
+                )
 
 
 # Table(s) to auto-release locks on when daemon hits lock timeout (e.g. after crash restart)
@@ -226,7 +257,12 @@ def _get_conn_params(config: dict) -> dict:
     db = pg.get("database") or pg.get("Database") or pg.get("db")
     if not db and pg:
         for k, v in pg.items():
-            if k and isinstance(v, str) and v.strip() and k.strip().lower() in ("database", "db"):
+            if (
+                k
+                and isinstance(v, str)
+                and v.strip()
+                and k.strip().lower() in ("database", "db")
+            ):
                 db = v.strip()
                 break
     return {
@@ -253,7 +289,8 @@ def _ensure_tables(conn) -> None:
     except Exception:
         pass
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS status_current (
                 id integer PRIMARY KEY DEFAULT 1,
                 daemon_state text,
@@ -271,8 +308,10 @@ def _ensure_tables(conn) -> None:
                 config_summary text,
                 ts double precision
             )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS status_history (
                 id bigserial PRIMARY KEY,
                 daemon_state text,
@@ -290,8 +329,10 @@ def _ensure_tables(conn) -> None:
                 config_summary text,
                 ts double precision
             )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS operations (
                 id bigserial PRIMARY KEY,
                 ts double precision,
@@ -301,50 +342,66 @@ def _ensure_tables(conn) -> None:
                 price double precision,
                 state_reason text
             )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS daemon_control (
                 id bigserial PRIMARY KEY,
                 command text NOT NULL,
                 created_at timestamptz DEFAULT now(),
                 consumed_at timestamptz
             )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS daemon_run_status (
                 id integer PRIMARY KEY DEFAULT 1,
                 suspended boolean NOT NULL DEFAULT false,
                 updated_at timestamptz DEFAULT now()
             )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             INSERT INTO daemon_run_status (id, suspended) VALUES (1, false)
             ON CONFLICT (id) DO NOTHING
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS daemon_heartbeat (
                 id integer PRIMARY KEY DEFAULT 1,
                 last_ts timestamptz NOT NULL DEFAULT now(),
                 hedge_running boolean NOT NULL DEFAULT false
             )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             INSERT INTO daemon_heartbeat (id, last_ts, hedge_running) VALUES (1, now(), false)
             ON CONFLICT (id) DO NOTHING
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS settings (
                 id integer PRIMARY KEY DEFAULT 1,
                 ib_host text NOT NULL DEFAULT '127.0.0.1',
                 ib_port_type text NOT NULL DEFAULT 'tws_paper'
             )
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             INSERT INTO settings (id, ib_host, ib_port_type) VALUES (1, '127.0.0.1', 'tws_paper')
             ON CONFLICT (id) DO NOTHING
-        """)
+        """
+        )
         # R-A1 normalized account tables (replacing raw jsonb for future account operations)
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS accounts (
                 account_id text PRIMARY KEY,
                 updated_at timestamptz DEFAULT now(),
@@ -353,9 +410,11 @@ def _ensure_tables(conn) -> None:
                 buying_power double precision,
                 summary_extra jsonb
             )
-        """)
+        """
+        )
         # account_positions: (account_id, contract_key) 为主键，无 id；天然按主键 INSERT/UPDATE，仅删除已平仓行
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS account_positions (
                 account_id text NOT NULL,
                 contract_key text NOT NULL,
@@ -371,7 +430,8 @@ def _ensure_tables(conn) -> None:
                 updated_at timestamptz DEFAULT now(),
                 PRIMARY KEY (account_id, contract_key)
             )
-        """)
+        """
+        )
         for col_def in (
             "expiry text",
             "strike double precision",
@@ -382,44 +442,93 @@ def _ensure_tables(conn) -> None:
             cur.execute(
                 f"ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS {name} {typ}"
             )
-        cur.execute("""
+        cur.execute(
+            """
             UPDATE account_positions SET contract_key = symbol || '|' || COALESCE(sec_type,'') || '|' || COALESCE(expiry,'') || '|' || COALESCE(strike::text,'') || '|' || COALESCE(option_right,'')
             WHERE contract_key IS NULL OR contract_key = ''
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             DROP INDEX IF EXISTS account_positions_account_symbol_sectype_key
-        """)
-        cur.execute("""
+        """
+        )
+        cur.execute(
+            """
             CREATE UNIQUE INDEX IF NOT EXISTS account_positions_account_contract_key
             ON account_positions (account_id, contract_key)
-        """)
+        """
+        )
+        # R-M6: 每个持仓标的当前价（按 contract_key 聚合），供监控页逐行展示与计算盈亏
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS instrument_prices (
+                contract_key text PRIMARY KEY,
+                symbol text,
+                sec_type text,
+                expiry text,
+                strike double precision,
+                option_right text,
+                last double precision,
+                bid double precision,
+                ask double precision,
+                mid double precision,
+                updated_at timestamptz DEFAULT now()
+            )
+        """
+        )
         conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
             with conn.cursor() as cur2:
-                cur2.execute("""
+                cur2.execute(
+                    """
                     UPDATE settings s SET ib_host = d.ib_host, ib_port_type = d.ib_port_type
                     FROM daemon_ib_config d WHERE d.id = 1 AND s.id = 1
-                """)
+                """
+                )
             conn.commit()
         except Exception:
             conn.rollback()
         # RE-7: add columns if not exist (each ALTER in its own transaction so duplicate_column doesn't abort the rest)
         for _col, sql in [
-            ("ib_connected", "ALTER TABLE daemon_heartbeat ADD COLUMN ib_connected boolean DEFAULT false"),
-            ("ib_client_id", "ALTER TABLE daemon_heartbeat ADD COLUMN ib_client_id integer"),
-            ("next_retry_ts", "ALTER TABLE daemon_heartbeat ADD COLUMN next_retry_ts timestamptz"),
-            ("seconds_until_retry", "ALTER TABLE daemon_heartbeat ADD COLUMN seconds_until_retry smallint"),
-            ("graceful_shutdown_at", "ALTER TABLE daemon_heartbeat ADD COLUMN graceful_shutdown_at timestamptz"),
-            ("heartbeat_interval_sec", "ALTER TABLE daemon_heartbeat ADD COLUMN heartbeat_interval_sec smallint"),
-            ("run_status_heartbeat_interval", "ALTER TABLE daemon_run_status ADD COLUMN heartbeat_interval_sec smallint"),
+            (
+                "ib_connected",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN ib_connected boolean DEFAULT false",
+            ),
+            (
+                "ib_client_id",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN ib_client_id integer",
+            ),
+            (
+                "next_retry_ts",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN next_retry_ts timestamptz",
+            ),
+            (
+                "seconds_until_retry",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN seconds_until_retry smallint",
+            ),
+            (
+                "graceful_shutdown_at",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN graceful_shutdown_at timestamptz",
+            ),
+            (
+                "heartbeat_interval_sec",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN heartbeat_interval_sec smallint",
+            ),
+            (
+                "run_status_heartbeat_interval",
+                "ALTER TABLE daemon_run_status ADD COLUMN heartbeat_interval_sec smallint",
+            ),
         ]:
             try:
                 cur.execute(sql)
                 conn.commit()
             except psycopg2.ProgrammingError as e:
                 conn.rollback()  # clear aborted state so next ALTER can run
-                if e.pgcode != "42701":  # 42701 = duplicate_column (column already exists)
+                if (
+                    e.pgcode != "42701"
+                ):  # 42701 = duplicate_column (column already exists)
                     raise
 
 
@@ -441,14 +550,24 @@ class PostgreSQLSink(StatusSink):
                     cur.execute("SET lock_timeout = '5s'")
                 self._conn.commit()
                 _ensure_tables(self._conn)
-                logger.info("PostgreSQL sink connected: %s@%s:%s/%s", params["user"], params["host"], params["port"], params["dbname"])
+                logger.info(
+                    "PostgreSQL sink connected: %s@%s:%s/%s",
+                    params["user"],
+                    params["host"],
+                    params["port"],
+                    params["dbname"],
+                )
                 return
             except Exception as e:
                 self._conn = None
                 if attempt == 1 and _is_lock_timeout_error(e):
                     n = release_pg_locks_for_tables(self._config)
                     if n > 0:
-                        logger.info("Released %s backend(s) holding lock on %s; retrying connect", n, _DAEMON_LOCK_TABLES)
+                        logger.info(
+                            "Released %s backend(s) holding lock on %s; retrying connect",
+                            n,
+                            _DAEMON_LOCK_TABLES,
+                        )
                         time.sleep(0.5)
                         continue
                 logger.warning("PostgreSQL sink connect failed: %s", e)
@@ -466,7 +585,9 @@ class PostgreSQLSink(StatusSink):
                 self._connect()
         return self._conn is not None
 
-    def write_snapshot(self, snapshot: Dict[str, Any], append_history: bool = False) -> None:
+    def write_snapshot(
+        self, snapshot: Dict[str, Any], append_history: bool = False
+    ) -> None:
         if not self._ensure_conn():
             return
         # status_current / status_history: only SNAPSHOT_KEYS (no account_* or accounts_snapshot; those live in accounts + account_positions)
@@ -474,7 +595,11 @@ class PostgreSQLSink(StatusSink):
         cols = ", ".join(keys)
         placeholders = ", ".join("%s" for _ in keys)
         values = [snapshot.get(k) for k in keys]
-        raw_accounts = snapshot.get(ACCOUNTS_SNAPSHOT_KEY) if ACCOUNTS_SNAPSHOT_KEY in snapshot else None
+        raw_accounts = (
+            snapshot.get(ACCOUNTS_SNAPSHOT_KEY)
+            if ACCOUNTS_SNAPSHOT_KEY in snapshot
+            else None
+        )
         try:
             with self._conn.cursor() as cur:
                 # Upsert single row (id=1) for status_current
@@ -517,6 +642,61 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.warning("PostgreSQL write_operation failed: %s", e)
 
+    def write_instrument_prices(self, rows):
+        """R-M6: 写入每个合约的当前价（按 contract_key upsert）。rows: Iterable[Dict]."""
+        if not rows:
+            return
+        if not self._ensure_conn():
+            return
+        logger.info("[R-M6] write_instrument_prices: %s rows received", len(rows))
+        try:
+            with self._conn.cursor() as cur:
+                for r in rows:
+                    contract_key = r.get("contract_key")
+                    if not contract_key:
+                        logger.warning(
+                            "[R-M6] write_instrument_prices: missing contract_key in row: %s",
+                            r,
+                        )
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO instrument_prices (
+                            contract_key, symbol, sec_type, expiry, strike, option_right,
+                            last, bid, ask, mid, updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        ON CONFLICT (contract_key) DO UPDATE SET
+                            symbol = EXCLUDED.symbol,
+                            sec_type = EXCLUDED.sec_type,
+                            expiry = EXCLUDED.expiry,
+                            strike = EXCLUDED.strike,
+                            option_right = EXCLUDED.option_right,
+                            last = EXCLUDED.last,
+                            bid = EXCLUDED.bid,
+                            ask = EXCLUDED.ask,
+                            mid = EXCLUDED.mid,
+                            updated_at = now()
+                        """,
+                        (
+                            contract_key,
+                            r.get("symbol"),
+                            r.get("sec_type"),
+                            r.get("expiry"),
+                            r.get("strike"),
+                            r.get("option_right"),
+                            r.get("last"),
+                            r.get("bid"),
+                            r.get("ask"),
+                            r.get("mid"),
+                        ),
+                    )
+            self._conn.commit()
+            logger.info("[R-M6] write_instrument_prices: commit ok")
+        except Exception as e:
+            self._conn.rollback()
+            logger.warning("write_instrument_prices failed: %s", e, exc_info=True)
+
     # Control commands older than this are ignored (consumed but not executed), to avoid executing
     # a stop from a previous run when the daemon restarts and immediately polls (e.g. after IB timeout → WAITING_IB).
     CONTROL_CMD_MAX_AGE_SEC = 60
@@ -556,7 +736,10 @@ class PostgreSQLSink(StatusSink):
                         created_utc = created_utc.replace(tzinfo=timezone.utc)
                     age_sec = (now_utc - created_utc).total_seconds()
                 if age_sec > self.CONTROL_CMD_MAX_AGE_SEC:
-                    cur.execute("UPDATE daemon_control SET consumed_at = now() WHERE id = %s", (row_id,))
+                    cur.execute(
+                        "UPDATE daemon_control SET consumed_at = now() WHERE id = %s",
+                        (row_id,),
+                    )
                     self._conn.commit()
                     logger.info(
                         "Consumed stale control command from daemon_control (id=%s): %s (age %.0fs > %s s, not executed)",
@@ -566,9 +749,14 @@ class PostgreSQLSink(StatusSink):
                         self.CONTROL_CMD_MAX_AGE_SEC,
                     )
                     return None
-                cur.execute("UPDATE daemon_control SET consumed_at = now() WHERE id = %s", (row_id,))
+                cur.execute(
+                    "UPDATE daemon_control SET consumed_at = now() WHERE id = %s",
+                    (row_id,),
+                )
             self._conn.commit()
-            logger.info("Consumed control command from daemon_control (id=%s): %s", row_id, cmd)
+            logger.info(
+                "Consumed control command from daemon_control (id=%s): %s", row_id, cmd
+            )
             return cmd
         except Exception as e:
             self._conn.rollback()
@@ -592,7 +780,11 @@ class PostgreSQLSink(StatusSink):
         for attempt in (1, 2):
             try:
                 with self._conn.cursor() as cur:
-                    iv = int(heartbeat_interval_sec) if heartbeat_interval_sec is not None else None
+                    iv = (
+                        int(heartbeat_interval_sec)
+                        if heartbeat_interval_sec is not None
+                        else None
+                    )
                     if next_retry_ts is not None:
                         cur.execute(
                             """
@@ -602,7 +794,14 @@ class PostgreSQLSink(StatusSink):
                                 graceful_shutdown_at = NULL, heartbeat_interval_sec = %s
                             WHERE id = 1
                             """,
-                            (hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, iv),
+                            (
+                                hedge_running,
+                                ib_connected,
+                                ib_client_id,
+                                next_retry_ts,
+                                seconds_until_retry,
+                                iv,
+                            ),
                         )
                     else:
                         cur.execute(
@@ -645,7 +844,8 @@ class PostgreSQLSink(StatusSink):
 
     def get_ib_connection_config(self) -> Optional[Dict[str, Any]]:
         """Read settings (id=1): ib_host, ib_port_type. Returns dict with host, port_type, port (resolved).
-        Used by daemon at startup to connect to IB; if None or table missing, daemon falls back to config file."""
+        Used by daemon at startup to connect to IB; if None or table missing, daemon falls back to config file.
+        """
         if not self._ensure_conn():
             return None
         try:
@@ -665,7 +865,8 @@ class PostgreSQLSink(StatusSink):
 
     def write_daemon_graceful_shutdown(self) -> None:
         """Set daemon_heartbeat.graceful_shutdown_at = now() and ib_client_id = NULL so next start uses client_id=1.
-        Call on SIGTERM/SIGINT or after consuming stop (not on SIGKILL - cannot be caught)."""
+        Call on SIGTERM/SIGINT or after consuming stop (not on SIGKILL - cannot be caught).
+        """
         if not self._ensure_conn():
             return
         for attempt in (1, 2):
@@ -675,7 +876,9 @@ class PostgreSQLSink(StatusSink):
                         "UPDATE daemon_heartbeat SET graceful_shutdown_at = now(), last_ts = now(), ib_client_id = NULL WHERE id = 1"
                     )
                 self._conn.commit()
-                logger.info("Wrote daemon_heartbeat.graceful_shutdown_at and ib_client_id=NULL (graceful stop for monitoring)")
+                logger.info(
+                    "Wrote daemon_heartbeat.graceful_shutdown_at and ib_client_id=NULL (graceful stop for monitoring)"
+                )
                 return
             except Exception as e:
                 self._conn.rollback()
@@ -708,7 +911,9 @@ class PostgreSQLSink(StatusSink):
             if "heartbeat_interval_sec" in str(e).lower() or "column" in str(e).lower():
                 try:
                     with self._conn.cursor() as cur:
-                        cur.execute("SELECT suspended FROM daemon_run_status WHERE id = 1")
+                        cur.execute(
+                            "SELECT suspended FROM daemon_run_status WHERE id = 1"
+                        )
                         row = cur.fetchone()
                     if row is None:
                         return False, None

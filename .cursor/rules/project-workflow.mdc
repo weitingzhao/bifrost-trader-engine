@@ -1,0 +1,29 @@
+---
+description: Project workflow — stable triangle, execution, assessment, and decision loop
+alwaysApply: true
+---
+
+# Project Workflow (项目运行工作流)
+
+When working on **planning**, **execution**, **phase acceptance**, or **documentation** for this project, follow the workflow defined in **docs/plans/PROJECT_WORKFLOW.md**. For **where to find** each document by task type, use **docs/index.md** (document index) and **.cursor/rules/doc-index.mdc**.
+
+## Stable triangle (do not change unless requirements or architecture change)
+
+- **docs/REQUIREMENTS.md** — product requirements (R-M*, R-C*, R-H*, R-B*, R-A*).
+- **docs/ARCHITECTURE.md** — system architecture and run environment (§2).
+- **docs/PLAN_NEXT_STEPS.md** — phased plan aligned with requirements (stages, acceptance criteria, test cases).
+
+Do **not** modify these three documents when:
+- Implementing a phase, running tests, or updating "current progress" or "milestone timeline".
+- Doing phase assessment or marking a phase as done.
+
+Modify them **only** when the **user (or project owner) explicitly** requests a change in **product requirements** or **hardware / run environment / architecture**. After such a change, keep the three documents consistent.
+
+## What to update during execution and assessment
+
+- **Current project progress** (阶段完成状态), **milestone timeline** (项目里程碑时间线), and **assessment conclusions** are maintained in **docs/plans/PHASE_ASSESSMENT.md**.
+- After completing or accepting a phase, update **PHASE_ASSESSMENT.md** (e.g. implementation/acceptance dates, milestone table). Do **not** add "current progress" or "milestone timeline" back into PLAN_NEXT_STEPS.md.
+
+## Decision after assessment
+
+- Whether to **proceed to the next phase** or **adjust requirements/architecture** is decided by the **project owner**. The agent only updates PHASE_ASSESSMENT and follows the owner’s instruction (continue to next phase vs. update the stable triangle).

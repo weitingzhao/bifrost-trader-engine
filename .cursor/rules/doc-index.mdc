@@ -1,0 +1,39 @@
+---
+description: Document index — where to find project docs by task type (流程 / 工作流 / 资源)
+alwaysApply: true
+---
+
+# Document Index (文档首页与 Agent 查文档)
+
+**文档首页**：**docs/index.md**。所有项目文档按三类组织，Agent 按任务类型到对应区块查找。
+
+## 1. 流程相关 (docs/index.md § 流程相关)
+
+- **产品需求** → docs/REQUIREMENTS.md  
+- **系统架构与运行环境** → docs/ARCHITECTURE.md（§2 运行环境与部署约束）  
+- **分步推进计划（与需求对比）** → docs/PLAN_NEXT_STEPS.md（稳定，仅需求/架构变更时改）  
+- **阶段评估、当前进展、里程碑** → docs/plans/PHASE_ASSESSMENT.md（每次阶段评估时更新）  
+- **分阶段执行现状**（各阶段 Todo、验收清单）→ docs/plans/phase1-execution-plan.md、phase2-execution-plan.md、phase3-execution-plan.md  
+
+**何时用**：需求/架构讨论、阶段划分与验收、当前进展与里程碑、执行计划与验收清单。
+
+## 2. AI Agent 工作流 (docs/index.md § AI Agent 工作流)
+
+- **项目运行工作流**（稳定三角、执行→评估→决策）→ **docs/plans/PROJECT_WORKFLOW.md**  
+- **本规则** → .cursor/rules/project-workflow.mdc（与 PROJECT_WORKFLOW.md 一致）
+
+**何时用**：参与规划、执行某阶段、阶段验收、更新阶段进展或里程碑时，**先读 PROJECT_WORKFLOW.md 与 project-workflow.mdc**，再决定改哪些文档、做哪些步骤。
+
+## 3. 项目资源 (docs/index.md § 项目资源)
+
+- **数据库设计（PostgreSQL）** → docs/DATABASE.md  
+- **FSM 状态流转** → docs/fsm/linkage.md  
+- **状态空间** (O,D,M,L,E,S) → docs/STATE_SPACE_MAPPING.md  
+- **配置安全分类 / 风险模型** → docs/CONFIG_SAFETY_TAXONOMY.md  
+- **Guard 边界与微调** → docs/GUARD_TUNING_AND_IMPACT.md  
+
+**何时用**：实现或修改**数据表、写入策略、sink** 时查 DATABASE.md；实现或修改**状态机、状态空间、风控边界、Guard 参数、block reason** 与回测验证时，查 FSM/状态空间/风险/Guard 文档。
+
+---
+
+**总结**：每次工作先看 **docs/index.md** 确定当前任务属于「流程相关 / AI Agent 工作流 / 项目资源」哪一类，再到对应区块打开具体文档；若涉及阶段执行或评估，同时遵循 **project-workflow.mdc** 与 **PROJECT_WORKFLOW.md**。

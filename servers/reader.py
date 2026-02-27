@@ -1,6 +1,7 @@
 """Read-only PostgreSQL access for status_current and operations. Phase 2."""
 
 import logging
+import math
 from typing import Any, Dict, List, Optional
 
 import psycopg2
@@ -197,28 +198,67 @@ class StatusReader:
                         summary[k] = v if isinstance(v, str) else str(v)
                 with self._conn.cursor(cursor_factory=RealDictCursor) as cur2:
                     cur2.execute(
-                        "SELECT account_id, symbol, sec_type, exchange, currency, position, avg_cost, expiry, strike, option_right FROM account_positions WHERE account_id = %s ORDER BY contract_key",
+                        """
+                        SELECT
+                            ap.account_id,
+                            ap.symbol,
+                            ap.sec_type,
+                            ap.exchange,
+                            ap.currency,
+                            ap.position,
+                            ap.avg_cost,
+                            ap.expiry,
+                            ap.strike,
+                            ap.option_right,
+                            ap.contract_key,
+                            ip.mid AS price_mid,
+                            ip.last AS price_last
+                        FROM account_positions ap
+                        LEFT JOIN instrument_prices ip
+                            ON ap.contract_key = ip.contract_key
+                        WHERE ap.account_id = %s
+                        ORDER BY ap.contract_key
+                        """,
                         (acc_id,),
                     )
                     pos_rows = cur2.fetchall()
-                positions = []
-                for p in pos_rows:
-                    pos_dict: Dict[str, Any] = {
-                        "account": p.get("account_id"),
-                        "symbol": p.get("symbol") or "",
-                        "secType": p.get("sec_type") or "",
-                        "exchange": p.get("exchange") or "",
-                        "currency": p.get("currency") or "",
-                        "position": p.get("position"),
-                        "avgCost": p.get("avg_cost"),
-                    }
-                    if p.get("expiry") is not None:
-                        pos_dict["lastTradeDateOrContractMonth"] = p.get("expiry")
-                    if p.get("strike") is not None:
-                        pos_dict["strike"] = p.get("strike")
-                    if p.get("option_right") is not None:
-                        pos_dict["right"] = p.get("option_right")
-                    positions.append(pos_dict)
+                    positions = []
+                    for p in pos_rows:
+                        pos_dict: Dict[str, Any] = {
+                            "account": p.get("account_id"),
+                            "symbol": p.get("symbol") or "",
+                            "secType": p.get("sec_type") or "",
+                            "exchange": p.get("exchange") or "",
+                            "currency": p.get("currency") or "",
+                            "position": p.get("position"),
+                            "avgCost": p.get("avg_cost"),
+                        }
+                        if p.get("expiry") is not None:
+                            pos_dict["lastTradeDateOrContractMonth"] = p.get("expiry")
+                        if p.get("strike") is not None:
+                            pos_dict["strike"] = p.get("strike")
+                        if p.get("option_right") is not None:
+                            pos_dict["right"] = p.get("option_right")
+
+                        # 价格优先使用 instrument_prices.mid，其次使用 last；仅过滤 NaN/Inf
+                        raw_mid = p.get("price_mid")
+                        raw_last = p.get("price_last")
+                        price_val: Optional[float] = None
+                        for candidate in (raw_mid, raw_last):
+                            if candidate is None:
+                                continue
+                            try:
+                                v = float(candidate)
+                            except (TypeError, ValueError):
+                                continue
+                            if not math.isfinite(v):
+                                continue
+                            price_val = v
+                            break
+                        if price_val is not None:
+                            pos_dict["price"] = price_val
+
+                        positions.append(pos_dict)
                 out.append({"account_id": acc_id, "summary": summary, "positions": positions})
             return out
         except Exception as e:

@@ -56,7 +56,7 @@ The **status server** (monitoring and control) is a **separate process** from th
 
 - `status.sink: "postgres"` and `status.postgres`: same as Phase 1; control uses the same DB and tables (see [docs/DATABASE.md](docs/DATABASE.md) §2.4–2.5).
 - `status_server.port`: HTTP port (default 8765).
-- **API only**: Port 8765 serves FastAPI (GET /status, GET /operations, POST /control/*). **Monitoring UI** is the separate frontend in `frontend/` (e.g. `cd frontend && npm run dev` then open the dev server URL, or build and deploy the frontend elsewhere; it calls this API). **Start** the daemon on the **trading machine**: run `python scripts/run_engine.py config/config.yaml`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §5.1 and [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md) §3.1.
+- **API only**: Port 8765 serves FastAPI (GET /status, GET /operations, POST /control/*). **Monitoring UI** is the separate frontend in `frontend/` (e.g. `cd frontend && npm run dev` then open the dev server URL, or build and deploy the frontend elsewhere; it calls this API). **Start** the daemon on the **daemon host** (Mac Mini or Linux server): run `python scripts/run_engine.py config/config.yaml`. TWS runs on a dedicated Mac Mini; the daemon connects to it (same machine or over network from Linux). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.1 and §2.3–2.4 (run environment).
 
 **Start**:
 
@@ -85,13 +85,11 @@ curl -X POST http://<host>:8765/control/resume
 
 ## Run environment and operations
 
-- **Single account**: TWS with one account; auto-trading (this daemon) and manual trading share the account (different API `client_id`).
-- **Daemon**: On the trading machine, run `run_engine.py` (single process: IB + hedging in one). Monitoring and control are done by **separate app(s)** (see [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md)).
-- **Deployment**: Mac (all-in-one) or Linux server (TWS + daemon on server; manual trading via remote desktop). See the doc above for details.
+- **Single account**: TWS with one account; auto-trading (this daemon) and manual trading share the account (different API `client_id`). **Deployment**: TWS runs on a **dedicated Mac Mini** only; you remote into that Mac Mini (e.g. from MacBook Air) for manual trading. The **daemon** runs on that Mac Mini or on a **separate Linux server**, connecting to TWS for market data and orders (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §2.3).
 
 ## Architecture
 
-The system has **three parts**: (1) **auto-trading** daemon, (2) **monitoring & control** (separate app), (3) **backtest-based safety boundary tuning** (reuse FSM/Guard on historical replay). Full system architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Requirements: [docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md](docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md) §2.
+The system has **three parts**: (1) **auto-trading** daemon, (2) **monitoring & control** (separate app), (3) **backtest-based safety boundary tuning** (reuse FSM/Guard on historical replay). Full system architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Product requirements: [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 - **Auto-trading**: IB Connector, Store, Portfolio (parse 21–35 DTE near ATM → delta), Gamma Scalper (|Δ| > threshold → hedge), Risk Guard (cooldown, daily limits, earnings blackout), Daemon (single process, single asyncio loop; on ticker/heartbeat run maybe_hedge).
 - **Monitoring & control**: Daemon writes state via a sink (e.g. SQLite); a **separate** app reads it and exposes HTTP/CLI and sends stop/pause (see run environment doc).

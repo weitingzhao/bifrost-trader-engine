@@ -18,6 +18,8 @@ export interface IbPositionRow {
   expiry?: string
   strike?: number
   right?: string
+  /** 当前价（来自 instrument_prices.mid/last），用于逐行计算盈亏 */
+  price?: number | null
 }
 
 /** One account in GET /status accounts (R-A1 multi-account) */

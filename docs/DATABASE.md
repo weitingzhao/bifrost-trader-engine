@@ -47,11 +47,11 @@
 
 - **主键/唯一**：单行表使用固定行 id=1，upsert 时更新该行。
 
-- **涉及库表**：上述列所在数据库与表为：配置中的 **status 用 PostgreSQL**（`config.status.postgres` 或环境变量 `PGHOST` 等，见 RUN_ENVIRONMENT_AND_REQUIREMENTS.md）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），status_current/status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
+- **涉及库表**：上述列所在数据库与表为：配置中的 **status 用 PostgreSQL**（`config.status.postgres` 或环境变量 `PGHOST` 等，见 [ARCHITECTURE.md](ARCHITECTURE.md) §2 运行环境）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），status_current/status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
 
 ### 2.2 表 `status_history`（状态历史）
 
-- **用途**：按时间序保留状态快照，供阶段 3.1 历史统计与后续分析；R-H1 要求“当前 + 历史”同一 sink。
+- **用途**：按时间序保留状态快照，供**阶段 3**历史统计与后续分析；R-H1 要求“当前 + 历史”同一 sink。
 - **写入**：仅在**有意义**时追加（见下文「写入策略」），例如发生对冲相关操作时或可选每心跳一条；纯无操作心跳不追加。
 - **列**：与 `status_current` 列一致，另加自增主键便于分页与保留策略：
 
@@ -110,7 +110,7 @@
 | buying_power | double precision | 购买力（BuyingPower） |
 | summary_extra | jsonb | 其他 IB summary 键值（未单独列出的 tag） |
 
-### 2.8 表 `account_positions`（阶段 3.0 R-A1：多账户持仓，由 accounts_snapshot 规范化）
+### 2.8 表 `account_positions`（阶段 3 R-A1：多账户持仓，由 accounts_snapshot 规范化）
 
 - **用途**：存每个账户的持仓明细，便于按账户/标的查询与后续风控、对冲逻辑。
 - **主键**：**(account_id, contract_key)**，无自增 id；据此判断插入新行或更新现有行。
@@ -134,6 +134,28 @@
 | updated_at | timestamptz | 最后更新时间 |
 
 - **语义**：GET /status 的 `accounts` 从 **accounts** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 accounts 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**按钮写入 `daemon_control` 的 **refresh_accounts**，守护进程消费后从 IB 拉取账户/持仓并写 DB，再轮询 GET /status 直至 accounts_fetched_at 更新；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
+
+### 2.10 表 `instrument_prices`（阶段 3 R-M6：持仓标的当前价）
+
+- **用途**：按 `contract_key`（同 `account_positions`）存放**每个持仓标的的当前价**，用于监控页逐行展示「当前价」并计算浮动盈亏。设计为**与账户无关**：同一合约在多个账户持有时仅存一行价格。
+- **写入**：守护进程在每次 **heartbeat** 中，根据内存中的 `accounts_snapshot`（或等效结构）按 `contract_key` 聚合出标的集合，按标的从 IB 拉取当前价（股票/期权可区分逻辑），并通过 sink `write_instrument_prices` Upsert 到本表。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| contract_key | text PRIMARY KEY | 合约唯一键：`symbol\|sec_type\|expiry\|strike\|right`，与 `account_positions` 一致 |
+| symbol | text | 标的代码 |
+| sec_type | text | 类型（STK/OPT 等） |
+| expiry | text | 期权到期（YYYYMM/YYYYMMDD） |
+| strike | double precision | 期权行权价 |
+| option_right | text | 期权权利（C/P 或 CALL/PUT） |
+| last | double precision | 最新成交价（若 IB 提供） |
+| bid | double precision | 买一 |
+| ask | double precision | 卖一 |
+| mid | double precision | 中间价：`(bid+ask)/2`，若无则回退为 last |
+| updated_at | timestamptz | 最后更新时间 |
+
+- **读取**：`servers/reader.get_accounts_from_tables()` 在读取 `account_positions` 时 LEFT JOIN 本表，将 `mid/last` 作为 `price` 字段下发到 `accounts[*].positions[*]`，前端据此逐行展示当前价并计算浮动盈亏；若某合约暂无价格，则对应行的 `price` 为 NULL，前端显示 `—`。
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
@@ -293,7 +315,7 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 
 - **阶段 2**：独立应用**只读** `status_current`、`operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
 - **阶段 3.1（历史统计）**：只读 `status_history`、`operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
-- **阶段 3.5（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
+- **阶段 4（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
 - **其他**：控制指令、告警、用户配置等若未来落库，均在本文档中新增章节并注明引入阶段。
 
 ---

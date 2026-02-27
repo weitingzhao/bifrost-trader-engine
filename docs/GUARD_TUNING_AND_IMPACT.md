@@ -90,7 +90,7 @@
 - **建议**：
   1. **记录“被拦原因”**：在 `apply_hedge_gates` 或调用处，当 `allowed is False` 时打一条日志（如 `logger.debug("hedge blocked: %s", reason)`），或写入状态 sink（见 PLAN_NEXT_STEPS）。这样后续可统计：今日被 cooldown / max_daily_hedge_count / spread_too_wide 等各拦了多少次。
   2. **状态 sink 中带上 guard 信息**：若实现阶段 1 的 StatusSink，可在 snapshot 中增加“最近一次 block reason”或“本周期内各 reason 计数”，便于监控与事后分析。
-  3. **历史与统计（阶段 3.1）**：用 SQLite 历史表做“按日/周：对冲次数、被拦次数（按 reason 分）、平均延迟、滑点”。据此可量化“调大 cooldown 后，拦单次数与对冲次数的变化”。
+  3. **历史与统计（阶段 3）**：用 SQLite 历史表做“按日/周：对冲次数、被拦次数（按 reason 分）、平均延迟、滑点”。据此可量化“调大 cooldown 后，拦单次数与对冲次数的变化”。
 
 ---
 
@@ -106,9 +106,9 @@
 
 ## 6. 回测：策略 PnL 优化与 Guard 参数验证
 
-- **需求文档**（`RUN_ENVIRONMENT_AND_REQUIREMENTS.md` 第 8 节）已明确：回测 **首要用于策略回报 PnL 优化**（对比不同参数下的理论 P&L、收益曲线、回撤等），同时用于 Guard 参数的有效性与合理性验证；**回测**（用历史数据离线回放同一套 classify → FSM → guard，不下单）是推荐手段。
+- **需求文档**（`REQUIREMENTS.md` §4 回测）已明确：回测 **首要用于策略回报 PnL 优化**（对比不同参数下的理论 P&L、收益曲线、回撤等），同时用于 Guard 参数的有效性与合理性验证；**回测**（用历史数据离线回放同一套 classify → FSM → guard，不下单）是推荐手段。
 - **与微调的关系**：实盘/模拟盘调参前，可先用回测对比多组参数下的 **理论 P&L、收益曲线、对冲次数、拦截原因分布**，再选一组上线；调参后也可用新历史数据回测做“假如当时用这组参数会怎样”的对比，既优化策略回报，也验证 Guard 行为。
-- **实现依赖**：回测依赖历史数据存储（阶段 1 的 StatusSink + 历史表，或阶段 3.1 的历史与统计）；回放时只需读历史 tick/快照，注入到 StateClassifier + TradingFSM + ExecutionGuard 的同一套逻辑，不连 TWS、不真实下单。具体排期见分步计划（如阶段 3 的“回测/参数验证”）。
+- **实现依赖**：回测依赖历史数据存储（阶段 1 的 StatusSink + 历史表，或阶段 3 的历史与统计）；回放时只需读历史 tick/快照，注入到 StateClassifier + TradingFSM + ExecutionGuard 的同一套逻辑，不连 TWS、不真实下单。具体排期见分步计划（**阶段 4**）。
 
 ---
 
@@ -116,6 +116,6 @@
 
 - **CONFIG_SAFETY_TAXONOMY.md**：从“边界分类”和配置结构角度说明各 section 的含义。
 - **本文档**：从“如何微调、微调后会发生什么、如何观察影响”的角度补充，并建议“记录 block reason + 用状态/历史做简单统计 + 回测验证”，以便数据驱动的调参。
-- **RUN_ENVIRONMENT_AND_REQUIREMENTS.md**：第 8 节将回测列为 Guard 参数验证的产品需求。
+- **REQUIREMENTS.md**：§4 将回测列为 Guard 参数验证的产品需求。
 
-若你愿意，可以在实现 StatusSink 或阶段 3.1 历史统计时，把“guard block reason”作为首批字段之一；回测模块则可复用同一套 guard 与 FSM 逻辑，仅数据源改为历史回放。
+若你愿意，可以在实现 StatusSink 或阶段 3 历史统计时，把“guard block reason”作为首批字段之一；回测模块则可复用同一套 guard 与 FSM 逻辑，仅数据源改为历史回放。

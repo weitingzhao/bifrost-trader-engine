@@ -5,6 +5,9 @@ alwaysApply: true
 
 # Run Environment and Product Requirements
 
-When discussing or implementing **run environment**, **deployment** (Mac vs Linux), **monitoring**, or **control** of the daemon, read and follow **docs/RUN_ENVIRONMENT_AND_REQUIREMENTS.md**.
+When discussing or implementing **run environment**, **deployment** (Mac vs Linux), **monitoring**, or **control** of the daemon:
 
-That document defines: single-thread only for auto-trading; control/monitoring via separate app(s); single TWS/account with manual + auto; deployment options; LAN-only monitoring; phased control (start/stop first, then finer control).
+- **Run environment & deployment constraints**: read and follow **docs/ARCHITECTURE.md** §2（运行环境与部署约束）. That section defines: TWS runs on a dedicated Mac Mini only; manual trading via remote login to that Mac Mini (e.g. from MacBook Air); daemon may run on the same Mac Mini or on a separate Linux server, connecting to TWS for market data and orders; single process on daemon host; monitoring/control via separate app(s); LAN-only monitoring; daemon behavior when IB is unavailable (WAITING_IB, retry, yellow lamp).
+- **Product requirements** (what to build for monitoring/control, R-M*/R-C*/R-H*/R-B*/R-A*): read **docs/REQUIREMENTS.md** and **docs/PLAN_NEXT_STEPS.md** for acceptance criteria and test cases.
+
+The former is part of system architecture; the latter is independent of run environment.
