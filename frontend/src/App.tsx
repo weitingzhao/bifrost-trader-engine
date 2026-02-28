@@ -74,7 +74,10 @@ function setMsg(
   setter({ text, isErr })
 }
 
+type TabId = 'daemon' | 'hedge' | 'ib' | 'operations'
+
 export default function App() {
+  const [activeTab, setActiveTab] = useState<TabId>('daemon')
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
@@ -319,6 +322,13 @@ export default function App() {
 
   const apiLamp = apiReachable ? 'green' : 'red'
 
+  const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
+    { id: 'daemon', label: '守护程序', lamp: daemonLamp },
+    { id: 'hedge', label: '对冲程序', lamp: hedgeLamp },
+    { id: 'ib', label: 'IB 账户' },
+    { id: 'operations', label: '近期操作' },
+  ]
+
   return (
     <div className="app">
       <h1>Bifrost 自动交易监控</h1>
@@ -328,6 +338,22 @@ export default function App() {
         <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">API 文档</a>
       </div>
 
+      <nav className="app-tabs" aria-label="监控分区">
+        {tabList.map(({ id, label, lamp }) => (
+          <button
+            key={id}
+            type="button"
+            className={`app-tab ${activeTab === id ? 'active' : ''}`}
+            onClick={() => setActiveTab(id)}
+            aria-current={activeTab === id ? 'page' : undefined}
+          >
+            {lamp != null && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === 'daemon' && (
       <div className="card process-section">
         <h2>
           守护程序{' '}
@@ -496,7 +522,9 @@ export default function App() {
           {ctrlMsg.text}
         </div>
       </div>
+      )}
 
+      {activeTab === 'ib' && (
       <div className="card process-section">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
           <h2 style={{ margin: 0 }}>
@@ -805,7 +833,9 @@ export default function App() {
           )
         })()}
       </div>
+      )}
 
+      {activeTab === 'hedge' && (
       <div className="card process-section">
         <h2>
           对冲程序{' '}
@@ -825,7 +855,8 @@ export default function App() {
         <div className="statusSummary" style={{ marginTop: '0.5rem' }}>
           {statusSummaryItems.map(({ label, value }) => (
             <div key={label}>
-              <span>{label}</span> {value}
+              <span>{label}</span>{' '}
+              <span className="status-summary-value">{value}</span>
             </div>
           ))}
         </div>
@@ -843,7 +874,9 @@ export default function App() {
           {hedgeCtrlMsg.text}
         </div>
       </div>
+      )}
 
+      {activeTab === 'operations' && (
       <div className="card">
         <h2>近期操作</h2>
         <table>
@@ -877,6 +910,7 @@ export default function App() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   )
 }
