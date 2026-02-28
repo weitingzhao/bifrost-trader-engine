@@ -1,6 +1,5 @@
 /* ==========================================================================
-   Bifrost 监控 — 工业风深色设计系统
-   Industrial/utilitarian dark UI: 深炭底、钢灰面板、单一高亮（青柠）
+   Bifrost 监控 — 主题：深色(dark) / 明亮(light，默认)
    Typography: DM Sans (UI) + JetBrains Mono (数字/数据)
    ========================================================================== */
 
@@ -66,6 +65,38 @@
   --transition-normal: 0.2s var(--ease-out);
 }
 
+/* ---------- 明亮主题 ---------- */
+[data-theme="light"] {
+  --color-bg: #f0f2f5;
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f8f9fa;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+
+  --color-text-main: #1a1d21;
+  --color-text-muted: #6b7280;
+  --color-text-dim: #9ca3af;
+
+  --color-lamp-green: #16a34a;
+  --color-lamp-yellow: #ca8a04;
+  --color-lamp-red: #dc2626;
+  --color-lamp-none: var(--color-text-dim);
+
+  --color-accent: #0ea5e9;
+  --color-accent-soft: rgba(14, 165, 233, 0.12);
+  --color-accent-glow: rgba(14, 165, 233, 0.25);
+
+  --color-link: #0284c7;
+  --color-link-hover: #0369a1;
+
+  --color-danger: #dc2626;
+  --color-danger-soft: rgba(220, 38, 38, 0.1);
+  --color-warning: #ca8a04;
+  --color-warning-soft: rgba(202, 138, 4, 0.12);
+  --color-success: #16a34a;
+  --color-success-soft: rgba(22, 163, 74, 0.12);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -79,9 +110,10 @@ body {
   margin: 0;
   padding: var(--space-4);
   -webkit-font-smoothing: antialiased;
+  transition: background var(--transition-normal), color var(--transition-normal);
 }
 
-/* 背景层次：极 subtle 的径向渐变，增加纵深 */
+/* 深色：背景层次；明亮：极淡渐变 */
 body::before {
   content: '';
   position: fixed;
@@ -89,6 +121,10 @@ body::before {
   background: radial-gradient(ellipse 120% 80% at 50% -20%, rgba(26, 31, 38, 0.6), transparent 50%);
   pointer-events: none;
   z-index: 0;
+}
+
+[data-theme="light"] body::before {
+  background: radial-gradient(ellipse 100% 60% at 50% 0%, rgba(14, 165, 233, 0.04), transparent 50%);
 }
 
 .app {
@@ -135,6 +171,31 @@ body::before {
 .api-docs-link:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  margin-right: var(--space-2);
+}
+
+.theme-select {
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.theme-select:hover,
+.theme-select:focus {
+  border-color: var(--color-accent);
+  outline: none;
 }
 
 /* ---------- 分区标签 ---------- */
@@ -240,18 +301,24 @@ body::before {
   box-shadow: none;
 }
 
-/* ---------- 卡片与区块 ---------- */
+/* ---------- 卡片与区块（Skote 借鉴：阴影与层次） ---------- */
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: var(--space-4);
   margin-bottom: var(--space-4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.12);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .card:focus-within {
   border-color: var(--color-border-strong);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.card-operations {
+  margin-bottom: var(--space-5);
 }
 
 .card h2 {
@@ -321,9 +388,15 @@ body::before {
   flex: 1;
   min-width: 200px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: var(--space-3) var(--space-4);
   background: var(--color-surface-elevated);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: box-shadow var(--transition-fast);
+}
+
+.daemon-group:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .daemon-group-header {
@@ -444,6 +517,11 @@ button:disabled {
   background: #bef264;
 }
 
+[data-theme="light"] .btn-resume,
+[data-theme="light"] .btn-resume:hover:not(:disabled) {
+  color: #fff;
+}
+
 .btn-flatten {
   background: var(--color-border-strong);
   color: var(--color-text-main);
@@ -461,6 +539,11 @@ button:disabled {
 .btn-retry-ib:hover:not(:disabled) {
   background: var(--color-link-hover);
   color: #0a0c0f;
+}
+
+[data-theme="light"] .btn-retry-ib,
+[data-theme="light"] .btn-retry-ib:hover:not(:disabled) {
+  color: #fff;
 }
 
 .btn-stop {
@@ -530,7 +613,7 @@ select:focus {
   color: var(--color-text-main);
 }
 
-/* ---------- 表格 ---------- */
+/* ---------- 表格（Skote 借鉴：表头背景、行悬停） ---------- */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -550,6 +633,34 @@ th {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
+  background: var(--color-surface-elevated);
+}
+
+.table-operations {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.table-operations thead th {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 2px solid var(--color-border-strong);
+}
+
+.table-operations tbody tr {
+  transition: background var(--transition-fast);
+}
+
+.table-operations tbody tr:hover {
+  background: rgba(163, 230, 53, 0.06);
+}
+
+[data-theme="light"] .table-operations tbody tr:hover {
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.table-operations tbody td {
+  padding: var(--space-2) var(--space-4);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- IB 账户 ---------- */

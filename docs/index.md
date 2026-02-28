@@ -28,7 +28,7 @@
 |------|------|
 | **[项目运行工作流](plans/PROJECT_WORKFLOW.md)** | 稳定三角（需求/架构/分步计划）、执行→评估→负责人决策的闭环；规范 AI 与人工的更新对象与决策路径。**Agent 执行计划或评估时先读本文** |
 
-Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Agent 在参与规划、执行、阶段验收或文档更新时，应遵循该规则并在本区块查找工作流说明。
+Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Agent 在参与规划、执行、阶段验收或文档更新时，应遵循该规则并在本区块查找工作流说明。监控页面 UI 的修改原则与 Skote 参考路径见 **.cursor/rules/monitoring-ui.mdc**。
 
 ---
 

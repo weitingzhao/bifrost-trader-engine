@@ -74,10 +74,26 @@ function setMsg(
   setter({ text, isErr })
 }
 
-type TabId = 'daemon' | 'hedge' | 'ib' | 'operations'
+const THEME_KEY = 'bifrost-monitor-theme'
+type ThemeId = 'dark' | 'light'
+
+function loadTheme(): ThemeId {
+  try {
+    const t = localStorage.getItem(THEME_KEY)
+    if (t === 'light' || t === 'dark') return t
+  } catch {}
+  return 'light'
+}
+
+function applyTheme(theme: ThemeId) {
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
+}
+
+type TabId = 'monitor' | 'ib'
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('daemon')
+  const [activeTab, setActiveTab] = useState<TabId>('monitor')
+  const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
@@ -91,6 +107,13 @@ export default function App() {
   /** IB 账户区块数据：仅在手点刷新或 1 小时自动刷新时更新，不随 5s 轮询更新 */
   const [accountsDisplay, setAccountsDisplay] = useState<IbAccountSnapshot[] | null>(null)
   const [ibAccountsRefreshing, setIbAccountsRefreshing] = useState(false)
+
+  useEffect(() => {
+    applyTheme(theme)
+    try {
+      localStorage.setItem(THEME_KEY, theme)
+    } catch {}
+  }, [theme])
 
   const loadStatus = useCallback(async () => {
     try {
@@ -323,10 +346,8 @@ export default function App() {
   const apiLamp = apiReachable ? 'green' : 'red'
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'daemon', label: '守护程序', lamp: daemonLamp },
-    { id: 'hedge', label: '对冲程序', lamp: hedgeLamp },
+    { id: 'monitor', label: '监控与控制', lamp: daemonLamp },
     { id: 'ib', label: 'IB 账户' },
-    { id: 'operations', label: '近期操作' },
   ]
 
   return (
@@ -335,6 +356,18 @@ export default function App() {
       <div className="api-status-bar">
         <div className={`lamp lamp-sm ${apiLamp}`} title="Trader API 是否可达" />
         <span className="api-status-label">Trader API: {apiReachable ? '正常' : '异常'}</span>
+        <label className="theme-switch">
+          <span className="api-status-label" style={{ marginRight: '0.5rem' }}>主题</span>
+          <select
+            value={theme}
+            onChange={(e) => setTheme(e.target.value as ThemeId)}
+            title="切换深色/明亮主题"
+            className="theme-select"
+          >
+            <option value="dark">深色</option>
+            <option value="light">明亮</option>
+          </select>
+        </label>
         <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">API 文档</a>
       </div>
 
@@ -353,7 +386,8 @@ export default function App() {
         ))}
       </nav>
 
-      {activeTab === 'daemon' && (
+      {activeTab === 'monitor' && (
+      <>
       <div className="card process-section">
         <h2>
           守护程序{' '}
@@ -522,6 +556,80 @@ export default function App() {
           {ctrlMsg.text}
         </div>
       </div>
+
+      <div className="card process-section">
+        <h2>
+          对冲程序{' '}
+          <span className="section-desc">
+            （依赖守护程序运行；业务相关，未来可多策略）
+          </span>
+        </h2>
+        <div className="row" style={{ marginBottom: '0.5rem' }}>
+          <div className={`lamp ${hedgeLamp}`} title="对冲程序状态灯" />
+          <div>
+            <strong>自检: {j ? hedgeSelfCheckText : '获取失败'}</strong>
+            <div className="block-reasons">{j ? hedgeBlockReasons : ''}</div>
+          </div>
+        </div>
+        <div className="process-summary">状态: {hedgeLabel}</div>
+        <p className="section-hint">{hedgeHint}</p>
+        <div className="statusSummary" style={{ marginTop: '0.5rem' }}>
+          {statusSummaryItems.map(({ label, value }) => (
+            <div key={label}>
+              <span>{label}</span>{' '}
+              <span className="status-summary-value">{value}</span>
+            </div>
+          ))}
+        </div>
+        <div className="controls" style={{ marginTop: '0.5rem' }}>
+          <button
+            type="button"
+            className="btn-flatten"
+            title="由对冲程序消费并执行，平掉本策略对冲敞口"
+            onClick={onFlatten}
+          >
+            一键平敞口
+          </button>
+        </div>
+        <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'}`}>
+          {hedgeCtrlMsg.text}
+        </div>
+      </div>
+
+      <div className="card card-operations">
+        <h2>近期操作</h2>
+        <table className="table-operations">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>类型</th>
+              <th>方向</th>
+              <th>数量</th>
+              <th>价格</th>
+              <th>原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            {operations.length === 0 ? (
+              <tr>
+                <td colSpan={6}>无</td>
+              </tr>
+            ) : (
+              operations.map((op, i) => (
+                <tr key={`${op.ts}-${i}`}>
+                  <td>{fmtTs(op.ts)}</td>
+                  <td>{op.type ?? ''}</td>
+                  <td>{op.side ?? ''}</td>
+                  <td>{op.quantity ?? ''}</td>
+                  <td>{op.price ?? ''}</td>
+                  <td>{op.state_reason ?? ''}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      </>
       )}
 
       {activeTab === 'ib' && (
@@ -835,82 +943,6 @@ export default function App() {
       </div>
       )}
 
-      {activeTab === 'hedge' && (
-      <div className="card process-section">
-        <h2>
-          对冲程序{' '}
-          <span className="section-desc">
-            （依赖守护程序运行；业务相关，未来可多策略）
-          </span>
-        </h2>
-        <div className="row" style={{ marginBottom: '0.5rem' }}>
-          <div className={`lamp ${hedgeLamp}`} title="对冲程序状态灯" />
-          <div>
-            <strong>自检: {j ? hedgeSelfCheckText : '获取失败'}</strong>
-            <div className="block-reasons">{j ? hedgeBlockReasons : ''}</div>
-          </div>
-        </div>
-        <div className="process-summary">状态: {hedgeLabel}</div>
-        <p className="section-hint">{hedgeHint}</p>
-        <div className="statusSummary" style={{ marginTop: '0.5rem' }}>
-          {statusSummaryItems.map(({ label, value }) => (
-            <div key={label}>
-              <span>{label}</span>{' '}
-              <span className="status-summary-value">{value}</span>
-            </div>
-          ))}
-        </div>
-        <div className="controls" style={{ marginTop: '0.5rem' }}>
-          <button
-            type="button"
-            className="btn-flatten"
-            title="由对冲程序消费并执行，平掉本策略对冲敞口"
-            onClick={onFlatten}
-          >
-            一键平敞口
-          </button>
-        </div>
-        <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'}`}>
-          {hedgeCtrlMsg.text}
-        </div>
-      </div>
-      )}
-
-      {activeTab === 'operations' && (
-      <div className="card">
-        <h2>近期操作</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>类型</th>
-              <th>方向</th>
-              <th>数量</th>
-              <th>价格</th>
-              <th>原因</th>
-            </tr>
-          </thead>
-          <tbody>
-            {operations.length === 0 ? (
-              <tr>
-                <td colSpan={6}>无</td>
-              </tr>
-            ) : (
-              operations.map((op, i) => (
-                <tr key={`${op.ts}-${i}`}>
-                  <td>{fmtTs(op.ts)}</td>
-                  <td>{op.type ?? ''}</td>
-                  <td>{op.side ?? ''}</td>
-                  <td>{op.quantity ?? ''}</td>
-                  <td>{op.price ?? ''}</td>
-                  <td>{op.state_reason ?? ''}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-      )}
     </div>
   )
 }
