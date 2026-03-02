@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -44,6 +44,37 @@ export async function postRefreshAccounts(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
+export async function postRefreshReplay(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/refresh_replay`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** R-A2: 直接由 API 连 IB 拉取执行记录并写库，无需 daemon。days: 1=当天, 3=最近3天, 7=最近7天 */
+export async function postExecutionsFetch(days: 1 | 3 | 7 = 1): Promise<ControlResponse & { count?: number }> {
+  const params = new URLSearchParams({ days: String(days) })
+  const r = await fetch(`${API}/executions/fetch?${params}`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), count: j.count }
+}
+
+/** R-A3: 直接由 API 连 IB 拉取 K 线并写库，返回 bars（不经过 daemon） */
+export async function postBarsFetch(
+  symbol: string,
+  period = '1 D',
+  duration = '30 D',
+): Promise<{ ok: boolean; error?: string; bars?: Bar[]; count?: number }> {
+  const params = new URLSearchParams({ symbol, period, duration })
+  const r = await fetch(`${API}/bars/fetch?${params}`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: j.ok === true,
+    error: j.error,
+    bars: j.bars ?? [],
+    count: j.count ?? 0,
+  }
+}
+
 export async function postStop(): Promise<ControlResponse> {
   const r = await fetch(`${API}/control/stop`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
@@ -68,4 +99,30 @@ export async function postIbConfig(ib_host: string, ib_port_type: 'tws_live' | '
   })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+export async function fetchRiskSummary(): Promise<RiskSummaryResponse> {
+  const r = await fetch(`${API}/risk_summary`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchExecutions(since_ts?: number, until_ts?: number, limit = 200): Promise<ExecutionsResponse> {
+  const params = new URLSearchParams()
+  if (since_ts != null) params.set('since_ts', String(since_ts))
+  if (until_ts != null) params.set('until_ts', String(until_ts))
+  params.set('limit', String(limit))
+  const r = await fetch(`${API}/executions?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchBars(symbol?: string, period = '1 D', limit = 100): Promise<BarsResponse> {
+  const params = new URLSearchParams()
+  if (symbol) params.set('symbol', symbol)
+  params.set('period', period)
+  params.set('limit', String(limit))
+  const r = await fetch(`${API}/bars?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
 }

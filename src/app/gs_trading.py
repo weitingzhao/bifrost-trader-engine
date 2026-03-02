@@ -282,8 +282,36 @@ class GsTrading:
                 len(accounts_list),
                 primary_id,
             )
+            # R-A2: 拉取账户执行/成交并写入 account_executions，供复盘与 GET /executions
+            if self._status_sink and hasattr(self._status_sink, "write_account_executions"):
+                try:
+                    for acc_id in account_ids:
+                        exec_list = await self.connector.get_executions_async(account=acc_id)
+                        if exec_list:
+                            self._status_sink.write_account_executions(exec_list)
+                except Exception as ex:
+                    logger.debug("[R-A2] get_executions_async/write_account_executions: %s", ex)
         except Exception as e:
             logger.warning("_refresh_accounts_data: %s", e, exc_info=True)
+
+    async def _refresh_executions_only(self) -> None:
+        """R-A2: 仅从 IB 拉取账户执行/成交并写入 account_executions，供复盘与风控 Tab 使用。
+        与 _refresh_accounts_data 解耦：复盘 Tab 的刷新只做此事，不拉账户摘要与持仓。"""
+        if not self.connector.is_connected:
+            return
+        if not self._status_sink or not hasattr(self._status_sink, "write_account_executions"):
+            return
+        try:
+            account_ids = self.connector.get_managed_accounts()
+            if not account_ids:
+                return
+            for acc_id in account_ids:
+                exec_list = await self.connector.get_executions_async(account=acc_id)
+                if exec_list:
+                    self._status_sink.write_account_executions(exec_list)
+            logger.info("[R-A2] _refresh_executions_only: synced executions for %s accounts", len(account_ids))
+        except Exception as ex:
+            logger.warning("[R-A2] _refresh_executions_only: %s", ex, exc_info=True)
 
     async def _refresh_positions(self) -> None:
         """Fetch positions from IB and update store (raw positions + stock_shares only). No option parse. R-A1: use account_id when available."""
@@ -778,6 +806,15 @@ class GsTrading:
                 self._last_accounts_refresh_ts = time.time()
                 minimal = self._build_heartbeat_minimal_dict()
                 self._status_sink.write_snapshot(minimal, append_history=False)
+            if (
+                cmd == "refresh_replay"
+                and self.connector.is_connected
+                and self._status_sink
+            ):
+                logger.info(
+                    "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
+                )
+                await self._refresh_executions_only()
             suspended = self._apply_run_status_transition()
             interval_sec = self._effective_heartbeat_interval()
             state_label = self._fsm_daemon.current.value
@@ -815,6 +852,15 @@ class GsTrading:
                 self._last_accounts_refresh_ts = time.time()
                 minimal = self._build_heartbeat_minimal_dict()
                 self._status_sink.write_snapshot(minimal, append_history=False)
+            if (
+                cmd == "refresh_replay"
+                and self.connector.is_connected
+                and self._status_sink
+            ):
+                logger.info(
+                    "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
+                )
+                await self._refresh_executions_only()
             suspended = self._apply_run_status_transition()
             # Detect IB disconnect during RUNNING/RUNNING_SUSPENDED: write DB then transition to WAITING_IB (RE-7)
             if not self.connector.is_connected:

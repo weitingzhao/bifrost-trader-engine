@@ -67,3 +67,11 @@ class StatusSink(ABC):
     # 默认实现为空，具体 sink（如 PostgreSQLSink）可选择性实现。
     def write_instrument_prices(self, rows: Any) -> None:  # rows: Iterable[Dict[str, Any]]
         return
+
+    # 可选：写入账户执行/成交记录（R-A2）。默认实现为空。
+    def write_account_executions(self, rows: Any) -> None:  # rows: Iterable[Dict[str, Any]]
+        return
+
+    # 可选：写入 K 线/OHLC（R-A3）。默认实现为空。
+    def write_ohlc_bars(self, rows: Any) -> None:  # rows: Iterable[Dict[str, Any]]
+        return

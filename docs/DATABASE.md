@@ -81,14 +81,14 @@
 
 ### 2.4 表 `daemon_control`（阶段 2：控制通道，替代本地文件）
 
-- **用途**：供监控服务（可运行在另一台主机，RE-5）向守护进程发送控制指令（stop/flatten），替代本地控制文件，无需共享文件系统（如 NFS）。
-- **写入**：监控应用（如 status server）在 POST /control/stop、POST /control/flatten、POST /control/retry_ib（RE-7）或 **POST /control/refresh_accounts** 时 **INSERT** 一行；守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
+- **用途**：供监控服务（可运行在另一台主机，RE-5）向守护进程发送控制指令（stop/flatten/refresh_accounts/refresh_replay），替代本地控制文件，无需共享文件系统（如 NFS）。
+- **写入**：监控应用（如 status server）在 POST /control/stop、POST /control/flatten、POST /control/retry_ib（RE-7）、**POST /control/refresh_accounts** 或 **POST /control/refresh_replay** 时 **INSERT** 一行；守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | bigserial | 自增主键 |
-| command | text NOT NULL | 指令：`stop`、`flatten`、`retry_ib`（RE-7）或 `refresh_accounts`（请求守护进程从 IB 拉取账户/持仓并写 DB） |
+| command | text NOT NULL | 指令：`stop`、`flatten`、`retry_ib`（RE-7）、`refresh_accounts`（从 IB 拉取账户/持仓并写 DB）、`refresh_replay`（R-A2：仅从 IB 拉取执行记录写 account_executions，供复盘与风控 Tab 刷新） |
 | created_at | timestamptz | 创建时间（默认 now()） |
 | consumed_at | timestamptz | 守护进程消费时间；NULL 表示待处理 |
 
@@ -156,6 +156,83 @@
 | updated_at | timestamptz | 最后更新时间 |
 
 - **读取**：`servers/reader.get_accounts_from_tables()` 在读取 `account_positions` 时 LEFT JOIN 本表，将 `mid/last` 作为 `price` 字段下发到 `accounts[*].positions[*]`，前端据此逐行展示当前价并计算浮动盈亏；若某合约暂无价格，则对应行的 `price` 为 NULL，前端显示 `—`。
+
+### 2.11 表 `account_executions`（阶段 3 R-A2：账户执行/成交记录）
+
+- **用途**：存**账户级**执行/成交记录（含手动与机器），供复盘与风控（GET /executions、复盘页）查询；与 `operations`（仅本程序对冲事件）区分。**完整存储 IB 返回的全部字段**，便于复盘与统计。
+- **写入**：由守护程序周期从 IB 拉取 executions/fills，或独立脚本/服务拉取后写入；按 `exec_id` 去重（若 IB 提供），避免重复插入。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| account_id | text | 账户标识 |
+| exec_id | text | IB 执行 id（若有，用于去重） |
+| exec_time | timestamptz | 成交时间 |
+| symbol | text | 标的 |
+| sec_type | text | 类型（STK/OPT 等） |
+| side | text | BUY / SELL（由 IB BOT/SLD 映射） |
+| quantity | double precision | 数量 |
+| price | double precision | 成交价 |
+| commission | double precision | 手续费（可选） |
+| source | text | 来源（manual / daemon，若可区分） |
+| expiry | text | 期权到期（YYYYMMDD，OPT 时） |
+| strike | double precision | 期权行权价（OPT 时） |
+| option_right | text | 期权权利 C/P（OPT 时） |
+| exchange | text | 交易所 |
+| order_id | bigint | IB 订单 id |
+| cum_qty | double precision | 累计成交量 |
+| realized_pnl | double precision | 实现盈亏 |
+| contract_key | text | 合约唯一键 symbol\|sec_type\|expiry\|strike\|right |
+| currency | text | 币种 |
+| raw_extra | jsonb | 其他 IB 字段（permId、clientId、conId 等） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **索引**：建议 `(account_id, exec_time DESC)`、若用 exec_id 去重则 `UNIQUE(exec_id)` 或唯一索引。
+- **读取**：独立应用 GET /executions 按 `since_ts`/`until_ts` 查询本表；复盘页展示账户执行列表；**方向**由 `side` 正确显示（买/卖）。
+
+### 2.12 表 `ohlc_bars`（阶段 3 R-A3：复盘辅助行情 K 线）
+
+- **用途**：存标的的 K 线/OHLC 数据，供复盘页与风控分析结合成交时间查看当时行情；数据源为 IB 历史数据或既有行情写入。
+- **写入**：独立脚本/模块或守护程序按标的与周期（如 1 min、1 D）从 IB 拉取并 INSERT；同一 (symbol, period, bar_time) 仅保留一行（UPSERT 或 INSERT 前去重）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 标的（如 NVDA） |
+| period | text NOT NULL | 周期（如 '1 min', '1 D'） |
+| bar_time | timestamptz NOT NULL | K 线周期起始时间 |
+| open | double precision | 开 |
+| high | double precision | 高 |
+| low | double precision | 低 |
+| close | double precision | 收 |
+| volume | double precision | 成交量（可选） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(symbol, period, bar_time)` 便于 UPSERT 与去重。
+- **索引**：建议 **`(symbol, period, bar_time DESC)`**，供「按标的+周期+时间范围」查询（如最近 N 根 K 线）保持性能；与 UNIQUE 兼容且覆盖常见读路径。
+- **读取**：GET /bars 或复盘页按 symbol、period、时间范围查询；供 K 线图与复盘分析使用。
+
+#### 2.12.1 时序扩展与多 Period 存储（设计选型）
+
+**1. 是否采用 TimescaleDB 等 Timeseries 扩展？**
+
+- **优点**：压缩、自动按时间分块、连续聚合、保留策略等，适合大规模时序写入与按时间范围查询。
+- **成本**：多一层扩展依赖与运维；若仅复盘辅助、标的少、历史有限（如数只标的、1–2 年日线 + 部分日内），**原生 PostgreSQL + 合适索引**即可满足。
+- **建议**：**当前阶段不强制依赖 TimescaleDB**；表结构按「普通堆表 + 索引」设计。若后续出现多标的、长周期 1min 等导致数据量与查询压力明显上升，再评估引入 TimescaleDB 或将本表迁入 hypertable，文档与迁移路径可在彼时补充。
+
+**2. 多 Period（日线、小时线、分钟线）是否分表存储？**
+
+- **方案 A（当前）**：单表 + `period` 列，查询带 `WHERE symbol = ? AND period = ? AND bar_time ...`，依赖 **`(symbol, period, bar_time DESC)`** 索引，逻辑简单、应用只认一张表。
+- **方案 B**：按 period 分表（如 `ohlc_bars_1d`、`ohlc_bars_1h`、`ohlc_bars_1min`）。单表数据量更小、可按周期单独调优或分区，但需应用层按 period 路由、表与索引重复维护。
+- **方案 C**：PostgreSQL 原生分区（PG 10+），按 **LIST(period)** 或 **(symbol, period)** 分区，逻辑仍为一张表，物理按 period（或 period+时间范围）分片。
+
+- **建议**：**现阶段保持单表 + period 列**，通过 **`(symbol, period, bar_time DESC)`** 索引保证「按标的+周期+时间」查询性能。若未来单表行数或写入/查询延迟明显上升（例如 1min 多标的多年），再择一推进：
+  - **原生分区**：`PARTITION BY LIST (period)`，每个 period 一个分区，便于按周期做保留策略或独立 vacuum/analyze；
+  - 或 **分表**：仅对「高频、大数据量」的 period（如 1min）拆到独立表，日线/周线仍保留在统一表。
+
+- **总结**：不强制 TimescaleDB；多 period 先单表 + 索引，数据量暴增后再按 period 分区或分表，并在文档中记录当前选型与扩展路径。
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
@@ -227,6 +304,8 @@
   - 控制指令（阶段 2）：`SELECT * FROM daemon_control ORDER BY id DESC LIMIT 10;`
   - 挂起/恢复状态（阶段 2）：`SELECT * FROM daemon_run_status WHERE id = 1;`
   - 守护进程心跳（阶段 2）：`SELECT * FROM daemon_heartbeat WHERE id = 1;`
+  - 账户执行（阶段 3 R-A2）：`SELECT * FROM account_executions ORDER BY exec_time DESC LIMIT 50;`
+  - K 线（阶段 3 R-A3）：`SELECT * FROM ohlc_bars WHERE symbol = 'NVDA' AND period = '1 D' ORDER BY bar_time DESC LIMIT 30;`
   - 统一设置（阶段 2）：`SELECT * FROM settings WHERE id = 1;`
 
 ### 4.1 连接失败：`no pg_hba.conf entry for host ...`
@@ -260,7 +339,7 @@
 python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions** 等表（与 `PostgreSQLSink._ensure_tables` 一致；status_current/status_history 不含 account 相关列）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**ohlc_bars** 等表（与 `PostgreSQLSink._ensure_tables` 一致；status_current/status_history 不含 account 相关列）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
@@ -315,6 +394,7 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 
 - **阶段 2**：独立应用**只读** `status_current`、`operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
 - **阶段 3.1（历史统计）**：只读 `status_history`、`operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
+- **阶段 3 R-A2/R-A3（复盘与风控）**：**account_executions**（§2.11）存账户执行/成交，**ohlc_bars**（§2.12）存 K 线；GET /executions、GET /bars 与复盘页读上述表；写入由守护程序或独立脚本在阶段 3 实现时接入。
 - **阶段 4（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
 - **其他**：控制指令、告警、用户配置等若未来落库，均在本文档中新增章节并注明引入阶段。
 
@@ -330,6 +410,7 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 | 挂起/恢复状态 | 新增 §2.5 表 daemon_run_status；监控机写入、交易机轮询，实现挂起/恢复对冲；监控机移除 subprocess/start。 | 阶段 2 |
 | 守护进程心跳 | 新增 §2.6 表 daemon_heartbeat；稳定守护进程每心跳写入，监控端区分守护/对冲并分开显示（RE-6）。 | 阶段 2 |
 | IB 连接状态（RE-7） | daemon_heartbeat 增加 ib_connected、ib_client_id；daemon_control 支持 command=retry_ib；守护程序不假定 IB 已运行，可观测与重试。 | 阶段 2 |
+| 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）、§2.12 表 ohlc_bars（K 线）；供复盘与风控页及 GET /executions、GET /bars 使用。 | 阶段 3 |
 
 ---
 

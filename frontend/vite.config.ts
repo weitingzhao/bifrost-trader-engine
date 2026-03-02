@@ -8,6 +8,9 @@ export default defineConfig({
     proxy: {
       '/status': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/operations': { target: 'http://127.0.0.1:8765', changeOrigin: true },
+      '/risk_summary': { target: 'http://127.0.0.1:8765', changeOrigin: true },
+      '/executions': { target: 'http://127.0.0.1:8765', changeOrigin: true },
+      '/bars': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/control': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/config': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/docs': { target: 'http://127.0.0.1:8765', changeOrigin: true },

@@ -477,6 +477,53 @@ def _ensure_tables(conn) -> None:
             )
         """
         )
+        # R-A2: 账户执行/成交记录，供复盘与 GET /executions（见 docs/DATABASE.md §2.11）
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_executions (
+                id bigserial PRIMARY KEY,
+                account_id text,
+                exec_id text,
+                exec_time timestamptz,
+                symbol text,
+                sec_type text,
+                side text,
+                quantity double precision,
+                price double precision,
+                commission double precision,
+                source text,
+                raw_extra jsonb,
+                created_at timestamptz DEFAULT now()
+            )
+        """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS account_executions_exec_id_key ON account_executions (exec_id) WHERE exec_id IS NOT NULL AND exec_id != ''"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_executions_account_time ON account_executions (account_id, exec_time DESC)"
+        )
+        # R-A3: K 线/OHLC，供复盘与 GET /bars（见 docs/DATABASE.md §2.12）
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ohlc_bars (
+                id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                period text NOT NULL,
+                bar_time timestamptz NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                created_at timestamptz DEFAULT now(),
+                UNIQUE(symbol, period, bar_time)
+            )
+        """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS ohlc_bars_symbol_period_time ON ohlc_bars (symbol, period, bar_time DESC)"
+        )
         conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
@@ -490,6 +537,25 @@ def _ensure_tables(conn) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
+        # R-A2 extended: add columns to account_executions for full IB data (expiry, strike, option_right, etc.)
+        for _col, sql in [
+            ("expiry", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS expiry text"),
+            ("strike", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS strike double precision"),
+            ("option_right", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS option_right text"),
+            ("exchange", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS exchange text"),
+            ("order_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS order_id bigint"),
+            ("cum_qty", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS cum_qty double precision"),
+            ("realized_pnl", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS realized_pnl double precision"),
+            ("contract_key", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS contract_key text"),
+            ("currency", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS currency text"),
+        ]:
+            try:
+                cur.execute(sql)
+                conn.commit()
+            except psycopg2.ProgrammingError as e:
+                conn.rollback()
+                if getattr(e, "pgcode", None) != "42701":
+                    raise
         # RE-7: add columns if not exist (each ALTER in its own transaction so duplicate_column doesn't abort the rest)
         for _col, sql in [
             (
@@ -697,6 +763,114 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.warning("write_instrument_prices failed: %s", e, exc_info=True)
 
+    def write_account_executions(self, rows: Any) -> None:
+        """R-A2: 写入账户执行/成交记录；按 exec_id 去重（ON CONFLICT DO NOTHING）。写入 IB 全部字段。"""
+        if not rows:
+            return
+        if not self._ensure_conn():
+            return
+        try:
+            import json
+            with self._conn.cursor() as cur:
+                for r in rows:
+                    exec_id = r.get("exec_id")
+                    account_id = r.get("account_id")
+                    exec_time = r.get("time")
+                    symbol = r.get("symbol")
+                    sec_type = r.get("sec_type")
+                    side = r.get("side")
+                    quantity = r.get("quantity")
+                    price = r.get("price")
+                    commission = r.get("commission")
+                    source = r.get("source")
+                    expiry = r.get("expiry")
+                    strike = r.get("strike")
+                    option_right = r.get("option_right")
+                    exchange = r.get("exchange")
+                    order_id = r.get("order_id")
+                    cum_qty = r.get("cum_qty")
+                    realized_pnl = r.get("realized_pnl")
+                    contract_key = r.get("contract_key")
+                    currency = r.get("currency")
+                    raw_extra = r.get("raw_extra")
+                    if raw_extra is not None and not isinstance(raw_extra, str):
+                        raw_extra = json.dumps(raw_extra) if raw_extra else None
+                    if exec_time is not None:
+                        try:
+                            from datetime import datetime, timezone
+                            if isinstance(exec_time, (int, float)):
+                                exec_dt = datetime.fromtimestamp(exec_time, tz=timezone.utc)
+                            else:
+                                exec_dt = exec_time
+                        except Exception:
+                            exec_dt = None
+                    else:
+                        exec_dt = None
+                    cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, commission, source, expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra"
+                    placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+                    vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, commission, source, expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra)
+                    if exec_id:
+                        cur.execute(
+                            f"""
+                            INSERT INTO account_executions ({cols})
+                            VALUES ({placeholders})
+                            ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                            """,
+                            vals,
+                        )
+                    else:
+                        cur.execute(
+                            f"""
+                            INSERT INTO account_executions ({cols})
+                            VALUES ({placeholders})
+                            """,
+                            vals,
+                        )
+            self._conn.commit()
+            logger.info("[R-A2] write_account_executions: wrote %s rows", len(rows))
+        except Exception as e:
+            self._conn.rollback()
+            logger.warning("write_account_executions failed: %s", e, exc_info=True)
+
+    def write_ohlc_bars(self, rows: Any) -> None:
+        """R-A3: 写入 K 线/OHLC；按 (symbol, period, bar_time) UPSERT。"""
+        if not rows:
+            return
+        if not self._ensure_conn():
+            return
+        try:
+            with self._conn.cursor() as cur:
+                for r in rows:
+                    symbol = r.get("symbol") or ""
+                    period = r.get("period") or "1 D"
+                    bar_time = r.get("bar_time")
+                    open_ = r.get("open")
+                    high = r.get("high")
+                    low = r.get("low")
+                    close = r.get("close")
+                    volume = r.get("volume")
+                    if bar_time is None:
+                        continue
+                    if isinstance(bar_time, (int, float)):
+                        bar_dt = datetime.fromtimestamp(float(bar_time), tz=timezone.utc)
+                    else:
+                        bar_dt = bar_time
+                    cur.execute(
+                        """
+                        INSERT INTO ohlc_bars (symbol, period, bar_time, open, high, low, close, volume)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (symbol, period, bar_time)
+                        DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                                      close = EXCLUDED.close, volume = EXCLUDED.volume
+                        """,
+                        (symbol, period, bar_dt, open_, high, low, close, volume),
+                    )
+            self._conn.commit()
+            logger.info("[R-A3] write_ohlc_bars: wrote %s rows", len(rows))
+        except Exception as e:
+            self._conn.rollback()
+            logger.warning("write_ohlc_bars failed: %s", e, exc_info=True)
+
     # Control commands older than this are ignored (consumed but not executed), to avoid executing
     # a stop from a previous run when the daemon restarts and immediately polls (e.g. after IB timeout → WAITING_IB).
     CONTROL_CMD_MAX_AGE_SEC = 60
@@ -722,7 +896,7 @@ class PostgreSQLSink(StatusSink):
                     return None
                 row_id, command, created_at = row
                 cmd = (command or "").strip().lower()
-                if cmd not in ("stop", "flatten", "retry_ib", "refresh_accounts"):
+                if cmd not in ("stop", "flatten", "retry_ib", "refresh_accounts", "refresh_replay"):
                     cmd = "stop"  # treat unknown as stop for safety
                 if consume_only is not None and cmd not in consume_only:
                     return None  # do not consume this command (caller may leave flatten for same process to consume)

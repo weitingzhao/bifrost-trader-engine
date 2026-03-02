@@ -198,14 +198,30 @@ body::before {
   outline: none;
 }
 
-/* ---------- 分区标签 ---------- */
+/* ---------- 主菜单与分区标签 ---------- */
+.app-subtitle {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-3) 0;
+}
+
 .app-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-2);
   margin-bottom: var(--space-4);
   border-bottom: 1px solid var(--color-border);
   padding-bottom: var(--space-2);
+}
+
+.app-tabs-label {
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-right: var(--space-1);
 }
 
 .app-tab {
@@ -785,6 +801,168 @@ th {
   color: var(--color-text-muted);
   margin: var(--space-1) 0 0 0;
   padding: var(--space-2) 0;
+}
+
+/* ---------- 复盘与风控 (R-M7) ---------- */
+.replay-page {
+  max-width: 100%;
+}
+
+.replay-page h2 {
+  margin-bottom: var(--space-2);
+}
+
+.replay-page > .section-desc {
+  margin-bottom: var(--space-5);
+  color: var(--color-text-muted);
+}
+
+.replay-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.replay-fetch-days-label {
+  font-weight: 500;
+}
+
+.replay-fetch-days-select {
+  padding: var(--space-1) var(--space-2);
+  font-size: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.replay-sync-hint {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.replay-bar-symbol-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.replay-bar-symbol-label {
+  font-weight: 500;
+  min-width: 2.5rem;
+}
+
+.replay-bar-symbol-input {
+  width: 8rem;
+  padding: var(--space-1) var(--space-2);
+  font-size: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.replay-section {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.replay-section:first-of-type {
+  margin-top: var(--space-4);
+  padding-top: 0;
+  border-top: none;
+}
+
+.replay-section h3 {
+  font-size: var(--text-title);
+  margin-bottom: var(--space-3);
+  color: var(--color-text-main);
+}
+
+.replay-sub {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin: var(--space-4) 0 var(--space-2) 0;
+}
+
+.replay-opt-groups {
+  margin-bottom: var(--space-4);
+}
+
+.replay-opt-contract {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-small);
+}
+
+.replay-status-realized {
+  color: var(--color-success, #0a0);
+}
+
+.replay-status-unrealized {
+  color: var(--color-warning, #a60);
+}
+
+.replay-pnl-realized {
+  color: var(--color-success, #0a0);
+  font-weight: 600;
+}
+
+.replay-pnl-unrealized {
+  color: var(--color-warning, #b8860b);
+  font-weight: 600;
+}
+
+.replay-opt-detail-title {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.risk-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-4);
+}
+
+.risk-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.risk-card-label {
+  font-size: var(--text-tiny);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.risk-card-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-title);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+}
+
+.replay-placeholder {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-elevated);
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-dim);
+  font-size: var(--text-caption);
 }
 
 /* ---------- 响应式 ---------- */

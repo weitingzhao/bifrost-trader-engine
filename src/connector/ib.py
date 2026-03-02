@@ -16,6 +16,7 @@ from ib_insync import (
     Ticker,
     AccountValue,
     Option,
+    ExecutionFilter,
 )
 
 logger = logging.getLogger(__name__)
@@ -358,6 +359,195 @@ class IBConnector:
         if not self.is_connected:
             return
         self.ib.execDetailsEvent += lambda trade, fill: on_fill(trade)
+
+    def _exec_side_to_buy_sell(self, side: Optional[str]) -> str:
+        """Map IB Execution.side (BOT/SLD) to BUY/SELL. Handles variants."""
+        if not side:
+            return ""
+        s = str(side).strip().upper()
+        if s in ("BOT", "BUY", "B"):
+            return "BUY"
+        if s in ("SLD", "SELL", "S"):
+            return "SELL"
+        return side
+
+    def _contract_key(self, contract: Any) -> str:
+        """Build contract_key like account_positions: symbol|sec_type|expiry|strike|right."""
+        if contract is None:
+            return ""
+        sym = getattr(contract, "symbol", "") or ""
+        st = getattr(contract, "secType", "") or ""
+        if st == "OPT":
+            exp = getattr(contract, "lastTradeDateOrContractMonth", "") or ""
+            strike = getattr(contract, "strike", 0) or 0
+            right = getattr(contract, "right", "") or ""
+            return f"{sym}|{st}|{exp}|{strike}|{right}"
+        return f"{sym}|{st}||||"
+
+    async def get_executions_async(
+        self,
+        account: Optional[str] = None,
+        since_days: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Request from IB and return account executions/fills (R-A2). Returns full data for DB storage.
+        Use reqExecutionsAsync so we get fills from IB server (including today's trades), not only from current session.
+        since_days: 1=仅当天(默认), 3=最近3天, 7=最近7天；需 TWS Trade Log 已勾选对应天数。"""
+        if not self.is_connected:
+            await self.connect()
+        try:
+            from datetime import datetime, timedelta
+            time_str = ""
+            if since_days is not None and since_days > 0:
+                # IB ExecutionFilter.Time: yyyymmdd hh:mm:ss (local time)
+                start = datetime.now() - timedelta(days=since_days - 1)
+                time_str = start.strftime("%Y%m%d 00:00:00")
+            ef = ExecutionFilter(acctCode=account or "", time=time_str)
+            fills = await self.ib.reqExecutionsAsync(ef)
+            out: List[Dict[str, Any]] = []
+            for fill in fills or []:
+                if not isinstance(fill, Fill):
+                    continue
+                ex = getattr(fill, "execution", None)
+                contract = getattr(fill, "contract", None)
+                comm_report = getattr(fill, "commissionReport", None)
+                fill_time = getattr(fill, "time", None) or (ex.time if ex else None)
+                exec_id = ex.execId if ex else None
+                acct = ex.acctNumber if ex else None
+                side_raw = ex.side if ex else None  # BOT / SLD
+                side = self._exec_side_to_buy_sell(side_raw)
+                shares = ex.shares if ex else None
+                price = ex.price if ex else None
+                commission = None
+                realized_pnl = None
+                comm_currency = None
+                if comm_report is not None:
+                    commission = getattr(comm_report, "commission", None)
+                    realized_pnl = getattr(comm_report, "realizedPNL", None)
+                    comm_currency = getattr(comm_report, "currency", None)
+                symbol = ""
+                sec_type = ""
+                expiry = ""
+                strike = None
+                option_right = ""
+                exchange = ""
+                currency = ""
+                local_symbol = ""
+                con_id = None
+                if contract is not None:
+                    symbol = getattr(contract, "symbol", "") or ""
+                    sec_type = getattr(contract, "secType", "") or ""
+                    exchange = getattr(contract, "exchange", "") or ""
+                    currency = getattr(contract, "currency", "") or ""
+                    local_symbol = getattr(contract, "localSymbol", "") or ""
+                    con_id = getattr(contract, "conId", None)
+                    if sec_type == "OPT":
+                        expiry = getattr(contract, "lastTradeDateOrContractMonth", "") or ""
+                        strike = getattr(contract, "strike", None)
+                        option_right = getattr(contract, "right", "") or ""
+                if ex and not exchange:
+                    exchange = getattr(ex, "exchange", "") or ""
+                ts = None
+                if fill_time is not None:
+                    try:
+                        ts = fill_time.timestamp()
+                    except Exception:
+                        pass
+                contract_key = self._contract_key(contract)
+                raw_extra: Dict[str, Any] = {}
+                if ex:
+                    for attr in ("permId", "clientId", "orderId", "liquidation", "cumQty", "avgPrice", "orderRef", "evRule", "evMultiplier", "modelCode", "lastLiquidity"):
+                        v = getattr(ex, attr, None)
+                        if v is not None and v != "" and v != 0:
+                            raw_extra[attr] = v
+                if comm_report:
+                    for attr in ("yield_", "yieldRedemptionDate"):
+                        v = getattr(comm_report, attr, None)
+                        if v is not None:
+                            raw_extra[attr] = v
+                if contract and con_id is not None:
+                    raw_extra["conId"] = con_id
+                if local_symbol:
+                    raw_extra["localSymbol"] = local_symbol
+                out.append({
+                    "exec_id": exec_id,
+                    "time": ts,
+                    "account_id": acct,
+                    "symbol": symbol,
+                    "sec_type": sec_type,
+                    "side": side,
+                    "quantity": float(shares) if shares is not None else None,
+                    "price": float(price) if price is not None else None,
+                    "commission": float(commission) if commission is not None else None,
+                    "source": "daemon" if (ex and getattr(ex, "clientId", None) == self.client_id) else "manual",
+                    "expiry": expiry or None,
+                    "strike": float(strike) if strike is not None else None,
+                    "option_right": option_right or None,
+                    "exchange": exchange or None,
+                    "currency": currency or None,
+                    "order_id": ex.orderId if ex else None,
+                    "cum_qty": float(ex.cumQty) if ex and hasattr(ex, "cumQty") and ex.cumQty is not None else None,
+                    "realized_pnl": float(realized_pnl) if realized_pnl is not None else None,
+                    "contract_key": contract_key or None,
+                    "raw_extra": raw_extra if raw_extra else None,
+                })
+            logger.info("[R-A2] get_executions_async: got %s fills for account=%r", len(out), account)
+            return out
+        except Exception as e:
+            logger.warning("get_executions_async: %s", e, exc_info=True)
+            return []
+
+    # R-A3: 复盘辅助行情 K 线。period 与 IB barSizeSetting 映射：'1 D' -> '1 day', '1 min' -> '1 min', '1 h' -> '1 hour'
+    _BAR_SIZE_MAP = {
+        "1 d": "1 day",
+        "1 day": "1 day",
+        "1 min": "1 min",
+        "5 mins": "5 mins",
+        "1 hour": "1 hour",
+        "1 h": "1 hour",
+    }
+
+    async def get_historical_bars_async(
+        self,
+        symbol: str,
+        period: str = "1 D",
+        duration_str: str = "30 D",
+    ) -> List[Dict[str, Any]]:
+        """Request historical OHLC bars from IB (R-A3). Returns list of dicts: bar_time (Unix), open, high, low, close, volume."""
+        if not self.is_connected:
+            await self.connect()
+        if not symbol or not symbol.strip():
+            return []
+        try:
+            stock = self._stock(symbol.strip())
+            bar_setting = self._BAR_SIZE_MAP.get((period or "1 D").strip().lower(), "1 day")
+            bars = await self.ib.reqHistoricalDataAsync(
+                stock,
+                endDateTime="",
+                durationStr=duration_str or "30 D",
+                barSizeSetting=bar_setting,
+                whatToShow="TRADES",
+                useRTH=True,
+                formatDate=1,
+            )
+            out: List[Dict[str, Any]] = []
+            for bar in bars or []:
+                t = getattr(bar, "date", None)
+                ts = t.timestamp() if t is not None and hasattr(t, "timestamp") else None
+                if ts is None:
+                    continue
+                out.append({
+                    "bar_time": ts,
+                    "open": float(getattr(bar, "open", 0) or 0),
+                    "high": float(getattr(bar, "high", 0) or 0),
+                    "low": float(getattr(bar, "low", 0) or 0),
+                    "close": float(getattr(bar, "close", 0) or 0),
+                    "volume": float(getattr(bar, "volume", 0) or 0),
+                })
+            logger.info("[R-A3] get_historical_bars_async: %s %s → %s bars", symbol, period, len(out))
+            return out
+        except Exception as e:
+            logger.warning("get_historical_bars_async: %s", e, exc_info=True)
+            return []
 
     async def place_order(
         self,

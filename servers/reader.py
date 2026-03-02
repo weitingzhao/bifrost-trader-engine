@@ -2,6 +2,7 @@
 
 import logging
 import math
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import psycopg2
@@ -167,6 +168,129 @@ class StatusReader:
             logger.warning("get_operations failed: %s", e)
             return []
 
+    def get_executions(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Return rows from account_executions (R-A2). Newest first. Converts exec_time to Unix time for API."""
+        if not self._connect():
+            return []
+        try:
+            conditions = []
+            values: List[Any] = []
+            if since_ts is not None:
+                conditions.append("extract(epoch from exec_time) >= %s")
+                values.append(since_ts)
+            if until_ts is not None:
+                conditions.append("extract(epoch from exec_time) <= %s")
+                values.append(until_ts)
+            if account_id is not None and account_id.strip():
+                conditions.append("account_id = %s")
+                values.append(account_id.strip())
+            where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+            values.append(limit)
+            _cols_ext = "expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra"
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                try:
+                    cur.execute(
+                        f"""
+                        SELECT account_id, exec_id, extract(epoch from exec_time) AS time,
+                               symbol, sec_type, side, quantity, price, commission, source,
+                               {_cols_ext}
+                        FROM account_executions {where}
+                        ORDER BY exec_time DESC NULLS LAST LIMIT %s
+                        """,
+                        values,
+                    )
+                except Exception as col_err:
+                    if "does not exist" in str(col_err).lower() or "42703" in str(getattr(col_err, "pgcode", "")):
+                        cur.execute(
+                            f"""
+                            SELECT account_id, exec_id, extract(epoch from exec_time) AS time,
+                                   symbol, sec_type, side, quantity, price, commission, source
+                            FROM account_executions {where}
+                            ORDER BY exec_time DESC NULLS LAST LIMIT %s
+                            """,
+                            values,
+                        )
+                    else:
+                        raise
+                rows = cur.fetchall()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                d = dict(r)
+                if d.get("raw_extra") is not None and isinstance(d["raw_extra"], str):
+                    try:
+                        import json
+                        d["raw_extra"] = json.loads(d["raw_extra"])
+                    except Exception:
+                        pass
+                out.append(d)
+            return out
+        except Exception as e:
+            logger.debug("get_executions failed: %s", e)
+            self._conn = None
+            return []
+
+    def get_bars(
+        self,
+        symbol: Optional[str] = None,
+        period: str = "1 D",
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Return rows from ohlc_bars (R-A3). Newest first. bar_time as Unix time for API."""
+        if not self._connect():
+            return []
+        if not symbol or not symbol.strip():
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT symbol, period, extract(epoch from bar_time) AS time,
+                           open, high, low, close, volume
+                    FROM ohlc_bars
+                    WHERE symbol = %s AND period = %s
+                    ORDER BY bar_time DESC NULLS LAST
+                    LIMIT %s
+                    """,
+                    (symbol.strip(), period.strip(), limit),
+                )
+                rows = cur.fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.debug("get_bars failed: %s", e)
+            self._conn = None
+            return []
+
+    def get_risk_summary(self) -> Dict[str, Any]:
+        """Return risk/post-mortem summary for 复盘与风控 page: status_current (daily_hedge_count, daily_pnl) + operations count in last 24h + block_reasons. R-M7."""
+        import time
+        out: Dict[str, Any] = {
+            "daily_hedge_count": None,
+            "daily_pnl": None,
+            "spot": None,
+            "symbol": None,
+            "operations_count_24h": 0,
+            "block_reasons": [],
+            "ts": None,
+        }
+        row = self.get_status_current()
+        if row is not None:
+            out["daily_hedge_count"] = row.get("daily_hedge_count")
+            out["daily_pnl"] = row.get("daily_pnl")
+            out["spot"] = row.get("spot")
+            out["symbol"] = row.get("symbol")
+            out["ts"] = row.get("ts")
+        now = time.time()
+        ops = self.get_operations(since_ts=now - 86400, limit=500)
+        out["operations_count_24h"] = len(ops)
+        # block_reasons 由 self_check 产出，此处无 self_check；若需要可从 status_current 扩展或由 API 层合并 GET /status 的 block_reasons
+        return out
+
     def get_accounts_from_tables(self) -> Optional[List[Dict[str, Any]]]:
         """Build R-A1 accounts list from normalized accounts + account_positions (same shape as [{ account_id, summary, positions }]).
         Returns None on error or missing tables; caller typically uses [] in that case."""
@@ -324,6 +448,123 @@ def write_control_command(status_config: dict, command: str) -> bool:
             conn.close()
     except Exception as e:
         logger.warning("write_control_command failed: %s", e)
+        return False
+
+
+def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bool:
+    """R-A2: 写入执行记录到 account_executions（供 API 直接拉取后落库）。按 exec_id 去重。Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    import json
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for r in rows:
+                    exec_id = r.get("exec_id")
+                    account_id = r.get("account_id")
+                    exec_time = r.get("time")
+                    symbol = r.get("symbol")
+                    sec_type = r.get("sec_type")
+                    side = r.get("side")
+                    quantity = r.get("quantity")
+                    price = r.get("price")
+                    commission = r.get("commission")
+                    source = r.get("source")
+                    expiry = r.get("expiry")
+                    strike = r.get("strike")
+                    option_right = r.get("option_right")
+                    exchange = r.get("exchange")
+                    order_id = r.get("order_id")
+                    cum_qty = r.get("cum_qty")
+                    realized_pnl = r.get("realized_pnl")
+                    contract_key = r.get("contract_key")
+                    currency = r.get("currency")
+                    raw_extra = r.get("raw_extra")
+                    if raw_extra is not None and not isinstance(raw_extra, str):
+                        raw_extra = json.dumps(raw_extra) if raw_extra else None
+                    if exec_time is not None:
+                        try:
+                            if isinstance(exec_time, (int, float)):
+                                exec_dt = datetime.fromtimestamp(float(exec_time), tz=timezone.utc)
+                            else:
+                                exec_dt = exec_time
+                        except Exception:
+                            exec_dt = None
+                    else:
+                        exec_dt = None
+                    cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, commission, source, expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra"
+                    placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+                    vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, commission, source, expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra)
+                    if exec_id:
+                        cur.execute(
+                            f"""
+                            INSERT INTO account_executions ({cols})
+                            VALUES ({placeholders})
+                            ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                            """,
+                            vals,
+                        )
+                    else:
+                        cur.execute(
+                            f"""
+                            INSERT INTO account_executions ({cols})
+                            VALUES ({placeholders})
+                            """,
+                            vals,
+                        )
+            conn.commit()
+            logger.info("[R-A2] write_account_executions_to_db: wrote %s rows", len(rows))
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_account_executions_to_db failed: %s", e)
+        return False
+
+
+def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bool:
+    """R-A3: 写入 K 线到 ohlc_bars（供 API 直接拉取后落库）。按 (symbol, period, bar_time) UPSERT。Returns True on success."""
+    if not rows or not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for r in rows:
+                    symbol = r.get("symbol") or ""
+                    period = r.get("period") or "1 D"
+                    bar_time = r.get("bar_time")
+                    if bar_time is None:
+                        continue
+                    if isinstance(bar_time, (int, float)):
+                        bar_dt = datetime.fromtimestamp(float(bar_time), tz=timezone.utc)
+                    else:
+                        bar_dt = bar_time
+                    open_ = r.get("open")
+                    high = r.get("high")
+                    low = r.get("low")
+                    close = r.get("close")
+                    volume = r.get("volume")
+                    cur.execute(
+                        """
+                        INSERT INTO ohlc_bars (symbol, period, bar_time, open, high, low, close, volume)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (symbol, period, bar_time)
+                        DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                                      close = EXCLUDED.close, volume = EXCLUDED.volume
+                        """,
+                        (symbol, period, bar_dt, open_, high, low, close, volume),
+                    )
+            conn.commit()
+            logger.info("[R-A3] write_ohlc_bars_to_db: wrote %s rows", len(rows))
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_ohlc_bars_to_db failed: %s", e)
         return False
 
 

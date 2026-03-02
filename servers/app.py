@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 
-from servers.reader import StatusReader, write_control_command, write_run_status, write_heartbeat_interval, write_ib_config
+from servers.reader import StatusReader, write_control_command, write_run_status, write_heartbeat_interval, write_ib_config, write_ohlc_bars_to_db, write_account_executions_to_db
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,136 @@ def create_app(
         items = reader.get_operations(since_ts=since_ts, until_ts=until_ts, type_filter=operation_type, limit=limit)
         return {"operations": items}
 
+    @app.get("/risk_summary")
+    def get_risk_summary() -> Dict[str, Any]:
+        """Return risk/post-mortem summary for 复盘与风控 page (R-M7): daily_hedge_count, daily_pnl, operations_count_24h, etc."""
+        return reader.get_risk_summary()
+
+    @app.get("/executions")
+    def get_executions(
+        since_ts: Optional[float] = Query(None, description="Filter executions with time >= this (Unix s)"),
+        until_ts: Optional[float] = Query(None, description="Filter executions with time <= this"),
+        account_id: Optional[str] = Query(None, description="Filter by account ID"),
+        limit: int = Query(200, ge=1, le=1000),
+    ) -> Dict[str, Any]:
+        """Account-level executions/trades (R-A2). Reads from account_executions table (daemon syncs from IB)."""
+        items = reader.get_executions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        return {"executions": items}
+
+    @app.get("/bars")
+    def get_bars(
+        symbol: Optional[str] = Query(None, description="Symbol, e.g. NVDA"),
+        period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 min, 1 D)"),
+        limit: int = Query(100, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        """K-line/OHLC bars for replay (R-A3). Reads from ohlc_bars; requires symbol."""
+        sym = (symbol or "").strip()
+        if not sym:
+            return {"bars": [], "message": "请提供 symbol 参数。"}
+        per = (period or "1 D").strip()
+        items = reader.get_bars(symbol=sym, period=per, limit=limit)
+        # API 返回 time, open, high, low, close, volume 与前端 Bar 一致
+        bars = [
+            {
+                "time": float(r["time"]) if r.get("time") is not None else 0,
+                "open": float(r["open"]) if r.get("open") is not None else 0,
+                "high": float(r["high"]) if r.get("high") is not None else 0,
+                "low": float(r["low"]) if r.get("low") is not None else 0,
+                "close": float(r["close"]) if r.get("close") is not None else 0,
+                "volume": float(r["volume"]) if r.get("volume") is not None else 0,
+            }
+            for r in items
+        ]
+        return {"bars": bars}
+
+    # R-A3: 复盘 K 线由 API 直接连 IB 拉取并写库，不经过 daemon（历史数据一次性拉取更合适）
+    # R-A2: 执行记录同样支持 API 直接连 IB 拉取并写库，无需 daemon
+    _IB_PORT_MAP = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
+
+    @app.post("/executions/fetch")
+    async def post_executions_fetch(
+        days: int = Query(1, ge=1, le=7, description="拉取范围：1=当天, 3=最近3天, 7=最近7天（需 TWS Trade Log 勾选对应天数）"),
+    ) -> Dict[str, Any]:
+        """R-A2: 直接连 IB 拉取执行/成交记录并写入 account_executions。无需 daemon；适合复盘页按需拉取。"""
+        from src.connector.ib import IBConnector
+
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。", "count": 0}
+        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
+        host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
+        port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
+        port = _IB_PORT_MAP.get(port_type, 7497)
+        connector = IBConnector(host=host, port=port, client_id=4)
+        try:
+            if not await connector.connect(max_attempts=3):
+                return {"ok": False, "error": "无法连接 IB，请确认 TWS/Gateway 已运行且端口正确。", "count": 0}
+            account_ids = connector.get_managed_accounts()
+            if not account_ids:
+                account_ids = [""]
+            all_execs: list = []
+            for acc_id in account_ids:
+                exec_list = await connector.get_executions_async(account=acc_id or None, since_days=days)
+                if exec_list:
+                    all_execs.extend(exec_list)
+        finally:
+            try:
+                await connector.disconnect()
+            except Exception:
+                pass
+        if not all_execs:
+            return {"ok": True, "message": f"IB 未返回执行记录（当前范围：最近{days}天；若选多天请确认 TWS Trade Log 已勾选对应天数）。", "count": 0}
+        if not write_account_executions_to_db(control_via_db, all_execs):
+            return {"ok": False, "error": "写入 account_executions 失败。", "count": 0}
+        return {"ok": True, "count": len(all_execs), "message": f"已写入 {len(all_execs)} 条执行记录。"}
+
+    @app.post("/bars/fetch")
+    async def post_bars_fetch(
+        symbol: Optional[str] = Query(..., description="Symbol, e.g. NVDA"),
+        period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 D, 1 min)"),
+        duration: Optional[str] = Query("30 D", description="IB durationStr (e.g. 30 D, 5 D)"),
+    ) -> Dict[str, Any]:
+        """R-A3: 直接连 IB 拉取 K 线并写入 ohlc_bars，返回拉取的 bars。无需 daemon；适合复盘页按需一次性拉取。"""
+        from src.connector.ib import IBConnector
+
+        sym = (symbol or "").strip()
+        if not sym:
+            return {"ok": False, "error": "请提供 symbol 参数。", "bars": [], "count": 0}
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 ohlc_bars。", "bars": [], "count": 0}
+        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
+        host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
+        port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
+        port = _IB_PORT_MAP.get(port_type, 7497)
+        per = (period or "1 D").strip()
+        dur = (duration or "30 D").strip()
+        connector = IBConnector(host=host, port=port, client_id=3)
+        try:
+            if not await connector.connect(max_attempts=3):
+                return {"ok": False, "error": "无法连接 IB，请确认 TWS/Gateway 已运行且端口正确。", "bars": [], "count": 0}
+            raw = await connector.get_historical_bars_async(sym, period=per, duration_str=dur)
+        finally:
+            try:
+                await connector.disconnect()
+            except Exception:
+                pass
+        if not raw:
+            return {"ok": True, "message": "IB 未返回 K 线数据。", "bars": [], "count": 0}
+        rows = [dict(b, symbol=sym, period=per) for b in raw]
+        if not write_ohlc_bars_to_db(control_via_db, rows):
+            return {"ok": False, "error": "写入 ohlc_bars 失败。", "bars": [], "count": 0}
+        bars = [
+            {
+                "time": float(b.get("bar_time") or 0),
+                "open": float(b.get("open") or 0),
+                "high": float(b.get("high") or 0),
+                "low": float(b.get("low") or 0),
+                "close": float(b.get("close") or 0),
+                "volume": float(b.get("volume") or 0),
+            }
+            for b in raw
+        ]
+        return {"ok": True, "count": len(bars), "bars": bars}
+
     @app.post("/control/stop")
     def post_control_stop() -> JSONResponse:
         """Insert 'stop' into daemon_control; daemon will request_stop() on next heartbeat (R-C1b)."""
@@ -163,6 +293,15 @@ def create_app(
             return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
         if write_control_command(control_via_db, "refresh_accounts"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_accounts written to daemon_control"})
+        return JSONResponse(status_code=500, content={"error": "failed to write control command"})
+
+    @app.post("/control/refresh_replay")
+    def post_control_refresh_replay() -> JSONResponse:
+        """Insert 'refresh_replay' into daemon_control; daemon will sync executions from IB to account_executions on next poll (R-A2, 复盘与风控 Tab 专用刷新)."""
+        if not control_via_db:
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+        if write_control_command(control_via_db, "refresh_replay"):
+            return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_replay written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
     @app.post("/control/set_heartbeat_interval")

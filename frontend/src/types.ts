@@ -96,3 +96,78 @@ export interface ControlResponse {
   error?: string
   message?: string
 }
+
+/** Risk/post-mortem summary for 复盘与风控 page (GET /risk_summary) */
+export interface RiskSummaryResponse {
+  daily_hedge_count?: number | null
+  daily_pnl?: number | null
+  spot?: number | null
+  symbol?: string | null
+  operations_count_24h?: number
+  block_reasons?: string[]
+  ts?: number | null
+}
+
+/** Account execution/trade (R-A2). Full IB data. */
+export interface Execution {
+  time?: number
+  symbol?: string
+  sec_type?: string
+  side?: string
+  quantity?: number
+  price?: number
+  commission?: number
+  source?: string
+  expiry?: string
+  strike?: number
+  option_right?: string
+  exchange?: string
+  order_id?: number
+  cum_qty?: number
+  realized_pnl?: number
+  contract_key?: string
+  currency?: string
+  raw_extra?: Record<string, unknown>
+}
+
+/** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */
+export interface OptExecutionGroup {
+  contract_key: string
+  strike: number
+  expiry: string
+  /** 净持仓：买量 - 卖量；>0=买状态，=0=已兑现，<0=卖状态 */
+  net_qty: number
+  /** Buy 总手数（该组所有买 quantity 之和） */
+  buy_volume: number
+  /** Sell 总手数（该组所有卖 quantity 之和） */
+  sell_volume: number
+  /** 买均价（该组 Buy 的加权平均价，$/股） */
+  buy_avg_price: number | null
+  /** 卖均价（该组 Sell 的加权平均价，$/股） */
+  sell_avg_price: number | null
+  /** 盈利：sell_value - buy_value（价格×数量×100-手续费），始终可算；用状态区分颜色 */
+  realized_pnl: number
+  /** 已兑现 | 未兑现（用于字体颜色：已兑现绿，未兑现黄） */
+  status: 'realized' | 'unrealized'
+  trades: Execution[]
+}
+
+export interface ExecutionsResponse {
+  executions: Execution[]
+  message?: string
+}
+
+/** K-line/OHLC bar (R-A3). Stub until stage 3. */
+export interface Bar {
+  time: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume?: number
+}
+
+export interface BarsResponse {
+  bars: Bar[]
+  message?: string
+}
