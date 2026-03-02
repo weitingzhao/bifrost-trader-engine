@@ -192,30 +192,54 @@ class StatusReader:
                 values.append(account_id.strip())
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
             values.append(limit)
-            _cols_ext = "expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra"
+            # commission/realized_pnl/currency 来自 account_execution_commissions（§2.11.1）
             with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
                 try:
                     cur.execute(
                         f"""
-                        SELECT account_id, exec_id, extract(epoch from exec_time) AS time,
-                               symbol, sec_type, side, quantity, price, commission, source,
-                               {_cols_ext}
-                        FROM account_executions {where}
-                        ORDER BY exec_time DESC NULLS LAST LIMIT %s
+                        SELECT e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                               e.symbol, e.sec_type, e.side, e.quantity, e.price,
+                               c.commission, e.source,
+                               e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
+                               c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra
+                        FROM account_executions e
+                        LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
+                        {where}
+                        ORDER BY e.exec_time DESC NULLS LAST LIMIT %s
                         """,
                         values,
                     )
                 except Exception as col_err:
                     if "does not exist" in str(col_err).lower() or "42703" in str(getattr(col_err, "pgcode", "")):
-                        cur.execute(
-                            f"""
-                            SELECT account_id, exec_id, extract(epoch from exec_time) AS time,
-                                   symbol, sec_type, side, quantity, price, commission, source
-                            FROM account_executions {where}
-                            ORDER BY exec_time DESC NULLS LAST LIMIT %s
-                            """,
-                            values,
-                        )
+                        try:
+                            cur.execute(
+                                f"""
+                                SELECT e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                                       e.symbol, e.sec_type, e.side, e.quantity, e.price,
+                                       c.commission, e.source,
+                                       e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
+                                       c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra
+                                FROM account_executions e
+                                LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id
+                                {where}
+                                ORDER BY e.exec_time DESC NULLS LAST LIMIT %s
+                                """,
+                                values,
+                            )
+                        except Exception:
+                            cur.execute(
+                                f"""
+                                        SELECT account_id, exec_id, extract(epoch from exec_time) AS time,
+                                               symbol, sec_type, side, quantity, price,
+                                               NULL::double precision AS commission, source,
+                                               expiry, strike, option_right, exchange, order_id, cum_qty,
+                                               NULL::double precision AS realized_pnl, contract_key,
+                                               NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date, raw_extra
+                                        FROM account_executions {where}
+                                ORDER BY exec_time DESC NULLS LAST LIMIT %s
+                                """,
+                                values,
+                            )
                     else:
                         raise
                 rows = cur.fetchall()
@@ -451,8 +475,19 @@ def write_control_command(status_config: dict, command: str) -> bool:
         return False
 
 
+def _has_meaningful_commission(v: Any, is_numeric: bool = True) -> bool:
+    """是否有意义的 commission 相关值（非 None，数值非 0，字符串非空）。"""
+    if v is None:
+        return False
+    if is_numeric and v == 0:
+        return False
+    if not is_numeric and (not v or not str(v).strip()):
+        return False
+    return True
+
+
 def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bool:
-    """R-A2: 写入执行记录到 account_executions（供 API 直接拉取后落库）。按 exec_id 去重。Returns True on success."""
+    """R-A2: 写入执行记录到 account_executions；CommissionReport 写入 account_execution_commissions。按 exec_id 去重。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     import json
@@ -470,7 +505,6 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                     side = r.get("side")
                     quantity = r.get("quantity")
                     price = r.get("price")
-                    commission = r.get("commission")
                     source = r.get("source")
                     expiry = r.get("expiry")
                     strike = r.get("strike")
@@ -478,9 +512,7 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                     exchange = r.get("exchange")
                     order_id = r.get("order_id")
                     cum_qty = r.get("cum_qty")
-                    realized_pnl = r.get("realized_pnl")
                     contract_key = r.get("contract_key")
-                    currency = r.get("currency")
                     raw_extra = r.get("raw_extra")
                     if raw_extra is not None and not isinstance(raw_extra, str):
                         raw_extra = json.dumps(raw_extra) if raw_extra else None
@@ -494,9 +526,9 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                             exec_dt = None
                     else:
                         exec_dt = None
-                    cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, commission, source, expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra"
-                    placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
-                    vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, commission, source, expiry, strike, option_right, exchange, order_id, cum_qty, realized_pnl, contract_key, currency, raw_extra)
+                    cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra"
+                    placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+                    vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra)
                     if exec_id:
                         cur.execute(
                             f"""
@@ -514,13 +546,137 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                             """,
                             vals,
                         )
+                    commission = r.get("commission")
+                    realized_pnl = r.get("realized_pnl")
+                    currency = r.get("currency")
+                    yield_ = r.get("yield_")
+                    yield_redemption_date = r.get("yield_redemption_date")
+                    # 传参时把 0 当作 NULL，避免 SQL 端用 0 覆盖已有值（含类型为 str 的 "0"）
+                    def _null_if_zero(v):
+                        if v is None:
+                            return None
+                        try:
+                            if float(v) == 0:
+                                return None
+                        except (TypeError, ValueError):
+                            pass
+                        return v if (v != "" and v is not None) else None
+                    commission_val = _null_if_zero(commission)
+                    realized_pnl_val = _null_if_zero(realized_pnl)
+                    yield_val = _null_if_zero(yield_)
+                    yield_redemption_date_val = _null_if_zero(yield_redemption_date)
+                    currency_val = currency if (currency and str(currency).strip()) else None
+                    # 仅当有至少一个「有意义」的 commission 字段时才写 commission 表，避免 7 天拉取时用空数据覆盖 1 天拉到的有效值
+                    has_comm = (
+                        _has_meaningful_commission(commission)
+                        or _has_meaningful_commission(realized_pnl)
+                        or _has_meaningful_commission(currency, is_numeric=False)
+                        or _has_meaningful_commission(yield_)
+                        or _has_meaningful_commission(yield_redemption_date)
+                    )
+                    if exec_id and has_comm:
+                        cur.execute(
+                            """
+                            INSERT INTO account_execution_commissions (exec_id, commission, currency, realized_pnl, yield_, yield_redemption_date)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (exec_id) DO UPDATE SET
+                                commission = CASE
+                                    WHEN EXCLUDED.commission IS NOT NULL AND EXCLUDED.commission != 0 THEN EXCLUDED.commission
+                                    ELSE account_execution_commissions.commission
+                                END,
+                                currency = CASE
+                                    WHEN EXCLUDED.currency IS NOT NULL AND TRIM(COALESCE(EXCLUDED.currency, '')) != '' THEN EXCLUDED.currency
+                                    ELSE account_execution_commissions.currency
+                                END,
+                                realized_pnl = CASE
+                                    WHEN EXCLUDED.realized_pnl IS NOT NULL AND EXCLUDED.realized_pnl != 0 THEN EXCLUDED.realized_pnl
+                                    ELSE account_execution_commissions.realized_pnl
+                                END,
+                                yield_ = CASE
+                                    WHEN EXCLUDED.yield_ IS NOT NULL AND EXCLUDED.yield_ != 0 THEN EXCLUDED.yield_
+                                    ELSE account_execution_commissions.yield_
+                                END,
+                                yield_redemption_date = CASE
+                                    WHEN EXCLUDED.yield_redemption_date IS NOT NULL AND EXCLUDED.yield_redemption_date != 0 THEN EXCLUDED.yield_redemption_date
+                                    ELSE account_execution_commissions.yield_redemption_date
+                                END
+                            """,
+                            (exec_id, commission_val, currency_val, realized_pnl_val, yield_val, yield_redemption_date_val),
+                        )
+            n_comm = sum(1 for r in rows if r.get("exec_id") and (r.get("commission") is not None or r.get("realized_pnl") is not None or r.get("currency") is not None or r.get("yield_") is not None or r.get("yield_redemption_date") is not None))
             conn.commit()
-            logger.info("[R-A2] write_account_executions_to_db: wrote %s rows", len(rows))
+            logger.info("[R-A2] write_account_executions_to_db: wrote %s rows (%s with commission)", len(rows), n_comm)
             return True
         finally:
             conn.close()
     except Exception as e:
         logger.warning("write_account_executions_to_db failed: %s", e)
+        return False
+
+
+def update_execution_commission(
+    status_config: dict,
+    exec_id: str,
+    commission: Optional[float],
+    realized_pnl: Optional[float],
+    currency: Optional[str],
+    yield_: Optional[float] = None,
+    yield_redemption_date: Optional[int] = None,
+) -> bool:
+    """R-A2: 收到 IB commissionReport 事件时按 exec_id 写入 account_execution_commissions。"""
+    if not exec_id or not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    def _nz(v):
+        if v is None: return None
+        try:
+            if float(v) == 0: return None
+        except (TypeError, ValueError):
+            pass
+        return v
+    commission_val = _nz(commission)
+    realized_pnl_val = _nz(realized_pnl)
+    yield_val = _nz(yield_)
+    yield_redemption_date_val = _nz(yield_redemption_date)
+    currency_val = currency if (currency and str(currency).strip()) else None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO account_execution_commissions (exec_id, commission, currency, realized_pnl, yield_, yield_redemption_date)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (exec_id) DO UPDATE SET
+                        commission = CASE
+                            WHEN EXCLUDED.commission IS NOT NULL AND EXCLUDED.commission != 0 THEN EXCLUDED.commission
+                            ELSE account_execution_commissions.commission
+                        END,
+                        currency = CASE
+                            WHEN EXCLUDED.currency IS NOT NULL AND TRIM(COALESCE(EXCLUDED.currency, '')) != '' THEN EXCLUDED.currency
+                            ELSE account_execution_commissions.currency
+                        END,
+                        realized_pnl = CASE
+                            WHEN EXCLUDED.realized_pnl IS NOT NULL AND EXCLUDED.realized_pnl != 0 THEN EXCLUDED.realized_pnl
+                            ELSE account_execution_commissions.realized_pnl
+                        END,
+                        yield_ = CASE
+                            WHEN EXCLUDED.yield_ IS NOT NULL AND EXCLUDED.yield_ != 0 THEN EXCLUDED.yield_
+                            ELSE account_execution_commissions.yield_
+                        END,
+                        yield_redemption_date = CASE
+                            WHEN EXCLUDED.yield_redemption_date IS NOT NULL AND EXCLUDED.yield_redemption_date != 0 THEN EXCLUDED.yield_redemption_date
+                            ELSE account_execution_commissions.yield_redemption_date
+                        END
+                    """,
+                    (exec_id, commission_val, currency_val, realized_pnl_val, yield_val, yield_redemption_date_val),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("update_execution_commission failed: exec_id=%r %s", exec_id, e)
         return False
 
 

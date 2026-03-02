@@ -159,8 +159,8 @@
 
 ### 2.11 表 `account_executions`（阶段 3 R-A2：账户执行/成交记录）
 
-- **用途**：存**账户级**执行/成交记录（含手动与机器），供复盘与风控（GET /executions、复盘页）查询；与 `operations`（仅本程序对冲事件）区分。**完整存储 IB 返回的全部字段**，便于复盘与统计。
-- **写入**：由守护程序周期从 IB 拉取 executions/fills，或独立脚本/服务拉取后写入；按 `exec_id` 去重（若 IB 提供），避免重复插入。
+- **用途**：存**账户级**执行/成交记录（含手动与机器），供复盘与风控（GET /executions、复盘页）查询；与 `operations`（仅本程序对冲事件）区分。对应 IB 的 **Execution** 结构，不含手续费/实现盈亏（见 §2.11.1）。
+- **写入**：由守护程序周期从 IB 拉取 executions/fills，或独立脚本/服务拉取后写入；按 `exec_id` 去重（若 IB 提供），避免重复插入。手续费与实现盈亏写入 **account_execution_commissions**（§2.11.1）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -174,7 +174,6 @@
 | side | text | BUY / SELL（由 IB BOT/SLD 映射） |
 | quantity | double precision | 数量 |
 | price | double precision | 成交价 |
-| commission | double precision | 手续费（可选） |
 | source | text | 来源（manual / daemon，若可区分） |
 | expiry | text | 期权到期（YYYYMMDD，OPT 时） |
 | strike | double precision | 期权行权价（OPT 时） |
@@ -182,14 +181,30 @@
 | exchange | text | 交易所 |
 | order_id | bigint | IB 订单 id |
 | cum_qty | double precision | 累计成交量 |
-| realized_pnl | double precision | 实现盈亏 |
 | contract_key | text | 合约唯一键 symbol\|sec_type\|expiry\|strike\|right |
-| currency | text | 币种 |
 | raw_extra | jsonb | 其他 IB 字段（permId、clientId、conId 等） |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
 - **索引**：建议 `(account_id, exec_time DESC)`、若用 exec_id 去重则 `UNIQUE(exec_id)` 或唯一索引。
-- **读取**：独立应用 GET /executions 按 `since_ts`/`until_ts` 查询本表；复盘页展示账户执行列表；**方向**由 `side` 正确显示（买/卖）。
+- **读取**：独立应用 GET /executions 按 `since_ts`/`until_ts` 查询本表，并 **LEFT JOIN account_execution_commissions** 得到 commission、realized_pnl、currency；复盘页展示账户执行列表；**方向**由 `side` 正确显示（买/卖）。
+
+### 2.11.1 表 `account_execution_commissions`（阶段 3 R-A2：CommissionReport）
+
+- **用途**：存 IB **CommissionReport** 数据，与 `account_executions` 通过 `exec_id` 一对一关联；贴合 IB 将 Execution 与 CommissionReport 分开推送的结构。
+- **写入**：拉取 executions 时若 Fill 带 commissionReport 则写入本表；或收到 **commissionReport 事件**（仅 live 成交）时 UPSERT。按 `exec_id` 唯一。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| exec_id | text PRIMARY KEY | 对应 account_executions.exec_id |
+| commission | double precision | 手续费 |
+| currency | text | 币种 |
+| realized_pnl | double precision | 实现盈亏 |
+| yield_ | double precision | IB yield（可选） |
+| yield_redemption_date | integer | yyyymmdd 格式（可选） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **读取**：GET /executions 通过 LEFT JOIN 本表将 commission、realized_pnl、currency 拼回执行记录返回前端。
 
 ### 2.12 表 `ohlc_bars`（阶段 3 R-A3：复盘辅助行情 K 线）
 
@@ -339,7 +354,7 @@
 python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**ohlc_bars** 等表（与 `PostgreSQLSink._ensure_tables` 一致；status_current/status_history 不含 account 相关列）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**ohlc_bars** 等表（与 `PostgreSQLSink._ensure_tables` 一致；status_current/status_history 不含 account 相关列）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。

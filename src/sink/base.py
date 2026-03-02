@@ -72,6 +72,14 @@ class StatusSink(ABC):
     def write_account_executions(self, rows: Any) -> None:  # rows: Iterable[Dict[str, Any]]
         return
 
+    # 可选：收到 commissionReport 事件时按 exec_id 更新 commission/realized_pnl/currency/yield_/yield_redemption_date（R-A2）。
+    def update_execution_commission(
+        self, _exec_id: str, _commission: Any, _realized_pnl: Any, _currency: Any,
+        _yield_: Any = None, _yield_redemption_date: Any = None,
+    ) -> None:
+        """Default no-op; PostgreSQLSink implements UPDATE by exec_id."""
+        return
+
     # 可选：写入 K 线/OHLC（R-A3）。默认实现为空。
     def write_ohlc_bars(self, rows: Any) -> None:  # rows: Iterable[Dict[str, Any]]
         return

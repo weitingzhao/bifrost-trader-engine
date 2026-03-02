@@ -39,6 +39,41 @@ class IBConnector:
         self.ib = IB()
         self._connected = False
         self._stock_contract: Optional[Stock] = None
+        self._commission_report_callback: Optional[
+            Callable[[str, Optional[float], Optional[float], Optional[str], Optional[float], Optional[int]], None]
+        ] = None
+
+    def set_commission_report_callback(
+        self,
+        callback: Optional[
+            Callable[[str, Optional[float], Optional[float], Optional[str], Optional[float], Optional[int]], None]
+        ],
+    ) -> None:
+        """设置 commissionReport 事件回调：收到 IB commissionReport 时调用 callback(exec_id, commission, realized_pnl, currency, yield_, yield_redemption_date)。
+        仅 live 成交会触发；历史 reqExecutions 不会触发事件，仍依赖 get_executions_async 返回后合并。"""
+        self._commission_report_callback = callback
+
+    def _on_commission_report(self, trade: Any, fill: Any, report: Any) -> None:
+        if not self._commission_report_callback or not fill or not report:
+            return
+        ex = getattr(fill, "execution", None)
+        exec_id = getattr(ex, "execId", None) if ex else None
+        if not exec_id:
+            return
+        commission = getattr(report, "commission", None)
+        realized_pnl = getattr(report, "realizedPNL", None)
+        currency = getattr(report, "currency", None)
+        yield_ = getattr(report, "yield_", None)
+        yield_redemption_date = getattr(report, "yieldRedemptionDate", None)
+        if yield_redemption_date is not None:
+            try:
+                yield_redemption_date = int(yield_redemption_date)
+            except (TypeError, ValueError):
+                yield_redemption_date = None
+        try:
+            self._commission_report_callback(exec_id, commission, realized_pnl, currency, yield_, yield_redemption_date)
+        except Exception as e:
+            logger.warning("commission_report_callback failed: exec_id=%r %s", exec_id, e)
 
     @property
     def is_connected(self) -> bool:
@@ -113,6 +148,7 @@ class IBConnector:
                         self.port,
                         self.client_id,
                     )
+                self.ib.commissionReportEvent += self._on_commission_report
                 return True
             except Exception as e:
                 last_exc = e
@@ -150,6 +186,10 @@ class IBConnector:
         """Disconnect from IB."""
         if not self._connected:
             return
+        try:
+            self.ib.commissionReportEvent -= self._on_commission_report
+        except Exception:
+            pass
         try:
             self.ib.disconnect()
         except Exception as e:
@@ -391,19 +431,45 @@ class IBConnector:
     ) -> List[Dict[str, Any]]:
         """Request from IB and return account executions/fills (R-A2). Returns full data for DB storage.
         Use reqExecutionsAsync so we get fills from IB server (including today's trades), not only from current session.
-        since_days: 1=仅当天(默认), 3=最近3天, 7=最近7天；需 TWS Trade Log 已勾选对应天数。"""
+        since_days: 1=仅当天(默认), 3=最近3天, 7=最近7天；需 TWS Trade Log 已勾选对应天数。
+        TWS 先发 execDetails/execDetailsEnd 再发 commissionReport，故在拿到 fills 后等待一段时间并订阅
+        commissionReportEvent，确保 commission/realizedPNL 能落库。"""
         if not self.is_connected:
             await self.connect()
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
             time_str = ""
             if since_days is not None and since_days > 0:
-                # IB ExecutionFilter.Time: yyyymmdd hh:mm:ss (local time)
-                start = datetime.now() - timedelta(days=since_days - 1)
-                time_str = start.strftime("%Y%m%d 00:00:00")
+                # IB ExecutionFilter.Time: 使用 UTC 明确时区，避免 Warning 2174
+                start = datetime.now(timezone.utc) - timedelta(days=since_days - 1)
+                time_str = start.strftime("%Y%m%d %H:%M:%S") + " UTC"
             ef = ExecutionFilter(acctCode=account or "", time=time_str)
-            fills = await self.ib.reqExecutionsAsync(ef)
+
+            # 收集 execId -> CommissionReport 数据（TWS 的 commissionReport 在 execDetailsEnd 之后才到达）
+            commission_by_exec_id: Dict[str, Dict[str, Any]] = {}
+
+            def on_commission_report(trade: Any, fill: Any, report: Any) -> None:
+                if fill and getattr(fill, "execution", None) and report:
+                    eid = getattr(fill.execution, "execId", None)
+                    if eid:
+                        commission_by_exec_id[eid] = {
+                            "commission": getattr(report, "commission", None),
+                            "realizedPNL": getattr(report, "realizedPNL", None),
+                            "currency": getattr(report, "currency", None),
+                            "yield_": getattr(report, "yield_", None),
+                            "yieldRedemptionDate": getattr(report, "yieldRedemptionDate", None),
+                        }
+
+            self.ib.commissionReportEvent += on_commission_report
+            try:
+                fills = await self.ib.reqExecutionsAsync(ef)
+                # TWS 在 execDetailsEnd 之后才发 commissionReport，给事件循环时间处理并合并到 fill
+                await asyncio.sleep(3.0)
+            finally:
+                self.ib.commissionReportEvent -= on_commission_report
+
             out: List[Dict[str, Any]] = []
+            seen_exec_ids: set = set()
             for fill in fills or []:
                 if not isinstance(fill, Fill):
                     continue
@@ -412,6 +478,8 @@ class IBConnector:
                 comm_report = getattr(fill, "commissionReport", None)
                 fill_time = getattr(fill, "time", None) or (ex.time if ex else None)
                 exec_id = ex.execId if ex else None
+                if exec_id and exec_id in seen_exec_ids:
+                    continue
                 acct = ex.acctNumber if ex else None
                 side_raw = ex.side if ex else None  # BOT / SLD
                 side = self._exec_side_to_buy_sell(side_raw)
@@ -424,6 +492,12 @@ class IBConnector:
                     commission = getattr(comm_report, "commission", None)
                     realized_pnl = getattr(comm_report, "realizedPNL", None)
                     comm_currency = getattr(comm_report, "currency", None)
+                # 若 Fill 上仍无 commission（历史请求时 report 可能未合并到同一对象），用事件里收集的
+                if commission is None and exec_id and exec_id in commission_by_exec_id:
+                    rec = commission_by_exec_id[exec_id]
+                    commission = rec.get("commission")
+                    realized_pnl = realized_pnl if realized_pnl is not None else rec.get("realizedPNL")
+                    comm_currency = comm_currency or rec.get("currency")
                 symbol = ""
                 sec_type = ""
                 expiry = ""
@@ -464,6 +538,8 @@ class IBConnector:
                         v = getattr(comm_report, attr, None)
                         if v is not None:
                             raw_extra[attr] = v
+                yield_val = getattr(comm_report, "yield_", None) if comm_report else None
+                yield_redemption = getattr(comm_report, "yieldRedemptionDate", None) if comm_report else None
                 if contract and con_id is not None:
                     raw_extra["conId"] = con_id
                 if local_symbol:
@@ -483,13 +559,121 @@ class IBConnector:
                     "strike": float(strike) if strike is not None else None,
                     "option_right": option_right or None,
                     "exchange": exchange or None,
-                    "currency": currency or None,
+                    "currency": (comm_currency or currency or None),
                     "order_id": ex.orderId if ex else None,
                     "cum_qty": float(ex.cumQty) if ex and hasattr(ex, "cumQty") and ex.cumQty is not None else None,
                     "realized_pnl": float(realized_pnl) if realized_pnl is not None else None,
                     "contract_key": contract_key or None,
                     "raw_extra": raw_extra if raw_extra else None,
+                    "yield_": float(yield_val) if yield_val is not None else None,
+                    "yield_redemption_date": int(yield_redemption) if yield_redemption is not None else None,
                 })
+                if exec_id:
+                    seen_exec_ids.add(exec_id)
+            # 补全：TWS 可能在连接/同步时已下发 fills+commissionReport 到 wrapper.fills，但 reqExecutions 因时间过滤返回 0；把这些也纳入以便落库并更新 commission
+            account_filter = (account or "").strip()
+            for wfill in self.ib.fills():
+                if not isinstance(wfill, Fill):
+                    continue
+                wex = getattr(wfill, "execution", None)
+                if not wex:
+                    continue
+                weid = getattr(wex, "execId", None)
+                if not weid or weid in seen_exec_ids:
+                    continue
+                wacct = getattr(wex, "acctNumber", None) or ""
+                if account_filter and wacct != account_filter:
+                    continue
+                # 复用上面相同逻辑从 wfill 建一行（简化：只取关键字段，commission 从 fill.commissionReport 或 commission_by_exec_id）
+                wcontract = getattr(wfill, "contract", None)
+                wcomm = getattr(wfill, "commissionReport", None)
+                wtime = getattr(wfill, "time", None) or (wex.time if wex else None)
+                wcommission = getattr(wcomm, "commission", None) if wcomm else None
+                wrealized = getattr(wcomm, "realizedPNL", None) if wcomm else None
+                wcur = getattr(wcomm, "currency", None) if wcomm else None
+                wyield_val = getattr(wcomm, "yield_", None) if wcomm else None
+                wyield_redemption = getattr(wcomm, "yieldRedemptionDate", None) if wcomm else None
+                if wcommission is None and weid in commission_by_exec_id:
+                    rec = commission_by_exec_id[weid]
+                    wcommission = rec.get("commission")
+                    wrealized = wrealized if wrealized is not None else rec.get("realizedPNL")
+                    wcur = wcur or rec.get("currency")
+                    wyield_val = wyield_val if wyield_val is not None else rec.get("yield_")
+                    wyield_redemption = wyield_redemption if wyield_redemption is not None else rec.get("yieldRedemptionDate")
+                wsym = getattr(wcontract, "symbol", "") or "" if wcontract else ""
+                wst = getattr(wcontract, "secType", "") or "" if wcontract else ""
+                wexch = getattr(wcontract, "exchange", "") or "" if wcontract else ""
+                wcurr = getattr(wcontract, "currency", "") or "" if wcontract else ""
+                if wex and not wexch:
+                    wexch = getattr(wex, "exchange", "") or ""
+                wts = None
+                if wtime is not None:
+                    try:
+                        wts = wtime.timestamp()
+                    except Exception:
+                        pass
+                out.append({
+                    "exec_id": weid,
+                    "time": wts,
+                    "account_id": wacct,
+                    "symbol": wsym,
+                    "sec_type": wst,
+                    "side": self._exec_side_to_buy_sell(wex.side if wex else None),
+                    "quantity": float(wex.shares) if wex and wex.shares is not None else None,
+                    "price": float(wex.price) if wex and wex.price is not None else None,
+                    "commission": float(wcommission) if wcommission is not None else None,
+                    "source": "daemon" if (wex and getattr(wex, "clientId", None) == self.client_id) else "manual",
+                    "expiry": getattr(wcontract, "lastTradeDateOrContractMonth", "") or None if wcontract else None,
+                    "strike": float(getattr(wcontract, "strike", None)) if wcontract and getattr(wcontract, "strike", None) is not None else None,
+                    "option_right": getattr(wcontract, "right", "") or None if wcontract else None,
+                    "exchange": wexch or None,
+                    "currency": (wcur or wcurr or None),
+                    "order_id": wex.orderId if wex else None,
+                    "cum_qty": float(wex.cumQty) if wex and getattr(wex, "cumQty", None) is not None else None,
+                    "realized_pnl": float(wrealized) if wrealized is not None else None,
+                    "contract_key": self._contract_key(wcontract) or None,
+                    "raw_extra": None,
+                    "yield_": float(wyield_val) if wyield_val is not None else None,
+                    "yield_redemption_date": int(wyield_redemption) if wyield_redemption is not None else None,
+                })
+                seen_exec_ids.add(weid)
+            # 二次补全 commission：sleep 后直接从 self.ib.fills() 建 exec_id->Fill 映射再补全（与 wrapper 解耦，避免 wrapper.fills 不可用或键不一致）
+            n_second_pass = 0
+            try:
+                fills_by_id: Dict[str, Any] = {}
+                for f in self.ib.fills():
+                    ex = getattr(f, "execution", None)
+                    if ex:
+                        eid = getattr(ex, "execId", None)
+                        if eid:
+                            fills_by_id[eid] = f
+                for row in out:
+                    eid = row.get("exec_id")
+                    if not eid or row.get("commission") is not None:
+                        continue
+                    wf = fills_by_id.get(eid)
+                    cr = getattr(wf, "commissionReport", None) if wf else None
+                    if not cr:
+                        continue
+                    c = getattr(cr, "commission", None)
+                    rp = getattr(cr, "realizedPNL", None)
+                    cu = getattr(cr, "currency", None)
+                    y_ = getattr(cr, "yield_", None)
+                    yr = getattr(cr, "yieldRedemptionDate", None)
+                    if c is not None or rp is not None or cu is not None or y_ is not None or yr is not None:
+                        row["commission"] = float(c) if c is not None else None
+                        row["realized_pnl"] = float(rp) if rp is not None else None
+                        row["currency"] = cu or row.get("currency") or None
+                        row["yield_"] = float(y_) if y_ is not None else None
+                        row["yield_redemption_date"] = int(yr) if yr is not None else None
+                        n_second_pass += 1
+            except Exception as _e:
+                logger.warning("commission from ib.fills() second pass: %s", _e)
+            if n_second_pass:
+                logger.info("[R-A2] get_executions_async: second pass filled commission for %s rows", n_second_pass)
+            n_with_commission = sum(1 for x in out if x.get("commission") is not None or x.get("realized_pnl") is not None)
+            if n_with_commission:
+                logger.info("[R-A2] get_executions_async: %s/%s fills with commission/realized_pnl", n_with_commission, len(out))
             logger.info("[R-A2] get_executions_async: got %s fills for account=%r", len(out), account)
             return out
         except Exception as e:

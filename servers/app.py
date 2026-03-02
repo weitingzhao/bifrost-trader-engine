@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 
-from servers.reader import StatusReader, write_control_command, write_run_status, write_heartbeat_interval, write_ib_config, write_ohlc_bars_to_db, write_account_executions_to_db
+from servers.reader import StatusReader, write_control_command, write_run_status, write_heartbeat_interval, write_ib_config, write_ohlc_bars_to_db, write_account_executions_to_db, update_execution_commission
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
@@ -174,6 +174,10 @@ def create_app(
         try:
             if not await connector.connect(max_attempts=3):
                 return {"ok": False, "error": "无法连接 IB，请确认 TWS/Gateway 已运行且端口正确。", "count": 0}
+            # 收到 commissionReport 事件时直接按 exec_id 更新 DB（仅 live 成交会触发；历史仍靠 get_executions_async 合并）
+            connector.set_commission_report_callback(
+                lambda eid, c, pnl, cur, y_, yrd: update_execution_commission(control_via_db, eid, c, pnl, cur, y_, yrd)
+            )
             account_ids = connector.get_managed_accounts()
             if not account_ids:
                 account_ids = [""]
@@ -183,6 +187,10 @@ def create_app(
                 if exec_list:
                     all_execs.extend(exec_list)
         finally:
+            try:
+                connector.set_commission_report_callback(None)
+            except Exception:
+                pass
             try:
                 await connector.disconnect()
             except Exception:

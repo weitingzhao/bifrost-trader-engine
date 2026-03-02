@@ -285,12 +285,23 @@ class GsTrading:
             # R-A2: 拉取账户执行/成交并写入 account_executions，供复盘与 GET /executions
             if self._status_sink and hasattr(self._status_sink, "write_account_executions"):
                 try:
+                    if hasattr(self._status_sink, "update_execution_commission"):
+                        self.connector.set_commission_report_callback(
+                            lambda eid, c, pnl, cur, y_, yrd: self._status_sink.update_execution_commission(
+                                eid, c, pnl, cur, y_, yrd
+                            )
+                        )
                     for acc_id in account_ids:
                         exec_list = await self.connector.get_executions_async(account=acc_id)
                         if exec_list:
                             self._status_sink.write_account_executions(exec_list)
                 except Exception as ex:
                     logger.debug("[R-A2] get_executions_async/write_account_executions: %s", ex)
+                finally:
+                    try:
+                        self.connector.set_commission_report_callback(None)
+                    except Exception:
+                        pass
         except Exception as e:
             logger.warning("_refresh_accounts_data: %s", e, exc_info=True)
 
@@ -305,6 +316,12 @@ class GsTrading:
             account_ids = self.connector.get_managed_accounts()
             if not account_ids:
                 return
+            if hasattr(self._status_sink, "update_execution_commission"):
+                self.connector.set_commission_report_callback(
+                    lambda eid, c, pnl, cur, y_, yrd: self._status_sink.update_execution_commission(
+                        eid, c, pnl, cur, y_, yrd
+                    )
+                )
             for acc_id in account_ids:
                 exec_list = await self.connector.get_executions_async(account=acc_id)
                 if exec_list:
@@ -312,6 +329,11 @@ class GsTrading:
             logger.info("[R-A2] _refresh_executions_only: synced executions for %s accounts", len(account_ids))
         except Exception as ex:
             logger.warning("[R-A2] _refresh_executions_only: %s", ex, exc_info=True)
+        finally:
+            try:
+                self.connector.set_commission_report_callback(None)
+            except Exception:
+                pass
 
     async def _refresh_positions(self) -> None:
         """Fetch positions from IB and update store (raw positions + stock_shares only). No option parse. R-A1: use account_id when available."""
