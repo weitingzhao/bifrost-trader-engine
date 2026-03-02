@@ -249,3 +249,35 @@ These examples illustrate how to think and talk about direction before coding.
 
 Use these as mental templates for how detailed and intentional your aesthetic thinking should be before you start coding.
 
+---
+
+## Project-Specific Notes: Bifrost Trader + Skote Theme
+
+When working on the **Bifrost Trader Engine** frontend (monitoring, replay & risk pages):
+
+- **Stack & architecture**
+  - Keep the existing React SPA and FastAPI backend; **do not** migrate to Skote’s Node/Express/EJS stack.
+  - Treat Skote purely as a **visual and layout reference library**, not as code to be dropped in.
+
+- **Where Skote lives (for humans)**
+  - Local path (as provided by the project owner):
+    - `~/Desktop/framework/Skote_Nodejs_v4.2.0`
+  - In this project, Skote may be mounted under a read-only reference path（如 `reference/frontend/skote`）仅用于浏览。
+
+- **What to borrow from Skote**
+  - **Card and panel patterns**：卡片留白、标题行 + 操作按钮、阴影/圆角、Hover 状态等适合 Dashboard 的样式。
+  - **Data tables**：紧凑行高、表头层级、斑马纹、状态 Badge / Tag 的用法。
+  - **Dashboard 布局**：KPI 卡片网格、侧边栏 + 顶栏组合、表格上方的筛选/工具栏布局。
+  - **表单与筛选条**：紧凑输入框、下拉、多选/Segmented 控件、按钮层级。
+  - **色彩与强调**：成功/警告/危险颜色的用法（文字、图标、背景），以及如何用粗体/对比度突出关键数字。
+
+- **What NOT to borrow directly**
+  - 不拷贝 Skote 的路由、服务端模板或 JS 运行时到本项目。
+  - 不直接整段复制带内联脚本或不明依赖的大块 HTML。
+  - 不在监控前端中引入 Skote 的整套 Vendor CSS/JS；如需样式，只抽取必要部分并用现有 CSS/组件重写。
+
+- **Target aesthetic for this project**
+  - 监控 UI 应该是 **偏工业化的交易 Dashboard**：暗色系、信息密度较高，但阅读与扫一眼 PnL / 风险灯要非常清楚。
+  - 功能与可读性优先，其次才是装饰；Skote 用来提升「打磨程度」（卡片、表格、间距、层次），而不是覆盖项目自身的视觉方向。
+
+在为 Bifrost 设计或重构 UI 时，结合本 Skill 的通用指导，**同时遵守** `.cursor/rules/monitoring-ui.mdc` 中的项目规则（监控/IB 账户分区、红绿灯、自检等），并把 Skote 当作「参考图册」来查阅，而不是模板工程。

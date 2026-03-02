@@ -145,7 +145,11 @@ export interface OptExecutionGroup {
   buy_avg_price: number | null
   /** 卖均价（该组 Sell 的加权平均价，$/股） */
   sell_avg_price: number | null
-  /** 盈利：sell_value - buy_value（价格×数量×100-手续费），始终可算；用状态区分颜色 */
+  /** Buy 成本：sum(Size×@×100−Commission)，来自 account_execution_commissions */
+  buy_cost: number
+  /** Sell 权利金：sum(Size×@×100−Commission)，来自 account_execution_commissions */
+  sell_premium: number
+  /** 盈利：sell_premium - buy_cost，用状态区分颜色 */
   realized_pnl: number
   /** 已兑现 | 未兑现（用于字体颜色：已兑现绿，未兑现黄） */
   status: 'realized' | 'unrealized'

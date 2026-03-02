@@ -895,6 +895,12 @@ th {
   margin-bottom: var(--space-4);
 }
 
+.replay-opt-groups .replay-th-sub {
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-size: var(--text-small, 0.875rem);
+}
+
 .replay-opt-contract {
   font-family: var(--font-mono, monospace);
   font-size: var(--text-small);
@@ -915,7 +921,25 @@ th {
 
 .replay-pnl-unrealized {
   color: var(--color-warning, #b8860b);
+}
+
+.replay-pnl-detail-negative {
+  color: var(--color-danger);
+}
+
+.replay-pnl-detail-positive {
+  color: var(--color-success);
   font-weight: 600;
+}
+
+.replay-cost {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.replay-premium {
+  color: var(--color-success);
+  font-weight: 700;
 }
 
 .replay-opt-detail-title {
