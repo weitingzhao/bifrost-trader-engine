@@ -117,6 +117,65 @@ export async function fetchExecutions(since_ts?: number, until_ts?: number, limi
   return r.json()
 }
 
+/** R-A2 扩展：手动添加一条执行记录（历史补录） */
+export async function createExecution(body: Record<string, unknown>): Promise<{ ok: boolean; id?: number; error?: string }> {
+  const r = await fetch(`${API}/executions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  const ok = Boolean((j as any).ok) && r.ok
+  const detail = (j as any).detail
+  const detailMsg =
+    typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail) && detail[0]?.msg
+        ? detail[0].msg
+        : undefined
+  const statusMsg = `${r.status} ${r.statusText || ''}`.trim()
+  const error = (j as any).error || detailMsg || (!r.ok ? statusMsg : undefined)
+  return { ok, id: (j as any).id, error }
+}
+
+/** R-A2 扩展：按 id 更新一条执行记录（手动修正） */
+export async function updateExecution(id: number, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/executions/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  const ok = Boolean((j as any).ok) && r.ok
+  const detail = (j as any).detail
+  const detailMsg =
+    typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail) && detail[0]?.msg
+        ? detail[0].msg
+        : undefined
+  const statusMsg = `${r.status} ${r.statusText || ''}`.trim()
+  const error = (j as any).error || detailMsg || (!r.ok ? statusMsg : undefined)
+  return { ok, error }
+}
+
+/** R-A2 扩展：按 id 删除一条执行记录（逐笔操作） */
+export async function deleteExecution(id: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/executions/${id}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  const ok = Boolean((j as any).ok) && r.ok
+  const detail = (j as any).detail
+  const detailMsg =
+    typeof detail === 'string'
+      ? detail
+      : Array.isArray(detail) && detail[0]?.msg
+        ? detail[0].msg
+        : undefined
+  const statusMsg = `${r.status} ${r.statusText || ''}`.trim()
+  const error = (j as any).error || detailMsg || (!r.ok ? statusMsg : undefined)
+  return { ok, error }
+}
+
 export async function fetchBars(symbol?: string, period = '1 D', limit = 100): Promise<BarsResponse> {
   const params = new URLSearchParams()
   if (symbol) params.set('symbol', symbol)

@@ -9,11 +9,14 @@ import type {
   StatusResponse,
 } from '../types'
 import {
+  createExecution,
+  deleteExecution,
   fetchBars,
   fetchExecutions,
   fetchRiskSummary,
   postBarsFetch,
   postExecutionsFetch,
+  updateExecution,
 } from '../api'
 
 function fmtTs(ts: number | null | undefined): string {
@@ -58,6 +61,24 @@ function fmtExpiry(expiry: string | null | undefined): string {
   return s
 }
 
+function unixToDatetimeLocal(ts: number | string | null | undefined): string {
+  if (ts == null) return ''
+  const n = typeof ts === 'number' ? ts : Number(ts)
+  if (!Number.isFinite(n)) return ''
+  const d = new Date(n * 1000)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const h = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${day}T${h}:${min}`
+}
+
+function datetimeLocalToUnix(value: string): number {
+  if (!value || !value.trim()) return Math.floor(Date.now() / 1000)
+  return Math.floor(new Date(value).getTime() / 1000)
+}
+
 function getContractLabelParts(contract_key: string): { symbol: string; rightLabel: string } {
   const parts = contract_key.split('|')
   const symbol = parts[0]?.trim() || ''
@@ -80,6 +101,79 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   const [barsSyncing, setBarsSyncing] = useState(false)
   const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
   const [replayBarSymbol, setReplayBarSymbol] = useState('')
+  const [addExecOpen, setAddExecOpen] = useState(false)
+  const [editExec, setEditExec] = useState<Execution | null>(null)
+  const [execFormError, setExecFormError] = useState<string | null>(null)
+  const [execForm, setExecForm] = useState({
+    account_id: '',
+    time: '',
+    symbol: '',
+    sec_type: 'STK',
+    side: 'BUY',
+    quantity: '',
+    price: '',
+    expiry: '',
+    strike: '',
+    option_right: 'C',
+    commission: '',
+    realized_pnl: '',
+    currency: 'USD',
+  })
+  const OFF_TRACK_ACCOUNT_ID = 'Off-Track'
+
+  const executionAccountOptions = useMemo(() => {
+    const fromStatus = ((status?.accounts as { account_id?: string }[] | undefined) ?? [])
+      .map(a => (a.account_id ?? '').trim())
+      .filter(Boolean)
+    const fromExec = (executions || [])
+      .map(e => (e.account_id ?? '').trim())
+      .filter(Boolean)
+    const merged = Array.from(new Set([...fromStatus, ...fromExec]))
+    merged.sort().reverse()
+    if (!merged.includes(OFF_TRACK_ACCOUNT_ID)) {
+      merged.push(OFF_TRACK_ACCOUNT_ID)
+    }
+    return merged
+  }, [status?.accounts, executions])
+  useEffect(() => {
+    if (addExecOpen) {
+      const defaultAccount = executionAccountOptions[0] ?? ''
+      setExecForm({
+        account_id: defaultAccount,
+        time: unixToDatetimeLocal(Date.now() / 1000),
+        symbol: '',
+        sec_type: 'STK',
+        side: 'BUY',
+        quantity: '',
+        price: '',
+        expiry: '',
+        strike: '',
+        option_right: 'C',
+        commission: '',
+        realized_pnl: '',
+        currency: 'USD',
+      })
+    }
+  }, [addExecOpen])
+  useEffect(() => {
+    if (editExec) {
+      setExecForm({
+        account_id: editExec.account_id ?? '',
+        time: unixToDatetimeLocal(editExec.time),
+        symbol: editExec.symbol ?? '',
+        sec_type: (editExec.sec_type ?? 'STK').toUpperCase(),
+        side: (editExec.side ?? 'BUY').toUpperCase(),
+        quantity: String(editExec.quantity ?? ''),
+        price: String(editExec.price ?? ''),
+        expiry: editExec.expiry ?? '',
+        strike: String(editExec.strike ?? ''),
+        option_right: (editExec.option_right ?? 'C').toUpperCase().slice(0, 1),
+        commission: String(editExec.commission ?? ''),
+        realized_pnl: String(editExec.realized_pnl ?? ''),
+        currency: editExec.currency ?? 'USD',
+      })
+    }
+  }, [editExec])
 
   const replayBarCandidateSymbols = useMemo(() => {
     const fromStatus = riskSummary?.symbol ? [riskSummary.symbol] : []
@@ -154,6 +248,10 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
     return result
   }, [executions])
 
+  const optGroupsPnlSum = useMemo(() => {
+    return optExecutionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0)
+  }, [optExecutionGroups])
+
   const loadReplayData = useCallback(async () => {
     setReplayLoading(true)
     try {
@@ -222,6 +320,14 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
         {replaySyncing && (
           <span className="replay-sync-hint">正在连接 IB 拉取执行记录…</span>
         )}
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => { setAddExecOpen(true); setExecFormError(null); }}
+          aria-label="手动添加一条执行记录（历史补录）"
+        >
+          添加历史记录
+        </button>
       </div>
 
       <section className="replay-section" aria-labelledby="risk-summary-head">
@@ -258,8 +364,8 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
 
       <section className="replay-section" aria-labelledby="trade-records-head">
         <h3 id="trade-records-head">交易记录</h3>
-        <h4 className="replay-sub">本程序操作（对冲相关）</h4>
-        <p className="section-hint">来自 GET /operations；账户级执行记录（R-A2）在下方「账户执行」中展示。</p>
+        <h4 className="replay-sub">自动交易策略操作（对冲相关）</h4>
+        <p className="section-hint">来自 GET /operations；账户级执行记录（R-A2）在下方「组合」中展示。</p>
         <table className="table-operations">
           <thead>
             <tr>
@@ -288,9 +394,9 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
             )}
           </tbody>
         </table>
-        <h4 className="replay-sub">账户执行（R-A2）</h4>
+        <h4 className="replay-sub">组合</h4>
         {executions.length === 0 ? (
-          <p className="section-hint">暂无数据；点击「刷新复盘数据」从 IB 拉取并写入数据库。</p>
+          <p className="section-hint">暂无数据；点击「刷新复盘数据」从 IB 拉取并写入数据库，或点击「添加历史记录」手动补录。</p>
         ) : (
           <>
             {optExecutionGroups.length > 0 && (
@@ -303,12 +409,13 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                     <tr>
                       <th rowSpan={2}>合约</th>
                       <th rowSpan={2}>到期日</th>
-                      <th rowSpan={2}>Strike</th>
+                      <th rowSpan={2}>STRIKE</th>
                       <th colSpan={3}>BUY</th>
                       <th colSpan={3}>SELL</th>
                       <th rowSpan={2}>净持仓</th>
                       <th rowSpan={2}>状态</th>
                       <th rowSpan={2}>盈利</th>
+                      <th rowSpan={2}>Pool</th>
                     </tr>
                     <tr>
                       <th className="replay-th-sub">Size</th>
@@ -322,6 +429,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                   <tbody>
                     {optExecutionGroups.map((g, idx) => {
                       const stateLabel = g.net_qty === 0 ? '已兑现' : g.net_qty > 0 ? 'Holding' : 'Selling'
+                      const poolLabel = g.trades.some(t => (t.account_id ?? '').trim() === 'Off-Track') ? 'Off' : 'On'
                       return (
                         <tr key={`${g.contract_key}-${g.strike}-${idx}`}>
                           <td className="replay-opt-contract">
@@ -337,7 +445,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                             })()}
                           </td>
                           <td>{fmtExpiry(g.expiry)}</td>
-                          <td>{fmtUsd(g.strike)}</td>
+                          <td><strong>{fmtUsd(g.strike)}</strong></td>
                           <td>{g.buy_volume}</td>
                           <td>{fmtUsd(g.buy_avg_price)}</td>
                           <td><span className="replay-cost">{fmtUsd(g.buy_cost)}</span></td>
@@ -355,25 +463,39 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                               {fmtUsd0(g.realized_pnl)}
                             </span>
                           </td>
+                          <td>{poolLabel}</td>
                         </tr>
                       )
                     })}
                   </tbody>
+                  <tfoot>
+                    <tr className="replay-opt-summary-row">
+                      <td colSpan={11}>合计</td>
+                      <td>
+                        <strong className={optGroupsPnlSum >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                          {fmtUsd0(optGroupsPnlSum)}
+                        </strong>
+                      </td>
+                      <td>—</td>
+                    </tr>
+                  </tfoot>
                 </table>
 
-                <h5 className="replay-sub replay-opt-detail-title">期权分组明细（逐笔）</h5>
+                <h5 className="replay-sub replay-opt-detail-title">明细（逐笔）</h5>
                 <table className="table-operations">
                   <thead>
                     <tr>
                       <th>合约</th>
-                      <th>Strike</th>
+                      <th>到期日</th>
+                      <th>STRIKE</th>
                       <th>时间</th>
                       <th>方向</th>
                       <th>数量</th>
                       <th>成交价</th>
                       <th>手续费</th>
                       <th>PnL</th>
-                      <th>来源</th>
+                      <th>Pool</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -408,7 +530,8 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                                 )
                               })()}
                             </td>
-                            <td>{fmtUsd(g.strike)}</td>
+                            <td>{fmtExpiry(ex.expiry ?? g.expiry)}</td>
+                            <td><strong>{fmtUsd(g.strike)}</strong></td>
                             <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
                             <td>{sideLabel}</td>
                             <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
@@ -417,7 +540,31 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                             <td>
                               <span className={pnlClass}>{fmtUsd(pnl)}</span>
                             </td>
-                            <td>{ex.source ?? '—'}</td>
+                            <td>{(ex.account_id ?? '').trim() === 'Off-Track' ? 'Off' : 'On'}</td>
+                            <td>
+                              {ex.id != null ? (
+                                <span className="replay-exec-row-actions">
+                                  <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null); }}>编辑</button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-small btn-x"
+                                    onClick={async () => {
+                                      if (!window.confirm('确定删除这条执行记录？')) return
+                                      const res = await deleteExecution(ex.id!)
+                                      if (res.ok) {
+                                        if (editExec?.id === ex.id) setEditExec(null)
+                                        await loadReplayData()
+                                      } else {
+                                        setExecFormError(res.error ?? '删除失败')
+                                      }
+                                    }}
+                                    title="删除"
+                                  >
+                                    X
+                                  </button>
+                                </span>
+                              ) : '—'}
+                            </td>
                           </tr>
                         )
                       }),
@@ -440,6 +587,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                       <th>成交价</th>
                       <th>手续费</th>
                       <th>来源</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -462,6 +610,30 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                             <td>{fmtUsd(ex.price)}</td>
                             <td>{fmtUsd(ex.commission)}</td>
                             <td>{ex.source ?? '—'}</td>
+                            <td>
+                              {ex.id != null ? (
+                                <span className="replay-exec-row-actions">
+                                  <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null); }}>编辑</button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-small btn-x"
+                                    onClick={async () => {
+                                      if (!window.confirm('确定删除这条执行记录？')) return
+                                      const res = await deleteExecution(ex.id!)
+                                      if (res.ok) {
+                                        if (editExec?.id === ex.id) setEditExec(null)
+                                        await loadReplayData()
+                                      } else {
+                                        setExecFormError(res.error ?? '删除失败')
+                                      }
+                                    }}
+                                    title="删除"
+                                  >
+                                    X
+                                  </button>
+                                </span>
+                              ) : '—'}
+                            </td>
                           </tr>
                         )
                       })}
@@ -543,6 +715,224 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
           </table>
         )}
       </section>
+
+      {(addExecOpen || editExec) && (
+        <div className="modal-overlay" onClick={() => { setAddExecOpen(false); setEditExec(null); setExecFormError(null); }} role="dialog" aria-modal="true" aria-labelledby="exec-modal-title">
+          <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="exec-modal-title">{editExec ? '编辑执行记录' : '添加历史记录'}</h3>
+            {execFormError && <p className="section-hint replay-form-error">{execFormError}</p>}
+            <form
+              className="replay-exec-form"
+              onSubmit={async e => {
+                e.preventDefault()
+                setExecFormError(null)
+                const sym = execForm.symbol.trim()
+                const q = Number(execForm.quantity)
+                const p = Number(execForm.price)
+                if (!sym || !Number.isFinite(q) || !Number.isFinite(p)) {
+                  setExecFormError('请填写标的、数量、价格。')
+                  return
+                }
+                const timeUnix = datetimeLocalToUnix(execForm.time)
+                const isOpt = (execForm.sec_type || 'STK').toUpperCase() === 'OPT'
+                if (isOpt) {
+                  const strikeNum = execForm.strike != null && execForm.strike !== '' ? Number(execForm.strike) : NaN
+                  if (!Number.isFinite(strikeNum) || strikeNum <= 0) {
+                    setExecFormError('期权行权价为必填项，且不能为 0。')
+                    return
+                  }
+                }
+                let contract_key: string | undefined
+                if (isOpt && sym) {
+                  const rawStrike = execForm.strike ? Number(execForm.strike) : 0
+                  const strikeStr = Number.isFinite(rawStrike) ? rawStrike.toFixed(1) : '0.0'
+                  contract_key = `${sym}|OPT|${execForm.expiry || ''}|${strikeStr}|${(execForm.option_right || 'C').toUpperCase().slice(0, 1)}`
+                } else {
+                  contract_key = undefined
+                }
+                if (editExec?.id != null) {
+                  const body: Record<string, unknown> = {
+                    exec_time: timeUnix,
+                    symbol: sym,
+                    sec_type: execForm.sec_type || 'STK',
+                    side: (execForm.side || 'BUY').toUpperCase(),
+                    quantity: q,
+                    price: p,
+                    account_id: execForm.account_id.trim(),
+                    strike: execForm.strike ? Number(execForm.strike) : undefined,
+                    option_right: execForm.option_right || undefined,
+                    contract_key: contract_key || undefined,
+                    commission: execForm.commission ? Number(execForm.commission) : undefined,
+                    realized_pnl: execForm.realized_pnl ? Number(execForm.realized_pnl) : undefined,
+                    currency: execForm.currency.trim() || undefined,
+                  }
+                  const expiryTrimmed = execForm.expiry.trim()
+                  if (isOpt && expiryTrimmed && /^\d{6,8}$/.test(expiryTrimmed)) {
+                    body.expiry = expiryTrimmed
+                  }
+                  const res = await updateExecution(editExec.id, body)
+                  if (res.ok) {
+                    setEditExec(null)
+                    setAddExecOpen(false)
+                    await loadReplayData()
+                  } else {
+                    setExecFormError(res.error ?? '更新失败')
+                  }
+                } else {
+                  const body: Record<string, unknown> = {
+                    account_id: execForm.account_id.trim(),
+                    time: timeUnix,
+                    symbol: sym,
+                    sec_type: execForm.sec_type || 'STK',
+                    side: (execForm.side || 'BUY').toUpperCase(),
+                    quantity: q,
+                    price: p,
+                    source: 'manual',
+                    expiry: execForm.expiry.trim() || undefined,
+                    strike: execForm.strike ? Number(execForm.strike) : undefined,
+                    option_right: execForm.option_right || undefined,
+                    contract_key: contract_key || undefined,
+                    commission: execForm.commission ? Number(execForm.commission) : undefined,
+                    realized_pnl: execForm.realized_pnl ? Number(execForm.realized_pnl) : undefined,
+                    currency: execForm.currency.trim() || undefined,
+                  }
+                  const res = await createExecution(body)
+                  if (res.ok) {
+                    setAddExecOpen(false)
+                    await loadReplayData()
+                  } else {
+                    setExecFormError(res.error ?? '添加失败')
+                  }
+                }
+              }}
+            >
+              <div className="replay-exec-form-row">
+                <label>账户</label>
+                <select
+                  value={execForm.account_id}
+                  onChange={e => setExecForm(f => ({ ...f, account_id: e.target.value }))}
+                  required
+                >
+                  {executionAccountOptions.map(accId => (
+                    <option key={accId} value={accId}>
+                      {accId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="replay-exec-form-row">
+                <label>时间</label>
+                <input type="datetime-local" value={execForm.time} onChange={e => setExecForm(f => ({ ...f, time: e.target.value }))} required />
+              </div>
+              <div className="replay-exec-form-row">
+                <label>标的</label>
+                <input type="text" value={execForm.symbol} onChange={e => setExecForm(f => ({ ...f, symbol: e.target.value.trim().toUpperCase() }))} placeholder="如 NVDA" required />
+              </div>
+              <div className="replay-exec-form-row">
+                <label>类型</label>
+                <div className="replay-exec-type-radios">
+                  <label>
+                    <input
+                      type="radio"
+                      name="exec-sec-type"
+                      value="STK"
+                      checked={(execForm.sec_type || 'STK').toUpperCase() === 'STK'}
+                      onChange={e => setExecForm(f => ({ ...f, sec_type: e.target.value }))}
+                    />
+                    STK
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="exec-sec-type"
+                      value="OPT"
+                      checked={(execForm.sec_type || 'STK').toUpperCase() === 'OPT'}
+                      onChange={e => setExecForm(f => ({ ...f, sec_type: e.target.value }))}
+                    />
+                    OPT
+                  </label>
+                </div>
+              </div>
+              <div className="replay-exec-form-row">
+                <label>方向</label>
+                <select value={execForm.side} onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))}>
+                  <option value="BUY">买</option>
+                  <option value="SELL">卖</option>
+                </select>
+              </div>
+              <div className="replay-exec-form-row">
+                <label>数量</label>
+                <input type="number" step="any" value={execForm.quantity} onChange={e => setExecForm(f => ({ ...f, quantity: e.target.value }))} required />
+              </div>
+              <div className="replay-exec-form-row">
+                <label>成交价</label>
+                <input type="number" step="any" value={execForm.price} onChange={e => setExecForm(f => ({ ...f, price: e.target.value }))} required />
+              </div>
+              {(execForm.sec_type || 'STK').toUpperCase() === 'OPT' && (
+                <>
+                  <div className="replay-exec-form-row">
+                    <label>到期 (YYYYMMDD)</label>
+                    <input type="text" value={execForm.expiry} onChange={e => setExecForm(f => ({ ...f, expiry: e.target.value }))} placeholder="20251219" />
+                  </div>
+                  <div className="replay-exec-form-row">
+                    <label>STRIKE</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      value={execForm.strike}
+                      onChange={e => setExecForm(f => ({ ...f, strike: e.target.value }))}
+                      required
+                      placeholder="必填，且大于 0"
+                    />
+                  </div>
+                  <div className="replay-exec-form-row">
+                    <label>权利</label>
+                    <div className="replay-exec-type-radios">
+                      <label>
+                        <input
+                          type="radio"
+                          name="exec-option-right"
+                          value="C"
+                          checked={(execForm.option_right || 'C').toUpperCase() === 'C'}
+                          onChange={e => setExecForm(f => ({ ...f, option_right: e.target.value }))}
+                        />
+                        Call
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="exec-option-right"
+                          value="P"
+                          checked={(execForm.option_right || 'C').toUpperCase() === 'P'}
+                          onChange={e => setExecForm(f => ({ ...f, option_right: e.target.value }))}
+                        />
+                        Put
+                      </label>
+                    </div>
+                  </div>
+                </>
+              )}
+              <div className="replay-exec-form-row">
+                <label>手续费</label>
+                <input type="number" step="any" value={execForm.commission} onChange={e => setExecForm(f => ({ ...f, commission: e.target.value }))} placeholder="可选" />
+              </div>
+              <div className="replay-exec-form-row">
+                <label>实现盈亏</label>
+                <input type="number" step="any" value={execForm.realized_pnl} onChange={e => setExecForm(f => ({ ...f, realized_pnl: e.target.value }))} placeholder="可选" />
+              </div>
+              <div className="replay-exec-form-row">
+                <label>币种</label>
+                <input type="text" value={execForm.currency} onChange={e => setExecForm(f => ({ ...f, currency: e.target.value }))} placeholder="USD" />
+              </div>
+              <div className="replay-exec-form-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => { setAddExecOpen(false); setEditExec(null); setExecFormError(null); }}>取消</button>
+                <button type="submit" className="btn btn-primary">{editExec ? '保存' : '添加'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

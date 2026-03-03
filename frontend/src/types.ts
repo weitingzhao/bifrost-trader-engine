@@ -110,6 +110,9 @@ export interface RiskSummaryResponse {
 
 /** Account execution/trade (R-A2). Full IB data. */
 export interface Execution {
+  id?: number
+  account_id?: string
+  exec_id?: string
   time?: number
   symbol?: string
   sec_type?: string

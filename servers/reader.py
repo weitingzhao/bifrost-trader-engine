@@ -1,7 +1,9 @@
 """Read-only PostgreSQL access for status_current and operations. Phase 2."""
 
+import json
 import logging
 import math
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -197,7 +199,7 @@ class StatusReader:
                 try:
                     cur.execute(
                         f"""
-                        SELECT e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                        SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
                                e.symbol, e.sec_type, e.side, e.quantity, e.price,
                                c.commission, e.source,
                                e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
@@ -214,7 +216,7 @@ class StatusReader:
                         try:
                             cur.execute(
                                 f"""
-                                SELECT e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                                SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
                                        e.symbol, e.sec_type, e.side, e.quantity, e.price,
                                        c.commission, e.source,
                                        e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
@@ -229,7 +231,7 @@ class StatusReader:
                         except Exception:
                             cur.execute(
                                 f"""
-                                        SELECT account_id, exec_id, extract(epoch from exec_time) AS time,
+                                        SELECT id, account_id, exec_id, extract(epoch from exec_time) AS time,
                                                symbol, sec_type, side, quantity, price,
                                                NULL::double precision AS commission, source,
                                                expiry, strike, option_right, exchange, order_id, cum_qty,
@@ -677,6 +679,183 @@ def update_execution_commission(
             conn.close()
     except Exception as e:
         logger.warning("update_execution_commission failed: exec_id=%r %s", exec_id, e)
+        return False
+
+
+def _exec_time_to_dt(exec_time: Any) -> Optional[datetime]:
+    if exec_time is None:
+        return None
+    try:
+        if isinstance(exec_time, (int, float)):
+            return datetime.fromtimestamp(float(exec_time), tz=timezone.utc)
+        if isinstance(exec_time, str) and exec_time.strip():
+            return datetime.fromtimestamp(float(exec_time.strip()), tz=timezone.utc)
+        return exec_time
+    except (TypeError, ValueError):
+        return None
+
+
+def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[int]:
+    """R-A2 扩展：手动添加一条执行记录（历史补录）。返回新行 id，失败返回 None。
+    body: account_id, time(Unix s), symbol, sec_type, side, quantity, price; 可选 source('manual'), exec_id, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key; 可选 commission, realized_pnl, currency。
+    若未提供 exec_id 则生成 manual_<uuid> 以便可写 commission 表。"""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    account_id = body.get("account_id") or ""
+    exec_time = body.get("time")
+    symbol = (body.get("symbol") or "").strip()
+    sec_type = (body.get("sec_type") or "STK").strip().upper() or "STK"
+    side = (body.get("side") or "").strip().upper()
+    quantity = body.get("quantity")
+    price = body.get("price")
+    if symbol is None or quantity is None or price is None:
+        return None
+    exec_id = (body.get("exec_id") or "").strip()
+    if not exec_id:
+        exec_id = "manual_" + uuid.uuid4().hex
+    source = (body.get("source") or "manual").strip() or "manual"
+    expiry = body.get("expiry")
+    strike = body.get("strike")
+    option_right = body.get("option_right")
+    exchange = body.get("exchange")
+    order_id = body.get("order_id")
+    cum_qty = body.get("cum_qty")
+    contract_key = body.get("contract_key")
+    raw_extra = body.get("raw_extra")
+    if raw_extra is not None and not isinstance(raw_extra, str):
+        raw_extra = json.dumps(raw_extra) if raw_extra else None
+    exec_dt = _exec_time_to_dt(exec_time)
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra"
+                placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+                vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra)
+                cur.execute(
+                    f"INSERT INTO account_executions ({cols}) VALUES ({placeholders}) RETURNING id",
+                    vals,
+                )
+                row = cur.fetchone()
+                new_id = row[0] if row else None
+                commission = body.get("commission")
+                realized_pnl = body.get("realized_pnl")
+                currency = body.get("currency")
+                if commission is not None or realized_pnl is not None or (currency and str(currency).strip()):
+                    cur.execute(
+                        """
+                        INSERT INTO account_execution_commissions (exec_id, commission, currency, realized_pnl, yield_, yield_redemption_date)
+                        VALUES (%s, %s, %s, %s, NULL, NULL)
+                        ON CONFLICT (exec_id) DO UPDATE SET
+                            commission = COALESCE(EXCLUDED.commission, account_execution_commissions.commission),
+                            currency = COALESCE(NULLIF(TRIM(COALESCE(EXCLUDED.currency, '')), ''), account_execution_commissions.currency),
+                            realized_pnl = COALESCE(EXCLUDED.realized_pnl, account_execution_commissions.realized_pnl)
+                        """,
+                        (exec_id, commission, currency or None, realized_pnl),
+                    )
+            conn.commit()
+            return new_id
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("insert_one_execution failed: %s", e)
+        return None
+
+
+def update_one_execution(status_config: dict, id_: int, body: Dict[str, Any]) -> bool:
+    """R-A2 扩展：按 id 更新一条执行记录（手动修正）。body 可含任意子集：time, symbol, sec_type, side, quantity, price, account_id, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key; 以及 commission, realized_pnl, currency（写 account_execution_commissions，以该行 exec_id 关联；若无 exec_id 则设为 manual_<id> 再写入）。"""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    # 可更新列（account_executions）
+    exec_cols = ("exec_time", "symbol", "sec_type", "side", "quantity", "price", "account_id", "source", "expiry", "strike", "option_right", "exchange", "order_id", "cum_qty", "contract_key")
+    commission_keys = ("commission", "realized_pnl", "currency")
+    updates: List[str] = []
+    values: List[Any] = []
+    for k in exec_cols:
+        if k == "exec_time":
+            # 前端传 time（Unix 秒），后端列名为 exec_time
+            v = body.get("exec_time") if body.get("exec_time") is not None else body.get("time")
+            if v is None:
+                continue
+            v = _exec_time_to_dt(v)
+        elif k not in body:
+            continue
+        else:
+            v = body[k]
+        if k == "raw_extra" and v is not None and not isinstance(v, str):
+            v = json.dumps(v) if v else None
+        updates.append(f'"{k}" = %s')
+        values.append(v)
+    values.append(id_)
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                if updates:
+                    cur.execute(
+                        "UPDATE account_executions SET " + ", ".join(updates) + " WHERE id = %s",
+                        values,
+                    )
+                    if cur.rowcount == 0:
+                        conn.rollback()
+                        return False
+                # commission 相关
+                if any(k in body for k in commission_keys):
+                    cur.execute("SELECT exec_id FROM account_executions WHERE id = %s", (id_,))
+                    row = cur.fetchone()
+                    exec_id = row[0] if row and row[0] and str(row[0]).strip() else None
+                    if not exec_id:
+                        exec_id = "manual_" + str(id_)
+                        cur.execute("UPDATE account_executions SET exec_id = %s WHERE id = %s", (exec_id, id_))
+                    comm = body.get("commission")
+                    pnl = body.get("realized_pnl")
+                    cur_ = body.get("currency")
+                    cur.execute(
+                        """
+                        INSERT INTO account_execution_commissions (exec_id, commission, currency, realized_pnl, yield_, yield_redemption_date)
+                        VALUES (%s, %s, %s, %s, NULL, NULL)
+                        ON CONFLICT (exec_id) DO UPDATE SET
+                            commission = CASE WHEN EXCLUDED.commission IS NOT NULL THEN EXCLUDED.commission ELSE account_execution_commissions.commission END,
+                            currency = CASE WHEN EXCLUDED.currency IS NOT NULL AND TRIM(EXCLUDED.currency) != '' THEN EXCLUDED.currency ELSE account_execution_commissions.currency END,
+                            realized_pnl = CASE WHEN EXCLUDED.realized_pnl IS NOT NULL THEN EXCLUDED.realized_pnl ELSE account_execution_commissions.realized_pnl END
+                        """,
+                        (exec_id, comm, cur_, pnl),
+                    )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("update_one_execution failed: id=%s %s", id_, e)
+        return False
+
+
+def delete_one_execution(status_config: dict, id_: int) -> bool:
+    """R-A2 扩展：按 id 删除一条执行记录。先删 account_execution_commissions 中关联的 exec_id，再删 account_executions。"""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT exec_id FROM account_executions WHERE id = %s", (id_,))
+                row = cur.fetchone()
+                exec_id = row[0] if row and row[0] and str(row[0]).strip() else None
+                if exec_id:
+                    cur.execute("DELETE FROM account_execution_commissions WHERE exec_id = %s", (exec_id,))
+                cur.execute("DELETE FROM account_executions WHERE id = %s", (id_,))
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return False
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_one_execution failed: id=%s %s", id_, e)
         return False
 
 

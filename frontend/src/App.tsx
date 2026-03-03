@@ -119,41 +119,42 @@ export default function App() {
 
   return (
     <div className="app">
-      <h1>Bifrost 自动交易监控</h1>
-      <p className="app-subtitle">通过下方主菜单切换：守护程序 · IB 账户 · 头寸盈亏</p>
-      <div className="api-status-bar">
-        <div className={`lamp lamp-sm ${apiLamp}`} title="Trader API 是否可达" />
-        <span className="api-status-label">Trader API: {apiReachable ? '正常' : '异常'}</span>
-        <label className="theme-switch">
-          <span className="api-status-label" style={{ marginRight: '0.5rem' }}>主题</span>
-          <select
-            value={theme}
-            onChange={(e) => setTheme(e.target.value as ThemeId)}
-            title="切换深色/明亮主题"
-            className="theme-select"
-          >
-            <option value="dark">深色</option>
-            <option value="light">明亮</option>
-          </select>
-        </label>
-        <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">API 文档</a>
-      </div>
-
-      <nav className="app-tabs" aria-label="主菜单：在守护程序、IB 账户、头寸盈亏等页面间切换">
-        <span className="app-tabs-label" aria-hidden>主菜单</span>
-        {tabList.map(({ id, label, lamp }) => (
-          <button
-            key={id}
-            type="button"
-            className={`app-tab ${activeTab === id ? 'active' : ''}`}
-            onClick={() => setActiveTab(id)}
-            aria-current={activeTab === id ? 'page' : undefined}
-          >
-            {lamp != null && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
+      <header className="app-header">
+        <div className="app-header-left">
+          <h1>Bifrost Trader</h1>
+          <nav className="app-tabs" aria-label="守护程序、IB 账户、头寸盈亏">
+            {tabList.map(({ id, label, lamp }) => (
+              <button
+                key={id}
+                type="button"
+                className={`app-tab ${activeTab === id ? 'active' : ''}`}
+                onClick={() => setActiveTab(id)}
+                aria-current={activeTab === id ? 'page' : undefined}
+              >
+                {lamp != null && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+        <div className="app-header-right">
+          <div className={`lamp lamp-sm ${apiLamp}`} title="API 是否可达" aria-hidden />
+          <span className="api-status-label">API: {apiReachable ? '正常' : '异常'}</span>
+          <label className="theme-switch">
+            <span className="api-status-label" style={{ marginRight: '0.25rem' }}>主题</span>
+            <select
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as ThemeId)}
+              title="切换深色/明亮主题"
+              className="theme-select"
+            >
+              <option value="dark">深色</option>
+              <option value="light">明亮</option>
+            </select>
+          </label>
+          <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">文档</a>
+        </div>
+      </header>
 
       {activeTab === 'monitor' && (
         <DaemonMonitorPage status={status} operations={operations} loadStatus={loadStatus} />

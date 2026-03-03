@@ -9,7 +9,19 @@ from typing import Any, Dict, Optional
 from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 
-from servers.reader import StatusReader, write_control_command, write_run_status, write_heartbeat_interval, write_ib_config, write_ohlc_bars_to_db, write_account_executions_to_db, update_execution_commission
+from servers.reader import (
+    StatusReader,
+    write_control_command,
+    write_run_status,
+    write_heartbeat_interval,
+    write_ib_config,
+    write_ohlc_bars_to_db,
+    write_account_executions_to_db,
+    update_execution_commission,
+    insert_one_execution,
+    update_one_execution,
+    delete_one_execution,
+)
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
@@ -123,9 +135,37 @@ def create_app(
         account_id: Optional[str] = Query(None, description="Filter by account ID"),
         limit: int = Query(200, ge=1, le=1000),
     ) -> Dict[str, Any]:
-        """Account-level executions/trades (R-A2). Reads from account_executions table (daemon syncs from IB)."""
+        """Account-level executions/trades (R-A2). Reads from account_executions table (daemon syncs from IB). Each item includes id for edit."""
         items = reader.get_executions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
         return {"executions": items}
+
+    @app.post("/executions")
+    def post_execution(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """R-A2 扩展：手动添加一条执行记录（历史补录）。body: account_id, time(Unix s), symbol, sec_type, side, quantity, price；可选 source, exec_id, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, commission, realized_pnl, currency。"""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。", "id": None}
+        new_id = insert_one_execution(control_via_db, body)
+        if new_id is None:
+            return {"ok": False, "error": "添加执行记录失败（请检查必填项：symbol, quantity, price）。", "id": None}
+        return {"ok": True, "id": new_id, "message": "已添加一条执行记录。"}
+
+    @app.put("/executions/{execution_id:int}")
+    def put_execution(execution_id: int, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """R-A2 扩展：按 id 更新一条执行记录（手动修正）。body 可含任意子集：time, symbol, sec_type, side, quantity, price, account_id, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, commission, realized_pnl, currency。"""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。"}
+        if update_one_execution(control_via_db, execution_id, body):
+            return {"ok": True, "message": "已更新执行记录。"}
+        return {"ok": False, "error": "更新失败（id 不存在或数据库错误）。"}
+
+    @app.delete("/executions/{execution_id:int}")
+    def delete_execution(execution_id: int) -> Dict[str, Any]:
+        """R-A2 扩展：按 id 删除一条执行记录（逐笔操作）。"""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。"}
+        if delete_one_execution(control_via_db, execution_id):
+            return {"ok": True, "message": "已删除该条执行记录。"}
+        return {"ok": False, "error": "删除失败（id 不存在或数据库错误）。"}
 
     @app.get("/bars")
     def get_bars(
