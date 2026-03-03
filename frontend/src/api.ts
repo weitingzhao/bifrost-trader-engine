@@ -91,11 +91,28 @@ export async function postSetHeartbeatInterval(heartbeat_interval_sec: number): 
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-export async function postIbConfig(ib_host: string, ib_port_type: 'tws_live' | 'tws_paper' | 'gateway'): Promise<ControlResponse & Partial<IbConfig>> {
+/** 保存 IB 与 client_id 设置（POST /config/ib）。不传的 client_id 保持库中原值。 */
+export async function postIbConfig(
+  ib_host: string,
+  ib_port_type: 'tws_live' | 'tws_paper' | 'gateway',
+  clientIds?: {
+    ib_client_id_daemon?: number
+    ib_client_id_listener?: number
+    ib_client_id_account?: number
+    ib_client_id_markets?: number
+  }
+): Promise<ControlResponse & Partial<IbConfig>> {
+  const body: Record<string, string | number> = { ib_host, ib_port_type }
+  if (clientIds) {
+    if (clientIds.ib_client_id_daemon != null) body.ib_client_id_daemon = clientIds.ib_client_id_daemon
+    if (clientIds.ib_client_id_listener != null) body.ib_client_id_listener = clientIds.ib_client_id_listener
+    if (clientIds.ib_client_id_account != null) body.ib_client_id_account = clientIds.ib_client_id_account
+    if (clientIds.ib_client_id_markets != null) body.ib_client_id_markets = clientIds.ib_client_id_markets
+  }
   const r = await fetch(`${API}/config/ib`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ib_host: ib_host.trim(), ib_port_type }),
+    body: JSON.stringify(body),
   })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }

@@ -1,7 +1,15 @@
-/** IB connection config (from DB, daemon loads on start) */
+/** IB connection config (from DB, daemon loads on start). client_id_* 供不同用途使用，避免冲突。 */
 export interface IbConfig {
   ib_host?: string
   ib_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
+  /** 守护进程连接 IB 使用的 Client ID（默认 1） */
+  ib_client_id_daemon?: number
+  /** 守护侧监听进程使用的 Client ID（预留，默认 2） */
+  ib_client_id_listener?: number
+  /** 监控端拉取账户信息/执行记录（POST /executions/fetch）使用的 Client ID（默认 4） */
+  ib_client_id_account?: number
+  /** 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 10） */
+  ib_client_id_markets?: number
 }
 
 /** One position row from IB (R-A1 multi-account) */

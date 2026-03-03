@@ -77,12 +77,16 @@ class GsTrading:
             except Exception as e:
                 logger.warning("Status sink (postgres) init failed: %s", e)
 
-        # 1.b IB Connector: host/port from DB (settings) when present, else config; client_id from DB last+1 or config
+        # 1.b IB Connector: host/port from DB (settings) when present, else config; client_id from DB last+1 or settings.ib_client_id_daemon or config
         ib_cfg = config.get("ib", {})
         config_client_id = int(ib_cfg.get("client_id") or 1)
         last_ib = None
         if self._status_sink and hasattr(self._status_sink, "get_last_ib_client_id"):
             last_ib = self._status_sink.get_last_ib_client_id()
+        if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
+            db_ib = self._status_sink.get_ib_connection_config()
+            if db_ib and db_ib.get("client_id_daemon") is not None:
+                config_client_id = int(db_ib["client_id_daemon"])
         client_id = (last_ib + 1) if last_ib is not None else config_client_id
         if last_ib is not None:
             logger.info(

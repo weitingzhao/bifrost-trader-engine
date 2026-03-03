@@ -434,20 +434,50 @@ class StatusReader:
             return None
 
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
-        """Return settings row id=1: ib_host, ib_port_type (for GET /status and UI). None if table missing."""
+        """Return settings row id=1: ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets (for GET /status and UI). None if table missing."""
         if not self._connect():
             return None
         try:
             with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT ib_host, ib_port_type FROM settings WHERE id = 1")
+                cur.execute(
+                    "SELECT ib_host, ib_port_type, "
+                    "COALESCE(ib_client_id_daemon, 1) AS ib_client_id_daemon, "
+                    "COALESCE(ib_client_id_listener, 2) AS ib_client_id_listener, "
+                    "COALESCE(ib_client_id_account, 100) AS ib_client_id_account, "
+                    "COALESCE(ib_client_id_markets, 101) AS ib_client_id_markets "
+                    "FROM settings WHERE id = 1"
+                )
                 row = cur.fetchone()
             if row is None:
                 return None
-            return {"ib_host": (row.get("ib_host") or "127.0.0.1").strip(), "ib_port_type": (row.get("ib_port_type") or "tws_paper").strip().lower()}
+            return {
+                "ib_host": (row.get("ib_host") or "127.0.0.1").strip(),
+                "ib_port_type": (row.get("ib_port_type") or "tws_paper").strip().lower(),
+                "ib_client_id_daemon": int(row["ib_client_id_daemon"]) if row.get("ib_client_id_daemon") is not None else 1,
+                "ib_client_id_listener": int(row["ib_client_id_listener"]) if row.get("ib_client_id_listener") is not None else 2,
+                "ib_client_id_account": int(row["ib_client_id_account"]) if row.get("ib_client_id_account") is not None else 4,
+                "ib_client_id_markets": int(row["ib_client_id_markets"]) if row.get("ib_client_id_markets") is not None else 10,
+            }
         except Exception as e:
-            logger.debug("get_ib_config failed: %s", e)
-            self._conn = None
-            return None
+            # 旧库可能尚无 client_id 列，仅查 host/port_type
+            try:
+                with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT ib_host, ib_port_type FROM settings WHERE id = 1")
+                    row = cur.fetchone()
+                if row is None:
+                    return None
+                return {
+                    "ib_host": (row.get("ib_host") or "127.0.0.1").strip(),
+                    "ib_port_type": (row.get("ib_port_type") or "tws_paper").strip().lower(),
+                    "ib_client_id_daemon": 1,
+                    "ib_client_id_listener": 2,
+                    "ib_client_id_account": 100,
+                    "ib_client_id_markets": 101,
+                }
+            except Exception as e2:
+                logger.debug("get_ib_config failed: %s", e2)
+                self._conn = None
+                return None
 
     def close(self) -> None:
         if self._conn:
@@ -955,27 +985,65 @@ def write_heartbeat_interval(status_config: dict, heartbeat_interval_sec: int) -
 _VALID_IB_PORT_TYPES = frozenset(("tws_live", "tws_paper", "gateway"))
 
 
-def write_ib_config(status_config: dict, ib_host: str, ib_port_type: str) -> bool:
-    """Update settings (id=1): ib_host and ib_port_type (tws_live|tws_paper|gateway). Daemon loads this on next start. Returns True on success."""
+def write_ib_config(
+    status_config: dict,
+    ib_host: str,
+    ib_port_type: str,
+    ib_client_id_daemon: int = 1,
+    ib_client_id_listener: int = 2,
+    ib_client_id_account: int = 100,
+    ib_client_id_markets: int = 101,
+) -> bool:
+    """Update settings (id=1): ib_host, ib_port_type, 以及多种用途的 client_id（守护进程/监听进程/账户信息/市场数据）。守护进程/API 下次使用时会加载。Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     host = (ib_host or "").strip() or "127.0.0.1"
     port_type = (ib_port_type or "").strip().lower() or "tws_paper"
     if port_type not in _VALID_IB_PORT_TYPES:
         port_type = "tws_paper"
+    cid_d = max(1, int(ib_client_id_daemon)) if ib_client_id_daemon is not None else 1
+    cid_l = max(1, int(ib_client_id_listener)) if ib_client_id_listener is not None else 2
+    cid_a = max(1, int(ib_client_id_account)) if ib_client_id_account is not None else 100
+    cid_m = max(1, int(ib_client_id_markets)) if ib_client_id_markets is not None else 101
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
+                # 确保 client_id 列存在
+                for col, default in (
+                    ("ib_client_id_daemon", 1),
+                    ("ib_client_id_listener", 2),
+                    ("ib_client_id_account", 100),
+                    ("ib_client_id_markets", 101),
+                ):
+                    cur.execute(
+                        f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
+                    )
                 cur.execute(
                     """
-                    INSERT INTO settings (id, ib_host, ib_port_type) VALUES (1, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET ib_host = EXCLUDED.ib_host, ib_port_type = EXCLUDED.ib_port_type
+                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets)
+                    VALUES (1, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        ib_host = EXCLUDED.ib_host,
+                        ib_port_type = EXCLUDED.ib_port_type,
+                        ib_client_id_daemon = EXCLUDED.ib_client_id_daemon,
+                        ib_client_id_listener = EXCLUDED.ib_client_id_listener,
+                        ib_client_id_account = EXCLUDED.ib_client_id_account,
+                        ib_client_id_markets = EXCLUDED.ib_client_id_markets
                     """,
-                    (host, port_type),
+                    (host, port_type, cid_d, cid_l, cid_a, cid_m),
                 )
             conn.commit()
+            logger.info(
+                "[R-A3] write_ib_config: wrote settings id=1 host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s",
+                host,
+                port_type,
+                cid_d,
+                cid_l,
+                cid_a,
+                cid_m,
+            )
             return True
         finally:
             conn.close()

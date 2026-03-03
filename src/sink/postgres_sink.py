@@ -410,6 +410,15 @@ def _ensure_tables(conn) -> None:
             ON CONFLICT (id) DO NOTHING
         """
         )
+        for col, default in (
+            ("ib_client_id_daemon", 1),
+            ("ib_client_id_listener", 2),
+            ("ib_client_id_account", 100),
+            ("ib_client_id_markets", 101),
+        ):
+            cur.execute(
+                f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
+            )
         # R-A1 normalized account tables (replacing raw jsonb for future account operations)
         cur.execute(
             """
@@ -1188,21 +1197,32 @@ class PostgreSQLSink(StatusSink):
             return None
 
     def get_ib_connection_config(self) -> Optional[Dict[str, Any]]:
-        """Read settings (id=1): ib_host, ib_port_type. Returns dict with host, port_type, port (resolved).
+        """Read settings (id=1): ib_host, ib_port_type, ib_client_id_daemon. Returns dict with host, port_type, port (resolved), client_id_daemon.
         Used by daemon at startup to connect to IB; if None or table missing, daemon falls back to config file.
         """
         if not self._ensure_conn():
             return None
         try:
             with self._conn.cursor() as cur:
-                cur.execute("SELECT ib_host, ib_port_type FROM settings WHERE id = 1")
+                cur.execute(
+                    "SELECT ib_host, ib_port_type, "
+                    "COALESCE(ib_client_id_daemon, 1), COALESCE(ib_client_id_account, 100), COALESCE(ib_client_id_markets, 101) "
+                    "FROM settings WHERE id = 1"
+                )
                 row = cur.fetchone()
             if row is None or not row[0]:
                 return None
             host = (row[0] or "").strip() or "127.0.0.1"
             port_type = (row[1] or "").strip().lower() or "tws_paper"
             port = IB_PORT_TYPE_TO_PORT.get(port_type, 7497)
-            return {"host": host, "port_type": port_type, "port": port}
+            return {
+                "host": host,
+                "port_type": port_type,
+                "port": port,
+                "client_id_daemon": int(row[2]) if row[2] is not None else 1,
+                "ib_client_id_account": int(row[3]) if row[3] is not None else 4,
+                "ib_client_id_markets": int(row[4]) if row[4] is not None else 10,
+            }
         except Exception as e:
             self._conn.rollback()
             logger.debug("get_ib_connection_config failed: %s", e)

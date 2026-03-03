@@ -38,6 +38,7 @@ class IBConnector:
         self.connect_timeout = connect_timeout
         self.ib = IB()
         self._connected = False
+        self._commission_registered = False
         self._stock_contract: Optional[Stock] = None
         self._commission_report_callback: Optional[
             Callable[[str, Optional[float], Optional[float], Optional[str], Optional[float], Optional[int]], None]
@@ -85,12 +86,13 @@ class IBConnector:
     # Per-attempt timeout when retrying client IDs; avoid waiting full connect_timeout (e.g. 60s) after 326
     _CONNECT_ATTEMPT_TIMEOUT = 15.0
 
-    async def connect(self, max_attempts: Optional[int] = None) -> bool:
+    async def connect(self, max_attempts: Optional[int] = None, bars_only: bool = False) -> bool:
         """Connect to TWS/Gateway.
 
         When max_attempts is 1 (e.g. daemon heartbeat retry): try once with current client_id and return.
         When max_attempts is None or >1: try up to max_attempts (default 10) with client_id, client_id+1, ...
         so that "client_id in use" (326) can be worked around. No delay between attempts when >1.
+        When bars_only is True, do not register commissionReportEvent (used by 拉取K线 to avoid position/exec side effects).
         """
         if self.is_connected:
             return True
@@ -148,7 +150,9 @@ class IBConnector:
                         self.port,
                         self.client_id,
                     )
-                self.ib.commissionReportEvent += self._on_commission_report
+                if not bars_only:
+                    self.ib.commissionReportEvent += self._on_commission_report
+                    self._commission_registered = True
                 return True
             except Exception as e:
                 last_exc = e
@@ -186,10 +190,12 @@ class IBConnector:
         """Disconnect from IB."""
         if not self._connected:
             return
-        try:
-            self.ib.commissionReportEvent -= self._on_commission_report
-        except Exception:
-            pass
+        if self._commission_registered:
+            try:
+                self.ib.commissionReportEvent -= self._on_commission_report
+            except Exception:
+                pass
+            self._commission_registered = False
         try:
             self.ib.disconnect()
         except Exception as e:
@@ -703,20 +709,38 @@ class IBConnector:
             return []
         try:
             stock = self._stock(symbol.strip())
+            await self.ib.qualifyContractsAsync(stock)
             bar_setting = self._BAR_SIZE_MAP.get((period or "1 D").strip().lower(), "1 day")
+            # 日线用 useRTH=False 更易拿到数据；盘内分钟线可用 useRTH=True
+            use_rth = bar_setting != "1 day"
             bars = await self.ib.reqHistoricalDataAsync(
                 stock,
                 endDateTime="",
                 durationStr=duration_str or "30 D",
                 barSizeSetting=bar_setting,
                 whatToShow="TRADES",
-                useRTH=True,
-                formatDate=1,
+                useRTH=use_rth,
+                # formatDate=2 让 bar.date 直接是 datetime，方便转 Unix time
+                formatDate=2,
             )
             out: List[Dict[str, Any]] = []
             for bar in bars or []:
                 t = getattr(bar, "date", None)
-                ts = t.timestamp() if t is not None and hasattr(t, "timestamp") else None
+                ts: Optional[float]
+                if t is None:
+                    ts = None
+                elif hasattr(t, "timestamp"):
+                    # datetime-like
+                    ts = float(t.timestamp())
+                else:
+                    # 兼容字符串等情况（极端情况下 bar.date 仍可能是 str）
+                    try:
+                        from datetime import datetime
+
+                        # IB formatDate=2 一般不会走到这里，但防御性处理
+                        ts = datetime.fromisoformat(str(t)).timestamp()
+                    except Exception:
+                        ts = None
                 if ts is None:
                     continue
                 out.append({

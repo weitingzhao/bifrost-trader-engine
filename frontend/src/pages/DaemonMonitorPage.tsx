@@ -5,9 +5,7 @@ import {
   postResume,
   postFlatten,
   postRetryIb,
-  postSetHeartbeatInterval,
   postStop,
-  postIbConfig,
 } from '../api'
 
 function fmtTs(ts: number | null | undefined): string {
@@ -84,15 +82,14 @@ export interface DaemonMonitorPageProps {
   status: StatusResponse | null
   operations: Operation[]
   loadStatus: () => Promise<StatusResponse | null>
+  /** 切换到「设置」标签页（用于“在设置页修改”入口） */
+  onNavigateToSettings?: () => void
 }
 
-export function DaemonMonitorPage({ status, operations, loadStatus }: DaemonMonitorPageProps) {
+export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateToSettings }: DaemonMonitorPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [tick, setTick] = useState(0)
-  const [heartbeatIntervalInput, setHeartbeatIntervalInput] = useState<string>('10')
-  const [ibHostInput, setIbHostInput] = useState<string>('127.0.0.1')
-  const [ibPortTypeInput, setIbPortTypeInput] = useState<'tws_live' | 'tws_paper' | 'gateway'>('tws_paper')
 
   const j = status
   const hb = j?.daemon_heartbeat
@@ -107,13 +104,6 @@ export function DaemonMonitorPage({ status, operations, loadStatus }: DaemonMoni
   const suspended = j?.trading_suspended === true
   const ibConnected = hb?.ib_connected === true
   const showRetryIb = hb?.daemon_alive === true && !ibConnected
-
-  useEffect(() => {
-    if (j?.daemon_heartbeat?.heartbeat_interval_sec != null)
-      setHeartbeatIntervalInput(String(j.daemon_heartbeat.heartbeat_interval_sec))
-    if (j?.ib_config?.ib_host != null) setIbHostInput(j.ib_config.ib_host)
-    if (j?.ib_config?.ib_port_type != null) setIbPortTypeInput(j.ib_config.ib_port_type)
-  }, [j?.daemon_heartbeat?.heartbeat_interval_sec, j?.ib_config?.ib_host, j?.ib_config?.ib_port_type])
 
   useEffect(() => {
     if (!hbForCountdown?.daemon_alive) return
@@ -239,39 +229,6 @@ export function DaemonMonitorPage({ status, operations, loadStatus }: DaemonMoni
     if (res.ok) loadStatus()
   }
 
-  const onSetHeartbeatInterval = async () => {
-    const sec = parseInt(heartbeatIntervalInput, 10)
-    if (Number.isNaN(sec) || sec < 5 || sec > 120) {
-      setMsg(setCtrlMsg, '请输入 5–120 之间的整数', true)
-      return
-    }
-    setMsg(setCtrlMsg, '设置心跳间隔中…', false)
-    const res = await postSetHeartbeatInterval(sec)
-    setMsg(
-      setCtrlMsg,
-      res.ok
-        ? `心跳间隔已设为 ${res.heartbeat_interval_sec ?? sec} 秒，守护进程下一轮将生效。`
-        : (res.error ?? ''),
-      !res.ok
-    )
-    if (res.ok) {
-      setHeartbeatIntervalInput(String(res.heartbeat_interval_sec ?? sec))
-      loadStatus()
-    }
-  }
-
-  const onSaveIbConfig = async () => {
-    const host = ibHostInput.trim() || '127.0.0.1'
-    setMsg(setCtrlMsg, '保存 IB 连接配置中…', false)
-    const res = await postIbConfig(host, ibPortTypeInput)
-    setMsg(
-      setCtrlMsg,
-      res.ok ? 'IB 连接配置已保存，下次启动守护程序时生效。' : (res.error ?? ''),
-      !res.ok
-    )
-    if (res.ok) loadStatus()
-  }
-
   return (
     <>
       <div className="card process-section">
@@ -309,84 +266,57 @@ export function DaemonMonitorPage({ status, operations, loadStatus }: DaemonMoni
           <div className="daemon-group">
             <div className="daemon-group-header">
               <div className={`lamp lamp-sm ${heartbeatGroupLamp}`} title="心跳状态" />
-              <span className="daemon-group-title">心跳</span>
+              <span className="daemon-group-title">
+                {onNavigateToSettings ? (
+                  <button type="button" className="link-button" onClick={onNavigateToSettings} style={{ fontSize: 'inherit', fontWeight: 'inherit' }}>
+                    心跳
+                  </button>
+                ) : (
+                  '心跳'
+                )}
+              </span>
             </div>
             <div className="daemon-group-body">
-              <p className="section-hint">{daemonHint || '—'}</p>
+              {hb?.daemon_alive && hb.last_ts != null ? (
+                <p className="section-hint">最后心跳: <strong>{fmtTs(hb.last_ts)}</strong></p>
+              ) : hb?.graceful_shutdown_at != null ? (
+                <p className="section-hint">已于 <strong>{fmtTs(hb.graceful_shutdown_at)}</strong> 优雅停止（SIGTERM/Stop）</p>
+              ) : hb?.last_ts != null ? (
+                <p className="section-hint">最后心跳: <strong>{fmtTs(hb.last_ts)}</strong>（已超时，可能被 kill -9 或崩溃）</p>
+              ) : (
+                <p className="section-hint">{daemonHint || '—'}</p>
+              )}
               {hb?.daemon_alive && secondsUntilNextHeartbeat != null && (
                 <p className="section-hint countdown-line">
                   下次心跳: <span className="countdown-num">{secondsUntilNextHeartbeat}</span> 秒
                 </p>
-              )}
-              {hb?.daemon_alive && (
-                <div className="controls">
-                  <span>
-                    心跳间隔(秒):
-                    <input
-                      type="number"
-                      min={5}
-                      max={120}
-                      value={heartbeatIntervalInput}
-                      onChange={(e) => setHeartbeatIntervalInput(e.target.value)}
-                      style={{ width: '3.5rem', marginLeft: '0.25rem' }}
-                    />
-                    <button
-                      type="button"
-                      className="btn-resume"
-                      title="守护进程下一心跳起使用新间隔"
-                      onClick={onSetHeartbeatInterval}
-                    >
-                      设置
-                    </button>
-                  </span>
-                </div>
               )}
             </div>
           </div>
           <div className="daemon-group">
             <div className="daemon-group-header">
               <div className={`lamp lamp-sm ${ibGroupLamp}`} title="IB 连接状态" />
-              <span className="daemon-group-title">IB 连接</span>
+              <span className="daemon-group-title">
+                {onNavigateToSettings ? (
+                  <button type="button" className="link-button" onClick={onNavigateToSettings} style={{ fontSize: 'inherit', fontWeight: 'inherit' }}>
+                    IB 连接
+                  </button>
+                ) : (
+                  'IB 连接'
+                )}
+              </span>
             </div>
             <div className="daemon-group-body">
-              <p className="section-hint">{daemonIbLine || '—'}</p>
+              {ibConnected ? (
+                <p className="section-hint countdown-line">
+                  IB: <span className="countdown-num">已连接</span> (Client ID {hb?.ib_client_id ?? '?'})
+                </p>
+              ) : (
+                <p className="section-hint">{daemonIbLine || '—'}</p>
+              )}
               {hb?.daemon_alive && !ibConnected && (
                 <p className="section-hint">会在下次心跳时，尝试重连。</p>
               )}
-              <p className="section-hint">连接地址（守护程序下次启动时加载）：</p>
-              <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                <label>
-                  IP/主机:
-                  <input
-                    type="text"
-                    value={ibHostInput}
-                    onChange={(e) => setIbHostInput(e.target.value)}
-                    placeholder="127.0.0.1"
-                    style={{ width: '8rem', marginLeft: '0.25rem' }}
-                  />
-                </label>
-                <label>
-                  端口类型:
-                  <select
-                    value={ibPortTypeInput}
-                    onChange={(e) => setIbPortTypeInput(e.target.value as 'tws_live' | 'tws_paper' | 'gateway')}
-                    style={{ marginLeft: '0.25rem' }}
-                  >
-                    <option value="tws_live">TWS Live (7496)</option>
-                    <option value="tws_paper">TWS Paper (7497)</option>
-                    <option value="gateway">Gateway (4002)</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="btn-resume"
-                  title="保存到数据库，下次启动守护程序时生效"
-                  onClick={onSaveIbConfig}
-                >
-                  保存
-                </button>
-              </div>
-              <p className="section-hint" style={{ marginTop: '0.25rem' }}>生效需重启守护程序。</p>
               {showRetryIb && (
                 <div className="controls">
                   <button

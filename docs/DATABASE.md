@@ -284,8 +284,8 @@
 
 ### 2.9 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
 
-- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。当前包含 IB 连接配置（主机与端口类型），供监控页「IB 连接」区编辑；守护进程**每次启动时**从该表读取并连接 IB。后续新增设置时在此表**增加列**即可。
-- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入 `ib_host`、`ib_port_type`；StatusReader 的 `write_ib_config(status_config, ib_host, ib_port_type)` 执行 UPDATE。
+- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。当前包含 IB 连接配置（主机、端口类型）以及**多种用途的 IB Client ID**，供监控页「设置」与「守护程序」区编辑；守护进程**每次启动时**从该表读取并连接 IB；API 拉取账户信息/成交与 K 线时按用途使用对应 client_id。后续新增设置时在此表**增加列**即可。
+- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入 `ib_host`、`ib_port_type` 及可选的 `ib_client_id_daemon`、`ib_client_id_listener`、`ib_client_id_account`、`ib_client_id_markets`；StatusReader 的 `write_ib_config(...)` 执行 UPDATE。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -293,8 +293,12 @@
 | id | integer | 主键，固定为 1（单行表） |
 | ib_host | text NOT NULL | 连接 IB 的主机（IP 或主机名），默认 '127.0.0.1' |
 | ib_port_type | text NOT NULL | 端口类型：`tws_live`（7496）、`tws_paper`（7497）、`gateway`（4002）；默认 `tws_paper` |
+| ib_client_id_daemon | integer | 守护进程（交易进程）连接 IB 使用的 Client ID（默认 1）；TWS 多连接时与手动/其他程序区分 |
+| ib_client_id_listener | integer | 守护侧监听进程使用的 Client ID（预留，默认 2），避免与交易进程及监控端冲突 |
+| ib_client_id_account | integer | 监控端拉取账户信息/执行记录（POST /executions/fetch）使用的 Client ID（默认 100） |
+| ib_client_id_markets | integer | 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 101） |
 
-- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置；否则使用 config 中的 `ib.host` 与 `ib.port`。修改后**需重启守护程序**生效。将来其他设置（如告警阈值、显示偏好等）可在此表新增列并写入，无需再建新表。
+- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`（监听进程如需连接可使用 `ib_client_id_listener`）；否则使用 config 中的 `ib.host`、`ib.port`、`ib.client_id`。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`，避免与守护进程或彼此占用同一 client_id。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 的 client_id 每次请求时从 settings 读取。
 
 ---
 

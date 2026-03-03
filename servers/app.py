@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse, HTMLResponse
+from pydantic import BaseModel
 
 from servers.reader import (
     StatusReader,
@@ -25,6 +26,19 @@ from servers.reader import (
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
+
+
+class IbConfigBody(BaseModel):
+    """POST /config/ib 请求体，保证 client_id 被正确解析并写入 DB。"""
+    ib_host: Optional[str] = None
+    ib_port_type: Optional[str] = None
+    ib_client_id_daemon: Optional[int] = None
+    ib_client_id_listener: Optional[int] = None
+    ib_client_id_account: Optional[int] = None
+    ib_client_id_markets: Optional[int] = None
+
+    class Config:
+        extra = "ignore"  # 忽略多余字段，避免解析错误
 
 
 def create_app(
@@ -93,7 +107,14 @@ def create_app(
                 payload["accounts"] = []
             payload["accounts_fetched_at"] = reader.get_accounts_fetched_at()
             ib_cfg = reader.get_ib_config()
-            payload["ib_config"] = ib_cfg if ib_cfg else {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
+            payload["ib_config"] = ib_cfg if ib_cfg else {
+                "ib_host": "127.0.0.1",
+                "ib_port_type": "tws_paper",
+                "ib_client_id_daemon": 1,
+                "ib_client_id_listener": 2,
+                "ib_client_id_account": 100,
+                "ib_client_id_markets": 101,
+            }
             return payload
         except Exception as e:
             logger.warning("get_status failed: %s", e)
@@ -109,7 +130,14 @@ def create_app(
                 "status": None,
                 "accounts": None,
                 "accounts_fetched_at": None,
-                "ib_config": {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"},
+                "ib_config": {
+                    "ib_host": "127.0.0.1",
+                    "ib_port_type": "tws_paper",
+                    "ib_client_id_daemon": 1,
+                    "ib_client_id_listener": 2,
+                    "ib_client_id_account": 100,
+                    "ib_client_id_markets": 101,
+                },
             }
 
     @app.get("/operations")
@@ -206,11 +234,12 @@ def create_app(
 
         if not control_via_db:
             return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。", "count": 0}
-        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
+        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper", "ib_client_id_account": 100}
         host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
         port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
         port = _IB_PORT_MAP.get(port_type, 7497)
-        connector = IBConnector(host=host, port=port, client_id=4)
+        client_id = int(ib_cfg.get("ib_client_id_account", 100))
+        connector = IBConnector(host=host, port=port, client_id=client_id)
         try:
             if not await connector.connect(max_attempts=3):
                 return {"ok": False, "error": "无法连接 IB，请确认 TWS/Gateway 已运行且端口正确。", "count": 0}
@@ -255,15 +284,16 @@ def create_app(
             return {"ok": False, "error": "请提供 symbol 参数。", "bars": [], "count": 0}
         if not control_via_db:
             return {"ok": False, "error": "需要 status.postgres 配置以写入 ohlc_bars。", "bars": [], "count": 0}
-        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
+        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper", "ib_client_id_markets": 101}
         host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
         port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
         port = _IB_PORT_MAP.get(port_type, 7497)
         per = (period or "1 D").strip()
         dur = (duration or "30 D").strip()
-        connector = IBConnector(host=host, port=port, client_id=3)
+        client_id = int(ib_cfg.get("ib_client_id_markets", 101))
+        connector = IBConnector(host=host, port=port, client_id=client_id)
         try:
-            if not await connector.connect(max_attempts=3):
+            if not await connector.connect(max_attempts=3, bars_only=True):
                 return {"ok": False, "error": "无法连接 IB，请确认 TWS/Gateway 已运行且端口正确。", "bars": [], "count": 0}
             raw = await connector.get_historical_bars_async(sym, period=per, duration_str=dur)
         finally:
@@ -369,20 +399,50 @@ def create_app(
         return JSONResponse(status_code=500, content={"error": "failed to set heartbeat interval"})
 
     @app.post("/config/ib")
-    def post_config_ib(body: Dict[str, Any] = Body(...)) -> JSONResponse:
-        """Update settings: ib_host and ib_port_type (tws_live|tws_paper|gateway). Daemon loads this on next start."""
+    def post_config_ib(body: IbConfigBody = Body(...)) -> JSONResponse:
+        """Update settings: ib_host, ib_port_type, 以及多种 IB client_id（守护进程/监听进程/账户信息/市场数据）。守护进程下次启动时加载。"""
         if not control_via_db:
             return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
-        current = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper"}
-        ib_host = body.get("ib_host")
-        ib_port_type = body.get("ib_port_type")
-        host = (str(ib_host).strip() if ib_host is not None else current.get("ib_host", "127.0.0.1")).strip() or "127.0.0.1"
-        port_type = (str(ib_port_type).strip().lower() if ib_port_type is not None else current.get("ib_port_type", "tws_paper")) or "tws_paper"
+        current = reader.get_ib_config() or {
+            "ib_host": "127.0.0.1",
+            "ib_port_type": "tws_paper",
+            "ib_client_id_daemon": 1,
+            "ib_client_id_listener": 2,
+            "ib_client_id_account": 100,
+            "ib_client_id_markets": 101,
+        }
+        host = (str(body.ib_host or current.get("ib_host", "127.0.0.1"))).strip() or "127.0.0.1"
+        port_type = (str(body.ib_port_type or current.get("ib_port_type", "tws_paper"))).strip().lower() or "tws_paper"
         if port_type not in ("tws_live", "tws_paper", "gateway"):
             port_type = "tws_paper"
-        if write_ib_config(control_via_db, host, port_type):
-            return JSONResponse(status_code=200, content={"ok": True, "ib_host": host, "ib_port_type": port_type})
-        return JSONResponse(status_code=500, content={"error": "failed to write ib config"})
+        cid_d = body.ib_client_id_daemon if body.ib_client_id_daemon is not None else current.get("ib_client_id_daemon", 1)
+        cid_l = body.ib_client_id_listener if body.ib_client_id_listener is not None else current.get("ib_client_id_listener", 2)
+        cid_a = body.ib_client_id_account if body.ib_client_id_account is not None else current.get("ib_client_id_account", 100)
+        cid_m = body.ib_client_id_markets if body.ib_client_id_markets is not None else current.get("ib_client_id_markets", 101)
+        cid_d, cid_l, cid_a, cid_m = int(cid_d), int(cid_l), int(cid_a), int(cid_m)
+        logger.info(
+            "[config/ib] writing settings: host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s",
+            host,
+            port_type,
+            cid_d,
+            cid_l,
+            cid_a,
+            cid_m,
+        )
+        if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m):
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ok": True,
+                    "ib_host": host,
+                    "ib_port_type": port_type,
+                    "ib_client_id_daemon": cid_d,
+                    "ib_client_id_listener": cid_l,
+                    "ib_client_id_account": cid_a,
+                    "ib_client_id_markets": cid_m,
+                },
+            )
+        return JSONResponse(status_code=500, content={"error": "failed to write settings"})
 
     return app
 

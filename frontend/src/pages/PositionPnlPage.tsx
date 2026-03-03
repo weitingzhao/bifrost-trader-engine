@@ -121,6 +121,65 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   })
   const OFF_TRACK_ACCOUNT_ID = 'Off-Track'
 
+  const [filterSymbol, setFilterSymbol] = useState('')
+  const [filterExpiryStart, setFilterExpiryStart] = useState('')
+  const [filterExpiryEnd, setFilterExpiryEnd] = useState('')
+  const [filterExecStart, setFilterExecStart] = useState('')
+  const [filterExecEnd, setFilterExecEnd] = useState('')
+  const [filterPool, setFilterPool] = useState<'ALL' | 'ON' | 'Off'>('ALL')
+
+  const getOptGroupKey = (g: OptExecutionGroup) => `${g.contract_key}-${g.strike}-${g.expiry}`
+  const [expandedDetailKeys, setExpandedDetailKeys] = useState<string[]>([])
+  const toggleDetailExpand = (key: string) => {
+    setExpandedDetailKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }
+
+  const filteredExecutions = useMemo(() => {
+    let list = [...(executions || [])]
+    const sym = filterSymbol.trim().toUpperCase()
+    if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
+    const expStart = filterExpiryStart.trim().replace(/-/g, '')
+    if (expStart) {
+      list = list.filter(e => {
+        const ex = (e.expiry || '').trim().replace(/-/g, '')
+        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex + '01'
+        return cmp >= expStart.slice(0, 8)
+      })
+    }
+    const expEnd = filterExpiryEnd.trim().replace(/-/g, '')
+    if (expEnd) {
+      list = list.filter(e => {
+        const ex = (e.expiry || '').trim().replace(/-/g, '')
+        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex.length === 6 ? ex + '31' : ex
+        return cmp <= expEnd.slice(0, 8)
+      })
+    }
+    if (filterExecStart.trim()) {
+      const t = datetimeLocalToUnix(filterExecStart)
+      if (Number.isFinite(t)) list = list.filter(e => (e.time ?? 0) >= t)
+    }
+    if (filterExecEnd.trim()) {
+      const t = datetimeLocalToUnix(filterExecEnd + 'T23:59:59')
+      if (Number.isFinite(t)) list = list.filter(e => (e.time ?? 0) <= t)
+    }
+    if (filterPool === 'ON') list = list.filter(e => (e.account_id ?? '').trim() !== OFF_TRACK_ACCOUNT_ID)
+    else if (filterPool === 'Off') list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
+    return list
+  }, [executions, filterSymbol, filterExpiryStart, filterExpiryEnd, filterExecStart, filterExecEnd, filterPool])
+
+  const filteredOperations = useMemo(() => {
+    let list = [...(operations || [])]
+    if (filterExecStart.trim()) {
+      const t = datetimeLocalToUnix(filterExecStart)
+      if (Number.isFinite(t)) list = list.filter(op => (op.ts ?? 0) >= t)
+    }
+    if (filterExecEnd.trim()) {
+      const t = datetimeLocalToUnix(filterExecEnd + 'T23:59:59')
+      if (Number.isFinite(t)) list = list.filter(op => (op.ts ?? 0) <= t)
+    }
+    return list
+  }, [operations, filterExecStart, filterExecEnd])
+
   const executionAccountOptions = useMemo(() => {
     const fromStatus = ((status?.accounts as { account_id?: string }[] | undefined) ?? [])
       .map(a => (a.account_id ?? '').trim())
@@ -185,7 +244,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   }, [riskSummary?.symbol, executions, status?.accounts])
 
   const optExecutionGroups = useMemo((): OptExecutionGroup[] => {
-    const opt = executions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
+    const opt = filteredExecutions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
     const key = (e: Execution) => `${e.contract_key ?? ''}|${e.strike ?? 0}`
     const groups = new Map<string, Execution[]>()
     for (const e of opt) {
@@ -246,7 +305,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
     }
     result.sort((a, b) => (b.trades[0]?.time ?? 0) - (a.trades[0]?.time ?? 0))
     return result
-  }, [executions])
+  }, [filteredExecutions])
 
   const optGroupsPnlSum = useMemo(() => {
     return optExecutionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0)
@@ -364,6 +423,80 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
 
       <section className="replay-section" aria-labelledby="trade-records-head">
         <h3 id="trade-records-head">交易记录</h3>
+        <div className="replay-filters">
+          <label className="replay-filter-wrap-symbol">
+            <input
+              type="text"
+              placeholder="Symbol"
+              value={filterSymbol}
+              onChange={e => setFilterSymbol(e.target.value)}
+              className="replay-filter-input"
+            />
+          </label>
+          <label>
+            <span className="replay-filter-label">Expiry</span>
+            <input
+              type="date"
+              value={filterExpiryStart}
+              onChange={e => setFilterExpiryStart(e.target.value)}
+              className="replay-filter-input replay-filter-date"
+              title="Start"
+            />
+            <span className="replay-filter-sep">～</span>
+            <input
+              type="date"
+              value={filterExpiryEnd}
+              onChange={e => setFilterExpiryEnd(e.target.value)}
+              className="replay-filter-input replay-filter-date"
+              title="End"
+            />
+          </label>
+          <label>
+            <span className="replay-filter-label">Submit</span>
+            <input
+              type="date"
+              value={filterExecStart}
+              onChange={e => setFilterExecStart(e.target.value)}
+              className="replay-filter-input replay-filter-date"
+              title="Start"
+            />
+            <span className="replay-filter-sep">～</span>
+            <input
+              type="date"
+              value={filterExecEnd}
+              onChange={e => setFilterExecEnd(e.target.value)}
+              className="replay-filter-input replay-filter-date"
+              title="End"
+            />
+          </label>
+          <label>
+            <span className="replay-filter-label">POOL</span>
+            <select
+              value={filterPool}
+              onChange={e => setFilterPool(e.target.value as 'ALL' | 'ON' | 'Off')}
+              className="replay-filter-input replay-filter-select"
+              aria-label="Pool 筛选"
+            >
+              <option value="ALL">ALL</option>
+              <option value="ON">ON</option>
+              <option value="Off">Off</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn btn-small replay-filter-clear"
+            onClick={() => {
+              setFilterSymbol('')
+              setFilterExpiryStart('')
+              setFilterExpiryEnd('')
+              setFilterExecStart('')
+              setFilterExecEnd('')
+              setFilterPool('ALL')
+            }}
+          >
+            清除筛选
+          </button>
+        </div>
         <h4 className="replay-sub">自动交易策略操作（对冲相关）</h4>
         <p className="section-hint">来自 GET /operations；账户级执行记录（R-A2）在下方「组合」中展示。</p>
         <table className="table-operations">
@@ -378,10 +511,10 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
             </tr>
           </thead>
           <tbody>
-            {operations.length === 0 ? (
+            {filteredOperations.length === 0 ? (
               <tr><td colSpan={6}>无</td></tr>
             ) : (
-              operations.slice(0, 50).map((op, i) => (
+              filteredOperations.slice(0, 50).map((op, i) => (
                 <tr key={`${op.ts}-${i}`}>
                   <td>{fmtTs(op.ts)}</td>
                   <td>{op.type ?? ''}</td>
@@ -395,8 +528,8 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
           </tbody>
         </table>
         <h4 className="replay-sub">组合</h4>
-        {executions.length === 0 ? (
-          <p className="section-hint">暂无数据；点击「刷新复盘数据」从 IB 拉取并写入数据库，或点击「添加历史记录」手动补录。</p>
+        {filteredExecutions.length === 0 ? (
+          <p className="section-hint">暂无数据；点击「刷新复盘数据」从 IB 拉取并写入数据库，或点击「添加历史记录」手动补录。{([filterSymbol, filterExpiryStart, filterExpiryEnd, filterExecStart, filterExecEnd].some(Boolean) || filterPool !== 'ALL') ? ' 当前已应用筛选，可清除筛选查看全部。' : ''}</p>
         ) : (
           <>
             {optExecutionGroups.length > 0 && (
@@ -407,6 +540,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                 <table className="table-operations replay-opt-groups">
                   <thead>
                     <tr>
+                      <th rowSpan={2} className="replay-opt-expand-col"></th>
                       <th rowSpan={2}>合约</th>
                       <th rowSpan={2}>到期日</th>
                       <th rowSpan={2}>STRIKE</th>
@@ -427,11 +561,25 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {optExecutionGroups.map((g, idx) => {
+                    {optExecutionGroups.map((g) => {
                       const stateLabel = g.net_qty === 0 ? '已兑现' : g.net_qty > 0 ? 'Holding' : 'Selling'
                       const poolLabel = g.trades.some(t => (t.account_id ?? '').trim() === 'Off-Track') ? 'Off' : 'On'
+                      const groupKey = getOptGroupKey(g)
+                      const isExpanded = expandedDetailKeys.includes(groupKey)
                       return (
-                        <tr key={`${g.contract_key}-${g.strike}-${idx}`}>
+                        <tr
+                          key={groupKey}
+                          className="replay-opt-group-row"
+                          onClick={() => toggleDetailExpand(groupKey)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDetailExpand(groupKey); } }}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? '收起该组合的逐笔明细' : '展开该组合的逐笔明细'}
+                        >
+                          <td className="replay-opt-expand-col">
+                            <span className="replay-opt-expand-icon" aria-hidden>{isExpanded ? '▼' : '▶'}</span>
+                          </td>
                           <td className="replay-opt-contract">
                             {(() => {
                               const p = getContractLabelParts(g.contract_key)
@@ -470,7 +618,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                   </tbody>
                   <tfoot>
                     <tr className="replay-opt-summary-row">
-                      <td colSpan={11}>合计</td>
+                      <td colSpan={12}>合计</td>
                       <td>
                         <strong className={optGroupsPnlSum >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
                           {fmtUsd0(optGroupsPnlSum)}
@@ -482,6 +630,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                 </table>
 
                 <h5 className="replay-sub replay-opt-detail-title">明细（逐笔）</h5>
+                <p className="section-hint">点击上方组合行加载该合约的逐笔明细。</p>
                 <table className="table-operations">
                   <thead>
                     <tr>
@@ -499,8 +648,15 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {optExecutionGroups.flatMap((g, gi) =>
-                      g.trades.map((ex, ti) => {
+                    {expandedDetailKeys.length === 0 ? (
+                      <tr>
+                        <td colSpan={11} className="replay-detail-placeholder">点击上方组合行以加载逐笔明细</td>
+                      </tr>
+                    ) : (
+                      optExecutionGroups
+                        .filter(g => expandedDetailKeys.includes(getOptGroupKey(g)))
+                        .flatMap((g) =>
+                          g.trades.map((ex, ti) => {
                         const s = (ex.side ?? '').toUpperCase()
                         const sideLabel =
                           s === 'BUY' || s === 'BOT' || s === 'B'
@@ -517,7 +673,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                         const pnlClass =
                           pnl < 0 ? 'replay-pnl-detail-negative' : pnl > 0 ? 'replay-pnl-detail-positive' : ''
                         return (
-                          <tr key={`${gi}-${ti}-${ex.time ?? ti}`}>
+                          <tr key={`${getOptGroupKey(g)}-${ti}-${ex.time ?? ti}`}>
                             <td>
                               {(() => {
                                 const p_ = getContractLabelParts(g.contract_key)
@@ -567,14 +723,15 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                             </td>
                           </tr>
                         )
-                      }),
+                          })
+                        )
                     )}
                   </tbody>
                 </table>
               </>
             )}
 
-            {executions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT') && (
+            {filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT') && (
               <>
                 <h5 className="replay-sub">非期权（股票等）明细</h5>
                 <table className="table-operations">
@@ -591,7 +748,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {executions
+                    {filteredExecutions
                       .filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
                       .map((ex, i) => {
                         const s = (ex.side ?? '').toUpperCase()

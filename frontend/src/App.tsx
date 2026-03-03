@@ -8,6 +8,7 @@ import {
 import { DaemonMonitorPage } from './pages/DaemonMonitorPage'
 import { IbAccountsPage } from './pages/IbAccountsPage'
 import { PositionPnlPage } from './pages/PositionPnlPage'
+import { SettingsPage } from './pages/SettingsPage'
 import './App.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
@@ -25,7 +26,7 @@ function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
 }
 
-type TabId = 'monitor' | 'ib' | 'replay'
+type TabId = 'monitor' | 'ib' | 'replay' | 'settings'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('monitor')
@@ -115,6 +116,7 @@ export default function App() {
     { id: 'monitor', label: '守护程序', lamp: daemonLamp },
     { id: 'ib', label: 'IB 账户' },
     { id: 'replay', label: '头寸盈亏', lamp: hedgeLamp },
+    { id: 'settings', label: '设置' },
   ]
 
   return (
@@ -122,7 +124,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="守护程序、IB 账户、头寸盈亏">
+          <nav className="app-tabs" aria-label="守护程序、IB 账户、头寸盈亏、设置">
             {tabList.map(({ id, label, lamp }) => (
               <button
                 key={id}
@@ -157,7 +159,12 @@ export default function App() {
       </header>
 
       {activeTab === 'monitor' && (
-        <DaemonMonitorPage status={status} operations={operations} loadStatus={loadStatus} />
+        <DaemonMonitorPage
+          status={status}
+          operations={operations}
+          loadStatus={loadStatus}
+          onNavigateToSettings={() => setActiveTab('settings')}
+        />
       )}
 
       {activeTab === 'ib' && (
@@ -173,6 +180,10 @@ export default function App() {
 
       {activeTab === 'replay' && (
         <PositionPnlPage status={status} operations={operations} />
+      )}
+
+      {activeTab === 'settings' && (
+        <SettingsPage status={status} loadStatus={loadStatus} />
       )}
     </div>
   )

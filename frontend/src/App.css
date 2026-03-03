@@ -571,6 +571,21 @@ button:disabled {
   background: #dc2626;
 }
 
+/* 文字链接式按钮（如「在设置页修改」） */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-link);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: var(--color-link-hover);
+}
+
 /* ---------- 表单控件 ---------- */
 input[type="text"],
 input[type="number"],
@@ -608,6 +623,9 @@ select:focus {
   color: var(--color-lamp-green);
   background: var(--color-success-soft);
 }
+
+.msg-ok { color: var(--color-lamp-green); }
+.msg-error { color: var(--color-danger); }
 
 /* ---------- 状态摘要网格 ---------- */
 .statusSummary {
@@ -891,8 +909,90 @@ th {
   margin: var(--space-4) 0 var(--space-2) 0;
 }
 
+.replay-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-4) 0;
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--color-border);
+}
+
+.replay-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.replay-filter-label {
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+  min-width: 4rem;
+}
+
+.replay-filter-input {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-body);
+  background: var(--color-bg);
+  color: var(--color-text-main);
+}
+
+.replay-filter-input::placeholder {
+  color: var(--color-text-dim);
+}
+
+.replay-filter-input.replay-filter-date,
+.replay-filters input[type="date"] {
+  background: var(--color-bg);
+  color: var(--color-text-main);
+}
+
+.replay-filter-input.replay-filter-select,
+.replay-filters select.replay-filter-input {
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  cursor: pointer;
+}
+
+.replay-filter-wrap-symbol {
+  min-width: 0;
+}
+
+.replay-filter-sep {
+  margin: 0 var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.replay-filter-clear {
+  margin-left: auto;
+}
+
 .replay-opt-groups {
   margin-bottom: var(--space-4);
+}
+
+.replay-opt-group-row {
+  cursor: pointer;
+}
+
+.replay-opt-group-row:hover {
+  background: var(--color-surface-elevated);
+}
+
+.replay-opt-expand-col {
+  width: 2rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.replay-opt-expand-icon {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
 }
 
 .replay-opt-summary-row td {
@@ -951,6 +1051,13 @@ th {
 .replay-opt-detail-title {
   margin-top: var(--space-4);
   margin-bottom: var(--space-2);
+}
+
+.replay-detail-placeholder {
+  color: var(--color-text-muted);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-4);
 }
 
 .risk-summary-cards {
