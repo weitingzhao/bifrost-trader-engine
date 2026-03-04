@@ -137,6 +137,55 @@ class AccountIbClient(BaseMonitorIbClient):
             )
             return []
 
+    async def fetch_accounts_snapshot(self) -> List[Dict[str, Any]]:
+        """R-A1: 从 IB 拉取多账户摘要与持仓，返回与 postgres_sink 一致的 accounts_snapshot 列表形状。
+        供监控端「刷新」按钮通过长连接 Account Client 立即拉取并写库。
+        """
+        await self.ensure_connected()
+        assert self.connector is not None
+        try:
+            account_ids = self.connector.get_managed_accounts()
+            if not account_ids:
+                logger.warning(
+                    "[monitor_ib] AccountIbClient.fetch_accounts_snapshot: get_managed_accounts returned 0"
+                )
+                return []
+            all_positions = await self.connector.get_positions(account=None)
+            accounts_list: List[Dict[str, Any]] = []
+            for account_id in account_ids:
+                values = await self.connector.get_account_summary(account=account_id)
+                summary: Dict[str, Any] = {}
+                for v in values:
+                    if getattr(v, "tag", None) and getattr(v, "value", None) is not None:
+                        summary[v.tag] = v.value
+                if account_id:
+                    summary["account"] = account_id
+                acct_positions = [
+                    p for p in all_positions if getattr(p, "account", None) == account_id
+                ]
+                pos_dicts = [
+                    self.connector.position_to_dict(p) for p in acct_positions
+                ]
+                accounts_list.append({
+                    "account_id": account_id,
+                    "summary": summary,
+                    "positions": pos_dicts,
+                })
+            self.last_error = None
+            logger.info(
+                "[monitor_ib] AccountIbClient.fetch_accounts_snapshot: %s accounts",
+                len(accounts_list),
+            )
+            return accounts_list
+        except Exception as e:
+            self.last_error = str(e)
+            logger.warning(
+                "[monitor_ib] AccountIbClient.fetch_accounts_snapshot failed: %s",
+                e,
+                exc_info=True,
+            )
+            return []
+
 
 class MarketIbClient(BaseMonitorIbClient):
     """Monitor-side market client: historical bars and other market data."""

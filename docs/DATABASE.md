@@ -81,14 +81,14 @@
 
 ### 2.4 表 `daemon_control`（阶段 2：控制通道，替代本地文件）
 
-- **用途**：供监控服务（可运行在另一台主机，RE-5）向守护进程发送控制指令（stop/flatten/refresh_accounts/refresh_replay），替代本地控制文件，无需共享文件系统（如 NFS）。
-- **写入**：监控应用（如 status server）在 POST /control/stop、POST /control/flatten、POST /control/retry_ib（RE-7）、**POST /control/refresh_accounts** 或 **POST /control/refresh_replay** 时 **INSERT** 一行；守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
+- **用途**：供监控服务（可运行在另一台主机，RE-5）向守护进程发送控制指令（stop/flatten/refresh_replay 等），替代本地控制文件，无需共享文件系统（如 NFS）。
+- **写入**：监控应用在 POST /control/stop、POST /control/flatten、POST /control/retry_ib（RE-7）、**POST /control/refresh_replay** 时 **INSERT** 一行；**POST /control/refresh_accounts 不写本表**，由监控端用其维护的 AccountIbClient 直接向 IB 拉取并写 accounts/account_positions。守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | bigserial | 自增主键 |
-| command | text NOT NULL | 指令：`stop`、`flatten`、`retry_ib`（RE-7）、`refresh_accounts`（从 IB 拉取账户/持仓并写 DB）、`refresh_replay`（R-A2：仅从 IB 拉取执行记录写 account_executions，供复盘与风控 Tab 刷新） |
+| command | text NOT NULL | 指令：`stop`、`flatten`、`retry_ib`（RE-7）、`refresh_accounts`（守护进程消费后从 IB 拉取账户/持仓并写 DB，**监控页刷新不写此指令**）、`refresh_replay`（R-A2：仅从 IB 拉取执行记录写 account_executions，供复盘与风控 Tab 刷新） |
 | created_at | timestamptz | 创建时间（默认 now()） |
 | consumed_at | timestamptz | 守护进程消费时间；NULL 表示待处理 |
 
@@ -133,7 +133,7 @@
 | option_right | text | 期权权利（C/P 或 CALL/PUT）；列名不用 right 因系 PostgreSQL 保留字 |
 | updated_at | timestamptz | 最后更新时间 |
 
-- **语义**：GET /status 的 `accounts` 从 **accounts** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 accounts 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**按钮写入 `daemon_control` 的 **refresh_accounts**，守护进程消费后从 IB 拉取账户/持仓并写 DB，再轮询 GET /status 直至 accounts_fetched_at 更新；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
+- **语义**：GET /status 的 `accounts` 从 **accounts** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 accounts 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**由监控端维护的 **AccountIbClient** 直接向 IB 拉取账户/持仓并写入 accounts/account_positions，不写 daemon_control；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
 
 ### 2.10 表 `instrument_prices`（阶段 3 R-M6：持仓标的当前价）
 

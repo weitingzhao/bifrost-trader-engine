@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
-  Bar,
   Execution,
   IbAccountSnapshot,
   Operation,
@@ -11,10 +10,8 @@ import type {
 import {
   createExecution,
   deleteExecution,
-  fetchBars,
   fetchExecutions,
   fetchRiskSummary,
-  postBarsFetch,
   postExecutionsFetch,
   updateExecution,
 } from '../api'
@@ -95,12 +92,9 @@ interface PositionPnlPageProps {
 export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   const [riskSummary, setRiskSummary] = useState<RiskSummaryResponse | null>(null)
   const [executions, setExecutions] = useState<Execution[]>([])
-  const [bars, setBars] = useState<Bar[]>([])
   const [replayLoading, setReplayLoading] = useState(false)
   const [replaySyncing, setReplaySyncing] = useState(false)
-  const [barsSyncing, setBarsSyncing] = useState(false)
   const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
-  const [replayBarSymbol, setReplayBarSymbol] = useState('')
   const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
   const [execFormError, setExecFormError] = useState<string | null>(null)
@@ -234,15 +228,6 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
     }
   }, [editExec])
 
-  const replayBarCandidateSymbols = useMemo(() => {
-    const fromStatus = riskSummary?.symbol ? [riskSummary.symbol] : []
-    const fromExec = (executions || []).map(e => e.symbol).filter((s): s is string => Boolean(s?.trim()))
-    const fromAccounts = (status?.accounts || []).flatMap((acc: IbAccountSnapshot) =>
-      (acc.positions || []).map(p => p.symbol).filter((s): s is string => Boolean(s?.trim())),
-    )
-    return [...new Set([...fromStatus, ...fromExec, ...fromAccounts])]
-  }, [riskSummary?.symbol, executions, status?.accounts])
-
   const optExecutionGroups = useMemo((): OptExecutionGroup[] => {
     const opt = filteredExecutions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
     const key = (e: Execution) => `${e.contract_key ?? ''}|${e.strike ?? 0}`
@@ -316,16 +301,11 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
     try {
       const summary = await fetchRiskSummary()
       setRiskSummary(summary)
-      const [execRes, barsRes] = await Promise.all([
-        fetchExecutions(undefined, undefined, 100),
-        fetchBars(summary?.symbol ?? undefined, '1 D', 100),
-      ])
+      const execRes = await fetchExecutions(undefined, undefined, 100)
       setExecutions(execRes.executions || [])
-      setBars(barsRes.bars || [])
     } catch {
       setRiskSummary(null)
       setExecutions([])
-      setBars([])
     } finally {
       setReplayLoading(false)
     }
@@ -334,11 +314,6 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   useEffect(() => {
     loadReplayData()
   }, [loadReplayData])
-
-  useEffect(() => {
-    if (replayBarCandidateSymbols.length > 0 && !replayBarSymbol.trim())
-      setReplayBarSymbol(replayBarCandidateSymbols[0])
-  }, [replayBarCandidateSymbols.join(','), replayBarSymbol])
 
   return (
     <div className="card process-section replay-page">
@@ -799,77 +774,6 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
               </>
             )}
           </>
-        )}
-      </section>
-
-      <section className="replay-section" aria-labelledby="bars-head">
-        <h3 id="bars-head">辅助行情（K 线）</h3>
-        <p className="section-hint">
-          按标的拉取日线，供复盘时结合成交时间查看当时行情。下方可输入标的代码，或从「当前持仓 + 交易记录」汇总的候选中选择。
-        </p>
-        <div className="replay-bar-symbol-row">
-          <label htmlFor="replay-bar-symbol" className="replay-bar-symbol-label">标的</label>
-          <input
-            id="replay-bar-symbol"
-            type="text"
-            className="replay-bar-symbol-input"
-            placeholder="输入标的代码，如 NVDA"
-            value={replayBarSymbol}
-            onChange={e => setReplayBarSymbol((e.target.value || '').trim().toUpperCase())}
-            aria-label="拉取 K 线的标的代码"
-          />
-          {replayBarCandidateSymbols.length > 0 && (
-            <span className="replay-sync-hint">可拉取：{replayBarCandidateSymbols.join(', ')}</span>
-          )}
-        </div>
-        <div className="replay-toolbar">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={barsSyncing || replayLoading || !(replayBarSymbol.trim() || replayBarCandidateSymbols[0])}
-            onClick={async () => {
-              const symbol = replayBarSymbol.trim() || replayBarCandidateSymbols[0] || ''
-              if (!symbol) return
-              setBarsSyncing(true)
-              const res = await postBarsFetch(symbol, '1 D', '30 D')
-              setBarsSyncing(false)
-              if (res.ok) setBars(res.bars ?? [])
-            }}
-            aria-label="从 IB 拉取 K 线并刷新列表"
-          >
-            {barsSyncing ? '拉取中…' : '拉取 K 线'}
-          </button>
-          {barsSyncing && (
-            <span className="replay-sync-hint">正在由 API 直接连接 IB 拉取 K 线…</span>
-          )}
-        </div>
-        {bars.length === 0 ? (
-          <div className="replay-placeholder">暂无 K 线数据</div>
-        ) : (
-          <table className="table-operations">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>开</th>
-                <th>高</th>
-                <th>低</th>
-                <th>收</th>
-                <th>量</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bars.slice(0, 50).map((b, i) => (
-                <tr key={i}>
-                  <td>{b.time != null ? fmtTs(b.time) : '—'}</td>
-                  <td>{fmtUsd(b.open)}</td>
-                  <td>{fmtUsd(b.high)}</td>
-                  <td>{fmtUsd(b.low)}</td>
-                  <td>{fmtUsd(b.close)}</td>
-                  <td>{b.volume != null ? Number(b.volume).toLocaleString() : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         )}
       </section>
 

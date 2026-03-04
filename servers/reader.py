@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from src.sink.postgres_sink import _get_conn_params
+from src.sink.postgres_sink import _get_conn_params, _sync_accounts_snapshot_to_tables
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +504,30 @@ def write_control_command(status_config: dict, command: str) -> bool:
             conn.close()
     except Exception as e:
         logger.warning("write_control_command failed: %s", e)
+        return False
+
+
+def sync_accounts_snapshot_to_db(
+    status_config: dict, accounts_list: Optional[List[Dict[str, Any]]]
+) -> bool:
+    """将监控端拉取的 accounts_snapshot 写入 accounts + account_positions 表。返回 True 表示成功。"""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    if not accounts_list:
+        return True
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET lock_timeout = '5s'")
+            _sync_accounts_snapshot_to_tables(conn, accounts_list)
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("sync_accounts_snapshot_to_db failed: %s", e)
         return False
 
 

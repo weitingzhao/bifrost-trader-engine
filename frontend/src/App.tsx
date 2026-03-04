@@ -7,6 +7,7 @@ import {
 } from './api'
 import { DaemonMonitorPage } from './pages/DaemonMonitorPage'
 import { IbAccountsPage } from './pages/IbAccountsPage'
+import { MarketDataPage } from './pages/MarketDataPage'
 import { PositionPnlPage } from './pages/PositionPnlPage'
 import { SettingsPage } from './pages/SettingsPage'
 import './App.css'
@@ -26,7 +27,7 @@ function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
 }
 
-type TabId = 'monitor' | 'ib' | 'replay' | 'settings'
+type TabId = 'monitor' | 'ib' | 'replay' | 'market' | 'settings'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('monitor')
@@ -108,14 +109,25 @@ export default function App() {
   }, [loadStatus])
 
   const j = status
-  const daemonLamp = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'none'
-  const hedgeLamp = (j?.status_lamp as 'green' | 'yellow' | 'red') || 'none'
+  // 系统状态灯：三者都绿才绿，有一个非绿则取最差（前端合并，确保挂起等 status_lamp 黄时 Tab 也显示黄）
+  const dl = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'red'
+  const ml = (j?.monitor_lamp as 'green' | 'yellow' | 'red') || 'red'
+  const sl = (j?.status_lamp as 'green' | 'yellow' | 'red') || 'red'
+  const systemLamp: 'green' | 'yellow' | 'red' | 'none' =
+    dl === 'red' || ml === 'red' || sl === 'red'
+      ? 'red'
+      : dl === 'yellow' || ml === 'yellow' || sl === 'yellow'
+        ? 'yellow'
+        : dl === 'green' && ml === 'green' && sl === 'green'
+          ? 'green'
+          : 'none'
   const apiLamp = apiReachable ? 'green' : 'red'
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'monitor', label: '系统状态', lamp: daemonLamp },
+    { id: 'monitor', label: '系统状态', lamp: systemLamp },
     { id: 'ib', label: 'IB 账户' },
-    { id: 'replay', label: '头寸盈亏', lamp: hedgeLamp },
+    { id: 'replay', label: '头寸盈亏' },
+    { id: 'market', label: '市场数据' },
     { id: 'settings', label: '设置' },
   ]
 
@@ -124,7 +136,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="守护程序、IB 账户、头寸盈亏、设置">
+          <nav className="app-tabs" aria-label="守护程序、IB 账户、头寸盈亏、市场数据、设置">
             {tabList.map(({ id, label, lamp }) => (
               <button
                 key={id}
@@ -180,6 +192,10 @@ export default function App() {
 
       {activeTab === 'replay' && (
         <PositionPnlPage status={status} operations={operations} />
+      )}
+
+      {activeTab === 'market' && (
+        <MarketDataPage status={status} />
       )}
 
       {activeTab === 'settings' && (

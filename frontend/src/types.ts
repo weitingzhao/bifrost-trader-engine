@@ -46,6 +46,8 @@ export interface StatusResponse {
   daemon_heartbeat?: DaemonHeartbeat | null
   daemon_self_check?: string
   daemon_lamp?: 'green' | 'yellow' | 'red'
+  /** 系统状态 Tab 用：daemon / monitor / status 三者都绿才绿，否则取最差 */
+  system_lamp?: 'green' | 'yellow' | 'red'
   daemon_block_reasons?: string[]
   status?: StatusRow | null
   /** R-A1 multi-account: 与守护/对冲同级，交易账户与持仓基础数据 */

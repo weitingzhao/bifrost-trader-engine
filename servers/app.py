@@ -26,6 +26,7 @@ from servers.reader import (
     insert_one_execution,
     update_one_execution,
     delete_one_execution,
+    sync_accounts_snapshot_to_db,
 )
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
@@ -238,6 +239,16 @@ def create_app(
             payload["monitor_self_check"] = monitor_self_check
             payload["monitor_lamp"] = monitor_lamp
             payload["monitor_block_reasons"] = monitor_block_reasons
+            # 系统状态灯：三者都绿才绿，有一个非绿则取最差（红 > 黄 > 绿）
+            dl = (payload.get("daemon_lamp") or "red").strip().lower()
+            ml = (payload.get("monitor_lamp") or "red").strip().lower()
+            sl = (payload.get("status_lamp") or "red").strip().lower()
+            if dl == "red" or ml == "red" or sl == "red":
+                payload["system_lamp"] = "red"
+            elif dl == "yellow" or ml == "yellow" or sl == "yellow":
+                payload["system_lamp"] = "yellow"
+            else:
+                payload["system_lamp"] = "green"
             return payload
         except Exception as e:
             logger.warning("get_status failed: %s", e)
@@ -267,6 +278,7 @@ def create_app(
                 "monitor_self_check": "blocked",
                 "monitor_lamp": "red",
                 "monitor_block_reasons": ["status_read_error"],
+                "system_lamp": "red",
             }
 
     @app.get("/operations")
@@ -573,13 +585,41 @@ def create_app(
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
     @app.post("/control/refresh_accounts")
-    def post_control_refresh_accounts() -> JSONResponse:
-        """Insert 'refresh_accounts' into daemon_control; daemon will fetch accounts/positions from IB and sync to DB on next poll."""
+    async def post_control_refresh_accounts() -> JSONResponse:
+        """仅通过监控端维护的 AccountIbClient 长连接从 IB 拉取账户/持仓并写库，不写 daemon_control。"""
         if not control_via_db:
             return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
-        if write_control_command(control_via_db, "refresh_accounts"):
-            return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_accounts written to daemon_control"})
-        return JSONResponse(status_code=500, content={"error": "failed to write control command"})
+        acc_client = getattr(app.state, "account_ib_client", None)
+        if acc_client is None:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "监控端 Account Client 未初始化，请检查服务启动与 IB 配置（设置页）。"},
+            )
+        try:
+            accounts_list = await acc_client.fetch_accounts_snapshot()
+            if not accounts_list:
+                return JSONResponse(
+                    status_code=200,
+                    content={"ok": True, "message": "未获取到账户数据（IB 可能未返回 managed accounts）"},
+                )
+            if not sync_accounts_snapshot_to_db(control_via_db, accounts_list):
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "账户数据写库失败，请稍后重试"},
+                )
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ok": True,
+                    "message": "账户/持仓已通过监控端 Account Client 从 IB 拉取并写入数据库",
+                },
+            )
+        except Exception as e:
+            logger.warning("refresh_accounts via AccountIbClient failed: %s", e, exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": f"监控端拉取失败: {e}"},
+            )
 
     @app.post("/control/refresh_replay")
     def post_control_refresh_replay() -> JSONResponse:
