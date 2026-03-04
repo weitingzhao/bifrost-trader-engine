@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { IbAccountSnapshot, IbPositionRow, RealtimeQuote, StatusResponse, WishlistItem } from '../types'
 import type { BarStatsResponse } from '../types'
 import { fetchWishlist, fetchBarStats, fetchQuotes, postBarsFetch, postWishlist, deleteWishlist } from '../api'
+import { InfoTooltip } from '../components/InfoTooltip'
 
 interface WishlistPageProps {
   status: StatusResponse | null
@@ -99,7 +100,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
       const res = await fetchWishlist()
       setWishlistItems(res.items || [])
     } catch (e) {
-      setWishlistError(e instanceof Error ? e.message : '加载失败')
+      setWishlistError(e instanceof Error ? e.message : 'Load failed')
       setWishlistItems([])
     } finally {
       setWishlistLoading(false)
@@ -156,9 +157,9 @@ export function WishlistPage({ status }: WishlistPageProps) {
           source,
         })
         if (res.ok) await loadWishlist()
-        else setWishlistError(res.error || '添加失败')
+        else setWishlistError(res.error || 'Add failed')
       } catch (e) {
-        setWishlistError(e instanceof Error ? e.message : '添加请求失败，请检查网络或 API')
+        setWishlistError(e instanceof Error ? e.message : 'Add request failed; check network or API')
       } finally {
         setAddPending(false)
       }
@@ -173,7 +174,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
         ? await deleteWishlist({ id: item.id })
         : await deleteWishlist({ contract_key: item.contract_key })
       if (res.ok) await loadWishlist()
-      else setWishlistError(res.error || '删除失败')
+      else setWishlistError(res.error || 'Remove failed')
     },
     [loadWishlist],
   )
@@ -246,32 +247,32 @@ export function WishlistPage({ status }: WishlistPageProps) {
     const steps: { period: string; label: string; duration: string; smart: boolean }[] = [
       {
         period: '1 D',
-        label: '日线',
+        label: 'Daily',
         duration: dayCount === 0 ? '1 Y' : '30 D',
         smart: dayCount > 0,
       },
       {
         period: '1 min',
-        label: '1 分钟',
+        label: '1 min',
         duration: (minCounts['1 min'] ?? 0) === 0 ? '1 D' : '5 D',
         smart: (minCounts['1 min'] ?? 0) > 0,
       },
       {
         period: '5 mins',
-        label: '5 分钟',
+        label: '5 min',
         duration: (minCounts['5 mins'] ?? 0) === 0 ? '1 D' : '5 D',
         smart: (minCounts['5 mins'] ?? 0) > 0,
       },
       {
         period: '1 hour',
-        label: '1 小时',
+        label: '1 hour',
         duration: (minCounts['1 hour'] ?? 0) === 0 ? '1 D' : '5 D',
         smart: (minCounts['1 hour'] ?? 0) > 0,
       },
     ]
     let lastError: string | null = null
     for (const { period, label, duration, smart } of steps) {
-      setFetchMarketDataStep(`正在拉取 ${label}${duration === '1 Y' ? '（约 1 年）' : ''}…`)
+      setFetchMarketDataStep(`Fetching ${label}${duration === '1 Y' ? ' (~1 year)' : ''}…`)
       try {
         const res = await postBarsFetch(sym, period, duration, smart)
         if (res.error) {
@@ -280,7 +281,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
           break
         }
       } catch (e) {
-        lastError = e instanceof Error ? e.message : '拉取失败'
+        lastError = e instanceof Error ? e.message : 'Fetch failed'
         setFetchMarketDataError(lastError)
         break
       }
@@ -303,8 +304,8 @@ export function WishlistPage({ status }: WishlistPageProps) {
         <thead>
           <tr>
             <th>Symbol</th>
-            <th>当前价</th>
-            <th>操作</th>
+            <th>Price</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -322,23 +323,23 @@ export function WishlistPage({ status }: WishlistPageProps) {
                     className="btn btn-secondary"
                     onClick={() => handleAnalyze(item)}
                     disabled={analysisLoadingSymbol !== null}
-                    aria-label={`分析 ${symbolFromItem(item) || wishlistItemLabel(item)} 在 Stock_xx 中的数据`}
+                    aria-label={`Analyze ${symbolFromItem(item) || wishlistItemLabel(item)} in Stock_xx`}
                   >
-                    {analysisLoadingSymbol === symbolFromItem(item) ? '分析中…' : '分析'}
+                    {analysisLoadingSymbol === symbolFromItem(item) ? 'Analyzing…' : 'Analyze'}
                   </button>
                   <button
                     type="button"
                     className="btn btn-secondary"
                     onClick={() => openAddOptionModal(item)}
-                    aria-label="添加期权"
+                    aria-label="Add option"
                   >
-                    期权
+                    Options
                   </button>
                   <button
                     type="button"
                     className="btn btn-secondary"
                     onClick={() => handleRemoveWishlist(item)}
-                    aria-label="从自选移除"
+                    aria-label="Remove from wishlist"
                   >
                     X
                   </button>
@@ -359,11 +360,11 @@ export function WishlistPage({ status }: WishlistPageProps) {
         <thead>
           <tr>
             <th>Symbol</th>
-            <th>当前价（标的）</th>
-            <th>到期</th>
-            <th>权利</th>
-            <th>行权价</th>
-            <th>操作</th>
+            <th>Price (underlying)</th>
+            <th>Expiry</th>
+            <th>Right</th>
+            <th>Strike</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -382,7 +383,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => handleRemoveWishlist(item)}
-                  aria-label="从自选移除"
+                  aria-label="Remove from wishlist"
                 >
                   X
                 </button>
@@ -397,31 +398,31 @@ export function WishlistPage({ status }: WishlistPageProps) {
 
   return (
     <div className="card process-section wishlist-page">
-      <h2>自选</h2>
-      <p className="section-desc">
-        自选标的列表（Wishlist），用于拉取报价与 K 线时的标的候选；可从当前持仓添加或输入 Symbol 添加。
-      </p>
+      <h2 className="page-title-with-tooltip">
+        Wishlist
+        <InfoTooltip text="Watchlist for quotes and bars; add from positions or enter Symbol." />
+      </h2>
 
       <section className="replay-section" aria-labelledby="wishlist-head">
-        <h3 id="wishlist-head">自选股</h3>
-        <p className="section-hint">
-          股票：输入 Symbol 添加。期权：在股票行的「期权」中填写到期日、权利、行权价。
-        </p>
+        <h3 id="wishlist-head" className="page-title-with-tooltip">
+          Stocks & options
+          <InfoTooltip text={'Stocks: enter Symbol to add. Options: use "Options" on a stock row and fill expiry, right, strike.'} />
+        </h3>
         {wishlistError && (
           <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
             {wishlistError}
           </div>
         )}
         <div className="replay-bar-symbol-row">
-          <label htmlFor="wishlist-symbol" className="replay-bar-symbol-label">添加股票</label>
+          <label htmlFor="wishlist-symbol" className="replay-bar-symbol-label">Add stock</label>
           <input
             id="wishlist-symbol"
             type="text"
             className="replay-bar-symbol-input"
-            placeholder="Symbol，如 NVDA"
+            placeholder="Symbol, e.g. NVDA"
             value={addContractKey}
             onChange={e => setAddContractKey(e.target.value)}
-            aria-label="输入 Symbol 添加股票"
+            aria-label="Enter Symbol to add stock"
           />
           <button
             type="button"
@@ -434,12 +435,12 @@ export function WishlistPage({ status }: WishlistPageProps) {
               setAddContractKey('')
             }}
           >
-            {addPending ? '添加中…' : '添加'}
+            {addPending ? 'Adding…' : 'Add'}
           </button>
         </div>
         {positionsNotInWishlist.length > 0 && (
           <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '0.25rem' }}>
-            <span className="replay-bar-symbol-label">从持仓添加：</span>
+            <span className="replay-bar-symbol-label">Add from positions:</span>
             {positionsNotInWishlist.map((p, idx) => {
               const ck = positionToContractKey(p)
               const label = (p.symbol || '')
@@ -463,40 +464,42 @@ export function WishlistPage({ status }: WishlistPageProps) {
           </div>
         )}
         {wishlistLoading ? (
-          <div className="replay-placeholder">加载自选列表…</div>
+          <div className="replay-placeholder">Loading wishlist…</div>
         ) : wishlistItems.length === 0 ? (
-          <div className="replay-placeholder">暂无自选。请输入 Symbol 添加，或从持仓添加。</div>
+          <div className="replay-placeholder">No items. Enter Symbol to add or add from positions.</div>
         ) : (
           <>
-            <h4 className="wishlist-subhead">股票</h4>
-            {renderStockTable(wishlistStocks, '暂无自选股票。')}
-            <h4 className="wishlist-subhead" style={{ marginTop: '1rem' }}>期权</h4>
-            {renderOptionsTable(wishlistOptions, '暂无自选期权。')}
+            <h4 className="wishlist-subhead">Stocks</h4>
+            {renderStockTable(wishlistStocks, 'No stocks in wishlist.')}
+            <h4 className="wishlist-subhead" style={{ marginTop: '1rem' }}>Options</h4>
+            {renderOptionsTable(wishlistOptions, 'No options in wishlist.')}
           </>
         )}
       </section>
 
       {analysisResult && (
         <section className="replay-section market-data-analysis" aria-labelledby="wishlist-analysis-head">
-          <h3 id="wishlist-analysis-head">当前选中 Symbol 在 Stock_xx 表中的数据情况</h3>
-          <p className="section-hint">标的 <strong>{analysisResult.symbol}</strong> 在数据库中的 K 线行数统计。</p>
+          <h3 id="wishlist-analysis-head" className="page-title-with-tooltip">
+            Bar stats for {analysisResult.symbol} in Stock_xx
+            <InfoTooltip text="K-line row counts for this symbol in DB." />
+          </h3>
           <div className="analysis-stats">
             <div className="analysis-stat-row">
-              <span className="analysis-stat-label">stock_day（日线）</span>
+              <span className="analysis-stat-label">stock_day (daily)</span>
               <span className="analysis-stat-value">{analysisResult.stats.stock_day}</span>
-              <span className="analysis-stat-desc">{analysisResult.stats.stock_day === 0 ? '无数据' : '条'}</span>
+              <span className="analysis-stat-desc">{analysisResult.stats.stock_day === 0 ? 'No data' : 'rows'}</span>
             </div>
             <div className="analysis-stat-row">
-              <span className="analysis-stat-label">stock_min（分钟/小时线）</span>
+              <span className="analysis-stat-label">stock_min (min/hour)</span>
               <div className="analysis-stat-value">
                 {analysisResult.stats.stock_min && Object.keys(analysisResult.stats.stock_min).length > 0 ? (
                   <ul className="analysis-period-list">
                     {Object.entries(analysisResult.stats.stock_min).map(([period, count]) => (
-                      <li key={period}>{period}: {count} 条</li>
+                      <li key={period}>{period}: {count} rows</li>
                     ))}
                   </ul>
                 ) : (
-                  <span>无数据</span>
+                  <span>No data</span>
                 )}
               </div>
             </div>
@@ -507,9 +510,9 @@ export function WishlistPage({ status }: WishlistPageProps) {
               className="btn btn-primary"
               disabled={!!fetchMarketDataStep}
               onClick={() => handleFetchMarketData()}
-              aria-label="智能拉取该标的 K 线（日线最多 1 年，分钟/小时线按需补全）"
+              aria-label="Smart fetch bars for this symbol (daily up to 1Y, min/hour as needed)"
             >
-              {fetchMarketDataStep || '获取市场数据'}
+              {fetchMarketDataStep || 'Get market data'}
             </button>
             {fetchMarketDataError && (
               <span className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginLeft: '0.5rem' }}>
@@ -542,25 +545,25 @@ export function WishlistPage({ status }: WishlistPageProps) {
             style={{ padding: '1.25rem', minWidth: '18rem', maxWidth: '90vw' }}
             onClick={e => e.stopPropagation()}
           >
-            <h4 id="wishlist-add-option-title" style={{ marginTop: 0 }}>为 {addOptionForSymbol} 添加期权</h4>
+            <h4 id="wishlist-add-option-title" style={{ marginTop: 0 }}>Add option for {addOptionForSymbol}</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <div className="replay-bar-symbol-row">
-                <label className="replay-bar-symbol-label">到期日</label>
+                <label className="replay-bar-symbol-label">Expiry</label>
                 <input
                   type="text"
-                  placeholder="yyyy-mm-dd 或 YYYYMMDD"
+                  placeholder="yyyy-mm-dd or YYYYMMDD"
                   value={addOptExpiry}
                   onChange={e => setAddOptExpiry(e.target.value)}
                   className="replay-bar-symbol-input"
-                  aria-label="到期日"
+                  aria-label="Expiry"
                 />
               </div>
               <div className="replay-bar-symbol-row">
-                <label className="replay-bar-symbol-label">权利</label>
+                <label className="replay-bar-symbol-label">Right</label>
                 <select
                   value={addOptRight}
                   onChange={e => setAddOptRight(e.target.value as 'CALL' | 'PUT')}
-                  aria-label="权利"
+                  aria-label="Right"
                   style={{ padding: '0.25rem 0.5rem', flex: 1 }}
                 >
                   <option value="CALL">CALL</option>
@@ -568,21 +571,21 @@ export function WishlistPage({ status }: WishlistPageProps) {
                 </select>
               </div>
               <div className="replay-bar-symbol-row">
-                <label className="replay-bar-symbol-label">行权价</label>
+                <label className="replay-bar-symbol-label">Strike</label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
-                  placeholder="如 120"
+                  placeholder="e.g. 120"
                   value={addOptStrike}
                   onChange={e => setAddOptStrike(e.target.value)}
                   className="replay-bar-symbol-input"
-                  aria-label="行权价"
+                  aria-label="Strike"
                 />
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
                 <button type="button" className="btn btn-secondary" onClick={closeAddOptionModal}>
-                  取消
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -590,7 +593,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
                   disabled={addPending || !addOptExpiry.trim() || !addOptStrike.trim()}
                   onClick={() => submitAddOption()}
                 >
-                  {addPending ? '添加中…' : '添加'}
+                  {addPending ? 'Adding…' : 'Add'}
                 </button>
               </div>
             </div>

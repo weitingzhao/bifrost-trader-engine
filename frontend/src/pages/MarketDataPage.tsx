@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBars, fetchQuotes, postBarsFetch } from '../api'
+import { InfoTooltip } from '../components/InfoTooltip'
 
 const BAR_PERIODS = [
-  { value: '1 D', label: '日线' },
-  { value: '1 min', label: '1 分钟' },
-  { value: '5 mins', label: '5 分钟' },
-  { value: '1 hour', label: '1 小时' },
+  { value: '1 D', label: 'Daily' },
+  { value: '1 min', label: '1 min' },
+  { value: '5 mins', label: '5 min' },
+  { value: '1 hour', label: '1 hour' },
 ] as const
 
 function fmtTs(ts: number | null | undefined): string {
@@ -62,7 +63,7 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
       } catch {
         if (!cancelled) {
           setQuotes([])
-          setQuotesMessage('实时行情不可用')
+          setQuotesMessage('Realtime quotes unavailable')
         }
       }
     }
@@ -95,14 +96,14 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
 
   return (
     <div className="card process-section market-data-page">
-      <h2>市场数据</h2>
-      <p className="section-desc">
-        统一管理 K 线等市场数据，按标的拉取并写入数据库（stock_day / stock_min），供复盘、风控等使用。
-      </p>
+      <h2 className="page-title-with-tooltip">
+        Market data
+        <InfoTooltip text="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk." />
+      </h2>
 
       {quotes.length > 0 && (
         <section className="replay-section realtime-quotes-wall" aria-labelledby="realtime-quotes-head">
-          <h3 id="realtime-quotes-head">实时行情</h3>
+          <h3 id="realtime-quotes-head">Realtime quotes</h3>
           {quotesMessage && <p className="section-hint">{quotesMessage}</p>}
           <div className="quotes-ticker" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.5rem' }}>
             {quotes.map(q => (
@@ -132,31 +133,31 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
       )}
 
       <section className="replay-section" aria-labelledby="bars-head">
-        <h3 id="bars-head">K 线</h3>
-        <p className="section-hint">
-          按标的与周期拉取，供复盘时结合成交时间查看当时行情。可输入标的代码，或从「当前持仓汇总」候选中选择。
-        </p>
+        <h3 id="bars-head" className="page-title-with-tooltip">
+          Bars
+          <InfoTooltip text="Fetch by symbol and period for replay. Enter symbol or pick from current positions." />
+        </h3>
         <div className="replay-bar-symbol-row">
-          <label htmlFor="market-bar-symbol" className="replay-bar-symbol-label">标的</label>
+          <label htmlFor="market-bar-symbol" className="replay-bar-symbol-label">Symbol</label>
           <input
             id="market-bar-symbol"
             type="text"
             className="replay-bar-symbol-input"
-            placeholder="输入标的代码，如 NVDA"
+            placeholder="Symbol, e.g. NVDA"
             value={barSymbol}
             onChange={e => setBarSymbol((e.target.value || '').trim().toUpperCase())}
-            aria-label="拉取 K 线的标的代码"
+            aria-label="Symbol for bars"
           />
           {candidateSymbols.length > 0 && (
-            <span className="replay-sync-hint">当前持仓汇总可拉取：{candidateSymbols.join(', ')}</span>
+            <span className="replay-sync-hint">From positions: {candidateSymbols.join(', ')}</span>
           )}
         </div>
         <div className="replay-bar-symbol-row">
-          <label className="replay-bar-symbol-label">周期</label>
+          <label className="replay-bar-symbol-label">Period</label>
           <select
             value={barPeriod}
             onChange={e => setBarPeriod(e.target.value)}
-            aria-label="K 线周期"
+            aria-label="Bar period"
           >
             {BAR_PERIODS.map(p => (
               <option key={p.value} value={p.value}>{p.label}</option>
@@ -167,9 +168,9 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
               type="checkbox"
               checked={smartDuration}
               onChange={e => setSmartDuration(e.target.checked)}
-              aria-label="智能拉取"
+              aria-label="Smart fetch"
             />
-            智能拉取（根据最新 K 线只补缺失区间）
+            Smart fetch (fill only missing range from latest bar)
           </label>
         </div>
         <div className="replay-toolbar">
@@ -186,35 +187,35 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
               if (res.ok && res.bars) setBars(res.bars)
               else if (res.ok) await loadBarsFromApi(symbol)
             }}
-            aria-label="从 IB 拉取 K 线并刷新列表"
+            aria-label="Fetch bars from IB and refresh list"
           >
-            {barsSyncing ? '拉取中…' : '拉取 K 线'}
+            {barsSyncing ? 'Fetching…' : 'Fetch bars'}
           </button>
           <button
             type="button"
             className="btn btn-secondary"
             disabled={barsLoading || !barSymbol.trim()}
             onClick={() => loadBarsFromApi(barSymbol.trim())}
-            aria-label="从数据库读取已拉取的 K 线"
+            aria-label="Load bars from DB"
           >
-            {barsLoading ? '加载中…' : '从库中读取'}
+            {barsLoading ? 'Loading…' : 'Load from DB'}
           </button>
           {barsSyncing && (
-            <span className="replay-sync-hint">正在由 API 连接 IB 拉取 K 线…</span>
+            <span className="replay-sync-hint">Fetching bars from IB…</span>
           )}
         </div>
         {bars.length === 0 ? (
-          <div className="replay-placeholder">暂无 K 线数据。输入标的后点击「拉取 K 线」或「从库中读取」。</div>
+          <div className="replay-placeholder">No bars. Enter symbol and click "Fetch bars" or "Load from DB".</div>
         ) : (
           <table className="table-operations">
             <thead>
               <tr>
-                <th>时间</th>
-                <th>开</th>
-                <th>高</th>
-                <th>低</th>
-                <th>收</th>
-                <th>量</th>
+                <th>Time</th>
+                <th>Open</th>
+                <th>High</th>
+                <th>Low</th>
+                <th>Close</th>
+                <th>Vol</th>
               </tr>
             </thead>
             <tbody>

@@ -35,11 +35,10 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
-  const [apiReachable, setApiReachable] = useState<boolean>(false)
   const [ibAccountIndex, setIbAccountIndex] = useState(0)
   const [accountsDisplay, setAccountsDisplay] = useState<IbAccountSnapshot[] | null>(null)
   const [ibAccountsRefreshing, setIbAccountsRefreshing] = useState(false)
-  /** 刷新账户后的简短反馈（成功/失败/超时），几秒后自动清除 */
+  /** Short feedback after account refresh (success/fail/timeout); auto-cleared after a few seconds */
   const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
 
   useEffect(() => {
@@ -53,11 +52,9 @@ export default function App() {
     try {
       const j = await fetchStatus()
       setStatus(j)
-      setApiReachable(true)
       return j
     } catch {
       setStatus(null)
-      setApiReachable(false)
       return null
     }
   }, [])
@@ -107,7 +104,7 @@ export default function App() {
     try {
       const res = await postRefreshAccounts()
       if (!res.ok) {
-        setAccountsRefreshFeedback(res.error || '刷新请求失败')
+        setAccountsRefreshFeedback(res.error || 'Refresh request failed')
         return
       }
       let refreshed = false
@@ -116,24 +113,24 @@ export default function App() {
         const j = await loadStatus()
         if (j?.accounts != null) setAccountsDisplay(j.accounts ? [...j.accounts] : [])
         if (j?.accounts_fetched_at != null && j.accounts_fetched_at > requestedAt) {
-          setAccountsRefreshFeedback('已刷新')
+          setAccountsRefreshFeedback('Refreshed')
           refreshed = true
           break
         }
         await new Promise((r) => setTimeout(r, 2000))
       }
       if (!refreshed) {
-        setAccountsRefreshFeedback('请求已发出，但未检测到数据更新，请稍后再看')
+        setAccountsRefreshFeedback('Request sent; no data update detected yet. Try again later.')
       }
     } catch (e) {
-      setAccountsRefreshFeedback(e instanceof Error ? e.message : '网络或服务异常')
+      setAccountsRefreshFeedback(e instanceof Error ? e.message : 'Network or API error')
     } finally {
       setIbAccountsRefreshing(false)
     }
   }, [loadStatus])
 
   const j = status
-  // 系统状态灯：三者都绿才绿，有一个非绿则取最差（前端合并，确保挂起等 status_lamp 黄时 Tab 也显示黄）
+  // System status lamp: green only when daemon/monitor/status all green; otherwise worst of the three
   const dl = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'red'
   const ml = (j?.monitor_lamp as 'green' | 'yellow' | 'red') || 'red'
   const sl = (j?.status_lamp as 'green' | 'yellow' | 'red') || 'red'
@@ -145,15 +142,14 @@ export default function App() {
         : dl === 'green' && ml === 'green' && sl === 'green'
           ? 'green'
           : 'none'
-  const apiLamp = apiReachable ? 'green' : 'red'
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'monitor', label: '系统', lamp: systemLamp },
-    { id: 'ib', label: '账户' },
-    { id: 'replay', label: '头寸' },
-    { id: 'market', label: '市场' },
-    { id: 'wishlist', label: '自选' },
-    { id: 'settings', label: '设置' },
+    { id: 'monitor', label: 'System', lamp: systemLamp },
+    { id: 'ib', label: 'Accounts' },
+    { id: 'replay', label: 'Positions' },
+    { id: 'market', label: 'Market' },
+    { id: 'wishlist', label: 'Wishlist' },
+    { id: 'settings', label: 'Settings' },
   ]
 
   return (
@@ -161,7 +157,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="系统、账户、头寸、市场、自选、设置">
+          <nav className="app-tabs" aria-label="System, Accounts, Positions, Market, Wishlist, Settings">
             {tabList.map(({ id, label, lamp }) => (
               <button
                 key={id}
@@ -177,21 +173,19 @@ export default function App() {
           </nav>
         </div>
         <div className="app-header-right">
-          <div className={`lamp lamp-sm ${apiLamp}`} title="API 是否可达" aria-hidden />
-          <span className="api-status-label">API: {apiReachable ? '正常' : '异常'}</span>
           <label className="theme-switch">
-            <span className="api-status-label" style={{ marginRight: '0.25rem' }}>主题</span>
+            <span className="api-status-label" style={{ marginRight: '0.25rem' }}>Theme</span>
             <select
               value={theme}
               onChange={(e) => setTheme(e.target.value as ThemeId)}
-              title="切换深色/明亮主题"
+              title="Switch dark/light theme"
               className="theme-select"
             >
-              <option value="dark">深色</option>
-              <option value="light">明亮</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
             </select>
           </label>
-          <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">文档</a>
+          <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">Docs</a>
         </div>
       </header>
 

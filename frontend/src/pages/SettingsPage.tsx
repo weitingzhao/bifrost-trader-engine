@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { postIbConfig, postSetHeartbeatInterval } from '../api'
+import { InfoTooltip } from '../components/InfoTooltip'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -49,7 +50,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
   }, [status?.daemon_heartbeat?.heartbeat_interval_sec, heartbeatInitialized])
 
   const onSave = async () => {
-    setMsg({ text: '保存中…', isErr: false })
+    setMsg({ text: 'Saving…', isErr: false })
     const host = ibHost.trim() || DEFAULT_HOST
     const sec = Math.max(5, Math.min(120, Math.round(Number(heartbeatIntervalSec)) || DEFAULT_HEARTBEAT_SEC))
     const [resIb, resHb] = await Promise.all([
@@ -65,8 +66,8 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     const err = !resIb.ok ? resIb.error : !resHb.ok ? resHb.error : undefined
     setMsg({
       text: ok
-        ? '设置已保存。IB 连接与 client_id 下次启动/使用时生效；心跳间隔下一心跳起生效。'
-        : err ?? '保存失败',
+        ? 'Settings saved. IB connection and client_id apply on next start/use; heartbeat interval on next heartbeat.'
+        : err ?? 'Save failed',
       isErr: !ok,
     })
     if (ok) {
@@ -77,20 +78,20 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
 
   return (
     <div className="card process-section">
-      <h2>设置</h2>
-      <p className="section-hint">
-        统一配置守护程序相关参数，写入数据库；守护进程启动或下一心跳时读取并生效。
-      </p>
+      <h2 className="settings-page-title">
+        Settings
+        <InfoTooltip text="Configure daemon-related parameters; written to DB and read by daemon on start or next heartbeat." />
+      </h2>
       <div className="daemon-groups">
         <div className="daemon-group">
           <div className="daemon-group-header">
-            <span className="daemon-group-title">心跳间隔</span>
+            <span className="daemon-group-title">Heartbeat interval</span>
+            <InfoTooltip text="Daemon heartbeat write interval (seconds); takes effect on next heartbeat." />
           </div>
           <div className="daemon-group-body">
-            <p className="section-hint">守护进程心跳写库间隔（秒），下一心跳起生效。</p>
             <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
               <label>
-                间隔(秒):
+                Interval (sec):
                 <input
                   type="number"
                   min={5}
@@ -105,12 +106,12 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
         </div>
         <div className="daemon-group">
           <div className="daemon-group-header">
-            <span className="daemon-group-title">IB 连接</span>
+            <span className="daemon-group-title">IB connection</span>
           </div>
           <div className="daemon-group-body">
             <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
               <label>
-                IP/主机:
+                IP/Host:
                 <input
                   type="text"
                   value={ibHost}
@@ -120,7 +121,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                 />
               </label>
               <label>
-                端口类型:
+                Port type:
                 <select
                   value={ibPortType}
                   onChange={(e) => setIbPortType(e.target.value as 'tws_live' | 'tws_paper' | 'gateway')}
@@ -136,16 +137,16 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
         </div>
         <div className="daemon-group">
           <div className="daemon-group-header">
-            <span className="daemon-group-title">IB Client ID（按用途区分，避免与 TWS 其他连接冲突）</span>
+            <span className="daemon-group-title">IB Client ID</span>
+            <InfoTooltip text="Per role; avoid conflict with other TWS connections. TWS allows multiple API connections with different client_id. Do not reuse with manual trading or other apps." />
           </div>
           <div className="daemon-group-body">
-            <p className="section-hint">同一 TWS 允许多个 API 连接，用不同 client_id 区分。请勿与手动交易或其它程序重复。</p>
             <div className="daemon-groups" style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem' }}>
               <div>
-                <div className="daemon-group-subtitle">守护组（交易主机）</div>
+                <div className="daemon-group-subtitle">Daemon (trading host)</div>
                 <div className="controls" style={{ flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-start' }}>
                   <label>
-                    交易进程:
+                    Trading:
                     <input
                       type="number"
                       min={1}
@@ -156,7 +157,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                     />
                   </label>
                   <label>
-                    监听进程:
+                    Listener:
                     <input
                       type="number"
                       min={1}
@@ -169,10 +170,10 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                 </div>
               </div>
               <div>
-                <div className="daemon-group-subtitle">监控组（本机 API 直连 IB）</div>
+                <div className="daemon-group-subtitle">Monitor (this API, direct to IB)</div>
                 <div className="controls" style={{ flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-start' }}>
                   <label>
-                    账户信息:
+                    Account:
                     <input
                       type="number"
                       min={1}
@@ -183,7 +184,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                     />
                   </label>
                   <label>
-                    市场数据:
+                    Market data:
                     <input
                       type="number"
                       min={1}
@@ -201,7 +202,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
       </div>
       <div className="controls" style={{ marginTop: '1rem' }}>
         <button type="button" className="btn-resume" onClick={onSave}>
-          保存设置
+          Save settings
         </button>
         {msg.text && (
           <span className={msg.isErr ? 'msg-error' : 'msg-ok'} style={{ marginLeft: '0.5rem' }}>

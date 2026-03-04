@@ -1,6 +1,6 @@
 /* ==========================================================================
-   Bifrost 监控 — 主题：深色(dark) / 明亮(light，默认)
-   Typography: DM Sans (UI) + JetBrains Mono (数字/数据)
+   Bifrost Monitor — Theme: dark / light (default)
+   Typography: DM Sans (UI) + JetBrains Mono (numbers/data)
    ========================================================================== */
 
 :root {
@@ -372,6 +372,36 @@ body::before {
   min-width: 0;
 }
 
+/* Lamp left of title + status so it spans two rows */
+.daemon-header-with-lamp {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.daemon-header-main.daemon-header-with-lamp {
+  flex: 1;
+  min-width: 0;
+}
+.lamp-wrap-span {
+  width: 12px;
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+}
+.lamp-wrap-span .lamp {
+  width: 100%;
+  height: 100%;
+  min-height: 12px;
+  border-radius: 999px;
+}
+.daemon-card-title {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
 .daemon-header-meta {
   display: flex;
   flex-wrap: wrap;
@@ -605,6 +635,64 @@ button:disabled {
 
 .link-button:hover {
   color: var(--color-link-hover);
+}
+
+/* Settings page: ? icon tooltip (hover to show) */
+.settings-page-title,
+.page-title-with-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.info-tooltip-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  vertical-align: middle;
+  position: relative;
+}
+.info-tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface-elevated);
+}
+.info-tooltip-wrap:hover .info-tooltip-icon {
+  color: var(--color-text-main);
+  border-color: var(--color-text-dim);
+}
+.info-tooltip-popup {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(100% + 0.5rem);
+  z-index: 100;
+  max-width: 20rem;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-caption);
+  font-weight: normal;
+  line-height: 1.4;
+  color: var(--color-text-main);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+}
+.info-tooltip-wrap:hover .info-tooltip-popup {
+  opacity: 1;
 }
 
 /* ---------- 表单控件 ---------- */

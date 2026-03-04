@@ -1,4 +1,5 @@
 import type { IbAccountSnapshot, StatusResponse } from '../types'
+import { InfoTooltip } from '../components/InfoTooltip'
 
 function fmtUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—'
@@ -51,7 +52,7 @@ export interface IbAccountsPageProps {
   setIbAccountIndex: (i: number) => void
   ibAccountsRefreshing: boolean
   onRefreshAccounts: () => Promise<void>
-  /** 刷新后的简短反馈（成功/失败/超时），由父组件在数秒后清除 */
+  /** Short feedback after refresh (success/fail/timeout); cleared by parent after a few seconds */
   refreshFeedback?: string | null
 }
 
@@ -73,29 +74,27 @@ export function IbAccountsPage({
     return (
       <div className="card process-section">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-          <h2 style={{ margin: 0 }}>
-            IB 账户{' '}
-            <span className="section-desc">
-              （多账户摘要与持仓，来自 DB；自动刷新每 1 小时）
-            </span>
+          <h2 style={{ margin: 0 }} className="page-title-with-tooltip">
+            IB Accounts{' '}
+            <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
           </h2>
           <button
             type="button"
             className="btn-resume"
             disabled={ibAccountsRefreshing}
             onClick={onRefreshAccounts}
-            title="由监控端 Account Client 从 IB 拉取账户与持仓并写入 DB，然后更新展示"
+            title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
           >
-            {ibAccountsRefreshing ? '刷新中…' : '刷新'}
+            {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
         {refreshFeedback != null && refreshFeedback !== '' && (
-          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('已刷新') ? 'var(--color-success, green)' : undefined }}>
+          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
             {refreshFeedback}
           </p>
         )}
         <p className="section-hint">
-          无账户数据（IB 未连接或守护进程尚未写入；连接后按心跳拉取并写入 accounts / account_positions）
+          No account data (IB not connected or daemon has not written yet; after connection, data is pulled on heartbeat and written to accounts / account_positions)
         </p>
       </div>
     )
@@ -104,7 +103,7 @@ export function IbAccountsPage({
   const accounts = [...rawAccounts!].sort((a, b) => getNetLiq(b) - getNetLiq(a))
   const selectedIndex = Math.min(ibAccountIndex, accounts.length - 1)
   const acc = accounts[selectedIndex]
-  const aid = acc.account_id ?? `账户-${selectedIndex + 1}`
+  const aid = acc.account_id ?? `Account-${selectedIndex + 1}`
   const sum = acc.summary ?? {}
   const netLiq = sum.NetLiquidation != null ? parseFloat(String(sum.NetLiquidation)) : undefined
   const totalCash = sum.TotalCashValue != null ? parseFloat(String(sum.TotalCashValue)) : undefined
@@ -120,43 +119,41 @@ export function IbAccountsPage({
   return (
     <div className="card process-section">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-        <h2 style={{ margin: 0 }}>
-          IB 账户{' '}
-          <span className="section-desc">
-            （多账户摘要与持仓，来自 DB；自动刷新每 1 小时）
-          </span>
+        <h2 style={{ margin: 0 }} className="page-title-with-tooltip">
+          IB Accounts{' '}
+          <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
         </h2>
         <button
           type="button"
           className="btn-resume"
           disabled={ibAccountsRefreshing}
           onClick={onRefreshAccounts}
-          title="由监控端 Account Client 从 IB 拉取账户与持仓并写入 DB，然后更新展示"
+          title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
         >
-          {ibAccountsRefreshing ? '刷新中…' : '刷新'}
+          {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
       {refreshFeedback != null && refreshFeedback !== '' && (
-        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('已刷新') ? 'var(--color-success, green)' : undefined }}>
+        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
           {refreshFeedback}
         </p>
       )}
 
       {fetchedAt != null && Number.isFinite(fetchedAt) && (
         <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
-          数据来自 {new Date(fetchedAt * 1000).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'medium' })}
-          ，已过 {(() => {
+          Data from {new Date(fetchedAt * 1000).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium' })}
+          , {(() => {
             const sec = Math.floor(Date.now() / 1000 - fetchedAt)
-            if (sec < 60) return `${sec} 秒`
-            if (sec < 3600) return `${Math.floor(sec / 60)} 分钟`
-            return `${(sec / 3600).toFixed(1)} 小时`
+            if (sec < 60) return `${sec}s ago`
+            if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
+            return `${(sec / 3600).toFixed(1)}h ago`
           })()}
         </p>
       )}
       {hasAccounts && (fetchedAt == null || !Number.isFinite(fetchedAt)) && (
         <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
-          数据时间未知（点击「刷新」由监控端从 IB 拉取并写库后此处会显示拉取时间）
+          Data time unknown (click "Refresh" to have monitor fetch from IB and write to DB; fetch time will appear here)
         </p>
       )}
 
@@ -170,7 +167,7 @@ export function IbAccountsPage({
                 className={`ib-accounts-tab ${idx === selectedIndex ? 'active' : ''}`}
                 onClick={() => setIbAccountIndex(idx)}
               >
-                {a.account_id ?? `账户-${idx + 1}`}
+                {a.account_id ?? `Account-${idx + 1}`}
                 {(a.positions?.length ?? 0) > 0 && (
                   <span className="section-hint" style={{ marginLeft: '0.35rem', fontWeight: 'normal' }}>
                     ({a.positions!.length})
@@ -183,43 +180,43 @@ export function IbAccountsPage({
         <div className="ib-accounts-content">
           <div className="ib-summary-row">
             <div className="ib-summary-item">
-              <span className="label">账户</span>
+              <span className="label">Account</span>
               <span className="value">{aid}</span>
             </div>
             {netLiq != null && Number.isFinite(netLiq) && (
               <div className="ib-summary-item">
-                <span className="label">净资产</span>
+                <span className="label">Net liquidation</span>
                 <span className="value">{fmtUsd(netLiq)}</span>
               </div>
             )}
             {totalCash != null && Number.isFinite(totalCash) && (
               <div className="ib-summary-item">
-                <span className="label">总现金</span>
+                <span className="label">Total cash</span>
                 <span className="value">{fmtUsd(totalCash)}</span>
               </div>
             )}
             {buyingPower != null && Number.isFinite(buyingPower) && (
               <div className="ib-summary-item">
-                <span className="label">购买力</span>
+                <span className="label">Buying power</span>
                 <span className="value">{fmtUsd(buyingPower)}</span>
               </div>
             )}
           </div>
 
-          <div className="ib-positions-title">股票持仓</div>
+          <div className="ib-positions-title">Stock positions</div>
           {stockPositions.length === 0 ? (
-            <p className="ib-positions-empty">无</p>
+            <p className="ib-positions-empty">None</p>
           ) : (
             <>
               <table className="ib-positions-table">
                 <thead>
                   <tr>
-                    <th>标的</th>
-                    <th>数量</th>
-                    <th>成本</th>
-                    <th>总成本</th>
-                    <th>当前价</th>
-                    <th>浮动盈亏</th>
+                    <th>Symbol</th>
+                    <th>Qty</th>
+                    <th>Cost</th>
+                    <th>Total cost</th>
+                    <th>Price</th>
+                    <th>PnL</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -269,31 +266,31 @@ export function IbAccountsPage({
                 if (!Number.isFinite(sumTotal)) return null
                 return (
                   <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
-                    股票总成本：{fmtUsd(sumTotal)}
+                    Stock total cost: {fmtUsd(sumTotal)}
                   </p>
                 )
               })()}
             </>
           )}
 
-          <div className="ib-positions-title" style={{ marginTop: '1rem' }}>期权持仓</div>
+          <div className="ib-positions-title" style={{ marginTop: '1rem' }}>Option positions</div>
           {optionPositions.length === 0 ? (
-            <p className="ib-positions-empty">无</p>
+            <p className="ib-positions-empty">None</p>
           ) : (
             <>
               <table className="ib-positions-table">
                 <thead>
                   <tr>
-                    <th>标的</th>
-                    <th>权利</th>
-                    <th>到期</th>
+                    <th>Symbol</th>
+                    <th>Right</th>
+                    <th>Expiry</th>
                     <th>Strike</th>
-                    <th>数量</th>
-                    <th>多/空</th>
-                    <th>成本</th>
-                    <th>权利金</th>
-                    <th>内在价值</th>
-                    <th>虚实</th>
+                    <th>Qty</th>
+                    <th>Side</th>
+                    <th>Cost</th>
+                    <th>Premium</th>
+                    <th>Intrinsic</th>
+                    <th>Moneyness</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -307,7 +304,7 @@ export function IbAccountsPage({
                     const premium = Number.isFinite(qty) && Number.isFinite(cost) ? -(qty * cost) : null
                     const intrinsic = spot != null && Number.isFinite(strike) ? optionIntrinsic(isCall, strike, spot) : null
                     const moneyness = spot != null && Number.isFinite(strike) ? optionMoneyness(isCall, strike, spot) : '—'
-                    const sideLabel = Number.isFinite(qty) ? (qty > 0 ? '多' : qty < 0 ? '空' : '—') : '—'
+                    const sideLabel = Number.isFinite(qty) ? (qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—') : '—'
                     return (
                       <tr key={`opt-${pos.symbol}-${i}`} className="ib-pos-opt">
                         <td>{pos.symbol ?? '—'}</td>
@@ -335,10 +332,10 @@ export function IbAccountsPage({
                 if (!Number.isFinite(sumPremium)) return null
                 return (
                   <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
-                    期权权利金合计：{fmtUsd(sumPremium)}
+                    Option premium total: {fmtUsd(sumPremium)}
                     {spot != null && (
                       <span className="section-desc" style={{ marginLeft: '0.5rem' }}>
-                        （标的现价 {fmtUsd(spot)}）
+                        (spot {fmtUsd(spot)})
                       </span>
                     )}
                   </p>
