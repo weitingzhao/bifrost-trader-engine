@@ -106,7 +106,7 @@ export interface DaemonMonitorPageProps {
   onNavigateToSettings?: () => void
 }
 
-export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateToSettings }: DaemonMonitorPageProps) {
+export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateToSettings: _onNavigateToSettings }: DaemonMonitorPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
@@ -180,8 +180,8 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     hedgeLabel = hb.hedge_running ? 'Running' : 'Suspended (or not started)'
     hedgeHint = hb.hedge_running
       ? 'Single-process: daemon and hedge in same process'
-      : 'Click "Resume hedge" on monitor to resume'
-    daemonIbLine = `IB: ${ibConnected ? `Connected (Client ID ${hb.ib_client_id ?? '?'})` : 'Not connected'}`
+      : 'Click "Resume" on monitor to resume'
+    daemonIbLine = `Trading Client: ${ibConnected ? `Connected @ ${hb.ib_client_id ?? '?'}` : 'Not connected'}`
   } else if (hb) {
     daemonLabel = 'Not running'
     if (hb.graceful_shutdown_at != null) {
@@ -372,15 +372,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           <div className="daemon-group">
             <div className="daemon-group-header">
               <div className={`lamp lamp-sm ${heartbeatGroupLamp}`} title="Heartbeat status" />
-              <span className="daemon-group-title">
-                {onNavigateToSettings ? (
-                  <button type="button" className="link-button" onClick={onNavigateToSettings} style={{ fontSize: 'inherit', fontWeight: 'inherit' }}>
-                    Heartbeat
-                  </button>
-                ) : (
-                  'Heartbeat'
-                )}
-              </span>
+              <span className="daemon-group-title">Heartbeat</span>
             </div>
             <div className="daemon-group-body">
               {hb?.daemon_alive && hb.last_ts != null ? (
@@ -402,23 +394,20 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           <div className="daemon-group">
             <div className="daemon-group-header">
               <div className={`lamp lamp-sm ${ibGroupLamp}`} title="IB connection status" />
-              <span className="daemon-group-title">
-                {onNavigateToSettings ? (
-                  <button type="button" className="link-button" onClick={onNavigateToSettings} style={{ fontSize: 'inherit', fontWeight: 'inherit' }}>
-                    IB connection
-                  </button>
-                ) : (
-                  'IB connection'
-                )}
-              </span>
+              <span className="daemon-group-title">IB connection</span>
             </div>
             <div className="daemon-group-body">
               {ibConnected ? (
                 <p className="section-hint countdown-line">
-                  IB: <span className="countdown-num">Connected</span> (Client ID {hb?.ib_client_id ?? '?'})
+                  Trading Client: <span className="countdown-num">Connected @ {hb?.ib_client_id ?? '?'}</span>
                 </p>
               ) : (
                 <p className="section-hint">{daemonIbLine || '—'}</p>
+              )}
+              {j?.ib_config?.ib_client_id_listener != null && (
+                <p className="section-hint countdown-line">
+                  Listener Client: <span className="countdown-num">Connected @ {j.ib_config.ib_client_id_listener}</span>
+                </p>
               )}
               {hb?.daemon_alive && !ibConnected && (
                 <p className="section-hint">Will retry connection on next heartbeat.</p>
@@ -466,7 +455,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                   title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
                   onClick={onSuspend}
                 >
-                  Suspend hedge
+                  Suspend
                 </button>
                 <button
                   type="button"
@@ -475,7 +464,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                   title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
                   onClick={onResume}
                 >
-                  Resume hedge
+                  Resume
                 </button>
               </div>
             </div>
@@ -543,27 +532,17 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             </div>
             <div className="daemon-group-body">
               <p className="section-hint countdown-line">
-                Account IB (AccountIbClient):
+                Account Client:{' '}
                 {monitorAccount?.connected ? (
-                  <>
-                    <span className="countdown-num">Connected</span>
-                    {' '}(
-                    Client ID <span className="countdown-num">{monitorAccount?.client_id ?? '—'}</span>
-                    )
-                  </>
+                  <span className="countdown-num">Connected @ {monitorAccount?.client_id ?? '—'}</span>
                 ) : (
                   'Not connected'
                 )}
               </p>
               <p className="section-hint countdown-line">
-                Market IB (MarketIbClient):
+                Market Client:{' '}
                 {monitorMarket?.connected ? (
-                  <>
-                    <span className="countdown-num">Connected</span>
-                    {' '}(
-                    Client ID <span className="countdown-num">{monitorMarket?.client_id ?? '—'}</span>
-                    )
-                  </>
+                  <span className="countdown-num">Connected @ {monitorMarket?.client_id ?? '—'}</span>
                 ) : (
                   'Not connected'
                 )}
@@ -582,7 +561,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                   title={monitorEnabled ? 'Establish monitor IB connection (AccountIbClient + MarketIbClient)' : 'Monitor stopped; cannot connect'}
                   onClick={onMonitorConnect}
                 >
-                  Connect IB account
+                  Connect
                 </button>
               </div>
             </div>
