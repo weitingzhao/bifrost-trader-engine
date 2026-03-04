@@ -537,10 +537,29 @@ def _ensure_tables(conn) -> None:
             )
         """
         )
-        # R-A3: K 线/OHLC，供复盘与 GET /bars（见 docs/DATABASE.md §2.12）
+        # R-A3 扩展：股票/期权 K 线分表（见 docs/DATABASE.md §2.13–§2.17）；ohlc_bars 已弃用，不再创建。
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS ohlc_bars (
+            CREATE TABLE IF NOT EXISTS stock_day (
+                id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                bar_time timestamptz NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                created_at timestamptz DEFAULT now(),
+                UNIQUE(symbol, bar_time)
+            )
+        """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS stock_day_symbol_time ON stock_day (symbol, bar_time DESC)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stock_min (
                 id bigserial PRIMARY KEY,
                 symbol text NOT NULL,
                 period text NOT NULL,
@@ -556,7 +575,71 @@ def _ensure_tables(conn) -> None:
         """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS ohlc_bars_symbol_period_time ON ohlc_bars (symbol, period, bar_time DESC)"
+            "CREATE INDEX IF NOT EXISTS stock_min_symbol_period_time ON stock_min (symbol, period, bar_time DESC)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS option_day (
+                id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                strike double precision NOT NULL,
+                option_right text NOT NULL,
+                bar_time timestamptz NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                created_at timestamptz DEFAULT now(),
+                UNIQUE(symbol, expiry, strike, option_right, bar_time)
+            )
+        """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_day_symbol_expiry_strike_right_time ON option_day (symbol, expiry, strike, option_right, bar_time DESC)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS option_min (
+                id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                strike double precision NOT NULL,
+                option_right text NOT NULL,
+                period text NOT NULL,
+                bar_time timestamptz NOT NULL,
+                open double precision,
+                high double precision,
+                low double precision,
+                close double precision,
+                volume double precision,
+                created_at timestamptz DEFAULT now(),
+                UNIQUE(symbol, expiry, strike, option_right, period, bar_time)
+            )
+        """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_min_symbol_expiry_strike_right_period_time ON option_min (symbol, expiry, strike, option_right, period, bar_time DESC)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS wishlist (
+                id bigserial PRIMARY KEY,
+                contract_key text NOT NULL UNIQUE,
+                symbol text,
+                sec_type text,
+                expiry text,
+                strike double precision,
+                option_right text,
+                display_label text,
+                source text,
+                created_at timestamptz DEFAULT now()
+            )
+        """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS wishlist_contract_key ON wishlist (contract_key)"
         )
         conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
@@ -1013,7 +1096,7 @@ class PostgreSQLSink(StatusSink):
             logger.warning("update_execution_commission failed: exec_id=%r %s", exec_id, e)
 
     def write_ohlc_bars(self, rows: Any) -> None:
-        """R-A3: 写入 K 线/OHLC；按 (symbol, period, bar_time) UPSERT。"""
+        """R-A3 扩展：写入股票 K 线到 stock_day（1 D）或 stock_min（1 min, 5 mins, 1 hour）。按 (symbol, bar_time) 或 (symbol, period, bar_time) UPSERT。"""
         if not rows:
             return
         if not self._ensure_conn():
@@ -1021,32 +1104,44 @@ class PostgreSQLSink(StatusSink):
         try:
             with self._conn.cursor() as cur:
                 for r in rows:
-                    symbol = r.get("symbol") or ""
-                    period = r.get("period") or "1 D"
+                    symbol = (r.get("symbol") or "").strip()
+                    period = (r.get("period") or "1 D").strip()
                     bar_time = r.get("bar_time")
                     open_ = r.get("open")
                     high = r.get("high")
                     low = r.get("low")
                     close = r.get("close")
                     volume = r.get("volume")
-                    if bar_time is None:
+                    if bar_time is None or not symbol:
                         continue
                     if isinstance(bar_time, (int, float)):
                         bar_dt = datetime.fromtimestamp(float(bar_time), tz=timezone.utc)
                     else:
                         bar_dt = bar_time
-                    cur.execute(
-                        """
-                        INSERT INTO ohlc_bars (symbol, period, bar_time, open, high, low, close, volume)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (symbol, period, bar_time)
-                        DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-                                      close = EXCLUDED.close, volume = EXCLUDED.volume
-                        """,
-                        (symbol, period, bar_dt, open_, high, low, close, volume),
-                    )
+                    if period.upper() == "1 D":
+                        cur.execute(
+                            """
+                            INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (symbol, bar_time)
+                            DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                                          close = EXCLUDED.close, volume = EXCLUDED.volume
+                            """,
+                            (symbol, bar_dt, open_, high, low, close, volume),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO stock_min (symbol, period, bar_time, open, high, low, close, volume)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (symbol, period, bar_time)
+                            DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                                          close = EXCLUDED.close, volume = EXCLUDED.volume
+                            """,
+                            (symbol, period, bar_dt, open_, high, low, close, volume),
+                        )
             self._conn.commit()
-            logger.info("[R-A3] write_ohlc_bars: wrote %s rows", len(rows))
+            logger.info("[R-A3] write_ohlc_bars: wrote %s rows to stock_day/stock_min", len(rows))
         except Exception as e:
             self._conn.rollback()
             logger.warning("write_ohlc_bars failed: %s", e, exc_info=True)

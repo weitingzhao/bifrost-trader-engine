@@ -51,6 +51,8 @@ export interface IbAccountsPageProps {
   setIbAccountIndex: (i: number) => void
   ibAccountsRefreshing: boolean
   onRefreshAccounts: () => Promise<void>
+  /** 刷新后的简短反馈（成功/失败/超时），由父组件在数秒后清除 */
+  refreshFeedback?: string | null
 }
 
 export function IbAccountsPage({
@@ -60,6 +62,7 @@ export function IbAccountsPage({
   setIbAccountIndex,
   ibAccountsRefreshing,
   onRefreshAccounts,
+  refreshFeedback,
 }: IbAccountsPageProps) {
   const j = status
   const rawAccounts = (accountsDisplay ?? j?.accounts) as IbAccountSnapshot[] | undefined
@@ -81,11 +84,16 @@ export function IbAccountsPage({
             className="btn-resume"
             disabled={ibAccountsRefreshing}
             onClick={onRefreshAccounts}
-            title="请求守护进程从 IB 拉取账户与持仓并写入 DB，然后更新展示"
+            title="由监控端 Account Client 从 IB 拉取账户与持仓并写入 DB，然后更新展示"
           >
             {ibAccountsRefreshing ? '刷新中…' : '刷新'}
           </button>
         </div>
+        {refreshFeedback != null && refreshFeedback !== '' && (
+          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('已刷新') ? 'var(--color-success, green)' : undefined }}>
+            {refreshFeedback}
+          </p>
+        )}
         <p className="section-hint">
           无账户数据（IB 未连接或守护进程尚未写入；连接后按心跳拉取并写入 accounts / account_positions）
         </p>
@@ -123,11 +131,17 @@ export function IbAccountsPage({
           className="btn-resume"
           disabled={ibAccountsRefreshing}
           onClick={onRefreshAccounts}
-          title="请求守护进程从 IB 拉取账户与持仓并写入 DB，然后更新展示"
+          title="由监控端 Account Client 从 IB 拉取账户与持仓并写入 DB，然后更新展示"
         >
           {ibAccountsRefreshing ? '刷新中…' : '刷新'}
         </button>
       </div>
+
+      {refreshFeedback != null && refreshFeedback !== '' && (
+        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('已刷新') ? 'var(--color-success, green)' : undefined }}>
+          {refreshFeedback}
+        </p>
+      )}
 
       {fetchedAt != null && Number.isFinite(fetchedAt) && (
         <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
@@ -142,7 +156,7 @@ export function IbAccountsPage({
       )}
       {hasAccounts && (fetchedAt == null || !Number.isFinite(fetchedAt)) && (
         <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
-          数据时间未知（点击「刷新」由守护进程从 IB 拉取并写库后此处会显示拉取时间）
+          数据时间未知（点击「刷新」由监控端从 IB 拉取并写库后此处会显示拉取时间）
         </p>
       )}
 

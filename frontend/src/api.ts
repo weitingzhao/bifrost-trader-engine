@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, WishlistItem } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -65,13 +65,15 @@ export async function postExecutionsFetch(days: 1 | 3 | 7 = 1): Promise<ControlR
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), count: j.count }
 }
 
-/** R-A3: 直接由 API 连 IB 拉取 K 线并写库，返回 bars（不经过 daemon） */
+/** R-A3: 直接由 API 连 IB 拉取 K 线并写库，返回 bars（不经过 daemon）。smart_duration 为 true 时由服务端根据最新 K 线计算 duration。 */
 export async function postBarsFetch(
   symbol: string,
   period = '1 D',
   duration = '30 D',
+  smartDuration = false,
 ): Promise<{ ok: boolean; error?: string; bars?: Bar[]; count?: number }> {
   const params = new URLSearchParams({ symbol, period, duration })
+  if (smartDuration) params.set('smart_duration', 'true')
   const r = await fetch(`${API}/bars/fetch?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
@@ -80,6 +82,51 @@ export async function postBarsFetch(
     bars: j.bars ?? [],
     count: j.count ?? 0,
   }
+}
+
+/** R-A3 扩展：获取指定标的+周期的最新一根 K 线时间（用于智能拉取）。 */
+export async function fetchBarsLatest(symbol: string, period = '1 D'): Promise<{ latest: number | null }> {
+  const params = new URLSearchParams({ symbol, period })
+  const r = await fetch(`${API}/bars/latest?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** R-A3 扩展：Wishlist 列表。 */
+export async function fetchWishlist(): Promise<{ items: WishlistItem[] }> {
+  const r = await fetch(`${API}/wishlist`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** R-A3 扩展：添加/更新 Wishlist 项。 */
+export async function postWishlist(item: {
+  contract_key: string
+  symbol?: string
+  sec_type?: string
+  expiry?: string
+  strike?: number
+  option_right?: string
+  display_label?: string
+  source?: string
+}): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/wishlist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: j.ok === true, error: j.error }
+}
+
+/** R-A3 扩展：删除 Wishlist 项（传 contract_key 或 id 之一）。 */
+export async function deleteWishlist(by: { contract_key?: string; id?: number }): Promise<{ ok: boolean; error?: string }> {
+  const params = new URLSearchParams()
+  if (by.contract_key) params.set('contract_key', by.contract_key)
+  if (by.id != null) params.set('id', String(by.id))
+  const r = await fetch(`${API}/wishlist?${params}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: j.ok === true, error: j.error }
 }
 
 export async function postStop(): Promise<ControlResponse> {

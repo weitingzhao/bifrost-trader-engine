@@ -206,17 +206,45 @@
 
 - **读取**：GET /executions 通过 LEFT JOIN 本表将 commission、realized_pnl、currency 拼回执行记录返回前端。
 
-### 2.12 表 `ohlc_bars`（阶段 3 R-A3：复盘辅助行情 K 线）
+### 2.12 表 `ohlc_bars`（已弃用，由 stock_day / stock_min / option_day / option_min 替代）
 
-- **用途**：存标的的 K 线/OHLC 数据，供复盘页与风控分析结合成交时间查看当时行情；数据源为 IB 历史数据或既有行情写入。
-- **写入**：独立脚本/模块或守护程序按标的与周期（如 1 min、1 D）从 IB 拉取并 INSERT；同一 (symbol, period, bar_time) 仅保留一行（UPSERT 或 INSERT 前去重）。
+- **状态**：**弃用**。表名过于笼统，且股票与期权未区分。替代方案见 §2.13–§2.17。
+- **替代**：股票日线 → **stock_day**（§2.13）；股票分钟/小时线 → **stock_min**（§2.14）；期权日线 → **option_day**（§2.15）；期权分钟/小时线 → **option_min**（§2.16）；自选/待操作标的列表 → **wishlist**（§2.17）。
+- 新部署不再创建本表；已有数据可通过迁移脚本写入 stock_day / stock_min（仅股票），再择机删除本表。
+
+### 2.13 表 `stock_day`（阶段 3 R-A3 扩展：股票日 K 线）
+
+- **用途**：存**股票**的**日线** OHLC 数据，供复盘、回测与风控分析；数据源为 IB 历史数据。
+- **写入**：监控端 POST /bars/fetch（或等效）按标的与周期 `1 D` 从 IB 拉取并 UPSERT；同一 (symbol, bar_time) 仅保留一行。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | bigserial | 自增主键 |
-| symbol | text NOT NULL | 标的（如 NVDA） |
-| period | text NOT NULL | 周期（如 '1 min', '1 D'） |
+| symbol | text NOT NULL | 股票代码（如 NVDA） |
+| bar_time | timestamptz NOT NULL | K 线周期起始时间（日线为当日 00:00 UTC 或交易所日） |
+| open | double precision | 开 |
+| high | double precision | 高 |
+| low | double precision | 低 |
+| close | double precision | 收 |
+| volume | double precision | 成交量（可选） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(symbol, bar_time)`，便于 UPSERT。
+- **索引**：建议 `(symbol, bar_time DESC)`，供按标的与时间范围查询。
+- **读取**：GET /bars?sec_type=STK&period=1 D 或复盘/市场数据页按 symbol、时间范围查询。
+
+### 2.14 表 `stock_min`（阶段 3 R-A3 扩展：股票分钟/小时 K 线）
+
+- **用途**：存**股票**的**分钟线、小时线** OHLC 数据（周期 1 min、5 mins、1 hour）；供复盘与短期回测。
+- **写入**：同上，周期为 `1 min`、`5 mins`、`1 hour` 时写入本表。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 股票代码 |
+| period | text NOT NULL | 周期：'1 min' \| '5 mins' \| '1 hour' |
 | bar_time | timestamptz NOT NULL | K 线周期起始时间 |
 | open | double precision | 开 |
 | high | double precision | 高 |
@@ -225,29 +253,79 @@
 | volume | double precision | 成交量（可选） |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, period, bar_time)` 便于 UPSERT 与去重。
-- **索引**：建议 **`(symbol, period, bar_time DESC)`**，供「按标的+周期+时间范围」查询（如最近 N 根 K 线）保持性能；与 UNIQUE 兼容且覆盖常见读路径。
-- **读取**：GET /bars 或复盘页按 symbol、period、时间范围查询；供 K 线图与复盘分析使用。
+- **唯一约束**：`UNIQUE(symbol, period, bar_time)`。
+- **索引**：建议 `(symbol, period, bar_time DESC)`。
+- **读取**：GET /bars?sec_type=STK&period=1 min（或 5 mins、1 hour）按 symbol、时间范围查询。
 
-#### 2.12.1 时序扩展与多 Period 存储（设计选型）
+### 2.15 表 `option_day`（阶段 3 R-A3 扩展：期权日 K 线）
 
-**1. 是否采用 TimescaleDB 等 Timeseries 扩展？**
+- **用途**：存**期权**的**日线** OHLC 数据；期权按标的+到期+行权价+权利区分合约。
+- **写入**：监控端按期权合约从 IB 拉取日线并 UPSERT；同一 (symbol, expiry, strike, option_right, bar_time) 仅保留一行。
+- **列**：
 
-- **优点**：压缩、自动按时间分块、连续聚合、保留策略等，适合大规模时序写入与按时间范围查询。
-- **成本**：多一层扩展依赖与运维；若仅复盘辅助、标的少、历史有限（如数只标的、1–2 年日线 + 部分日内），**原生 PostgreSQL + 合适索引**即可满足。
-- **建议**：**当前阶段不强制依赖 TimescaleDB**；表结构按「普通堆表 + 索引」设计。若后续出现多标的、长周期 1min 等导致数据量与查询压力明显上升，再评估引入 TimescaleDB 或将本表迁入 hypertable，文档与迁移路径可在彼时补充。
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 标的代码（期权 underlying，如 NVDA） |
+| expiry | text NOT NULL | 到期（lastTradeDateOrContractMonth，YYYYMM 或 YYYYMMDD） |
+| strike | double precision NOT NULL | 行权价 |
+| option_right | text NOT NULL | 权利：C/CALL 或 P/PUT |
+| bar_time | timestamptz NOT NULL | K 线周期起始时间 |
+| open | double precision | 开 |
+| high | double precision | 高 |
+| low | double precision | 低 |
+| close | double precision | 收 |
+| volume | double precision | 成交量（可选） |
+| created_at | timestamptz | 写入时间（默认 now()） |
 
-**2. 多 Period（日线、小时线、分钟线）是否分表存储？**
+- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, bar_time)`。
+- **索引**：建议 `(symbol, expiry, strike, option_right, bar_time DESC)`。
+- **读取**：GET /bars?sec_type=OPT&period=1 D 并传 symbol+expiry+strike+right 或 contract_key 查询。
 
-- **方案 A（当前）**：单表 + `period` 列，查询带 `WHERE symbol = ? AND period = ? AND bar_time ...`，依赖 **`(symbol, period, bar_time DESC)`** 索引，逻辑简单、应用只认一张表。
-- **方案 B**：按 period 分表（如 `ohlc_bars_1d`、`ohlc_bars_1h`、`ohlc_bars_1min`）。单表数据量更小、可按周期单独调优或分区，但需应用层按 period 路由、表与索引重复维护。
-- **方案 C**：PostgreSQL 原生分区（PG 10+），按 **LIST(period)** 或 **(symbol, period)** 分区，逻辑仍为一张表，物理按 period（或 period+时间范围）分片。
+### 2.16 表 `option_min`（阶段 3 R-A3 扩展：期权分钟/小时 K 线）
 
-- **建议**：**现阶段保持单表 + period 列**，通过 **`(symbol, period, bar_time DESC)`** 索引保证「按标的+周期+时间」查询性能。若未来单表行数或写入/查询延迟明显上升（例如 1min 多标的多年），再择一推进：
-  - **原生分区**：`PARTITION BY LIST (period)`，每个 period 一个分区，便于按周期做保留策略或独立 vacuum/analyze；
-  - 或 **分表**：仅对「高频、大数据量」的 period（如 1min）拆到独立表，日线/周线仍保留在统一表。
+- **用途**：存**期权**的**分钟线、小时线**（1 min、5 mins、1 hour）。
+- **列**：
 
-- **总结**：不强制 TimescaleDB；多 period 先单表 + 索引，数据量暴增后再按 period 分区或分表，并在文档中记录当前选型与扩展路径。
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 标的代码（期权 underlying） |
+| expiry | text NOT NULL | 到期（YYYYMM 或 YYYYMMDD） |
+| strike | double precision NOT NULL | 行权价 |
+| option_right | text NOT NULL | 权利 C/CALL 或 P/PUT |
+| period | text NOT NULL | 周期：'1 min' \| '5 mins' \| '1 hour' |
+| bar_time | timestamptz NOT NULL | K 线周期起始时间 |
+| open | double precision | 开 |
+| high | double precision | 高 |
+| low | double precision | 低 |
+| close | double precision | 收 |
+| volume | double precision | 成交量（可选） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, period, bar_time)`。
+- **索引**：建议 `(symbol, expiry, strike, option_right, period, bar_time DESC)`。
+
+### 2.17 表 `wishlist`（阶段 3 R-A3 扩展：自选/待操作标的）
+
+- **用途**：存用户「想操作的标的」列表（Wishlist），可含股票与期权；用于市场数据页拉取报价与 K 线的标的集合，服务重启后不丢失。
+- **写入**：监控端通过 Wishlist CRUD API（POST/GET/DELETE /wishlist）增删改查；可从当前持仓、曾持仓或手动输入添加。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| contract_key | text NOT NULL UNIQUE | 合约唯一键：与 account_positions 一致，symbol\|sec_type\|expiry\|strike\|right |
+| symbol | text | 标的代码 |
+| sec_type | text | STK \| OPT |
+| expiry | text | 期权到期（OPT 时） |
+| strike | double precision | 期权行权价（OPT 时） |
+| option_right | text | 期权权利 C/P（OPT 时） |
+| display_label | text | 可选显示名（如 "NVDA 25/6 C 120"） |
+| source | text | 来源：manual \| position \| execution |
+| created_at | timestamptz | 创建时间（默认 now()） |
+
+- **读取**：GET /wishlist 供市场数据页与报价请求使用；Wishlist 标的的报价写入 **instrument_prices**（与持仓共用），监控端拉取报价后 UPSERT 到 instrument_prices，供前端统一展示。
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
@@ -324,7 +402,7 @@
   - 挂起/恢复状态（阶段 2）：`SELECT * FROM daemon_run_status WHERE id = 1;`
   - 守护进程心跳（阶段 2）：`SELECT * FROM daemon_heartbeat WHERE id = 1;`
   - 账户执行（阶段 3 R-A2）：`SELECT * FROM account_executions ORDER BY exec_time DESC LIMIT 50;`
-  - K 线（阶段 3 R-A3）：`SELECT * FROM ohlc_bars WHERE symbol = 'NVDA' AND period = '1 D' ORDER BY bar_time DESC LIMIT 30;`
+  - K 线（阶段 3 R-A3 扩展）：股票日线 `SELECT * FROM stock_day WHERE symbol = 'NVDA' ORDER BY bar_time DESC LIMIT 30;`；股票分钟线 `SELECT * FROM stock_min WHERE symbol = 'NVDA' AND period = '1 min' ORDER BY bar_time DESC LIMIT 100;`；期权日线/分钟线见 option_day、option_min。
   - 统一设置（阶段 2）：`SELECT * FROM settings WHERE id = 1;`
 
 ### 4.1 连接失败：`no pg_hba.conf entry for host ...`
@@ -358,7 +436,7 @@
 python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**ohlc_bars** 等表（与 `PostgreSQLSink._ensure_tables` 一致；status_current/status_history 不含 account 相关列）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**wishlist** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
@@ -413,7 +491,7 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 
 - **阶段 2**：独立应用**只读** `status_current`、`operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
 - **阶段 3.1（历史统计）**：只读 `status_history`、`operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
-- **阶段 3 R-A2/R-A3（复盘与风控）**：**account_executions**（§2.11）存账户执行/成交，**ohlc_bars**（§2.12）存 K 线；GET /executions、GET /bars 与复盘页读上述表；写入由守护程序或独立脚本在阶段 3 实现时接入。
+- **阶段 3 R-A2/R-A3（复盘与风控）**：**account_executions**（§2.11）存账户执行/成交；**stock_day**、**stock_min**、**option_day**、**option_min**（§2.13–§2.16）存股票与期权 K 线；**wishlist**（§2.17）存自选标的。GET /executions、GET /bars、GET/POST/DELETE /wishlist 与复盘/市场数据页读上述表；写入由监控端或独立脚本在阶段 3 实现时接入。
 - **阶段 4（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
 - **其他**：控制指令、告警、用户配置等若未来落库，均在本文档中新增章节并注明引入阶段。
 
@@ -429,7 +507,8 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 | 挂起/恢复状态 | 新增 §2.5 表 daemon_run_status；监控机写入、交易机轮询，实现挂起/恢复对冲；监控机移除 subprocess/start。 | 阶段 2 |
 | 守护进程心跳 | 新增 §2.6 表 daemon_heartbeat；稳定守护进程每心跳写入，监控端区分守护/对冲并分开显示（RE-6）。 | 阶段 2 |
 | IB 连接状态（RE-7） | daemon_heartbeat 增加 ib_connected、ib_client_id；daemon_control 支持 command=retry_ib；守护程序不假定 IB 已运行，可观测与重试。 | 阶段 2 |
-| 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）、§2.12 表 ohlc_bars（K 线）；供复盘与风控页及 GET /executions、GET /bars 使用。 | 阶段 3 |
+| 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）；§2.12 弃用 ohlc_bars，新增 §2.13–§2.17 表 stock_day、stock_min、option_day、option_min、wishlist（股票/期权 K 线与自选标的）；供复盘与风控页及 GET /executions、GET /bars、Wishlist CRUD、报价落库使用。 | 阶段 3 |
+| 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、wishlist；K 线读写改为分表；Wishlist CRUD 与智能拉取 duration。 | 阶段 3 |
 
 ---
 

@@ -28,6 +28,8 @@ export interface IbPositionRow {
   right?: string
   /** 当前价（来自 instrument_prices.mid/last），用于逐行计算盈亏 */
   price?: number | null
+  /** 合约唯一键 symbol|sec_type|expiry|strike|right（若后端返回） */
+  contract_key?: string | null
 }
 
 /** One account in GET /status accounts (R-A1 multi-account) */
@@ -200,4 +202,18 @@ export interface Bar {
 export interface BarsResponse {
   bars: Bar[]
   message?: string
+}
+
+/** R-A3 扩展：Wishlist 项（自选/待操作标的）。 */
+export interface WishlistItem {
+  id?: number
+  contract_key: string
+  symbol?: string | null
+  sec_type?: string | null
+  expiry?: string | null
+  strike?: number | null
+  option_right?: string | null
+  display_label?: string | null
+  source?: string | null
+  created_at?: number | null
 }

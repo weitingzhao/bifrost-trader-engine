@@ -2,8 +2,9 @@
 """刷新 status 用 PostgreSQL 库表结构（与 PostgreSQLSink._ensure_tables 一致，见 docs/DATABASE.md）。
 
 创建或补齐表：status_current、status_history、operations、daemon_control、daemon_run_status、
-daemon_heartbeat、settings、accounts、account_positions、instrument_prices、account_executions、ohlc_bars。
-账户数据仅存于 accounts / account_positions，status_current、status_history 不含 account 相关列。从项目根目录执行。
+daemon_heartbeat、settings、accounts、account_positions、instrument_prices、account_executions、
+account_execution_commissions、stock_day、stock_min、option_day、option_min、wishlist。
+不再创建 ohlc_bars（已弃用）。从项目根目录执行。
 
 Usage:
   python scripts/refresh_db_schema.py [--config PATH]
@@ -79,7 +80,8 @@ def main() -> int:
         tables_list = (
             "status_current, status_history, operations, daemon_control, "
             "daemon_run_status, daemon_heartbeat, settings, accounts, account_positions, "
-            "instrument_prices, account_executions, account_execution_commissions, ohlc_bars"
+            "instrument_prices, account_executions, account_execution_commissions, "
+            "stock_day, stock_min, option_day, option_min, wishlist"
         )
         print(f"Schema refreshed in database {dbname!r}.")
         print(f"  Tables: {tables_list}")

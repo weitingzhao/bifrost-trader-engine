@@ -342,7 +342,7 @@ def create_app(
         period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 min, 1 D)"),
         limit: int = Query(100, ge=1, le=500),
     ) -> Dict[str, Any]:
-        """K-line/OHLC bars for replay (R-A3). Reads from ohlc_bars; requires symbol."""
+        """K-line/OHLC bars for replay (R-A3). Reads from stock_day (1 D) or stock_min (1 min, 5 mins, 1 hour); requires symbol."""
         sym = (symbol or "").strip()
         if not sym:
             return {"bars": [], "message": "请提供 symbol 参数。"}
@@ -361,6 +361,70 @@ def create_app(
             for r in items
         ]
         return {"bars": bars}
+
+    @app.get("/bars/latest")
+    def get_bars_latest(
+        symbol: Optional[str] = Query(None, description="Symbol"),
+        period: Optional[str] = Query("1 D", description="Bar period"),
+    ) -> Dict[str, Any]:
+        """Return latest bar time (Unix) for symbol+period; for smart duration (first load full, then request from latest)."""
+        sym = (symbol or "").strip()
+        if not sym:
+            return {"latest": None, "message": "请提供 symbol 参数。"}
+        per = (period or "1 D").strip()
+        t = reader.get_bars_latest(symbol=sym, period=per)
+        return {"latest": t}
+
+    @app.get("/wishlist")
+    def get_wishlist() -> Dict[str, Any]:
+        """R-A3 扩展：返回 Wishlist 列表（自选/待操作标的）。"""
+        items = reader.get_wishlist()
+        return {"items": items}
+
+    class WishlistBody(BaseModel):
+        contract_key: str
+        symbol: Optional[str] = None
+        sec_type: Optional[str] = None
+        expiry: Optional[str] = None
+        strike: Optional[float] = None
+        option_right: Optional[str] = None
+        display_label: Optional[str] = None
+        source: Optional[str] = None
+
+    @app.post("/wishlist")
+    def post_wishlist(body: WishlistBody = Body(...)) -> Dict[str, Any]:
+        """R-A3 扩展：添加或更新 Wishlist 项（按 contract_key 唯一）。"""
+        if not control_via_db:
+            logger.info("POST /wishlist rejected: 需要 status.postgres 配置以写入 wishlist")
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 wishlist。"}
+        ok = reader.add_wishlist(
+            contract_key=body.contract_key,
+            symbol=body.symbol,
+            sec_type=body.sec_type,
+            expiry=body.expiry,
+            strike=body.strike,
+            option_right=body.option_right,
+            display_label=body.display_label,
+            source=body.source or "manual",
+        )
+        if ok:
+            return {"ok": True, "message": "已添加或更新 Wishlist 项。"}
+        logger.warning("POST /wishlist 写入失败")
+        return {"ok": False, "error": "写入 wishlist 失败。"}
+
+    @app.delete("/wishlist")
+    def delete_wishlist(
+        contract_key: Optional[str] = Query(None, description="Delete by contract_key"),
+        id: Optional[int] = Query(None, description="Delete by id"),
+    ) -> Dict[str, Any]:
+        """R-A3 扩展：删除一条 Wishlist 项（传 contract_key 或 id 之一）。"""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以修改 wishlist。"}
+        if contract_key is None and id is None:
+            return {"ok": False, "error": "请提供 contract_key 或 id 参数。"}
+        if reader.delete_wishlist(contract_key=contract_key, id_=id):
+            return {"ok": True, "message": "已删除。"}
+        return {"ok": False, "error": "删除失败（未找到或数据库错误）。"}
 
     # R-A3: 复盘 K 线由 API 直接连 IB 拉取并写库，不经过 daemon（历史数据一次性拉取更合适）
     # R-A2: 执行记录同样支持 API 直接连 IB 拉取并写库，无需 daemon
@@ -413,14 +477,15 @@ def create_app(
     async def post_bars_fetch(
         symbol: Optional[str] = Query(..., description="Symbol, e.g. NVDA"),
         period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 D, 1 min)"),
-        duration: Optional[str] = Query("30 D", description="IB durationStr (e.g. 30 D, 5 D)"),
+        duration: Optional[str] = Query("30 D", description="IB durationStr (e.g. 30 D, 5 D)；smart_duration 为 true 时可能被覆盖"),
+        smart_duration: bool = Query(False, description="为 true 时根据最新一根 K 线距今天数计算 duration"),
     ) -> Dict[str, Any]:
-        """R-A3: 通过监控端 MarketIbClient 拉取 K 线并写入 ohlc_bars，返回拉取的 bars。"""
+        """R-A3: 通过监控端 MarketIbClient 拉取 K 线并写入 stock_day/stock_min，返回拉取的 bars。"""
         sym = (symbol or "").strip()
         if not sym:
             return {"ok": False, "error": "请提供 symbol 参数。", "bars": [], "count": 0}
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 ohlc_bars。", "bars": [], "count": 0}
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 K 线表。", "bars": [], "count": 0}
         if not getattr(app.state, "monitor_enabled", True):
             return {"ok": False, "error": "监控已停止，无法拉取 K 线。", "bars": [], "count": 0}
         client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
@@ -428,6 +493,18 @@ def create_app(
             return {"ok": False, "error": "监控端 MarketIbClient 未初始化。", "bars": [], "count": 0}
         per = (period or "1 D").strip()
         dur = (duration or "30 D").strip()
+        if smart_duration:
+            latest_ts = reader.get_bars_latest(symbol=sym, period=per)
+            if latest_ts is not None:
+                from datetime import datetime, timezone
+                now = datetime.now(tz=timezone.utc).timestamp()
+                gap_sec = max(0, now - latest_ts)
+                if per.upper() == "1 D":
+                    gap_days = min(max(1, int(gap_sec / 86400) + 1), 720)
+                    dur = f"{gap_days} D"
+                else:
+                    gap_days = min(max(1, int(gap_sec / 86400) + 1), 7)
+                    dur = f"{gap_days} D"
 
         try:
             await client.ensure_connected()
@@ -439,7 +516,7 @@ def create_app(
             return {"ok": True, "message": "IB 未返回 K 线数据。", "bars": [], "count": 0}
         rows = [dict(b, symbol=sym, period=per) for b in raw]
         if not write_ohlc_bars_to_db(control_via_db, rows):
-            return {"ok": False, "error": "写入 ohlc_bars 失败。", "bars": [], "count": 0}
+            return {"ok": False, "error": "写入 K 线表失败。", "bars": [], "count": 0}
         bars = [
             {
                 "time": float(b.get("bar_time") or 0),

@@ -267,30 +267,161 @@ class StatusReader:
         period: str = "1 D",
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
-        """Return rows from ohlc_bars (R-A3). Newest first. bar_time as Unix time for API."""
+        """Return rows from stock_day (1 D) or stock_min (1 min, 5 mins, 1 hour). Newest first. bar_time as Unix time for API."""
         if not self._connect():
             return []
         if not symbol or not symbol.strip():
             return []
+        per = (period or "1 D").strip()
+        table = "stock_day" if per.upper() == "1 D" else "stock_min"
         try:
             with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT symbol, period, extract(epoch from bar_time) AS time,
-                           open, high, low, close, volume
-                    FROM ohlc_bars
-                    WHERE symbol = %s AND period = %s
-                    ORDER BY bar_time DESC NULLS LAST
-                    LIMIT %s
-                    """,
-                    (symbol.strip(), period.strip(), limit),
-                )
+                if table == "stock_day":
+                    cur.execute(
+                        """
+                        SELECT symbol, '1 D' AS period, extract(epoch from bar_time) AS time,
+                               open, high, low, close, volume
+                        FROM stock_day
+                        WHERE symbol = %s
+                        ORDER BY bar_time DESC NULLS LAST
+                        LIMIT %s
+                        """,
+                        (symbol.strip(), limit),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT symbol, period, extract(epoch from bar_time) AS time,
+                               open, high, low, close, volume
+                        FROM stock_min
+                        WHERE symbol = %s AND period = %s
+                        ORDER BY bar_time DESC NULLS LAST
+                        LIMIT %s
+                        """,
+                        (symbol.strip(), per, limit),
+                    )
                 rows = cur.fetchall()
             return [dict(r) for r in rows]
         except Exception as e:
             logger.debug("get_bars failed: %s", e)
             self._conn = None
             return []
+
+    def get_bars_latest(
+        self,
+        symbol: Optional[str] = None,
+        period: str = "1 D",
+    ) -> Optional[float]:
+        """Return Unix time of the latest bar for symbol+period (from stock_day or stock_min), or None if no data. For smart duration: request more history when latest is old."""
+        if not self._connect():
+            return None
+        if not symbol or not symbol.strip():
+            return None
+        per = (period or "1 D").strip()
+        table = "stock_day" if per.upper() == "1 D" else "stock_min"
+        try:
+            with self._conn.cursor() as cur:
+                if table == "stock_day":
+                    cur.execute(
+                        "SELECT extract(epoch from bar_time) AS t FROM stock_day WHERE symbol = %s ORDER BY bar_time DESC LIMIT 1",
+                        (symbol.strip(),),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT extract(epoch from bar_time) AS t FROM stock_min WHERE symbol = %s AND period = %s ORDER BY bar_time DESC LIMIT 1",
+                        (symbol.strip(), per),
+                    )
+                row = cur.fetchone()
+            return float(row[0]) if row and row[0] is not None else None
+        except Exception as e:
+            logger.debug("get_bars_latest failed: %s", e)
+            self._conn = None
+            return None
+
+    def get_wishlist(self) -> List[Dict[str, Any]]:
+        """Return all wishlist rows (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, created_at)."""
+        if not self._connect():
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source,
+                           extract(epoch from created_at) AS created_at
+                    FROM wishlist ORDER BY created_at DESC
+                    """
+                )
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.debug("get_wishlist failed: %s", e)
+            self._conn = None
+            return []
+
+    def add_wishlist(
+        self,
+        contract_key: str,
+        symbol: Optional[str] = None,
+        sec_type: Optional[str] = None,
+        expiry: Optional[str] = None,
+        strike: Optional[float] = None,
+        option_right: Optional[str] = None,
+        display_label: Optional[str] = None,
+        source: str = "manual",
+    ) -> bool:
+        """Insert or replace wishlist row by contract_key. Returns True on success.
+        If contract_key contains no '|', treat as stock symbol and normalize to SYMBOL|STK|||."""
+        raw = (contract_key or "").strip()
+        if not raw:
+            return False
+        if "|" not in raw:
+            contract_key = f"{raw}|STK|||"
+            if symbol is None:
+                symbol = raw
+            if sec_type is None or sec_type == "":
+                sec_type = "STK"
+        else:
+            contract_key = raw
+        if not self._connect():
+            logger.warning("add_wishlist: DB connect failed")
+            return False
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO wishlist (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (contract_key) DO UPDATE SET
+                        symbol = EXCLUDED.symbol, sec_type = EXCLUDED.sec_type, expiry = EXCLUDED.expiry,
+                        strike = EXCLUDED.strike, option_right = EXCLUDED.option_right,
+                        display_label = EXCLUDED.display_label, source = EXCLUDED.source
+                    """,
+                    (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source),
+                )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("add_wishlist failed: %s", e)
+            self._conn = None
+            return False
+
+    def delete_wishlist(self, contract_key: Optional[str] = None, id_: Optional[int] = None) -> bool:
+        """Delete one wishlist entry by contract_key or id. Returns True on success."""
+        if not self._connect():
+            return False
+        try:
+            with self._conn.cursor() as cur:
+                if id_ is not None:
+                    cur.execute("DELETE FROM wishlist WHERE id = %s", (id_,))
+                elif contract_key and contract_key.strip():
+                    cur.execute("DELETE FROM wishlist WHERE contract_key = %s", (contract_key.strip(),))
+                else:
+                    return False
+            self._conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("delete_wishlist failed: %s", e)
+            self._conn = None
+            return False
 
     def get_risk_summary(self) -> Dict[str, Any]:
         """Return risk/post-mortem summary for 复盘与风控 page: status_current (daily_hedge_count, daily_pnl) + operations count in last 24h + block_reasons. R-M7."""
@@ -382,6 +513,7 @@ class StatusReader:
                             "currency": p.get("currency") or "",
                             "position": p.get("position"),
                             "avgCost": p.get("avg_cost"),
+                            "contract_key": p.get("contract_key"),
                         }
                         if p.get("expiry") is not None:
                             pos_dict["lastTradeDateOrContractMonth"] = p.get("expiry")
@@ -914,7 +1046,7 @@ def delete_one_execution(status_config: dict, id_: int) -> bool:
 
 
 def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bool:
-    """R-A3: 写入 K 线到 ohlc_bars（供 API 直接拉取后落库）。按 (symbol, period, bar_time) UPSERT。Returns True on success."""
+    """R-A3 扩展：写入股票 K 线到 stock_day（1 D）或 stock_min（1 min, 5 mins, 1 hour）。按 (symbol, bar_time) 或 (symbol, period, bar_time) UPSERT。Returns True on success."""
     if not rows or not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     try:
@@ -923,10 +1055,10 @@ def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bo
         try:
             with conn.cursor() as cur:
                 for r in rows:
-                    symbol = r.get("symbol") or ""
-                    period = r.get("period") or "1 D"
+                    symbol = (r.get("symbol") or "").strip()
+                    period = (r.get("period") or "1 D").strip()
                     bar_time = r.get("bar_time")
-                    if bar_time is None:
+                    if bar_time is None or not symbol:
                         continue
                     if isinstance(bar_time, (int, float)):
                         bar_dt = datetime.fromtimestamp(float(bar_time), tz=timezone.utc)
@@ -937,18 +1069,30 @@ def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bo
                     low = r.get("low")
                     close = r.get("close")
                     volume = r.get("volume")
-                    cur.execute(
-                        """
-                        INSERT INTO ohlc_bars (symbol, period, bar_time, open, high, low, close, volume)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (symbol, period, bar_time)
-                        DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
-                                      close = EXCLUDED.close, volume = EXCLUDED.volume
-                        """,
-                        (symbol, period, bar_dt, open_, high, low, close, volume),
-                    )
+                    if period.upper() == "1 D":
+                        cur.execute(
+                            """
+                            INSERT INTO stock_day (symbol, bar_time, open, high, low, close, volume)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (symbol, bar_time)
+                            DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                                          close = EXCLUDED.close, volume = EXCLUDED.volume
+                            """,
+                            (symbol, bar_dt, open_, high, low, close, volume),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO stock_min (symbol, period, bar_time, open, high, low, close, volume)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (symbol, period, bar_time)
+                            DO UPDATE SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                                          close = EXCLUDED.close, volume = EXCLUDED.volume
+                            """,
+                            (symbol, period, bar_dt, open_, high, low, close, volume),
+                        )
             conn.commit()
-            logger.info("[R-A3] write_ohlc_bars_to_db: wrote %s rows", len(rows))
+            logger.info("[R-A3] write_ohlc_bars_to_db: wrote %s rows to stock_day/stock_min", len(rows))
             return True
         finally:
             conn.close()

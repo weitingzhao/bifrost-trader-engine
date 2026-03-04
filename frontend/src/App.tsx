@@ -10,6 +10,7 @@ import { IbAccountsPage } from './pages/IbAccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
 import { PositionPnlPage } from './pages/PositionPnlPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { WishlistPage } from './pages/WishlistPage'
 import './App.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
@@ -27,7 +28,7 @@ function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
 }
 
-type TabId = 'monitor' | 'ib' | 'replay' | 'market' | 'settings'
+type TabId = 'monitor' | 'ib' | 'replay' | 'market' | 'wishlist' | 'settings'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('monitor')
@@ -38,6 +39,8 @@ export default function App() {
   const [ibAccountIndex, setIbAccountIndex] = useState(0)
   const [accountsDisplay, setAccountsDisplay] = useState<IbAccountSnapshot[] | null>(null)
   const [ibAccountsRefreshing, setIbAccountsRefreshing] = useState(false)
+  /** 刷新账户后的简短反馈（成功/失败/超时），几秒后自动清除 */
+  const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
 
   useEffect(() => {
     applyTheme(theme)
@@ -91,18 +94,39 @@ export default function App() {
     return () => clearInterval(t)
   }, [loadStatus])
 
+  useEffect(() => {
+    if (accountsRefreshFeedback == null) return
+    const t = setTimeout(() => setAccountsRefreshFeedback(null), 5000)
+    return () => clearTimeout(t)
+  }, [accountsRefreshFeedback])
+
   const onRefreshAccounts = useCallback(async () => {
     setIbAccountsRefreshing(true)
+    setAccountsRefreshFeedback(null)
     const requestedAt = Date.now() / 1000
     try {
-      await postRefreshAccounts()
+      const res = await postRefreshAccounts()
+      if (!res.ok) {
+        setAccountsRefreshFeedback(res.error || '刷新请求失败')
+        return
+      }
+      let refreshed = false
       const deadline = Date.now() + 30000
       while (Date.now() < deadline) {
         const j = await loadStatus()
         if (j?.accounts != null) setAccountsDisplay(j.accounts ? [...j.accounts] : [])
-        if (j?.accounts_fetched_at != null && j.accounts_fetched_at > requestedAt) break
+        if (j?.accounts_fetched_at != null && j.accounts_fetched_at > requestedAt) {
+          setAccountsRefreshFeedback('已刷新')
+          refreshed = true
+          break
+        }
         await new Promise((r) => setTimeout(r, 2000))
       }
+      if (!refreshed) {
+        setAccountsRefreshFeedback('请求已发出，但未检测到数据更新，请稍后再看')
+      }
+    } catch (e) {
+      setAccountsRefreshFeedback(e instanceof Error ? e.message : '网络或服务异常')
     } finally {
       setIbAccountsRefreshing(false)
     }
@@ -124,10 +148,11 @@ export default function App() {
   const apiLamp = apiReachable ? 'green' : 'red'
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'monitor', label: '系统状态', lamp: systemLamp },
-    { id: 'ib', label: 'IB 账户' },
-    { id: 'replay', label: '头寸盈亏' },
-    { id: 'market', label: '市场数据' },
+    { id: 'monitor', label: '系统', lamp: systemLamp },
+    { id: 'ib', label: '账户' },
+    { id: 'replay', label: '头寸' },
+    { id: 'market', label: '市场' },
+    { id: 'wishlist', label: '自选' },
     { id: 'settings', label: '设置' },
   ]
 
@@ -136,7 +161,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="守护程序、IB 账户、头寸盈亏、市场数据、设置">
+          <nav className="app-tabs" aria-label="系统、账户、头寸、市场、自选、设置">
             {tabList.map(({ id, label, lamp }) => (
               <button
                 key={id}
@@ -187,6 +212,7 @@ export default function App() {
           setIbAccountIndex={setIbAccountIndex}
           ibAccountsRefreshing={ibAccountsRefreshing}
           onRefreshAccounts={onRefreshAccounts}
+          refreshFeedback={accountsRefreshFeedback}
         />
       )}
 
@@ -196,6 +222,10 @@ export default function App() {
 
       {activeTab === 'market' && (
         <MarketDataPage status={status} />
+      )}
+
+      {activeTab === 'wishlist' && (
+        <WishlistPage status={status} />
       )}
 
       {activeTab === 'settings' && (

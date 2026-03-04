@@ -2,6 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar, IbAccountSnapshot, StatusResponse } from '../types'
 import { fetchBars, postBarsFetch } from '../api'
 
+const BAR_PERIODS = [
+  { value: '1 D', label: '日线' },
+  { value: '1 min', label: '1 分钟' },
+  { value: '5 mins', label: '5 分钟' },
+  { value: '1 hour', label: '1 小时' },
+] as const
+
 function fmtTs(ts: number | null | undefined): string {
   if (ts == null) return '--'
   return new Date(ts * 1000).toLocaleString()
@@ -21,7 +28,7 @@ interface MarketDataPageProps {
   status: StatusResponse | null
 }
 
-/** 从持仓汇总可拉取 K 线的标的候选（后续可扩展为执行记录、风控标的等） */
+/** 从持仓汇总可拉取 K 线的标的候选（后续可合并 Wishlist） */
 function useBarCandidateSymbols(status: StatusResponse | null): string[] {
   return useMemo(() => {
     const fromAccounts = (status?.accounts || []).flatMap((acc: IbAccountSnapshot) =>
@@ -36,8 +43,8 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
   const [barsSyncing, setBarsSyncing] = useState(false)
   const [barsLoading, setBarsLoading] = useState(false)
   const [barSymbol, setBarSymbol] = useState('')
-  const [barPeriod] = useState('1 D')
-  const [barDuration] = useState('30 D')
+  const [barPeriod, setBarPeriod] = useState<string>('1 D')
+  const [smartDuration, setSmartDuration] = useState(true)
 
   const candidateSymbols = useBarCandidateSymbols(status)
 
@@ -58,17 +65,19 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
     if (candidateSymbols.length > 0 && !barSymbol.trim()) setBarSymbol(candidateSymbols[0])
   }, [candidateSymbols.join(','), barSymbol])
 
+  const defaultDuration = barPeriod === '1 D' ? '30 D' : '5 D'
+
   return (
     <div className="card process-section market-data-page">
       <h2>市场数据</h2>
       <p className="section-desc">
-        统一管理 K 线等市场数据，按标的拉取并写入数据库，供复盘、风控等使用。后续可在此页扩展更多数据源与类型。
+        统一管理 K 线等市场数据，按标的拉取并写入数据库（stock_day / stock_min），供复盘、风控等使用。
       </p>
 
       <section className="replay-section" aria-labelledby="bars-head">
-        <h3 id="bars-head">K 线（日线）</h3>
+        <h3 id="bars-head">K 线</h3>
         <p className="section-hint">
-          按标的拉取日线，供复盘时结合成交时间查看当时行情。可输入标的代码，或从下方「当前持仓汇总」候选中选择。
+          按标的与周期拉取，供复盘时结合成交时间查看当时行情。可输入标的代码，或从「当前持仓汇总」候选中选择。
         </p>
         <div className="replay-bar-symbol-row">
           <label htmlFor="market-bar-symbol" className="replay-bar-symbol-label">标的</label>
@@ -85,6 +94,27 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
             <span className="replay-sync-hint">当前持仓汇总可拉取：{candidateSymbols.join(', ')}</span>
           )}
         </div>
+        <div className="replay-bar-symbol-row">
+          <label className="replay-bar-symbol-label">周期</label>
+          <select
+            value={barPeriod}
+            onChange={e => setBarPeriod(e.target.value)}
+            aria-label="K 线周期"
+          >
+            {BAR_PERIODS.map(p => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+          <label className="replay-sync-hint" style={{ marginLeft: '1rem' }}>
+            <input
+              type="checkbox"
+              checked={smartDuration}
+              onChange={e => setSmartDuration(e.target.checked)}
+              aria-label="智能拉取"
+            />
+            智能拉取（根据最新 K 线只补缺失区间）
+          </label>
+        </div>
         <div className="replay-toolbar">
           <button
             type="button"
@@ -94,7 +124,7 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
               const symbol = barSymbol.trim() || candidateSymbols[0] || ''
               if (!symbol) return
               setBarsSyncing(true)
-              const res = await postBarsFetch(symbol, barPeriod, barDuration)
+              const res = await postBarsFetch(symbol, barPeriod, defaultDuration, smartDuration)
               setBarsSyncing(false)
               if (res.ok && res.bars) setBars(res.bars)
               else if (res.ok) await loadBarsFromApi(symbol)
