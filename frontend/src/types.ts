@@ -53,6 +53,19 @@ export interface StatusResponse {
   /** 账户/持仓数据最后从 IB 拉取并写入 DB 的时间（Unix 秒），供监控页显示数据新鲜度 */
   accounts_fetched_at?: number | null
   ib_config?: IbConfig | null
+  /** 监控端 IB 状态：AccountIbClient/MarketIbClient 的连接情况与错误信息 */
+  monitor_ib_status?: {
+    account?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
+    market?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
+  } | null
+  /** 监控端是否启用（停止监控后需重新启动监控服务进程） */
+  monitor_enabled?: boolean
+  /** 监控服务健康：能拿到 /status 或 GET /health 200 即表示进程存活 */
+  monitor_health?: string
+  /** 监控服务自检结果与原因（与守护类似的红绿灯语义） */
+  monitor_self_check?: string
+  monitor_lamp?: 'green' | 'yellow' | 'red'
+  monitor_block_reasons?: string[]
 }
 
 export interface DaemonHeartbeat {

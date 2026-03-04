@@ -113,7 +113,7 @@ export default function App() {
   const apiLamp = apiReachable ? 'green' : 'red'
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'monitor', label: '守护程序', lamp: daemonLamp },
+    { id: 'monitor', label: '系统状态', lamp: daemonLamp },
     { id: 'ib', label: 'IB 账户' },
     { id: 'replay', label: '头寸盈亏', lamp: hedgeLamp },
     { id: 'settings', label: '设置' },

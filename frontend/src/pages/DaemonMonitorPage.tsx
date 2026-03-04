@@ -1,12 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
-import {
-  postSuspend,
-  postResume,
-  postFlatten,
-  postRetryIb,
-  postStop,
-} from '../api'
+import { postSuspend, postResume, postFlatten, postRetryIb, postStop, postMonitorStop, postMonitorConnect, fetchHealth } from '../api'
 
 function fmtTs(ts: number | null | undefined): string {
   if (ts == null) return '--'
@@ -49,6 +43,17 @@ const DAEMON_SELF_CHECK_LABELS: Record<string, string> = {
   blocked: '异常',
 }
 
+const MONITOR_SELF_CHECK_LABELS: Record<string, string> = {
+  ok: '正常',
+  degraded: '降级',
+  blocked: '异常',
+}
+
+const MONITOR_REASON_LABELS: Record<string, string> = {
+  monitor_stopped: '监控服务已停止',
+  monitor_ib_error: '监控端 IB 连接异常（账户或行情）',
+}
+
 const DAEMON_STATE_LABELS: Record<string, string> = {
   running: '运行中',
   running_suspended: '运行中（对冲已挂起）',
@@ -78,6 +83,20 @@ function setMsg(
   setter({ text, isErr })
 }
 
+const MSG_AUTO_CLEAR_MS = 5000
+
+function scheduleMsgClear(
+  setter: (v: { text: string; isErr: boolean }) => void,
+  timeoutRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
+  delayMs: number = MSG_AUTO_CLEAR_MS
+) {
+  if (timeoutRef.current != null) clearTimeout(timeoutRef.current)
+  timeoutRef.current = setTimeout(() => {
+    setter({ text: '', isErr: false })
+    timeoutRef.current = null
+  }, delayMs)
+}
+
 export interface DaemonMonitorPageProps {
   status: StatusResponse | null
   operations: Operation[]
@@ -89,7 +108,13 @@ export interface DaemonMonitorPageProps {
 export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateToSettings }: DaemonMonitorPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
+  const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
   const [tick, setTick] = useState(0)
+  const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
+  const [healthTick, setHealthTick] = useState(0)
+  const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const monitorCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const j = status
   const hb = j?.daemon_heartbeat
@@ -97,6 +122,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const intervalSec = hbForCountdown?.heartbeat_interval_sec ?? 10
   const nowSec = Date.now() / 1000
   void tick
+  void healthTick
   const secondsUntilNextHeartbeat =
     hbForCountdown?.daemon_alive && hbForCountdown?.last_ts != null
       ? Math.max(0, Math.ceil(hbForCountdown.last_ts + intervalSec - nowSec))
@@ -106,10 +132,38 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const showRetryIb = hb?.daemon_alive === true && !ibConnected
 
   useEffect(() => {
+    return () => {
+      if (ctrlMsgClearRef.current != null) clearTimeout(ctrlMsgClearRef.current)
+      if (hedgeCtrlMsgClearRef.current != null) clearTimeout(hedgeCtrlMsgClearRef.current)
+      if (monitorCtrlMsgClearRef.current != null) clearTimeout(monitorCtrlMsgClearRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!hbForCountdown?.daemon_alive) return
     const id = setInterval(() => setTick((n) => n + 1), 1000)
     return () => clearInterval(id)
   }, [hbForCountdown?.daemon_alive])
+
+  useEffect(() => {
+    fetchHealth()
+      .then(() => setLastHealthAt(Date.now() / 1000))
+      .catch(() => setLastHealthAt(null))
+  }, [])
+
+  useEffect(() => {
+    if (lastHealthAt == null) return
+    const id = setInterval(() => {
+      const now = Date.now() / 1000
+      setHealthTick((n) => n + 1)
+      if (now - lastHealthAt >= 60) {
+        fetchHealth()
+          .then(() => setLastHealthAt(Date.now() / 1000))
+          .catch(() => setLastHealthAt(null))
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [lastHealthAt])
 
   let daemonLabel = '未运行（或单进程模式）'
   let daemonHint = '在交易机执行 run_engine.py 后此处会显示运行中'
@@ -143,6 +197,21 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
 
   const daemonLamp = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'none'
   const hedgeLamp = (j?.status_lamp as 'green' | 'yellow' | 'red') || 'none'
+  const monitorEnabled = j?.monitor_enabled !== false
+  const monitorStatus = (j?.monitor_ib_status as any) || {}
+  const monitorAccount = monitorStatus.account as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorMarket = monitorStatus.market as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorHasError = Boolean(monitorAccount?.last_error || monitorMarket?.last_error)
+  const monitorLamp =
+    !monitorEnabled
+      ? 'red'
+      : monitorHasError
+        ? 'yellow'
+        : monitorAccount && !monitorAccount.connected
+          ? 'yellow'
+          : (monitorAccount?.connected || monitorMarket?.connected)
+            ? 'green'
+            : 'yellow'
   const suspendedInReasons = j?.block_reasons?.includes('trading_suspended') ?? false
   const daemonSelfCheckText =
     DAEMON_SELF_CHECK_LABELS[j?.daemon_self_check ?? ''] ?? j?.daemon_self_check ?? '--'
@@ -154,6 +223,20 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const hedgeBlockReasons = (j?.block_reasons ?? [])
     .map((r) => HEDGE_REASON_LABELS[r] ?? r)
     .join('；') || '无'
+
+  const monitorSelfCheckText =
+    MONITOR_SELF_CHECK_LABELS[j?.monitor_self_check ?? ''] ?? j?.monitor_self_check ?? '--'
+  const monitorBlockReasons = (j?.monitor_block_reasons ?? [])
+    .map((r) => MONITOR_REASON_LABELS[r] ?? r)
+    .join('；') || '无'
+
+  const monitorIbGroupLamp =
+    !monitorEnabled ? 'none' : (monitorAccount?.connected && monitorMarket?.connected) ? 'green' : (monitorAccount?.connected || monitorMarket?.connected) ? 'yellow' : 'red'
+
+  const healthElapsedSec = lastHealthAt != null ? Math.floor(Date.now() / 1000 - lastHealthAt) : null
+  const healthCountdownSec =
+    lastHealthAt != null ? Math.max(0, 60 - (healthElapsedSec! % 60)) : null
+  const apiHealthLamp = lastHealthAt != null ? 'green' : 'red'
 
   const runStatusLabel = suspended ? '已挂起（不执行新对冲）' : '运行中'
   const heartbeatGroupLamp = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
@@ -184,6 +267,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       !res.ok
     )
     if (res.ok) loadStatus()
+    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
   }
 
   const onResume = async () => {
@@ -195,6 +279,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       !res.ok
     )
     if (res.ok) loadStatus()
+    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
   }
 
   const onRetryIb = async () => {
@@ -206,6 +291,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       !res.ok
     )
     if (res.ok) loadStatus()
+    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
   }
 
   const onFlatten = async () => {
@@ -216,6 +302,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       res.ok ? '已发送平敞口指令，由对冲程序消费并执行。' : (res.error ?? ''),
       !res.ok
     )
+    scheduleMsgClear(setHedgeCtrlMsg, hedgeCtrlMsgClearRef)
   }
 
   const onStop = async () => {
@@ -227,17 +314,37 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       !res.ok
     )
     if (res.ok) loadStatus()
+    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
+  }
+
+  const onMonitorStop = async () => {
+    setMsg(setMonitorCtrlMsg, '正在停止监控服务…', false)
+    const res = await postMonitorStop()
+    setMsg(
+      setMonitorCtrlMsg,
+      res.ok ? '监控服务已停止（不再向 IB 发起新请求）。' : (res.error ?? ''),
+      !res.ok
+    )
+    if (res.ok) loadStatus()
+    scheduleMsgClear(setMonitorCtrlMsg, monitorCtrlMsgClearRef)
+  }
+
+  const onMonitorConnect = async () => {
+    setMsg(setMonitorCtrlMsg, '正在建立监控端 IB 连接…', false)
+    const res = await postMonitorConnect()
+    setMsg(
+      setMonitorCtrlMsg,
+      res.ok ? '已请求连接监控端 IB（账户 + 行情），稍后在状态栏查看连接结果。' : (res.error ?? ''),
+      !res.ok,
+    )
+    if (res.ok) loadStatus()
+    scheduleMsgClear(setMonitorCtrlMsg, monitorCtrlMsgClearRef)
   }
 
   return (
     <>
       <div className="card process-section">
-        <h2>
-          守护程序{' '}
-          <span className="section-desc">
-            （对冲可运行的前提；业务无关，有且仅有一个）
-          </span>
-        </h2>
+        <h2>守护程序状态</h2>
         <div className="daemon-header">
           <div className="daemon-header-main">
             <div className="row" style={{ marginBottom: '0.35rem' }}>
@@ -245,11 +352,8 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
               <div>
                 <strong>自检: {j ? daemonSelfCheckText : '获取失败'}</strong>
                 <div className="block-reasons">{j ? daemonBlockReasons : ''}</div>
+                <span className="process-summary">状态: {daemonLabel}</span>
               </div>
-            </div>
-            <div className="daemon-header-meta">
-              <span className="process-summary">状态: {daemonLabel}</span>
-              <span className="daemon-start-hint" title="启动守护程序请在交易机执行该命令">启动: python scripts/run_engine.py config/config.yaml</span>
             </div>
           </div>
           <button
@@ -365,9 +469,119 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           </div>
         </div>
 
-        <div className={`msg ${ctrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
-          {ctrlMsg.text}
+        {ctrlMsg.text ? (
+          <div className={`msg ${ctrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
+            {ctrlMsg.text}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="card process-section">
+        <h2>监控服务状态</h2>
+        <div className="daemon-header">
+          <div className="daemon-header-main">
+            <div className="row" style={{ marginBottom: '0.35rem' }}>
+              <div className={`lamp ${monitorLamp}`} title="监控服务状态灯" />
+              <div>
+                <strong>自检: {j ? monitorSelfCheckText : '获取失败'}</strong>
+                <div className="block-reasons">{j ? monitorBlockReasons : '无'}</div>
+                <span className="process-summary">当前：{monitorEnabled ? '运行中' : '已停止'}</span>
+              </div>
+            </div>
+          </div>
+          <div className="monitor-header-actions">
+            <button
+              type="button"
+              className="btn-stop"
+              disabled={!monitorEnabled}
+              title={monitorEnabled ? '停止监控端与 IB 的交互，并断开长连接' : '当前已停止'}
+              onClick={onMonitorStop}
+            >
+              停止监控
+            </button>
+          </div>
         </div>
+
+        <div className="daemon-groups">
+          <div className="daemon-group">
+            <div className="daemon-group-header">
+              <div className={`lamp lamp-sm ${apiHealthLamp}`} title="API 服务（Health 可访问为绿，否则红）" />
+              <span className="daemon-group-title">API 服务</span>
+            </div>
+            <div className="daemon-group-body">
+              <p className="section-hint">
+                <strong>自检: {j ? monitorSelfCheckText : '获取失败'}</strong>
+              </p>
+              <div className="block-reasons">{j ? monitorBlockReasons : '—'}</div>
+              <p className="section-hint">
+                当前：<strong>{monitorEnabled ? '运行中' : '已停止'}</strong>
+              </p>
+              {healthCountdownSec != null ? (
+                <p className="section-hint countdown-line">
+                  下次健康检查: <span className="countdown-num">{healthCountdownSec}</span> 秒
+                </p>
+              ) : (
+                <p className="section-hint">健康检查：—</p>
+              )}
+            </div>
+          </div>
+          <div className="daemon-group">
+            <div className="daemon-group-header">
+              <div className={`lamp lamp-sm ${monitorIbGroupLamp}`} title="监控端 IB 连接状态" />
+              <span className="daemon-group-title">IB 连接</span>
+            </div>
+            <div className="daemon-group-body">
+              <p className="section-hint countdown-line">
+                账户 IB 连接（AccountIbClient）：
+                {monitorAccount?.connected ? (
+                  <>
+                    <span className="countdown-num">已连接</span>
+                    {' '}(
+                    Client ID <span className="countdown-num">{monitorAccount?.client_id ?? '—'}</span>
+                    )
+                  </>
+                ) : (
+                  '未连接'
+                )}
+              </p>
+              <p className="section-hint countdown-line">
+                行情 IB 连接（MarketIbClient）：
+                {monitorMarket?.connected ? (
+                  <>
+                    <span className="countdown-num">已连接</span>
+                    {' '}(
+                    Client ID <span className="countdown-num">{monitorMarket?.client_id ?? '—'}</span>
+                    )
+                  </>
+                ) : (
+                  '未连接'
+                )}
+              </p>
+              {monitorAccount?.last_error && (
+                <p className="section-hint">账户客户端错误: {monitorAccount.last_error}</p>
+              )}
+              {monitorMarket?.last_error && (
+                <p className="section-hint">行情客户端错误: {monitorMarket.last_error}</p>
+              )}
+              <div className="controls" style={{ marginTop: '0.25rem' }}>
+                <button
+                  type="button"
+                  className="btn-resume"
+                  disabled={!monitorEnabled}
+                  title={monitorEnabled ? '显式建立监控端与 IB 的长连接（AccountIbClient + MarketIbClient）' : '监控已停止，无法连接'}
+                  onClick={onMonitorConnect}
+                >
+                  打开 IB 账户连接
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {monitorCtrlMsg.text ? (
+          <div className={`msg ${monitorCtrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
+            {monitorCtrlMsg.text}
+          </div>
+        ) : null}
       </div>
 
       <div className="card process-section">
@@ -404,9 +618,11 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             一键平敞口
           </button>
         </div>
-        <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'}`}>
-          {hedgeCtrlMsg.text}
-        </div>
+        {hedgeCtrlMsg.text ? (
+          <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'}`}>
+            {hedgeCtrlMsg.text}
+          </div>
+        ) : null}
       </div>
 
       <div className="card card-operations">

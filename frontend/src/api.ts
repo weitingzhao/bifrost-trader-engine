@@ -8,6 +8,13 @@ export async function fetchStatus(): Promise<StatusResponse | null> {
   return r.json()
 }
 
+/** 监控服务健康检查：GET /health，200 表示进程存活；返回 ts 为服务端响应时刻的 Unix 秒 */
+export async function fetchHealth(): Promise<{ status: string; service: string; ts: number }> {
+  const r = await fetch(`${API}/health`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
 export async function fetchOperations(limit = 20): Promise<OperationsResponse> {
   const r = await fetch(`${API}/operations?limit=${limit}`)
   if (!r.ok) throw new Error(r.statusText)
@@ -116,6 +123,29 @@ export async function postIbConfig(
   })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+export async function postMonitorStop(): Promise<ControlResponse & { monitor_enabled?: boolean }> {
+  const r = await fetch(`${API}/control/monitor_stop`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), monitor_enabled: j.monitor_enabled }
+}
+
+export async function postMonitorConnect(): Promise<
+  ControlResponse & {
+    account?: { requested?: boolean; success?: boolean; error?: string | null }
+    market?: { requested?: boolean; success?: boolean; error?: string | null }
+  }
+> {
+  const r = await fetch(`${API}/control/monitor_connect`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ...j,
+    ok: r.ok && (j.ok !== false),
+    error: j.error || (r.ok ? undefined : r.statusText),
+    account: j.account,
+    market: j.market,
+  }
 }
 
 export async function fetchRiskSummary(): Promise<RiskSummaryResponse> {

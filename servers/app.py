@@ -3,13 +3,17 @@
 Monitoring runs on a separate host from the trading daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server."""
 
 import logging
+import os
+import signal
 import time
 from typing import Any, Dict, Optional
 
+import asyncio
 from fastapi import Body, FastAPI, Query
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from servers.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
     StatusReader,
     write_control_command,
@@ -49,6 +53,68 @@ def create_app(
     """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). API only; no built-in Web UI. No start: daemon is started on trading host only."""
     app = FastAPI(title="Bifrost Trader API", description="Phase 2: status and control API (frontend is separate)")
 
+    # Monitor-side IB state (for AccountIbClient / MarketIbClient).
+    app.state.monitor_enabled = True
+    app.state.account_ib_client = None
+    app.state.market_ib_client = None
+
+    @app.on_event("startup")
+    async def startup_event() -> None:
+        """初始化监控端 IB 客户端（账户 + 行情），使用 settings 中的 host/port/client_id。"""
+        try:
+            ib_cfg = reader.get_ib_config() or {
+                "ib_host": "127.0.0.1",
+                "ib_port_type": "tws_paper",
+                "ib_client_id_daemon": 1,
+                "ib_client_id_listener": 2,
+                "ib_client_id_account": 100,
+                "ib_client_id_markets": 101,
+            }
+            host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
+            port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
+            port_map = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
+            port = port_map.get(port_type, 7497)
+
+            app.state.account_ib_client = AccountIbClient(
+                host=host,
+                port=port,
+                client_id=int(ib_cfg.get("ib_client_id_account", 100)),
+                name="AccountIbClient",
+            )
+            app.state.market_ib_client = MarketIbClient(
+                host=host,
+                port=port,
+                client_id=int(ib_cfg.get("ib_client_id_markets", 101)),
+                name="MarketIbClient",
+            )
+            logger.info(
+                "Monitor IB clients initialized (host=%s port=%s account_id=%s market_id=%s)",
+                host,
+                port,
+                getattr(app.state.account_ib_client, "client_id", None),
+                getattr(app.state.market_ib_client, "client_id", None),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to initialize monitor IB clients: %s", exc, exc_info=True)
+            app.state.account_ib_client = None
+            app.state.market_ib_client = None
+
+    @app.on_event("shutdown")
+    async def shutdown_event() -> None:
+        """优雅断开监控端 IB 客户端。"""
+        try:
+            client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+            if client is not None:
+                await client.disconnect()
+        except Exception:
+            pass
+        try:
+            mclient: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+            if mclient is not None:
+                await mclient.disconnect()
+        except Exception:
+            pass
+
     @app.get("/", response_class=HTMLResponse)
     def get_root() -> str:
         """API only: link to docs and main endpoints. Use project frontend (e.g. npm run dev) for the monitoring UI."""
@@ -58,6 +124,11 @@ def create_app(
   <p><strong>Bifrost Trader API</strong> — 本端口仅提供 API，监控页面请使用项目内 frontend（如 <code>cd frontend && npm run dev</code>）。</p>
   <p><a href="/docs">/docs</a> · <a href="/status">/status</a> · <a href="/operations">/operations</a></p>
 </body></html>"""
+
+    @app.get("/health")
+    def get_health() -> Dict[str, Any]:
+        """健康检查：进程存活即可返回 200；返回访问时刻的服务器时间戳（Unix 秒），供前端计算距上次检查时长。"""
+        return {"status": "ok", "service": "bifrost-monitor", "ts": time.time()}
 
     @app.get("/status")
     def get_status() -> Dict[str, Any]:
@@ -115,6 +186,58 @@ def create_app(
                 "ib_client_id_account": 100,
                 "ib_client_id_markets": 101,
             }
+            # Monitor-side IB client status for UI.
+            try:
+                monitor_ib_status: Dict[str, Any] = {}
+                acc_client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+                mkt_client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+                if acc_client is not None:
+                    monitor_ib_status["account"] = {
+                        "connected": bool(acc_client.connected),
+                        "client_id": acc_client.client_id,
+                        "last_error": acc_client.last_error,
+                    }
+                if mkt_client is not None:
+                    monitor_ib_status["market"] = {
+                        "connected": bool(mkt_client.connected),
+                        "client_id": mkt_client.client_id,
+                        "last_error": mkt_client.last_error,
+                    }
+                payload["monitor_ib_status"] = monitor_ib_status or None
+            except Exception:  # pragma: no cover - defensive
+                payload["monitor_ib_status"] = None
+            monitor_enabled = bool(getattr(app.state, "monitor_enabled", True))
+            payload["monitor_enabled"] = monitor_enabled
+            # 能返回 /status 即表示监控进程存活，与 GET /health 等价
+            payload["monitor_health"] = "ok"
+            # Derive monitor self-check & lamp (与守护类似，但更轻量）。
+            monitor_block_reasons: list[str] = []
+            monitor_status_obj = payload.get("monitor_ib_status") or {}
+            acc_status = monitor_status_obj.get("account") or {}
+            mkt_status = monitor_status_obj.get("market") or {}
+            if not monitor_enabled:
+                monitor_block_reasons.append("monitor_stopped")
+            if acc_status.get("last_error") or mkt_status.get("last_error"):
+                monitor_block_reasons.append("monitor_ib_error")
+            # 监控健康度：正常/降级/异常
+            if not monitor_enabled:
+                monitor_self_check = "blocked"
+                monitor_lamp = "red"
+            elif "monitor_ib_error" in monitor_block_reasons:
+                monitor_self_check = "degraded"
+                monitor_lamp = "yellow"
+            else:
+                monitor_self_check = "ok"
+                # 若账户 IB 未连上或两侧都未连上，则灯保持黄灯提示关注。
+                acc_conn = bool(acc_status.get("connected"))
+                mkt_conn = bool(mkt_status.get("connected"))
+                if not acc_conn and not mkt_conn:
+                    monitor_lamp = "yellow"
+                else:
+                    monitor_lamp = "green"
+            payload["monitor_self_check"] = monitor_self_check
+            payload["monitor_lamp"] = monitor_lamp
+            payload["monitor_block_reasons"] = monitor_block_reasons
             return payload
         except Exception as e:
             logger.warning("get_status failed: %s", e)
@@ -138,6 +261,12 @@ def create_app(
                     "ib_client_id_account": 100,
                     "ib_client_id_markets": 101,
                 },
+                "monitor_ib_status": None,
+                "monitor_enabled": False,
+                "monitor_health": "ok",
+                "monitor_self_check": "blocked",
+                "monitor_lamp": "red",
+                "monitor_block_reasons": ["status_read_error"],
             }
 
     @app.get("/operations")
@@ -229,43 +358,41 @@ def create_app(
     async def post_executions_fetch(
         days: int = Query(1, ge=1, le=7, description="拉取范围：1=当天, 3=最近3天, 7=最近7天（需 TWS Trade Log 勾选对应天数）"),
     ) -> Dict[str, Any]:
-        """R-A2: 直接连 IB 拉取执行/成交记录并写入 account_executions。无需 daemon；适合复盘页按需拉取。"""
-        from src.connector.ib import IBConnector
-
+        """R-A2: 通过监控端 AccountIbClient 拉取执行/成交记录并写入 account_executions。"""
         if not control_via_db:
             return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。", "count": 0}
-        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper", "ib_client_id_account": 100}
-        host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
-        port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
-        port = _IB_PORT_MAP.get(port_type, 7497)
-        client_id = int(ib_cfg.get("ib_client_id_account", 100))
-        connector = IBConnector(host=host, port=port, client_id=client_id)
+        if not getattr(app.state, "monitor_enabled", True):
+            return {"ok": False, "error": "监控已停止，无法拉取执行记录。", "count": 0}
+        client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+        if client is None:
+            return {"ok": False, "error": "监控端 AccountIbClient 未初始化。", "count": 0}
         try:
-            if not await connector.connect(max_attempts=3):
-                return {"ok": False, "error": "无法连接 IB，请确认 TWS/Gateway 已运行且端口正确。", "count": 0}
-            # 收到 commissionReport 事件时直接按 exec_id 更新 DB（仅 live 成交会触发；历史仍靠 get_executions_async 合并）
-            connector.set_commission_report_callback(
-                lambda eid, c, pnl, cur, y_, yrd: update_execution_commission(control_via_db, eid, c, pnl, cur, y_, yrd)
+            await client.ensure_connected()
+        except Exception as e:
+            return {"ok": False, "error": f"连接 IB 失败：{e}", "count": 0}
+
+        # 收到 commissionReport 事件时直接按 exec_id 更新 DB（仅 live 成交会触发；历史仍靠 get_executions_async 合并）
+        from src.connector.ib import IBConnector as _IBConnectorAlias
+        if not isinstance(client.connector, _IBConnectorAlias):
+            return {"ok": False, "error": "AccountIbClient connector 未就绪。", "count": 0}
+        client.connector.set_commission_report_callback(
+            lambda eid, c, pnl, cur, y_, yrd: update_execution_commission(
+                control_via_db, eid, c, pnl, cur, y_, yrd
             )
-            account_ids = connector.get_managed_accounts()
-            if not account_ids:
-                account_ids = [""]
-            all_execs: list = []
-            for acc_id in account_ids:
-                exec_list = await connector.get_executions_async(account=acc_id or None, since_days=days)
-                if exec_list:
-                    all_execs.extend(exec_list)
+        )
+        try:
+            all_execs = await client.fetch_executions(days=days)
         finally:
             try:
-                connector.set_commission_report_callback(None)
-            except Exception:
-                pass
-            try:
-                await connector.disconnect()
+                client.connector.set_commission_report_callback(None)
             except Exception:
                 pass
         if not all_execs:
-            return {"ok": True, "message": f"IB 未返回执行记录（当前范围：最近{days}天；若选多天请确认 TWS Trade Log 已勾选对应天数）。", "count": 0}
+            return {
+                "ok": True,
+                "message": f"IB 未返回执行记录（当前范围：最近{days}天；若选多天请确认 TWS Trade Log 已勾选对应天数）。",
+                "count": 0,
+            }
         if not write_account_executions_to_db(control_via_db, all_execs):
             return {"ok": False, "error": "写入 account_executions 失败。", "count": 0}
         return {"ok": True, "count": len(all_execs), "message": f"已写入 {len(all_execs)} 条执行记录。"}
@@ -276,31 +403,26 @@ def create_app(
         period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 D, 1 min)"),
         duration: Optional[str] = Query("30 D", description="IB durationStr (e.g. 30 D, 5 D)"),
     ) -> Dict[str, Any]:
-        """R-A3: 直接连 IB 拉取 K 线并写入 ohlc_bars，返回拉取的 bars。无需 daemon；适合复盘页按需一次性拉取。"""
-        from src.connector.ib import IBConnector
-
+        """R-A3: 通过监控端 MarketIbClient 拉取 K 线并写入 ohlc_bars，返回拉取的 bars。"""
         sym = (symbol or "").strip()
         if not sym:
             return {"ok": False, "error": "请提供 symbol 参数。", "bars": [], "count": 0}
         if not control_via_db:
             return {"ok": False, "error": "需要 status.postgres 配置以写入 ohlc_bars。", "bars": [], "count": 0}
-        ib_cfg = reader.get_ib_config() or {"ib_host": "127.0.0.1", "ib_port_type": "tws_paper", "ib_client_id_markets": 101}
-        host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
-        port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
-        port = _IB_PORT_MAP.get(port_type, 7497)
+        if not getattr(app.state, "monitor_enabled", True):
+            return {"ok": False, "error": "监控已停止，无法拉取 K 线。", "bars": [], "count": 0}
+        client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+        if client is None:
+            return {"ok": False, "error": "监控端 MarketIbClient 未初始化。", "bars": [], "count": 0}
         per = (period or "1 D").strip()
         dur = (duration or "30 D").strip()
-        client_id = int(ib_cfg.get("ib_client_id_markets", 101))
-        connector = IBConnector(host=host, port=port, client_id=client_id)
+
         try:
-            if not await connector.connect(max_attempts=3, bars_only=True):
-                return {"ok": False, "error": "无法连接 IB，请确认 TWS/Gateway 已运行且端口正确。", "bars": [], "count": 0}
-            raw = await connector.get_historical_bars_async(sym, period=per, duration_str=dur)
-        finally:
-            try:
-                await connector.disconnect()
-            except Exception:
-                pass
+            await client.ensure_connected()
+        except Exception as e:
+            return {"ok": False, "error": f"连接 IB 失败：{e}", "bars": [], "count": 0}
+
+        raw = await client.fetch_bars(sym, per, dur)
         if not raw:
             return {"ok": True, "message": "IB 未返回 K 线数据。", "bars": [], "count": 0}
         rows = [dict(b, symbol=sym, period=per) for b in raw]
@@ -318,6 +440,92 @@ def create_app(
             for b in raw
         ]
         return {"ok": True, "count": len(bars), "bars": bars}
+
+    async def _shutdown_monitor_process() -> None:
+        """异步触发监控服务自身退出（类似停止守护），用于 /monitor/stop 调用后释放进程占用。"""
+        # 给响应一点时间发回前端，再发 SIGTERM。
+        await asyncio.sleep(0.5)
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+        except Exception:
+            # 兜底：若发送信号失败，直接退出进程。
+            raise SystemExit(0)
+
+    @app.post("/control/monitor_stop")
+    async def post_monitor_stop() -> JSONResponse:
+        """Stop monitor-side IB activity AND terminate the monitor process itself.
+
+        语义：与“停止守护”对应——先关闭监控端 IB 长连接，然后 Kill 掉监控服务进程，
+        释放掉当前进程占用的所有资源（包括 IB client_id）。重启需重新运行 run_server.py。
+        """
+        app.state.monitor_enabled = False
+        # Best-effort disconnect; ignore errors.
+        try:
+            client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+            if client is not None:
+                await client.disconnect()
+        except Exception:
+            pass
+        try:
+            mclient: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+            if mclient is not None:
+                await mclient.disconnect()
+        except Exception:
+            pass
+        # 异步触发整个监控服务进程退出（SIGTERM），尽量在响应发回前稍作等待。
+        asyncio.create_task(_shutdown_monitor_process())
+        return JSONResponse(status_code=200, content={"ok": True, "monitor_enabled": False})
+
+    @app.post("/control/monitor_connect")
+    async def post_monitor_connect() -> JSONResponse:
+        """显式建立监控端 IB 连接（账户 + 行情），便于“随时可服务”。
+
+        - 不写库、不拉数据，只做 ensure_connected。
+        - 成功后，/status 里的 monitor_ib_status.*.connected 会变为 true。
+        """
+        if not getattr(app.state, "monitor_enabled", True):
+            return JSONResponse(status_code=400, content={"ok": False, "error": "监控已停止，无法连接 IB。"})
+
+        acc_client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+        mkt_client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+
+        if acc_client is None and mkt_client is None:
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": "监控端 IB 客户端未初始化（请检查服务启动日志或 DB 中的 IB 设置）。"},
+            )
+
+        acc_ok: Optional[bool] = None
+        acc_err: Optional[str] = None
+        mkt_ok: Optional[bool] = None
+        mkt_err: Optional[str] = None
+
+        if acc_client is not None:
+            try:
+                await acc_client.ensure_connected()
+                acc_ok = True
+            except Exception as e:  # pragma: no cover - defensive
+                acc_ok = False
+                acc_err = str(e)
+
+        if mkt_client is not None:
+            try:
+                await mkt_client.ensure_connected()
+                mkt_ok = True
+            except Exception as e:  # pragma: no cover - defensive
+                mkt_ok = False
+                mkt_err = str(e)
+
+        ok = (acc_ok is not False) and (mkt_ok is not False)
+        status_code = 200 if ok else 500
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "ok": ok,
+                "account": {"requested": acc_client is not None, "success": acc_ok, "error": acc_err},
+                "market": {"requested": mkt_client is not None, "success": mkt_ok, "error": mkt_err},
+            },
+        )
 
     @app.post("/control/stop")
     def post_control_stop() -> JSONResponse:
