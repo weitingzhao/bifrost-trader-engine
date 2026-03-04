@@ -1,3 +1,5 @@
 ib_insync>=0.9.86
 py_vollib>=1.0.1
 PyYAML>=6.0
+# Optional: real-time quotes cache and linkage (R-RM*). Omit if not using redis in config.
+redis>=4.0.0

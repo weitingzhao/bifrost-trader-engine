@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
-    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at[, heartbeat_interval_sec])."""
+    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at[, heartbeat_interval_sec[, redis_quotes_connected]])."""
     out = {
         "last_ts": float(row[0]) if row[0] is not None else None,
         "hedge_running": bool(row[1]),
@@ -27,6 +27,7 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
         "graceful_shutdown_at": float(row[6]) if len(row) > 6 and row[6] is not None else None,
     }
     out["heartbeat_interval_sec"] = int(row[7]) if len(row) > 7 and row[7] is not None else None
+    out["redis_quotes_connected"] = bool(row[8]) if len(row) > 8 and row[8] is not None else False
     return out
 
 
@@ -101,7 +102,8 @@ class StatusReader:
                            extract(epoch from next_retry_ts) AS next_retry_ts,
                            seconds_until_retry,
                            extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                           heartbeat_interval_sec
+                           heartbeat_interval_sec,
+                           redis_quotes_connected
                     FROM daemon_heartbeat WHERE id = 1
                     """
                 )
@@ -111,8 +113,28 @@ class StatusReader:
             out = _row_to_heartbeat(row)
             return out
         except Exception as e:
-            # Column graceful_shutdown_at may be missing in DBs not yet migrated
+            # Column graceful_shutdown_at or redis_quotes_connected may be missing in DBs not yet migrated
             err = str(e).lower()
+            if "redis_quotes_connected" in err:
+                try:
+                    with self._conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                                   ib_connected, ib_client_id,
+                                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                                   seconds_until_retry,
+                                   extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                                   heartbeat_interval_sec
+                            FROM daemon_heartbeat WHERE id = 1
+                            """
+                        )
+                        row = cur.fetchone()
+                    if row is None:
+                        return None
+                    return _row_to_heartbeat(row + (None,))  # redis_quotes_connected = None
+                except Exception as e2:
+                    logger.debug("get_daemon_heartbeat (fallback no redis_quotes_connected) failed: %s", e2)
             if "graceful_shutdown_at" in err or "column" in err:
                 try:
                     with self._conn.cursor() as cur:
@@ -120,14 +142,15 @@ class StatusReader:
                             """
                             SELECT extract(epoch from last_ts), hedge_running,
                                    ib_connected, ib_client_id,
-                                   extract(epoch from next_retry_ts), seconds_until_retry
+                                   extract(epoch from next_retry_ts), seconds_until_retry,
+                                   NULL, NULL, NULL
                             FROM daemon_heartbeat WHERE id = 1
                             """
                         )
                         row = cur.fetchone()
                     if row is None:
                         return None
-                    return _row_to_heartbeat(row + (None, None))  # graceful_shutdown_at, heartbeat_interval_sec = None
+                    return _row_to_heartbeat(row)  # graceful_shutdown_at, heartbeat_interval_sec, redis_quotes_connected = None
                 except Exception as e2:
                     logger.debug("get_daemon_heartbeat (fallback) failed: %s", e2)
                     self._conn = None
@@ -337,6 +360,38 @@ class StatusReader:
             logger.debug("get_bars_latest failed: %s", e)
             self._conn = None
             return None
+
+    def get_bars_stats(
+        self,
+        symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return row counts for the given symbol in stock_day and stock_min (per period). Used by 分析 button."""
+        if not self._connect():
+            return {"stock_day": 0, "stock_min": {}}
+        if not symbol or not symbol.strip():
+            return {"stock_day": 0, "stock_min": {}}
+        sym = symbol.strip()
+        out: Dict[str, Any] = {"stock_day": 0, "stock_min": {}}
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM stock_day WHERE symbol = %s",
+                    (sym,),
+                )
+                row = cur.fetchone()
+                out["stock_day"] = int(row[0]) if row and row[0] is not None else 0
+                for per in ("1 min", "5 mins", "1 hour"):
+                    cur.execute(
+                        "SELECT COUNT(*) FROM stock_min WHERE symbol = %s AND period = %s",
+                        (sym, per),
+                    )
+                    r = cur.fetchone()
+                    out["stock_min"][per] = int(r[0]) if r and r[0] is not None else 0
+            return out
+        except Exception as e:
+            logger.debug("get_bars_stats failed: %s", e)
+            self._conn = None
+            return {"stock_day": 0, "stock_min": {}}
 
     def get_wishlist(self) -> List[Dict[str, Any]]:
         """Return all wishlist rows (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, created_at)."""

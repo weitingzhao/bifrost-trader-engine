@@ -15,6 +15,17 @@
 # status_server:
 #   port: 8765
 
+# Real-time quotes (R-RM*): daemon writes to Redis; monitor subscribes and serves GET /quotes. Optional; omit or enabled: false to disable.
+# redis:
+#   enabled: false
+#   host: "127.0.0.1"
+#   port: 6379
+#   db: 0
+#   password: ""
+#   socket_connect_timeout: 5
+#   quote_ttl_sec: 300
+#   channel: "daemon:quotes"
+
 # Frontend dev server (scripts/run_frontend.sh dev). Port for Vite; script kills process on this port before starting.
 # frontend:
 #   port: 5173

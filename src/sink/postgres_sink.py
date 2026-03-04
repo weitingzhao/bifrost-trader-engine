@@ -732,6 +732,10 @@ def _ensure_tables(conn) -> None:
                 "ALTER TABLE daemon_heartbeat ADD COLUMN heartbeat_interval_sec smallint",
             ),
             (
+                "redis_quotes_connected",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN redis_quotes_connected boolean DEFAULT false",
+            ),
+            (
                 "run_status_heartbeat_interval",
                 "ALTER TABLE daemon_run_status ADD COLUMN heartbeat_interval_sec smallint",
             ),
@@ -1220,10 +1224,12 @@ class PostgreSQLSink(StatusSink):
         next_retry_ts: Optional[float] = None,
         seconds_until_retry: Optional[int] = None,
         heartbeat_interval_sec: Optional[float] = None,
+        redis_quotes_connected: bool = False,
     ) -> None:
         """Update daemon_heartbeat row (id=1). RE-6: daemon vs hedge; RE-7: ib_connected, ib_client_id, next_retry_ts.
         seconds_until_retry: relative countdown from daemon clock, avoids clock skew on UI (optional).
-        heartbeat_interval_sec: interval in use by daemon, for monitor countdown."""
+        heartbeat_interval_sec: interval in use by daemon, for monitor countdown.
+        redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*)."""
         if not self._ensure_conn():
             return
         for attempt in (1, 2):
@@ -1240,7 +1246,7 @@ class PostgreSQLSink(StatusSink):
                             UPDATE daemon_heartbeat
                             SET last_ts = now(), hedge_running = %s, ib_connected = %s, ib_client_id = %s,
                                 next_retry_ts = to_timestamp(%s) AT TIME ZONE 'UTC', seconds_until_retry = %s,
-                                graceful_shutdown_at = NULL, heartbeat_interval_sec = %s
+                                graceful_shutdown_at = NULL, heartbeat_interval_sec = %s, redis_quotes_connected = %s
                             WHERE id = 1
                             """,
                             (
@@ -1250,6 +1256,7 @@ class PostgreSQLSink(StatusSink):
                                 next_retry_ts,
                                 seconds_until_retry,
                                 iv,
+                                redis_quotes_connected,
                             ),
                         )
                     else:
@@ -1258,10 +1265,10 @@ class PostgreSQLSink(StatusSink):
                             UPDATE daemon_heartbeat
                             SET last_ts = now(), hedge_running = %s, ib_connected = %s, ib_client_id = %s,
                                 next_retry_ts = NULL, seconds_until_retry = NULL, graceful_shutdown_at = NULL,
-                                heartbeat_interval_sec = %s
+                                heartbeat_interval_sec = %s, redis_quotes_connected = %s
                             WHERE id = 1
                             """,
-                            (hedge_running, ib_connected, ib_client_id, iv),
+                            (hedge_running, ib_connected, ib_client_id, iv, redis_quotes_connected),
                         )
                 self._conn.commit()
                 return

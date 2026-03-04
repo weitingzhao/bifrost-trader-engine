@@ -200,6 +200,18 @@
                                               决策序列、block reason、理论 P&L
 ```
 
+### 5.1 实时行情缓存与联动（R-RM*，可选）
+
+在保留上述数据流的前提下，可增加**实时行情缓存与守护→监控联动**（详见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)）：
+
+- **守护进程**：除心跳写 PG 外，在 **IB 事件回调**中把行情写入 **Redis**（缓存），并通过 **Redis Pub/Sub 或 Streams** 发布「有更新」通知。
+- **Redis**：仅作行情**缓存**与**联动通道**；**唯一写入方为守护进程**；监控 Server **不**向 Redis 写行情。
+- **监控 Server**：订阅 Redis 联动通道；收到通知后**读 Redis**（或解析消息体），向前端推送（WebSocket/SSE 或 GET /quotes）；与守护仍**物理解耦**，仅需与守护同连 Redis。
+
+部署时 Redis 可与 PG 同机或独立；未配置或不可用时系统退化为仅 PG + 现有 GET /status 轮询，不破坏现有行为。
+
+---
+
 ---
 
 ## 6. 部署视图
@@ -266,6 +278,7 @@
 | 回测（策略 PnL 优化 + Guard 验证） | 回测入口 + 复用 Classifier/FSM/Guard，历史回放；产出 PnL/收益曲线，首要优化策略回报 | 阶段 4 |
 | 部署 A/B（Mac vs Linux）、进程管理 | 文档、可选 systemd/supervisor 示例 | 按需 |
 | 多消费者/远程存储可选 | RedisSink/PostgreSQLSink | 按需 |
+| **实时行情与联动（R-RM*）** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端 | 见 PLAN_NEXT_STEPS「实时行情与联动」 |
 
 ---
 
@@ -276,6 +289,7 @@
 - **阶段 3**：数据获取（账户、持仓、市值、交易历史与统计）；架构上完成策略与监控所需数据的获取。
 - **阶段 4**：策略框架与回测（R-B1、R-B2）；架构上完成“可回测优化策略 PnL 并验证 Guard”。
 - **阶段 5**：自动交易对冲与监控（R-C2、R-C3）；架构上完成暂停/恢复、一键平敞口等。
+- **实时行情与联动（R-RM*，可选）**：守护双线（心跳+事件）、Redis 行情缓存、Redis Pub/Sub 或 Streams 联动、监控订阅并推前端；详见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)，步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」。
 
 各阶段 **里程碑、检查方式、验证标准** 以 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 为准；**本阶段验收通过后，方可启动下一阶段开发**。
 

@@ -70,6 +70,8 @@ export interface StatusResponse {
   monitor_self_check?: string
   monitor_lamp?: 'green' | 'yellow' | 'red'
   monitor_block_reasons?: string[]
+  /** 监控端是否能连接 Redis 并读取行情（R-RM*） */
+  redis_quotes_connected?: boolean
 }
 
 export interface DaemonHeartbeat {
@@ -83,6 +85,8 @@ export interface DaemonHeartbeat {
   graceful_shutdown_at?: number | null
   /** Interval in seconds used by daemon (5–120); for countdown. */
   heartbeat_interval_sec?: number | null
+  /** 守护进程是否连接 Redis 并写入行情（R-RM*） */
+  redis_quotes_connected?: boolean
 }
 
 export interface StatusRow {
@@ -204,6 +208,13 @@ export interface BarsResponse {
   message?: string
 }
 
+/** 标的在 stock_day / stock_min 中的行数统计（GET /bars/stats） */
+export interface BarStatsResponse {
+  stock_day: number
+  stock_min: Record<string, number>
+  message?: string
+}
+
 /** R-A3 扩展：Wishlist 项（自选/待操作标的）。 */
 export interface WishlistItem {
   id?: number
@@ -216,4 +227,20 @@ export interface WishlistItem {
   display_label?: string | null
   source?: string | null
   created_at?: number | null
+}
+
+/** R-RM*: 实时行情（从 Redis 读取，守护进程写入）。 */
+export interface RealtimeQuote {
+  symbol: string
+  bid?: number | null
+  ask?: number | null
+  last: number
+  ts: number
+  /** 可选：相对前价的涨跌，前端可算 */
+  change?: number | null
+}
+
+export interface QuotesResponse {
+  quotes: RealtimeQuote[]
+  message?: string
 }

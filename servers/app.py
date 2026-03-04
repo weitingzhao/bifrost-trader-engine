@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from servers.ib_clients import AccountIbClient, MarketIbClient
+from servers.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
     StatusReader,
     write_control_command,
@@ -29,6 +30,12 @@ from servers.reader import (
     sync_accounts_snapshot_to_db,
 )
 from servers.self_check import derive_daemon_self_check, derive_self_check
+
+try:
+    from src.realtime.redis_quotes import RedisQuotesClient, create_from_config as create_redis_quotes
+except ImportError:
+    create_redis_quotes = None  # type: ignore
+    RedisQuotesClient = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +57,11 @@ def create_app(
     reader: StatusReader,
     control_via_db: Optional[dict],
     data_lag_threshold_ms: Optional[float],
+    redis_quotes: Optional[Any] = None,
 ) -> FastAPI:
-    """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). API only; no built-in Web UI. No start: daemon is started on trading host only."""
+    """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*)."""
     app = FastAPI(title="Bifrost Trader API", description="Phase 2: status and control API (frontend is separate)")
+    app.state.redis_quotes = redis_quotes
 
     # Monitor-side IB state (for AccountIbClient / MarketIbClient).
     app.state.monitor_enabled = True
@@ -115,6 +124,12 @@ def create_app(
                 await mclient.disconnect()
         except Exception:
             pass
+        try:
+            rq = getattr(app.state, "redis_quotes", None)
+            if rq is not None and getattr(rq, "close", None):
+                rq.close()
+        except Exception:
+            pass
 
     @app.get("/", response_class=HTMLResponse)
     def get_root() -> str:
@@ -130,6 +145,41 @@ def create_app(
     def get_health() -> Dict[str, Any]:
         """健康检查：进程存活即可返回 200；返回访问时刻的服务器时间戳（Unix 秒），供前端计算距上次检查时长。"""
         return {"status": "ok", "service": "bifrost-monitor", "ts": time.time()}
+
+    @app.get("/quotes")
+    def get_quotes(
+        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use focus list (status symbol + positions + wishlist)"),
+    ) -> Dict[str, Any]:
+        """R-RM*: 从 Redis 读取当前行情缓存（守护进程写入）。无 Redis 或未启用时返回空列表。"""
+        rq = getattr(app.state, "redis_quotes", None)
+        if rq is None or not getattr(rq, "available", False):
+            return {"quotes": [], "message": "实时行情未开启或 Redis 不可用"}
+        symbol_list: list[str] = []
+        if symbols and symbols.strip():
+            symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+        else:
+            # Focus list: status symbol + account positions symbols + wishlist symbols
+            row = reader.get_status_current()
+            if row and row.get("symbol"):
+                symbol_list.append(str(row["symbol"]).strip())
+            accounts = reader.get_accounts_from_tables() or []
+            for acc in accounts:
+                for pos in (acc.get("positions") or []):
+                    sym = (pos.get("symbol") or "").strip()
+                    if sym and sym not in symbol_list:
+                        symbol_list.append(sym)
+            for w in reader.get_wishlist():
+                sym = (w.get("symbol") or "").strip()
+                if sym and sym not in symbol_list:
+                    symbol_list.append(sym)
+        if not symbol_list:
+            return {"quotes": [], "message": "无关注标的"}
+        try:
+            quotes = rq.get_quotes(symbol_list)
+            return {"quotes": quotes}
+        except Exception as e:
+            logger.warning("GET /quotes failed: %s", e)
+            return {"quotes": [], "message": f"读取行情失败: {e}"}
 
     @app.get("/status")
     def get_status() -> Dict[str, Any]:
@@ -158,6 +208,7 @@ def create_app(
                     "seconds_until_retry": hb.get("seconds_until_retry"),
                     "graceful_shutdown_at": hb.get("graceful_shutdown_at"),
                     "heartbeat_interval_sec": hb.get("heartbeat_interval_sec"),
+                    "redis_quotes_connected": hb.get("redis_quotes_connected", False),
                 }
                 dsc = derive_daemon_self_check(payload["daemon_heartbeat"])
                 payload["daemon_self_check"] = dsc["daemon_self_check"]
@@ -239,6 +290,9 @@ def create_app(
             payload["monitor_self_check"] = monitor_self_check
             payload["monitor_lamp"] = monitor_lamp
             payload["monitor_block_reasons"] = monitor_block_reasons
+            # Redis 行情：监控端是否能读 Redis（R-RM*）
+            rq = getattr(app.state, "redis_quotes", None)
+            payload["redis_quotes_connected"] = bool(rq and getattr(rq, "available", False))
             # 系统状态灯：三者都绿才绿，有一个非绿则取最差（红 > 黄 > 绿）
             dl = (payload.get("daemon_lamp") or "red").strip().lower()
             ml = (payload.get("monitor_lamp") or "red").strip().lower()
@@ -278,6 +332,7 @@ def create_app(
                 "monitor_self_check": "blocked",
                 "monitor_lamp": "red",
                 "monitor_block_reasons": ["status_read_error"],
+                "redis_quotes_connected": False,
                 "system_lamp": "red",
             }
 
@@ -374,6 +429,17 @@ def create_app(
         per = (period or "1 D").strip()
         t = reader.get_bars_latest(symbol=sym, period=per)
         return {"latest": t}
+
+    @app.get("/bars/stats")
+    def get_bars_stats(
+        symbol: Optional[str] = Query(None, description="Symbol, e.g. NVDA"),
+    ) -> Dict[str, Any]:
+        """返回指定标的在 stock_day / stock_min 中的行数，供市场数据页「分析」按钮使用。"""
+        sym = (symbol or "").strip()
+        if not sym:
+            return {"stock_day": 0, "stock_min": {}, "message": "请提供 symbol 参数。"}
+        stats = reader.get_bars_stats(symbol=sym)
+        return stats
 
     @app.get("/wishlist")
     def get_wishlist() -> Dict[str, Any]:
@@ -790,7 +856,10 @@ def run_server(config: dict) -> None:
 
     reader = StatusReader(status_cfg)
     control_via_db = status_cfg if use_db_control else None
-    app = create_app(reader, control_via_db, data_lag_ms)
+    redis_quotes = None
+    if create_redis_quotes:
+        redis_quotes = create_redis_quotes(config)
+    app = create_app(reader, control_via_db, data_lag_ms, redis_quotes=redis_quotes)
     host = "0.0.0.0"
     logger.info("Status server on %s:%s (control=daemon_control + daemon_run_status; start only on trading host)", host, port)
     uvicorn.run(app, host=host, port=int(port), log_level="info")

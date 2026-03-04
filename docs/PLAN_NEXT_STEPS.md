@@ -33,6 +33,7 @@
 | **阶段 3**（数据获取） | **R-A1**、**R-A2**、**R-A3**、**R-M6**、**R-M7**、**R-H2** | 账户、持仓、市值、账户执行交易与辅助行情、复盘页、历史统计等数据的获取（供策略与监控使用） |
 | **阶段 4**（策略与回测） | **R-B1**、**R-B2** | 交易策略框架建立、策略创建与回测（PnL 优化与 Guard 验证） |
 | **阶段 5**（自动对冲与监控） | **R-C2**、**R-C3** | 基于成熟策略的自动交易对冲与监控（暂停/恢复、一键平敞口等） |
+| **实时行情与联动**（R-RM*，可选/阶段 3 之后） | **R-RM1**、**R-RM2**、**R-RM3** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端（详见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)） |
 
 **需求编号 → 产品需求文档与验收/Test Case 链接**（便于从需求编号反查描述与验证位置）：
 
@@ -53,6 +54,7 @@
 | R-B1 / R-B2 | 同上 §4.2、§6 | 同上 R-B1/R-B2 行；**阶段 4** 验证标准与 Test Case 清单 |
 | R-C2 | 同上 §1.3、§6 | 同上 R-C2 行；**阶段 5** 验证标准与 Test Case 清单 |
 | R-C3 | 同上 §5、§6 | 同上 R-C3 行；**阶段 5**（依赖 R-A1、持仓与策略边界等），验证标准与 Test Case 待该阶段规划时补全 |
+| **R-RM1 / R-RM2 / R-RM3** | [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md) §1、§2、§3 | 下文「实时行情与联动」步骤；验收标准见该设计文档 §1 |
 
 ---
 
@@ -104,6 +106,14 @@
 |----------|----------|----------|----------------|
 | **R-B1** | 策略 PnL 优化：在历史数据上对比不同参数的理论 P&L、收益曲线、回撤等，优化策略回报。 | **阶段 4** | ① 存在**回测入口**（如 `scripts/backtest.py` 或回测模式），**不**连接 IB、**不**下真实单。② 数据源为**历史回放**（从历史表或回放文件按时间序喂入）。③ 输出包含 **理论 P&L、收益曲线、回撤**；可对比不同参数组合。④ 回测输出记录本 run 使用的 **gates 参数或 config_version/config_hash**，便于与实盘配置对应。 |
 | **R-B2** | 安全边界验证：Guard/边界参数可验证；不同参数下对冲与拦截次数及原因可复盘。 | **阶段 4** | ① 回测**复用**与实盘相同的 StateClassifier、TradingFSM、ExecutionGuard、gamma_scalper_intent、apply_hedge_gates。② 输出包含每 tick **是否对冲、方向/数量、block reason**（被哪一 guard 拦截及原因）。③ 可复盘**不同参数**下：对冲次数、被各 guard 拦截次数及原因，用于 Guard/边界参数评估与微调。 |
+
+### 实时行情与联动（R-RM*）
+
+| 需求编号 | 需求简述 | 完成阶段 | 详细验收标准 |
+|----------|----------|----------|----------------|
+| **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅；行情以事件驱动更新。 | **阶段 3 之后或按需** | ① 守护进程同时维护心跳循环（写 PG、轮询控制）与 IB 事件回调（tick/持仓/订单）。② 行情与持仓更新以 IB 事件驱动为主，轮询仅用于控制通道。详见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md) §1。 |
+| **R-RM2** | 行情写入 Redis；唯一写入方为守护进程；监控不写 Redis 行情。 | **阶段 3 之后或按需** | ① 事件订阅所得行情写入 Redis 缓存（key/TTL 见设计文档 §2.3）。② 仅守护进程写 Redis 行情；监控 Server 不写。③ 无 Redis 时可降级为仅 PG + GET /status 轮询。 |
+| **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | **阶段 3 之后或按需** | ① 守护在写 Redis 后发布通知（Pub/Sub 或 XADD）。② 监控 Server 订阅该通道；收到后读 Redis（或消息体）并向前端推送（WebSocket/SSE 或 GET /quotes）。③ 守护与监控仅需同连 Redis，不直连。 |
 
 ---
 
@@ -336,6 +346,24 @@
 | **5.2** | **一键平敞口**：控制通道支持 flatten；守护程序根据当前账户/持仓与目标计算平仓量并下单，写入操作记录；独立应用 POST /control/flatten；不触碰非本策略头寸。 | 发 flatten 后本策略对冲敞口被平掉；操作表有记录 | R-C3 |
 
 **里程碑**：支持 pause/resume；支持一键平敞口（R-C3）；监控与自动对冲可稳定运行。**阶段通过条件**：R-C2、R-C3 验收条全部通过（R-C3 的 Test Case 待该阶段规划时补全）。
+
+---
+
+### 实时行情与联动（R-RM*，可选；建议阶段 3 之后）
+
+**本步骤实现并验收的需求**：**R-RM1**、**R-RM2**、**R-RM3**。**详细需求与架构**见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)（需求 §1、架构 §2、注意要点 §3）。
+
+**目标**：守护进程双线（心跳 + IB 事件订阅）；事件订阅所得行情写入 Redis；通过 Redis Pub/Sub 或 Streams 联动监控端；监控订阅后读 Redis 并推前端，使 UI 可获得近实时行情。
+
+| 步骤 | 内容 | 可交付物 | 对应需求 |
+|------|------|----------|----------|
+| **RM.1** | **守护进程**：在 IB tick/持仓回调中写 Redis（行情缓存）+ 发布联动通知（Pub/Sub 或 Streams）；配置 Redis 连接与开关。 | 守护写 Redis + 发布；无 Redis 时降级 | R-RM1、R-RM2 |
+| **RM.2** | **监控 Server**：订阅 Redis 联动通道；收到通知后读 Redis（或解析消息体），推送给前端（WebSocket/SSE 或 GET /quotes）。 | 监控可推送行情；不写 Redis 行情 | R-RM3 |
+| **RM.3** | **前端**：消费监控推送或轮询 GET /quotes，展示行情墙/ticker 等。 | UI 可展示近实时行情 | — |
+
+**里程碑**：守护双线运行且写 Redis + 发布；监控订阅并推前端；UI 可展示由守护事件驱动的行情。**检查方式**：按 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md) §3 注意要点与 §1 验收条执行。**阶段通过条件**：R-RM1、R-RM2、R-RM3 在上文「需求与阶段一一对应及详细验收标准」表中对应验收条全部通过。
+
+---
 
 **按需项**（不绑定阶段 3/4/5）：可选 Redis/PostgreSQL sink 扩展；部署与进程管理（systemd/supervisor、文档）。
 

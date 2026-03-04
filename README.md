@@ -37,6 +37,7 @@ Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 - **hedge**: threshold_hedge_shares (25), cooldown_sec (60), max_hedge_shares_per_order
 - **earnings.dates**: list of `YYYY-MM-DD` earnings dates for blackout
 - **risk**: max_daily_hedge_count, max_position_shares, max_daily_loss_usd, trading_hours_only, **paper_trade** (set `false` for live)
+- **redis** (optional, R-RM*): set `redis.enabled: true` and `redis.host`/`redis.port` (default 6379) so the daemon writes real-time quotes to Redis and the status server exposes GET /quotes. Omit or `enabled: false` to disable. See [docs/REALTIME_MARKET_DATA_DESIGN.md](docs/REALTIME_MARKET_DATA_DESIGN.md).
 
 ## Run
 

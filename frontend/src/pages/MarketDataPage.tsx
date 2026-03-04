@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Bar, IbAccountSnapshot, StatusResponse } from '../types'
-import { fetchBars, postBarsFetch } from '../api'
+import type { Bar, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
+import { fetchBars, fetchQuotes, postBarsFetch } from '../api'
 
 const BAR_PERIODS = [
   { value: '1 D', label: '日线' },
@@ -45,8 +45,34 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
   const [barSymbol, setBarSymbol] = useState('')
   const [barPeriod, setBarPeriod] = useState<string>('1 D')
   const [smartDuration, setSmartDuration] = useState(true)
+  const [quotes, setQuotes] = useState<RealtimeQuote[]>([])
+  const [quotesMessage, setQuotesMessage] = useState<string | null>(null)
 
   const candidateSymbols = useBarCandidateSymbols(status)
+
+  /** R-RM*: 轮询实时行情（无 symbols 时使用服务端关注列表）；4 秒周期 */
+  useEffect(() => {
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const res = await fetchQuotes()
+        if (cancelled) return
+        setQuotes(res.quotes || [])
+        setQuotesMessage(res.message || null)
+      } catch {
+        if (!cancelled) {
+          setQuotes([])
+          setQuotesMessage('实时行情不可用')
+        }
+      }
+    }
+    tick()
+    const id = setInterval(tick, 4000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [])
 
   const loadBarsFromApi = useCallback(async (symbol: string) => {
     if (!symbol.trim()) return
@@ -73,6 +99,37 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
       <p className="section-desc">
         统一管理 K 线等市场数据，按标的拉取并写入数据库（stock_day / stock_min），供复盘、风控等使用。
       </p>
+
+      {quotes.length > 0 && (
+        <section className="replay-section realtime-quotes-wall" aria-labelledby="realtime-quotes-head">
+          <h3 id="realtime-quotes-head">实时行情</h3>
+          {quotesMessage && <p className="section-hint">{quotesMessage}</p>}
+          <div className="quotes-ticker" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.5rem' }}>
+            {quotes.map(q => (
+              <div
+                key={q.symbol}
+                className="quote-card"
+                style={{
+                  padding: '0.5rem 0.75rem',
+                  border: '1px solid var(--border, #ddd)',
+                  borderRadius: '6px',
+                  minWidth: '7rem',
+                }}
+              >
+                <span className="quote-symbol" style={{ fontWeight: 600 }}>{q.symbol}</span>
+                <span className="quote-last" style={{ marginLeft: '0.5rem' }}>
+                  {q.last != null && Number.isFinite(q.last) ? fmtUsd(q.last) : '—'}
+                </span>
+                {(q.bid != null || q.ask != null) && (
+                  <div className="quote-bidask" style={{ fontSize: '0.85rem', color: 'var(--muted, #666)' }}>
+                    {q.bid != null ? fmtUsd(q.bid) : '—'} / {q.ask != null ? fmtUsd(q.ask) : '—'}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="replay-section" aria-labelledby="bars-head">
         <h3 id="bars-head">K 线</h3>

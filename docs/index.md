@@ -39,6 +39,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | 文档 | 说明 |
 |------|------|
 | **[数据库设计（PostgreSQL）](DATABASE.md)** | 与 PostgreSQL 交互的唯一设计说明：连接配置、表结构（status_current、status_history、operations、daemon_control 等）、写入策略、阶段预留与变更记录 |
+| **[实时行情与联动架构](REALTIME_MARKET_DATA_DESIGN.md)** | 守护双线（心跳+事件）、Redis 行情缓存、守护→监控联动（Pub/Sub 或 Streams）、需求与注意要点 |
 | **[FSM 状态流转](fsm/linkage.md)** | Daemon、Trading、Hedge 三状态机图示与串联说明 |
 | **[状态空间](STATE_SPACE_MAPPING.md)** | O、D、M、L、E、S 与代码/配置的对应关系 |
 | **[配置安全分类（风险模型）](CONFIG_SAFETY_TAXONOMY.md)** | 配置中的安全边界分类与风险维度 |

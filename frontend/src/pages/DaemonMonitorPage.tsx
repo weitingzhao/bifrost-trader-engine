@@ -437,6 +437,17 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           </div>
           <div className="daemon-group">
             <div className="daemon-group-header">
+              <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.redis_quotes_connected ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="守护程序 Redis 状态" />
+              <span className="daemon-group-title">数据库</span>
+            </div>
+            <div className="daemon-group-body">
+              <p className="section-hint">
+                Redis: {!hb?.daemon_alive ? '—' : hb.redis_quotes_connected ? '已连接（写行情并发布联动）' : '未连接或未配置'}
+              </p>
+            </div>
+          </div>
+          <div className="daemon-group">
+            <div className="daemon-group-header">
               <div className={`lamp lamp-sm ${strategyGroupLamp}`} title="交易策略状态" />
               <span className="daemon-group-title">交易策略</span>
             </div>
@@ -574,6 +585,17 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                   打开 IB 账户连接
                 </button>
               </div>
+            </div>
+          </div>
+          <div className="daemon-group">
+            <div className="daemon-group-header">
+              <div className={`lamp lamp-sm ${j?.redis_quotes_connected ? 'green' : monitorEnabled ? 'red' : 'none'}`} title="监控端 Redis 状态" />
+              <span className="daemon-group-title">数据库</span>
+            </div>
+            <div className="daemon-group-body">
+              <p className="section-hint">
+                Redis: {!monitorEnabled ? '—' : j?.redis_quotes_connected ? '已连接（可读 GET /quotes）' : '未连接或未配置'}
+              </p>
             </div>
           </div>
         </div>

@@ -41,6 +41,7 @@ from src.pricing.greeks import Greeks
 from src.guards.execution_guard import ExecutionGuard
 from src.sink import StatusSink
 from src.sink.postgres_sink import PostgreSQLSink
+from src.realtime.redis_quotes import create_from_config as create_redis_quotes
 from src.strategy.gamma_scalper import gamma_scalper_intent
 from src.strategy.hedge_gate import apply_hedge_gates
 
@@ -183,6 +184,8 @@ class GsTrading:
         self._last_positions_refresh_ts = (
             0.0  # 对冲用持仓也按同一间隔，避免每心跳请求 IB positions
         )
+        # R-RM*: optional Redis real-time quotes (daemon is sole writer)
+        self._redis_quotes = create_redis_quotes(config)
 
     def _reload_config(self, config: dict) -> None:
         """Apply hot-reloadable config (IB host/port require restart)."""
@@ -208,6 +211,14 @@ class GsTrading:
             blackout_days_after=self._hedge_cfg["blackout_days_after"],
             trading_hours_only=self._hedge_cfg["trading_hours_only"],
         )
+        # R-RM*: try to (re)create Redis quotes client on config reload (e.g. Redis was down at daemon start)
+        if getattr(self, "_redis_quotes", None) is not None:
+            try:
+                self._redis_quotes.close()
+            except Exception:
+                pass
+            self._redis_quotes = None
+        self._redis_quotes = create_redis_quotes(config)
 
     async def _reload_config_loop(self) -> None:
         """Periodically check config file mtime and reload if changed."""
@@ -569,9 +580,35 @@ class GsTrading:
                 last = getattr(ticker, "last", None)
                 if last is not None:
                     self.store.set_underlying_price(float(last))
+            # R-RM*: write quote to Redis and publish (daemon sole writer; failures do not affect hedge)
+            if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
+                try:
+                    payload = self._quote_payload()
+                    if payload:
+                        self._redis_quotes.set_quote(self.symbol, payload)
+                        self._redis_quotes.publish_update(self.symbol, {"symbol": self.symbol, "ts": payload.get("ts")})
+                except Exception as e:
+                    logger.warning("Redis quote write/publish in _on_ticker: %s", e)
             self._eval_hedge_threadsafe()
         except Exception as e:
             logger.debug("ticker callback error: %s", e)
+
+    def _quote_payload(self) -> Optional[dict]:
+        """Build quote dict for Redis from store (symbol, bid, ask, last, ts)."""
+        bid = self.store.get_bid()
+        ask = self.store.get_ask()
+        last = self.store.get_underlying_price()
+        if last is None and bid is not None and ask is not None:
+            last = (float(bid) + float(ask)) / 2.0
+        if last is None:
+            return None
+        return {
+            "symbol": self.symbol,
+            "bid": float(bid) if bid is not None else None,
+            "ask": float(ask) if ask is not None else None,
+            "last": float(last),
+            "ts": time.time(),
+        }
 
     def _eval_hedge_threadsafe(self) -> None:
         """Threadsafe: schedule _on_tick to be run safely from any thread using call_soon_threadsafe."""
@@ -792,6 +829,13 @@ class GsTrading:
         )
         return max(5.0, min(120.0, float(raw)))
 
+    def _redis_quotes_connected(self) -> bool:
+        """Whether daemon is connected to Redis and writing real-time quotes (for status/monitoring)."""
+        return bool(
+            getattr(self, "_redis_quotes", None)
+            and getattr(self._redis_quotes, "available", False)
+        )
+
     def _apply_run_status_transition(self) -> bool:
         """Sync Daemon FSM with daemon_run_status: RUNNING <-> RUNNING_SUSPENDED. Returns True if suspended (skip hedge)."""
         suspended, interval = self._poll_run_status()
@@ -903,6 +947,7 @@ class GsTrading:
                         ib_client_id=None,
                         next_retry_ts=next_retry_ts,
                         seconds_until_retry=sec_until,
+                        redis_quotes_connected=self._redis_quotes_connected(),
                     )
                 logger.warning(
                     "[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)",
@@ -929,12 +974,29 @@ class GsTrading:
                         snapshot, spot, cs, data_lag_ms
                     )
                     self._status_sink.write_snapshot(snap_dict, append_history=False)
+                    # R-RM*: push current symbol quote to Redis on heartbeat (so monitor has at least heartbeat cadence)
+                    if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
+                        try:
+                            payload = self._quote_payload()
+                            if payload:
+                                self._redis_quotes.set_quote(self.symbol, payload)
+                                self._redis_quotes.publish_update(self.symbol, {"symbol": self.symbol, "ts": payload.get("ts")})
+                        except Exception as e:
+                            logger.warning("Redis quote write in heartbeat: %s", e)
                 else:
                     logger.debug(
                         "Heartbeat: no full snapshot (spot unavailable), writing minimal status"
                     )
                     minimal = self._build_heartbeat_minimal_dict()
                     self._status_sink.write_snapshot(minimal, append_history=False)
+                    if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
+                        try:
+                            payload = self._quote_payload()
+                            if payload:
+                                self._redis_quotes.set_quote(self.symbol, payload)
+                                self._redis_quotes.publish_update(self.symbol, {"symbol": self.symbol, "ts": payload.get("ts")})
+                        except Exception as e:
+                            logger.warning("Redis quote write in heartbeat (minimal): %s", e)
                 # 阶段 3 R-M6：按 account_positions 逐标的拉价 + 写库（低频：按心跳刷新一次）
                 try:
                     await self._refresh_position_prices()
@@ -946,6 +1008,7 @@ class GsTrading:
                         ib_connected=self.connector.is_connected,
                         ib_client_id=getattr(self.connector, "client_id", None),
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
+                        redis_quotes_connected=self._redis_quotes_connected(),
                     )
             if not suspended:
                 logger.info(
@@ -1075,6 +1138,7 @@ class GsTrading:
                 next_retry_ts=next_retry_ts,
                 seconds_until_retry=sec_until,
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
+                redis_quotes_connected=self._redis_quotes_connected(),
             )
         logger.info(
             "[Daemon] state=WAITING_IB | IB not connected; next retry in %ss (heartbeat interval=%.0fs)",
@@ -1102,6 +1166,7 @@ class GsTrading:
                             ib_connected=True,
                             ib_client_id=getattr(self.connector, "client_id", None),
                             heartbeat_interval_sec=self._effective_heartbeat_interval(),
+                            redis_quotes_connected=self._redis_quotes_connected(),
                         )
                     logger.info("[Daemon] state=WAITING_IB → CONNECTED (IB connected)")
                     return DaemonState.CONNECTED
@@ -1119,6 +1184,7 @@ class GsTrading:
                         next_retry_ts=next_retry_ts,
                         seconds_until_retry=sec_until,
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
+                        redis_quotes_connected=self._redis_quotes_connected(),
                     )
                 logger.debug(
                     "[Daemon] state=WAITING_IB | connect failed; next retry in %ss",
@@ -1135,6 +1201,7 @@ class GsTrading:
                 ib_connected=self.connector.is_connected,
                 ib_client_id=getattr(self.connector, "client_id", None),
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
+                redis_quotes_connected=self._redis_quotes_connected(),
             )
         logger.info(
             "[Daemon] state=CONNECTED | fetching account summary and positions, building snapshot..."
@@ -1176,6 +1243,7 @@ class GsTrading:
                     ib_connected=self.connector.is_connected,
                     ib_client_id=getattr(self.connector, "client_id", None),
                     heartbeat_interval_sec=self._effective_heartbeat_interval(),
+                    redis_quotes_connected=self._redis_quotes_connected(),
                 )
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
         self._config_reload_task = asyncio.create_task(self._reload_config_loop())
@@ -1229,6 +1297,11 @@ class GsTrading:
                 self._status_sink.close()
             except Exception as e:
                 logger.debug("Status sink close: %s", e)
+        if getattr(self, "_redis_quotes", None):
+            try:
+                self._redis_quotes.close()
+            except Exception as e:
+                logger.debug("Redis quotes close: %s", e)
         await self.connector.disconnect()
         logger.info("[Daemon] state=STOPPING → STOPPED (exit)")
         return DaemonState.STOPPED

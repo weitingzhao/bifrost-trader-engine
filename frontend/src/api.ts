@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, WishlistItem } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, BarStatsResponse, WishlistItem, RealtimeQuote, QuotesResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -127,6 +127,20 @@ export async function deleteWishlist(by: { contract_key?: string; id?: number })
   const r = await fetch(`${API}/wishlist?${params}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: j.ok === true, error: j.error }
+}
+
+/** R-RM*: 从监控 API 获取实时行情（GET /quotes）。symbols 为空则使用服务端关注列表（持仓+wishlist）。 */
+export async function fetchQuotes(symbols?: string[]): Promise<QuotesResponse> {
+  const params = new URLSearchParams()
+  if (symbols?.length) params.set('symbols', symbols.join(','))
+  const r = await fetch(`${API}/quotes?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** R-RM*: 预留：后续 WebSocket/SSE 订阅实时推送。当前为 no-op。 */
+export function subscribeQuotes(_onQuote: (q: RealtimeQuote) => void): () => void {
+  return () => {}
 }
 
 export async function postStop(): Promise<ControlResponse> {
@@ -276,6 +290,14 @@ export async function fetchBars(symbol?: string, period = '1 D', limit = 100): P
   params.set('period', period)
   params.set('limit', String(limit))
   const r = await fetch(`${API}/bars?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** 获取指定标的在 stock_day / stock_min 中的行数（供市场数据页「分析」） */
+export async function fetchBarStats(symbol: string): Promise<BarStatsResponse> {
+  const params = new URLSearchParams({ symbol: symbol.trim() })
+  const r = await fetch(`${API}/bars/stats?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }

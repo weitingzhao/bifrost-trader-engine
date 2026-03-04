@@ -923,6 +923,54 @@ th {
   color: var(--color-text-main);
 }
 
+.market-data-analysis .analysis-stats {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--color-border);
+}
+
+.market-data-analysis .analysis-stat-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.market-data-analysis .analysis-stat-row:last-child {
+  margin-bottom: 0;
+}
+
+.market-data-analysis .analysis-stat-label {
+  min-width: 12rem;
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+
+.market-data-analysis .analysis-stat-value {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.market-data-analysis .analysis-period-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  list-style: disc;
+}
+
+.market-data-analysis .analysis-period-list li {
+  margin-bottom: var(--space-1);
+}
+
+.market-data-analysis .analysis-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
 .replay-sub {
   font-size: var(--text-body);
   font-weight: 600;
