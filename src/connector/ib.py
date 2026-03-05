@@ -40,6 +40,7 @@ class IBConnector:
         self._connected = False
         self._commission_registered = False
         self._stock_contract: Optional[Stock] = None
+        self._tickers: Dict[str, Ticker] = {}  # symbol -> Ticker for multi-symbol subscription
         self._commission_report_callback: Optional[
             Callable[[str, Optional[float], Optional[float], Optional[str], Optional[float], Optional[int]], None]
         ] = None
@@ -190,6 +191,7 @@ class IBConnector:
         """Disconnect from IB."""
         if not self._connected:
             return
+        self._tickers.clear()
         if self._commission_registered:
             try:
                 self.ib.commissionReportEvent -= self._on_commission_report
@@ -393,6 +395,58 @@ class IBConnector:
         except Exception as e:
             logger.error("subscribe_ticker %s: %s", symbol, e)
             return None
+
+    async def subscribe_tickers(
+        self,
+        symbols: List[str],
+        on_update: Callable[[str, Ticker], None],
+    ) -> Dict[str, Ticker]:
+        """Subscribe to live tickers for multiple symbols (STK). on_update(symbol, ticker) on each tick.
+        Returns dict symbol -> Ticker. Keeps tickers in self._tickers so they stay alive."""
+        out: Dict[str, Ticker] = {}
+        if not self.is_connected:
+            logger.warning("subscribe_tickers: not connected")
+            return out
+        seen = set()
+        for symbol in symbols:
+            s = (symbol or "").strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            stock = self._stock(s)
+            try:
+                await self.ib.qualifyContractsAsync(stock)
+                ticker = self.ib.reqMktData(stock, "", False, False)
+                # Closure: capture symbol so callback knows which symbol updated
+                def _make_cb(sym: str) -> Callable[[Ticker], None]:
+                    def cb(t: Ticker) -> None:
+                        on_update(sym, t)
+                    return cb
+                ticker.updateEvent += _make_cb(s)
+                self._tickers[s] = ticker
+                out[s] = ticker
+                if self._stock_contract is None:
+                    self._stock_contract = stock
+            except Exception as e:
+                logger.error("subscribe_tickers %s: %s", s, e)
+        return out
+
+    def get_subscribed_ticker_symbols(self) -> List[str]:
+        """Return list of symbols currently subscribed for market data."""
+        return list(self._tickers.keys())
+
+    def unsubscribe_ticker(self, symbol: str) -> None:
+        """Cancel market data for one symbol and remove from _tickers."""
+        s = (symbol or "").strip()
+        if not s or s not in self._tickers:
+            return
+        ticker = self._tickers[s]
+        try:
+            self.ib.cancelMktData(ticker)
+        except Exception as e:
+            logger.warning("unsubscribe_ticker %s: %s", s, e)
+        finally:
+            self._tickers.pop(s, None)
 
     def subscribe_positions(self, on_update: Callable[[], None]) -> None:
         """Subscribe to position updates; on_update() called when positions change."""

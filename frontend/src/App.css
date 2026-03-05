@@ -337,6 +337,12 @@ body::before {
   margin-bottom: var(--space-5);
 }
 
+.card-event-subscribe .table-operations tbody td:last-child {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .card h2 {
   font-size: var(--text-title);
   font-weight: 600;
@@ -355,6 +361,68 @@ body::before {
   display: flex;
   align-items: center;
   margin-bottom: var(--space-2);
+}
+
+/* ---------- System 页 Tabs（Daemon / Monitor / Trading Strategy）---------- */
+.system-tabs-wrapper {
+  padding-top: var(--space-2);
+}
+.system-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+.system-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+.system-tab:hover {
+  color: var(--color-text-main);
+}
+.system-tab.active {
+  color: var(--color-text-main);
+  border-bottom-color: var(--color-accent);
+}
+.system-tab .lamp {
+  flex-shrink: 0;
+}
+.system-tab-panel {
+  min-height: 120px;
+}
+
+/* 实时行情表格 */
+.realtime-quotes-table-wrap {
+  overflow-x: auto;
+  margin-top: var(--space-2);
+}
+.realtime-quotes-table {
+  width: 100%;
+  min-width: 320px;
+}
+.realtime-quotes-table .realtime-quote-num {
+  font-variant-numeric: tabular-nums;
+}
+.realtime-quotes-table .realtime-quote-since {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+.realtime-quotes-table .pnl-positive {
+  color: var(--color-success);
+}
+.realtime-quotes-table .pnl-negative {
+  color: var(--color-danger);
 }
 
 /* ---------- 守护程序区块 ---------- */
@@ -490,6 +558,28 @@ body::before {
 
 .daemon-group-body .controls {
   margin-top: var(--space-2);
+}
+
+.event-subscribe-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.event-subscribe-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.event-subscribe-row:first-child {
+  margin-top: 0;
+}
+
+.event-subscribe-row.event-subscribe-symbols {
+  margin-left: calc(var(--space-2) + 1rem);
+  margin-top: var(--space-1);
 }
 
 .countdown-line {

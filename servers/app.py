@@ -2,15 +2,17 @@
 
 Monitoring runs on a separate host from the trading daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server."""
 
+import json
 import logging
 import os
 import signal
+import threading
 import time
 from typing import Any, Dict, Optional
 
 import asyncio
 from fastapi import Body, FastAPI, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from servers.ib_clients import AccountIbClient, MarketIbClient
@@ -32,10 +34,15 @@ from servers.reader import (
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
 try:
-    from src.realtime.redis_quotes import RedisQuotesClient, create_from_config as create_redis_quotes
+    from src.realtime.redis_quotes import (
+        RedisQuotesClient,
+        create_from_config as create_redis_quotes,
+        run_subscribe_loop as redis_run_subscribe_loop,
+    )
 except ImportError:
     create_redis_quotes = None  # type: ignore
     RedisQuotesClient = None  # type: ignore
+    redis_run_subscribe_loop = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +69,12 @@ def create_app(
     """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*)."""
     app = FastAPI(title="Bifrost Trader API", description="Phase 2: status and control API (frontend is separate)")
     app.state.redis_quotes = redis_quotes
+    # SSE 实时行情：每个连接一个 asyncio.Queue；Redis 订阅线程收到消息后广播到各 queue
+    app.state.sse_queues: list = []
+    app.state.sse_lock = threading.Lock()
+    app.state._sse_loop: Optional[asyncio.AbstractEventLoop] = None
+    app.state._redis_subscriber_stop = threading.Event()
+    app.state._redis_subscriber_thread: Optional[threading.Thread] = None
 
     # Monitor-side IB state (for AccountIbClient / MarketIbClient).
     app.state.monitor_enabled = True
@@ -70,7 +83,8 @@ def create_app(
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        """初始化监控端 IB 客户端（账户 + 行情），使用 settings 中的 host/port/client_id。"""
+        """初始化监控端 IB 客户端（账户 + 行情），使用 settings 中的 host/port/client_id。若启用 Redis 行情，启动 SUBSCRIBE 线程供 SSE 推送。"""
+        app.state._sse_loop = asyncio.get_running_loop()
         try:
             ib_cfg = reader.get_ib_config() or {
                 "ib_host": "127.0.0.1",
@@ -109,9 +123,45 @@ def create_app(
             app.state.account_ib_client = None
             app.state.market_ib_client = None
 
+        # R-RM* SSE: 若 Redis 行情可用，启动 SUBSCRIBE 线程，收到 daemon:quotes 后广播到各 SSE 连接的 queue
+        rq = getattr(app.state, "redis_quotes", None)
+        if redis_run_subscribe_loop and rq is not None and getattr(rq, "available", False):
+
+            def _broadcast_quote(quote: Dict[str, Any]) -> None:
+                loop = getattr(app.state, "_sse_loop", None)
+                if loop is None:
+                    return
+                with app.state.sse_lock:
+                    queues = list(app.state.sse_queues)
+                for q in queues:
+                    try:
+                        loop.call_soon_threadsafe(q.put_nowait, quote)
+                    except Exception:
+                        pass
+
+            app.state._redis_subscriber_stop.clear()
+            app.state._redis_subscriber_thread = threading.Thread(
+                target=redis_run_subscribe_loop,
+                args=(rq, _broadcast_quote, app.state._redis_subscriber_stop),
+                daemon=True,
+                name="redis-quotes-subscriber",
+            )
+            app.state._redis_subscriber_thread.start()
+            logger.info("Redis quotes SSE subscriber thread started")
+
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        """优雅断开监控端 IB 客户端。"""
+        """优雅断开监控端 IB 客户端，并停止 Redis 订阅线程。"""
+        app.state._redis_subscriber_stop.set()
+        if getattr(app.state, "_redis_subscriber_thread", None) is not None:
+            app.state._redis_subscriber_thread.join(timeout=2.0)
+            app.state._redis_subscriber_thread = None
+        try:
+            client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+            if client is not None:
+                await client.disconnect()
+        except Exception:
+            pass
         try:
             client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
             if client is not None:
@@ -181,6 +231,45 @@ def create_app(
             logger.warning("GET /quotes failed: %s", e)
             return {"quotes": [], "message": f"读取行情失败: {e}"}
 
+    @app.get("/quotes/stream")
+    async def get_quotes_stream():
+        """R-RM* SSE: 订阅 Redis daemon:quotes，守护进程每次更新行情会推送一条 data 事件。无 Redis 时立即返回 503。"""
+        rq = getattr(app.state, "redis_quotes", None)
+        if rq is None or not getattr(rq, "available", False):
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "实时行情未开启或 Redis 不可用"},
+            )
+        queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+
+        with app.state.sse_lock:
+            app.state.sse_queues.append(queue)
+
+        async def event_gen():
+            try:
+                while True:
+                    try:
+                        data = await asyncio.wait_for(queue.get(), timeout=25.0)
+                        yield f"data: {json.dumps(data)}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                with app.state.sse_lock:
+                    if queue in app.state.sse_queues:
+                        app.state.sse_queues.remove(queue)
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @app.get("/status")
     def get_status() -> Dict[str, Any]:
         """Return current run status plus self_check, status_lamp, trading_suspended (R-M1b, R-M2, R-M3). Self-check reflects suspended state (degraded + trading_suspended in block_reasons). Never returns 5xx: on read error returns 200 with blocked/red so UI shows reason instead of '获取失败'."""
@@ -209,6 +298,10 @@ def create_app(
                     "graceful_shutdown_at": hb.get("graceful_shutdown_at"),
                     "heartbeat_interval_sec": hb.get("heartbeat_interval_sec"),
                     "redis_quotes_connected": hb.get("redis_quotes_connected", False),
+                    "event_subscribe_ticker": hb.get("event_subscribe_ticker", False),
+                    "event_subscribe_positions": hb.get("event_subscribe_positions", False),
+                    "event_subscribe_fills": hb.get("event_subscribe_fills", False),
+                    "event_subscribe_commission": hb.get("event_subscribe_commission", False),
                 }
                 dsc = derive_daemon_self_check(payload["daemon_heartbeat"])
                 payload["daemon_self_check"] = dsc["daemon_self_check"]
@@ -224,7 +317,17 @@ def create_app(
                 payload["status"] = row
             else:
                 payload["status"] = None
-            # R-A1: 始终从 DB (accounts + account_positions) 读账户并返回，便于自动交易页 IB 账户区展示
+            # Subscribed tickers: Wishlist STK + strategy symbol (same set daemon subscribes to when RUNNING)
+            symbols_set: set = set()
+            if row and row.get("symbol"):
+                symbols_set.add(str(row.get("symbol", "") or "").strip())
+            for w in reader.get_wishlist():
+                st = (w.get("sec_type") or "").strip().upper()
+                sym = (w.get("symbol") or "").strip()
+                if sym and (st == "STK" or not st):
+                    symbols_set.add(sym)
+            payload["subscribed_tickers"] = sorted(s for s in symbols_set if s)
+            # R-A1: 始终从 DB (accounts + account_positions) 读账户并返回
             payload["accounts"] = reader.get_accounts_from_tables()
             if payload["accounts"] is None:
                 payload["accounts"] = []
@@ -771,6 +874,15 @@ def create_app(
             return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
         if write_control_command(control_via_db, "refresh_replay"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_replay written to daemon_control"})
+        return JSONResponse(status_code=500, content={"error": "failed to write control command"})
+
+    @app.post("/control/refresh_ticker_subscriptions")
+    def post_control_refresh_ticker_subscriptions() -> JSONResponse:
+        """Insert 'refresh_ticker_subscriptions' into daemon_control; daemon will sync Real-time ticker with Wishlist on next poll (多退少补，清除残留)."""
+        if not control_via_db:
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+        if write_control_command(control_via_db, "refresh_ticker_subscriptions"):
+            return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_ticker_subscriptions written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
     @app.post("/control/set_heartbeat_interval")

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Operation, StatusResponse } from '../types'
-import { postSuspend, postResume, postFlatten, postRetryIb, postStop, postMonitorStop, postMonitorConnect, fetchHealth } from '../api'
+import type { Operation, RealtimeQuote, StatusResponse } from '../types'
+import { postSuspend, postResume, postFlatten, postRetryIb, postStop, postMonitorStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchQuotes, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
 function fmtTs(ts: number | null | undefined): string {
@@ -16,6 +16,17 @@ function fmtUsd(n: number | null | undefined): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n)
+}
+
+/** 根据 ts (Unix 秒) 与当前时间差显示：秒 → 分钟 → 小时 → 天 */
+function fmtSince(ts: number | null | undefined): string {
+  if (ts == null || !Number.isFinite(ts)) return '—'
+  const nowSec = Date.now() / 1000
+  const elapsed = Math.max(0, Math.floor(nowSec - ts))
+  if (elapsed < 60) return `${elapsed}s`
+  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`
+  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h`
+  return `${Math.floor(elapsed / 86400)}d`
 }
 
 const HEDGE_REASON_LABELS: Record<string, string> = {
@@ -110,20 +121,28 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
+  const [syncTickerLoading, setSyncTickerLoading] = useState(false)
+  const [syncTickerMsg, setSyncTickerMsg] = useState({ text: '', isErr: false })
   const [tick, setTick] = useState(0)
   const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
   const [healthTick, setHealthTick] = useState(0)
+  const [systemTab, setSystemTab] = useState<'daemon' | 'monitor' | 'strategy'>('daemon')
+  const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+  const [quoteTick, setQuoteTick] = useState(0)
   const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const syncTickerMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const monitorCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const j = status
   const hb = j?.daemon_heartbeat
   const hbForCountdown = hb
+  const quotesCount = Object.keys(quotesMap).length
   const intervalSec = hbForCountdown?.heartbeat_interval_sec ?? 10
   const nowSec = Date.now() / 1000
   void tick
   void healthTick
+  void quoteTick
   const secondsUntilNextHeartbeat =
     hbForCountdown?.daemon_alive && hbForCountdown?.last_ts != null
       ? Math.max(0, Math.ceil(hbForCountdown.last_ts + intervalSec - nowSec))
@@ -136,7 +155,33 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     return () => {
       if (ctrlMsgClearRef.current != null) clearTimeout(ctrlMsgClearRef.current)
       if (hedgeCtrlMsgClearRef.current != null) clearTimeout(hedgeCtrlMsgClearRef.current)
+      if (syncTickerMsgClearRef.current != null) clearTimeout(syncTickerMsgClearRef.current)
       if (monitorCtrlMsgClearRef.current != null) clearTimeout(monitorCtrlMsgClearRef.current)
+    }
+  }, [])
+
+  // 实时行情：初始拉取 + SSE 订阅（监听 Redis 推送）
+  useEffect(() => {
+    let cancelled = false
+    fetchQuotes()
+      .then((res) => {
+        if (!cancelled && res.quotes?.length) {
+          setQuotesMap((prev) => {
+            const next = { ...prev }
+            res.quotes!.forEach((q) => {
+              next[q.symbol] = q
+            })
+            return next
+          })
+        }
+      })
+      .catch(() => {})
+    const unsub = subscribeQuotes((q) => {
+      setQuotesMap((prev) => ({ ...prev, [q.symbol]: q }))
+    })
+    return () => {
+      cancelled = true
+      unsub()
     }
   }, [])
 
@@ -165,6 +210,14 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     }, 1000)
     return () => clearInterval(id)
   }, [lastHealthAt])
+
+  // Refresh "Since" column every second when we have quotes
+  useEffect(() => {
+    const count = Object.keys(quotesMap).length
+    if (count === 0) return
+    const id = setInterval(() => setQuoteTick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [quotesCount])
 
   let daemonLabel = 'Not running (or single-process mode)'
   let daemonHint = 'Run run_engine.py on the trading machine to see "Running" here'
@@ -245,6 +298,36 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const strategyGroupLamp = suspended ? 'red' : 'green'
 
   const s = j?.status ?? {}
+  /** Symbols to show: from status (Wishlist STK + strategy symbol) first; merge with any symbols that have quote data. */
+  const watchlistSymbols = [...new Set([...(j?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort()
+  /** Aggregate current stock positions per symbol for Watchlist (qty, cost, pnl). */
+  const accountsList = j?.accounts ?? []
+  const watchlistRows = watchlistSymbols.map((symbol) => {
+    let qty = 0
+    let totalCost = 0
+    let hasCost = false
+    for (const acc of accountsList) {
+      const positions = acc?.positions ?? []
+      for (const p of positions) {
+        const sym = (p.symbol || '').trim()
+        const secType = (p.secType || '').toString().toUpperCase()
+        const posQty = typeof p.position === 'number' ? p.position : 0
+        if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
+        qty += posQty
+        if (p.avgCost != null && Number.isFinite(p.avgCost as number)) {
+          totalCost += (p.avgCost as number) * posQty
+          hasCost = true
+        }
+      }
+    }
+    const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
+    const quote = quotesMap[symbol]
+    let pnl: number | null = null
+    if (quote && avgCost != null && Number.isFinite(quote.last) && qty !== 0) {
+      pnl = (quote.last - avgCost) * qty
+    }
+    return { symbol, quote, qty: qty || null, avgCost, pnl }
+  })
   const statusSummaryItems = STATUS_FIELDS.map(([k, label]) => {
     let v: string | number | undefined = (s as Record<string, unknown>)[k] as string | number | undefined
     let out: string | number
@@ -344,8 +427,49 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
 
   return (
     <>
-      <div className="card process-section">
-        <div className="daemon-header">
+      <div className="card process-section system-tabs-wrapper">
+        <div className="system-tabs" role="tablist" aria-label="System sections">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={systemTab === 'daemon'}
+            aria-controls="system-panel-daemon"
+            id="tab-daemon"
+            className={`system-tab ${systemTab === 'daemon' ? 'active' : ''}`}
+            onClick={() => setSystemTab('daemon')}
+          >
+            <span className={`lamp lamp-sm ${daemonLamp}`} title="Daemon status" aria-hidden />
+            <span>Daemon</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={systemTab === 'monitor'}
+            aria-controls="system-panel-monitor"
+            id="tab-monitor"
+            className={`system-tab ${systemTab === 'monitor' ? 'active' : ''}`}
+            onClick={() => setSystemTab('monitor')}
+          >
+            <span className={`lamp lamp-sm ${monitorLamp}`} title="Monitor status" aria-hidden />
+            <span>Monitor</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={systemTab === 'strategy'}
+            aria-controls="system-panel-strategy"
+            id="tab-strategy"
+            className={`system-tab ${systemTab === 'strategy' ? 'active' : ''}`}
+            onClick={() => setSystemTab('strategy')}
+          >
+            <span className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status" aria-hidden />
+            <span>Trading Strategy</span>
+          </button>
+        </div>
+
+        {systemTab === 'daemon' && (
+      <div id="system-panel-daemon" role="tabpanel" aria-labelledby="tab-daemon" className="system-tab-panel">
+      <div className="daemon-header">
           <div className="daemon-header-main daemon-header-with-lamp">
             <div className="lamp-wrap-span">
               <div className={`lamp lamp-sm ${daemonLamp}`} title="Daemon status lamp" />
@@ -439,6 +563,32 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           </div>
           <div className="daemon-group">
             <div className="daemon-group-header">
+              <span className="daemon-group-title">Event Subscribe</span>
+              <InfoTooltip text="Daemon IB event subscription status: ticker (Wishlist STK), positions, fills, commission. Green = subscribed; red = not subscribed when daemon is running." />
+            </div>
+            <div className="daemon-group-body">
+              <ul className="event-subscribe-list">
+                <li className="event-subscribe-row">
+                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
+                  <span>Real-time ticker</span>
+                </li>
+                <li className="event-subscribe-row">
+                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
+                  <span>Position updates</span>
+                </li>
+                <li className="event-subscribe-row">
+                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
+                  <span>Fill / execution report</span>
+                </li>
+                <li className="event-subscribe-row">
+                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
+                  <span>Commission report</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div className="daemon-group">
+            <div className="daemon-group-header">
               <div className={`lamp lamp-sm ${strategyGroupLamp}`} title="Trading strategy status" />
               <span className="daemon-group-title">Trading strategy</span>
             </div>
@@ -477,8 +627,10 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           </div>
         ) : null}
       </div>
+        )}
 
-      <div className="card process-section">
+        {systemTab === 'monitor' && (
+      <div id="system-panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" className="system-tab-panel">
         <div className="daemon-header">
           <div className="daemon-header-main daemon-header-with-lamp">
             <div className="lamp-wrap-span">
@@ -584,8 +736,10 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           </div>
         ) : null}
       </div>
+        )}
 
-      <div className="card process-section">
+        {systemTab === 'strategy' && (
+      <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className="system-tab-panel">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <div className="lamp-wrap-span">
             <div className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status lamp" />
@@ -625,6 +779,172 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             {hedgeCtrlMsg.text}
           </div>
         ) : null}
+      </div>
+        )}
+      </div>
+
+      <div className="card card-operations realtime-quotes-card">
+        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+          <div className="lamp-wrap-span">
+            <div className={`lamp lamp-sm ${j?.redis_quotes_connected ? 'green' : 'none'}`} title="Watchlist (Redis)" aria-hidden />
+          </div>
+          <div>
+            <h2 className="daemon-card-title page-title-with-tooltip">
+              Watchlist
+              <InfoTooltip text="Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Wishlist STK + strategy symbol. Requires Redis and daemon Event subscription." />
+            </h2>
+            <p className="section-hint" style={{ margin: 0 }}>
+              {j?.redis_quotes_connected
+                ? `SSE connected, ${watchlistSymbols.length} symbol(s) (prices & PnL update when stream arrives)`
+                : 'Redis not connected or monitor not subscribed; check config and daemon Event subscription.'}
+            </p>
+          </div>
+        </div>
+        <div className="realtime-quotes-table-wrap">
+          <table className="table-operations realtime-quotes-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Qty</th>
+                <th>Cost</th>
+                <th>PnL</th>
+                <th>Last</th>
+                <th>Bid</th>
+                <th>Ask</th>
+                <th>Since</th>
+              </tr>
+            </thead>
+            <tbody>
+              {watchlistRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8}>No symbols in watchlist (add symbols in Wishlist or ensure daemon is running)</td>
+                </tr>
+              ) : (
+                watchlistRows.map((row) => {
+                  const { symbol, quote: q, qty, avgCost, pnl } = row
+                  return (
+                    <tr key={symbol}>
+                      <td><strong>{symbol}</strong></td>
+                      <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
+                      <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
+                      <td className="realtime-quote-num">
+                        {pnl != null && Number.isFinite(pnl) ? (
+                          <span className={pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : ''}>
+                            {fmtUsd(pnl)}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="realtime-quote-num">{q ? fmtUsd(q.last) : '—'}</td>
+                      <td className="realtime-quote-num">{q ? fmtUsd(q.bid ?? null) : '—'}</td>
+                      <td className="realtime-quote-num">{q ? fmtUsd(q.ask ?? null) : '—'}</td>
+                      <td className="realtime-quote-since">{q ? fmtSince(q.ts) : '—'}</td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card card-operations card-event-subscribe">
+        <h2 className="daemon-card-title page-title-with-tooltip">
+          Event Subscribe
+          <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Wishlist STK + strategy symbol)." />
+          {hb?.daemon_alive != null && hb?.daemon_alive && (
+            <button
+              type="button"
+              className="btn-resume"
+              style={{ marginLeft: '0.5rem', verticalAlign: 'middle' }}
+              title="Sync Real-time ticker with Wishlist (subscribe/add, unsubscribe/remove); list updates on next heartbeat"
+              disabled={syncTickerLoading}
+              onClick={async () => {
+                setSyncTickerLoading(true)
+                try {
+                  const res = await postRefreshTickerSubscriptions()
+                  if (res.ok && typeof loadStatus === 'function') {
+                    setMsg(setSyncTickerMsg, 'Synced', false)
+                    scheduleMsgClear(setSyncTickerMsg, syncTickerMsgClearRef)
+                    setTimeout(() => loadStatus(), 1500)
+                  }
+                  if (!res.ok && res.error) setMsg(setSyncTickerMsg, res.error, true)
+                } finally {
+                  setSyncTickerLoading(false)
+                }
+              }}
+            >
+              {syncTickerLoading ? 'Syncing…' : 'Sync'}
+            </button>
+          )}
+        </h2>
+        <table className="table-operations">
+          <thead>
+            <tr>
+              <th>Subscription</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Real-time ticker</td>
+              <td>
+                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
+                <span className="event-subscribe-status-text">
+                  {hb?.daemon_alive && hb?.event_subscribe_ticker
+                    ? `Subscribed (${j?.subscribed_tickers?.length ?? 0} ticker${(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring)`
+                    : hb?.daemon_alive
+                      ? 'Not subscribed'
+                      : '—'}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Position updates</td>
+              <td>
+                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
+                <span className="event-subscribe-status-text">
+                  {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Fill / execution report</td>
+              <td>
+                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
+                <span className="event-subscribe-status-text">
+                  {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td>Commission report</td>
+              <td>
+                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
+                <span className="event-subscribe-status-text">
+                  {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {syncTickerMsg.text ? (
+          <div className={`msg ${syncTickerMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
+            {syncTickerMsg.text}
+          </div>
+        ) : null}
+        {hb?.daemon_alive && hb?.event_subscribe_ticker && (
+          <div className="event-subscribe-tickers-block" style={{ marginTop: '1rem' }}>
+            <h3 className="daemon-group-title" style={{ marginBottom: '0.5rem' }}>Real-time ticker — subscribed symbols</h3>
+            <p className="section-hint" style={{ margin: 0, fontWeight: 600 }}>
+              {(j?.subscribed_tickers?.length ?? 0)} ticker{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring
+            </p>
+            <p className="section-hint" style={{ margin: '0.25rem 0 0 0' }}>
+              {j?.subscribed_tickers?.length ? j.subscribed_tickers.join(', ') : '—'}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="card card-operations">

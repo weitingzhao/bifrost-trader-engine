@@ -138,7 +138,7 @@
 ### 2.10 表 `instrument_prices`（阶段 3 R-M6：持仓标的当前价）
 
 - **用途**：按 `contract_key`（同 `account_positions`）存放**每个持仓标的的当前价**，用于监控页逐行展示「当前价」并计算浮动盈亏。设计为**与账户无关**：同一合约在多个账户持有时仅存一行价格。
-- **写入**：守护进程在每次 **heartbeat** 中，根据内存中的 `accounts_snapshot`（或等效结构）按 `contract_key` 聚合出标的集合，按标的从 IB 拉取当前价（股票/期权可区分逻辑），并通过 sink `write_instrument_prices` Upsert 到本表。
+- **写入**：守护进程 **首次有持仓时** 或监控端 **Accounts Refresh** 时，按持仓标的从 IB 全量拉价并 Upsert 到本表；**每次心跳** 则用 Redis 中 Event 已写入的行情（Real-time ticker）更新本表，仅更新有 Redis 数据的标的，不再每心跳向 IB 拉价。
 - **列**：
 
 | 列名 | 类型 | 说明 |

@@ -57,6 +57,13 @@ export async function postRefreshReplay(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
+/** 让守护进程立即按 Wishlist 同步 Real-time ticker 订阅（多退少补，清除残留） */
+export async function postRefreshTickerSubscriptions(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/refresh_ticker_subscriptions`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
 /** R-A2: 直接由 API 连 IB 拉取执行记录并写库，无需 daemon。days: 1=当天, 3=最近3天, 7=最近7天 */
 export async function postExecutionsFetch(days: 1 | 3 | 7 = 1): Promise<ControlResponse & { count?: number }> {
   const params = new URLSearchParams({ days: String(days) })
@@ -138,9 +145,24 @@ export async function fetchQuotes(symbols?: string[]): Promise<QuotesResponse> {
   return r.json()
 }
 
-/** R-RM*: 预留：后续 WebSocket/SSE 订阅实时推送。当前为 no-op。 */
-export function subscribeQuotes(_onQuote: (q: RealtimeQuote) => void): () => void {
-  return () => {}
+/** R-RM*: SSE 订阅实时行情推送（GET /quotes/stream）。返回取消订阅的函数。服务端无 Redis 时连接会失败，可先 GET /quotes 或 /status 判断 redis_quotes_connected。 */
+export function subscribeQuotes(onQuote: (q: RealtimeQuote) => void): () => void {
+  const url = `${API || ''}/quotes/stream`
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const q = JSON.parse(e.data) as RealtimeQuote
+      if (q && typeof q.symbol === 'string' && typeof q.ts === 'number') onQuote(q)
+    } catch {
+      // ignore parse error (e.g. keepalive comment)
+    }
+  }
+  es.onerror = () => {
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
 }
 
 export async function postStop(): Promise<ControlResponse> {

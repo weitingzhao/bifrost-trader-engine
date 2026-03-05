@@ -141,16 +141,22 @@ def _sync_accounts_snapshot_to_tables(
                         pos_f = float(pos_val) if pos_val is not None else None
                     except (TypeError, ValueError):
                         pos_f = None
+                    if pos_f is not None and not math.isfinite(pos_f):
+                        pos_f = None
                     avg = p.get("avgCost") or p.get("avg_cost")
                     try:
                         avg_f = float(avg) if avg is not None else None
                     except (TypeError, ValueError):
+                        avg_f = None
+                    if avg_f is not None and not math.isfinite(avg_f):
                         avg_f = None
                     exp = p.get("lastTradeDateOrContractMonth") or p.get("expiry") or ""
                     strike_raw = p.get("strike")
                     try:
                         strike_f = float(strike_raw) if strike_raw is not None else None
                     except (TypeError, ValueError):
+                        strike_f = None
+                    if strike_f is not None and not math.isfinite(strike_f):
                         strike_f = None
                     rt = p.get("right") or ""
                     if sec == "OPT":
@@ -736,6 +742,22 @@ def _ensure_tables(conn) -> None:
                 "ALTER TABLE daemon_heartbeat ADD COLUMN redis_quotes_connected boolean DEFAULT false",
             ),
             (
+                "event_subscribe_ticker",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_ticker boolean DEFAULT false",
+            ),
+            (
+                "event_subscribe_positions",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_positions boolean DEFAULT false",
+            ),
+            (
+                "event_subscribe_fills",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_fills boolean DEFAULT false",
+            ),
+            (
+                "event_subscribe_commission",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_commission boolean DEFAULT false",
+            ),
+            (
                 "run_status_heartbeat_interval",
                 "ALTER TABLE daemon_run_status ADD COLUMN heartbeat_interval_sec smallint",
             ),
@@ -862,12 +884,23 @@ class PostgreSQLSink(StatusSink):
             logger.warning("PostgreSQL write_operation failed: %s", e)
 
     def write_instrument_prices(self, rows):
-        """R-M6: 写入每个合约的当前价（按 contract_key upsert）。rows: Iterable[Dict]."""
+        """R-M6: 写入每个合约的当前价（按 contract_key upsert）。rows: Iterable[Dict]。
+        过滤 NaN/Null：价格字段若为 NaN、inf 或空则写入 NULL，不污染数据库。若整行无有效价格则跳过该行。"""
         if not rows:
             return
         if not self._ensure_conn():
             return
         logger.info("[R-M6] write_instrument_prices: %s rows received", len(rows))
+
+        def _sanitize(v):
+            if v is None:
+                return None
+            try:
+                f = float(v)
+                return f if math.isfinite(f) else None
+            except (TypeError, ValueError):
+                return None
+
         try:
             with self._conn.cursor() as cur:
                 for r in rows:
@@ -876,6 +909,16 @@ class PostgreSQLSink(StatusSink):
                         logger.warning(
                             "[R-M6] write_instrument_prices: missing contract_key in row: %s",
                             r,
+                        )
+                        continue
+                    last = _sanitize(r.get("last"))
+                    bid = _sanitize(r.get("bid"))
+                    ask = _sanitize(r.get("ask"))
+                    mid = _sanitize(r.get("mid"))
+                    if last is None and bid is None and ask is None and mid is None:
+                        logger.debug(
+                            "[R-M6] write_instrument_prices: skip row (all price fields NaN/Null): %s",
+                            contract_key,
                         )
                         continue
                     cur.execute(
@@ -904,10 +947,10 @@ class PostgreSQLSink(StatusSink):
                             r.get("expiry"),
                             r.get("strike"),
                             r.get("option_right"),
-                            r.get("last"),
-                            r.get("bid"),
-                            r.get("ask"),
-                            r.get("mid"),
+                            last,
+                            bid,
+                            ask,
+                            mid,
                         ),
                     )
             self._conn.commit()
@@ -1175,7 +1218,7 @@ class PostgreSQLSink(StatusSink):
                     return None
                 row_id, command, created_at = row
                 cmd = (command or "").strip().lower()
-                if cmd not in ("stop", "flatten", "retry_ib", "refresh_accounts", "refresh_replay"):
+                if cmd not in ("stop", "flatten", "retry_ib", "refresh_accounts", "refresh_replay", "refresh_ticker_subscriptions"):
                     cmd = "stop"  # treat unknown as stop for safety
                 if consume_only is not None and cmd not in consume_only:
                     return None  # do not consume this command (caller may leave flatten for same process to consume)
@@ -1225,11 +1268,16 @@ class PostgreSQLSink(StatusSink):
         seconds_until_retry: Optional[int] = None,
         heartbeat_interval_sec: Optional[float] = None,
         redis_quotes_connected: bool = False,
+        event_subscribe_ticker: bool = False,
+        event_subscribe_positions: bool = False,
+        event_subscribe_fills: bool = False,
+        event_subscribe_commission: bool = False,
     ) -> None:
         """Update daemon_heartbeat row (id=1). RE-6: daemon vs hedge; RE-7: ib_connected, ib_client_id, next_retry_ts.
         seconds_until_retry: relative countdown from daemon clock, avoids clock skew on UI (optional).
         heartbeat_interval_sec: interval in use by daemon, for monitor countdown.
-        redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*)."""
+        redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*).
+        event_subscribe_*: daemon IB event subscription status for System page (ticker, positions, fills, commission)."""
         if not self._ensure_conn():
             return
         for attempt in (1, 2):
@@ -1246,7 +1294,9 @@ class PostgreSQLSink(StatusSink):
                             UPDATE daemon_heartbeat
                             SET last_ts = now(), hedge_running = %s, ib_connected = %s, ib_client_id = %s,
                                 next_retry_ts = to_timestamp(%s) AT TIME ZONE 'UTC', seconds_until_retry = %s,
-                                graceful_shutdown_at = NULL, heartbeat_interval_sec = %s, redis_quotes_connected = %s
+                                graceful_shutdown_at = NULL, heartbeat_interval_sec = %s, redis_quotes_connected = %s,
+                                event_subscribe_ticker = %s, event_subscribe_positions = %s,
+                                event_subscribe_fills = %s, event_subscribe_commission = %s
                             WHERE id = 1
                             """,
                             (
@@ -1257,6 +1307,10 @@ class PostgreSQLSink(StatusSink):
                                 seconds_until_retry,
                                 iv,
                                 redis_quotes_connected,
+                                event_subscribe_ticker,
+                                event_subscribe_positions,
+                                event_subscribe_fills,
+                                event_subscribe_commission,
                             ),
                         )
                     else:
@@ -1265,10 +1319,13 @@ class PostgreSQLSink(StatusSink):
                             UPDATE daemon_heartbeat
                             SET last_ts = now(), hedge_running = %s, ib_connected = %s, ib_client_id = %s,
                                 next_retry_ts = NULL, seconds_until_retry = NULL, graceful_shutdown_at = NULL,
-                                heartbeat_interval_sec = %s, redis_quotes_connected = %s
+                                heartbeat_interval_sec = %s, redis_quotes_connected = %s,
+                                event_subscribe_ticker = %s, event_subscribe_positions = %s,
+                                event_subscribe_fills = %s, event_subscribe_commission = %s
                             WHERE id = 1
                             """,
-                            (hedge_running, ib_connected, ib_client_id, iv, redis_quotes_connected),
+                            (hedge_running, ib_connected, ib_client_id, iv, redis_quotes_connected,
+                             event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission),
                         )
                 self._conn.commit()
                 return
@@ -1329,6 +1386,28 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.debug("get_ib_connection_config failed: %s", e)
             return None
+
+    def get_wishlist_stk_symbols(self) -> List[str]:
+        """Return distinct symbol strings from wishlist where sec_type is STK (or null/empty).
+        Used by daemon to subscribe to market data for Wishlist stocks only (R-RM*)."""
+        if not self._ensure_conn():
+            return []
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT TRIM(symbol) AS sym FROM wishlist
+                    WHERE symbol IS NOT NULL AND TRIM(symbol) != ''
+                    AND (sec_type IS NULL OR UPPER(TRIM(sec_type)) = 'STK')
+                    ORDER BY sym
+                    """
+                )
+                rows = cur.fetchall()
+            return [str(r[0]) for r in rows if r and r[0]]
+        except Exception as e:
+            logger.debug("get_wishlist_stk_symbols failed: %s", e)
+            self._conn.rollback()
+            return []
 
     def write_daemon_graceful_shutdown(self) -> None:
         """Set daemon_heartbeat.graceful_shutdown_at = now() and ib_client_id = NULL so next start uses client_id=1.

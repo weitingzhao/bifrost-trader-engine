@@ -4,7 +4,7 @@ import json
 import logging
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import psycopg2
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
-    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at[, heartbeat_interval_sec[, redis_quotes_connected]])."""
+    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at[, heartbeat_interval_sec[, redis_quotes_connected[, event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission]]])."""
     out = {
         "last_ts": float(row[0]) if row[0] is not None else None,
         "hedge_running": bool(row[1]),
@@ -28,6 +28,10 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
     }
     out["heartbeat_interval_sec"] = int(row[7]) if len(row) > 7 and row[7] is not None else None
     out["redis_quotes_connected"] = bool(row[8]) if len(row) > 8 and row[8] is not None else False
+    out["event_subscribe_ticker"] = bool(row[9]) if len(row) > 9 and row[9] is not None else False
+    out["event_subscribe_positions"] = bool(row[10]) if len(row) > 10 and row[10] is not None else False
+    out["event_subscribe_fills"] = bool(row[11]) if len(row) > 11 and row[11] is not None else False
+    out["event_subscribe_commission"] = bool(row[12]) if len(row) > 12 and row[12] is not None else False
     return out
 
 
@@ -103,7 +107,9 @@ class StatusReader:
                            seconds_until_retry,
                            extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
                            heartbeat_interval_sec,
-                           redis_quotes_connected
+                           redis_quotes_connected,
+                           event_subscribe_ticker, event_subscribe_positions,
+                           event_subscribe_fills, event_subscribe_commission
                     FROM daemon_heartbeat WHERE id = 1
                     """
                 )
@@ -113,9 +119,9 @@ class StatusReader:
             out = _row_to_heartbeat(row)
             return out
         except Exception as e:
-            # Column graceful_shutdown_at or redis_quotes_connected may be missing in DBs not yet migrated
+            # Column graceful_shutdown_at or redis_quotes_connected or event_subscribe_* may be missing in DBs not yet migrated
             err = str(e).lower()
-            if "redis_quotes_connected" in err:
+            if "event_subscribe" in err or "redis_quotes_connected" in err:
                 try:
                     with self._conn.cursor() as cur:
                         cur.execute(
@@ -125,16 +131,19 @@ class StatusReader:
                                    extract(epoch from next_retry_ts) AS next_retry_ts,
                                    seconds_until_retry,
                                    extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
-                                   heartbeat_interval_sec
+                                   heartbeat_interval_sec,
+                                   redis_quotes_connected
                             FROM daemon_heartbeat WHERE id = 1
                             """
                         )
                         row = cur.fetchone()
                     if row is None:
                         return None
-                    return _row_to_heartbeat(row + (None,))  # redis_quotes_connected = None
+                    # Append None for missing event_subscribe_* (or redis_quotes_connected)
+                    extra = (None,) * (13 - len(row))
+                    return _row_to_heartbeat(row + extra)
                 except Exception as e2:
-                    logger.debug("get_daemon_heartbeat (fallback no redis_quotes_connected) failed: %s", e2)
+                    logger.debug("get_daemon_heartbeat (fallback no event_subscribe/redis_quotes) failed: %s", e2)
             if "graceful_shutdown_at" in err or "column" in err:
                 try:
                     with self._conn.cursor() as cur:
@@ -143,14 +152,14 @@ class StatusReader:
                             SELECT extract(epoch from last_ts), hedge_running,
                                    ib_connected, ib_client_id,
                                    extract(epoch from next_retry_ts), seconds_until_retry,
-                                   NULL, NULL, NULL
+                                   NULL, NULL, NULL, NULL, NULL, NULL, NULL
                             FROM daemon_heartbeat WHERE id = 1
                             """
                         )
                         row = cur.fetchone()
                     if row is None:
                         return None
-                    return _row_to_heartbeat(row)  # graceful_shutdown_at, heartbeat_interval_sec, redis_quotes_connected = None
+                    return _row_to_heartbeat(row)  # minimal columns
                 except Exception as e2:
                     logger.debug("get_daemon_heartbeat (fallback) failed: %s", e2)
                     self._conn = None
@@ -548,7 +557,8 @@ class StatusReader:
                             ap.option_right,
                             ap.contract_key,
                             ip.mid AS price_mid,
-                            ip.last AS price_last
+                            ip.last AS price_last,
+                            ip.updated_at AS price_updated_at
                         FROM account_positions ap
                         LEFT JOIN instrument_prices ip
                             ON ap.contract_key = ip.contract_key
@@ -577,7 +587,7 @@ class StatusReader:
                         if p.get("option_right") is not None:
                             pos_dict["right"] = p.get("option_right")
 
-                        # 价格优先使用 instrument_prices.mid，其次使用 last；仅过滤 NaN/Inf
+                        # 价格优先使用 instrument_prices.mid，其次 last；仅过滤 NaN/Inf
                         raw_mid = p.get("price_mid")
                         raw_last = p.get("price_last")
                         price_val: Optional[float] = None
@@ -594,6 +604,64 @@ class StatusReader:
                             break
                         if price_val is not None:
                             pos_dict["price"] = price_val
+
+                        # instrument_prices.updated_at → price_updated_at (Unix sec) for Since 显示（兼容列名大小写）
+                        raw_updated = next(
+                            (p[k] for k in p if k and k.lower() == "price_updated_at"),
+                            p.get("price_updated_at"),
+                        )
+                        if raw_updated is not None:
+                            try:
+                                if hasattr(raw_updated, "timestamp"):
+                                    pos_dict["price_updated_at"] = raw_updated.timestamp()
+                                elif isinstance(raw_updated, (int, float)) and math.isfinite(float(raw_updated)):
+                                    pos_dict["price_updated_at"] = float(raw_updated)
+                                elif isinstance(raw_updated, str) and raw_updated.strip():
+                                    s = raw_updated.strip()
+                                    # PostgreSQL 文本格式可能为 "2026-03-04 19:44:43.373 -0600"（空格+±HHMM），fromisoformat 不认
+                                    parts = s.rsplit(" ", 1)
+                                    if len(parts) == 2 and len(parts[1]) == 5 and parts[1][0] in "+-" and parts[1][1:].isdigit():
+                                        dt_naive = datetime.strptime(parts[0], "%Y-%m-%d %H:%M:%S.%f")
+                                        sign = -1 if parts[1][0] == "-" else 1
+                                        hours = sign * int(parts[1][1:3])
+                                        mins = sign * int(parts[1][3:5])
+                                        dt = dt_naive.replace(tzinfo=timezone(timedelta(hours=hours, minutes=mins)))
+                                        pos_dict["price_updated_at"] = dt.timestamp()
+                                    else:
+                                        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                                        pos_dict["price_updated_at"] = dt.timestamp()
+                            except (TypeError, ValueError, OSError):
+                                pass
+
+                        # 持仓盈亏：用 instrument_prices.last（无则 mid）与 position/avg_cost 计算
+                        price_for_pnl: Optional[float] = None
+                        for candidate in (raw_last, raw_mid):
+                            if candidate is None:
+                                continue
+                            try:
+                                v = float(candidate)
+                            except (TypeError, ValueError):
+                                continue
+                            if not math.isfinite(v):
+                                continue
+                            price_for_pnl = v
+                            break
+                        pos_qty = p.get("position")
+                        pos_avg = p.get("avg_cost")
+                        if (
+                            price_for_pnl is not None
+                            and pos_qty is not None
+                            and pos_avg is not None
+                        ):
+                            try:
+                                q = float(pos_qty)
+                                c = float(pos_avg)
+                                if math.isfinite(q) and math.isfinite(c):
+                                    pos_dict["unrealized_pnl"] = round(
+                                        (price_for_pnl - c) * q, 2
+                                    )
+                            except (TypeError, ValueError):
+                                pass
 
                         positions.append(pos_dict)
                 out.append({"account_id": acc_id, "summary": summary, "positions": positions})

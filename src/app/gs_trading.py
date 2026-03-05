@@ -1,7 +1,8 @@
-"""Gamma scalping strategy: connector -> state -> greeks -> scalper -> guard -> order."""
+"""Gamma Scalping strategy: connector -> state -> greeks -> scalper -> guard -> order."""
 
 import asyncio
 import logging
+import math
 import os
 import signal
 import time
@@ -184,8 +185,18 @@ class GsTrading:
         self._last_positions_refresh_ts = (
             0.0  # 对冲用持仓也按同一间隔，避免每心跳请求 IB positions
         )
+        # R-M6: 首次有持仓时全量 IB 拉价一次；之后心跳用 Redis（Event）更新，仅 Refresh 时再全量拉价
+        self._instrument_prices_initialized = False
         # R-RM*: optional Redis real-time quotes (daemon is sole writer)
         self._redis_quotes = create_redis_quotes(config)
+        if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
+            logger.info(
+                "Redis quotes: connected (Event ticker → quote:{symbol}, channel daemon:quotes)"
+            )
+        else:
+            logger.info(
+                "Redis quotes: disabled or unavailable (config redis.enabled and Redis server required for ticker→Redis)"
+            )
 
     def _reload_config(self, config: dict) -> None:
         """Apply hot-reloadable config (IB host/port require restart)."""
@@ -569,44 +580,113 @@ class GsTrading:
         return (snapshot, spot, cs, data_lag_ms)
 
     def _on_ticker(self, ticker: Any) -> None:
-        """Called on each ticker update from IB (may be from IB thread)."""
+        """Called on each ticker update from IB (may be from IB thread). Delegates to _on_ticker_for_symbol."""
+        self._on_ticker_for_symbol(self.symbol, ticker)
+
+    def _on_ticker_for_symbol(self, symbol: str, ticker: Any) -> None:
+        """Called on each ticker update from IB for a symbol (may be from IB thread).
+        For strategy symbol: update store, write Redis, trigger hedge eval.
+        For other symbols (Wishlist STK): write Redis only."""
         try:
-            self._market_data.touch_ts()
-            bid = getattr(ticker, "bid", None)
-            ask = getattr(ticker, "ask", None)
-            if bid is not None and ask is not None:
-                self.store.set_underlying_quote(float(bid), float(ask))
-            else:
-                last = getattr(ticker, "last", None)
-                if last is not None:
-                    self.store.set_underlying_price(float(last))
+            if symbol == self.symbol:
+                self._market_data.touch_ts()
+                bid = getattr(ticker, "bid", None)
+                ask = getattr(ticker, "ask", None)
+                if bid is not None and ask is not None:
+                    try:
+                        b, a = float(bid), float(ask)
+                        if math.isfinite(b) and math.isfinite(a):
+                            self.store.set_underlying_quote(b, a)
+                    except (TypeError, ValueError):
+                        pass
+                else:
+                    last = getattr(ticker, "last", None)
+                    if last is not None:
+                        try:
+                            L = float(last)
+                            if math.isfinite(L):
+                                self.store.set_underlying_price(L)
+                        except (TypeError, ValueError):
+                            pass
             # R-RM*: write quote to Redis and publish (daemon sole writer; failures do not affect hedge)
             if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
                 try:
-                    payload = self._quote_payload()
+                    payload = (
+                        self._quote_payload()
+                        if symbol == self.symbol
+                        else self._quote_payload_from_ticker(symbol, ticker)
+                    )
                     if payload:
-                        self._redis_quotes.set_quote(self.symbol, payload)
-                        self._redis_quotes.publish_update(self.symbol, {"symbol": self.symbol, "ts": payload.get("ts")})
+                        self._redis_quotes.set_quote(symbol, payload)
+                        self._redis_quotes.publish_update(symbol, {"symbol": symbol, "ts": payload.get("ts")})
                 except Exception as e:
-                    logger.warning("Redis quote write/publish in _on_ticker: %s", e)
-            self._eval_hedge_threadsafe()
+                    logger.warning("Redis quote write/publish in _on_ticker_for_symbol: %s", e)
+            if symbol == self.symbol:
+                self._eval_hedge_threadsafe()
         except Exception as e:
-            logger.debug("ticker callback error: %s", e)
+            logger.debug("ticker callback error for %s: %s", symbol, e)
+
+    def _quote_payload_from_ticker(self, symbol: str, ticker: Any) -> Optional[dict]:
+        """Build quote dict for Redis from ticker (symbol, bid, ask, last, ts). Used for non-strategy symbols.
+        Returns None if price is NaN, inf, or empty — such events are discarded and not written to Redis."""
+        bid = getattr(ticker, "bid", None)
+        ask = getattr(ticker, "ask", None)
+        last = getattr(ticker, "last", None)
+        try:
+            bid = float(bid) if bid is not None else None
+            ask = float(ask) if ask is not None else None
+            last = float(last) if last is not None else None
+        except (TypeError, ValueError):
+            bid = ask = last = None
+        if bid is not None and not math.isfinite(bid):
+            bid = None
+        if ask is not None and not math.isfinite(ask):
+            ask = None
+        if last is not None and not math.isfinite(last):
+            last = None
+        if last is None and (bid is None or ask is None):
+            return None
+        if last is None and bid is not None and ask is not None:
+            last = (float(bid) + float(ask)) / 2.0
+        if last is None or not math.isfinite(last):
+            return None
+        return {
+            "symbol": symbol,
+            "bid": bid,
+            "ask": ask,
+            "last": last,
+            "ts": time.time(),
+        }
 
     def _quote_payload(self) -> Optional[dict]:
-        """Build quote dict for Redis from store (symbol, bid, ask, last, ts)."""
+        """Build quote dict for Redis from store (symbol, bid, ask, last, ts). Returns None if price is NaN/inf/empty."""
         bid = self.store.get_bid()
         ask = self.store.get_ask()
         last = self.store.get_underlying_price()
         if last is None and bid is not None and ask is not None:
-            last = (float(bid) + float(ask)) / 2.0
+            try:
+                last = (float(bid) + float(ask)) / 2.0
+            except (TypeError, ValueError):
+                last = None
         if last is None:
             return None
+        try:
+            last_f = float(last)
+            if not math.isfinite(last_f):
+                return None
+        except (TypeError, ValueError):
+            return None
+        bid_f = float(bid) if bid is not None else None
+        ask_f = float(ask) if ask is not None else None
+        if bid_f is not None and not math.isfinite(bid_f):
+            bid_f = None
+        if ask_f is not None and not math.isfinite(ask_f):
+            ask_f = None
         return {
             "symbol": self.symbol,
-            "bid": float(bid) if bid is not None else None,
-            "ask": float(ask) if ask is not None else None,
-            "last": float(last),
+            "bid": bid_f,
+            "ask": ask_f,
+            "last": last_f,
             "ts": time.time(),
         }
 
@@ -836,6 +916,17 @@ class GsTrading:
             and getattr(self._redis_quotes, "available", False)
         )
 
+    def _event_subscribe_flags(self) -> dict:
+        """IB event subscription status for System page: ticker, positions, fills, commission."""
+        connected = self.connector.is_connected
+        running = self._fsm_daemon.is_running()
+        return {
+            "event_subscribe_ticker": running and connected,
+            "event_subscribe_positions": running and connected,
+            "event_subscribe_fills": False,  # connector supports it but daemon does not subscribe yet
+            "event_subscribe_commission": connected,
+        }
+
     def _apply_run_status_transition(self) -> bool:
         """Sync Daemon FSM with daemon_run_status: RUNNING <-> RUNNING_SUSPENDED. Returns True if suspended (skip hedge)."""
         suspended, interval = self._poll_run_status()
@@ -876,6 +967,8 @@ class GsTrading:
                 self._last_accounts_refresh_ts = time.time()
                 minimal = self._build_heartbeat_minimal_dict()
                 self._status_sink.write_snapshot(minimal, append_history=False)
+                await self._refresh_position_prices()
+                self._instrument_prices_initialized = True
             if (
                 cmd == "refresh_replay"
                 and self.connector.is_connected
@@ -885,6 +978,14 @@ class GsTrading:
                     "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
                 )
                 await self._refresh_executions_only()
+            if (
+                cmd == "refresh_ticker_subscriptions"
+                and self.connector.is_connected
+            ):
+                logger.info(
+                    "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Wishlist"
+                )
+                await self._refresh_ticker_subscriptions()
             suspended = self._apply_run_status_transition()
             interval_sec = self._effective_heartbeat_interval()
             state_label = self._fsm_daemon.current.value
@@ -922,6 +1023,8 @@ class GsTrading:
                 self._last_accounts_refresh_ts = time.time()
                 minimal = self._build_heartbeat_minimal_dict()
                 self._status_sink.write_snapshot(minimal, append_history=False)
+                await self._refresh_position_prices()
+                self._instrument_prices_initialized = True
             if (
                 cmd == "refresh_replay"
                 and self.connector.is_connected
@@ -931,6 +1034,14 @@ class GsTrading:
                     "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
                 )
                 await self._refresh_executions_only()
+            if (
+                cmd == "refresh_ticker_subscriptions"
+                and self.connector.is_connected
+            ):
+                logger.info(
+                    "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Wishlist"
+                )
+                await self._refresh_ticker_subscriptions()
             suspended = self._apply_run_status_transition()
             # Detect IB disconnect during RUNNING/RUNNING_SUSPENDED: write DB then transition to WAITING_IB (RE-7)
             if not self.connector.is_connected:
@@ -948,6 +1059,7 @@ class GsTrading:
                         next_retry_ts=next_retry_ts,
                         seconds_until_retry=sec_until,
                         redis_quotes_connected=self._redis_quotes_connected(),
+                        **self._event_subscribe_flags(),
                     )
                 logger.warning(
                     "[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)",
@@ -997,11 +1109,20 @@ class GsTrading:
                                 self._redis_quotes.publish_update(self.symbol, {"symbol": self.symbol, "ts": payload.get("ts")})
                         except Exception as e:
                             logger.warning("Redis quote write in heartbeat (minimal): %s", e)
-                # 阶段 3 R-M6：按 account_positions 逐标的拉价 + 写库（低频：按心跳刷新一次）
+                # R-M6：优先用 Redis（Event）更新 instrument_prices；无 Redis 时回退为 IB 全量拉价。全量拉价仅在首次有持仓或 Accounts Refresh 时执行。
+                if not getattr(self, "_instrument_prices_initialized", False):
+                    try:
+                        await self._refresh_position_prices()
+                        self._instrument_prices_initialized = True
+                    except Exception as e:
+                        logger.debug("R-M6 initial refresh_position_prices: %s", e)
                 try:
-                    await self._refresh_position_prices()
+                    if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
+                        self._sync_instrument_prices_from_redis()
+                    else:
+                        await self._refresh_position_prices()
                 except Exception as e:
-                    logger.debug("refresh_position_prices failed: %s", e, exc_info=True)
+                    logger.debug("R-M6 instrument_prices sync failed: %s", e)
                 if hasattr(self._status_sink, "write_daemon_heartbeat"):
                     self._status_sink.write_daemon_heartbeat(
                         hedge_running=True,
@@ -1009,28 +1130,51 @@ class GsTrading:
                         ib_client_id=getattr(self.connector, "client_id", None),
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
                         redis_quotes_connected=self._redis_quotes_connected(),
+                        **self._event_subscribe_flags(),
                     )
+            # 每次心跳同步 Real-time ticker 订阅：与 Wishlist STK + 策略标的 一致，多退少补
+            await self._refresh_ticker_subscriptions()
             if not suspended:
                 logger.info(
                     "[Daemon] state=RUNNING | heartbeat: tick, running maybe_hedge"
                 )
                 await self._eval_hedge_sync()
 
-    async def _refresh_position_prices(self) -> None:
-        """R-M6：根据当前 accounts_data 按 contract_key 聚合标的，逐标的拉价并写入 instrument_prices。
-
-        刷新频率：随 heartbeat，一次性覆盖当前所有持仓标的；与高频 status_current.spot 解耦。
-        """
-        if not self._status_sink or not hasattr(
-            self._status_sink, "write_instrument_prices"
-        ):
-            return
+    async def _refresh_ticker_subscriptions(self) -> None:
+        """每次心跳同步 Real-time ticker：应与 Wishlist STK + 策略标的 一致；多退少补，无需重启守护进程。"""
         if not self.connector.is_connected:
             return
+        desired: set = set()
+        if self.symbol:
+            desired.add(self.symbol.strip())
+        if self._status_sink and hasattr(self._status_sink, "get_wishlist_stk_symbols"):
+            for s in getattr(self._status_sink, "get_wishlist_stk_symbols")() or []:
+                if s and str(s).strip():
+                    desired.add(str(s).strip())
+        current = set(self.connector.get_subscribed_ticker_symbols())
+        to_remove = current - desired
+        to_add = desired - current
+        for sym in sorted(to_remove):
+            self.connector.unsubscribe_ticker(sym)
+            if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
+                self._redis_quotes.delete_quote(sym)
+            logger.info("[Daemon] Real-time ticker unsubscribed: %s", sym)
+        if to_add:
+            added = await self.connector.subscribe_tickers(
+                sorted(to_add), self._on_ticker_for_symbol
+            )
+            if added:
+                logger.info(
+                    "[Daemon] Real-time ticker subscribed: %s",
+                    sorted(added.keys()),
+                )
+
+    def _get_position_stk_instruments(self) -> dict:
+        """从 accounts_data 聚合持仓中的 STK 标的，返回 contract_key -> meta（symbol, sec_type, expiry, strike, option_right, exchange, currency）。"""
+        instruments: dict = {}
         accounts = self.store.get_accounts_data()
         if not accounts:
-            return
-        instruments = {}
+            return instruments
         for acc in accounts:
             positions = acc.get("positions") or []
             if not isinstance(positions, list):
@@ -1043,7 +1187,6 @@ class GsTrading:
                     continue
                 sec = (p.get("secType") or p.get("sec_type") or "").strip()
                 sec_u = sec.upper()
-                # 先只对股票逐标的拉价 + 写库；期权后续单独按 IB 的完整合约信息处理
                 if sec_u != "STK":
                     continue
                 ex = (p.get("exchange") or "").strip() or "SMART"
@@ -1060,10 +1203,20 @@ class GsTrading:
                     "exchange": ex,
                     "currency": curr,
                 }
+        return instruments
+
+    async def _refresh_position_prices(self) -> None:
+        """R-M6：根据当前 accounts_data 按 contract_key 聚合标的，逐标的向 IB 拉价并写入 instrument_prices。
+        用于：守护进程启动后首次有持仓时执行一次；监控端点击 Accounts Refresh 时执行。
+        """
+        if not self._status_sink or not hasattr(
+            self._status_sink, "write_instrument_prices"
+        ):
+            return
+        if not self.connector.is_connected:
+            return
+        instruments = self._get_position_stk_instruments()
         if not instruments:
-            logger.info(
-                "[R-M6] refresh_position_prices: no stock instruments in accounts_data; skip"
-            )
             return
         rows = []
         for ck, meta in instruments.items():
@@ -1105,6 +1258,76 @@ class GsTrading:
         if rows:
             self._status_sink.write_instrument_prices(rows)
 
+    def _sync_instrument_prices_from_redis(self) -> None:
+        """R-M6：用 Redis 中 Event 已写入的行情更新 instrument_prices，仅更新有 Redis 数据的持仓标的。"""
+        if not self._status_sink or not hasattr(
+            self._status_sink, "write_instrument_prices"
+        ):
+            return
+        if not getattr(self, "_redis_quotes", None) or not self._redis_quotes.available:
+            return
+        instruments = self._get_position_stk_instruments()
+        if not instruments:
+            return
+        symbols = [m["symbol"] for m in instruments.values()]
+        quotes = self._redis_quotes.get_quotes(symbols)
+        if not quotes:
+            return
+        symbol_to_ck = {m["symbol"]: ck for ck, m in instruments.items()}
+        rows = []
+        for q in quotes:
+            sym = q.get("symbol")
+            ck = symbol_to_ck.get(sym) if sym else None
+            if not ck:
+                continue
+            meta = instruments[ck]
+            bid = q.get("bid")
+            ask = q.get("ask")
+            last = q.get("last")
+            try:
+                bid_f = float(bid) if bid is not None else None
+                ask_f = float(ask) if ask is not None else None
+                last_f = float(last) if last is not None else None
+            except (TypeError, ValueError):
+                continue
+            if bid_f is not None and not math.isfinite(bid_f):
+                bid_f = None
+            if ask_f is not None and not math.isfinite(ask_f):
+                ask_f = None
+            if last_f is not None and not math.isfinite(last_f):
+                last_f = None
+            if last_f is None and (bid_f is None or ask_f is None):
+                continue
+            mid = (
+                (bid_f + ask_f) / 2.0
+                if bid_f is not None and ask_f is not None
+                else last_f
+            )
+            if mid is None:
+                mid = last_f
+            if mid is not None and not math.isfinite(mid):
+                continue
+            rows.append(
+                {
+                    "contract_key": ck,
+                    "symbol": meta["symbol"],
+                    "sec_type": meta["sec_type"],
+                    "expiry": meta["expiry"],
+                    "strike": meta["strike"],
+                    "option_right": meta["option_right"],
+                    "last": last_f,
+                    "bid": bid_f,
+                    "ask": ask_f,
+                    "mid": mid,
+                }
+            )
+        if rows:
+            self._status_sink.write_instrument_prices(rows)
+            logger.debug(
+                "[R-M6] sync_instrument_prices_from_redis: %s rows from Redis",
+                len(rows),
+            )
+
     # --- State handlers: each runs its logic and returns the next state ---
 
     async def _handle_idle(self) -> DaemonState:
@@ -1113,12 +1336,15 @@ class GsTrading:
         return DaemonState.CONNECTING
 
     async def _handle_connecting(self) -> DaemonState:
-        """CONNECTING: try IB once; if fail → WAITING_IB (RE-7). Retries happen in WAITING_IB at heartbeat interval."""
-        logger.info("[Daemon] state=CONNECTING | connecting to IB (single attempt)...")
-        ok = await self.connector.connect(max_attempts=1)
+        """CONNECTING: try IB with client_id, client_id+1, ... (up to 10 attempts) on 326; if all fail → WAITING_IB (RE-7)."""
+        logger.info(
+            "[Daemon] state=CONNECTING | connecting to IB (clientId=%s; will try +1, +2, ... if already in use)",
+            getattr(self.connector, "client_id", None),
+        )
+        ok = await self.connector.connect(max_attempts=10)
         if not ok:
             logger.warning(
-                "[Daemon] state=CONNECTING | IB connect failed → WAITING_IB (daemon stays up, will retry)"
+                "[Daemon] state=CONNECTING | IB connect failed after 10 attempts → WAITING_IB (daemon stays up, will retry)"
             )
             return DaemonState.WAITING_IB
         logger.info("[Daemon] state=CONNECTING → CONNECTED (IB connected)")
@@ -1139,6 +1365,7 @@ class GsTrading:
                 seconds_until_retry=sec_until,
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
                 redis_quotes_connected=self._redis_quotes_connected(),
+                **self._event_subscribe_flags(),
             )
         logger.info(
             "[Daemon] state=WAITING_IB | IB not connected; next retry in %ss (heartbeat interval=%.0fs)",
@@ -1152,10 +1379,11 @@ class GsTrading:
                 return DaemonState.STOPPING
             if cmd == "retry_ib" or time.time() >= next_retry_ts:
                 logger.info(
-                    "[Daemon] state=WAITING_IB | %s → connecting to IB (one attempt)...",
+                    "[Daemon] state=WAITING_IB | %s → connecting to IB (clientId=%s; will try +1, +2, ... if in use)",
                     "retry_ib" if cmd == "retry_ib" else "retry timer",
+                    getattr(self.connector, "client_id", None),
                 )
-                ok = await self.connector.connect(max_attempts=1)
+                ok = await self.connector.connect(max_attempts=10)
                 if ok:
                     # 立即写心跳，避免进入 CONNECTED/RUNNING 前 last_ts 过期导致监控端误判为异常（CONNECTED 阶段 _refresh_and_build_snapshot 可能较慢）
                     if self._status_sink and hasattr(
@@ -1167,6 +1395,7 @@ class GsTrading:
                             ib_client_id=getattr(self.connector, "client_id", None),
                             heartbeat_interval_sec=self._effective_heartbeat_interval(),
                             redis_quotes_connected=self._redis_quotes_connected(),
+                            **self._event_subscribe_flags(),
                         )
                     logger.info("[Daemon] state=WAITING_IB → CONNECTED (IB connected)")
                     return DaemonState.CONNECTED
@@ -1185,6 +1414,7 @@ class GsTrading:
                         seconds_until_retry=sec_until,
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
                         redis_quotes_connected=self._redis_quotes_connected(),
+                        **self._event_subscribe_flags(),
                     )
                 logger.debug(
                     "[Daemon] state=WAITING_IB | connect failed; next retry in %ss",
@@ -1202,6 +1432,7 @@ class GsTrading:
                 ib_client_id=getattr(self.connector, "client_id", None),
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
                 redis_quotes_connected=self._redis_quotes_connected(),
+                **self._event_subscribe_flags(),
             )
         logger.info(
             "[Daemon] state=CONNECTED | fetching account summary and positions, building snapshot..."
@@ -1227,9 +1458,25 @@ class GsTrading:
         return DaemonState.RUNNING
 
     async def _handle_running(self) -> DaemonState:
-        """RUNNING: subscribe, start background tasks, loop until stop requested. May transition to RUNNING_SUSPENDED if daemon_run_status.suspended."""
-        logger.info("[Daemon] state=RUNNING | subscribing to ticker and positions...")
-        await self.connector.subscribe_ticker(self.symbol, self._on_ticker)
+        """RUNNING: subscribe to Wishlist STK + strategy symbol, start background tasks, loop until stop requested. May transition to RUNNING_SUSPENDED if daemon_run_status.suspended."""
+        logger.info("[Daemon] state=RUNNING | subscribing to tickers (Wishlist STK + strategy symbol) and positions...")
+        # Symbols to subscribe: Wishlist STK only + ensure strategy symbol is included for hedge
+        symbols_to_subscribe: list = []
+        if self._status_sink and hasattr(self._status_sink, "get_wishlist_stk_symbols"):
+            symbols_to_subscribe = getattr(self._status_sink, "get_wishlist_stk_symbols")() or []
+        logger.info("[Daemon] Wishlist STK symbols from DB: %s", symbols_to_subscribe)
+        symbols_set = set(s.strip() for s in symbols_to_subscribe if s and str(s).strip())
+        symbols_set.add(self.symbol)
+        symbols_set = {s for s in symbols_set if s and str(s).strip()}
+        symbols_list = sorted(symbols_set)
+        if not symbols_list and self.symbol:
+            symbols_list = [self.symbol]
+        if symbols_list:
+            await self.connector.subscribe_tickers(symbols_list, self._on_ticker_for_symbol)
+            logger.info("[Daemon] subscribed to %s symbol(s): %s", len(symbols_list), symbols_list)
+        else:
+            await self.connector.subscribe_ticker(self.symbol, self._on_ticker)
+            logger.info("[Daemon] subscribed to strategy symbol only: %s", self.symbol)
         self.connector.subscribe_positions(self._eval_hedge_threadsafe)
         # Sync FSM with daemon_run_status so first snapshot reflects RUNNING_SUSPENDED if already set
         self._apply_run_status_transition()
@@ -1244,6 +1491,7 @@ class GsTrading:
                     ib_client_id=getattr(self.connector, "client_id", None),
                     heartbeat_interval_sec=self._effective_heartbeat_interval(),
                     redis_quotes_connected=self._redis_quotes_connected(),
+                    **self._event_subscribe_flags(),
                 )
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
         self._config_reload_task = asyncio.create_task(self._reload_config_loop())

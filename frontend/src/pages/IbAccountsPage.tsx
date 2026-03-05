@@ -34,6 +34,17 @@ function rightLabel(r: string | undefined): string {
   return r
 }
 
+/** 根据 price_updated_at (Unix 秒) 与当前时间差显示：秒 → 分钟 → 小时 → 天 */
+function formatLastUpdate(updatedAtSec: number | null | undefined): string {
+  if (updatedAtSec == null || !Number.isFinite(updatedAtSec)) return '—'
+  const nowSec = Date.now() / 1000
+  const elapsed = Math.max(0, Math.floor(nowSec - updatedAtSec))
+  if (elapsed < 60) return `${elapsed}s`
+  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`
+  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h`
+  return `${Math.floor(elapsed / 86400)}d`
+}
+
 function optionIntrinsic(isCall: boolean, k: number, s: number): number {
   return isCall ? Math.max(0, s - k) : Math.max(0, k - s)
 }
@@ -215,8 +226,9 @@ export function IbAccountsPage({
                     <th>Qty</th>
                     <th>Cost</th>
                     <th>Total cost</th>
-                    <th>Price</th>
+                    <th>Market</th>
                     <th>PnL</th>
+                    <th>Since</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -240,17 +252,30 @@ export function IbAccountsPage({
                     const currPrice =
                       Number.isFinite(perPrice) && perPrice > 0 ? perPrice : fallbackSpot
                     const pnl =
-                      currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)
-                        ? (currPrice - cost) * qty
-                        : null
+                      pos.unrealized_pnl != null && Number.isFinite(pos.unrealized_pnl)
+                        ? pos.unrealized_pnl
+                        : currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)
+                          ? (currPrice - cost) * qty
+                          : null
+                    const marketColor =
+                      currPrice != null && Number.isFinite(cost)
+                        ? (currPrice > cost ? 'var(--color-success, green)' : currPrice < cost ? 'var(--color-danger, #c00)' : undefined)
+                        : undefined
+                    const pnlColor =
+                      pnl != null ? (pnl > 0 ? 'var(--color-success, green)' : pnl < 0 ? 'var(--color-danger, #c00)' : undefined) : undefined
                     return (
                       <tr key={`stk-${pos.symbol}-${i}`} className="ib-pos-stock">
                         <td>{pos.symbol ?? '—'}</td>
                         <td>{pos.position != null ? pos.position : '—'}</td>
                         <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
                         <td>{totalCost != null ? fmtUsd(totalCost) : '—'}</td>
-                        <td>{currPrice != null ? fmtUsd(currPrice) : '—'}</td>
-                        <td>{pnl != null ? fmtUsd(pnl) : '—'}</td>
+                        <td style={marketColor ? { color: marketColor, fontWeight: 600 } : undefined}>
+                          {currPrice != null ? fmtUsd(currPrice) : '—'}
+                        </td>
+                        <td style={pnlColor ? { color: pnlColor, fontWeight: 600 } : undefined}>
+                          {pnl != null ? fmtUsd(pnl) : '—'}
+                        </td>
+                        <td>{formatLastUpdate(pos.price_updated_at)}</td>
                       </tr>
                     )
                   })}
@@ -263,10 +288,24 @@ export function IbAccountsPage({
                   if (Number.isFinite(qty) && Number.isFinite(cost)) return acc + qty * cost
                   return acc
                 }, 0)
-                if (!Number.isFinite(sumTotal)) return null
+                const sumPnl = stockPositions.reduce((acc, pos) => {
+                  const p =
+                    pos.unrealized_pnl != null && Number.isFinite(pos.unrealized_pnl)
+                      ? pos.unrealized_pnl
+                      : (pos.price != null && pos.avgCost != null && pos.position != null &&
+                         Number.isFinite(pos.price) && Number.isFinite(pos.avgCost) && Number.isFinite(pos.position))
+                        ? (Number(pos.price) - Number(pos.avgCost)) * Number(pos.position)
+                        : NaN
+                  return Number.isFinite(p) ? acc + p : acc
+                }, 0)
                 return (
                   <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
                     Stock total cost: {fmtUsd(sumTotal)}
+                    {Number.isFinite(sumPnl) && (
+                      <span style={{ marginLeft: '1rem', color: sumPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
+                        Unrealized PnL: {fmtUsd(sumPnl)}
+                      </span>
+                    )}
                   </p>
                 )
               })()}

@@ -6,8 +6,9 @@ TTL on quote keys to avoid stale data. Channel: daemon:quotes (minimal payload: 
 
 import json
 import logging
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,18 @@ class RedisQuotesClient:
             logger.warning("Redis publish_update failed symbol=%s: %s", symbol, e)
             return False
 
+    def delete_quote(self, symbol: str) -> bool:
+        """Remove quote key from Redis (e.g. when unsubscribing ticker). Returns True on success or key already missing."""
+        if not self._client:
+            return False
+        key = f"{QUOTE_KEY_PREFIX}{symbol}"
+        try:
+            self._client.delete(key)
+            return True
+        except Exception as e:
+            logger.warning("Redis delete_quote failed symbol=%s: %s", symbol, e)
+            return False
+
     def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Read one quote from Redis (for monitor). Returns None if key missing or error."""
         if not self._client:
@@ -185,26 +198,56 @@ def create_from_config(config: Dict[str, Any]) -> Optional[RedisQuotesClient]:
         port,
     )
     return None
-    port = int(redis_cfg.get("port", 6379))
-    db = int(redis_cfg.get("db", 0))
-    password = redis_cfg.get("password")
-    timeout = float(redis_cfg.get("socket_connect_timeout", 5.0))
-    ttl = int(redis_cfg.get("quote_ttl_sec", QUOTE_TTL_SEC))
-    channel = redis_cfg.get("channel", PUB_CHANNEL)
-    client = RedisQuotesClient(
-        host=host,
-        port=port,
-        db=db,
-        password=password,
-        socket_connect_timeout=timeout,
-        quote_ttl_sec=ttl,
-        channel=channel,
+
+
+def run_subscribe_loop(
+    rq: RedisQuotesClient,
+    on_quote: Callable[[Dict[str, Any]], None],
+    stop_event: threading.Event,
+    poll_timeout: float = 0.5,
+) -> None:
+    """Run Redis SUBSCRIBE loop in a thread; for each daemon:quotes message, read quote from rq and call on_quote(quote_dict).
+    Uses a separate Redis connection so the main rq connection can still do GET. Call from a daemon thread; stops when stop_event is set."""
+    try:
+        import redis
+    except ImportError:
+        logger.warning("redis package not installed; SSE quote stream disabled")
+        return
+    sub_client = redis.Redis(
+        host=rq._host,
+        port=rq._port,
+        db=rq._db,
+        password=rq._password if rq._password else None,
+        socket_connect_timeout=rq._socket_connect_timeout,
+        decode_responses=True,
     )
-    if client.connect():
-        return client
-    logger.warning(
-        "Redis quotes unavailable: connect failed to %s:%s (check Redis is running and redis.host/port in config)",
-        host,
-        port,
-    )
-    return None
+    try:
+        pubsub = sub_client.pubsub()
+        pubsub.subscribe(rq._channel)
+        logger.info("Redis quotes subscribe loop started on channel=%s", rq._channel)
+        while not stop_event.is_set():
+            msg = pubsub.get_message(timeout=poll_timeout)
+            if msg is None:
+                continue
+            if msg.get("type") != "message":
+                continue
+            try:
+                data = json.loads(msg["data"])
+                symbol = (data.get("symbol") or "").strip()
+                if not symbol:
+                    continue
+                quote = rq.get_quote(symbol)
+                if quote:
+                    on_quote(quote)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.debug("Redis subscribe message parse skip: %s", e)
+    finally:
+        try:
+            pubsub.close()
+        except Exception:
+            pass
+        try:
+            sub_client.close()
+        except Exception:
+            pass
+        logger.info("Redis quotes subscribe loop stopped")

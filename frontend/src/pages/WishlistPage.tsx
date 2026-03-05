@@ -181,9 +181,13 @@ export function WishlistPage({ status }: WishlistPageProps) {
 
   const wishlistContractKeys = useMemo(() => new Set(wishlistItems.map(w => w.contract_key)), [wishlistItems])
 
-  /** 仅展示尚未在自选中的持仓，用于「从持仓添加」按钮列表 */
+  /** 仅展示尚未在自选中的持仓，用于「从持仓添加」按钮列表；只列 STK（股票） */
   const positionsNotInWishlist = useMemo(() => {
-    return positions.filter(p => !wishlistContractKeys.has(positionToContractKey(p)))
+    return positions.filter(p => {
+      const st = (p.secType ?? '').toString().trim().toUpperCase()
+      if (st !== 'STK' && st !== '') return false
+      return !wishlistContractKeys.has(positionToContractKey(p))
+    })
   }, [positions, wishlistContractKeys])
 
   const wishlistStocks = useMemo(() => wishlistItems.filter(w => (w.sec_type || 'STK').toUpperCase() !== 'OPT'), [wishlistItems])
@@ -406,15 +410,18 @@ export function WishlistPage({ status }: WishlistPageProps) {
       <section className="replay-section" aria-labelledby="wishlist-head">
         <h3 id="wishlist-head" className="page-title-with-tooltip">
           Stocks & options
-          <InfoTooltip text={'Stocks: enter Symbol to add. Options: use "Options" on a stock row and fill expiry, right, strike.'} />
+          <InfoTooltip text="Stocks: enter Symbol to add. Options: use 'Options' on a stock row and fill expiry, right, strike." />
         </h3>
+        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: '0.75rem' }}>
+          Stocks in this list are subscribed by the daemon as <strong>Real-time ticker</strong> (see System → Event Subscribe). Add a symbol below to include it in monitoring. The daemon syncs this list on every heartbeat; no restart is needed when you add or remove symbols.
+        </p>
         {wishlistError && (
           <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
             {wishlistError}
           </div>
         )}
         <div className="replay-bar-symbol-row">
-          <label htmlFor="wishlist-symbol" className="replay-bar-symbol-label">Add stock</label>
+          <label htmlFor="wishlist-symbol" className="replay-bar-symbol-label">Add stock (→ Real-time ticker)</label>
           <input
             id="wishlist-symbol"
             type="text"

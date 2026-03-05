@@ -28,6 +28,10 @@ export interface IbPositionRow {
   right?: string
   /** 当前价（来自 instrument_prices.mid/last），用于逐行计算盈亏 */
   price?: number | null
+  /** 当前持仓浮动盈亏（后端用 instrument_prices.last 与 position/avg_cost 计算） */
+  unrealized_pnl?: number | null
+  /** instrument_prices.updated_at 的 Unix 秒，用于 Last Update 显示 */
+  price_updated_at?: number | null
   /** 合约唯一键 symbol|sec_type|expiry|strike|right（若后端返回） */
   contract_key?: string | null
 }
@@ -72,6 +76,8 @@ export interface StatusResponse {
   monitor_block_reasons?: string[]
   /** 监控端是否能连接 Redis 并读取行情（R-RM*） */
   redis_quotes_connected?: boolean
+  /** 当前守护进程订阅的 Real-time ticker 标的（Wishlist STK + strategy symbol），与 Event Subscribe 一致 */
+  subscribed_tickers?: string[]
 }
 
 export interface DaemonHeartbeat {
@@ -87,6 +93,11 @@ export interface DaemonHeartbeat {
   heartbeat_interval_sec?: number | null
   /** 守护进程是否连接 Redis 并写入行情（R-RM*） */
   redis_quotes_connected?: boolean
+  /** Daemon IB 事件订阅状态（System 页 Event Subscribe 区块） */
+  event_subscribe_ticker?: boolean
+  event_subscribe_positions?: boolean
+  event_subscribe_fills?: boolean
+  event_subscribe_commission?: boolean
 }
 
 export interface StatusRow {
