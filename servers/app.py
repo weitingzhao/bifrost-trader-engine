@@ -34,6 +34,8 @@ from servers.reader import (
     insert_bars_backfill_job,
     get_bars_backfill_jobs,
     get_bars_backfill_job,
+    delete_bars_backfill_job,
+    delete_all_bars_backfill_jobs,
     trim_bars_backfill_jobs,
     get_bars_backfill_last_updated,
 )
@@ -72,8 +74,10 @@ def create_app(
     control_via_db: Optional[dict],
     data_lag_threshold_ms: Optional[float],
     redis_quotes: Optional[Any] = None,
+    status_cfg_for_read: Optional[dict] = None,
 ) -> FastAPI:
-    """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*)."""
+    """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*).
+    status_cfg_for_read: when set, GET /bars/jobs (and GET /bars/jobs/{id}) use this for DB read even if control_via_db is None (e.g. only PGHOST or postgres configured without sink=postgres)."""
     app = FastAPI(title="Bifrost Trader API", description="Phase 2: status and control API (frontend is separate)")
     app.state.redis_quotes = redis_quotes
     # SSE 实时行情：每个连接一个 asyncio.Queue；Redis 订阅线程收到消息后广播到各 queue
@@ -1127,24 +1131,51 @@ def create_app(
 
     @app.get("/bars/jobs")
     def get_bars_jobs(
-        limit: int = Query(50, ge=1, le=100, description="Max jobs to return (newest first)"),
+        limit: int = Query(20, ge=0, le=500, description="Page size; 0 = return up to 500 (no pagination)"),
+        offset: int = Query(0, ge=0, description="Offset for pagination"),
+        status: Optional[str] = Query(None, description="Filter by status: pending, running, done, failed"),
     ) -> Dict[str, Any]:
-        """List recent backfill jobs (from PG queue)."""
-        if not control_via_db:
-            return {"jobs": []}
-        rows = get_bars_backfill_jobs(control_via_db, limit=limit)
+        """List backfill jobs with pagination and optional status filter. Uses control_via_db or status_cfg_for_read so that jobs are returned whenever Postgres is configured (config or PGHOST)."""
+        db_config = control_via_db or status_cfg_for_read
+        if not db_config:
+            logger.info("GET /bars/jobs: no Postgres config (control_via_db and status_cfg_for_read both None), returning empty list")
+            return {"jobs": [], "total": 0}
+        # When limit=0 (e.g. old client or "get all"), return up to 500
+        effective_limit = limit if limit and limit > 0 else 500
+        rows, total = get_bars_backfill_jobs(db_config, limit=effective_limit, offset=offset, status=status)
         list_jobs = [_job_row_to_api(r) for r in rows]
-        return {"jobs": list_jobs}
+        logger.info("GET /bars/jobs: returning %d jobs, total=%d (limit=%s, offset=%s)", len(list_jobs), total, effective_limit, offset)
+        return {"jobs": list_jobs, "total": total}
 
     @app.get("/bars/jobs/{job_id}")
     def get_bars_job(job_id: str) -> Dict[str, Any]:
-        """Get one backfill job status and result."""
-        if not control_via_db:
+        """Get one backfill job status and result. Uses control_via_db or status_cfg_for_read."""
+        db_config = control_via_db or status_cfg_for_read
+        if not db_config:
             return {"ok": False, "error": "No DB"}
-        job = get_bars_backfill_job(control_via_db, job_id)
+        job = get_bars_backfill_job(db_config, job_id)
         if job is None:
             return {"ok": False, "error": "Job not found"}
         return {"ok": True, "job": _job_row_to_api(job)}
+
+    @app.delete("/bars/jobs/{job_id}")
+    def delete_bars_job(job_id: str) -> Dict[str, Any]:
+        """Delete one backfill job by id (from DB only; Celery task may already be running)."""
+        if not control_via_db:
+            return {"ok": False, "error": "No DB"}
+        if delete_bars_backfill_job(control_via_db, job_id):
+            return {"ok": True}
+        return {"ok": False, "error": "Delete failed"}
+
+    @app.delete("/bars/jobs")
+    def delete_all_bars_jobs(
+        status: Optional[str] = Query(None, description="If set, only delete jobs with this status (pending, running, done, failed)"),
+    ) -> Dict[str, Any]:
+        """Delete all backfill jobs, or only those matching status filter."""
+        if not control_via_db:
+            return {"ok": False, "error": "No DB", "deleted": 0}
+        deleted = delete_all_bars_backfill_jobs(control_via_db, status_filter=status)
+        return {"ok": True, "deleted": deleted}
 
     def _exit_after_send() -> None:
         time.sleep(1.5)  # give time for response to be sent and flushed
@@ -1466,6 +1497,14 @@ def run_server(config: dict) -> None:
 
     status_cfg = config.get("status") or {}
     use_db_control = status_cfg.get("sink") == "postgres" and (status_cfg.get("postgres") or os.environ.get("PGHOST"))
+    # Allow GET /bars/jobs to read from Postgres whenever postgres is configured (even if use_db_control is False, e.g. missing sink=postgres)
+    has_postgres = bool(status_cfg.get("postgres") or os.environ.get("PGHOST"))
+    if has_postgres:
+        status_cfg_for_read = dict(status_cfg)
+        if status_cfg_for_read.get("sink") != "postgres":
+            status_cfg_for_read.setdefault("sink", "postgres")
+    else:
+        status_cfg_for_read = None
 
     port = config.get("status_server", {}).get("port") or config.get("server", {}).get("port") or 8765
     data_lag_ms = None
@@ -1480,7 +1519,7 @@ def run_server(config: dict) -> None:
     redis_quotes = None
     if create_redis_quotes:
         redis_quotes = create_redis_quotes(config)
-    app = create_app(reader, control_via_db, data_lag_ms, redis_quotes=redis_quotes)
+    app = create_app(reader, control_via_db, data_lag_ms, redis_quotes=redis_quotes, status_cfg_for_read=status_cfg_for_read)
     host = "0.0.0.0"
     logger.info("Status server on %s:%s (control=daemon_control + daemon_run_status; start only on trading host)", host, port)
     uvicorn.run(app, host=host, port=int(port), log_level="info")

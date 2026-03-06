@@ -94,7 +94,7 @@ async def _worker_connect_poll_loop() -> None:
     while True:
         # First time: shorter delay so we try connect soon after startup (3s)
         delay = 3 if first_run else 5
-        logger.info("Connect poll: next check in %ds", delay)
+        logger.debug("Connect poll: next check in %ds", delay)
         await asyncio.sleep(delay)
         first_run = False
         try:

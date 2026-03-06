@@ -5,7 +5,7 @@ import logging
 import math
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -1439,32 +1439,110 @@ def insert_bars_backfill_job(
         return None
 
 
-def get_bars_backfill_jobs(status_config: dict, limit: int = 50) -> List[Dict[str, Any]]:
-    """Return recent bars_backfill_jobs (newest first)."""
+def get_bars_backfill_jobs(
+    status_config: dict,
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Return bars_backfill_jobs (newest first) with optional status filter and pagination. Returns (rows, total_count)."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
-        return []
+        return [], 0
     try:
+        # Coerce to int in case callers pass query string values
+        try:
+            limit = max(1, min(500, int(limit))) if limit is not None else 50
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = max(0, int(offset)) if offset is not None else 0
+        except (TypeError, ValueError):
+            offset = 0
+
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if status and status.strip():
+                    st = status.strip().lower()
+                    if st not in ("pending", "running", "done", "failed"):
+                        st = None
+                else:
+                    st = None
+                where = "WHERE status = %s" if st else ""
+                args_count = [st] if st else []
                 cur.execute(
-                    """
+                    f"""
+                    SELECT COUNT(*) FROM bars_backfill_jobs {where}
+                    """,
+                    args_count,
+                )
+                total = int(cur.fetchone()[0])
+                args_list = (args_count + [limit, offset]) if st else [limit, offset]
+                cur.execute(
+                    f"""
                     SELECT id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, result,
                            created_at, updated_at
                     FROM bars_backfill_jobs
+                    {where}
                     ORDER BY id DESC
-                    LIMIT %s
+                    LIMIT %s OFFSET %s
                     """,
-                    (max(1, min(limit, 100)),),
+                    args_list,
                 )
                 rows = cur.fetchall()
-            return [dict(r) for r in rows] if rows else []
+            return [dict(r) for r in rows] if rows else [], total
         finally:
             conn.close()
     except Exception as e:
         logger.warning("get_bars_backfill_jobs failed: %s", e)
-        return []
+        return [], 0
+
+
+def delete_bars_backfill_job(status_config: dict, job_id: Any) -> bool:
+    """Delete one bars_backfill_job by id. Returns True if deleted (or not found)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        try:
+            jid = int(job_id)
+        except (TypeError, ValueError):
+            return False
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM bars_backfill_jobs WHERE id = %s", (jid,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_bars_backfill_job failed: %s", e)
+        return False
+
+
+def delete_all_bars_backfill_jobs(status_config: dict, status_filter: Optional[str] = None) -> int:
+    """Delete all bars_backfill_jobs, optionally only those with given status. Returns number deleted."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return 0
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                if status_filter and status_filter.strip().lower() in ("pending", "running", "done", "failed"):
+                    cur.execute("DELETE FROM bars_backfill_jobs WHERE status = %s", (status_filter.strip().lower(),))
+                else:
+                    cur.execute("DELETE FROM bars_backfill_jobs")
+                deleted = cur.rowcount
+            conn.commit()
+            return deleted
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_all_bars_backfill_jobs failed: %s", e)
+        return 0
 
 
 def get_bars_backfill_job(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:

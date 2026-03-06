@@ -146,11 +146,11 @@ export default function App() {
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
     { id: 'monitor', label: 'System', lamp: systemLamp },
-    { id: 'ib', label: 'Accounts' },
+    { id: 'wishlist', label: 'Wishlist' },
     { id: 'replay', label: 'Positions' },
+    { id: 'ib', label: 'Accounts' },
     { id: 'market', label: 'Market' },
     { id: 'data', label: 'Data' },
-    { id: 'wishlist', label: 'Wishlist' },
     { id: 'settings', label: 'Settings' },
   ]
 
@@ -159,7 +159,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="System, Accounts, Positions, Market, Data, Wishlist, Settings">
+          <nav className="app-tabs" aria-label="System, Wishlist, Positions, Accounts, Market, Data, Settings">
             {tabList.map(({ id, label, lamp }) => (
               <button
                 key={id}

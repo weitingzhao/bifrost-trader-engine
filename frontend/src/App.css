@@ -1044,6 +1044,19 @@ th {
   border-bottom: 2px solid var(--color-border-strong);
 }
 
+.table-operations thead th .table-sort-header {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.table-operations thead th .table-sort-header:hover {
+  text-decoration: underline;
+}
+
 .table-operations tbody tr {
   transition: background var(--transition-fast);
 }

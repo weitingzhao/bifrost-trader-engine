@@ -148,12 +148,40 @@ export async function fetchBarsJob(jobId: string): Promise<{ ok: boolean; job?: 
   return { ok: j.ok === true, job: j.job, error: j.error }
 }
 
-/** R-A3：列出最近 Backfill 任务（Celery 入队后可见，含 1 D / 1 min / 5 mins / 1 hour）。 */
-export async function fetchBarsJobs(limit = 50): Promise<{ jobs: BarsJob[] }> {
-  const r = await fetch(`${API}/bars/jobs?limit=${limit}`)
+/** List backfill jobs with pagination and optional status filter. */
+export async function fetchBarsJobs(
+  limit = 20,
+  offset = 0,
+  status?: string | null,
+): Promise<{ jobs: BarsJob[]; total: number }> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  params.set('offset', String(offset))
+  if (status && status !== 'all') params.set('status', status)
+  const r = await fetch(`${API}/bars/jobs?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   const j = await r.json().catch(() => ({}))
-  return { jobs: j.jobs ?? [] }
+  return { jobs: j.jobs ?? [], total: typeof j.total === 'number' ? j.total : 0 }
+}
+
+/** Delete one backfill job by id. */
+export async function deleteBarsJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/bars/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** Delete all backfill jobs, or only those with the given status (pending, running, done, failed). */
+export async function deleteAllBarsJobs(status?: string | null): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  const params = new URLSearchParams()
+  if (status && status !== 'all') params.set('status', status)
+  const r = await fetch(`${API}/bars/jobs?${params}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    deleted: typeof j.deleted === 'number' ? j.deleted : 0,
+    error: j.error,
+  }
 }
 
 /** R-A3 扩展：Wishlist 列表。 */

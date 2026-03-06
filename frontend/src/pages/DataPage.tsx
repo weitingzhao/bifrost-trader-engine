@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar, BarCoverageItem, BarsCoverageResponse, IbAccountSnapshot, StatusResponse } from '../types'
-import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, deleteBarsForSymbol } from '../api'
+import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, deleteBarsForSymbol, deleteBarsJob, deleteAllBarsJobs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
 const BAR_PERIODS = [
@@ -87,6 +87,10 @@ export function DataPage({ status }: DataPageProps) {
   const [barsLoading, setBarsLoading] = useState(false)
   const [barSymbol, setBarSymbol] = useState('')
   const [barPeriod, setBarPeriod] = useState<string>('1 D')
+  /** Bars (inspect) table: sort by time 'asc' = oldest first, 'desc' = newest first */
+  const [barsTimeSort, setBarsTimeSort] = useState<'asc' | 'desc'>('desc')
+  /** Bars (inspect): show top N lines, 10–500; also used as fetch limit */
+  const [barsTopN, setBarsTopN] = useState(10)
 
   const [coverage, setCoverage] = useState<BarCoverageItem[] | null>(null)
   const [coveragePolicy, setCoveragePolicy] = useState<BarsCoverageResponse['policy'] | null>(null)
@@ -116,10 +120,19 @@ export function DataPage({ status }: DataPageProps) {
   const [pullCustom1hourDays, setPullCustom1hourDays] = useState(7)
   const [barsJobs, setBarsJobs] = useState<Array<{ job_id: string; symbol: string; period: string; status: string; result?: { count?: number; message?: string; error?: string }; created_ts?: number; updated_ts?: number }>>([])
   const [barsJobsLoading, setBarsJobsLoading] = useState(false)
+  const [barsJobsTotal, setBarsJobsTotal] = useState(0)
+  const [barsJobsLimit, setBarsJobsLimit] = useState(50)
+  const [barsJobsStatusFilter, setBarsJobsStatusFilter] = useState<string>('all')
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
   const candidateSymbols = useBarCandidateSymbols(status)
 
-  // Default to first candidate symbol if any
+  const sortedBars = useMemo(() => {
+    if (bars.length === 0) return []
+    const order = barsTimeSort === 'desc' ? -1 : 1
+    return [...bars].sort((a, b) => order * (a.time - b.time))
+  }, [bars, barsTimeSort])
   useEffect(() => {
     if (candidateSymbols.length > 0 && !barSymbol.trim()) setBarSymbol(candidateSymbols[0])
   }, [candidateSymbols.join(','), barSymbol])
@@ -143,14 +156,18 @@ export function DataPage({ status }: DataPageProps) {
   const loadBarsJobs = useCallback(async () => {
     setBarsJobsLoading(true)
     try {
-      const res = await fetchBarsJobs(50)
-      setBarsJobs(res.jobs || [])
+      const statusParam = barsJobsStatusFilter === 'all' ? undefined : barsJobsStatusFilter
+      const limit = Math.max(1, Math.min(500, barsJobsLimit || 50))
+      const res = await fetchBarsJobs(limit, 0, statusParam)
+      setBarsJobs(Array.isArray(res.jobs) ? res.jobs : [])
+      setBarsJobsTotal(typeof res.total === 'number' ? res.total : 0)
     } catch {
       setBarsJobs([])
+      setBarsJobsTotal(0)
     } finally {
       setBarsJobsLoading(false)
     }
-  }, [])
+  }, [barsJobsLimit, barsJobsStatusFilter])
 
   useEffect(() => {
     loadCoverage()
@@ -158,33 +175,26 @@ export function DataPage({ status }: DataPageProps) {
 
   useEffect(() => {
     loadBarsJobs()
-    const t = setInterval(loadBarsJobs, 8000)
-    return () => clearInterval(t)
   }, [loadBarsJobs])
 
   const loadBarsFromApi = useCallback(async (symbol: string) => {
     if (!symbol.trim()) return
     setBarsLoading(true)
     try {
-      const res = await fetchBars(symbol, barPeriod, 100)
+      const res = await fetchBars(symbol, barPeriod, Math.min(500, Math.max(10, barsTopN)))
       setBars(res.bars || [])
     } catch {
       setBars([])
     } finally {
       setBarsLoading(false)
     }
-  }, [barPeriod])
+  }, [barPeriod, barsTopN])
 
   return (
     <div className="card process-section market-data-page">
-      <h2 className="page-title-with-tooltip">
-        Data
-        <InfoTooltip text="Backfill and manage historical bars: fetch from IB, write to DB (stock_day / stock_min), and inspect samples." />
-      </h2>
-
       <section className="replay-section" aria-labelledby="data-coverage-head">
         <h3 id="data-coverage-head" className="page-title-with-tooltip">
-          Wishlist data coverage
+          Data coverage (wishlist)
           <InfoTooltip text="Coverage of Wishlist stocks in stock_day / stock_min by period (count and date range). Empty when no Wishlist stocks." />
         </h3>
         <div className="replay-toolbar data-backfill-options" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
@@ -208,18 +218,16 @@ export function DataPage({ status }: DataPageProps) {
               aria-label="Seconds between each IB API request"
             />
             <InfoTooltip text="Wait this many seconds between each IB history request (chunk). Default 10." />
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={coverageLoading}
+              onClick={() => loadCoverage()}
+              aria-label="Refresh coverage"
+            >
+              {coverageLoading ? '…' : 'Refresh'}
+            </button>
           </label>
-        </div>
-        <div className="replay-toolbar" style={{ marginBottom: '0.5rem' }}>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={coverageLoading}
-            onClick={() => loadCoverage()}
-            aria-label="Refresh coverage"
-          >
-            {coverageLoading ? 'Loading…' : 'Refresh'}
-          </button>
         </div>
         {coveragePolicy && (
           <p className="replay-sync-hint" style={{ marginBottom: '0.5rem' }}>
@@ -573,19 +581,61 @@ export function DataPage({ status }: DataPageProps) {
 
       <section className="replay-section" aria-labelledby="data-jobs-head">
         <h3 id="data-jobs-head" className="page-title-with-tooltip">
-          Backfill jobs (Celery)
+          Market data (jobs)
           <InfoTooltip text="Recent bars backfill tasks sent to Celery. Each row = one period (1 D, 1 min, 5 mins, 1 hour). Check here to see if 1 hour or other periods were queued and their status." />
         </h3>
-        <div className="replay-toolbar" style={{ marginBottom: '0.5rem' }}>
+        <div className="replay-toolbar" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <span>Status:</span>
+            <select
+              value={barsJobsStatusFilter}
+              onChange={e => setBarsJobsStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+              style={{ minWidth: '6rem' }}
+            >
+              <option value="all">All</option>
+              <option value="pending">Pending</option>
+              <option value="running">Running</option>
+              <option value="done">Done</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <span>Show latest:</span>
+            <select
+              value={barsJobsLimit}
+              onChange={e => setBarsJobsLimit(Number(e.target.value))}
+              aria-label="Number of jobs to show"
+              style={{ minWidth: '5rem' }}
+            >
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+              <option value={500}>500</option>
+            </select>
+          </label>
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-sm"
             disabled={barsJobsLoading}
             onClick={() => loadBarsJobs()}
             aria-label="Refresh backfill jobs"
           >
-            {barsJobsLoading ? 'Loading…' : 'Refresh'}
+            {barsJobsLoading ? '…' : 'Refresh'}
           </button>
+          <button
+            type="button"
+            className="btn btn-reset btn-sm"
+            disabled={barsJobsTotal === 0 || barsJobsLoading}
+            onClick={() => setConfirmDeleteAll(true)}
+            aria-label="Delete all backfill jobs"
+          >
+            Delete all
+          </button>
+          <span className="replay-sync-hint" style={{ marginLeft: 'auto' }}>
+            {barsJobsTotal > 0 ? `${barsJobs.length} shown (${barsJobsTotal} total)` : '0 jobs'}
+          </span>
         </div>
         <p className="replay-sync-hint" style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
           Jobs are created when you click Pull above (one per period: 1 D, 1 min, 5 mins, 1 hour). Pending → Worker picks up → running → done/failed.
@@ -603,6 +653,7 @@ export function DataPage({ status }: DataPageProps) {
                 <th>Result</th>
                 <th>Created</th>
                 <th>Updated</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -624,6 +675,25 @@ export function DataPage({ status }: DataPageProps) {
                   </td>
                   <td>{j.created_ts != null ? fmtTs(j.created_ts) : '—'}</td>
                   <td>{j.updated_ts != null ? fmtTs(j.updated_ts) : '—'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-reset btn-sm"
+                      disabled={deletingJobId !== null}
+                      aria-label={`Delete job ${j.job_id}`}
+                      onClick={async () => {
+                        setDeletingJobId(j.job_id)
+                        try {
+                          const res = await deleteBarsJob(j.job_id)
+                          if (res.ok) await loadBarsJobs()
+                        } finally {
+                          setDeletingJobId(null)
+                        }
+                      }}
+                    >
+                      {deletingJobId === j.job_id ? '…' : 'Delete'}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -631,12 +701,37 @@ export function DataPage({ status }: DataPageProps) {
         )}
       </section>
 
+      {/* Delete all backfill jobs confirmation */}
+      {confirmDeleteAll && (
+        <div className="data-reset-modal-overlay" onClick={() => setConfirmDeleteAll(false)} role="dialog" aria-modal="true" aria-labelledby="delete-all-jobs-title">
+          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="delete-all-jobs-title">Delete all backfill jobs?</h3>
+            <p>This will remove all jobs from the list{barsJobsStatusFilter !== 'all' ? ` with status &quot;${barsJobsStatusFilter}&quot;` : ''}. Cannot be undone.</p>
+            <div className="data-reset-modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setConfirmDeleteAll(false)}>Cancel</button>
+              <button
+                type="button"
+                className="btn btn-reset"
+                onClick={async () => {
+                  setConfirmDeleteAll(false)
+                  const statusParam = barsJobsStatusFilter === 'all' ? undefined : barsJobsStatusFilter
+                  const res = await deleteAllBarsJobs(statusParam)
+                  if (res.ok) await loadBarsJobs()
+                }}
+              >
+                Delete all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <section className="replay-section" aria-labelledby="data-bars-head">
         <h3 id="data-bars-head" className="page-title-with-tooltip">
           Bars (inspect)
           <InfoTooltip text="Load bars from DB for a symbol and period. Backfill is triggered per symbol in the coverage table above (uses config default ranges)." />
         </h3>
-        <div className="replay-bar-symbol-row">
+        <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
           <label htmlFor="data-bar-symbol" className="replay-bar-symbol-label">Symbol</label>
           <input
             id="data-bar-symbol"
@@ -647,43 +742,65 @@ export function DataPage({ status }: DataPageProps) {
             onChange={e => setBarSymbol((e.target.value || '').trim().toUpperCase())}
             aria-label="Symbol for bars"
           />
-          {candidateSymbols.length > 0 && (
-            <span className="replay-sync-hint">From positions: {candidateSymbols.join(', ')}</span>
-          )}
-        </div>
-        <div className="replay-bar-symbol-row">
-          <label className="replay-bar-symbol-label">Period</label>
-          <select
-            value={barPeriod}
-            onChange={e => setBarPeriod(e.target.value)}
-            aria-label="Bar period"
-          >
+          <span className="replay-bar-symbol-label">Period</span>
+          <div className="replay-bar-period-radios" role="group" aria-label="Bar period">
             {BAR_PERIODS.map(p => (
-              <option key={p.value} value={p.value}>{p.label}</option>
+              <label key={p.value} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', marginRight: '1rem' }}>
+                <input
+                  type="radio"
+                  name="bar-period"
+                  value={p.value}
+                  checked={barPeriod === p.value}
+                  onChange={() => setBarPeriod(p.value)}
+                  aria-label={p.label}
+                />
+                <span>{p.label}</span>
+              </label>
             ))}
-          </select>
-        </div>
-        <div className="replay-toolbar">
+          </div>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+            <span>Top</span>
+            <input
+              type="number"
+              min={10}
+              max={500}
+              value={barsTopN}
+              onChange={e => setBarsTopN(Math.min(500, Math.max(10, parseInt(e.target.value, 10) || 10)))}
+              style={{ width: '4rem' }}
+              aria-label="Number of bar rows to show (10–500)"
+            />
+            <span>lines</span>
+          </label>
           <button
             type="button"
             className="btn btn-secondary"
             disabled={barsLoading || !barSymbol.trim()}
             onClick={() => loadBarsFromApi(barSymbol.trim())}
-            aria-label="Load bars from DB"
+            aria-label="Load bars"
           >
-            {barsLoading ? 'Loading…' : 'Load from DB'}
+            {barsLoading ? 'Loading…' : 'Load'}
           </button>
         </div>
         <p className="replay-sync-hint" style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
           Backfill runs in Celery Worker (config default ranges per period). See System → Recent operations for job status.
         </p>
         {bars.length === 0 ? (
-          <div className="replay-placeholder">No bars. Enter symbol, click \"Load from DB\", or run Backfill for a symbol above.</div>
+          <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
         ) : (
           <table className="table-operations">
             <thead>
               <tr>
-                <th>Time</th>
+                <th>
+                  <button
+                    type="button"
+                    className="table-sort-header"
+                    onClick={() => setBarsTimeSort(s => s === 'desc' ? 'asc' : 'desc')}
+                    aria-sort={barsTimeSort === 'desc' ? 'descending' : 'ascending'}
+                    aria-label={`Sort by time ${barsTimeSort === 'desc' ? '(newest first), click for oldest first' : '(oldest first), click for newest first'}`}
+                  >
+                    Time {barsTimeSort === 'desc' ? '↓' : '↑'}
+                  </button>
+                </th>
                 <th>Open</th>
                 <th>High</th>
                 <th>Low</th>
@@ -692,7 +809,7 @@ export function DataPage({ status }: DataPageProps) {
               </tr>
             </thead>
             <tbody>
-              {bars.slice(0, 50).map((b, i) => (
+              {sortedBars.slice(0, barsTopN).map((b, i) => (
                 <tr key={i}>
                   <td>{b.time != null ? fmtTs(b.time) : '—'}</td>
                   <td>{fmtUsd(b.open)}</td>

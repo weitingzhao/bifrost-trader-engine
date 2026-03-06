@@ -162,7 +162,7 @@ def _start_stop_polling() -> None:
             interval_sec = 2
             logger.info("Celery worker stop-poll thread started (checks Redis every %ds)", interval_sec)
             while True:
-                logger.info("Stop-poll: next check in %ds", interval_sec)
+                logger.debug("Stop-poll: next check in %ds", interval_sec)
                 time.sleep(interval_sec)
                 try:
                     with redis.from_url(broker_url) as r:
