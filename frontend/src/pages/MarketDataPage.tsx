@@ -29,7 +29,7 @@ interface MarketDataPageProps {
   status: StatusResponse | null
 }
 
-/** 从持仓汇总可拉取 K 线的标的候选（后续可合并 Wishlist） */
+/** 从持仓汇总可拉取 K 线的标的候选（后续可合并 Watchlist） */
 function useBarCandidateSymbols(status: StatusResponse | null): string[] {
   return useMemo(() => {
     const fromAccounts = (status?.accounts || []).flatMap((acc: IbAccountSnapshot) =>

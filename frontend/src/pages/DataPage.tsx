@@ -30,6 +30,23 @@ function fmtDate(ts: number | null | undefined): string {
   return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
+/** X-axis label by period: Daily → date only, intraday → time or short datetime. */
+function fmtTsForPeriod(ts: number | null | undefined, period: string): string {
+  if (ts == null || !Number.isFinite(ts)) return '—'
+  const d = new Date(ts * 1000)
+  if (period === '1 D') {
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+  if (period === '1 min' || period === '5 mins') {
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+  }
+  if (period === '1 hour') {
+    return d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' }) + ' ' +
+      d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
+  }
+  return d.toLocaleString()
+}
+
 function coverageCell(p: { count: number; min_ts: number | null; max_ts: number | null }): string {
   if (p.count === 0) return '—'
   const range = p.min_ts != null && p.max_ts != null ? `${fmtDate(p.min_ts)} ~ ${fmtDate(p.max_ts)}` : ''
@@ -71,7 +88,247 @@ interface DataPageProps {
   status: StatusResponse | null
 }
 
-/** Bar candidate symbols from positions (Wishlist can be merged later). */
+/** Lightweight SVG K-line chart for Bars (inspect). Shows price + volume and period-aware X-axis. */
+interface BarsCandlestickChartProps {
+  bars: Bar[]
+  period?: string
+}
+
+function BarsCandlestickChart({ bars, period = '1 D' }: BarsCandlestickChartProps) {
+  if (!bars || bars.length === 0) return null
+
+  const width = 800
+  const priceHeight = 200
+  const volumeHeight = 72
+  const gap = 8
+  const paddingLeft = 56
+  const paddingRight = 16
+  const paddingTop = 12
+  const paddingBottom = 28
+  const height = paddingTop + priceHeight + gap + volumeHeight + paddingBottom
+  const innerWidth = width - paddingLeft - paddingRight
+  const innerPriceHeight = priceHeight - 0
+  const innerVolumeHeight = volumeHeight - 0
+  const volumeTop = paddingTop + priceHeight + gap
+  const volumeBottom = volumeTop + innerVolumeHeight
+
+  const pricePoints: number[] = []
+  for (const b of bars) {
+    if (Number.isFinite(b.high)) pricePoints.push(b.high)
+    if (Number.isFinite(b.low)) pricePoints.push(b.low)
+  }
+  if (pricePoints.length === 0) return null
+
+  const minPrice = Math.min(...pricePoints)
+  const maxPrice = Math.max(...pricePoints)
+  const priceRange = maxPrice - minPrice || 1
+
+  const hasVolume = bars.some(b => b.volume != null && Number.isFinite(b.volume))
+  const volumes = bars.map(b => (b.volume != null && Number.isFinite(b.volume) ? Number(b.volume) : 0))
+  const maxVolume = hasVolume ? Math.max(...volumes, 1) : 1
+
+  const xStep = bars.length > 1 ? innerWidth / (bars.length - 1) : 0
+  const xForIndex = (i: number) =>
+    paddingLeft + (bars.length === 1 ? innerWidth / 2 : i * xStep)
+
+  const yForPrice = (p: number) =>
+    paddingTop + innerPriceHeight * (1 - (p - minPrice) / priceRange)
+
+  const yForVolume = (v: number) =>
+    volumeBottom - (v / maxVolume) * innerVolumeHeight
+
+  const topLabel = maxPrice
+  const midLabel = minPrice + priceRange / 2
+  const bottomLabel = minPrice
+
+  const lastBar = bars[bars.length - 1]
+
+  /** Indices for X-axis ticks (roughly 5–7 labels to avoid overlap). */
+  const xTickIndices = useMemo(() => {
+    const n = bars.length
+    if (n <= 1) return [0]
+    const count = Math.min(6, n)
+    const step = (n - 1) / (count - 1)
+    return Array.from({ length: count }, (_, i) => Math.round(i * step))
+  }, [bars.length])
+
+  return (
+    <div className="data-bars-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="data-bars-chart-svg"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="Candlestick preview for loaded bars"
+      >
+        <defs>
+          <linearGradient id="data-bars-bg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--color-surface-elevated)" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="var(--color-surface)" stopOpacity="0.9" />
+          </linearGradient>
+        </defs>
+
+        {/* Price area */}
+        <rect
+          x={paddingLeft}
+          y={paddingTop}
+          width={innerWidth}
+          height={innerPriceHeight}
+          fill="url(#data-bars-bg)"
+          stroke="var(--color-border)"
+          strokeWidth={1}
+          rx={8}
+        />
+
+        {[topLabel, midLabel, bottomLabel].map((p, idx) => {
+          const y = yForPrice(p)
+          return (
+            <g key={idx}>
+              <line
+                x1={paddingLeft}
+                x2={paddingLeft + innerWidth}
+                y1={y}
+                y2={y}
+                stroke={idx === 1 ? 'var(--color-border-strong)' : 'var(--color-border)'}
+                strokeDasharray={idx === 1 ? '3 3' : '2 4'}
+                strokeWidth={0.5}
+              />
+              <text
+                x={paddingLeft - 6}
+                y={y + 3}
+                textAnchor="end"
+                fontSize="10"
+                fill="var(--color-text-muted)"
+              >
+                {fmtUsd(p)}
+              </text>
+            </g>
+          )
+        })}
+
+        {bars.map((b, i) => {
+          const x = xForIndex(i)
+          const highY = yForPrice(b.high)
+          const lowY = yForPrice(b.low)
+          const openY = yForPrice(b.open)
+          const closeY = yForPrice(b.close)
+          const isUp = b.close >= b.open
+          const color = isUp ? 'var(--success, #16a34a)' : 'var(--danger, #b91c1c)'
+          const bodyTop = Math.min(openY, closeY)
+          const bodyHeight = Math.max(Math.abs(closeY - openY), 2)
+          const candleWidth = Math.max(4, xStep > 0 ? Math.min(18, xStep * 0.6) : 10)
+
+          return (
+            <g key={i}>
+              <line
+                x1={x}
+                x2={x}
+                y1={highY}
+                y2={lowY}
+                stroke={color}
+                strokeWidth={1}
+              />
+              <rect
+                x={x - candleWidth / 2}
+                y={bodyTop}
+                width={candleWidth}
+                height={bodyHeight}
+                fill={color}
+                fillOpacity={0.85}
+                stroke={color}
+                rx={1.5}
+              />
+            </g>
+          )
+        })}
+
+        {lastBar && bars.length > 1 && (
+          <text
+            x={paddingLeft + innerWidth}
+            y={height - 6}
+            textAnchor="end"
+            fontSize="10"
+            fill="var(--color-text-muted)"
+          >
+            {fmtTs(lastBar.time)}
+          </text>
+        )}
+        {/* Volume area */}
+        <rect
+          x={paddingLeft}
+          y={volumeTop}
+          width={innerWidth}
+          height={innerVolumeHeight}
+          fill="var(--color-surface)"
+          stroke="var(--color-border)"
+          strokeWidth={1}
+          rx={6}
+        />
+        {hasVolume && bars.map((b, i) => {
+          const v = volumes[i]
+          if (v <= 0) return null
+          const x = xForIndex(i)
+          const isUp = b.close >= b.open
+          const color = isUp ? 'var(--success, #16a34a)' : 'var(--danger, #b91c1c)'
+          const barW = Math.max(2, xStep > 0 ? Math.min(12, xStep * 0.5) : 6)
+          const y = yForVolume(v)
+          const h = volumeBottom - y
+          return (
+            <rect
+              key={i}
+              x={x - barW / 2}
+              y={y}
+              width={barW}
+              height={Math.max(h, 1)}
+              fill={color}
+              fillOpacity={0.7}
+              rx={1}
+            />
+          )
+        })}
+
+        {/* X-axis labels (period-formatted, multiple ticks) */}
+        {xTickIndices.map((i) => {
+          const bar = bars[i]
+          if (!bar) return null
+          const x = xForIndex(i)
+          const isFirst = i === 0
+          const isLast = i === bars.length - 1
+          let anchor: 'start' | 'middle' | 'end' = 'middle'
+          if (isFirst) anchor = 'start'
+          else if (isLast) anchor = 'end'
+          return (
+            <text
+              key={i}
+              x={x}
+              y={height - 6}
+              textAnchor={anchor}
+              fontSize="10"
+              fill="var(--color-text-muted)"
+            >
+              {fmtTsForPeriod(bar.time, period)}
+            </text>
+          )
+        })}
+      </svg>
+
+      {lastBar && (
+        <div className="data-bars-chart-legend">
+          <span className="data-bars-chart-legend-time">{fmtTsForPeriod(lastBar.time, period)}</span>
+          <span>O {fmtUsd(lastBar.open)}</span>
+          <span>H {fmtUsd(lastBar.high)}</span>
+          <span>L {fmtUsd(lastBar.low)}</span>
+          <span>C {fmtUsd(lastBar.close)}</span>
+          {lastBar.volume != null && (
+            <span>V {Number(lastBar.volume).toLocaleString()}</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Bar candidate symbols from positions (Watchlist can be merged later). */
 function useBarCandidateSymbols(status: StatusResponse | null): string[] {
   return useMemo(() => {
     const fromAccounts = (status?.accounts || []).flatMap((acc: IbAccountSnapshot) =>
@@ -89,8 +346,6 @@ export function DataPage({ status }: DataPageProps) {
   const [barPeriod, setBarPeriod] = useState<string>('1 D')
   /** Bars (inspect) table: sort by time 'asc' = oldest first, 'desc' = newest first */
   const [barsTimeSort, setBarsTimeSort] = useState<'asc' | 'desc'>('desc')
-  /** Bars (inspect): show top N lines, 5–500; also used as fetch limit */
-  const [barsTopN, setBarsTopN] = useState(5)
 
   const [coverage, setCoverage] = useState<BarCoverageItem[] | null>(null)
   const [coveragePolicy, setCoveragePolicy] = useState<BarsCoverageResponse['policy'] | null>(null)
@@ -165,6 +420,17 @@ export function DataPage({ status }: DataPageProps) {
       return dir * ((va as number) - (vb as number))
     })
   }, [barsJobs, barsJobsSortKey, barsJobsSortDir])
+  const chartBars = useMemo(() => {
+    if (bars.length === 0) return []
+    const sortedByTimeAsc = [...bars]
+      .filter(b => b.time != null)
+      .sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+    return sortedByTimeAsc.slice(-100)
+  }, [bars])
+  const tableBars = useMemo(() => {
+    if (sortedBars.length === 0) return []
+    return sortedBars.slice(0, 5)
+  }, [sortedBars])
   useEffect(() => {
     if (candidateSymbols.length > 0 && !barSymbol.trim()) setBarSymbol(candidateSymbols[0])
   }, [candidateSymbols.join(','), barSymbol])
@@ -216,24 +482,23 @@ export function DataPage({ status }: DataPageProps) {
     if (!symbol.trim()) return
     setBarsLoading(true)
     try {
-      const res = await fetchBars(symbol, barPeriod, Math.min(500, Math.max(5, barsTopN)))
+      const res = await fetchBars(symbol, barPeriod, 100)
       setBars(res.bars || [])
     } catch {
       setBars([])
     } finally {
       setBarsLoading(false)
     }
-  }, [barPeriod, barsTopN])
+  }, [barPeriod])
 
-  /** Click a Bars cell in Data Coverage: load that symbol+period in Bars (inspect) with top 5. */
+  /** Click a Bars cell in Data Coverage: load that symbol+period in Bars (inspect) with top N (default 200). */
   const openBarsForSymbol = useCallback(async (symbol: string, period: string) => {
     if (!symbol.trim()) return
     setBarSymbol(symbol.trim().toUpperCase())
     setBarPeriod(period)
-    setBarsTopN(5)
     setBarsLoading(true)
     try {
-      const res = await fetchBars(symbol.trim(), period, 5)
+      const res = await fetchBars(symbol.trim(), period, 100)
       setBars(res.bars || [])
     } catch {
       setBars([])
@@ -246,8 +511,8 @@ export function DataPage({ status }: DataPageProps) {
     <div className="card process-section market-data-page">
       <section className="replay-section" aria-labelledby="data-coverage-head">
         <h3 id="data-coverage-head" className="page-title-with-tooltip">
-          Data coverage (wishlist)
-          <InfoTooltip text="Coverage of Wishlist stocks in stock_day / stock_min by period (count and date range). Empty when no Wishlist stocks." />
+          Data coverage (watchlist)
+          <InfoTooltip text="Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Empty when no Watchlist stocks." />
         </h3>
         <div className="replay-toolbar data-backfill-options" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
           <label className="data-toggle-switch-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
@@ -297,7 +562,7 @@ export function DataPage({ status }: DataPageProps) {
           </div>
         )}
         {coverage && coverage.length === 0 && !coverageLoading && (
-          <div className="replay-placeholder">No stocks in Wishlist or not loaded yet. Add stocks on the Wishlist tab and refresh.</div>
+          <div className="replay-placeholder">No stocks in Watchlist or not loaded yet. Add stocks on the Watchlist tab and refresh.</div>
         )}
         {coverage && coverage.length > 0 && (
           <table className="table-operations data-coverage-table">
@@ -669,18 +934,6 @@ export function DataPage({ status }: DataPageProps) {
               </label>
             ))}
           </div>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span>Top</span>
-            <input
-              type="number"
-              min={5}
-              max={500}
-              value={barsTopN}
-              onChange={e => setBarsTopN(Math.min(500, Math.max(5, parseInt(e.target.value, 10) || 5)))}
-              style={{ width: '4rem' }}
-              aria-label="Number of bar rows to show (5–500)"
-            />
-          </label>
           <button
             type="button"
             className="btn btn-secondary"
@@ -694,6 +947,16 @@ export function DataPage({ status }: DataPageProps) {
         <p className="replay-sync-hint" style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
           Backfill runs in Celery Worker (config default ranges per period). See System → Recent operations for job status.
         </p>
+        {bars.length > 0 && (
+          <div className="data-bars-chart-container">
+            <div className="data-bars-chart-header">
+              <span className="data-bars-chart-title">
+                {barSymbol || '—'} {barPeriod} · 100 bars
+              </span>
+            </div>
+            <BarsCandlestickChart bars={chartBars} period={barPeriod} />
+          </div>
+        )}
         {bars.length === 0 ? (
           <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
         ) : (
@@ -719,7 +982,7 @@ export function DataPage({ status }: DataPageProps) {
               </tr>
             </thead>
             <tbody>
-              {sortedBars.slice(0, barsTopN).map((b, i) => (
+              {tableBars.map((b, i) => (
                 <tr key={i}>
                   <td>{b.time != null ? fmtTs(b.time) : '—'}</td>
                   <td>{fmtUsd(b.open)}</td>

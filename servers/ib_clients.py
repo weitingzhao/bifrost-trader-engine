@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.connector.ib import IBConnector
+from src.connector.ib import IBConnector, IBConnectionDroppedError
 
 logger = logging.getLogger(__name__)
 
@@ -247,10 +247,22 @@ class MarketIbClient(BaseMonitorIbClient):
             )
             self.last_error = None
             return raw
+        except IBConnectionDroppedError as e:
+            self.last_error = str(e)
+            logger.warning(
+                "[monitor_ib] MarketIbClient.fetch_bars_range connection dropped: %s",
+                e,
+                exc_info=True,
+            )
+            try:
+                await self.disconnect()
+            except Exception:
+                pass
+            raise
         except Exception as e:
             self.last_error = str(e)
             logger.warning(
                 "[monitor_ib] MarketIbClient.fetch_bars_range failed: %s", e, exc_info=True
             )
-            return []
+            raise
 

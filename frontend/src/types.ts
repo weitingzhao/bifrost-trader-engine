@@ -88,29 +88,8 @@ export interface StatusResponse {
   celery_worker_last_updated_ts?: number | null
   /** 当前响应的 Celery Worker 名称列表（inspect ping），用于 Celery 下列出已运行 Worker */
   celery_workers?: string[]
-  /** 当前守护进程订阅的 Real-time ticker 标的（Wishlist STK + strategy symbol），与 Event Subscribe 一致 */
+  /** 当前守护进程订阅的 Real-time ticker 标的（Watchlist STK + strategy symbol），与 Event Subscribe 一致 */
   subscribed_tickers?: string[]
-  /** IB 历史数据 Pacing 用量与边界（Worker/API 共享 Redis 计量），System 页显示 */
-  ib_pacing_usage?: IbPacingUsage | null
-}
-
-/** IB 历史数据 Pacing 用量（GET /status 或 GET /bars/pacing），见 docs/plans/ib-pacing-implementation-plan.md */
-export interface IbPacingUsage {
-  config?: {
-    max_requests_per_10min?: number
-    min_interval_identical_sec?: number
-    max_requests_per_2sec_per_contract?: number
-    max_concurrent?: number
-  }
-  usage?: {
-    requests_last_10min?: number
-    oldest_request_ts?: number | null
-    next_request_allowed_ts?: number | null
-    throttled?: boolean
-    throttle_reason?: string | null
-  }
-  /** 最近相同请求 (symbol|period|duration) → 上次请求时间戳 */
-  last_by_key?: Record<string, number>
 }
 
 export interface DaemonHeartbeat {
@@ -292,8 +271,8 @@ export interface BarsCoverageResponse {
   }
 }
 
-/** R-A3 扩展：Wishlist 项（自选/待操作标的）。 */
-export interface WishlistItem {
+/** R-A3 扩展：Watchlist 项（自选/待操作标的）。 */
+export interface WatchlistItem {
   id?: number
   contract_key: string
   symbol?: string | null

@@ -11,7 +11,7 @@ import { MarketDataPage } from './pages/MarketDataPage'
 import { DataPage } from './pages/DataPage'
 import { PositionPnlPage } from './pages/PositionPnlPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { WishlistPage } from './pages/WishlistPage'
+import { WatchlistPage } from './pages/WatchlistPage'
 import './App.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
@@ -29,7 +29,7 @@ function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
 }
 
-type TabId = 'monitor' | 'ib' | 'replay' | 'market' | 'data' | 'wishlist' | 'settings'
+type TabId = 'monitor' | 'ib' | 'replay' | 'market' | 'data' | 'watchlist' | 'settings'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('monitor')
@@ -146,7 +146,7 @@ export default function App() {
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
     { id: 'monitor', label: 'System', lamp: systemLamp },
-    { id: 'wishlist', label: 'Wishlist' },
+    { id: 'watchlist', label: 'Watchlist' },
     { id: 'replay', label: 'Positions' },
     { id: 'ib', label: 'Accounts' },
     { id: 'market', label: 'Market' },
@@ -159,7 +159,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="System, Wishlist, Positions, Accounts, Market, Data, Settings">
+          <nav className="app-tabs" aria-label="System, Watchlist, Positions, Accounts, Market, Data, Settings">
             {tabList.map(({ id, label, lamp }) => (
               <button
                 key={id}
@@ -224,8 +224,8 @@ export default function App() {
         <DataPage status={status} />
       )}
 
-      {activeTab === 'wishlist' && (
-        <WishlistPage status={status} />
+      {activeTab === 'watchlist' && (
+        <WatchlistPage status={status} />
       )}
 
       {activeTab === 'settings' && (

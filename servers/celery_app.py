@@ -88,9 +88,8 @@ def get_celery_broker_connected() -> bool:
 WORKER_IB_STATUS_KEY = "bifrost:worker_ib_status"
 WORKER_IB_STATUS_TTL_SEC = 90
 WORKER_STOP_REQUESTED_KEY = "bifrost:worker_stop_requested"
-WORKER_CONNECT_REQUESTED_KEY = "bifrost:worker_connect_requested"
 CELERY_LOG_STREAM_KEY = "bifrost:celery_console"
-CELERY_LOG_STREAM_MAXLEN = 5000
+CELERY_LOG_STREAM_MAXLEN = 50
 
 
 def get_worker_ib_status() -> Optional[dict]:
@@ -125,9 +124,13 @@ def get_celery_workers_ping(timeout: float = 5.0) -> list[str]:
 
 
 class _RedisStreamLogHandler(logging.Handler):
-    """Logging handler that pushes each log record to a Redis Stream for UI console tail (Scheme B)."""
+    """Logging handler that pushes each log record to a Redis Stream for UI console tail.
 
-    def __init__(self, redis_url: str, stream_key: str, maxlen: int = 5000) -> None:
+    The stream is capped at a small fixed size so the latest console history is
+    available after tab switches without unbounded Redis growth.
+    """
+
+    def __init__(self, redis_url: str, stream_key: str, maxlen: int = 50) -> None:
         super().__init__()
         self._redis_url = redis_url
         self._stream_key = stream_key

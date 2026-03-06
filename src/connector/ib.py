@@ -22,6 +22,10 @@ from ib_insync import (
 logger = logging.getLogger(__name__)
 
 
+class IBConnectionDroppedError(ConnectionError):
+    """Raised when an existing IB connection drops during an in-flight request."""
+
+
 class IBConnector:
     """Minimal IB connector for gamma scalping daemon."""
 
@@ -93,6 +97,32 @@ class IBConnector:
             return True
         msg = (getattr(exc, "message", None) or str(exc)).lower()
         return "refus" in msg or "connection refused" in msg
+
+    @staticmethod
+    def _is_connection_dropped(exc: Exception) -> bool:
+        if isinstance(exc, (ConnectionError, IBConnectionDroppedError)):
+            return True
+        if getattr(exc, "errno", None) in (54, 104):
+            return True
+        msg = (getattr(exc, "message", None) or str(exc)).lower()
+        return any(token in msg for token in (
+            "socket disconnect",
+            "connection reset by peer",
+            "peer closed connection",
+            "not connected",
+            "connection closed",
+            "disconnected",
+        ))
+
+    def _mark_connection_dropped(self, reason: str, exc: Exception) -> None:
+        """Mark the connector disconnected after an in-flight socket drop."""
+        logger.warning("IB connection dropped (%s): %s", reason, exc)
+        try:
+            if self.ib.isConnected():
+                self.ib.disconnect()
+        except Exception:
+            pass
+        self._connected = False
 
     async def connect(self, max_attempts: Optional[int] = None, bars_only: bool = False) -> bool:
         """Connect to TWS/Gateway.
@@ -928,6 +958,9 @@ class IBConnector:
             stock = self._stock(sym)
             await self.ib.qualifyContractsAsync(stock)
         except Exception as e:
+            if self._is_connection_dropped(e):
+                self._mark_connection_dropped(f"qualifyContracts {sym}", e)
+                raise IBConnectionDroppedError(str(e)) from e
             logger.warning("get_historical_bars_range: qualifyContracts failed for %s: %s", sym, e, exc_info=True)
             return []
 
@@ -974,6 +1007,9 @@ class IBConnector:
                     formatDate=2,
                 )
             except Exception as e:
+                if self._is_connection_dropped(e):
+                    self._mark_connection_dropped(f"reqHistoricalDataAsync {sym} {per}", e)
+                    raise IBConnectionDroppedError(str(e)) from e
                 logger.warning(
                     "get_historical_bars_range: reqHistoricalDataAsync failed for %s %s: %s",
                     sym,

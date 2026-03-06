@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { IbAccountSnapshot, IbPositionRow, RealtimeQuote, StatusResponse, WishlistItem } from '../types'
+import type { IbAccountSnapshot, IbPositionRow, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
 import type { BarStatsResponse } from '../types'
-import { fetchWishlist, fetchBarStats, fetchQuotes, postBarsFetch, postWishlist, deleteWishlist } from '../api'
+import { fetchWatchlist, fetchBarStats, fetchQuotes, postBarsFetch, postWatchlist, deleteWatchlist } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
-interface WishlistPageProps {
+interface WatchlistPageProps {
   status: StatusResponse | null
 }
 
@@ -27,7 +27,7 @@ function positionToContractKey(p: IbPositionRow): string {
 }
 
 /** 自选股单项显示名 */
-function wishlistItemLabel(item: WishlistItem): string {
+function watchlistItemLabel(item: WatchlistItem): string {
   if (item.display_label && String(item.display_label).trim()) return item.display_label.trim()
   if (item.sec_type === 'OPT' && item.symbol) {
     const exp = item.expiry || ''
@@ -73,10 +73,10 @@ function formatStrike(strike: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(n)
 }
 
-export function WishlistPage({ status }: WishlistPageProps) {
-  const [wishlistItems, setWishlistItems] = useState<WishlistItem[]>([])
-  const [wishlistLoading, setWishlistLoading] = useState(false)
-  const [wishlistError, setWishlistError] = useState<string | null>(null)
+export function WatchlistPage({ status }: WatchlistPageProps) {
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([])
+  const [watchlistLoading, setWatchlistLoading] = useState(false)
+  const [watchlistError, setWatchlistError] = useState<string | null>(null)
   const [addContractKey, setAddContractKey] = useState('')
   const [addPending, setAddPending] = useState(false)
   const [addOptionForSymbol, setAddOptionForSymbol] = useState<string | null>(null)
@@ -93,23 +93,23 @@ export function WishlistPage({ status }: WishlistPageProps) {
     return (status?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
   }, [status?.accounts])
 
-  const loadWishlist = useCallback(async () => {
-    setWishlistLoading(true)
-    setWishlistError(null)
+  const loadWatchlist = useCallback(async () => {
+    setWatchlistLoading(true)
+    setWatchlistError(null)
     try {
-      const res = await fetchWishlist()
-      setWishlistItems(res.items || [])
+      const res = await fetchWatchlist()
+      setWatchlistItems(res.items || [])
     } catch (e) {
-      setWishlistError(e instanceof Error ? e.message : 'Load failed')
-      setWishlistItems([])
+      setWatchlistError(e instanceof Error ? e.message : 'Load failed')
+      setWatchlistItems([])
     } finally {
-      setWishlistLoading(false)
+      setWatchlistLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    loadWishlist()
-  }, [loadWishlist])
+    loadWatchlist()
+  }, [loadWatchlist])
 
   /** R-RM*: 轮询实时行情（用于当前价列）；4 秒 */
   useEffect(() => {
@@ -140,14 +140,14 @@ export function WishlistPage({ status }: WishlistPageProps) {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
   }
 
-  const handleAddWishlist = useCallback(
+  const handleAddWatchlist = useCallback(
     async (contract_key: string, source: string, symbol?: string, sec_type?: string, expiry?: string, strike?: number, option_right?: string) => {
       const key = contract_key.trim()
       if (!key) return
       setAddPending(true)
-      setWishlistError(null)
+      setWatchlistError(null)
       try {
-        const res = await postWishlist({
+        const res = await postWatchlist({
           contract_key: key,
           symbol: symbol || undefined,
           sec_type: sec_type || undefined,
@@ -156,44 +156,44 @@ export function WishlistPage({ status }: WishlistPageProps) {
           option_right: option_right || undefined,
           source,
         })
-        if (res.ok) await loadWishlist()
-        else setWishlistError(res.error || 'Add failed')
+        if (res.ok) await loadWatchlist()
+        else setWatchlistError(res.error || 'Add failed')
       } catch (e) {
-        setWishlistError(e instanceof Error ? e.message : 'Add request failed; check network or API')
+        setWatchlistError(e instanceof Error ? e.message : 'Add request failed; check network or API')
       } finally {
         setAddPending(false)
       }
     },
-    [loadWishlist],
+    [loadWatchlist],
   )
 
-  const handleRemoveWishlist = useCallback(
-    async (item: WishlistItem) => {
-      setWishlistError(null)
+  const handleRemoveWatchlist = useCallback(
+    async (item: WatchlistItem) => {
+      setWatchlistError(null)
       const res = item.id != null
-        ? await deleteWishlist({ id: item.id })
-        : await deleteWishlist({ contract_key: item.contract_key })
-      if (res.ok) await loadWishlist()
-      else setWishlistError(res.error || 'Remove failed')
+        ? await deleteWatchlist({ id: item.id })
+        : await deleteWatchlist({ contract_key: item.contract_key })
+      if (res.ok) await loadWatchlist()
+      else setWatchlistError(res.error || 'Remove failed')
     },
-    [loadWishlist],
+    [loadWatchlist],
   )
 
-  const wishlistContractKeys = useMemo(() => new Set(wishlistItems.map(w => w.contract_key)), [wishlistItems])
+  const watchlistContractKeys = useMemo(() => new Set(watchlistItems.map(w => w.contract_key)), [watchlistItems])
 
   /** 仅展示尚未在自选中的持仓，用于「从持仓添加」按钮列表；只列 STK（股票） */
-  const positionsNotInWishlist = useMemo(() => {
+  const positionsNotInWatchlist = useMemo(() => {
     return positions.filter(p => {
       const st = (p.secType ?? '').toString().trim().toUpperCase()
       if (st !== 'STK' && st !== '') return false
-      return !wishlistContractKeys.has(positionToContractKey(p))
+      return !watchlistContractKeys.has(positionToContractKey(p))
     })
-  }, [positions, wishlistContractKeys])
+  }, [positions, watchlistContractKeys])
 
-  const wishlistStocks = useMemo(() => wishlistItems.filter(w => (w.sec_type || 'STK').toUpperCase() !== 'OPT'), [wishlistItems])
-  const wishlistOptions = useMemo(() => wishlistItems.filter(w => (w.sec_type || '').toUpperCase() === 'OPT'), [wishlistItems])
+  const watchlistStocks = useMemo(() => watchlistItems.filter(w => (w.sec_type || 'STK').toUpperCase() !== 'OPT'), [watchlistItems])
+  const watchlistOptions = useMemo(() => watchlistItems.filter(w => (w.sec_type || '').toUpperCase() === 'OPT'), [watchlistItems])
 
-  function openAddOptionModal(item: WishlistItem) {
+  function openAddOptionModal(item: WatchlistItem) {
     const symbol = (item.symbol || (item.contract_key || '').split('|')[0] || '').trim()
     if (!symbol) return
     setAddOptionForSymbol(symbol)
@@ -215,18 +215,18 @@ export function WishlistPage({ status }: WishlistPageProps) {
     if (!expiry || Number.isNaN(strikeNum) || strikeNum < 0) return
     const rightLetter = addOptRight === 'CALL' ? 'C' : 'P'
     const contract_key = `${addOptionForSymbol}|OPT|${expiry}|${strikeNum}|${rightLetter}`
-    await handleAddWishlist(contract_key, 'manual', addOptionForSymbol, 'OPT', expiry, strikeNum, rightLetter)
+    await handleAddWatchlist(contract_key, 'manual', addOptionForSymbol, 'OPT', expiry, strikeNum, rightLetter)
     closeAddOptionModal()
   }
 
-  /** 从 wishlist 项取 symbol（股票用，分析 Stock_xx 表） */
-  function symbolFromItem(item: WishlistItem): string {
+  /** 从 watchlist 项取 symbol（股票用，分析 Stock_xx 表） */
+  function symbolFromItem(item: WatchlistItem): string {
     if (item.symbol && String(item.symbol).trim()) return String(item.symbol).trim()
     const parts = (item.contract_key || '').split('|')
     return (parts[0] || '').trim()
   }
 
-  async function handleAnalyze(item: WishlistItem) {
+  async function handleAnalyze(item: WatchlistItem) {
     const sym = symbolFromItem(item)
     if (!sym) return
     setAnalysisLoadingSymbol(sym)
@@ -301,7 +301,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
     }
   }
 
-  function renderStockTable(items: WishlistItem[], emptyText: string) {
+  function renderStockTable(items: WatchlistItem[], emptyText: string) {
     if (items.length === 0) return <p className="replay-placeholder">{emptyText}</p>
     return (
       <table className="table-operations">
@@ -318,7 +318,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
             const q = quoteBySymbol[sym]
             return (
               <tr key={item.contract_key}>
-                <td title={item.contract_key}>{wishlistItemLabel(item)}</td>
+                <td title={item.contract_key}>{watchlistItemLabel(item)}</td>
                 <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsdShort(q.last) : '—'}</td>
                 <td>
                 <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -327,7 +327,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
                     className="btn btn-secondary"
                     onClick={() => handleAnalyze(item)}
                     disabled={analysisLoadingSymbol !== null}
-                    aria-label={`Analyze ${symbolFromItem(item) || wishlistItemLabel(item)} in Stock_xx`}
+                    aria-label={`Analyze ${symbolFromItem(item) || watchlistItemLabel(item)} in Stock_xx`}
                   >
                     {analysisLoadingSymbol === symbolFromItem(item) ? 'Analyzing…' : 'Analyze'}
                   </button>
@@ -342,8 +342,8 @@ export function WishlistPage({ status }: WishlistPageProps) {
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={() => handleRemoveWishlist(item)}
-                    aria-label="Remove from wishlist"
+                    onClick={() => handleRemoveWatchlist(item)}
+                    aria-label="Remove from watchlist"
                   >
                     X
                   </button>
@@ -357,7 +357,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
     )
   }
 
-  function renderOptionsTable(items: WishlistItem[], emptyText: string) {
+  function renderOptionsTable(items: WatchlistItem[], emptyText: string) {
     if (items.length === 0) return <p className="replay-placeholder">{emptyText}</p>
     return (
       <table className="table-operations">
@@ -377,7 +377,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
             const q = quoteBySymbol[sym]
             return (
               <tr key={item.contract_key}>
-                <td title={item.contract_key}>{item.symbol || wishlistItemLabel(item)}</td>
+                <td title={item.contract_key}>{item.symbol || watchlistItemLabel(item)}</td>
                 <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsdShort(q.last) : '—'}</td>
                 <td>{formatExpiry(item.expiry)}</td>
                 <td>{formatOptionRight(item.option_right)}</td>
@@ -386,8 +386,8 @@ export function WishlistPage({ status }: WishlistPageProps) {
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => handleRemoveWishlist(item)}
-                  aria-label="Remove from wishlist"
+                  onClick={() => handleRemoveWatchlist(item)}
+                  aria-label="Remove from watchlist"
                 >
                   X
                 </button>
@@ -401,29 +401,29 @@ export function WishlistPage({ status }: WishlistPageProps) {
   }
 
   return (
-    <div className="card process-section wishlist-page">
+    <div className="card process-section watchlist-page">
       <h2 className="page-title-with-tooltip">
-        Wishlist
+        Watchlist
         <InfoTooltip text="Watchlist for quotes and bars; add from positions or enter Symbol." />
       </h2>
 
-      <section className="replay-section" aria-labelledby="wishlist-head">
-        <h3 id="wishlist-head" className="page-title-with-tooltip">
+      <section className="replay-section" aria-labelledby="watchlist-head">
+        <h3 id="watchlist-head" className="page-title-with-tooltip">
           Stocks & options
           <InfoTooltip text="Stocks: enter Symbol to add. Options: use 'Options' on a stock row and fill expiry, right, strike." />
         </h3>
         <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: '0.75rem' }}>
           Stocks in this list are subscribed by the daemon as <strong>Real-time ticker</strong> (see System → Event Subscribe). Add a symbol below to include it in monitoring. The daemon syncs this list on every heartbeat; no restart is needed when you add or remove symbols.
         </p>
-        {wishlistError && (
+        {watchlistError && (
           <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
-            {wishlistError}
+            {watchlistError}
           </div>
         )}
         <div className="replay-bar-symbol-row">
-          <label htmlFor="wishlist-symbol" className="replay-bar-symbol-label">Add stock (→ Real-time ticker)</label>
+          <label htmlFor="watchlist-symbol" className="replay-bar-symbol-label">Add stock (→ Real-time ticker)</label>
           <input
-            id="wishlist-symbol"
+            id="watchlist-symbol"
             type="text"
             className="replay-bar-symbol-input"
             placeholder="Symbol, e.g. NVDA"
@@ -438,17 +438,17 @@ export function WishlistPage({ status }: WishlistPageProps) {
             onClick={() => {
               const { contract_key, symbol, sec_type } = normalizeToContractKey(addContractKey)
               if (!contract_key) return
-              handleAddWishlist(contract_key, 'manual', symbol, sec_type)
+              handleAddWatchlist(contract_key, 'manual', symbol, sec_type)
               setAddContractKey('')
             }}
           >
             {addPending ? 'Adding…' : 'Add'}
           </button>
         </div>
-        {positionsNotInWishlist.length > 0 && (
+        {positionsNotInWatchlist.length > 0 && (
           <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '0.25rem' }}>
             <span className="replay-bar-symbol-label">Add from positions:</span>
-            {positionsNotInWishlist.map((p, idx) => {
+            {positionsNotInWatchlist.map((p, idx) => {
               const ck = positionToContractKey(p)
               const label = (p.symbol || '')
                 + (p.secType === 'OPT' && (p.expiry || p.lastTradeDateOrContractMonth) ? ` ${p.expiry || p.lastTradeDateOrContractMonth} ${p.right || ''} ${p.strike ?? ''}` : '')
@@ -460,7 +460,7 @@ export function WishlistPage({ status }: WishlistPageProps) {
                   disabled={addPending}
                   onClick={() => {
                     const exp = (p.expiry ?? p.lastTradeDateOrContractMonth) as string | undefined
-                    handleAddWishlist(ck, 'position', p.symbol || undefined, p.secType || undefined, exp, p.strike, p.right)
+                    handleAddWatchlist(ck, 'position', p.symbol || undefined, p.secType || undefined, exp, p.strike, p.right)
                   }}
                   title={ck}
                 >
@@ -470,23 +470,23 @@ export function WishlistPage({ status }: WishlistPageProps) {
             })}
           </div>
         )}
-        {wishlistLoading ? (
-          <div className="replay-placeholder">Loading wishlist…</div>
-        ) : wishlistItems.length === 0 ? (
+        {watchlistLoading ? (
+          <div className="replay-placeholder">Loading watchlist…</div>
+        ) : watchlistItems.length === 0 ? (
           <div className="replay-placeholder">No items. Enter Symbol to add or add from positions.</div>
         ) : (
           <>
-            <h4 className="wishlist-subhead">Stocks</h4>
-            {renderStockTable(wishlistStocks, 'No stocks in wishlist.')}
-            <h4 className="wishlist-subhead" style={{ marginTop: '1rem' }}>Options</h4>
-            {renderOptionsTable(wishlistOptions, 'No options in wishlist.')}
+            <h4 className="watchlist-subhead">Stocks</h4>
+            {renderStockTable(watchlistStocks, 'No stocks in watchlist.')}
+            <h4 className="watchlist-subhead" style={{ marginTop: '1rem' }}>Options</h4>
+            {renderOptionsTable(watchlistOptions, 'No options in watchlist.')}
           </>
         )}
       </section>
 
       {analysisResult && (
-        <section className="replay-section market-data-analysis" aria-labelledby="wishlist-analysis-head">
-          <h3 id="wishlist-analysis-head" className="page-title-with-tooltip">
+        <section className="replay-section market-data-analysis" aria-labelledby="watchlist-analysis-head">
+          <h3 id="watchlist-analysis-head" className="page-title-with-tooltip">
             Bar stats for {analysisResult.symbol} in Stock_xx
             <InfoTooltip text="K-line row counts for this symbol in DB." />
           </h3>
@@ -532,10 +532,10 @@ export function WishlistPage({ status }: WishlistPageProps) {
 
       {addOptionForSymbol != null && (
         <div
-          className="wishlist-modal-backdrop"
+          className="watchlist-modal-backdrop"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="wishlist-add-option-title"
+          aria-labelledby="watchlist-add-option-title"
           style={{
             position: 'fixed',
             inset: 0,
@@ -548,11 +548,11 @@ export function WishlistPage({ status }: WishlistPageProps) {
           onClick={e => e.target === e.currentTarget && closeAddOptionModal()}
         >
           <div
-            className="wishlist-modal-content card"
+            className="watchlist-modal-content card"
             style={{ padding: '1.25rem', minWidth: '18rem', maxWidth: '90vw' }}
             onClick={e => e.stopPropagation()}
           >
-            <h4 id="wishlist-add-option-title" style={{ marginTop: 0 }}>Add option for {addOptionForSymbol}</h4>
+            <h4 id="watchlist-add-option-title" style={{ marginTop: 0 }}>Add option for {addOptionForSymbol}</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <div className="replay-bar-symbol-row">
                 <label className="replay-bar-symbol-label">Expiry</label>

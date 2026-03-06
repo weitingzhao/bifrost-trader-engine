@@ -120,10 +120,11 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   const [filterExpiryEnd, setFilterExpiryEnd] = useState('')
   const [filterExecStart, setFilterExecStart] = useState('')
   const [filterExecEnd, setFilterExecEnd] = useState('')
-  const [filterPool, setFilterPool] = useState<'ALL' | 'ON' | 'Off'>('ALL')
+  const [filterPool, setFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
 
   const getOptGroupKey = (g: OptExecutionGroup) => `${g.contract_key}-${g.strike}-${g.expiry}`
   const [expandedDetailKeys, setExpandedDetailKeys] = useState<string[]>([])
+
   /** true = 手风琴模式（一次只展开一个），false = 可展开多列 */
   const [accordionMode, setAccordionMode] = useState<boolean>(false)
   const toggleDetailExpand = (key: string) => {
@@ -431,7 +432,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
         )}
       </section>
 
-      <section className="replay-section" aria-labelledby="trade-records-head">
+      <section className="replay-section replay-section-trade-records" aria-labelledby="trade-records-head">
         <h3 id="trade-records-head">Trade records</h3>
         <div className="replay-filters">
           <label className="replay-filter-wrap-symbol">
@@ -485,11 +486,11 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
               <input
                 type="radio"
                 name="replay-pool"
-                value="ALL"
-                checked={filterPool === 'ALL'}
-                onChange={() => setFilterPool('ALL')}
+                value="Mix"
+                checked={filterPool === 'Mix'}
+                onChange={() => setFilterPool('Mix')}
               />
-              <span>ALL</span>
+              <span>Mix</span>
             </label>
             <label className="replay-fetch-radio">
               <input
@@ -521,7 +522,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
               setFilterExpiryEnd('')
               setFilterExecStart('')
               setFilterExecEnd('')
-              setFilterPool('ALL')
+              setFilterPool('Mix')
             }}
           >
             Clear filters
@@ -531,6 +532,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
           Strategy operations (hedge)
           <InfoTooltip text={'From GET /operations; account-level executions (R-A2) shown in "Portfolio" below.'} />
         </h4>
+        <div className="replay-portfolio-table-wrap">
         <table className="table-operations">
           <thead>
             <tr>
@@ -559,31 +561,49 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
             )}
           </tbody>
         </table>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <h4 className="replay-sub page-title-with-tooltip" style={{ marginBottom: 0 }}>
-            Portfolio
-            <InfoTooltip text="Options grouped by contract_key and strike; Cost/Premium = Size×@×100−Commission; PnL = Premium − Cost; color by status (realized green, unrealized yellow)." />
-          </h4>
-          <label className="toggle-switch" style={{ marginBottom: 0 }}>
-            <span className="toggle-switch-caption">Detail view</span>
-            <span className="toggle-switch-mode">
-              {accordionMode ? 'Accordion' : 'Multi'}
-            </span>
-            <input
-              type="checkbox"
-              checked={accordionMode}
-              onChange={e => setAccordionMode(e.target.checked)}
-              aria-label="Toggle between multi-open and accordion detail view"
-            />
-            <span className="toggle-switch-slider" aria-hidden="true" />
-          </label>
         </div>
+        <div className="replay-portfolio-block">
+          <div className="replay-portfolio-header">
+            <h4 className="replay-sub page-title-with-tooltip" style={{ marginBottom: 0 }}>
+              Portfolio
+              <InfoTooltip text="Options grouped by contract_key and strike; Cost/Premium = Size×@×100−Commission; PnL = Premium − Cost; color by status (realized green, unrealized yellow)." />
+            </h4>
+            <div className="replay-portfolio-filters">
+              <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
+                <span className="replay-fetch-days-label">Pool</span>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-pool-header" value="Mix" checked={filterPool === 'Mix'} onChange={() => setFilterPool('Mix')} />
+                  <span>Mix</span>
+                </label>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-pool-header" value="ON" checked={filterPool === 'ON'} onChange={() => setFilterPool('ON')} />
+                  <span>On</span>
+                </label>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-pool-header" value="Off" checked={filterPool === 'Off'} onChange={() => setFilterPool('Off')} />
+                  <span>Off</span>
+                </label>
+              </div>
+              <div className="replay-fetch-range-group" role="radiogroup" aria-label="Detail view mode">
+                <span className="replay-fetch-days-label">Detail view</span>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-detail-view" value="accordion" checked={accordionMode} onChange={() => setAccordionMode(true)} />
+                  <span>Accordion</span>
+                </label>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-detail-view" value="multi" checked={!accordionMode} onChange={() => setAccordionMode(false)} />
+                  <span>Multi</span>
+                </label>
+              </div>
+            </div>
+          </div>
         {filteredExecutions.length === 0 ? (
-          <p className="section-hint">No data; click "Refresh replay data" to fetch from IB, or "Add history" to add manually.{([filterSymbol, filterExpiryStart, filterExpiryEnd, filterExecStart, filterExecEnd].some(Boolean) || filterPool !== 'ALL') ? ' Filters applied; clear to see all.' : ''}</p>
+          <p className="section-hint">No data; click "Refresh replay data" to fetch from IB, or "Add history" to add manually.{([filterSymbol, filterExpiryStart, filterExpiryEnd, filterExecStart, filterExecEnd].some(Boolean) || filterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
         ) : (
           <>
             {optExecutionGroups.length > 0 && (
               <>
+                <div className="replay-portfolio-table-wrap">
                 <table className="table-operations replay-opt-groups">
                   <thead>
                     <tr>
@@ -610,7 +630,9 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                   <tbody>
                     {optExecutionGroups.map((g) => {
                       const stateLabel = g.net_qty === 0 ? 'Realized' : g.net_qty > 0 ? 'Holding' : 'Selling'
-                      const poolLabel = g.trades.some(t => (t.account_id ?? '').trim() === 'Off-Track') ? 'Off' : 'On'
+                      const hasOff = g.trades.some(t => (t.account_id ?? '').trim() === 'Off-Track')
+                      const hasOn = g.trades.some(t => (t.account_id ?? '').trim() !== 'Off-Track')
+                      const poolLabel = hasOff && hasOn ? 'Mix' : hasOff ? 'Off' : 'On'
                       const groupKey = getOptGroupKey(g)
                       const isExpanded = expandedDetailKeys.includes(groupKey)
                       return (
@@ -680,6 +702,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                     </tr>
                   </tfoot>
                 </table>
+                </div>
 
                 <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
                   Details (per trade)
@@ -854,6 +877,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
             )}
           </>
         )}
+        </div>
       </section>
 
       {(addExecOpen || editExec) && (

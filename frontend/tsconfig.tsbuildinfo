@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts"],"version":"5.6.3"}
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/infotooltip.tsx","./src/components/logconsolepanel.tsx","./src/pages/daemonmonitorpage.tsx","./src/pages/datapage.tsx","./src/pages/ibaccountspage.tsx","./src/pages/marketdatapage.tsx","./src/pages/positionpnlpage.tsx","./src/pages/settingspage.tsx","./src/pages/watchlistpage.tsx"],"version":"5.6.3"}

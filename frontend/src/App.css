@@ -481,25 +481,61 @@ body::before {
   min-width: 0;
 }
 
+/* Celery 控制台按级别与时间着色 */
+.celery-log-line .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--error {
+  color: var(--color-danger);
+}
+.celery-log-line.celery-log--error .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--warning {
+  color: var(--color-warning);
+}
+.celery-log-line.celery-log--warning .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--info {
+  color: var(--color-text-muted);
+}
+.celery-log-line.celery-log--info .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--debug {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--debug .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--default {
+  color: var(--color-text-muted);
+}
+
 .celery-console-status-line {
   margin-top: var(--space-2);
   font-size: var(--text-tiny);
-}
-
-.celery-console-card .card h2 {
-  margin-bottom: var(--space-1);
-}
-
-.celery-console-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-1);
+  flex-wrap: wrap;
 }
 
-.celery-console-header h2 {
-  margin: 0;
+.celery-console-status-indicator {
+  min-height: 1.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.celery-console-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  flex-wrap: wrap;
 }
 
 .btn-celery-console-clear {
@@ -539,10 +575,6 @@ body::before {
   cursor: pointer;
 }
 
-.celery-console-card .section-desc {
-  margin-bottom: 0;
-}
-
 /* 实时行情表格 */
 .realtime-quotes-table-wrap {
   overflow-x: auto;
@@ -564,6 +596,29 @@ body::before {
 }
 .realtime-quotes-table .pnl-negative {
   color: var(--color-danger);
+}
+
+/* Watchlist summary row: fixed width per segment to avoid layout jump when numbers change */
+.watchlist-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5rem;
+}
+.watchlist-summary-segment {
+  display: inline-flex;
+  align-items: baseline;
+  width: 10rem;
+  font-variant-numeric: tabular-nums;
+}
+.watchlist-summary-segment .watchlist-summary-value {
+  display: inline-block;
+  width: 6.5rem;
+  text-align: right;
+  margin-left: 0.25rem;
+}
+.watchlist-summary-segment .watchlist-summary-value-pct {
+  width: 4.5rem;
 }
 
 /* ---------- 守护程序区块 ---------- */
@@ -1346,6 +1401,67 @@ th {
   gap: 0.35rem;
 }
 
+/* Data page: Bars candlestick preview */
+.data-bars-chart-container {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-surface-elevated);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  width: 100%;
+  min-width: 0;
+}
+
+.data-bars-chart-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.data-bars-chart-title {
+  font-weight: 600;
+  font-size: var(--text-body-strong, 0.98rem);
+}
+
+.data-bars-chart-subtitle {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.data-bars-chart {
+  width: 100%;
+  min-width: 0;
+}
+
+.data-bars-chart-svg {
+  width: 100%;
+  min-width: 0;
+  height: 320px;
+  display: block;
+}
+
+.data-bars-chart-legend {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.data-bars-chart-legend span {
+  white-space: nowrap;
+}
+
+.data-bars-chart-legend-time {
+  font-weight: 500;
+  color: var(--color-text);
+}
+
 .replay-fetch-days-label {
   font-weight: 500;
 }
@@ -1451,6 +1567,11 @@ th {
   font-size: var(--text-title);
   margin-bottom: var(--space-3);
   color: var(--color-text-main);
+}
+
+/* Trade records section: prevent wide tables from pushing the section (Detail view / Accordion stays in view) */
+.replay-section-trade-records {
+  max-width: 100%;
 }
 
 .market-data-analysis .analysis-stats {
@@ -1573,6 +1694,39 @@ th {
 
 .replay-opt-groups {
   margin-bottom: var(--space-4);
+}
+
+.replay-portfolio-block {
+  width: 100%;
+  min-width: 0;
+}
+
+.replay-portfolio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.replay-portfolio-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.replay-portfolio-filters .replay-fetch-range-group {
+  margin-bottom: 0;
+}
+
+.replay-portfolio-table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  margin-bottom: var(--space-3);
 }
 
 .replay-opt-group-row {
