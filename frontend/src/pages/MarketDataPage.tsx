@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Bar, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
-import { fetchBars, fetchQuotes, postBarsFetch } from '../api'
+import { fetchBars, fetchQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
 const BAR_PERIODS = [
@@ -41,11 +41,9 @@ function useBarCandidateSymbols(status: StatusResponse | null): string[] {
 
 export function MarketDataPage({ status }: MarketDataPageProps) {
   const [bars, setBars] = useState<Bar[]>([])
-  const [barsSyncing, setBarsSyncing] = useState(false)
   const [barsLoading, setBarsLoading] = useState(false)
   const [barSymbol, setBarSymbol] = useState('')
   const [barPeriod, setBarPeriod] = useState<string>('1 D')
-  const [smartDuration, setSmartDuration] = useState(true)
   const [quotes, setQuotes] = useState<RealtimeQuote[]>([])
   const [quotesMessage, setQuotesMessage] = useState<string | null>(null)
 
@@ -75,24 +73,9 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
     }
   }, [])
 
-  const loadBarsFromApi = useCallback(async (symbol: string) => {
-    if (!symbol.trim()) return
-    setBarsLoading(true)
-    try {
-      const res = await fetchBars(symbol, barPeriod, 100)
-      setBars(res.bars || [])
-    } catch {
-      setBars([])
-    } finally {
-      setBarsLoading(false)
-    }
-  }, [barPeriod])
-
   useEffect(() => {
     if (candidateSymbols.length > 0 && !barSymbol.trim()) setBarSymbol(candidateSymbols[0])
   }, [candidateSymbols.join(','), barSymbol])
-
-  const defaultDuration = barPeriod === '1 D' ? '30 D' : '5 D'
 
   return (
     <div className="card process-section market-data-page">
@@ -135,7 +118,7 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
       <section className="replay-section" aria-labelledby="bars-head">
         <h3 id="bars-head" className="page-title-with-tooltip">
           Bars
-          <InfoTooltip text="Fetch by symbol and period for replay. Enter symbol or pick from current positions." />
+          <InfoTooltip text="View bars from DB by symbol and period. For fetching/backfill, use the Data tab." />
         </h3>
         <div className="replay-bar-symbol-row">
           <label htmlFor="market-bar-symbol" className="replay-bar-symbol-label">Symbol</label>
@@ -163,46 +146,29 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
               <option key={p.value} value={p.value}>{p.label}</option>
             ))}
           </select>
-          <label className="replay-sync-hint" style={{ marginLeft: '1rem' }}>
-            <input
-              type="checkbox"
-              checked={smartDuration}
-              onChange={e => setSmartDuration(e.target.checked)}
-              aria-label="Smart fetch"
-            />
-            Smart fetch (fill only missing range from latest bar)
-          </label>
         </div>
         <div className="replay-toolbar">
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={barsSyncing || barsLoading || !(barSymbol.trim() || candidateSymbols[0])}
+            disabled={barsLoading || !barSymbol.trim()}
             onClick={async () => {
               const symbol = barSymbol.trim() || candidateSymbols[0] || ''
               if (!symbol) return
-              setBarsSyncing(true)
-              const res = await postBarsFetch(symbol, barPeriod, defaultDuration, smartDuration)
-              setBarsSyncing(false)
-              if (res.ok && res.bars) setBars(res.bars)
-              else if (res.ok) await loadBarsFromApi(symbol)
+              setBarsLoading(true)
+              try {
+                const res = await fetchBars(symbol, barPeriod, 100)
+                setBars(res.bars || [])
+              } catch {
+                setBars([])
+              } finally {
+                setBarsLoading(false)
+              }
             }}
-            aria-label="Fetch bars from IB and refresh list"
-          >
-            {barsSyncing ? 'Fetching…' : 'Fetch bars'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={barsLoading || !barSymbol.trim()}
-            onClick={() => loadBarsFromApi(barSymbol.trim())}
             aria-label="Load bars from DB"
           >
             {barsLoading ? 'Loading…' : 'Load from DB'}
           </button>
-          {barsSyncing && (
-            <span className="replay-sync-hint">Fetching bars from IB…</span>
-          )}
         </div>
         {bars.length === 0 ? (
           <div className="replay-placeholder">No bars. Enter symbol and click "Fetch bars" or "Load from DB".</div>

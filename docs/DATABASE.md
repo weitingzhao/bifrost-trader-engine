@@ -327,6 +327,29 @@
 
 - **读取**：GET /wishlist 供市场数据页与报价请求使用；Wishlist 标的的报价写入 **instrument_prices**（与持仓共用），监控端拉取报价后 UPSERT 到 instrument_prices，供前端统一展示。
 
+### 2.18 表 `bars_backfill_jobs`（阶段 3 非实时拉取 Worker：任务队列表）
+
+- **用途**：非实时 K 线拉取（backfill）的**任务队列**；API 入队时 INSERT，独立 Worker 进程用 `SELECT ... FOR UPDATE SKIP LOCKED` 取 pending 任务并执行，完成后 UPDATE status 与 result。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。
+- **写入**：监控 API 在 POST /bars/backfill（queue=1）时 **INSERT** 一行 status='pending'；Worker 取任务时 **UPDATE** status='running'，执行结束后 **UPDATE** status='done'|'failed' 与 result（jsonb）。
+- **消费语义**：Worker 使用 `SELECT id, symbol, period, years, days, override_days FROM bars_backfill_jobs WHERE status='pending' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED` 取一条，随后在同一事务内 `UPDATE ... SET status='running', updated_at=now() WHERE id=:id`，避免多 Worker 抢同一 job。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键（作为 job_id 返回给客户端） |
+| symbol | text NOT NULL | 标的代码（如 NVDA） |
+| period | text NOT NULL | 周期：'1 D' \| '1 min' \| '5 mins' \| '1 hour' |
+| years | double precision | 拉取跨度（年），仅当无数据时用 |
+| days | integer | 拉取跨度（天），仅当无数据时用 |
+| override_days | double precision | 已有数据时覆盖最近 N 天 |
+| status | text NOT NULL | pending \| running \| done \| failed |
+| result | jsonb | 执行结果：{ ok, count?, message? } 或 { ok: false, error } |
+| created_at | timestamptz | 创建时间（默认 now()） |
+| updated_at | timestamptz | 最后更新时间（默认 now()） |
+
+- **索引**：`(status, created_at)` 便于 Worker 按 pending 取最旧任务；GET /bars/jobs 按 id DESC 分页。
+- **Trim**：可选保留最近 200 条，删除更旧记录，与内存队列“保留 200”行为一致。
+
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
 - **用途**：供监控机设置「挂起/恢复」交易流程（不下新对冲），交易机在每次 heartbeat 及 tick 时**只读**该表并据此决定是否执行 maybe_hedge；与 daemon_control 配合实现 RE-5（监控与交易分离）。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
@@ -363,7 +386,7 @@
 ### 2.9 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
 
 - **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。当前包含 IB 连接配置（主机、端口类型）以及**多种用途的 IB Client ID**，供监控页「设置」与「守护程序」区编辑；守护进程**每次启动时**从该表读取并连接 IB；API 拉取账户信息/成交与 K 线时按用途使用对应 client_id。后续新增设置时在此表**增加列**即可。
-- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入 `ib_host`、`ib_port_type` 及可选的 `ib_client_id_daemon`、`ib_client_id_listener`、`ib_client_id_account`、`ib_client_id_markets`；StatusReader 的 `write_ib_config(...)` 执行 UPDATE。
+- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入 `ib_host`、`ib_port_type` 及可选的 `ib_client_id_daemon`、`ib_client_id_listener`、`ib_client_id_account`、`ib_client_id_markets`、`ib_client_id_worker_market`；StatusReader 的 `write_ib_config(...)` 执行 UPDATE。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -375,8 +398,9 @@
 | ib_client_id_listener | integer | 守护侧监听进程使用的 Client ID（预留，默认 2），避免与交易进程及监控端冲突 |
 | ib_client_id_account | integer | 监控端拉取账户信息/执行记录（POST /executions/fetch）使用的 Client ID（默认 100） |
 | ib_client_id_markets | integer | 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 101） |
+| ib_client_id_worker_market | integer | Celery worker（如 Bars 补全，worker_market）连接 IB 使用的 Client ID（默认 500），与 Daemon/Monitor 隔离，避免冲突 |
 
-- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`（监听进程如需连接可使用 `ib_client_id_listener`）；否则使用 config 中的 `ib.host`、`ib.port`、`ib.client_id`。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`，避免与守护进程或彼此占用同一 client_id。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 的 client_id 每次请求时从 settings 读取。
+- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`（监听进程如需连接可使用 `ib_client_id_listener`）；否则使用 config 中的 `ib.host`、`ib.port`、`ib.client_id`。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`，避免与守护进程或彼此占用同一 client_id。**Celery**（Celery worker，`scripts/run_celery.py`）使用 `ib_client_id_worker_market`（默认 500），与 Daemon、Monitor 的 client_id 完全隔离。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
 
 ---
 

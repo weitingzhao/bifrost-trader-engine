@@ -25,8 +25,16 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.chdir(_PROJECT_ROOT)
 
 
-# Tables we care about (Phase 2 single-row or hot tables)
-_TABLES = ("daemon_heartbeat", "status_current", "daemon_control", "daemon_run_status")
+# Tables we care about (Phase 2 + settings; stock_day/stock_min often locked by API/bars_worker during CREATE INDEX)
+_TABLES = (
+    "daemon_heartbeat",
+    "status_current",
+    "daemon_control",
+    "daemon_run_status",
+    "settings",
+    "stock_day",
+    "stock_min",
+)
 
 
 def _load_config(config_path: str) -> tuple[dict, dict]:
@@ -107,11 +115,11 @@ def main() -> int:
         return 1
 
     if not rows:
-        print("No other backends holding or waiting for locks on daemon_heartbeat / status_current / daemon_control / daemon_run_status.")
+        print("No other backends holding or waiting for locks on Phase 2 tables / settings / stock_day / stock_min.")
         conn.close()
         return 0
 
-    print("Backends with locks on Phase 2 tables (excluding this script):")
+    print("Backends with locks on Phase 2 tables + settings + stock_day/stock_min (excluding this script):")
     print("-" * 100)
     pids_to_terminate = []
     for r in rows:

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Operation, RealtimeQuote, StatusResponse } from '../types'
-import { postSuspend, postResume, postFlatten, postRetryIb, postStop, postMonitorStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchQuotes, subscribeQuotes } from '../api'
+import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postCeleryConnect, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchQuotes, subscribeQuotes, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, trimCeleryLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
 function fmtTs(ts: number | null | undefined): string {
@@ -121,18 +121,26 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
+  const [celeryCtrlMsg, setCeleryCtrlMsg] = useState({ text: '', isErr: false })
   const [syncTickerLoading, setSyncTickerLoading] = useState(false)
   const [syncTickerMsg, setSyncTickerMsg] = useState({ text: '', isErr: false })
   const [tick, setTick] = useState(0)
   const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
   const [healthTick, setHealthTick] = useState(0)
-  const [systemTab, setSystemTab] = useState<'daemon' | 'monitor' | 'strategy'>('daemon')
+  const [systemTab, setSystemTab] = useState<'daemon' | 'monitor' | 'celery' | 'strategy'>('daemon')
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [quoteTick, setQuoteTick] = useState(0)
+  const [celeryConsoleLines, setCeleryConsoleLines] = useState<string[]>([])
+  const [celeryConsoleStatus, setCeleryConsoleStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
+  const [celeryConsoleHeightPx, setCeleryConsoleHeightPx] = useState(260)
+  const [celeryConsoleMaxLines, setCeleryConsoleMaxLines] = useState(1000)
+  const celeryConsoleMaxLinesRef = useRef(1000)
   const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTickerMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const monitorCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const celeryCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const celeryConsoleRef = useRef<HTMLPreElement | null>(null)
 
   const j = status
   const hb = j?.daemon_heartbeat
@@ -149,7 +157,6 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       : null
   const suspended = j?.trading_suspended === true
   const ibConnected = hb?.ib_connected === true
-  const showRetryIb = hb?.daemon_alive === true && !ibConnected
 
   useEffect(() => {
     return () => {
@@ -157,6 +164,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       if (hedgeCtrlMsgClearRef.current != null) clearTimeout(hedgeCtrlMsgClearRef.current)
       if (syncTickerMsgClearRef.current != null) clearTimeout(syncTickerMsgClearRef.current)
       if (monitorCtrlMsgClearRef.current != null) clearTimeout(monitorCtrlMsgClearRef.current)
+      if (celeryCtrlMsgClearRef.current != null) clearTimeout(celeryCtrlMsgClearRef.current)
     }
   }, [])
 
@@ -218,6 +226,67 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     const id = setInterval(() => setQuoteTick((n) => n + 1), 1000)
     return () => clearInterval(id)
   }, [quotesCount])
+
+  useEffect(() => {
+    celeryConsoleMaxLinesRef.current = celeryConsoleMaxLines
+  }, [celeryConsoleMaxLines])
+
+  // Celery Console: fetch initial lines + SSE stream (Redis Stream, Scheme B); trim to max lines
+  useEffect(() => {
+    let unsub: (() => void) | null = null
+    const maxLines = celeryConsoleMaxLinesRef.current
+    setCeleryConsoleStatus('connecting')
+    fetchCeleryLogs(maxLines)
+      .then((res) => {
+        const lines = res.lines ?? []
+        const trimmed = lines.length > maxLines ? lines.slice(-maxLines) : lines
+        setCeleryConsoleLines(trimmed)
+        setCeleryConsoleStatus(res.error ? 'error' : 'connected')
+        if (lines.length > maxLines) {
+          trimCeleryLogs(maxLines).catch(() => {})
+        }
+        if (!res.error) {
+          unsub = subscribeCeleryLogs(
+            (line) => {
+              const limit = celeryConsoleMaxLinesRef.current
+              setCeleryConsoleLines((prev) => [...prev, line].slice(-limit))
+            },
+            () => setCeleryConsoleStatus('error'),
+          )
+        }
+      })
+      .catch(() => setCeleryConsoleStatus('error'))
+    return () => {
+      if (unsub) unsub()
+    }
+  }, [])
+
+  // Auto-scroll Celery console to bottom when new lines arrive
+  useEffect(() => {
+    const el = celeryConsoleRef.current
+    const container = el?.parentElement
+    if (container) container.scrollTop = container.scrollHeight
+  }, [celeryConsoleLines.length])
+
+  const onCeleryConsoleResizeStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return
+    const startY = e.clientY
+    const startHeight = celeryConsoleHeightPx
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(600, Math.max(120, startHeight + (ev.clientY - startY)))
+      setCeleryConsoleHeightPx(next)
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+  }
 
   let daemonLabel = 'Not running (or single-process mode)'
   let daemonHint = 'Run run_engine.py on the trading machine to see "Running" here'
@@ -286,6 +355,17 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
 
   const monitorIbGroupLamp =
     !monitorEnabled ? 'none' : (monitorAccount?.connected && monitorMarket?.connected) ? 'green' : (monitorAccount?.connected || monitorMarket?.connected) ? 'yellow' : 'red'
+
+  const celeryBrokerConnected = j?.celery_broker_connected === true
+  const celeryLastTs = j?.celery_worker_last_updated_ts
+  const celeryWorkerIbConnected = j?.celery_worker_ib_connected === true
+  const celeryWorkerIbClientId = j?.celery_worker_ib_client_id ?? null
+  /** 与 Monitor 的轮询方式一致：仅以 GET /status 时对 Celery 的 inspect ping 结果判断 Worker 是否存活，不依赖“近期 job 更新” */
+  const celeryWorkersAlive = (j?.celery_workers?.length ?? 0) > 0
+  const nowSecForCelery = Date.now() / 1000
+  const celeryWorkerRecent = celeryLastTs != null && Number.isFinite(celeryLastTs) && (nowSecForCelery - celeryLastTs) < 600
+  const celeryLamp =
+    !celeryBrokerConnected ? 'red' : celeryWorkersAlive ? 'green' : 'yellow'
 
   const healthElapsedSec = lastHealthAt != null ? Math.floor(Date.now() / 1000 - lastHealthAt) : null
   const healthCountdownSec =
@@ -366,12 +446,14 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
   }
 
-  const onRetryIb = async () => {
-    setMsg(setCtrlMsg, 'Requesting IB reconnect…', false)
-    const res = await postRetryIb()
+  const onReleaseIb = async () => {
+    setMsg(setCtrlMsg, 'Requesting release IB…', false)
+    const res = await postReleaseIb()
     setMsg(
       setCtrlMsg,
-      res.ok ? 'Retry sent; daemon will try to connect to IB immediately.' : (res.error ?? ''),
+      res.ok
+        ? 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB (daemon keeps running). Use «Retry IB connection» below to reconnect when ready.'
+        : (res.error ?? ''),
       !res.ok
     )
     if (res.ok) loadStatus()
@@ -425,6 +507,51 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     scheduleMsgClear(setMonitorCtrlMsg, monitorCtrlMsgClearRef)
   }
 
+  const onMonitorReleaseIb = async () => {
+    setMsg(setMonitorCtrlMsg, 'Releasing monitor IB connections…', false)
+    const res = await postMonitorReleaseIb()
+    setMsg(
+      setMonitorCtrlMsg,
+      res.ok ? 'Monitor IB connections released (Account + Market client_id). Use Connect to reconnect.' : (res.error ?? ''),
+      !res.ok,
+    )
+    if (res.ok) loadStatus()
+    scheduleMsgClear(setMonitorCtrlMsg, monitorCtrlMsgClearRef)
+  }
+
+  const onCeleryStop = async () => {
+    setMsg(setCeleryCtrlMsg, 'Requesting Celery worker stop…', false)
+    const res = await postCeleryStop()
+    setMsg(
+      setCeleryCtrlMsg,
+      res.ok ? 'Celery worker stop requested; process will exit within a few seconds.' : (res.error ?? ''),
+      !res.ok,
+    )
+    if (res.ok) loadStatus()
+    scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
+  }
+
+  const onCeleryConnect = async () => {
+    setMsg(setCeleryCtrlMsg, 'Requesting Worker IB connection…', false)
+    const res = await postCeleryConnect()
+    setMsg(
+      setCeleryCtrlMsg,
+      res.ok ? 'Worker connect requested; status will update in a few seconds. (Ensure Celery worker is running: python scripts/run_celery.py)' : (res.error ?? ''),
+      !res.ok,
+    )
+    if (res.ok) {
+      loadStatus()
+      // Poll status every 2s for 12s so UI updates when Worker connects (worker polls every 5s)
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 2000))
+        loadStatus()
+        if (i === 2) scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
+      }
+    } else {
+      scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
+    }
+  }
+
   return (
     <>
       <div className="card process-section system-tabs-wrapper">
@@ -452,6 +579,18 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           >
             <span className={`lamp lamp-sm ${monitorLamp}`} title="Monitor status" aria-hidden />
             <span>Monitor</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={systemTab === 'celery'}
+            aria-controls="system-panel-celery"
+            id="tab-celery"
+            className={`system-tab ${systemTab === 'celery' ? 'active' : ''}`}
+            onClick={() => setSystemTab('celery')}
+          >
+            <span className={`lamp lamp-sm ${celeryLamp}`} title="Celery (bars worker) status" aria-hidden />
+            <span>Celery</span>
           </button>
           <button
             type="button"
@@ -530,23 +669,27 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
               )}
               {j?.ib_config?.ib_client_id_listener != null && (
                 <p className="section-hint countdown-line">
-                  Listener Client: <span className="countdown-num">Connected @ {j.ib_config.ib_client_id_listener}</span>
+                  Listener Client: {hb?.listener_connected ? (
+                    <span className="countdown-num">Connected @ {hb?.listener_client_id ?? j.ib_config.ib_client_id_listener}</span>
+                  ) : (
+                    <span>Not connected</span>
+                  )}
                 </p>
               )}
-              {hb?.daemon_alive && !ibConnected && (
-                <p className="section-hint">Will retry connection on next heartbeat.</p>
-              )}
-              {showRetryIb && (
+              {ibConnected && (
                 <div className="controls">
                   <button
                     type="button"
                     className="btn-retry-ib"
-                    title="Notify daemon to try connecting to IB immediately"
-                    onClick={onRetryIb}
+                    title="Release IB connection on next daemon heartbeat (daemon will go to WAITING_IB and can retry later)"
+                    onClick={onReleaseIb}
                   >
-                    Retry IB connection
+                    Reset
                   </button>
                 </div>
+              )}
+              {hb?.daemon_alive && !ibConnected && (
+                <p className="section-hint section-hint--retry">Will retry connection on next heartbeat.</p>
               )}
             </div>
           </div>
@@ -706,15 +849,26 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                 <p className="section-hint">Market client error: {monitorMarket.last_error}</p>
               )}
               <div className="controls" style={{ marginTop: '0.25rem' }}>
-                <button
-                  type="button"
-                  className="btn-resume"
-                  disabled={!monitorEnabled}
-                  title={monitorEnabled ? 'Establish monitor IB connection (AccountIbClient + MarketIbClient)' : 'Monitor stopped; cannot connect'}
-                  onClick={onMonitorConnect}
-                >
-                  Connect
-                </button>
+                {(monitorAccount?.connected || monitorMarket?.connected) ? (
+                  <button
+                    type="button"
+                    className="btn-retry-ib"
+                    title="Release Monitor IB connections (Account + Market client_id). Monitor keeps running; use Connect to reconnect."
+                    onClick={onMonitorReleaseIb}
+                  >
+                    Release
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-resume"
+                    disabled={!monitorEnabled}
+                    title={monitorEnabled ? 'Establish monitor IB connection (AccountIbClient + MarketIbClient)' : 'Monitor stopped; cannot connect'}
+                    onClick={onMonitorConnect}
+                  >
+                    Connect
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -733,6 +887,95 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
         {monitorCtrlMsg.text ? (
           <div className={`msg ${monitorCtrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
             {monitorCtrlMsg.text}
+          </div>
+        ) : null}
+      </div>
+        )}
+
+        {systemTab === 'celery' && (
+      <div id="system-panel-celery" role="tabpanel" aria-labelledby="tab-celery" className="system-tab-panel">
+        <div className="daemon-header">
+          <div className="daemon-header-main daemon-header-with-lamp">
+            <div className="lamp-wrap-span">
+              <div className={`lamp lamp-sm ${celeryLamp}`} title="Celery status lamp" />
+            </div>
+            <div>
+              <h2 className="daemon-card-title">Celery</h2>
+              <div>
+                <strong>Status: {j ? (celeryBrokerConnected ? (celeryWorkersAlive ? 'Broker connected, worker(s) running (ping ok)' : 'Broker connected, no workers (start: python scripts/run_celery.py)') : 'Broker not connected') : 'Fetch failed'}</strong>
+              </div>
+            </div>
+          </div>
+          <div className="monitor-header-actions">
+            <button
+              type="button"
+              className="btn-stop"
+              title="Stop Celery worker process (same as Monitor/Daemon Stop); restart with: python scripts/run_celery.py"
+              onClick={onCeleryStop}
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+        <div className="daemon-groups">
+          <div className="daemon-group">
+            <div className="daemon-group-header">
+              <div className={`lamp lamp-sm ${celeryBrokerConnected ? 'green' : 'red'}`} title="Celery broker (Redis) status" />
+              <span className="daemon-group-title">Broker (Redis)</span>
+              <InfoTooltip text="Celery broker and result backend. Same Redis as config.redis (db 1 for Celery). Required for queued bars backfill. Worker (Bars Backfill) status is shown in Recent operations." />
+            </div>
+            <div className="daemon-group-body">
+              <p className="section-hint">
+                {celeryBrokerConnected ? 'Connected (bars queue available)' : 'Not connected or Redis not configured'}
+              </p>
+            </div>
+          </div>
+          <div className="daemon-group">
+            <div className="daemon-group-header">
+              <div className={`lamp lamp-sm ${(j?.celery_workers?.length ?? 0) > 0 ? 'green' : celeryBrokerConnected ? 'yellow' : 'none'}`} title="Celery workers responding to ping" />
+              <span className="daemon-group-title">Celery Workers</span>
+              <InfoTooltip text="Workers that responded to inspect ping. Worker connects to IB using Settings → Celery worker_market; connection is kept so backfill can use it. Use Stop above to terminate the worker." />
+            </div>
+            <div className="daemon-group-body">
+              <p className="section-hint">
+                {(j?.celery_workers?.length ?? 0) > 0
+                  ? (j?.celery_workers ?? []).join(', ')
+                  : 'None (start worker: python scripts/run_celery.py)'}
+              </p>
+              <p className="section-hint countdown-line">
+                IB Client ID:{' '}
+                {celeryWorkerIbConnected ? (
+                  <span className="countdown-num">Connected @ {celeryWorkerIbClientId ?? '—'}</span>
+                ) : (
+                  <>
+                    Not connected{' '}
+                    <InfoTooltip text="IB connection is inside the Worker process. Start worker first: python scripts/run_celery.py (uses Settings → Celery worker_market)." />
+                  </>
+                )}
+              </p>
+              <div className="controls" style={{ marginTop: '0.25rem' }}>
+                <button
+                  type="button"
+                  className="btn-resume"
+                  disabled={celeryWorkerIbConnected || (j?.celery_workers?.length ?? 0) === 0}
+                  title={
+                    (j?.celery_workers?.length ?? 0) === 0
+                      ? 'Start worker first (python scripts/run_celery.py); IB connection runs inside the worker process'
+                      : celeryWorkerIbConnected
+                        ? 'Already connected'
+                        : 'Request Worker to connect to IB (Settings → Celery worker_market)'
+                  }
+                  onClick={onCeleryConnect}
+                >
+                  Connect
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {celeryCtrlMsg.text ? (
+          <div className={`msg ${celeryCtrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
+            {celeryCtrlMsg.text}
           </div>
         ) : null}
       </div>
@@ -947,8 +1190,132 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
         )}
       </div>
 
+      <div className="card card-operations celery-console-card">
+        <div className="celery-console-header">
+          <h2>Celery Console</h2>
+          <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center', flexShrink: 0 }}>
+            <label className="celery-console-max-lines-label" title="Keep at most this many lines; older lines are removed from display and Redis">
+              Max lines:
+              <select
+                className="celery-console-max-lines-select"
+                value={celeryConsoleMaxLines}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isFinite(n) || n < 1) return
+                  setCeleryConsoleMaxLines(n)
+                  setCeleryConsoleLines((prev) => prev.slice(-n))
+                  trimCeleryLogs(n).catch(() => {})
+                }}
+                aria-label="Max lines to keep"
+              >
+                {[500, 1000, 2000, 5000].map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn-celery-console-clear"
+              onClick={() => {
+                const pre = celeryConsoleRef.current
+                if (!pre) return
+                const range = document.createRange()
+                range.selectNodeContents(pre)
+                const sel = window.getSelection()
+                if (sel) {
+                  sel.removeAllRanges()
+                  sel.addRange(range)
+                }
+              }}
+              title="Select all log text for copying"
+            >
+              Select All
+            </button>
+            <button
+              type="button"
+              className="btn-celery-console-clear"
+              onClick={async () => {
+                await clearCeleryLogs()
+                setCeleryConsoleLines([])
+              }}
+              title="Clear displayed log and Redis stream; new lines will continue to appear when Worker runs"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        <p className="section-desc section-hint">
+          Real-time Worker log (Redis Stream). Run <code>python scripts/run_celery.py</code> to see output.
+        </p>
+        <div className="celery-console-wrap">
+          <div
+            className="celery-console-terminal"
+            role="log"
+            aria-live="polite"
+            style={{ height: celeryConsoleHeightPx, minHeight: 120, maxHeight: 600 }}
+          >
+            <pre ref={celeryConsoleRef}>
+              {celeryConsoleStatus === 'connecting' && celeryConsoleLines.length === 0
+                ? 'Connecting…'
+                : celeryConsoleStatus === 'error'
+                  ? 'Unable to load (Redis/Celery broker may be down).'
+                  : celeryConsoleLines.length === 0
+                    ? 'No log lines yet. Start Worker: python scripts/run_celery.py'
+                    : celeryConsoleLines.join('\n')}
+            </pre>
+          </div>
+          <div
+            className="celery-console-resize-handle"
+            role="separator"
+            aria-label="Resize console height"
+            onMouseDown={onCeleryConsoleResizeStart}
+            title="Drag to resize height"
+          />
+          {celeryConsoleStatus !== 'idle' && celeryConsoleStatus !== 'connecting' && (
+            <p className="section-hint celery-console-status-line">
+              <span style={{ color: celeryConsoleStatus === 'connected' ? 'var(--color-lamp-green)' : 'var(--color-lamp-red)', fontWeight: 600 }}>
+                {celeryConsoleStatus === 'connected' ? '● Live' : '● Disconnected'}
+              </span>
+            </p>
+          )}
+        </div>
+      </div>
+
       <div className="card card-operations">
         <h2>Recent operations</h2>
+        <div className="daemon-groups" style={{ marginBottom: '1rem' }}>
+          <div className="daemon-group">
+            <div className="daemon-group-header">
+              <div className={`lamp lamp-sm ${celeryWorkersAlive ? (celeryWorkerRecent || celeryWorkerIbConnected ? 'green' : 'yellow') : celeryBrokerConnected ? 'yellow' : 'none'}`} title="Worker (bars backfill): alive = ping responded; green = recent job or IB connected" />
+              <span className="daemon-group-title">Worker (Bars Backfill)</span>
+              <InfoTooltip text="Task runner for bars backfill. Run: python scripts/run_celery.py. Worker maintains IB connection (Settings → Celery worker_market)." />
+            </div>
+            <div className="daemon-group-body">
+              <p className="section-hint countdown-line">
+                Broker (Redis):{' '}
+                {celeryBrokerConnected ? (
+                  <span className="countdown-num">Connected</span>
+                ) : (
+                  'Not connected'
+                )}
+              </p>
+              <p className="section-hint countdown-line">
+                Last job activity:{' '}
+                {celeryLastTs != null && Number.isFinite(celeryLastTs)
+                  ? `${fmtTs(celeryLastTs)} (${fmtSince(celeryLastTs)} ago)`
+                  : 'No job activity yet'}
+              </p>
+              <p className="section-hint countdown-line">
+                IB Client ID:{' '}
+                {celeryWorkerIbConnected ? (
+                  <span className="countdown-num">Connected @ {celeryWorkerIbClientId ?? '—'}</span>
+                ) : (
+                  'Not connected'
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
         <table className="table-operations">
           <thead>
             <tr>
@@ -979,6 +1346,65 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* IB Pacing：历史数据用量与边界，显示在 Recent operations 下方 */}
+      <div className="card card-operations" style={{ marginTop: '1rem' }}>
+        <h2>IB Pacing (Market Data Usage)</h2>
+        <div className="daemon-groups" style={{ marginBottom: '0.5rem' }}>
+          {j?.ib_pacing_usage ? (
+            <>
+              <div className="daemon-group">
+                <div className="daemon-group-header">
+                  <div
+                    className={`lamp lamp-sm ${j.ib_pacing_usage.usage?.throttled ? 'yellow' : 'green'}`}
+                    title={j.ib_pacing_usage.usage?.throttled ? 'Currently throttled' : 'Within limits'}
+                  />
+                  <span className="daemon-group-title">10‑minute window</span>
+                  <InfoTooltip text="IB historical data: requests in the last 10 minutes vs configured limit. Throttled when limit reached; Worker/API will wait before next request." />
+                </div>
+                <div className="daemon-group-body">
+                  <p className="section-hint countdown-line">
+                    Requests (last 10 min):{' '}
+                    <strong>
+                      {j.ib_pacing_usage.usage?.requests_last_10min ?? '—'} / {j.ib_pacing_usage.config?.max_requests_per_10min ?? 60}
+                    </strong>
+                  </p>
+                  {j.ib_pacing_usage.usage?.throttled && (
+                    <p className="section-hint countdown-line">
+                      Throttled: {j.ib_pacing_usage.usage?.throttle_reason ?? 'limit reached'}
+                      {j.ib_pacing_usage.usage?.next_request_allowed_ts != null && Number.isFinite(j.ib_pacing_usage.usage.next_request_allowed_ts) && (
+                        <> — Next request in <strong>{Math.max(0, Math.ceil((j.ib_pacing_usage.usage.next_request_allowed_ts as number) - Date.now() / 1000))}s</strong></>
+                      )}
+                    </p>
+                  )}
+                  <p className="section-hint countdown-line">
+                    Same-request cooldown: <strong>{j.ib_pacing_usage.config?.min_interval_identical_sec ?? 15}s</strong>
+                  </p>
+                </div>
+              </div>
+              {j.ib_pacing_usage.last_by_key && Object.keys(j.ib_pacing_usage.last_by_key).length > 0 && (
+                <div className="daemon-group" style={{ marginTop: '0.5rem' }}>
+                  <div className="daemon-group-header">
+                    <span className="daemon-group-title">Recent keys (symbol|period|duration)</span>
+                  </div>
+                  <div className="daemon-group-body">
+                    <p className="section-hint" style={{ margin: 0, fontSize: '0.85rem' }}>
+                      {Object.entries(j.ib_pacing_usage.last_by_key)
+                        .slice(0, 5)
+                        .map(([key, ts]) => `${key} @ ${fmtTs(ts)}`)
+                        .join(' · ')}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="section-hint" style={{ margin: 0 }}>
+              Not available (pacing not configured or Redis unavailable). See docs/plans/ib-pacing-implementation-plan.md.
+            </p>
+          )}
+        </div>
       </div>
     </>
   )

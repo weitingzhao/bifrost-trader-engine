@@ -59,6 +59,14 @@
 - [x] **3.6.1** 监控页「IB 账户」区块：刷新按钮（POST /control/refresh_accounts）、1 小时自动刷新、accounts_fetched_at 展示。
 - [x] **3.6.2** 守护进程消费 refresh_accounts 后从 IB 拉取账户/持仓并写 DB；监控端轮询 GET /status 直至 accounts_fetched_at 更新。
 
+### 步骤 3.5a：非实时市场数据拉取 Worker（R-A3 验收条 ⑥）
+
+- [x] **3.5a.1** 表 `bars_backfill_jobs` 已加入 DATABASE.md 与 postgres_sink._ensure_tables；`scripts/refresh_db_schema.py` 可创建表。
+- [x] **3.5a.2** API：POST /bars/backfill（queue=1）入队写入 PG 并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 从 PG 读取；queue=0 时同步执行共用 `run_one_backfill_impl`。
+- [x] **3.5a.3** 共用 backfill 逻辑：`servers/bars_backfill.run_one_backfill`；reader 层：`insert_bars_backfill_job`、`get_bars_backfill_jobs`、`get_bars_backfill_job`、`claim_next_pending_bars_backfill_job`、`update_bars_backfill_job_result`、`trim_bars_backfill_jobs`。
+- [x] **3.5a.4** 独立 Worker 进程：Celery worker（`scripts/run_celery.py`）；从 Redis 队列取任务（task_id = bars_backfill_jobs.id），执行 backfill，更新 PG 行 status/result，任务间由 Celery 串行。
+- [ ] **3.5a.5** **TC-3-R-A3-2 验收**：POST /bars/backfill 入队返回 job_id；独立 Worker 运行后 job 变为 done/failed；GET /bars/jobs、GET /bars/jobs/{id} 可查；前端轮询并刷新 coverage；Worker 串行且间隔约 2s。
+
 ### 步骤 3.7：文档与验收
 
 - [x] **3.7.1** 文档：PLAN_NEXT_STEPS 阶段 3 实现说明、REQUIREMENTS.md §1.4/§1.5/§3、DATABASE.md accounts/account_positions。
@@ -101,6 +109,8 @@
 | 标的市价 | gs_trading.py / status_current | 每次心跳拉取标的现价并写入 `status_current.spot`；GET /status 的 status.spot 来源于此 |
 | GET /status 组装 | servers/ | 从 status_current、accounts、account_positions、daemon_heartbeat 等组装；见 [DATABASE.md](../DATABASE.md) §2.7、§2.8 |
 | 刷新账户 | daemon_control | POST /control/refresh_accounts 写入 daemon_control；守护进程消费后拉取账户/持仓并写 DB |
+| Backfill 队列表 | DATABASE.md §2.18、postgres_sink | bars_backfill_jobs；API 入队、GET /bars/jobs、GET /bars/jobs/{id}；独立 Worker 消费 |
+| 独立 Bars Worker | scripts/run_celery.py（Celery + Redis） | 从 Redis 取任务，执行 servers.bars_backfill.run_one_backfill，更新 bars_backfill_jobs status/result |
 | 断连行为 | gs_trading.py | 进入 WAITING_IB 时不拉取账户/持仓；重连后再次拉取 |
 
 ---

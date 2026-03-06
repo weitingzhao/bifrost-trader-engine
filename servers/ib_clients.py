@@ -225,3 +225,32 @@ class MarketIbClient(BaseMonitorIbClient):
             )
             return []
 
+    async def fetch_bars_range(
+        self,
+        symbol: str,
+        period: str,
+        *,
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
+        interval_sec: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """按时间范围分段拉取历史 K 线（供补全历史使用），复用当前 Market 连接的 client_id。"""
+        await self.ensure_connected()
+        assert self.connector is not None
+        try:
+            raw = await self.connector.get_historical_bars_range(
+                symbol=symbol,
+                period=period,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                interval_sec=interval_sec,
+            )
+            self.last_error = None
+            return raw
+        except Exception as e:
+            self.last_error = str(e)
+            logger.warning(
+                "[monitor_ib] MarketIbClient.fetch_bars_range failed: %s", e, exc_info=True
+            )
+            return []
+

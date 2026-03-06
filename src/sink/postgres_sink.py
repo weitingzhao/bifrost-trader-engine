@@ -299,13 +299,19 @@ IB_PORT_TYPE_TO_PORT = {
 }
 
 
-def _ensure_tables(conn) -> None:
-    """Create status_current, status_history, operations if not exist (per DATABASE.md §2)."""
+def _ensure_tables(conn, log=None) -> None:
+    """Create status_current, status_history, operations if not exist (per DATABASE.md §2).
+    If log is callable, it is called with a short step name before each DDL section (for progress/debug).
+    """
+    def _log(msg: str) -> None:
+        if callable(log):
+            log(msg)
     try:
         conn.rollback()
     except Exception:
         pass
     with conn.cursor() as cur:
+        _log("status_current, status_history, operations")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS status_current (
@@ -361,6 +367,7 @@ def _ensure_tables(conn) -> None:
             )
         """
         )
+        _log("daemon_control, daemon_run_status, daemon_heartbeat")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_control (
@@ -401,6 +408,7 @@ def _ensure_tables(conn) -> None:
             ON CONFLICT (id) DO NOTHING
         """
         )
+        _log("settings + ib_client_id columns")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS settings (
@@ -416,16 +424,30 @@ def _ensure_tables(conn) -> None:
             ON CONFLICT (id) DO NOTHING
         """
         )
+        # 兼容旧库：若存在 ib_client_id_worker 且无 ib_client_id_worker_market，则重命名列
+        cur.execute(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'settings' AND column_name = 'ib_client_id_worker')
+                   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'settings' AND column_name = 'ib_client_id_worker_market')
+                THEN
+                    ALTER TABLE settings RENAME COLUMN ib_client_id_worker TO ib_client_id_worker_market;
+                END IF;
+            END $$;
+            """
+        )
         for col, default in (
             ("ib_client_id_daemon", 1),
             ("ib_client_id_listener", 2),
             ("ib_client_id_account", 100),
             ("ib_client_id_markets", 101),
+            ("ib_client_id_worker_market", 500),
         ):
             cur.execute(
                 f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
             )
-        # R-A1 normalized account tables (replacing raw jsonb for future account operations)
+        _log("accounts, account_positions, instrument_prices")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS accounts (
@@ -503,8 +525,7 @@ def _ensure_tables(conn) -> None:
             )
         """
         )
-        # R-A2: 账户执行/成交记录，供复盘与 GET /executions（见 docs/DATABASE.md §2.11）
-        # CommissionReport 单独存 account_execution_commissions（§2.11.1）
+        _log("account_executions, account_execution_commissions")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS account_executions (
@@ -543,7 +564,7 @@ def _ensure_tables(conn) -> None:
             )
         """
         )
-        # R-A3 扩展：股票/期权 K 线分表（见 docs/DATABASE.md §2.13–§2.17）；ohlc_bars 已弃用，不再创建。
+        _log("stock_day table + index (may block if API/worker use stock_day)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_day (
@@ -563,6 +584,7 @@ def _ensure_tables(conn) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_day_symbol_time ON stock_day (symbol, bar_time DESC)"
         )
+        _log("stock_min table + index")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_min (
@@ -583,6 +605,7 @@ def _ensure_tables(conn) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_min_symbol_period_time ON stock_min (symbol, period, bar_time DESC)"
         )
+        _log("option_day, option_min tables + indexes")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS option_day (
@@ -628,6 +651,7 @@ def _ensure_tables(conn) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_min_symbol_expiry_strike_right_period_time ON option_min (symbol, expiry, strike, option_right, period, bar_time DESC)"
         )
+        _log("wishlist, bars_backfill_jobs")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS wishlist (
@@ -647,6 +671,31 @@ def _ensure_tables(conn) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS wishlist_contract_key ON wishlist (contract_key)"
         )
+        # 阶段 3 非实时拉取 Worker：backfill 任务队列表（见 docs/DATABASE.md §2.x bars_backfill_jobs）
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bars_backfill_jobs (
+                id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                period text NOT NULL DEFAULT '1 D',
+                years double precision,
+                days integer,
+                override_days double precision,
+                status text NOT NULL DEFAULT 'pending',
+                result jsonb,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS bars_backfill_jobs_status_created ON bars_backfill_jobs (status, created_at)"
+        )
+        for col, default in (("skip_ib", "false"), ("api_interval_sec", "10")):
+            cur.execute(
+                f"ALTER TABLE bars_backfill_jobs ADD COLUMN IF NOT EXISTS {col} {'boolean' if col == 'skip_ib' else 'integer'} DEFAULT {default}"
+            )
+        cur.execute("ALTER TABLE bars_backfill_jobs ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
         conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
@@ -756,6 +805,14 @@ def _ensure_tables(conn) -> None:
             (
                 "event_subscribe_commission",
                 "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_commission boolean DEFAULT false",
+            ),
+            (
+                "listener_connected",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_connected boolean DEFAULT false",
+            ),
+            (
+                "listener_client_id",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_client_id integer",
             ),
             (
                 "run_status_heartbeat_interval",
@@ -1215,10 +1272,11 @@ class PostgreSQLSink(StatusSink):
                 )
                 row = cur.fetchone()
                 if row is None:
+                    self._conn.rollback()
                     return None
                 row_id, command, created_at = row
                 cmd = (command or "").strip().lower()
-                if cmd not in ("stop", "flatten", "retry_ib", "refresh_accounts", "refresh_replay", "refresh_ticker_subscriptions"):
+                if cmd not in ("stop", "flatten", "retry_ib", "release_ib", "refresh_accounts", "refresh_replay", "refresh_ticker_subscriptions"):
                     cmd = "stop"  # treat unknown as stop for safety
                 if consume_only is not None and cmd not in consume_only:
                     return None  # do not consume this command (caller may leave flatten for same process to consume)
@@ -1272,12 +1330,15 @@ class PostgreSQLSink(StatusSink):
         event_subscribe_positions: bool = False,
         event_subscribe_fills: bool = False,
         event_subscribe_commission: bool = False,
+        listener_connected: bool = False,
+        listener_client_id: Optional[int] = None,
     ) -> None:
         """Update daemon_heartbeat row (id=1). RE-6: daemon vs hedge; RE-7: ib_connected, ib_client_id, next_retry_ts.
         seconds_until_retry: relative countdown from daemon clock, avoids clock skew on UI (optional).
         heartbeat_interval_sec: interval in use by daemon, for monitor countdown.
         redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*).
-        event_subscribe_*: daemon IB event subscription status for System page (ticker, positions, fills, commission)."""
+        event_subscribe_*: daemon IB event subscription status for System page (ticker, positions, fills, commission).
+        listener_connected/listener_client_id: second daemon IB connection (TWS client_id from settings.ib_client_id_listener)."""
         if not self._ensure_conn():
             return
         for attempt in (1, 2):
@@ -1296,7 +1357,8 @@ class PostgreSQLSink(StatusSink):
                                 next_retry_ts = to_timestamp(%s) AT TIME ZONE 'UTC', seconds_until_retry = %s,
                                 graceful_shutdown_at = NULL, heartbeat_interval_sec = %s, redis_quotes_connected = %s,
                                 event_subscribe_ticker = %s, event_subscribe_positions = %s,
-                                event_subscribe_fills = %s, event_subscribe_commission = %s
+                                event_subscribe_fills = %s, event_subscribe_commission = %s,
+                                listener_connected = %s, listener_client_id = %s
                             WHERE id = 1
                             """,
                             (
@@ -1311,6 +1373,8 @@ class PostgreSQLSink(StatusSink):
                                 event_subscribe_positions,
                                 event_subscribe_fills,
                                 event_subscribe_commission,
+                                listener_connected,
+                                listener_client_id,
                             ),
                         )
                     else:
@@ -1321,11 +1385,13 @@ class PostgreSQLSink(StatusSink):
                                 next_retry_ts = NULL, seconds_until_retry = NULL, graceful_shutdown_at = NULL,
                                 heartbeat_interval_sec = %s, redis_quotes_connected = %s,
                                 event_subscribe_ticker = %s, event_subscribe_positions = %s,
-                                event_subscribe_fills = %s, event_subscribe_commission = %s
+                                event_subscribe_fills = %s, event_subscribe_commission = %s,
+                                listener_connected = %s, listener_client_id = %s
                             WHERE id = 1
                             """,
                             (hedge_running, ib_connected, ib_client_id, iv, redis_quotes_connected,
-                             event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission),
+                             event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission,
+                             listener_connected, listener_client_id),
                         )
                 self._conn.commit()
                 return
@@ -1365,7 +1431,7 @@ class PostgreSQLSink(StatusSink):
             with self._conn.cursor() as cur:
                 cur.execute(
                     "SELECT ib_host, ib_port_type, "
-                    "COALESCE(ib_client_id_daemon, 1), COALESCE(ib_client_id_account, 100), COALESCE(ib_client_id_markets, 101) "
+                    "COALESCE(ib_client_id_daemon, 1), COALESCE(ib_client_id_listener, 2), COALESCE(ib_client_id_account, 100), COALESCE(ib_client_id_markets, 101) "
                     "FROM settings WHERE id = 1"
                 )
                 row = cur.fetchone()
@@ -1379,8 +1445,9 @@ class PostgreSQLSink(StatusSink):
                 "port_type": port_type,
                 "port": port,
                 "client_id_daemon": int(row[2]) if row[2] is not None else 1,
-                "ib_client_id_account": int(row[3]) if row[3] is not None else 4,
-                "ib_client_id_markets": int(row[4]) if row[4] is not None else 10,
+                "client_id_listener": int(row[3]) if row[3] is not None else 2,
+                "ib_client_id_account": int(row[4]) if row[4] is not None else 4,
+                "ib_client_id_markets": int(row[5]) if row[5] is not None else 10,
             }
         except Exception as e:
             self._conn.rollback()

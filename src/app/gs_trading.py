@@ -115,6 +115,17 @@ class GsTrading:
             client_id=client_id,
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
+        listener_client_id = 2
+        if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
+            db_ib = self._status_sink.get_ib_connection_config()
+            if db_ib:
+                listener_client_id = int(db_ib.get("client_id_listener", 2))
+        self.listener_connector = IBConnector(
+            host=host,
+            port=port,
+            client_id=listener_client_id,
+            connect_timeout=ib_cfg.get("connect_timeout", 60.0),
+        )
 
         # 1.b Config sections (unified _*_cfg naming)
         self._structure_cfg = get_structure_config(config)
@@ -927,6 +938,14 @@ class GsTrading:
             "event_subscribe_commission": connected,
         }
 
+    def _listener_heartbeat_kwargs(self) -> dict:
+        """Listener connection status for daemon_heartbeat (second IB client_id so TWS shows it)."""
+        listener = getattr(self, "listener_connector", None)
+        return {
+            "listener_connected": bool(listener and listener.is_connected),
+            "listener_client_id": getattr(listener, "client_id", None) if listener else None,
+        }
+
     def _apply_run_status_transition(self) -> bool:
         """Sync Daemon FSM with daemon_run_status: RUNNING <-> RUNNING_SUSPENDED. Returns True if suspended (skip hedge)."""
         suspended, interval = self._poll_run_status()
@@ -955,6 +974,30 @@ class GsTrading:
                 return
             if cmd == "flatten":
                 logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+            if cmd == "release_ib" and self.connector.is_connected:
+                now_t = time.time()
+                interval = self._effective_heartbeat_interval()
+                next_retry_ts = now_t + interval
+                sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
+                if self._status_sink and hasattr(
+                    self._status_sink, "write_daemon_heartbeat"
+                ):
+                    self._status_sink.write_daemon_heartbeat(
+                        hedge_running=True,
+                        ib_connected=False,
+                        ib_client_id=None,
+                        next_retry_ts=next_retry_ts,
+                        seconds_until_retry=sec_until,
+                        redis_quotes_connected=self._redis_quotes_connected(),
+                        **self._event_subscribe_flags(),
+                        **self._listener_heartbeat_kwargs(),
+                    )
+                logger.info(
+                    "[Daemon] state=%s | control release_ib → releasing IB on next heartbeat",
+                    self._fsm_daemon.current.value,
+                )
+                self._ib_disconnected_during_run = True
+                # Main run loop will see flag within 1s and transition to WAITING_IB; do not return (keeps daemon running)
             if (
                 cmd == "refresh_accounts"
                 and self.connector.is_connected
@@ -1011,6 +1054,30 @@ class GsTrading:
                 return
             if cmd == "flatten":
                 logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+            if cmd == "release_ib" and self.connector.is_connected:
+                now_t = time.time()
+                interval = self._effective_heartbeat_interval()
+                next_retry_ts = now_t + interval
+                sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
+                if self._status_sink and hasattr(
+                    self._status_sink, "write_daemon_heartbeat"
+                ):
+                    self._status_sink.write_daemon_heartbeat(
+                        hedge_running=True,
+                        ib_connected=False,
+                        ib_client_id=None,
+                        next_retry_ts=next_retry_ts,
+                        seconds_until_retry=sec_until,
+                        redis_quotes_connected=self._redis_quotes_connected(),
+                        **self._event_subscribe_flags(),
+                        **self._listener_heartbeat_kwargs(),
+                    )
+                logger.info(
+                    "[Daemon] state=%s | control release_ib → releasing IB on next heartbeat",
+                    self._fsm_daemon.current.value,
+                )
+                self._ib_disconnected_during_run = True
+                # Main run loop will see flag within 1s and transition to WAITING_IB; do not return (keeps daemon running)
             if (
                 cmd == "refresh_accounts"
                 and self.connector.is_connected
@@ -1060,6 +1127,7 @@ class GsTrading:
                         seconds_until_retry=sec_until,
                         redis_quotes_connected=self._redis_quotes_connected(),
                         **self._event_subscribe_flags(),
+                        **self._listener_heartbeat_kwargs(),
                     )
                 logger.warning(
                     "[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)",
@@ -1131,6 +1199,7 @@ class GsTrading:
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
                         redis_quotes_connected=self._redis_quotes_connected(),
                         **self._event_subscribe_flags(),
+                        **self._listener_heartbeat_kwargs(),
                     )
             # 每次心跳同步 Real-time ticker 订阅：与 Wishlist STK + 策略标的 一致，多退少补
             await self._refresh_ticker_subscriptions()
@@ -1366,6 +1435,7 @@ class GsTrading:
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
                 redis_quotes_connected=self._redis_quotes_connected(),
                 **self._event_subscribe_flags(),
+                **self._listener_heartbeat_kwargs(),
             )
         logger.info(
             "[Daemon] state=WAITING_IB | IB not connected; next retry in %ss (heartbeat interval=%.0fs)",
@@ -1396,6 +1466,7 @@ class GsTrading:
                             heartbeat_interval_sec=self._effective_heartbeat_interval(),
                             redis_quotes_connected=self._redis_quotes_connected(),
                             **self._event_subscribe_flags(),
+                            **self._listener_heartbeat_kwargs(),
                         )
                     logger.info("[Daemon] state=WAITING_IB → CONNECTED (IB connected)")
                     return DaemonState.CONNECTED
@@ -1415,6 +1486,7 @@ class GsTrading:
                         heartbeat_interval_sec=self._effective_heartbeat_interval(),
                         redis_quotes_connected=self._redis_quotes_connected(),
                         **self._event_subscribe_flags(),
+                        **self._listener_heartbeat_kwargs(),
                     )
                 logger.debug(
                     "[Daemon] state=WAITING_IB | connect failed; next retry in %ss",
@@ -1433,6 +1505,7 @@ class GsTrading:
                 heartbeat_interval_sec=self._effective_heartbeat_interval(),
                 redis_quotes_connected=self._redis_quotes_connected(),
                 **self._event_subscribe_flags(),
+                **self._listener_heartbeat_kwargs(),
             )
         logger.info(
             "[Daemon] state=CONNECTED | fetching account summary and positions, building snapshot..."
@@ -1478,6 +1551,17 @@ class GsTrading:
             await self.connector.subscribe_ticker(self.symbol, self._on_ticker)
             logger.info("[Daemon] subscribed to strategy symbol only: %s", self.symbol)
         self.connector.subscribe_positions(self._eval_hedge_threadsafe)
+        # Connect listener with ib_client_id_listener so TWS shows the client ID
+        listener_just_connected = False
+        try:
+            ok = await self.listener_connector.connect(max_attempts=3)
+            if ok:
+                listener_just_connected = True
+                logger.info("[Daemon] Listener IB connected (client_id=%s)", self.listener_connector.client_id)
+            else:
+                logger.warning("[Daemon] Listener IB connect failed (TWS may not show listener client_id)")
+        except Exception as e:
+            logger.warning("[Daemon] Listener IB connect error: %s", e)
         # Sync FSM with daemon_run_status so first snapshot reflects RUNNING_SUSPENDED if already set
         self._apply_run_status_transition()
         if self._status_sink:
@@ -1485,6 +1569,8 @@ class GsTrading:
                 self._build_heartbeat_minimal_dict(), append_history=False
             )
             if hasattr(self._status_sink, "write_daemon_heartbeat"):
+                # Use explicit listener_connected=True when we just connected: is_connected can lag (ib.isConnected()) so _listener_heartbeat_kwargs() may still be False right after connect()
+                listener_kw = {"listener_connected": True, "listener_client_id": self.listener_connector.client_id} if listener_just_connected else self._listener_heartbeat_kwargs()
                 self._status_sink.write_daemon_heartbeat(
                     hedge_running=True,
                     ib_connected=self.connector.is_connected,
@@ -1492,6 +1578,7 @@ class GsTrading:
                     heartbeat_interval_sec=self._effective_heartbeat_interval(),
                     redis_quotes_connected=self._redis_quotes_connected(),
                     **self._event_subscribe_flags(),
+                    **listener_kw,
                 )
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
         self._config_reload_task = asyncio.create_task(self._reload_config_loop())
@@ -1513,7 +1600,16 @@ class GsTrading:
                 if getattr(self, "_ib_disconnected_during_run", False):
                     self._ib_disconnected_during_run = False
                     if self.connector.is_connected:
-                        await self.connector.disconnect()
+                        try:
+                            await self.connector.disconnect()
+                        except Exception as e:
+                            logger.warning("[Daemon] release_ib: disconnect failed (continuing to WAITING_IB): %s", e)
+                    listener = getattr(self, "listener_connector", None)
+                    if listener and listener.is_connected:
+                        try:
+                            await listener.disconnect()
+                        except Exception as e:
+                            logger.warning("[Daemon] release_ib: listener disconnect failed: %s", e)
                     return DaemonState.WAITING_IB
         except asyncio.CancelledError:
             pass
@@ -1547,10 +1643,30 @@ class GsTrading:
                 logger.debug("Status sink close: %s", e)
         if getattr(self, "_redis_quotes", None):
             try:
+                symbols = (
+                    self.connector.get_subscribed_ticker_symbols()
+                    if getattr(self.connector, "get_subscribed_ticker_symbols", None)
+                    else []
+                )
+                for sym in symbols:
+                    if sym and str(sym).strip():
+                        self._redis_quotes.delete_quote(sym.strip())
+                if symbols:
+                    logger.info(
+                        "[Daemon] STOPPING: cleared Redis ticker keys for %s symbol(s): %s",
+                        len(symbols),
+                        symbols,
+                    )
                 self._redis_quotes.close()
             except Exception as e:
                 logger.debug("Redis quotes close: %s", e)
         await self.connector.disconnect()
+        listener = getattr(self, "listener_connector", None)
+        if listener:
+            try:
+                await listener.disconnect()
+            except Exception as e:
+                logger.debug("Listener disconnect on stop: %s", e)
         logger.info("[Daemon] state=STOPPING → STOPPED (exit)")
         return DaemonState.STOPPED
 

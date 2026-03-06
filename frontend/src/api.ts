@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, BarStatsResponse, WishlistItem, RealtimeQuote, QuotesResponse } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WishlistItem, RealtimeQuote, QuotesResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -41,6 +41,13 @@ export async function postFlatten(): Promise<ControlResponse> {
 
 export async function postRetryIb(): Promise<ControlResponse> {
   const r = await fetch(`${API}/control/retry_ib`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** 写入 daemon_control release_ib；Daemon 下次心跳时释放 IB 连接并进入 WAITING_IB。 */
+export async function postReleaseIb(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/release_ib`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
@@ -97,6 +104,56 @@ export async function fetchBarsLatest(symbol: string, period = '1 D'): Promise<{
   const r = await fetch(`${API}/bars/latest?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
+}
+
+/** R-A3 扩展：补全历史 K 线（按时间范围从 IB 拉取并写库）。与 servers.bars_backfill / Celery bars worker 同逻辑。 */
+export async function postBarsBackfill(
+  symbol: string,
+  period: string,
+  options?: { years?: number; days?: number; override_days?: number; span_hours?: number; queue?: boolean; is_test?: boolean; api_interval_sec?: number },
+): Promise<{ ok: boolean; error?: string; count?: number; message?: string; job_id?: string }> {
+  const params = new URLSearchParams({ symbol: symbol.trim(), period })
+  if (options?.years != null) params.set('years', String(options.years))
+  if (options?.days != null) params.set('days', String(options.days))
+  if (options?.override_days != null) params.set('override_days', String(options.override_days))
+  if (options?.span_hours != null) params.set('span_hours', String(options.span_hours))
+  if (options?.queue !== false) params.set('queue', '1')
+  if (options?.is_test === true) params.set('is_test', '1')
+  if (options?.api_interval_sec != null) params.set('api_interval_sec', String(options.api_interval_sec))
+  const r = await fetch(`${API}/bars/backfill?${params}`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: j.ok === true,
+    error: j.error,
+    count: j.count ?? 0,
+    message: j.message,
+    job_id: j.job_id,
+  }
+}
+
+export interface BarsJob {
+  job_id: string
+  type: string
+  symbol: string
+  period: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  result?: { ok?: boolean; count?: number; message?: string; error?: string }
+  created_ts?: number
+  updated_ts?: number
+}
+
+export async function fetchBarsJob(jobId: string): Promise<{ ok: boolean; job?: BarsJob; error?: string }> {
+  const r = await fetch(`${API}/bars/jobs/${encodeURIComponent(jobId)}`)
+  const j = await r.json().catch(() => ({}))
+  return { ok: j.ok === true, job: j.job, error: j.error }
+}
+
+/** R-A3：列出最近 Backfill 任务（Celery 入队后可见，含 1 D / 1 min / 5 mins / 1 hour）。 */
+export async function fetchBarsJobs(limit = 50): Promise<{ jobs: BarsJob[] }> {
+  const r = await fetch(`${API}/bars/jobs?limit=${limit}`)
+  if (!r.ok) throw new Error(r.statusText)
+  const j = await r.json().catch(() => ({}))
+  return { jobs: j.jobs ?? [] }
 }
 
 /** R-A3 扩展：Wishlist 列表。 */
@@ -190,6 +247,7 @@ export async function postIbConfig(
     ib_client_id_listener?: number
     ib_client_id_account?: number
     ib_client_id_markets?: number
+    ib_client_id_worker_market?: number
   }
 ): Promise<ControlResponse & Partial<IbConfig>> {
   const body: Record<string, string | number> = { ib_host, ib_port_type }
@@ -198,6 +256,7 @@ export async function postIbConfig(
     if (clientIds.ib_client_id_listener != null) body.ib_client_id_listener = clientIds.ib_client_id_listener
     if (clientIds.ib_client_id_account != null) body.ib_client_id_account = clientIds.ib_client_id_account
     if (clientIds.ib_client_id_markets != null) body.ib_client_id_markets = clientIds.ib_client_id_markets
+    if (clientIds.ib_client_id_worker_market != null) body.ib_client_id_worker_market = clientIds.ib_client_id_worker_market
   }
   const r = await fetch(`${API}/config/ib`, {
     method: 'POST',
@@ -212,6 +271,74 @@ export async function postMonitorStop(): Promise<ControlResponse & { monitor_ena
   const r = await fetch(`${API}/control/monitor_stop`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), monitor_enabled: j.monitor_enabled }
+}
+
+/** Release Monitor IB connections (Account + Market client_id). Monitor process keeps running; use Connect to reconnect. */
+export async function postMonitorReleaseIb(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/monitor_release_ib`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** Request Celery worker to exit (same as Monitor/Daemon Stop). Worker polls Redis and exits within a few seconds. */
+export async function postCeleryStop(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/celery_stop`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** Request Celery worker to establish IB connection (Worker Client). Worker polls every 5s; connect within a few seconds. */
+export async function postCeleryConnect(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/celery_connect`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** Celery console: fetch last N lines from Redis stream (for initial display). Requires Celery broker (Redis). */
+export async function fetchCeleryLogs(tail = 200): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  const r = await fetch(`${API}/api/celery/logs?${params}`)
+  const j = await r.json().catch(() => ({ lines: [] }))
+  return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
+}
+
+/** Celery console: clear Redis stream (DELETE). After this, fetchCeleryLogs returns empty until Worker writes new lines. */
+export async function clearCeleryLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/api/celery/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** Celery console: trim Redis stream to at most max_lines (keep newest). Use when max lines limit is set or changed. */
+export async function trimCeleryLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/api/celery/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** Celery console: SSE stream of new log lines. Returns unsubscribe function. Call fetchCeleryLogs first for history. */
+export function subscribeCeleryLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${API || ''}/api/celery/logs/stream`
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
 }
 
 export async function postMonitorConnect(): Promise<
@@ -322,4 +449,36 @@ export async function fetchBarStats(symbol: string): Promise<BarStatsResponse> {
   const r = await fetch(`${API}/bars/stats?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
+}
+
+/** 获取 Wishlist 股票（或指定 symbols）在 stock_day / stock_min 的覆盖情况；不传 symbols 时使用服务端 Wishlist。 */
+export async function fetchBarsCoverage(symbols?: string[]): Promise<BarsCoverageResponse> {
+  const params = new URLSearchParams()
+  if (symbols && symbols.length > 0) params.set('symbols', symbols.join(','))
+  const r = await fetch(`${API}/bars/coverage?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Delete stock_day and/or stock_min rows for a symbol. periods: optional list (1 D, 1 min, 5 mins, 1 hour); omit to delete all. */
+export async function deleteBarsForSymbol(
+  symbol: string,
+  periods?: string[],
+): Promise<{ ok: boolean; error?: string; deleted_day?: number; deleted_min?: number; message?: string }> {
+  const params = new URLSearchParams({ symbol: symbol.trim() })
+  const url = `${API}/bars/symbol?${params}`
+  const init: RequestInit = { method: 'DELETE' }
+  if (periods && periods.length > 0) {
+    init.headers = { 'Content-Type': 'application/json' }
+    init.body = JSON.stringify({ periods })
+  }
+  const r = await fetch(url, init)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: j.ok === true,
+    error: j.error,
+    deleted_day: j.deleted_day,
+    deleted_min: j.deleted_min,
+    message: j.message,
+  }
 }

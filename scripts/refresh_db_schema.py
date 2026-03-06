@@ -24,6 +24,11 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.chdir(_PROJECT_ROOT)
 
 
+def _progress(msg: str) -> None:
+    """Print progress to stderr and flush so it appears immediately (e.g. when blocking on lock)."""
+    print(f"[schema] {msg}", file=sys.stderr, flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="刷新 status 用 PostgreSQL 库表结构（与 DATABASE.md 一致）。")
     parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
@@ -68,29 +73,64 @@ def main() -> int:
         "connect_timeout": 10,
     }
 
+    _progress("Connecting to PostgreSQL...")
+    conn = None
     try:
         conn = psycopg2.connect(**params)
     except Exception as e:
         print(f"PostgreSQL connect failed: {e}", file=sys.stderr)
         return 1
+    _progress("Connected. Setting lock_timeout=20s.")
+
+    # Avoid hanging forever if another backend (e.g. API with idle-in-transaction holding settings)
+    # blocks DDL on settings. Fail after 20s with a clear error.
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET lock_timeout = '20s'")
+    except Exception as e:
+        print(f"Setting lock_timeout failed: {e}", file=sys.stderr)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+        return 1
 
     try:
-        _ensure_tables(conn)
+        _progress("Running _ensure_tables (see step logs below; if it hangs, last step is where lock is held).")
+        _ensure_tables(conn, log=_progress)
         conn.commit()
         tables_list = (
             "status_current, status_history, operations, daemon_control, "
             "daemon_run_status, daemon_heartbeat, settings, accounts, account_positions, "
             "instrument_prices, account_executions, account_execution_commissions, "
-            "stock_day, stock_min, option_day, option_min, wishlist"
+            "stock_day, stock_min, option_day, option_min, wishlist, bars_backfill_jobs"
         )
         print(f"Schema refreshed in database {dbname!r}.")
         print(f"  Tables: {tables_list}")
         return 0
     except Exception as e:
+        err = str(e).strip()
+        if "lock_timeout" in err or "timeout" in err.lower():
+            print(
+                "Schema refresh timed out (another backend is holding locks).\n"
+                "  Stop the API server, daemon, and bars worker; or run: python scripts/release_pg_locks.py [--yes]",
+                file=sys.stderr,
+            )
         print(f"Schema refresh failed: {e}", file=sys.stderr)
         return 1
     finally:
-        conn.close()
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+            _progress("Connection closed.")
 
 
 if __name__ == "__main__":

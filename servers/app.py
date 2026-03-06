@@ -5,10 +5,9 @@ Monitoring runs on a separate host from the trading daemon (RE-5). Start of the 
 import json
 import logging
 import os
-import signal
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import asyncio
 from fastapi import Body, FastAPI, Query
@@ -24,12 +23,19 @@ from servers.reader import (
     write_heartbeat_interval,
     write_ib_config,
     write_ohlc_bars_to_db,
+    write_stock_bars,
+    delete_stock_bars_for_symbol,
     write_account_executions_to_db,
     update_execution_commission,
     insert_one_execution,
     update_one_execution,
     delete_one_execution,
     sync_accounts_snapshot_to_db,
+    insert_bars_backfill_job,
+    get_bars_backfill_jobs,
+    get_bars_backfill_job,
+    trim_bars_backfill_jobs,
+    get_bars_backfill_last_updated,
 )
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
@@ -55,6 +61,7 @@ class IbConfigBody(BaseModel):
     ib_client_id_listener: Optional[int] = None
     ib_client_id_account: Optional[int] = None
     ib_client_id_markets: Optional[int] = None
+    ib_client_id_worker_market: Optional[int] = None
 
     class Config:
         extra = "ignore"  # 忽略多余字段，避免解析错误
@@ -76,6 +83,12 @@ def create_app(
     app.state._redis_subscriber_stop = threading.Event()
     app.state._redis_subscriber_thread: Optional[threading.Thread] = None
 
+    # Celery console log stream (Redis Stream): reader thread + per-connection queues
+    app.state.celery_log_queues: list = []
+    app.state.celery_log_lock = threading.Lock()
+    app.state._celery_log_thread: Optional[threading.Thread] = None
+    app.state._celery_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
     # Monitor-side IB state (for AccountIbClient / MarketIbClient).
     app.state.monitor_enabled = True
     app.state.account_ib_client = None
@@ -93,6 +106,7 @@ def create_app(
                 "ib_client_id_listener": 2,
                 "ib_client_id_account": 100,
                 "ib_client_id_markets": 101,
+                "ib_client_id_worker_market": 500,
             }
             host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
             port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
@@ -118,6 +132,29 @@ def create_app(
                 getattr(app.state.account_ib_client, "client_id", None),
                 getattr(app.state.market_ib_client, "client_id", None),
             )
+            # 后台尝试建立 IB 连接，不阻塞 startup，避免 GET /status、GET /health 等不到响应导致前端显示 Fetch failed
+            async def _connect_ib_in_background() -> None:
+                acc_client = getattr(app.state, "account_ib_client", None)
+                mkt_client = getattr(app.state, "market_ib_client", None)
+                if acc_client is not None:
+                    try:
+                        await acc_client.ensure_connected()
+                        logger.info("Monitor AccountIbClient connected on startup")
+                    except Exception as e:
+                        logger.warning(
+                            "AccountIbClient auto-connect on startup failed: %s (will retry on first use)",
+                            e,
+                        )
+                if mkt_client is not None:
+                    try:
+                        await mkt_client.ensure_connected()
+                        logger.info("Monitor MarketIbClient connected on startup")
+                    except Exception as e:
+                        logger.warning(
+                            "MarketIbClient auto-connect on startup failed: %s (will retry on first use)",
+                            e,
+                        )
+            asyncio.create_task(_connect_ib_in_background())
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Failed to initialize monitor IB clients: %s", exc, exc_info=True)
             app.state.account_ib_client = None
@@ -270,6 +307,139 @@ def create_app(
             },
         )
 
+    def _celery_log_reader_loop() -> None:
+        """Background thread: XREAD Redis stream bifrost:celery_console, push each line to all SSE queues (for Celery console UI)."""
+        try:
+            import redis
+            from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+            r = redis.from_url(broker_url)
+            last_id = "$"
+            while True:
+                try:
+                    result = r.xread(block=5000, streams={CELERY_LOG_STREAM_KEY: last_id}, count=100)
+                    if not result:
+                        continue
+                    for stream_name, entries in result:
+                        for eid, fields in entries:
+                            last_id = eid
+                            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                            with app.state.celery_log_lock:
+                                queues = list(app.state.celery_log_queues)
+                            loop = getattr(app.state, "_celery_log_loop", None)
+                            for q in queues:
+                                if loop and not loop.is_closed():
+                                    loop.call_soon_threadsafe(q.put_nowait, line)
+                except redis.ConnectionError:
+                    time.sleep(2)
+                except Exception as e:
+                    logger.debug("celery_log_reader_loop: %s", e)
+        except Exception as e:
+            logger.warning("celery_log_reader_loop exited: %s", e)
+
+    @app.get("/api/celery/logs")
+    def get_celery_logs(
+        tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+    ) -> Dict[str, Any]:
+        """Return last N lines from Celery console Redis stream (for initial display in System → Celery Console)."""
+        try:
+            import redis
+            from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+            r = redis.from_url(broker_url)
+            # XREVRANGE + - COUNT tail → newest first; reverse to oldest first for display
+            raw = r.xrevrange(CELERY_LOG_STREAM_KEY, count=tail)
+            lines = []
+            for _eid, fields in reversed(raw):
+                line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                lines.append(line)
+            return {"lines": lines}
+        except Exception as e:
+            logger.warning("get_celery_logs failed: %s", e)
+            return {"lines": [], "error": str(e)}
+
+    @app.delete("/api/celery/logs")
+    def clear_celery_logs() -> Dict[str, Any]:
+        """Delete the Celery console Redis stream so next fetch is empty. UI Clear button uses this."""
+        try:
+            import redis
+            from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+            r = redis.from_url(broker_url)
+            r.delete(CELERY_LOG_STREAM_KEY)
+            return {"ok": True}
+        except Exception as e:
+            logger.warning("clear_celery_logs failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    @app.post("/api/celery/logs/trim")
+    def trim_celery_logs(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Trim Celery console Redis stream to at most max_lines (keep newest). UI uses this when max lines limit is set or changed."""
+        try:
+            max_lines = body.get("max_lines")
+            if max_lines is None:
+                return {"ok": False, "error": "max_lines required"}
+            max_lines = int(max_lines)
+            if max_lines < 1 or max_lines > 10000:
+                return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+            import redis
+            from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+            r = redis.from_url(broker_url)
+            r.xtrim(CELERY_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+            return {"ok": True}
+        except Exception as e:
+            logger.warning("trim_celery_logs failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/celery/logs/stream")
+    async def get_celery_logs_stream():
+        """SSE: stream new Celery console lines in real time (Redis XREAD). Connect after GET /api/celery/logs for history."""
+        try:
+            from servers.celery_app import get_celery_broker_connected
+            if not get_celery_broker_connected():
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Celery broker (Redis) not available"},
+                )
+        except Exception as e:
+            logger.warning("celery_logs_stream check failed: %s", e)
+            return JSONResponse(status_code=503, content={"detail": str(e)})
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+        with app.state.celery_log_lock:
+            app.state.celery_log_queues.append(queue)
+            if app.state._celery_log_loop is None:
+                app.state._celery_log_loop = asyncio.get_running_loop()
+            if app.state._celery_log_thread is None or not app.state._celery_log_thread.is_alive():
+                app.state._celery_log_thread = threading.Thread(
+                    target=_celery_log_reader_loop,
+                    name="celery-log-reader",
+                    daemon=True,
+                )
+                app.state._celery_log_thread.start()
+
+        async def event_gen():
+            try:
+                while True:
+                    try:
+                        line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                        yield f"data: {json.dumps({'line': line})}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                with app.state.celery_log_lock:
+                    if queue in app.state.celery_log_queues:
+                        app.state.celery_log_queues.remove(queue)
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @app.get("/status")
     def get_status() -> Dict[str, Any]:
         """Return current run status plus self_check, status_lamp, trading_suspended (R-M1b, R-M2, R-M3). Self-check reflects suspended state (degraded + trading_suspended in block_reasons). Never returns 5xx: on read error returns 200 with blocked/red so UI shows reason instead of '获取失败'."""
@@ -293,6 +463,8 @@ def create_app(
                     "daemon_alive": (last_ts is not None and (now - last_ts) < 35),
                     "ib_connected": hb.get("ib_connected", False),
                     "ib_client_id": hb.get("ib_client_id"),
+                    "listener_connected": hb.get("listener_connected", False),
+                    "listener_client_id": hb.get("listener_client_id"),
                     "next_retry_ts": hb.get("next_retry_ts"),
                     "seconds_until_retry": hb.get("seconds_until_retry"),
                     "graceful_shutdown_at": hb.get("graceful_shutdown_at"),
@@ -340,6 +512,7 @@ def create_app(
                 "ib_client_id_listener": 2,
                 "ib_client_id_account": 100,
                 "ib_client_id_markets": 101,
+                "ib_client_id_worker_market": 500,
             }
             # Monitor-side IB client status for UI.
             try:
@@ -396,6 +569,25 @@ def create_app(
             # Redis 行情：监控端是否能读 Redis（R-RM*）
             rq = getattr(app.state, "redis_quotes", None)
             payload["redis_quotes_connected"] = bool(rq and getattr(rq, "available", False))
+            # Celery (bars worker): broker reachable + last job activity + Worker IB status (like Monitor/Daemon)
+            try:
+                from servers.celery_app import get_celery_broker_connected, get_worker_ib_status, get_celery_workers_ping
+                payload["celery_broker_connected"] = get_celery_broker_connected()
+                # Short timeout so /status returns quickly when worker is stopped (avoids blocking and UI appearing frozen)
+                workers_ping = get_celery_workers_ping(timeout=1.0)
+                payload["celery_workers"] = workers_ping
+                worker_ib = get_worker_ib_status()
+                # 仅当 ping 到有 worker 且 Worker 自报 IB 已连时才算“已连接”；Stop 后进程退出，ping 无响应，UI 即显示已停止（类似 Monitor 的 health 轮询）
+                payload["celery_worker_ib_connected"] = bool(
+                    worker_ib and worker_ib.get("connected") and len(workers_ping) > 0
+                )
+                payload["celery_worker_ib_client_id"] = worker_ib.get("client_id") if worker_ib else None
+            except Exception:
+                payload["celery_broker_connected"] = False
+                payload["celery_worker_ib_connected"] = False
+                payload["celery_worker_ib_client_id"] = None
+                payload["celery_workers"] = []
+            payload["celery_worker_last_updated_ts"] = get_bars_backfill_last_updated(control_via_db) if control_via_db else None
             # 系统状态灯：三者都绿才绿，有一个非绿则取最差（红 > 黄 > 绿）
             dl = (payload.get("daemon_lamp") or "red").strip().lower()
             ml = (payload.get("monitor_lamp") or "red").strip().lower()
@@ -428,6 +620,7 @@ def create_app(
                     "ib_client_id_listener": 2,
                     "ib_client_id_account": 100,
                     "ib_client_id_markets": 101,
+                    "ib_client_id_worker_market": 500,
                 },
                 "monitor_ib_status": None,
                 "monitor_enabled": False,
@@ -436,6 +629,11 @@ def create_app(
                 "monitor_lamp": "red",
                 "monitor_block_reasons": ["status_read_error"],
                 "redis_quotes_connected": False,
+                "celery_broker_connected": False,
+                "celery_worker_ib_connected": False,
+                "celery_worker_ib_client_id": None,
+                "celery_workers": [],
+                "celery_worker_last_updated_ts": None,
                 "system_lamp": "red",
             }
 
@@ -543,6 +741,129 @@ def create_app(
             return {"stock_day": 0, "stock_min": {}, "message": "请提供 symbol 参数。"}
         stats = reader.get_bars_stats(symbol=sym)
         return stats
+
+    @app.get("/bars/coverage")
+    def get_bars_coverage(
+        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Wishlist stocks"),
+    ) -> Dict[str, Any]:
+        """Return coverage (count, min/max ts) plus target range from config and status: ok | gap_start | gap_end | gap | missing."""
+        if symbols is not None and str(symbols).strip():
+            sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
+        else:
+            wishlist = reader.get_wishlist()
+            sym_list = []
+            for w in wishlist:
+                sec = (w.get("sec_type") or "STK").strip().upper()
+                if sec == "OPT":
+                    continue
+                sym = (w.get("symbol") or "").strip()
+                if not sym and w.get("contract_key"):
+                    parts = (w["contract_key"] or "").split("|")
+                    sym = (parts[0] or "").strip() if parts else ""
+                if sym:
+                    sym_list.append(sym)
+            sym_list = list(dict.fromkeys(sym_list))
+        coverage = reader.get_bars_coverage(symbols=sym_list)
+
+        try:
+            from src.app.gs_trading import read_config
+            config, _ = read_config()
+        except Exception:
+            config = {}
+        hb = (config.get("history_backfill") or {}).get("stock") or {}
+        daily_years = float(hb.get("daily_years", 10.0))
+        min_weeks = float(hb.get("min_weeks", 1.0))
+        five_min_months = float(hb.get("5min_months", 1.0))
+        one_hour_months = float(hb.get("1hour_months", 3.0))
+        policy = {"daily_years": daily_years, "min_weeks": min_weeks, "5min_months": five_min_months, "1hour_months": one_hour_months}
+
+        now_ts = time.time()
+        one_day = 86400.0
+        target_end_ts = now_ts
+        target_daily_start = now_ts - (365 * daily_years * one_day)
+        target_min_start = now_ts - (7 * min_weeks * one_day)
+        target_5min_start = now_ts - (30 * five_min_months * one_day)
+        target_1hour_start = now_ts - (30 * one_hour_months * one_day)
+
+        enriched = []
+        for item in coverage:
+            day = item.get("stock_day") or {}
+            day_ts_s = day.get("min_ts")
+            day_ts_e = day.get("max_ts")
+            day_cnt = day.get("count") or 0
+            day_status = _coverage_status(day_ts_s, day_ts_e, day_cnt, target_daily_start, target_end_ts)
+            stock_day_enriched = {
+                **day,
+                "target_start_ts": target_daily_start,
+                "target_end_ts": target_end_ts,
+                "status": day_status,
+            }
+            mins = item.get("stock_min") or {}
+            min_1 = mins.get("1 min") or {}
+            min_5 = mins.get("5 mins") or {}
+            min_1h = mins.get("1 hour") or {}
+            stock_min_enriched = {
+                "1 min": {
+                    **min_1,
+                    "target_start_ts": target_min_start,
+                    "target_end_ts": target_end_ts,
+                    "status": _coverage_status(
+                        min_1.get("min_ts"), min_1.get("max_ts"), min_1.get("count") or 0,
+                        target_min_start, target_end_ts,
+                    ),
+                },
+                "5 mins": {
+                    **min_5,
+                    "target_start_ts": target_5min_start,
+                    "target_end_ts": target_end_ts,
+                    "status": _coverage_status(
+                        min_5.get("min_ts"), min_5.get("max_ts"), min_5.get("count") or 0,
+                        target_5min_start, target_end_ts,
+                    ),
+                },
+                "1 hour": {
+                    **min_1h,
+                    "target_start_ts": target_1hour_start,
+                    "target_end_ts": target_end_ts,
+                    "status": _coverage_status(
+                        min_1h.get("min_ts"), min_1h.get("max_ts"), min_1h.get("count") or 0,
+                        target_1hour_start, target_end_ts,
+                    ),
+                },
+            }
+            enriched.append({
+                "symbol": item.get("symbol"),
+                "stock_day": stock_day_enriched,
+                "stock_min": stock_min_enriched,
+            })
+        return {"coverage": enriched, "policy": policy}
+
+    class DeleteBarsBody(BaseModel):
+        periods: Optional[List[str]] = None  # e.g. ["1 D", "1 min"]; omit or empty = delete all
+
+    @app.delete("/bars/symbol")
+    def delete_bars_for_symbol(
+        symbol: Optional[str] = Query(..., description="Symbol to delete bars for"),
+        body: Optional[DeleteBarsBody] = Body(None, description="Optional: periods to delete (1 D, 1 min, 5 mins, 1 hour). Omit to delete all."),
+    ) -> Dict[str, Any]:
+        """Delete stock_day and/or stock_min rows for the given symbol. body.periods: optional list; omit or empty to delete all."""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以删除 K 线数据。"}
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            return {"ok": False, "error": "请提供 symbol 参数。"}
+        period_list = None
+        if body and body.periods and len(body.periods) > 0:
+            period_list = [p.strip() for p in body.periods if (p or "").strip()]
+        result = delete_stock_bars_for_symbol(control_via_db, sym, periods=period_list)
+        if result.get("ok"):
+            return {
+                "ok": True,
+                "deleted_day": result.get("deleted_day", 0),
+                "deleted_min": result.get("deleted_min", 0),
+                "message": f"已删除 {sym} 的选定周期记录，可重新 Pull。",
+            }
+        return {"ok": False, "error": result.get("error", "删除失败")}
 
     @app.get("/wishlist")
     def get_wishlist() -> Dict[str, Any]:
@@ -662,6 +983,9 @@ def create_app(
             return {"ok": False, "error": "监控端 MarketIbClient 未初始化。", "bars": [], "count": 0}
         per = (period or "1 D").strip()
         dur = (duration or "30 D").strip()
+        # IB step size: 1 min bar 仅支持 duration 1 D（见 docs/IB_MARKET_DATA_BOUNDARIES.md）
+        if per.lower() in ("1 min", "1min"):
+            dur = "1 D"
         if smart_duration:
             latest_ts = reader.get_bars_latest(symbol=sym, period=per)
             if latest_ts is not None:
@@ -671,6 +995,8 @@ def create_app(
                 if per.upper() == "1 D":
                     gap_days = min(max(1, int(gap_sec / 86400) + 1), 720)
                     dur = f"{gap_days} D"
+                elif per.lower() in ("1 min", "1min"):
+                    dur = "1 D"  # IB: 1 min bar 仅支持 1 D duration
                 else:
                     gap_days = min(max(1, int(gap_sec / 86400) + 1), 7)
                     dur = f"{gap_days} D"
@@ -699,15 +1025,131 @@ def create_app(
         ]
         return {"ok": True, "count": len(bars), "bars": bars}
 
-    async def _shutdown_monitor_process() -> None:
-        """异步触发监控服务自身退出（类似停止守护），用于 /monitor/stop 调用后释放进程占用。"""
-        # 给响应一点时间发回前端，再发 SIGTERM。
-        await asyncio.sleep(0.5)
+    _TOLERANCE_START_SEC = 7 * 86400
+    _TOLERANCE_END_SEC = 2 * 86400
+
+    def _coverage_status(
+        min_ts: Optional[float],
+        max_ts: Optional[float],
+        count: int,
+        target_start_ts: float,
+        target_end_ts: float,
+    ) -> str:
+        if count == 0:
+            return "missing"
+        gap_start = min_ts is None or min_ts > target_start_ts + _TOLERANCE_START_SEC
+        gap_end = max_ts is None or max_ts < target_end_ts - _TOLERANCE_END_SEC
+        if gap_start and gap_end:
+            return "gap"
+        if gap_start:
+            return "gap_start"
+        if gap_end:
+            return "gap_end"
+        return "ok"
+
+    def _job_row_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
+        """Map DB row (id, created_at, updated_at, ...) to API shape (job_id, created_ts, updated_ts, ...)."""
+        created_ts = j.get("created_at")
+        if hasattr(created_ts, "timestamp"):
+            created_ts = created_ts.timestamp()
+        updated_ts = j.get("updated_at")
+        if hasattr(updated_ts, "timestamp"):
+            updated_ts = updated_ts.timestamp()
+        return {
+            "job_id": str(j.get("id", "")),
+            "type": "backfill",
+            "symbol": j.get("symbol"),
+            "period": j.get("period"),
+            "years": j.get("years"),
+            "days": j.get("days"),
+            "override_days": j.get("override_days"),
+            "status": j.get("status"),
+            "result": j.get("result"),
+            "created_ts": created_ts,
+            "updated_ts": updated_ts,
+        }
+
+    @app.post("/bars/backfill")
+    async def post_bars_backfill(
+        symbol: Optional[str] = Query(..., description="Symbol, e.g. NVDA"),
+        period: Optional[str] = Query("1 D", description="Bar period: 1 D | 1 min | 5 mins | 1 hour"),
+        years: Optional[float] = Query(None, description="Span in years (only when symbol has no data)"),
+        days: Optional[int] = Query(None, description="Span in days (only when symbol has no data)"),
+        override_days: Optional[float] = Query(None, description="When symbol has data: re-fetch this many days before latest bar and overwrite for final values; 0 = strict incremental"),
+        span_hours: Optional[float] = Query(None, description="Span in hours (only when symbol has no data; overrides years/days for sub-day range, e.g. 1 for 1 hour)"),
+        queue: bool = Query(True, description="Must be true; backfill runs only via Celery Worker (IB rate limits)."),
+        is_test: bool = Query(False, description="If true, skip IB fetch (test mode; only log planned requests). Default off."),
+        api_interval_sec: int = Query(10, ge=0, le=300, description="Seconds to wait between each IB API request (chunk). Default 10."),
+    ) -> Dict[str, Any]:
+        """Backfill: enqueue job to Celery Worker only. Synchronous (queue=false) path removed to avoid IB rate limits from API process."""
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            return {"ok": False, "error": "请提供 symbol 参数。", "count": 0}
+        if not control_via_db:
+            return {"ok": False, "error": "需要 status.postgres 配置以写入 K 线表。", "count": 0}
+        if not getattr(app.state, "monitor_enabled", True):
+            return {"ok": False, "error": "监控已停止，无法补全 K 线。", "count": 0}
+        per = (period or "1 D").strip()
+
+        if not queue:
+            return {
+                "ok": False,
+                "error": "Backfill 仅支持 queue=true，由 Celery Worker 在后台拉取（IB 速率限制）。",
+                "count": 0,
+            }
+
+        jid = insert_bars_backfill_job(
+            control_via_db, sym, per, years, days, override_days,
+            span_hours=span_hours,
+            skip_ib=is_test,
+            api_interval_sec=api_interval_sec,
+        )
+        if jid is None:
+            return {"ok": False, "error": "入队失败。", "count": 0}
+        logger.info(
+            "bars/backfill enqueue job_id=%s symbol=%s period=%s years=%s days=%s override_days=%s span_hours=%s",
+            jid, sym, per, years, days, override_days, span_hours,
+        )
         try:
-            os.kill(os.getpid(), signal.SIGTERM)
-        except Exception:
-            # 兜底：若发送信号失败，直接退出进程。
-            raise SystemExit(0)
+            from servers.bars_tasks import backfill_bars
+            backfill_bars.apply_async(
+                args=[sym, per],
+                kwargs={"years": years, "days": days, "override_days": override_days, "span_hours": span_hours},
+                task_id=str(jid),
+            )
+        except Exception as e:
+            logger.exception("Celery enqueue failed: %s", e)
+            from servers.reader import update_bars_backfill_job_result
+            update_bars_backfill_job_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
+            return {"ok": False, "error": f"Celery 入队失败: {e}", "count": 0}
+        trim_bars_backfill_jobs(control_via_db, keep=200)
+        return {"ok": True, "job_id": str(jid), "message": "Queued (Celery). Poll GET /bars/jobs/{job_id} for status."}
+
+    @app.get("/bars/jobs")
+    def get_bars_jobs(
+        limit: int = Query(50, ge=1, le=100, description="Max jobs to return (newest first)"),
+    ) -> Dict[str, Any]:
+        """List recent backfill jobs (from PG queue)."""
+        if not control_via_db:
+            return {"jobs": []}
+        rows = get_bars_backfill_jobs(control_via_db, limit=limit)
+        list_jobs = [_job_row_to_api(r) for r in rows]
+        return {"jobs": list_jobs}
+
+    @app.get("/bars/jobs/{job_id}")
+    def get_bars_job(job_id: str) -> Dict[str, Any]:
+        """Get one backfill job status and result."""
+        if not control_via_db:
+            return {"ok": False, "error": "No DB"}
+        job = get_bars_backfill_job(control_via_db, job_id)
+        if job is None:
+            return {"ok": False, "error": "Job not found"}
+        return {"ok": True, "job": _job_row_to_api(job)}
+
+    def _exit_after_send() -> None:
+        time.sleep(1.5)  # give time for response to be sent and flushed
+        logger.info("Monitor stop: exiting process.")
+        os._exit(0)
 
     @app.post("/control/monitor_stop")
     async def post_monitor_stop() -> JSONResponse:
@@ -730,9 +1172,63 @@ def create_app(
                 await mclient.disconnect()
         except Exception:
             pass
-        # 异步触发整个监控服务进程退出（SIGTERM），尽量在响应发回前稍作等待。
-        asyncio.create_task(_shutdown_monitor_process())
+        # Schedule process exit in a background thread so response is sent first; delay so client gets 200.
+        threading.Thread(target=_exit_after_send, daemon=True).start()
         return JSONResponse(status_code=200, content={"ok": True, "monitor_enabled": False})
+
+    @app.post("/control/monitor_release_ib")
+    async def post_monitor_release_ib() -> JSONResponse:
+        """Release Monitor IB connections only (Account + Market client_id). Monitor process keeps running; use Connect to reconnect."""
+        try:
+            acc_client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+            if acc_client is not None:
+                await acc_client.disconnect()
+        except Exception as e:
+            logger.warning("monitor_release_ib account disconnect: %s", e)
+        try:
+            mkt_client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+            if mkt_client is not None:
+                await mkt_client.disconnect()
+        except Exception as e:
+            logger.warning("monitor_release_ib market disconnect: %s", e)
+        return JSONResponse(status_code=200, content={"ok": True, "message": "Monitor IB connections released."})
+
+    @app.post("/control/celery_stop")
+    def post_celery_stop() -> JSONResponse:
+        """Set Redis key so Celery worker exits (same semantics as Monitor/Daemon Stop).
+
+        Worker polls every 2s; process will terminate shortly after. Restart with: python scripts/run_celery.py
+        Immediately mark Worker IB status as disconnected so UI reflects stop on next GET /status poll.
+        """
+        try:
+            import json
+            import redis
+            from servers.celery_app import broker_url, WORKER_STOP_REQUESTED_KEY, WORKER_IB_STATUS_KEY, WORKER_IB_STATUS_TTL_SEC
+            r = redis.from_url(broker_url)
+            r.set(WORKER_STOP_REQUESTED_KEY, "1")
+            # 立即把 Worker IB 状态写成“已断开”，这样下一次 GET /status 轮询时 UI 就能显示已停止（类似 Monitor 的 health 轮询）
+            r.setex(
+                WORKER_IB_STATUS_KEY,
+                WORKER_IB_STATUS_TTL_SEC,
+                json.dumps({"connected": False, "client_id": 0}),
+            )
+            return JSONResponse(status_code=200, content={"ok": True, "message": "Celery worker stop requested; process will exit within a few seconds."})
+        except Exception as e:
+            logger.warning("celery_stop failed: %s", e)
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+    @app.post("/control/celery_connect")
+    def post_celery_connect() -> JSONResponse:
+        """Set Redis key so Celery worker establishes IB connection (Worker Client). Worker polls every 5s; connect within a few seconds."""
+        try:
+            from servers.celery_app import broker_url, WORKER_CONNECT_REQUESTED_KEY
+            import redis
+            r = redis.from_url(broker_url)
+            r.setex(WORKER_CONNECT_REQUESTED_KEY, 120, "1")
+            return JSONResponse(status_code=200, content={"ok": True, "message": "Worker connect requested; connection may take a few seconds."})
+        except Exception as e:
+            logger.warning("celery_connect failed: %s", e)
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
     @app.post("/control/monitor_connect")
     async def post_monitor_connect() -> JSONResponse:
@@ -830,6 +1326,15 @@ def create_app(
             return JSONResponse(status_code=200, content={"ok": True, "message": "retry_ib written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
+    @app.post("/control/release_ib")
+    def post_control_release_ib() -> JSONResponse:
+        """Insert 'release_ib' into daemon_control; daemon will release IB connection on next heartbeat (disconnect → WAITING_IB)."""
+        if not control_via_db:
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+        if write_control_command(control_via_db, "release_ib"):
+            return JSONResponse(status_code=200, content={"ok": True, "message": "release_ib written to daemon_control"})
+        return JSONResponse(status_code=500, content={"error": "failed to write control command"})
+
     @app.post("/control/refresh_accounts")
     async def post_control_refresh_accounts() -> JSONResponse:
         """仅通过监控端维护的 AccountIbClient 长连接从 IB 拉取账户/持仓并写库，不写 daemon_control。"""
@@ -913,6 +1418,7 @@ def create_app(
             "ib_client_id_listener": 2,
             "ib_client_id_account": 100,
             "ib_client_id_markets": 101,
+            "ib_client_id_worker_market": 500,
         }
         host = (str(body.ib_host or current.get("ib_host", "127.0.0.1"))).strip() or "127.0.0.1"
         port_type = (str(body.ib_port_type or current.get("ib_port_type", "tws_paper"))).strip().lower() or "tws_paper"
@@ -922,17 +1428,19 @@ def create_app(
         cid_l = body.ib_client_id_listener if body.ib_client_id_listener is not None else current.get("ib_client_id_listener", 2)
         cid_a = body.ib_client_id_account if body.ib_client_id_account is not None else current.get("ib_client_id_account", 100)
         cid_m = body.ib_client_id_markets if body.ib_client_id_markets is not None else current.get("ib_client_id_markets", 101)
-        cid_d, cid_l, cid_a, cid_m = int(cid_d), int(cid_l), int(cid_a), int(cid_m)
+        cid_w = body.ib_client_id_worker_market if body.ib_client_id_worker_market is not None else current.get("ib_client_id_worker_market", 500)
+        cid_d, cid_l, cid_a, cid_m, cid_w = int(cid_d), int(cid_l), int(cid_a), int(cid_m), int(cid_w)
         logger.info(
-            "[config/ib] writing settings: host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s",
+            "[config/ib] writing settings: host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s ib_client_id_worker_market=%s",
             host,
             port_type,
             cid_d,
             cid_l,
             cid_a,
             cid_m,
+            cid_w,
         )
-        if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m):
+        if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w):
             return JSONResponse(
                 status_code=200,
                 content={
@@ -943,6 +1451,7 @@ def create_app(
                     "ib_client_id_listener": cid_l,
                     "ib_client_id_account": cid_a,
                     "ib_client_id_markets": cid_m,
+                    "ib_client_id_worker_market": cid_w,
                 },
             )
         return JSONResponse(status_code=500, content={"error": "failed to write settings"})

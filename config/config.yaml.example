@@ -1,6 +1,7 @@
 # Gamma Scalping Engine MVP - copy to config.yaml and adjust
 
 # Status sink (Phase 1: PostgreSQL). Optional; omit to disable. See docs/DATABASE.md.
+# Optional: status.bars_skip_ib: true (or env BIFROST_BARS_SKIP_IB=1) so bars worker still connects to IB but skips fetch_bars_range (test mode).
 # status:
 #   sink: "postgres"
 #   postgres:
@@ -16,6 +17,7 @@
 #   port: 8765
 
 # Real-time quotes (R-RM*): daemon writes to Redis; monitor subscribes and serves GET /quotes. Optional; omit or enabled: false to disable.
+# Celery bars worker uses the same Redis as broker and result backend (default db 1); set redis.enabled and connection for queue=true backfill.
 # redis:
 #   enabled: false
 #   host: "127.0.0.1"

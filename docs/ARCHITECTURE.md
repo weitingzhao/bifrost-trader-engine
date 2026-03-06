@@ -73,9 +73,17 @@
 - **连接状态可观测**：监控端须展示守护程序是否与 IB 连接及连接成功时的 **Client ID**；未连接时展示**下次计划重试时间**（如 `next_retry_ts`）。
 - **自动重试与可选手动重试**：到点自动重试；监控端可选提供「重试连接 IB」按钮，通过 `daemon_control` 写入 `retry_ib`。
 
----
+### 2.7 非实时市场数据拉取与 Worker（R-A3 扩展）
 
-## 3. 三大组成部分（架构支柱）
+**原则**：**非实时要求的市场数据拉取**（如 K 线 backfill、历史补全）**不在 API 进程内同步执行**，而是通过**任务队列 + 独立 Worker 进程**在后台执行，以保证 API 响应不受拉取耗时与 IB 限速影响，且与守护程序、监控服务进程隔离。
+
+**要求**：
+- **队列**：拉取任务（如 backfill 请求）写入**队列**；当前实现采用 **Celery + Redis**（broker 与 result backend 使用同一 Redis，与实时行情可选共用实例、不同 db）；任务行仍写入 **bars_backfill_jobs** 表（job_id 即 Celery task_id），便于 GET /bars/jobs 与前端轮询。
+- **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A servers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
+- **API 行为**：监控/数据 API 收到 backfill 等请求时**仅入队并返回 job_id**；客户端通过 **GET /bars/jobs/{job_id}**（或等效）轮询任务状态与结果；任务完成后可刷新 coverage/列表。
+- **限速与串行**：Worker 串行处理任务并在任务间留间隔（如 2s），以符合 IB 历史数据 Pacing 限制；见 [IB_MARKET_DATA_BOUNDARIES.md](IB_MARKET_DATA_BOUNDARIES.md)。
+
+---
 
 系统由三部分组成，对应上文 §2.2，缺一不可：
 
@@ -145,13 +153,21 @@
 | **读 sink** | 优先读 SQLite 当前视图（或文件），GET /status → JSON；可含 **自检结果**（self_check），供控制台展示与告警。 | 阶段 2.1 |
 | **控制** | POST /control/stop（一键停止，R-C1）；POST /control/flatten（一键平敞口，R-C3）；可选 pause/resume（R-C2）；可选触发自检（守护进程写回 sink）。 | 阶段 2.1（stop、flatten）；细粒度 3.2（pause） |
 
-### 4.4 历史与统计（只读消费 sink 数据）
+### 4.4 非实时市场数据拉取（Worker）
+
+| 组件 | 说明 | 交付 |
+|------|------|------|
+| **任务队列** | backfill 等非实时拉取请求入队；**实现**：**Celery + Redis**（broker/result backend），任务行仍写 bars_backfill_jobs 表。 | 阶段 3（与 R-A3 一并） |
+| **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A servers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
+| **API 入队与查询** | POST /bars/backfill（或等效）入队并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态。 | 阶段 3 |
+
+### 4.5 历史与统计（只读消费 sink 数据）
 
 | 组件 | 说明 | 交付 |
 |------|------|------|
 | **历史统计脚本/模块** | 只读历史表，聚合：胜率、盈亏分布、按日/周/月、对冲次数、滑点等；**不跑** FSM/Guard。 | 阶段 3 |
 
-### 4.5 回测（策略 PnL 优化与安全边界验证）
+### 4.6 回测（策略 PnL 优化与安全边界验证）
 
 | 组件 | 说明 | 交付 |
 |------|------|------|
@@ -228,8 +244,9 @@
 - **TWS 主机（Mac Mini）**：仅运行 TWS（或 IB Gateway）；操作者通过 MacBook Air 等远程登录该机进行手动交易。若采用方案 A，本机同时运行守护进程。
 - **守护程序主机（Mac Mini 或 Linux 服务器）**：
   - **守护进程**（`run_engine.py`）：连接 Mac Mini 上的 TWS（`ib.client_id` 如 1），执行全部对冲逻辑（Gamma Scalping、FSM、写 status/operations）；轮询 PostgreSQL（`daemon_control`、`daemon_run_status`）。**运行不依赖 IB**（RE-7）：若 TWS 不可用则进入 WAITING_IB，持续写心跳（`ib_connected=false`、`next_retry_ts`）、轮询 stop/retry_ib，并按配置间隔**自动重试**连接；监控端显示**黄灯**（degraded）。收到 **stop** 则消费并退出；**suspend**/ **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED，同一进程内不再执行 maybe_hedge 或恢复执行。
-- **监控机（Monitoring Host）**：运行 **status server**（`run_server.py`），读 PostgreSQL，提供 GET /status、GET /operations、POST /control/stop、POST /control/flatten、POST /control/suspend、POST /control/resume。不提供「启动」；守护进程在**守护程序主机**执行 `run_engine.py`（SSH/systemd/手动）。
-- **PostgreSQL**：可与守护程序主机或监控机同机或独立；守护进程与 status server 均需能连同一实例。
+- **监控机（Monitoring Host）**：运行 **status server**（`run_server.py`），读 PostgreSQL，提供 GET /status、GET /operations、POST /control/stop 等。不提供「启动」；守护进程在**守护程序主机**执行 `run_engine.py`（SSH/systemd/手动）。
+- **非实时数据拉取 Worker**（§2.7）：**独立进程**（Celery worker），可与监控机或守护程序主机同机部署；从 **Celery 队列**（Redis broker）取 backfill 任务，任务行存 bars_backfill_jobs 表，串行执行并遵守 IB Pacing；与 status server、守护进程隔离。API 入队并返回 job_id，客户端通过 GET /bars/jobs/{id} 轮询状态。
+- **PostgreSQL**：可与守护程序主机或监控机同机或独立；守护进程、status server、Worker（若用 PG 队列）均需能连同一实例。
 
 **启停语义**：
 
@@ -278,6 +295,7 @@
 | 回测（策略 PnL 优化 + Guard 验证） | 回测入口 + 复用 Classifier/FSM/Guard，历史回放；产出 PnL/收益曲线，首要优化策略回报 | 阶段 4 |
 | 部署 A/B（Mac vs Linux）、进程管理 | 文档、可选 systemd/supervisor 示例 | 按需 |
 | 多消费者/远程存储可选 | RedisSink/PostgreSQLSink | 按需 |
+| **非实时市场数据拉取（R-A3 扩展）** | 队列（PG 表或 Redis+RQ）+ **独立 Worker 进程**；API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id}；串行+间隔满足 IB Pacing | 阶段 3 |
 | **实时行情与联动（R-RM*）** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端 | 见 PLAN_NEXT_STEPS「实时行情与联动」 |
 
 ---
@@ -286,7 +304,7 @@
 
 - **阶段 1**：在守护进程内引入 StatusSink 抽象与 SQLiteSink（及可选 FileSink）、信号停止、可选控制文件；架构上完成“自动交易写状态 + 可被外部停止”。
 - **阶段 2**：独立应用读 sink、提供 GET /status 与 POST /control/stop；架构上完成“监控与控制”支柱的落地。
-- **阶段 3**：数据获取（账户、持仓、市值、交易历史与统计）；架构上完成策略与监控所需数据的获取。
+- **阶段 3**：数据获取（账户、持仓、市值、交易历史与统计）；架构上完成策略与监控所需数据的获取；**非实时 K 线拉取（backfill）经队列 + 独立 Worker 进程执行**（§2.7、§4.4）。
 - **阶段 4**：策略框架与回测（R-B1、R-B2）；架构上完成“可回测优化策略 PnL 并验证 Guard”。
 - **阶段 5**：自动交易对冲与监控（R-C2、R-C3）；架构上完成暂停/恢复、一键平敞口等。
 - **实时行情与联动（R-RM*，可选）**：守护双线（心跳+事件）、Redis 行情缓存、Redis Pub/Sub 或 Streams 联动、监控订阅并推前端；详见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)，步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」。

@@ -10,6 +10,8 @@ export interface IbConfig {
   ib_client_id_account?: number
   /** 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 10） */
   ib_client_id_markets?: number
+  /** Celery worker（如 Bars 补全）连接 IB 使用的 Client ID（默认 500），worker_market，与 Daemon/Monitor 隔离 */
+  ib_client_id_worker_market?: number
 }
 
 /** One position row from IB (R-A1 multi-account) */
@@ -76,8 +78,39 @@ export interface StatusResponse {
   monitor_block_reasons?: string[]
   /** 监控端是否能连接 Redis 并读取行情（R-RM*） */
   redis_quotes_connected?: boolean
+  /** Celery broker (Redis) 是否可达，用于 System → Celery 状态 */
+  celery_broker_connected?: boolean
+  /** Worker 是否已连接 IB（与 Monitor/Daemon 同级，由 Worker 写入 Redis） */
+  celery_worker_ib_connected?: boolean
+  /** Worker 连接 IB 使用的 client_id（与 celery_worker_ib_connected 配套） */
+  celery_worker_ib_client_id?: number | null
+  /** bars_backfill_jobs 最近一次 updated_at（Unix 秒），用于判断 Worker 是否有近期活动 */
+  celery_worker_last_updated_ts?: number | null
+  /** 当前响应的 Celery Worker 名称列表（inspect ping），用于 Celery 下列出已运行 Worker */
+  celery_workers?: string[]
   /** 当前守护进程订阅的 Real-time ticker 标的（Wishlist STK + strategy symbol），与 Event Subscribe 一致 */
   subscribed_tickers?: string[]
+  /** IB 历史数据 Pacing 用量与边界（Worker/API 共享 Redis 计量），System 页显示 */
+  ib_pacing_usage?: IbPacingUsage | null
+}
+
+/** IB 历史数据 Pacing 用量（GET /status 或 GET /bars/pacing），见 docs/plans/ib-pacing-implementation-plan.md */
+export interface IbPacingUsage {
+  config?: {
+    max_requests_per_10min?: number
+    min_interval_identical_sec?: number
+    max_requests_per_2sec_per_contract?: number
+    max_concurrent?: number
+  }
+  usage?: {
+    requests_last_10min?: number
+    oldest_request_ts?: number | null
+    next_request_allowed_ts?: number | null
+    throttled?: boolean
+    throttle_reason?: string | null
+  }
+  /** 最近相同请求 (symbol|period|duration) → 上次请求时间戳 */
+  last_by_key?: Record<string, number>
 }
 
 export interface DaemonHeartbeat {
@@ -98,6 +131,9 @@ export interface DaemonHeartbeat {
   event_subscribe_positions?: boolean
   event_subscribe_fills?: boolean
   event_subscribe_commission?: boolean
+  /** 守护进程第二条 IB 连接（settings.ib_client_id_listener），TWS 中会显示该 Client ID */
+  listener_connected?: boolean
+  listener_client_id?: number | null
 }
 
 export interface StatusRow {
@@ -224,6 +260,36 @@ export interface BarStatsResponse {
   stock_day: number
   stock_min: Record<string, number>
   message?: string
+}
+
+/** Single-period coverage: count, min/max ts, optional target range and status (from server). */
+export interface BarCoveragePeriod {
+  count: number
+  min_ts: number | null
+  max_ts: number | null
+  target_start_ts?: number
+  target_end_ts?: number
+  /** ok | gap_start | gap_end | gap | missing */
+  status?: string
+}
+
+/** Per-symbol coverage in stock_day / stock_min (GET /bars/coverage). */
+export interface BarCoverageItem {
+  symbol: string
+  stock_day: BarCoveragePeriod
+  stock_min: Record<string, BarCoveragePeriod>
+}
+
+/** GET /bars/coverage response. */
+export interface BarsCoverageResponse {
+  coverage: BarCoverageItem[]
+  /** Target range from config (history_backfill.stock). */
+  policy?: {
+    daily_years: number
+    min_weeks: number
+    '5min_months': number
+    '1hour_months': number
+  }
 }
 
 /** R-A3 扩展：Wishlist 项（自选/待操作标的）。 */

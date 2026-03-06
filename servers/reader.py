@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
-    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at[, heartbeat_interval_sec[, redis_quotes_connected[, event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission]]])."""
+    """Build daemon_heartbeat dict from (last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts, seconds_until_retry, graceful_shutdown_at[, heartbeat_interval_sec[, redis_quotes_connected[, event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission[, listener_connected, listener_client_id]]])."""
     out = {
         "last_ts": float(row[0]) if row[0] is not None else None,
         "hedge_running": bool(row[1]),
@@ -32,6 +32,8 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
     out["event_subscribe_positions"] = bool(row[10]) if len(row) > 10 and row[10] is not None else False
     out["event_subscribe_fills"] = bool(row[11]) if len(row) > 11 and row[11] is not None else False
     out["event_subscribe_commission"] = bool(row[12]) if len(row) > 12 and row[12] is not None else False
+    out["listener_connected"] = bool(row[13]) if len(row) > 13 and row[13] is not None else False
+    out["listener_client_id"] = int(row[14]) if len(row) > 14 and row[14] is not None else None
     return out
 
 
@@ -109,7 +111,8 @@ class StatusReader:
                            heartbeat_interval_sec,
                            redis_quotes_connected,
                            event_subscribe_ticker, event_subscribe_positions,
-                           event_subscribe_fills, event_subscribe_commission
+                           event_subscribe_fills, event_subscribe_commission,
+                           listener_connected, listener_client_id
                     FROM daemon_heartbeat WHERE id = 1
                     """
                 )
@@ -119,8 +122,32 @@ class StatusReader:
             out = _row_to_heartbeat(row)
             return out
         except Exception as e:
-            # Column graceful_shutdown_at or redis_quotes_connected or event_subscribe_* may be missing in DBs not yet migrated
+            # Column graceful_shutdown_at or redis_quotes_connected or event_subscribe_* or listener_* may be missing in DBs not yet migrated
             err = str(e).lower()
+            if "listener_connected" in err or "listener_client_id" in err:
+                try:
+                    with self._conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                                   ib_connected, ib_client_id,
+                                   extract(epoch from next_retry_ts) AS next_retry_ts,
+                                   seconds_until_retry,
+                                   extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                                   heartbeat_interval_sec,
+                                   redis_quotes_connected,
+                                   event_subscribe_ticker, event_subscribe_positions,
+                                   event_subscribe_fills, event_subscribe_commission
+                            FROM daemon_heartbeat WHERE id = 1
+                            """
+                        )
+                        row = cur.fetchone()
+                    if row is None:
+                        return None
+                    extra = (None, None)  # listener_connected, listener_client_id
+                    return _row_to_heartbeat(row + extra)
+                except Exception as e2:
+                    logger.debug("get_daemon_heartbeat (fallback no listener_*) failed: %s", e2)
             if "event_subscribe" in err or "redis_quotes_connected" in err:
                 try:
                     with self._conn.cursor() as cur:
@@ -139,8 +166,8 @@ class StatusReader:
                         row = cur.fetchone()
                     if row is None:
                         return None
-                    # Append None for missing event_subscribe_* (or redis_quotes_connected)
-                    extra = (None,) * (13 - len(row))
+                    # Append None for missing event_subscribe_* (or redis_quotes_connected) and listener_*
+                    extra = (None,) * (15 - len(row))
                     return _row_to_heartbeat(row + extra)
                 except Exception as e2:
                     logger.debug("get_daemon_heartbeat (fallback no event_subscribe/redis_quotes) failed: %s", e2)
@@ -401,6 +428,78 @@ class StatusReader:
             logger.debug("get_bars_stats failed: %s", e)
             self._conn = None
             return {"stock_day": 0, "stock_min": {}}
+
+    def get_bars_coverage(
+        self,
+        symbols: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return per-symbol coverage (count, min_ts, max_ts) for stock_day and stock_min.
+        symbols: if None or empty, returns empty list. Each symbol is stripped; duplicates removed.
+        """
+        if not self._connect():
+            return []
+        sym_list = list({s.strip() for s in (symbols or []) if s and str(s).strip()})
+        if not sym_list:
+            return []
+        out: List[Dict[str, Any]] = []
+        try:
+            with self._conn.cursor() as cur:
+                # stock_day: per symbol count, min_ts, max_ts
+                cur.execute(
+                    """
+                    SELECT symbol,
+                           COUNT(*) AS cnt,
+                           extract(epoch from MIN(bar_time)) AS min_ts,
+                           extract(epoch from MAX(bar_time)) AS max_ts
+                    FROM stock_day
+                    WHERE symbol = ANY(%s)
+                    GROUP BY symbol
+                    """,
+                    (sym_list,),
+                )
+                day_rows = {row[0]: {"count": int(row[1]), "min_ts": float(row[2]) if row[2] is not None else None, "max_ts": float(row[3]) if row[3] is not None else None} for row in cur.fetchall()}
+
+                # stock_min: per symbol, per period
+                cur.execute(
+                    """
+                    SELECT symbol, period,
+                           COUNT(*) AS cnt,
+                           extract(epoch from MIN(bar_time)) AS min_ts,
+                           extract(epoch from MAX(bar_time)) AS max_ts
+                    FROM stock_min
+                    WHERE symbol = ANY(%s) AND period IN ('1 min', '5 mins', '1 hour')
+                    GROUP BY symbol, period
+                    """,
+                    (sym_list,),
+                )
+                min_rows: Dict[str, Dict[str, Dict[str, Any]]] = {}
+                for row in cur.fetchall():
+                    sym, per, cnt, min_ts, max_ts = row[0], row[1], int(row[2]), row[3], row[4]
+                    if sym not in min_rows:
+                        min_rows[sym] = {}
+                    min_rows[sym][per] = {
+                        "count": cnt,
+                        "min_ts": float(min_ts) if min_ts is not None else None,
+                        "max_ts": float(max_ts) if max_ts is not None else None,
+                    }
+
+                for sym in sym_list:
+                    day = day_rows.get(sym, {"count": 0, "min_ts": None, "max_ts": None})
+                    mins = min_rows.get(sym, {})
+                    out.append({
+                        "symbol": sym,
+                        "stock_day": day,
+                        "stock_min": {
+                            "1 min": mins.get("1 min", {"count": 0, "min_ts": None, "max_ts": None}),
+                            "5 mins": mins.get("5 mins", {"count": 0, "min_ts": None, "max_ts": None}),
+                            "1 hour": mins.get("1 hour", {"count": 0, "min_ts": None, "max_ts": None}),
+                        },
+                    })
+            return out
+        except Exception as e:
+            logger.debug("get_bars_coverage failed: %s", e)
+            self._conn = None
+            return []
 
     def get_wishlist(self) -> List[Dict[str, Any]]:
         """Return all wishlist rows (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, created_at)."""
@@ -689,7 +788,7 @@ class StatusReader:
             return None
 
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
-        """Return settings row id=1: ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets (for GET /status and UI). None if table missing."""
+        """Return settings row id=1: ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market (for GET /status and UI). None if table missing."""
         if not self._connect():
             return None
         try:
@@ -699,7 +798,8 @@ class StatusReader:
                     "COALESCE(ib_client_id_daemon, 1) AS ib_client_id_daemon, "
                     "COALESCE(ib_client_id_listener, 2) AS ib_client_id_listener, "
                     "COALESCE(ib_client_id_account, 100) AS ib_client_id_account, "
-                    "COALESCE(ib_client_id_markets, 101) AS ib_client_id_markets "
+                    "COALESCE(ib_client_id_markets, 101) AS ib_client_id_markets, "
+                    "COALESCE(ib_client_id_worker_market, 500) AS ib_client_id_worker_market "
                     "FROM settings WHERE id = 1"
                 )
                 row = cur.fetchone()
@@ -712,6 +812,7 @@ class StatusReader:
                 "ib_client_id_listener": int(row["ib_client_id_listener"]) if row.get("ib_client_id_listener") is not None else 2,
                 "ib_client_id_account": int(row["ib_client_id_account"]) if row.get("ib_client_id_account") is not None else 4,
                 "ib_client_id_markets": int(row["ib_client_id_markets"]) if row.get("ib_client_id_markets") is not None else 10,
+                "ib_client_id_worker_market": int(row["ib_client_id_worker_market"]) if row.get("ib_client_id_worker_market") is not None else 500,
             }
         except Exception as e:
             # 旧库可能尚无 client_id 列，仅查 host/port_type
@@ -728,6 +829,7 @@ class StatusReader:
                     "ib_client_id_listener": 2,
                     "ib_client_id_account": 100,
                     "ib_client_id_markets": 101,
+                    "ib_client_id_worker_market": 500,
                 }
             except Exception as e2:
                 logger.debug("get_ib_config failed: %s", e2)
@@ -1224,6 +1326,295 @@ def write_ohlc_bars_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bo
         return False
 
 
+def write_stock_bars(status_config: dict, symbol: str, period: str, bars: List[Dict[str, Any]]) -> bool:
+    """批量写入单一 symbol+period 的股票 K 线到 stock_day/stock_min。
+
+    这是对 write_ohlc_bars_to_db 的薄封装，便于 backfill 脚本按 chunk 写入并复用 UPSERT 语义。
+    bars 元素形状为 {bar_time, open, high, low, close, volume}。
+    """
+    if not bars:
+        return True
+    rows: List[Dict[str, Any]] = []
+    per = (period or "1 D").strip()
+    sym = (symbol or "").strip()
+    if not sym:
+        return False
+    for b in bars:
+        r = dict(b)
+        r["symbol"] = sym
+        r["period"] = per
+        rows.append(r)
+    return write_ohlc_bars_to_db(status_config, rows)
+
+
+def delete_stock_bars_for_symbol(
+    status_config: dict,
+    symbol: str,
+    periods: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    """Delete stock_day and/or stock_min rows for the given symbol.
+    periods: optional list of "1 D" | "1 min" | "5 mins" | "1 hour". If None or empty, delete all.
+    Returns {"ok": True, "deleted_day": n, "deleted_min": m} or {"ok": False, "error": "..."}.
+    """
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {"ok": False, "error": "No postgres config"}
+    sym = (symbol or "").strip()
+    if not sym:
+        return {"ok": False, "error": "Symbol required"}
+    # Normalize periods: None/[] = all; otherwise filter to valid values
+    valid_periods = {"1 D", "1 min", "5 mins", "1 hour"}
+    if periods:
+        periods = [p.strip() for p in periods if (p or "").strip() in valid_periods]
+    delete_day = not periods or "1 D" in periods
+    min_periods = [p for p in ("1 min", "5 mins", "1 hour") if not periods or p in periods]
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                deleted_day = 0
+                deleted_min = 0
+                if delete_day:
+                    cur.execute("DELETE FROM stock_day WHERE symbol = %s", (sym,))
+                    deleted_day = cur.rowcount
+                if min_periods:
+                    cur.execute(
+                        "DELETE FROM stock_min WHERE symbol = %s AND period = ANY(%s)",
+                        (sym, min_periods),
+                    )
+                    deleted_min = cur.rowcount
+            conn.commit()
+            logger.info("delete_stock_bars_for_symbol %s periods=%s: deleted_day=%s deleted_min=%s", sym, periods, deleted_day, deleted_min)
+            return {"ok": True, "deleted_day": deleted_day, "deleted_min": deleted_min}
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_stock_bars_for_symbol failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+def insert_bars_backfill_job(
+    status_config: dict,
+    symbol: str,
+    period: str,
+    years: Optional[float] = None,
+    days: Optional[int] = None,
+    override_days: Optional[float] = None,
+    span_hours: Optional[float] = None,
+    skip_ib: bool = False,
+    api_interval_sec: int = 10,
+) -> Optional[int]:
+    """Insert a pending bars backfill job. Returns job id (id) or None on failure."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO bars_backfill_jobs (symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', now(), now())
+                    RETURNING id
+                    """,
+                    (
+                        (symbol or "").strip(),
+                        (period or "1 D").strip(),
+                        years,
+                        days,
+                        override_days,
+                        span_hours,
+                        bool(skip_ib),
+                        max(0, min(300, int(api_interval_sec))),
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return int(row[0]) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("insert_bars_backfill_job failed: %s", e)
+        return None
+
+
+def get_bars_backfill_jobs(status_config: dict, limit: int = 50) -> List[Dict[str, Any]]:
+    """Return recent bars_backfill_jobs (newest first)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, result,
+                           created_at, updated_at
+                    FROM bars_backfill_jobs
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (max(1, min(limit, 100)),),
+                )
+                rows = cur.fetchall()
+            return [dict(r) for r in rows] if rows else []
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("get_bars_backfill_jobs failed: %s", e)
+        return []
+
+
+def get_bars_backfill_job(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:
+    """Return one bars_backfill_job by id, or None."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    try:
+        try:
+            jid = int(job_id)
+        except (TypeError, ValueError):
+            return None
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, result,
+                           created_at, updated_at
+                    FROM bars_backfill_jobs
+                    WHERE id = %s
+                    """,
+                    (jid,),
+                )
+                row = cur.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("get_bars_backfill_job failed: %s", e)
+        return None
+
+
+def claim_next_pending_bars_backfill_job(status_config: dict) -> Optional[Dict[str, Any]]:
+    """Select one pending job with FOR UPDATE SKIP LOCKED, set status=running, return job row. Returns None if no pending job."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, symbol, period, years, days, override_days
+                    FROM bars_backfill_jobs
+                    WHERE status = 'pending'
+                    ORDER BY id ASC
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                    """
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                jid = row["id"]
+                cur.execute(
+                    """
+                    UPDATE bars_backfill_jobs
+                    SET status = 'running', updated_at = now()
+                    WHERE id = %s
+                    """,
+                    (jid,),
+                )
+            conn.commit()
+            return dict(row)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("claim_next_pending_bars_backfill_job failed: %s", e)
+        return None
+
+
+def update_bars_backfill_job_result(
+    status_config: dict,
+    job_id: int,
+    status: str,
+    result: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Set job status and result (done/failed). Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        import json
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE bars_backfill_jobs
+                    SET status = %s, result = %s, updated_at = now()
+                    WHERE id = %s
+                    """,
+                    (status, json.dumps(result) if result is not None else None, job_id),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("update_bars_backfill_job_result failed: %s", e)
+        return False
+
+
+def trim_bars_backfill_jobs(status_config: dict, keep: int = 200) -> None:
+    """Keep only the most recent keep jobs; delete older ones."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH kept AS (SELECT id FROM bars_backfill_jobs ORDER BY id DESC LIMIT %s)
+                    DELETE FROM bars_backfill_jobs WHERE id NOT IN (SELECT id FROM kept)
+                    """,
+                    (max(1, keep),),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("trim_bars_backfill_jobs failed: %s", e)
+
+
+def get_bars_backfill_last_updated(status_config: dict) -> Optional[float]:
+    """Return max(updated_at) from bars_backfill_jobs as Unix timestamp, or None if no jobs or error.
+    Used for Celery worker status: recent activity if last_updated within last few minutes."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT EXTRACT(EPOCH FROM max(updated_at))::double precision FROM bars_backfill_jobs"
+                )
+                row = cur.fetchone()
+            return float(row[0]) if row and row[0] is not None else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_bars_backfill_last_updated failed: %s", e)
+        return None
+
+
 def write_run_status(status_config: dict, suspended: bool) -> bool:
     """Update daemon_run_status row id=1 (suspended=true/false). Daemon polls this to pause/resume hedging. Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
@@ -1284,8 +1675,9 @@ def write_ib_config(
     ib_client_id_listener: int = 2,
     ib_client_id_account: int = 100,
     ib_client_id_markets: int = 101,
+    ib_client_id_worker_market: int = 500,
 ) -> bool:
-    """Update settings (id=1): ib_host, ib_port_type, 以及多种用途的 client_id（守护进程/监听进程/账户信息/市场数据）。守护进程/API 下次使用时会加载。Returns True on success."""
+    """Update settings (id=1): ib_host, ib_port_type, 以及多种用途的 client_id（守护进程/监听进程/账户信息/市场数据/Celery worker_market）。守护进程/API 下次使用时会加载。Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     host = (ib_host or "").strip() or "127.0.0.1"
@@ -1296,6 +1688,7 @@ def write_ib_config(
     cid_l = max(1, int(ib_client_id_listener)) if ib_client_id_listener is not None else 2
     cid_a = max(1, int(ib_client_id_account)) if ib_client_id_account is not None else 100
     cid_m = max(1, int(ib_client_id_markets)) if ib_client_id_markets is not None else 101
+    cid_w = max(1, int(ib_client_id_worker_market)) if ib_client_id_worker_market is not None else 500
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -1307,33 +1700,36 @@ def write_ib_config(
                     ("ib_client_id_listener", 2),
                     ("ib_client_id_account", 100),
                     ("ib_client_id_markets", 101),
+                    ("ib_client_id_worker_market", 500),
                 ):
                     cur.execute(
                         f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
                     )
                 cur.execute(
                     """
-                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets)
-                    VALUES (1, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market)
+                    VALUES (1, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         ib_host = EXCLUDED.ib_host,
                         ib_port_type = EXCLUDED.ib_port_type,
                         ib_client_id_daemon = EXCLUDED.ib_client_id_daemon,
                         ib_client_id_listener = EXCLUDED.ib_client_id_listener,
                         ib_client_id_account = EXCLUDED.ib_client_id_account,
-                        ib_client_id_markets = EXCLUDED.ib_client_id_markets
+                        ib_client_id_markets = EXCLUDED.ib_client_id_markets,
+                        ib_client_id_worker_market = EXCLUDED.ib_client_id_worker_market
                     """,
-                    (host, port_type, cid_d, cid_l, cid_a, cid_m),
+                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w),
                 )
             conn.commit()
             logger.info(
-                "[R-A3] write_ib_config: wrote settings id=1 host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s",
+                "[R-A3] write_ib_config: wrote settings id=1 host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s ib_client_id_worker_market=%s",
                 host,
                 port_type,
                 cid_d,
                 cid_l,
                 cid_a,
                 cid_m,
+                cid_w,
             )
             return True
         finally:

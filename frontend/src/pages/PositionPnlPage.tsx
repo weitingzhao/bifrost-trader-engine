@@ -124,8 +124,18 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
 
   const getOptGroupKey = (g: OptExecutionGroup) => `${g.contract_key}-${g.strike}-${g.expiry}`
   const [expandedDetailKeys, setExpandedDetailKeys] = useState<string[]>([])
+  /** true = 手风琴模式（一次只展开一个），false = 可展开多列 */
+  const [accordionMode, setAccordionMode] = useState<boolean>(false)
   const toggleDetailExpand = (key: string) => {
-    setExpandedDetailKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+    setExpandedDetailKeys(prev => {
+      const isOpen = prev.includes(key)
+      if (accordionMode) {
+        // 手风琴：点击已展开的就收起，点击未展开的只保留当前一个
+        return isOpen ? [] : [key]
+      }
+      // 多开模式：和之前一样，可以展开多列
+      return isOpen ? prev.filter(k => k !== key) : [...prev, key]
+    })
   }
 
   const filteredExecutions = useMemo(() => {
@@ -322,37 +332,60 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
         <InfoTooltip text="Option and hedge leg position structure and PnL analysis; separate from real-time monitor." />
       </h2>
       <div className="replay-toolbar">
-        <label htmlFor="replay-fetch-days" className="replay-fetch-days-label">Fetch range</label>
-        <select
-          id="replay-fetch-days"
-          className="replay-fetch-days-select"
-          value={replayFetchDays}
-          onChange={e => setReplayFetchDays(Number(e.target.value) as 1 | 3 | 7)}
-          disabled={replaySyncing}
-          aria-label="Execution fetch range"
-        >
-          <option value={1}>Today</option>
-          <option value={3}>Last 3 days</option>
-          <option value={7}>Last 7 days</option>
-        </select>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={replaySyncing || replayLoading}
-          onClick={async () => {
-            setReplaySyncing(true)
-            const res = await postExecutionsFetch(replayFetchDays)
-            if (!res.ok) {
+        <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
+          <span className="replay-fetch-days-label">Fetch</span>
+          <label className="replay-fetch-radio">
+            <input
+              type="radio"
+              name="replay-fetch-days"
+              value={1}
+              checked={replayFetchDays === 1}
+              onChange={() => setReplayFetchDays(1)}
+              disabled={replaySyncing}
+            />
+            <span>Today</span>
+          </label>
+          <label className="replay-fetch-radio">
+            <input
+              type="radio"
+              name="replay-fetch-days"
+              value={3}
+              checked={replayFetchDays === 3}
+              onChange={() => setReplayFetchDays(3)}
+              disabled={replaySyncing}
+            />
+            <span>Last 3 days</span>
+          </label>
+          <label className="replay-fetch-radio">
+            <input
+              type="radio"
+              name="replay-fetch-days"
+              value={7}
+              checked={replayFetchDays === 7}
+              onChange={() => setReplayFetchDays(7)}
+              disabled={replaySyncing}
+            />
+            <span>Last 7 days</span>
+          </label>
+          <button
+            type="button"
+            className="btn btn-small replay-fetch-refresh-btn"
+            disabled={replaySyncing || replayLoading}
+            onClick={async () => {
+              setReplaySyncing(true)
+              const res = await postExecutionsFetch(replayFetchDays)
+              if (!res.ok) {
+                setReplaySyncing(false)
+                return
+              }
+              await loadReplayData()
               setReplaySyncing(false)
-              return
-            }
-            await loadReplayData()
-            setReplaySyncing(false)
-          }}
-          aria-label="Fetch executions from IB and write to DB"
-        >
-          {replaySyncing ? 'Fetching…' : 'Refresh replay data'}
-        </button>
+            }}
+            aria-label="Fetch executions from IB and write to DB"
+          >
+            {replaySyncing ? 'Fetching…' : 'Refresh'}
+          </button>
+        </div>
         {replaySyncing && (
           <span className="replay-sync-hint">Fetching executions from IB…</span>
         )}
@@ -362,7 +395,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
           onClick={() => { setAddExecOpen(true); setExecFormError(null); }}
           aria-label="Add execution record manually (historical)"
         >
-          Add history
+          Add Trade
         </button>
       </div>
 
@@ -446,19 +479,39 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
               title="End"
             />
           </label>
-          <label>
-            <span className="replay-filter-label">POOL</span>
-            <select
-              value={filterPool}
-              onChange={e => setFilterPool(e.target.value as 'ALL' | 'ON' | 'Off')}
-              className="replay-filter-input replay-filter-select"
-              aria-label="Pool filter"
-            >
-              <option value="ALL">ALL</option>
-              <option value="ON">ON</option>
-              <option value="Off">Off</option>
-            </select>
-          </label>
+          <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
+            <span className="replay-fetch-days-label">Pool</span>
+            <label className="replay-fetch-radio">
+              <input
+                type="radio"
+                name="replay-pool"
+                value="ALL"
+                checked={filterPool === 'ALL'}
+                onChange={() => setFilterPool('ALL')}
+              />
+              <span>ALL</span>
+            </label>
+            <label className="replay-fetch-radio">
+              <input
+                type="radio"
+                name="replay-pool"
+                value="ON"
+                checked={filterPool === 'ON'}
+                onChange={() => setFilterPool('ON')}
+              />
+              <span>ON</span>
+            </label>
+            <label className="replay-fetch-radio">
+              <input
+                type="radio"
+                name="replay-pool"
+                value="Off"
+                checked={filterPool === 'Off'}
+                onChange={() => setFilterPool('Off')}
+              />
+              <span>Off</span>
+            </label>
+          </div>
           <button
             type="button"
             className="btn btn-small replay-filter-clear"
@@ -506,10 +559,25 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
             )}
           </tbody>
         </table>
-        <h4 className="replay-sub page-title-with-tooltip">
-          Portfolio
-          <InfoTooltip text="Options grouped by contract_key and strike; Cost/Premium = Size×@×100−Commission; PnL = Premium − Cost; color by status (realized green, unrealized yellow)." />
-        </h4>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <h4 className="replay-sub page-title-with-tooltip" style={{ marginBottom: 0 }}>
+            Portfolio
+            <InfoTooltip text="Options grouped by contract_key and strike; Cost/Premium = Size×@×100−Commission; PnL = Premium − Cost; color by status (realized green, unrealized yellow)." />
+          </h4>
+          <label className="toggle-switch" style={{ marginBottom: 0 }}>
+            <span className="toggle-switch-caption">Detail view</span>
+            <span className="toggle-switch-mode">
+              {accordionMode ? 'Accordion' : 'Multi'}
+            </span>
+            <input
+              type="checkbox"
+              checked={accordionMode}
+              onChange={e => setAccordionMode(e.target.checked)}
+              aria-label="Toggle between multi-open and accordion detail view"
+            />
+            <span className="toggle-switch-slider" aria-hidden="true" />
+          </label>
+        </div>
         {filteredExecutions.length === 0 ? (
           <p className="section-hint">No data; click "Refresh replay data" to fetch from IB, or "Add history" to add manually.{([filterSymbol, filterExpiryStart, filterExpiryEnd, filterExecStart, filterExecEnd].some(Boolean) || filterPool !== 'ALL') ? ' Filters applied; clear to see all.' : ''}</p>
         ) : (
@@ -557,7 +625,12 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
                           aria-label={isExpanded ? 'Collapse group details' : 'Expand group details'}
                         >
                           <td className="replay-opt-expand-col">
-                            <span className="replay-opt-expand-icon" aria-hidden>{isExpanded ? '▼' : '▶'}</span>
+                            <span
+                              className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`}
+                              aria-hidden
+                            >
+                              {isExpanded ? '▼' : '▶'}
+                            </span>
                           </td>
                           <td className="replay-opt-contract">
                             {(() => {

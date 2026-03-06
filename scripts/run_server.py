@@ -84,6 +84,7 @@ def main() -> None:
         config_path = os.path.join(_PROJECT_ROOT, config_path)
     elif config_path is None:
         config_path = os.path.join(_PROJECT_ROOT, "config", "config.yaml")
+    os.environ["BIFROST_CONFIG"] = config_path
     config, _ = read_config(config_path)
     port = _port_from_config(config)
     if not _free_port(port):

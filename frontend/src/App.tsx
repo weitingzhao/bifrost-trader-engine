@@ -8,6 +8,7 @@ import {
 import { DaemonMonitorPage } from './pages/DaemonMonitorPage'
 import { IbAccountsPage } from './pages/IbAccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
+import { DataPage } from './pages/DataPage'
 import { PositionPnlPage } from './pages/PositionPnlPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { WishlistPage } from './pages/WishlistPage'
@@ -28,7 +29,7 @@ function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
 }
 
-type TabId = 'monitor' | 'ib' | 'replay' | 'market' | 'wishlist' | 'settings'
+type TabId = 'monitor' | 'ib' | 'replay' | 'market' | 'data' | 'wishlist' | 'settings'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('monitor')
@@ -54,7 +55,7 @@ export default function App() {
       setStatus(j)
       return j
     } catch {
-      setStatus(null)
+      // Keep previous status on failure so UI keeps updating (e.g. after Celery stop, one slow/timeout poll won't blank the page)
       return null
     }
   }, [])
@@ -148,6 +149,7 @@ export default function App() {
     { id: 'ib', label: 'Accounts' },
     { id: 'replay', label: 'Positions' },
     { id: 'market', label: 'Market' },
+    { id: 'data', label: 'Data' },
     { id: 'wishlist', label: 'Wishlist' },
     { id: 'settings', label: 'Settings' },
   ]
@@ -157,7 +159,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="System, Accounts, Positions, Market, Wishlist, Settings">
+          <nav className="app-tabs" aria-label="System, Accounts, Positions, Market, Data, Wishlist, Settings">
             {tabList.map(({ id, label, lamp }) => (
               <button
                 key={id}
@@ -216,6 +218,10 @@ export default function App() {
 
       {activeTab === 'market' && (
         <MarketDataPage status={status} />
+      )}
+
+      {activeTab === 'data' && (
+        <DataPage status={status} />
       )}
 
       {activeTab === 'wishlist' && (

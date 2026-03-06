@@ -82,7 +82,7 @@
 |----------|----------|----------|----------------|
 | **R-A1** | 账户与持仓可获取：自动交易程序能从 IB 获取当前账户基本信息与当前持仓，作为下一步自动交易对冲的基本能力。 | **阶段 3** | ① 守护程序在连接 IB 后能通过 IB API **请求并获取当前账户基本信息**（至少含账户标识、Balance/NetLiquidation 等权益类汇总，以 IB 提供为准）。② 守护程序能 **获取当前持仓**（至少含本策略涉及的标的如股票、期权腿的持仓数量与方向），可供内部对冲逻辑与风控使用。③ 上述数据在运行周期内可持续更新（如每次 heartbeat 或按配置间隔请求），异常或断连时行为明确（重试或降级）。 |
 | **R-A2** | 账户执行交易可获取：从 IB 获取当前账户的执行/成交记录（含手动与机器），用于事后复盘与风控。 | **阶段 3** | ① 能从 IB API **获取账户执行/成交记录**（如 executions、fills 或报表接口），含手动与机器交易。② 数据可同步或按需拉取并**写入 sink 或独立表**；独立应用提供**查询接口**（如 GET /executions 或 /trades），支持按时间范围等筛选。③ 每条记录至少含时间、标的、方向、数量、成交价、手续费等；若 IB 支持可区分来源（手动/机器）。 |
-| **R-A3** | 复盘辅助行情可获取：为复盘与风控分析提供辅助行情数据（K 线、报价等）；支持股票与期权、Wishlist 落库、多周期（1 D / 1 min / 5 mins / 1 hour）、智能拉取、Wishlist 报价写入 instrument_prices。 | **阶段 3** | ① 存在**数据源**（IB）并可**按标的与周期**拉取**K 线**（开高低收、成交量）；股票存 **stock_day** / **stock_min**，期权存 **option_day** / **option_min**。② **Wishlist** 表落库，支持 CRUD；市场数据页标的候选 = 持仓 + Wishlist。③ 首次拉取可请求全部历史，后续根据**最新一根 K 线时间**智能决定 duration。④ GET /bars（或等效）支持 sec_type、period、标的参数，可读取上述表。⑤ Wishlist 与持仓的**报价**可获取，拉取后写入 **instrument_prices**，供前端展示。 |
+| **R-A3** | 复盘辅助行情可获取：为复盘与风控分析提供辅助行情数据（K 线、报价等）；支持股票与期权、Wishlist 落库、多周期（1 D / 1 min / 5 mins / 1 hour）、智能拉取、Wishlist 报价写入 instrument_prices。 | **阶段 3** | ① 存在**数据源**（IB）并可**按标的与周期**拉取**K 线**（开高低收、成交量）；股票存 **stock_day** / **stock_min**，期权存 **option_day** / **option_min**。② **Wishlist** 表落库，支持 CRUD；市场数据页标的候选 = 持仓 + Wishlist。③ 首次拉取可请求全部历史，后续根据**最新一根 K 线时间**智能决定 duration。④ GET /bars（或等效）支持 sec_type、period、标的参数，可读取上述表。⑤ Wishlist 与持仓的**报价**可获取，拉取后写入 **instrument_prices**，供前端展示。⑥ **非实时拉取**（如 backfill）**经队列入队**，由**独立 Worker 进程**（或当前实现的同进程 worker）执行；API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id} 可查状态与结果。 |
 
 ### 控制类（R-C*）
 
@@ -252,7 +252,7 @@
 **本阶段实现并验收的需求**：**R-A1**、**R-A2**、**R-A3**、**R-M6**、**R-M7**、**R-H2**。  
 **各需求详细验收标准**：见上文「需求与阶段一一对应及详细验收标准」表中 R-A1、R-A2、R-A3、R-M6、R-M7、R-H2 对应行。
 
-**目标**：完成账户、持仓、标的市价、**账户执行交易**、**复盘辅助行情（如 K 线）**、**复盘与风控分析页面**及历史统计等**数据的获取与展示**，供策略与监控使用。包含：(1) 守护程序从 IB 获取账户与持仓（R-A1）、标的市价并写入 status 供监控展示（R-M6）；(2) 获取账户执行/成交记录（R-A2）与辅助行情（R-A3），并提供**独立复盘页**（R-M7）；(3) 基于历史数据产出统计报表（R-H2）。
+**目标**：完成账户、持仓、标的市价、**账户执行交易**、**复盘辅助行情（如 K 线）**、**复盘与风控分析页面**及历史统计等**数据的获取与展示**，供策略与监控使用。包含：(1) 守护程序从 IB 获取账户与持仓（R-A1）、标的市价并写入 status 供监控展示（R-M6）；(2) 获取账户执行/成交记录（R-A2）与辅助行情（R-A3），并提供**独立复盘页**（R-M7）；(3) **非实时市场数据拉取（如 K 线 backfill）经队列 + 独立 Worker 进程执行**（见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4）；(4) 基于历史数据产出统计报表（R-H2）。
 
 | 步骤 | 内容 | 可交付物 | 对应需求 |
 |------|------|----------|----------|
@@ -260,13 +260,14 @@
 | **3.2** | **标的市价**：heartbeat 或按间隔向 IB 请求标的行情（spot、bid/ask），写入 status_current；GET /status 含市价；监控页可展示持仓+当前价、盈亏、期权虚实。 | GET /status 含 spot 等；监控页可展示标的与持仓市价 | R-M6 |
 | **3.3** | **账户执行交易**：从 IB 获取账户执行/成交（executions、fills 或报表）；写入 sink 或独立表；独立应用提供 GET /executions（或 /trades），支持按时间筛选。 | 可查询账户级执行/成交记录，供复盘与风控 | R-A2 |
 | **3.4** | **复盘辅助行情（R-A3 扩展）**：K 线**股票与期权分表**——股票日线 **stock_day**、股票分钟/小时线 **stock_min**（1 min、5 mins、1 hour）；期权日线 **option_day**、期权分钟/小时线 **option_min**。从 IB 拉取并 UPSERT；**Wishlist** 表落库（CRUD），市场数据页标的 = 持仓 + Wishlist。**智能拉取**：首次可请求全部历史，后续根据最新一根 K 线时间决定 duration。GET /bars 支持 sec_type、period、标的（或 contract_key）；**报价**：Wishlist 与持仓的报价拉取后写入 **instrument_prices**，供前端展示。 | 复盘页与市场数据页可读股票/期权 K 线；Wishlist 持久化；报价落库 | R-A3 |
-| **3.5** | **复盘与风控分析页面**：监控应用内新增独立页面或路由（如「复盘」/「风控」），与实时监控页分离；展示执行交易、辅助行情及风险/统计视图。 | 通过导航可进入复盘页，不与 R-M5 同屏 | R-M7 |
-| **3.6** | **历史与统计**：独立脚本/模块只读历史表，产出按日/周对冲次数、盈亏分布或汇总等；可离线运行。 | 统计报表或 JSON（至少按日/周对冲次数、盈亏相关） | R-H2 |
+| **3.5** | **非实时市场数据拉取 Worker**（[ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4）：backfill 等非实时拉取**不入 API 进程同步执行**，而是**入队 + 独立 Worker 进程**。队列推荐 PostgreSQL 表或 Redis+RQ；Worker 单独进程从队列取任务、串行执行并遵守 IB Pacing（如任务间间隔 2s）。API：POST /bars/backfill 入队并返回 **job_id**；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态并在完成后刷新 coverage。 | 独立 Worker 进程；API 入队与 job 查询；前端轮询 job 状态 | R-A3 |
+| **3.6** | **复盘与风控分析页面**：监控应用内新增独立页面或路由（如「复盘」/「风控」），与实时监控页分离；展示执行交易、辅助行情及风险/统计视图。 | 通过导航可进入复盘页，不与 R-M5 同屏 | R-M7 |
+| **3.7** | **历史与统计**：独立脚本/模块只读历史表，产出按日/周对冲次数、盈亏分布或汇总等；可离线运行。 | 统计报表或 JSON（至少按日/周对冲次数、盈亏相关） | R-H2 |
 
 **里程碑**
 
-- 账户、持仓、标的市价可获取并供监控与对冲逻辑使用；**账户执行交易**与**辅助行情（K 线）**可获取并供复盘页使用；**复盘与风控分析页面**可独立于监控页访问；历史统计可产出报表。
-- **当前部分已落地**：R-A1、R-M6 已实现（见下方实现说明）；R-A2、R-A3、R-M7、R-H2 待实现。
+- 账户、持仓、标的市价可获取并供监控与对冲逻辑使用；**账户执行交易**与**辅助行情（K 线）**可获取并供复盘页使用；**非实时拉取（backfill）经队列 + 独立 Worker 进程执行**，API 入队返回 job_id，可查 job 状态；**复盘与风控分析页面**可独立于监控页访问；历史统计可产出报表。
+- **当前部分已落地**：R-A1、R-M6 已实现（见下方实现说明）；R-A2、R-A3、R-M7、R-H2 待实现；**backfill 队列与 Worker** 可为同进程 asyncio 先行实现，再演进为独立 Worker 进程 + PG 表或 RQ。
 
 **检查方式**
 
@@ -274,8 +275,9 @@
 2. 监控页可展示标的与持仓市价、盈亏、期权虚实等。
 3. **R-A2**：GET /executions（或 /trades）可返回账户执行/成交记录，支持按时间筛选。
 4. **R-A3**：可获取本策略标的的 K 线/OHLC，复盘页或 GET /bars 可读。
-5. **R-M7**：监控应用内可通过导航进入「复盘」/「风控」页，与实时监控页分离；页内可查看执行交易、辅助行情及风险/统计视图。
-6. （R-H2）运行统计脚本，确认从历史表只读并产出按日/周对冲次数、盈亏汇总。
+5. **非实时拉取 Worker**：POST /bars/backfill 入队并返回 job_id；独立 Worker 进程（或当前实现的同进程 worker）串行执行；GET /bars/jobs、GET /bars/jobs/{id} 可查状态与结果；前端可轮询并刷新 coverage。
+6. **R-M7**：监控应用内可通过导航进入「复盘」/「风控」页，与实时监控页分离；页内可查看执行交易、辅助行情及风险/统计视图。
+7. （R-H2）运行统计脚本，确认从历史表只读并产出按日/周对冲次数、盈亏汇总。
 
 **验证标准（测试标准）**：与「需求与阶段一一对应及详细验收标准」表中 R-A1、R-A2、R-A3、R-M6、R-M7、R-H2 一致。
 
@@ -283,7 +285,7 @@
 |---|------|--------|----------|
 | 1 | R-A1 | ①②③ | 能获取账户基本信息；能获取当前持仓供对冲使用；更新与异常行为明确 |
 | 2 | R-A2 | ①②③ | 能从 IB 获取账户执行/成交；写入存储并有查询接口；记录含时间/标的/方向/数量/成交价等 |
-| 3 | R-A3 | ①②③④⑤ | 股票/期权 K 线分表可拉取并写入；Wishlist 落库 CRUD；智能 duration；GET /bars 可读；Wishlist 报价写入 instrument_prices |
+| 3 | R-A3 | ①②③④⑤⑥ | 股票/期权 K 线分表可拉取并写入；Wishlist 落库 CRUD；智能 duration；GET /bars 可读；Wishlist 报价写入 instrument_prices；**非实时拉取（如 backfill）经队列入队、由独立 Worker 进程（或当前同进程 worker）执行，API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id} 可查状态与结果** |
 | 4 | R-M6 | ①②③ | 标的市价写入 sink/status；GET /status 含市价；监控页可展示标的与持仓市价（含盈亏/虚实等） |
 | 5 | R-M7 | ①②③ | 有独立复盘/风控页与导航；页内可展示执行交易、辅助行情、风险/统计视图；与 R-M5 分离 |
 | 6 | R-H2 | ①②③④ | 只读历史表；数据与 sink 一致；输出含按日/周对冲次数、盈亏分布或汇总；可离线运行 |
@@ -297,6 +299,7 @@
 | TC-3-R-A1-3 | R-A1 | ③ | 账户与持仓在运行中可持续更新；IB 断连或异常时行为明确（重试/降级，不阻塞） |
 | TC-3-R-A2-1 | R-A2 | ①②③ | 能从 IB 获取账户执行/成交记录；数据写入存储；GET /executions 或 /trades 可查询且记录含时间/标的/方向/数量/成交价等 |
 | TC-3-R-A3-1 | R-A3 | ①②③④⑤ | 股票/期权 K 线存 stock_day/stock_min/option_day/option_min；Wishlist 表 CRUD；首次拉取全历史、后续智能 duration；GET /bars 支持 sec_type/period/标的；Wishlist 与持仓报价拉取后写入 instrument_prices，复盘页或市场数据页可读 |
+| TC-3-R-A3-2 | R-A3 | ⑥ | 非实时拉取（backfill）经队列入队；API 返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 可查状态与结果；独立 Worker 进程（或同进程 worker）串行执行并遵守 IB Pacing；前端可轮询 job 并刷新 coverage |
 | TC-3-R-M6-1 | R-M6 | ① | 守护程序在运行中从 IB 拉取标的市价（spot 等）并写入 status_current/sink |
 | TC-3-R-M6-2 | R-M6 | ② | GET /status 返回中含标的市价（如 status.spot 或等价字段），可供监控页读取 |
 | TC-3-R-M6-3 | R-M6 | ③ | 监控页能结合持仓与市价展示（如持仓+当前价、盈亏、期权虚实等）；多标的时市价可区分 |
@@ -309,7 +312,7 @@
 - **R-A1**：`IBConnector.get_managed_accounts()`、`get_account_summary(account)`；Store 存 account_summary、accounts_data；CONNECTED 时拉取，RUNNING 后**每 1 小时**拉取；sink/GET /status 可选展示 account_id、account_net_liquidation 等。`_refresh_positions(account)` 与账户同间隔；断连时 WAITING_IB 不拉取，重连后再次拉取。  
 - **R-M6**：**每次心跳**向 IB 拉取标的现价并写入 `status_current.spot`；GET /status 含 `status.spot`；监控页 IB 账户区块有刷新按钮（POST /control/refresh_accounts）、1 小时自动刷新、accounts_fetched_at 展示。  
 - **R-A2**：待实现（从 IB 获取账户执行/成交，写入存储，GET /executions 或 /trades）。  
-- **R-A3**：待实现（扩展：股票/期权 K 线分表 stock_day、stock_min、option_day、option_min；Wishlist 落库与 CRUD；智能拉取 duration；GET /bars 支持 sec_type/period/标的；Wishlist 报价写入 instrument_prices，供复盘页或市场数据页）。  
+- **R-A3**：待实现（扩展：股票/期权 K 线分表 stock_day、stock_min、option_day、option_min；Wishlist 落库与 CRUD；智能拉取 duration；GET /bars 支持 sec_type/period/标的；Wishlist 报价写入 instrument_prices；**非实时拉取经队列+独立 Worker 进程**，API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id}；当前可实现为同进程 asyncio worker，再演进为独立进程+PG 表或 RQ）。  
 - **R-M7**：待实现（监控应用内复盘/风控独立页面或路由，与 R-M5 分离）。  
 - **R-H2**：待实现（独立脚本/模块只读历史表，产出按日/周对冲次数、盈亏汇总等）。
 

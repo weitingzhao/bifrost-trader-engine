@@ -87,6 +87,13 @@ class IBConnector:
     # Per-attempt timeout when retrying client IDs; avoid waiting full connect_timeout (e.g. 60s) after 326
     _CONNECT_ATTEMPT_TIMEOUT = 15.0
 
+    @staticmethod
+    def _is_connection_refused(exc: Exception) -> bool:
+        if getattr(exc, "errno", None) == 111:
+            return True
+        msg = (getattr(exc, "message", None) or str(exc)).lower()
+        return "refus" in msg or "connection refused" in msg
+
     async def connect(self, max_attempts: Optional[int] = None, bars_only: bool = False) -> bool:
         """Connect to TWS/Gateway.
 
@@ -171,6 +178,42 @@ class IBConnector:
                         wait_secs,
                     )
                 else:
+                    if self._is_connection_refused(e) and try_id == base_id:
+                        try_id_retry = base_id + 1
+                        logger.warning(
+                            "IB connection refused (clientId=%s), retrying once with clientId=%s",
+                            try_id,
+                            try_id_retry,
+                        )
+                        try:
+                            await asyncio.wait_for(
+                                self.ib.connectAsync(
+                                    self.host,
+                                    self.port,
+                                    clientId=try_id_retry,
+                                    timeout=attempt_timeout,
+                                ),
+                                timeout=attempt_timeout + 5.0,
+                            )
+                            self.client_id = try_id_retry
+                            self._connected = True
+                            if not bars_only:
+                                self.ib.commissionReportEvent += self._on_commission_report
+                                self._commission_registered = True
+                            logger.info(
+                                "Connected to IB %s:%s clientId=%s (after refused retry)",
+                                self.host,
+                                self.port,
+                                self.client_id,
+                            )
+                            return True
+                        except Exception as retry_exc:
+                            last_exc = retry_exc
+                            logger.warning(
+                                "IB retry with clientId=%s failed: %s",
+                                try_id_retry,
+                                retry_exc,
+                            )
                     if limit == 1:
                         logger.debug(
                             "IB connect attempt failed (will retry on next heartbeat): %s",
@@ -750,15 +793,51 @@ class IBConnector:
         "1 h": "1 hour",
     }
 
+    def _convert_ib_bars(self, bars: Any) -> List[Dict[str, Any]]:
+        """Convert ib_insync Bar list to our OHLC dict list."""
+        out: List[Dict[str, Any]] = []
+        for bar in bars or []:
+            t = getattr(bar, "date", None)
+            ts: Optional[float]
+            if t is None:
+                ts = None
+            elif hasattr(t, "timestamp"):
+                # datetime-like
+                ts = float(t.timestamp())
+            else:
+                # 兼容字符串等情况（极端情况下 bar.date 仍可能是 str）
+                try:
+                    from datetime import datetime
+
+                    # IB formatDate=2 一般不会走到这里，但防御性处理
+                    ts = datetime.fromisoformat(str(t)).timestamp()
+                except Exception:
+                    ts = None
+            if ts is None:
+                continue
+            out.append({
+                "bar_time": ts,
+                "open": float(getattr(bar, "open", 0) or 0),
+                "high": float(getattr(bar, "high", 0) or 0),
+                "low": float(getattr(bar, "low", 0) or 0),
+                "close": float(getattr(bar, "close", 0) or 0),
+                "volume": float(getattr(bar, "volume", 0) or 0),
+            })
+        return out
+
     async def get_historical_bars_async(
         self,
         symbol: str,
         period: str = "1 D",
         duration_str: str = "30 D",
     ) -> List[Dict[str, Any]]:
-        """Request historical OHLC bars from IB (R-A3). Returns list of dicts: bar_time (Unix), open, high, low, close, volume."""
+        """Request historical OHLC bars from IB (R-A3). Returns list of dicts: bar_time (Unix), open, high, low, close, volume.
+
+        注意：本方法始终以“现在”为 endDateTime，仅用于最近一段历史或增量拉取。
+        更长区间的回填请使用 get_historical_bars_range。
+        """
         if not self.is_connected:
-            await self.connect()
+            await self.connect(bars_only=True)
         if not symbol or not symbol.strip():
             return []
         try:
@@ -777,39 +856,170 @@ class IBConnector:
                 # formatDate=2 让 bar.date 直接是 datetime，方便转 Unix time
                 formatDate=2,
             )
-            out: List[Dict[str, Any]] = []
-            for bar in bars or []:
-                t = getattr(bar, "date", None)
-                ts: Optional[float]
-                if t is None:
-                    ts = None
-                elif hasattr(t, "timestamp"):
-                    # datetime-like
-                    ts = float(t.timestamp())
-                else:
-                    # 兼容字符串等情况（极端情况下 bar.date 仍可能是 str）
-                    try:
-                        from datetime import datetime
-
-                        # IB formatDate=2 一般不会走到这里，但防御性处理
-                        ts = datetime.fromisoformat(str(t)).timestamp()
-                    except Exception:
-                        ts = None
-                if ts is None:
-                    continue
-                out.append({
-                    "bar_time": ts,
-                    "open": float(getattr(bar, "open", 0) or 0),
-                    "high": float(getattr(bar, "high", 0) or 0),
-                    "low": float(getattr(bar, "low", 0) or 0),
-                    "close": float(getattr(bar, "close", 0) or 0),
-                    "volume": float(getattr(bar, "volume", 0) or 0),
-                })
-            logger.info("[R-A3] get_historical_bars_async: %s %s → %s bars", symbol, period, len(out))
+            out = self._convert_ib_bars(bars)
+            logger.info("[R-A3] get_historical_bars_async: %s %s %s → %s bars", symbol, period, duration_str, len(out))
             return out
         except Exception as e:
             logger.warning("get_historical_bars_async: %s", e, exc_info=True)
             return []
+
+    async def get_historical_bars_range(
+        self,
+        symbol: str,
+        period: str,
+        *,
+        start_ts: Optional[float],
+        end_ts: Optional[float],
+        interval_sec: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Request historical OHLC bars over a time range by chunking requests.
+
+        参数:
+            symbol: 股票代码，如 \"NVDA\"。
+            period: '1 D' | '1 min' | '5 mins' | '1 hour'。
+            start_ts: 起始 Unix 秒（含）；None 时表示“不设下限”，但仍受 IB 可用数据限制。
+            end_ts: 结束 Unix 秒（含）；None 时默认使用当前时间。
+
+        策略:
+            - 根据 period 选择 chunk 大小与 durationStr，遵守 IB step size（见 docs/IB_MARKET_DATA_BOUNDARIES.md）:
+              * 1 D   → barSize='1 day', durationStr='1 Y'，按 ~1 年一段向过去滚动。
+              * 1 hour/5 mins → barSize='1 hour'/'5 mins', durationStr='1 W'，按 1 周一段。
+              * 1 min → barSize='1 min', durationStr='1 D'，按 1 天一段。
+            - 每段请求之间插入短暂 sleep，降低 pacing 风险。
+        """
+        if not symbol or not symbol.strip():
+            return []
+        if not self.is_connected:
+            await self.connect(bars_only=True)
+
+        from datetime import datetime, timezone
+        import time as _time
+
+        sym = symbol.strip()
+        per = (period or "1 D").strip()
+        bar_setting = self._BAR_SIZE_MAP.get(per.lower(), "1 day")
+
+        # 计算 chunk 大小（秒）与 durationStr
+        one_day = 24 * 60 * 60
+        if bar_setting == "1 day":
+            chunk_seconds = 365 * one_day  # ~1 年
+            duration_str = "1 Y"
+        elif bar_setting in ("1 hour", "5 mins"):
+            chunk_seconds = 7 * one_day   # 1 周
+            duration_str = "1 W"
+        elif bar_setting == "1 min":
+            chunk_seconds = one_day       # 1 天
+            duration_str = "1 D"
+        else:
+            # 兜底：按 1 周窗口处理
+            chunk_seconds = 7 * one_day
+            duration_str = "1 W"
+
+        end_ts_eff: float
+        if end_ts is None:
+            end_ts_eff = datetime.now(tz=timezone.utc).timestamp()
+        else:
+            end_ts_eff = float(end_ts)
+
+        # 若 start_ts 为空，则仅从 end_ts_eff 向过去拉一段 chunk
+        start_ts_eff: Optional[float] = float(start_ts) if start_ts is not None else None
+
+        try:
+            stock = self._stock(sym)
+            await self.ib.qualifyContractsAsync(stock)
+        except Exception as e:
+            logger.warning("get_historical_bars_range: qualifyContracts failed for %s: %s", sym, e, exc_info=True)
+            return []
+
+        use_rth = bar_setting != "1 day"
+        all_out: List[Dict[str, Any]] = []
+
+        cur_end = end_ts_eff
+        loops = 0
+        # 当 start_ts_eff 为 None 时，只拉一段；否则一直向过去滚动直到到达/越过 start_ts_eff
+        while True:
+            loops += 1
+            if loops > 2000:
+                logger.warning("get_historical_bars_range: aborting after %s loops for %s %s", loops, sym, per)
+                break
+
+            # 计算本段的起始时间
+            if start_ts_eff is not None:
+                if cur_end <= start_ts_eff:
+                    break
+                seg_start = max(start_ts_eff, cur_end - chunk_seconds)
+            else:
+                seg_start = cur_end - chunk_seconds
+
+            end_dt = datetime.fromtimestamp(cur_end, tz=timezone.utc)
+            end_str = end_dt.strftime("%Y%m%d-%H:%M:%S")
+
+            logger.info(
+                "[R-A3] get_historical_bars_range chunk: %s %s %s duration=%s (start>=%.0f end<=%.0f)",
+                sym,
+                per,
+                end_str,
+                duration_str,
+                seg_start,
+                cur_end,
+            )
+            try:
+                bars = await self.ib.reqHistoricalDataAsync(
+                    stock,
+                    endDateTime=end_str,
+                    durationStr=duration_str,
+                    barSizeSetting=bar_setting,
+                    whatToShow="TRADES",
+                    useRTH=use_rth,
+                    formatDate=2,
+                )
+            except Exception as e:
+                logger.warning(
+                    "get_historical_bars_range: reqHistoricalDataAsync failed for %s %s: %s",
+                    sym,
+                    per,
+                    e,
+                    exc_info=True,
+                )
+                break
+
+            chunk_out = self._convert_ib_bars(bars)
+            if not chunk_out:
+                # 若已接近目标起点且没有更多数据，结束循环
+                logger.info(
+                    "[R-A3] get_historical_bars_range: empty chunk for %s %s at %s, stopping",
+                    sym,
+                    per,
+                    end_str,
+                )
+                break
+
+            all_out.extend(chunk_out)
+
+            # 下一段前等待：可配置间隔（Data 页 api_interval_sec）或默认 0.35s 降低 pacing 风险
+            if loops >= 1:
+                if interval_sec is not None:
+                    if interval_sec > 0:
+                        await asyncio.sleep(interval_sec)
+                else:
+                    _time.sleep(0.35)
+
+            # 下一段向过去滚动
+            cur_end = seg_start
+            if start_ts_eff is None:
+                # 只需一段
+                break
+
+        logger.info(
+            "[R-A3] get_historical_bars_range: %s %s from %s to %s → %s bars (loops=%s)",
+            sym,
+            per,
+            start_ts_eff,
+            end_ts_eff,
+            len(all_out),
+            loops,
+        )
+        return all_out
 
     async def place_order(
         self,

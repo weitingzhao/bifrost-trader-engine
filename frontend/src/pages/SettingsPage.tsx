@@ -14,6 +14,7 @@ const DEFAULT_DAEMON = 1
 const DEFAULT_LISTENER = 2
 const DEFAULT_REFRESH_EXECUTIONS = 100
 const DEFAULT_BARS_FETCH = 101
+const DEFAULT_WORKER = 500
 const DEFAULT_HEARTBEAT_SEC = 10
 
 export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
@@ -24,6 +25,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
   const [clientIdListener, setClientIdListener] = useState(DEFAULT_LISTENER)
   const [clientIdAccount, setClientIdAccount] = useState(DEFAULT_REFRESH_EXECUTIONS)
   const [clientIdMarkets, setClientIdMarkets] = useState(DEFAULT_BARS_FETCH)
+  const [clientIdWorker, setClientIdWorker] = useState(DEFAULT_WORKER)
   const [heartbeatIntervalSec, setHeartbeatIntervalSec] = useState(DEFAULT_HEARTBEAT_SEC)
   const [ibConfigInitialized, setIbConfigInitialized] = useState(false)
   const [heartbeatInitialized, setHeartbeatInitialized] = useState(false)
@@ -37,6 +39,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     if (c.ib_client_id_listener != null) setClientIdListener(c.ib_client_id_listener)
     if (c.ib_client_id_account != null) setClientIdAccount(c.ib_client_id_account)
     if (c.ib_client_id_markets != null) setClientIdMarkets(c.ib_client_id_markets)
+    if (c.ib_client_id_worker_market != null) setClientIdWorker(c.ib_client_id_worker_market)
     setIbConfigInitialized(true)
   }, [status?.ib_config, ibConfigInitialized])
 
@@ -59,6 +62,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
         ib_client_id_listener: clientIdListener,
         ib_client_id_account: clientIdAccount,
         ib_client_id_markets: clientIdMarkets,
+        ib_client_id_worker_market: clientIdWorker,
       }),
       postSetHeartbeatInterval(sec),
     ])
@@ -153,7 +157,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                       max={32}
                       value={clientIdDaemon}
                       onChange={(e) => setClientIdDaemon(parseInt(e.target.value, 10) || DEFAULT_DAEMON)}
-                      style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      style={{ width: '5rem', minWidth: '4rem', marginLeft: '0.25rem' }}
                     />
                   </label>
                   <label>
@@ -164,7 +168,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                       max={32}
                       value={clientIdListener}
                       onChange={(e) => setClientIdListener(parseInt(e.target.value, 10) || DEFAULT_LISTENER)}
-                      style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      style={{ width: '5rem', minWidth: '4rem', marginLeft: '0.25rem' }}
                     />
                   </label>
                 </div>
@@ -180,7 +184,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                       max={32}
                       value={clientIdAccount}
                       onChange={(e) => setClientIdAccount(parseInt(e.target.value, 10) || DEFAULT_REFRESH_EXECUTIONS)}
-                      style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      style={{ width: '5rem', minWidth: '4rem', marginLeft: '0.25rem' }}
                     />
                   </label>
                   <label>
@@ -191,7 +195,23 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                       max={32}
                       value={clientIdMarkets}
                       onChange={(e) => setClientIdMarkets(parseInt(e.target.value, 10) || DEFAULT_BARS_FETCH)}
-                      style={{ width: '3.5rem', marginLeft: '0.25rem' }}
+                      style={{ width: '5rem', minWidth: '4rem', marginLeft: '0.25rem' }}
+                    />
+                  </label>
+                </div>
+              </div>
+              <div>
+                <div className="daemon-group-subtitle">Celery</div>
+                <div className="controls" style={{ flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-start' }}>
+                  <label>
+                    worker_market:
+                    <input
+                      type="number"
+                      min={1}
+                      max={999}
+                      value={clientIdWorker}
+                      onChange={(e) => setClientIdWorker(parseInt(e.target.value, 10) || DEFAULT_WORKER)}
+                      style={{ width: '5rem', minWidth: '4rem', marginLeft: '0.25rem' }}
                     />
                   </label>
                 </div>
