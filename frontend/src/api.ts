@@ -153,7 +153,7 @@ export async function fetchBarsJobs(
   limit = 20,
   offset = 0,
   status?: string | null,
-): Promise<{ jobs: BarsJob[]; total: number }> {
+): Promise<{ jobs: BarsJob[]; total: number; error?: string }> {
   const params = new URLSearchParams()
   params.set('limit', String(limit))
   params.set('offset', String(offset))
@@ -161,7 +161,11 @@ export async function fetchBarsJobs(
   const r = await fetch(`${API}/bars/jobs?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   const j = await r.json().catch(() => ({}))
-  return { jobs: j.jobs ?? [], total: typeof j.total === 'number' ? j.total : 0 }
+  return {
+    jobs: j.jobs ?? [],
+    total: typeof j.total === 'number' ? j.total : 0,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
 }
 
 /** Delete one backfill job by id. */

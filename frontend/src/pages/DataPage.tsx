@@ -89,8 +89,8 @@ export function DataPage({ status }: DataPageProps) {
   const [barPeriod, setBarPeriod] = useState<string>('1 D')
   /** Bars (inspect) table: sort by time 'asc' = oldest first, 'desc' = newest first */
   const [barsTimeSort, setBarsTimeSort] = useState<'asc' | 'desc'>('desc')
-  /** Bars (inspect): show top N lines, 10–500; also used as fetch limit */
-  const [barsTopN, setBarsTopN] = useState(10)
+  /** Bars (inspect): show top N lines, 5–500; also used as fetch limit */
+  const [barsTopN, setBarsTopN] = useState(5)
 
   const [coverage, setCoverage] = useState<BarCoverageItem[] | null>(null)
   const [coveragePolicy, setCoveragePolicy] = useState<BarsCoverageResponse['policy'] | null>(null)
@@ -120,9 +120,12 @@ export function DataPage({ status }: DataPageProps) {
   const [pullCustom1hourDays, setPullCustom1hourDays] = useState(7)
   const [barsJobs, setBarsJobs] = useState<Array<{ job_id: string; symbol: string; period: string; status: string; result?: { count?: number; message?: string; error?: string }; created_ts?: number; updated_ts?: number }>>([])
   const [barsJobsLoading, setBarsJobsLoading] = useState(false)
+  const [barsJobsError, setBarsJobsError] = useState<string | null>(null)
   const [barsJobsTotal, setBarsJobsTotal] = useState(0)
-  const [barsJobsLimit, setBarsJobsLimit] = useState(50)
+  const [barsJobsLimit, setBarsJobsLimit] = useState(5)
   const [barsJobsStatusFilter, setBarsJobsStatusFilter] = useState<string>('all')
+  const [barsJobsSortKey, setBarsJobsSortKey] = useState<'job_id' | 'status' | 'created_ts' | 'updated_ts'>('updated_ts')
+  const [barsJobsSortDir, setBarsJobsSortDir] = useState<'asc' | 'desc'>('desc')
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
 
@@ -133,6 +136,35 @@ export function DataPage({ status }: DataPageProps) {
     const order = barsTimeSort === 'desc' ? -1 : 1
     return [...bars].sort((a, b) => order * (a.time - b.time))
   }, [bars, barsTimeSort])
+
+  const sortedBarsJobs = useMemo(() => {
+    if (barsJobs.length === 0) return []
+    const key = barsJobsSortKey
+    const dir = barsJobsSortDir === 'asc' ? 1 : -1
+    return [...barsJobs].sort((a, b) => {
+      let va: number | string
+      let vb: number | string
+      if (key === 'job_id') {
+        va = parseInt(a.job_id, 10) || 0
+        vb = parseInt(b.job_id, 10) || 0
+        return dir * ((va as number) - (vb as number))
+      }
+      if (key === 'status') {
+        va = (a.status || '').toLowerCase()
+        vb = (b.status || '').toLowerCase()
+        return dir * (va < vb ? -1 : va > vb ? 1 : 0)
+      }
+      if (key === 'created_ts') {
+        va = a.created_ts ?? 0
+        vb = b.created_ts ?? 0
+        return dir * ((va as number) - (vb as number))
+      }
+      // updated_ts
+      va = a.updated_ts ?? 0
+      vb = b.updated_ts ?? 0
+      return dir * ((va as number) - (vb as number))
+    })
+  }, [barsJobs, barsJobsSortKey, barsJobsSortDir])
   useEffect(() => {
     if (candidateSymbols.length > 0 && !barSymbol.trim()) setBarSymbol(candidateSymbols[0])
   }, [candidateSymbols.join(','), barSymbol])
@@ -155,15 +187,18 @@ export function DataPage({ status }: DataPageProps) {
 
   const loadBarsJobs = useCallback(async () => {
     setBarsJobsLoading(true)
+    setBarsJobsError(null)
     try {
       const statusParam = barsJobsStatusFilter === 'all' ? undefined : barsJobsStatusFilter
       const limit = Math.max(1, Math.min(500, barsJobsLimit || 50))
       const res = await fetchBarsJobs(limit, 0, statusParam)
       setBarsJobs(Array.isArray(res.jobs) ? res.jobs : [])
       setBarsJobsTotal(typeof res.total === 'number' ? res.total : 0)
-    } catch {
+      setBarsJobsError(res.error ?? null)
+    } catch (e) {
       setBarsJobs([])
       setBarsJobsTotal(0)
+      setBarsJobsError(e instanceof Error ? e.message : 'Load failed')
     } finally {
       setBarsJobsLoading(false)
     }
@@ -181,7 +216,7 @@ export function DataPage({ status }: DataPageProps) {
     if (!symbol.trim()) return
     setBarsLoading(true)
     try {
-      const res = await fetchBars(symbol, barPeriod, Math.min(500, Math.max(10, barsTopN)))
+      const res = await fetchBars(symbol, barPeriod, Math.min(500, Math.max(5, barsTopN)))
       setBars(res.bars || [])
     } catch {
       setBars([])
@@ -189,6 +224,23 @@ export function DataPage({ status }: DataPageProps) {
       setBarsLoading(false)
     }
   }, [barPeriod, barsTopN])
+
+  /** Click a Bars cell in Data Coverage: load that symbol+period in Bars (inspect) with top 5. */
+  const openBarsForSymbol = useCallback(async (symbol: string, period: string) => {
+    if (!symbol.trim()) return
+    setBarSymbol(symbol.trim().toUpperCase())
+    setBarPeriod(period)
+    setBarsTopN(5)
+    setBarsLoading(true)
+    try {
+      const res = await fetchBars(symbol.trim(), period, 5)
+      setBars(res.bars || [])
+    } catch {
+      setBars([])
+    } finally {
+      setBarsLoading(false)
+    }
+  }, [])
 
   return (
     <div className="card process-section market-data-page">
@@ -285,31 +337,37 @@ export function DataPage({ status }: DataPageProps) {
                 if (min1hStatus.needBackfill) periodsNeedingBackfill.push('1 hour')
                 const isBackfilling = backfillSymbol === row.symbol
                 const canBackfill = periodsNeedingBackfill.length > 0 && !isBackfilling && !isDeleting
-                const renderBarsCell = (p: { count: number; min_ts: number | null; max_ts: number | null }, label: string, severity: 'ok' | 'gap' | 'missing') => (
-                  <>
+                const renderBarsCell = (p: { count: number; min_ts: number | null; max_ts: number | null }, label: string, severity: 'ok' | 'gap' | 'missing', period: string) => (
+                  <button
+                    type="button"
+                    className="data-coverage-bars-btn"
+                    onClick={() => openBarsForSymbol(row.symbol, period)}
+                    title={`Show top 5 bars for ${row.symbol} (${period}) in Bars section`}
+                    aria-label={`Show bars ${row.symbol} ${period}`}
+                  >
                     {p.count === 0 ? '—' : `${p.count} bars`}
                     {label !== '' && label !== 'OK' && (
                       <span className="data-coverage-status" style={{ color: statusColor(severity) }}>[{label}]</span>
                     )}
-                  </>
+                  </button>
                 )
                 return (
                   <tr key={row.symbol}>
                     <td><strong>{row.symbol}</strong></td>
                     <td className="data-coverage-bars" title={coverageCell(row.stock_day)}>
-                      {renderBarsCell(row.stock_day, dayStatus.label, dayStatus.severity)}
+                      {renderBarsCell(row.stock_day, dayStatus.label, dayStatus.severity, '1 D')}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_day)}</td>
                     <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 min'])}>
-                      {renderBarsCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null }, min1Status.label, min1Status.severity)}
+                      {renderBarsCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null }, min1Status.label, min1Status.severity, '1 min')}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null })}</td>
                     <td className="data-coverage-bars" title={coverageCell(row.stock_min['5 mins'])}>
-                      {renderBarsCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null }, min5Status.label, min5Status.severity)}
+                      {renderBarsCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null }, min5Status.label, min5Status.severity, '5 mins')}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null })}</td>
                     <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 hour'])}>
-                      {renderBarsCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null }, min1hStatus.label, min1hStatus.severity)}
+                      {renderBarsCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null }, min1hStatus.label, min1hStatus.severity, '1 hour')}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null })}</td>
                     <td className="data-coverage-actions data-coverage-actions-nowrap">
@@ -579,6 +637,103 @@ export function DataPage({ status }: DataPageProps) {
         </div>
       )}
 
+      <section className="replay-section" aria-labelledby="data-bars-head">
+        <h3 id="data-bars-head" className="page-title-with-tooltip">
+          Bars (inspect)
+          <InfoTooltip text="Load bars from DB for a symbol and period. Backfill is triggered per symbol in the coverage table above (uses config default ranges)." />
+        </h3>
+        <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+          <label htmlFor="data-bar-symbol" className="replay-bar-symbol-label">Symbol</label>
+          <input
+            id="data-bar-symbol"
+            type="text"
+            className="replay-bar-symbol-input"
+            placeholder="Symbol, e.g. NVDA"
+            value={barSymbol}
+            onChange={e => setBarSymbol((e.target.value || '').trim().toUpperCase())}
+            aria-label="Symbol for bars"
+          />
+          <span className="replay-bar-symbol-label">Period</span>
+          <div className="replay-bar-period-radios" role="group" aria-label="Bar period">
+            {BAR_PERIODS.map(p => (
+              <label key={p.value} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', marginRight: '1rem' }}>
+                <input
+                  type="radio"
+                  name="bar-period"
+                  value={p.value}
+                  checked={barPeriod === p.value}
+                  onChange={() => setBarPeriod(p.value)}
+                  aria-label={p.label}
+                />
+                <span>{p.label}</span>
+              </label>
+            ))}
+          </div>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+            <span>Top</span>
+            <input
+              type="number"
+              min={5}
+              max={500}
+              value={barsTopN}
+              onChange={e => setBarsTopN(Math.min(500, Math.max(5, parseInt(e.target.value, 10) || 5)))}
+              style={{ width: '4rem' }}
+              aria-label="Number of bar rows to show (5–500)"
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={barsLoading || !barSymbol.trim()}
+            onClick={() => loadBarsFromApi(barSymbol.trim())}
+            aria-label="Load bars"
+          >
+            {barsLoading ? 'Loading…' : 'Load'}
+          </button>
+        </div>
+        <p className="replay-sync-hint" style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
+          Backfill runs in Celery Worker (config default ranges per period). See System → Recent operations for job status.
+        </p>
+        {bars.length === 0 ? (
+          <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
+        ) : (
+          <table className="table-operations">
+            <thead>
+              <tr>
+                <th>
+                  <button
+                    type="button"
+                    className="table-sort-header"
+                    onClick={() => setBarsTimeSort(s => s === 'desc' ? 'asc' : 'desc')}
+                    aria-sort={barsTimeSort === 'desc' ? 'descending' : 'ascending'}
+                    aria-label={`Sort by time ${barsTimeSort === 'desc' ? '(newest first), click for oldest first' : '(oldest first), click for newest first'}`}
+                  >
+                    Time {barsTimeSort === 'desc' ? '↓' : '↑'}
+                  </button>
+                </th>
+                <th>Open</th>
+                <th>High</th>
+                <th>Low</th>
+                <th>Close</th>
+                <th>Vol</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedBars.slice(0, barsTopN).map((b, i) => (
+                <tr key={i}>
+                  <td>{b.time != null ? fmtTs(b.time) : '—'}</td>
+                  <td>{fmtUsd(b.open)}</td>
+                  <td>{fmtUsd(b.high)}</td>
+                  <td>{fmtUsd(b.low)}</td>
+                  <td>{fmtUsd(b.close)}</td>
+                  <td>{b.volume != null ? Number(b.volume).toLocaleString() : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       <section className="replay-section" aria-labelledby="data-jobs-head">
         <h3 id="data-jobs-head" className="page-title-with-tooltip">
           Market data (jobs)
@@ -601,13 +756,15 @@ export function DataPage({ status }: DataPageProps) {
             </select>
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span>Show latest:</span>
+            <span>Least:</span>
             <select
               value={barsJobsLimit}
               onChange={e => setBarsJobsLimit(Number(e.target.value))}
               aria-label="Number of jobs to show"
               style={{ minWidth: '5rem' }}
             >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
               <option value={20}>20</option>
               <option value={50}>50</option>
               <option value={100}>100</option>
@@ -637,6 +794,11 @@ export function DataPage({ status }: DataPageProps) {
             {barsJobsTotal > 0 ? `${barsJobs.length} shown (${barsJobsTotal} total)` : '0 jobs'}
           </span>
         </div>
+        {barsJobsError && (
+          <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
+            {barsJobsError}
+          </div>
+        )}
         <p className="replay-sync-hint" style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
           Jobs are created when you click Pull above (one per period: 1 D, 1 min, 5 mins, 1 hour). Pending → Worker picks up → running → done/failed.
         </p>
@@ -646,18 +808,66 @@ export function DataPage({ status }: DataPageProps) {
           <table className="table-operations">
             <thead>
               <tr>
-                <th>Job ID</th>
+                <th>
+                  <button
+                    type="button"
+                    className="table-sort-header"
+                    onClick={() => {
+                      if (barsJobsSortKey === 'job_id') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                      else { setBarsJobsSortKey('job_id'); setBarsJobsSortDir('desc') }
+                    }}
+                    aria-sort={barsJobsSortKey === 'job_id' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+                  >
+                    Job ID {barsJobsSortKey === 'job_id' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
+                  </button>
+                </th>
                 <th>Symbol</th>
                 <th>Period</th>
-                <th>Status</th>
+                <th>
+                  <button
+                    type="button"
+                    className="table-sort-header"
+                    onClick={() => {
+                      if (barsJobsSortKey === 'status') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                      else { setBarsJobsSortKey('status'); setBarsJobsSortDir('asc') }
+                    }}
+                    aria-sort={barsJobsSortKey === 'status' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+                  >
+                    Status {barsJobsSortKey === 'status' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
+                  </button>
+                </th>
                 <th>Result</th>
-                <th>Created</th>
-                <th>Updated</th>
+                <th>
+                  <button
+                    type="button"
+                    className="table-sort-header"
+                    onClick={() => {
+                      if (barsJobsSortKey === 'created_ts') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                      else { setBarsJobsSortKey('created_ts'); setBarsJobsSortDir('desc') }
+                    }}
+                    aria-sort={barsJobsSortKey === 'created_ts' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+                  >
+                    Created {barsJobsSortKey === 'created_ts' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
+                  </button>
+                </th>
+                <th>
+                  <button
+                    type="button"
+                    className="table-sort-header"
+                    onClick={() => {
+                      if (barsJobsSortKey === 'updated_ts') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                      else { setBarsJobsSortKey('updated_ts'); setBarsJobsSortDir('desc') }
+                    }}
+                    aria-sort={barsJobsSortKey === 'updated_ts' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+                  >
+                    Updated {barsJobsSortKey === 'updated_ts' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
+                  </button>
+                </th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {barsJobs.map((j) => (
+              {sortedBarsJobs.map((j) => (
                 <tr key={j.job_id}>
                   <td><code style={{ fontSize: '0.85em' }}>{j.job_id}</code></td>
                   <td><strong>{j.symbol}</strong></td>
@@ -726,103 +936,6 @@ export function DataPage({ status }: DataPageProps) {
         </div>
       )}
 
-      <section className="replay-section" aria-labelledby="data-bars-head">
-        <h3 id="data-bars-head" className="page-title-with-tooltip">
-          Bars (inspect)
-          <InfoTooltip text="Load bars from DB for a symbol and period. Backfill is triggered per symbol in the coverage table above (uses config default ranges)." />
-        </h3>
-        <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-          <label htmlFor="data-bar-symbol" className="replay-bar-symbol-label">Symbol</label>
-          <input
-            id="data-bar-symbol"
-            type="text"
-            className="replay-bar-symbol-input"
-            placeholder="Symbol, e.g. NVDA"
-            value={barSymbol}
-            onChange={e => setBarSymbol((e.target.value || '').trim().toUpperCase())}
-            aria-label="Symbol for bars"
-          />
-          <span className="replay-bar-symbol-label">Period</span>
-          <div className="replay-bar-period-radios" role="group" aria-label="Bar period">
-            {BAR_PERIODS.map(p => (
-              <label key={p.value} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', marginRight: '1rem' }}>
-                <input
-                  type="radio"
-                  name="bar-period"
-                  value={p.value}
-                  checked={barPeriod === p.value}
-                  onChange={() => setBarPeriod(p.value)}
-                  aria-label={p.label}
-                />
-                <span>{p.label}</span>
-              </label>
-            ))}
-          </div>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span>Top</span>
-            <input
-              type="number"
-              min={10}
-              max={500}
-              value={barsTopN}
-              onChange={e => setBarsTopN(Math.min(500, Math.max(10, parseInt(e.target.value, 10) || 10)))}
-              style={{ width: '4rem' }}
-              aria-label="Number of bar rows to show (10–500)"
-            />
-            <span>lines</span>
-          </label>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={barsLoading || !barSymbol.trim()}
-            onClick={() => loadBarsFromApi(barSymbol.trim())}
-            aria-label="Load bars"
-          >
-            {barsLoading ? 'Loading…' : 'Load'}
-          </button>
-        </div>
-        <p className="replay-sync-hint" style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
-          Backfill runs in Celery Worker (config default ranges per period). See System → Recent operations for job status.
-        </p>
-        {bars.length === 0 ? (
-          <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
-        ) : (
-          <table className="table-operations">
-            <thead>
-              <tr>
-                <th>
-                  <button
-                    type="button"
-                    className="table-sort-header"
-                    onClick={() => setBarsTimeSort(s => s === 'desc' ? 'asc' : 'desc')}
-                    aria-sort={barsTimeSort === 'desc' ? 'descending' : 'ascending'}
-                    aria-label={`Sort by time ${barsTimeSort === 'desc' ? '(newest first), click for oldest first' : '(oldest first), click for newest first'}`}
-                  >
-                    Time {barsTimeSort === 'desc' ? '↓' : '↑'}
-                  </button>
-                </th>
-                <th>Open</th>
-                <th>High</th>
-                <th>Low</th>
-                <th>Close</th>
-                <th>Vol</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedBars.slice(0, barsTopN).map((b, i) => (
-                <tr key={i}>
-                  <td>{b.time != null ? fmtTs(b.time) : '—'}</td>
-                  <td>{fmtUsd(b.open)}</td>
-                  <td>{fmtUsd(b.high)}</td>
-                  <td>{fmtUsd(b.low)}</td>
-                  <td>{fmtUsd(b.close)}</td>
-                  <td>{b.volume != null ? Number(b.volume).toLocaleString() : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
     </div>
   )
 }

@@ -750,7 +750,7 @@ def create_app(
     def get_bars_coverage(
         symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Wishlist stocks"),
     ) -> Dict[str, Any]:
-        """Return coverage (count, min/max ts) plus target range from config and status: ok | gap_start | gap_end | gap | missing."""
+        """Return coverage (count, min/max ts) plus target range from config and status: ok | gap_end | missing (only end gap is checked)."""
         if symbols is not None and str(symbols).strip():
             sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
         else:
@@ -1029,7 +1029,6 @@ def create_app(
         ]
         return {"ok": True, "count": len(bars), "bars": bars}
 
-    _TOLERANCE_START_SEC = 7 * 86400
     _TOLERANCE_END_SEC = 2 * 86400
 
     def _coverage_status(
@@ -1039,14 +1038,10 @@ def create_app(
         target_start_ts: float,
         target_end_ts: float,
     ) -> str:
+        """Return ok | gap_end | missing. Only end gap is checked (no start check)."""
         if count == 0:
             return "missing"
-        gap_start = min_ts is None or min_ts > target_start_ts + _TOLERANCE_START_SEC
         gap_end = max_ts is None or max_ts < target_end_ts - _TOLERANCE_END_SEC
-        if gap_start and gap_end:
-            return "gap"
-        if gap_start:
-            return "gap_start"
         if gap_end:
             return "gap_end"
         return "ok"
@@ -1139,10 +1134,14 @@ def create_app(
         db_config = control_via_db or status_cfg_for_read
         if not db_config:
             logger.info("GET /bars/jobs: no Postgres config (control_via_db and status_cfg_for_read both None), returning empty list")
-            return {"jobs": [], "total": 0}
+            return {"jobs": [], "total": 0, "error": "No Postgres config. Set status.postgres in config or PGHOST."}
         # When limit=0 (e.g. old client or "get all"), return up to 500
         effective_limit = limit if limit and limit > 0 else 500
-        rows, total = get_bars_backfill_jobs(db_config, limit=effective_limit, offset=offset, status=status)
+        try:
+            rows, total = get_bars_backfill_jobs(db_config, limit=effective_limit, offset=offset, status=status)
+        except Exception as e:
+            logger.warning("GET /bars/jobs: get_bars_backfill_jobs failed: %s", e)
+            return {"jobs": [], "total": 0, "error": str(e)}
         list_jobs = [_job_row_to_api(r) for r in rows]
         logger.info("GET /bars/jobs: returning %d jobs, total=%d (limit=%s, offset=%s)", len(list_jobs), total, effective_limit, offset)
         return {"jobs": list_jobs, "total": total}

@@ -1473,11 +1473,11 @@ def get_bars_backfill_jobs(
                 args_count = [st] if st else []
                 cur.execute(
                     f"""
-                    SELECT COUNT(*) FROM bars_backfill_jobs {where}
+                    SELECT COUNT(*) AS count FROM bars_backfill_jobs {where}
                     """,
                     args_count,
                 )
-                total = int(cur.fetchone()[0])
+                total = int(cur.fetchone()["count"])
                 args_list = (args_count + [limit, offset]) if st else [limit, offset]
                 cur.execute(
                     f"""
@@ -1496,7 +1496,7 @@ def get_bars_backfill_jobs(
             conn.close()
     except Exception as e:
         logger.warning("get_bars_backfill_jobs failed: %s", e)
-        return [], 0
+        raise
 
 
 def delete_bars_backfill_job(status_config: dict, job_id: Any) -> bool:

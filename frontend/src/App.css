@@ -1328,6 +1328,16 @@ th {
 /* Data page: coverage table two-column layout + compact actions */
 .data-coverage-table .data-coverage-bars { white-space: nowrap; }
 .data-coverage-table .data-coverage-range { white-space: nowrap; font-size: 0.9em; color: var(--color-text-muted); }
+.data-coverage-bars-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.data-coverage-bars-btn:hover { text-decoration: underline; }
 .data-coverage-status { margin-left: 0.35rem; font-size: 0.85em; }
 .data-coverage-actions-nowrap {
   white-space: nowrap;
