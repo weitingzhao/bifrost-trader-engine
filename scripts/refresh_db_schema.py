@@ -3,7 +3,7 @@
 
 创建或补齐表：status_current、status_history、operations、daemon_control、daemon_run_status、
 daemon_heartbeat、settings、accounts、account_positions、instrument_prices、account_executions、
-account_execution_commissions、stock_day、stock_min、option_day、option_min、wishlist。
+account_execution_commissions、stock_day、stock_min、option_day、option_min、watchlist。
 不再创建 ohlc_bars（已弃用）。从项目根目录执行。
 
 Usage:
@@ -43,7 +43,7 @@ def main() -> int:
     try:
         import yaml
         import psycopg2
-        from src.sink.postgres_sink import _ensure_tables
+        from src.sink.postgres_sink import _ensure_tables, _get_conn_params
     except ImportError as e:
         print(f"Missing dependency: {e}", file=sys.stderr)
         print("  Install with: pip install -e .  (or pip install pyyaml psycopg2-binary)", file=sys.stderr)
@@ -51,27 +51,13 @@ def main() -> int:
 
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
-    status = config.get("status") or {}
-    pg = status.get("postgres") or {}
+    pg = config.get("postgres") or {}
     if not pg and not os.environ.get("PGHOST"):
-        print("status.postgres or PGHOST required. Configure status.sink and status.postgres in config.", file=sys.stderr)
+        print("postgres or PGHOST required. Configure postgres in config.", file=sys.stderr)
         return 1
-
-    db_from_config = pg.get("database") or pg.get("Database") or pg.get("db")
-    if not db_from_config and pg:
-        for k, v in pg.items():
-            if k and isinstance(v, str) and v.strip() and k.strip().lower() in ("database", "db"):
-                db_from_config = v.strip()
-                break
-    dbname = db_from_config or os.environ.get("PGDATABASE", "bifrost")
-    params = {
-        "host": pg.get("host") or os.environ.get("PGHOST", "127.0.0.1"),
-        "port": int(pg.get("port") or os.environ.get("PGPORT", "5432")),
-        "dbname": dbname,
-        "user": pg.get("user") or os.environ.get("PGUSER", "bifrost"),
-        "password": pg.get("password") or os.environ.get("PGPASSWORD", ""),
-        "connect_timeout": 10,
-    }
+    params = _get_conn_params(config)
+    params["connect_timeout"] = 10
+    dbname = params["dbname"]
 
     _progress("Connecting to PostgreSQL...")
     conn = None
@@ -80,13 +66,15 @@ def main() -> int:
     except Exception as e:
         print(f"PostgreSQL connect failed: {e}", file=sys.stderr)
         return 1
-    _progress("Connected. Setting lock_timeout=20s.")
+    _progress("Connected. Setting lock_timeout=20s, statement_timeout=60s.")
 
-    # Avoid hanging forever if another backend (e.g. API with idle-in-transaction holding settings)
-    # blocks DDL on settings. Fail after 20s with a clear error.
+    # Make timeouts session-level and commit them immediately so _ensure_tables()'s
+    # initial rollback will not clear them.
     try:
         with conn.cursor() as cur:
             cur.execute("SET lock_timeout = '20s'")
+            cur.execute("SET statement_timeout = '60s'")
+        conn.commit()
     except Exception as e:
         print(f"Setting lock_timeout failed: {e}", file=sys.stderr)
         if conn is not None:
@@ -105,7 +93,7 @@ def main() -> int:
             "status_current, status_history, operations, daemon_control, "
             "daemon_run_status, daemon_heartbeat, settings, accounts, account_positions, "
             "instrument_prices, account_executions, account_execution_commissions, "
-            "stock_day, stock_min, option_day, option_min, wishlist, bars_backfill_jobs"
+            "stock_day, stock_min, option_day, option_min, watchlist, bars_backfill_jobs"
         )
         print(f"Schema refreshed in database {dbname!r}.")
         print(f"  Tables: {tables_list}")

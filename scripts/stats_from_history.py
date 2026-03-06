@@ -28,7 +28,7 @@ os.chdir(_PROJECT_ROOT)
 
 
 def _load_config(config_path: str) -> Optional[dict]:
-    """Load YAML config and return status section."""
+    """Load YAML config."""
     try:
         import yaml
     except ImportError:
@@ -42,11 +42,11 @@ def _load_config(config_path: str) -> Optional[dict]:
         return None
     with open(path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
-    return config.get("status") or {}
+    return config
 
 
 def _connect(status_config: dict):
-    """Connect to PostgreSQL using status.postgres config."""
+    """Connect to PostgreSQL using root postgres config."""
     try:
         import psycopg2
         from psycopg2.extras import RealDictCursor
@@ -57,9 +57,9 @@ def _connect(status_config: dict):
         return None, None
     pg = status_config.get("postgres") or {}
     if not pg and not os.environ.get("PGHOST"):
-        print("status.postgres or PGHOST required.", file=sys.stderr)
+        print("postgres or PGHOST required.", file=sys.stderr)
         return None, None
-    params = _get_conn_params({"postgres": pg})
+    params = _get_conn_params(status_config)
     try:
         conn = psycopg2.connect(**params)
         return conn, RealDictCursor

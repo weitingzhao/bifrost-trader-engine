@@ -4,7 +4,7 @@ import json
 import logging
 import math
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
@@ -38,7 +38,7 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
 
 
 class StatusReader:
-    """Read status_current and operations from PostgreSQL. Uses same config as daemon (status.postgres)."""
+    """Read status_current and operations from PostgreSQL. Uses the same root postgres config as daemon."""
 
     def __init__(self, status_config: dict) -> None:
         self._config = status_config
@@ -397,6 +397,56 @@ class StatusReader:
             self._conn = None
             return None
 
+    def get_bars_benchmark(
+        self,
+        symbols: Optional[List[str]] = None,
+        on_or_before: Optional[date] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return latest daily bar on or before given date per symbol from stock_day.
+        Keys: symbol -> { bar_time: unix_ts, close: float, prev_close: float or None }.
+        prev_close is the close of the trading day immediately before the latest returned bar.
+        Symbols with no row are omitted.
+        """
+        if not self._connect():
+            return {}
+        sym_list = list({(s or "").strip() for s in (symbols or []) if (s or "").strip()})
+        if not sym_list:
+            return {}
+        ref = on_or_before if on_or_before is not None else date.today()
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    WITH ordered AS (
+                        SELECT symbol, bar_time, close,
+                               LEAD(close) OVER (PARTITION BY symbol ORDER BY bar_time DESC) AS prev_close
+                        FROM stock_day
+                        WHERE symbol = ANY(%s) AND (bar_time::date) <= %s
+                    )
+                    SELECT DISTINCT ON (symbol) symbol,
+                           extract(epoch from bar_time) AS bar_time,
+                           close,
+                           prev_close
+                    FROM ordered
+                    ORDER BY symbol, bar_time DESC
+                    """,
+                    (sym_list, ref),
+                )
+                rows = cur.fetchall()
+            return {
+                (r["symbol"] or "").strip(): {
+                    "bar_time": float(r["bar_time"]) if r.get("bar_time") is not None else 0,
+                    "close": float(r["close"]) if r.get("close") is not None else 0,
+                    "prev_close": float(r["prev_close"]) if r.get("prev_close") is not None and r["prev_close"] is not None else None,
+                }
+                for r in rows
+                if (r.get("symbol") or "").strip()
+            }
+        except Exception as e:
+            logger.debug("get_bars_benchmark failed: %s", e)
+            self._conn = None
+            return {}
+
     def get_bars_stats(
         self,
         symbol: Optional[str] = None,
@@ -501,8 +551,8 @@ class StatusReader:
             self._conn = None
             return []
 
-    def get_wishlist(self) -> List[Dict[str, Any]]:
-        """Return all wishlist rows (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, created_at)."""
+    def get_watchlist(self) -> List[Dict[str, Any]]:
+        """Return all watchlist rows (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, created_at)."""
         if not self._connect():
             return []
         try:
@@ -511,16 +561,16 @@ class StatusReader:
                     """
                     SELECT id, contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source,
                            extract(epoch from created_at) AS created_at
-                    FROM wishlist ORDER BY created_at DESC
+                    FROM watchlist ORDER BY created_at DESC
                     """
                 )
                 return [dict(r) for r in cur.fetchall()]
         except Exception as e:
-            logger.debug("get_wishlist failed: %s", e)
+            logger.debug("get_watchlist failed: %s", e)
             self._conn = None
             return []
 
-    def add_wishlist(
+    def add_watchlist(
         self,
         contract_key: str,
         symbol: Optional[str] = None,
@@ -531,7 +581,7 @@ class StatusReader:
         display_label: Optional[str] = None,
         source: str = "manual",
     ) -> bool:
-        """Insert or replace wishlist row by contract_key. Returns True on success.
+        """Insert or replace watchlist row by contract_key. Returns True on success.
         If contract_key contains no '|', treat as stock symbol and normalize to SYMBOL|STK|||."""
         raw = (contract_key or "").strip()
         if not raw:
@@ -545,13 +595,13 @@ class StatusReader:
         else:
             contract_key = raw
         if not self._connect():
-            logger.warning("add_wishlist: DB connect failed")
+            logger.warning("add_watchlist: DB connect failed")
             return False
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO wishlist (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source)
+                    INSERT INTO watchlist (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (contract_key) DO UPDATE SET
                         symbol = EXCLUDED.symbol, sec_type = EXCLUDED.sec_type, expiry = EXCLUDED.expiry,
@@ -563,26 +613,26 @@ class StatusReader:
             self._conn.commit()
             return True
         except Exception as e:
-            logger.warning("add_wishlist failed: %s", e)
+            logger.warning("add_watchlist failed: %s", e)
             self._conn = None
             return False
 
-    def delete_wishlist(self, contract_key: Optional[str] = None, id_: Optional[int] = None) -> bool:
-        """Delete one wishlist entry by contract_key or id. Returns True on success."""
+    def delete_watchlist(self, contract_key: Optional[str] = None, id_: Optional[int] = None) -> bool:
+        """Delete one watchlist entry by contract_key or id. Returns True on success."""
         if not self._connect():
             return False
         try:
             with self._conn.cursor() as cur:
                 if id_ is not None:
-                    cur.execute("DELETE FROM wishlist WHERE id = %s", (id_,))
+                    cur.execute("DELETE FROM watchlist WHERE id = %s", (id_,))
                 elif contract_key and contract_key.strip():
-                    cur.execute("DELETE FROM wishlist WHERE contract_key = %s", (contract_key.strip(),))
+                    cur.execute("DELETE FROM watchlist WHERE contract_key = %s", (contract_key.strip(),))
                 else:
                     return False
             self._conn.commit()
             return True
         except Exception as e:
-            logger.debug("delete_wishlist failed: %s", e)
+            logger.debug("delete_watchlist failed: %s", e)
             self._conn = None
             return False
 

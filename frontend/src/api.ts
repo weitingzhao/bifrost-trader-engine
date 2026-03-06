@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WishlistItem, RealtimeQuote, QuotesResponse } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -64,7 +64,7 @@ export async function postRefreshReplay(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** 让守护进程立即按 Wishlist 同步 Real-time ticker 订阅（多退少补，清除残留） */
+/** 让守护进程立即按 Watchlist 同步 Real-time ticker 订阅（多退少补，清除残留） */
 export async function postRefreshTickerSubscriptions(): Promise<ControlResponse> {
   const r = await fetch(`${API}/control/refresh_ticker_subscriptions`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
@@ -188,15 +188,15 @@ export async function deleteAllBarsJobs(status?: string | null): Promise<{ ok: b
   }
 }
 
-/** R-A3 扩展：Wishlist 列表。 */
-export async function fetchWishlist(): Promise<{ items: WishlistItem[] }> {
-  const r = await fetch(`${API}/wishlist`)
+/** R-A3 扩展：Watchlist 列表。 */
+export async function fetchWatchlist(): Promise<{ items: WatchlistItem[] }> {
+  const r = await fetch(`${API}/watchlist`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
-/** R-A3 扩展：添加/更新 Wishlist 项。 */
-export async function postWishlist(item: {
+/** R-A3 扩展：添加/更新 Watchlist 项。 */
+export async function postWatchlist(item: {
   contract_key: string
   symbol?: string
   sec_type?: string
@@ -206,7 +206,7 @@ export async function postWishlist(item: {
   display_label?: string
   source?: string
 }): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/wishlist`, {
+  const r = await fetch(`${API}/watchlist`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(item),
@@ -215,17 +215,17 @@ export async function postWishlist(item: {
   return { ok: j.ok === true, error: j.error }
 }
 
-/** R-A3 扩展：删除 Wishlist 项（传 contract_key 或 id 之一）。 */
-export async function deleteWishlist(by: { contract_key?: string; id?: number }): Promise<{ ok: boolean; error?: string }> {
+/** R-A3 扩展：删除 Watchlist 项（传 contract_key 或 id 之一）。 */
+export async function deleteWatchlist(by: { contract_key?: string; id?: number }): Promise<{ ok: boolean; error?: string }> {
   const params = new URLSearchParams()
   if (by.contract_key) params.set('contract_key', by.contract_key)
   if (by.id != null) params.set('id', String(by.id))
-  const r = await fetch(`${API}/wishlist?${params}`, { method: 'DELETE' })
+  const r = await fetch(`${API}/watchlist?${params}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: j.ok === true, error: j.error }
 }
 
-/** R-RM*: 从监控 API 获取实时行情（GET /quotes）。symbols 为空则使用服务端关注列表（持仓+wishlist）。 */
+/** R-RM*: 从监控 API 获取实时行情（GET /quotes）。symbols 为空则使用服务端关注列表（持仓+watchlist）。 */
 export async function fetchQuotes(symbols?: string[]): Promise<QuotesResponse> {
   const params = new URLSearchParams()
   if (symbols?.length) params.set('symbols', symbols.join(','))
@@ -319,17 +319,26 @@ export async function postCeleryStop(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** Request Celery worker to establish IB connection (Worker Client). Worker polls every 5s; connect within a few seconds. */
-export async function postCeleryConnect(): Promise<ControlResponse> {
-  const r = await fetch(`${API}/control/celery_connect`, { method: 'POST' })
-  const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
-}
-
 /** Celery console: fetch last N lines from Redis stream (for initial display). Requires Celery broker (Redis). */
-export async function fetchCeleryLogs(tail = 200): Promise<{ lines: string[]; error?: string }> {
+export async function fetchCeleryLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
   const r = await fetch(`${API}/api/celery/logs?${params}`)
+  const j = await r.json().catch(() => ({ lines: [] }))
+  return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
+}
+
+/** Daemon console: fetch last N lines from Redis stream (for initial display). Requires Redis. */
+export async function fetchDaemonLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  const r = await fetch(`${API}/api/daemon/logs?${params}`)
+  const j = await r.json().catch(() => ({ lines: [] }))
+  return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
+}
+
+/** Server console: fetch last N lines from Redis stream (for initial display). Requires Redis. */
+export async function fetchServerLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  const r = await fetch(`${API}/api/server/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
@@ -337,6 +346,20 @@ export async function fetchCeleryLogs(tail = 200): Promise<{ lines: string[]; er
 /** Celery console: clear Redis stream (DELETE). After this, fetchCeleryLogs returns empty until Worker writes new lines. */
 export async function clearCeleryLogs(): Promise<{ ok: boolean; error?: string }> {
   const r = await fetch(`${API}/api/celery/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** Daemon console: clear Redis stream (DELETE). After this, fetchDaemonLogs returns empty until daemon writes new lines. */
+export async function clearDaemonLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/api/daemon/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** Server console: clear Redis stream (DELETE). After this, fetchServerLogs returns empty until server writes new lines. */
+export async function clearServerLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/api/server/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
@@ -352,9 +375,73 @@ export async function trimCeleryLogs(maxLines: number): Promise<{ ok: boolean; e
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
+/** Daemon console: trim Redis stream to at most max_lines (keep newest). Use when max lines limit is set or changed. */
+export async function trimDaemonLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/api/daemon/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** Server console: trim Redis stream to at most max_lines (keep newest). Use when max lines limit is set or changed. */
+export async function trimServerLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/api/server/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
 /** Celery console: SSE stream of new log lines. Returns unsubscribe function. Call fetchCeleryLogs first for history. */
 export function subscribeCeleryLogs(onLine: (line: string) => void, onError?: () => void): () => void {
   const url = `${API || ''}/api/celery/logs/stream`
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+/** Daemon console: SSE stream of new log lines. Returns unsubscribe function. Call fetchDaemonLogs first for history. */
+export function subscribeDaemonLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${API || ''}/api/daemon/logs/stream`
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+/** Server console: SSE stream of new log lines. Returns unsubscribe function. Call fetchServerLogs first for history. */
+export function subscribeServerLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${API || ''}/api/server/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -483,11 +570,31 @@ export async function fetchBarStats(symbol: string): Promise<BarStatsResponse> {
   return r.json()
 }
 
-/** 获取 Wishlist 股票（或指定 symbols）在 stock_day / stock_min 的覆盖情况；不传 symbols 时使用服务端 Wishlist。 */
+/** 获取 Watchlist 股票（或指定 symbols）在 stock_day / stock_min 的覆盖情况；不传 symbols 时使用服务端 Watchlist。 */
 export async function fetchBarsCoverage(symbols?: string[]): Promise<BarsCoverageResponse> {
   const params = new URLSearchParams()
   if (symbols && symbols.length > 0) params.set('symbols', symbols.join(','))
   const r = await fetch(`${API}/bars/coverage?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** 获取各 symbol 在 stock_day 中「当日及之前最近一条」日线作为基准（用于 Daily % / Daily $）。
+ * 无数据则无该 key。
+ * - `is_today=true`: 用 instrument_prices.last 对比 `prev_close`
+ * - `is_today=false`: 用 instrument_prices.last 对比 `close`
+ */
+export async function fetchBarsBenchmark(
+  symbols: string[],
+  date?: string,
+): Promise<{
+  benchmarks: Record<string, { bar_time: number; close: number; prev_close?: number | null; is_today?: boolean; is_stale?: boolean }>
+}> {
+  const list = symbols.filter(s => (s || '').trim()).map(s => s.trim())
+  if (list.length === 0) return { benchmarks: {} }
+  const params = new URLSearchParams({ symbols: list.join(',') })
+  if (date && date.trim()) params.set('date', date.trim().slice(0, 10))
+  const r = await fetch(`${API}/bars/benchmark?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }

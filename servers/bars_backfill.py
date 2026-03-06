@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from src.connector.ib import IBConnectionDroppedError
 
 if TYPE_CHECKING:
     from servers.reader import StatusReader
@@ -165,10 +166,12 @@ async def run_one_backfill(
         if not bars:
             return {"ok": True, "count": 0, "message": "IB returned no data for this range."}
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 K 线表。"}
+            return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。"}
         if not write_stock_bars(control_via_db, sym, per, bars):
             return {"ok": False, "error": "写入 K 线表失败。"}
         return {"ok": True, "count": len(bars), "message": f"Backfilled {len(bars)} bar(s)."}
+    except IBConnectionDroppedError:
+        raise
     except Exception as e:
         logger.warning("run_one_backfill failed: %s", e, exc_info=True)
         return {"ok": False, "error": str(e)}

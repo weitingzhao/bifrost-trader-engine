@@ -78,22 +78,16 @@ def _fail_with_traceback(exc: BaseException, prefix: str = "", verbose: bool = F
 
 
 def check_config(config_path: str, verbose: bool = False) -> tuple[bool, str]:
-    """TC-1-R-H1-3: when status.sink=postgres, connection params must be present."""
+    """TC-1-R-H1-3: PostgreSQL connection params must be present."""
     try:
         import yaml
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except Exception as e:
         return False, _fail_with_traceback(e, "Config load: ", verbose)
-    status = config.get("status") or {}
-    sink = status.get("sink")
-    if not sink:
-        return True, "ok (sink disabled)"
-    if sink != "postgres":
-        return False, f"status.sink must be 'postgres' (got {sink!r})"
-    pg = status.get("postgres") or {}
+    pg = config.get("postgres") or {}
     if not pg and not os.environ.get("PGHOST"):
-        return False, "status.postgres or PGHOST required when sink=postgres"
+        return False, "postgres or PGHOST required"
     return True, "ok"
 
 
@@ -130,8 +124,7 @@ def check_pg_schema(config_path: str, verbose: bool = False) -> tuple[bool, str]
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
-        status = config.get("status") or {}
-        pg = status.get("postgres") or {}
+        pg = config.get("postgres") or {}
         # Database: prefer config (support database, Database, db) then env then default
         db_from_config = pg.get("database") or pg.get("Database") or pg.get("db")
         if not db_from_config and pg:
@@ -150,7 +143,7 @@ def check_pg_schema(config_path: str, verbose: bool = False) -> tuple[bool, str]
             "connect_timeout": 3,
         }
         if verbose and pg:
-            print(f"  [PostgreSQL]  (verbose) status.postgres keys: {list(pg.keys())}, database from config: {db_from_config!r}")
+            print(f"  [PostgreSQL]  (verbose) postgres keys: {list(pg.keys())}, database from config: {db_from_config!r}")
         # So user can see why DBeaver works but script fails (e.g. different database name)
         print(f"  [PostgreSQL]  DB: config={config_path!s}, host={params['host']}, database={params['dbname']!r} ({db_source}), user={params['user']!r}")
         conn = psycopg2.connect(**params)
@@ -159,7 +152,7 @@ def check_pg_schema(config_path: str, verbose: bool = False) -> tuple[bool, str]
         hint = ""
         if "pg_hba.conf" in err_msg and "database" in err_msg:
             hint = (
-                "\n  Tip: This script uses the database name from config (status.postgres.database) or PGDATABASE. "
+                "\n  Tip: This script uses the database name from config (postgres.database) or PGDATABASE. "
                 "If DBeaver uses a different database (e.g. options_db), ensure your config has that same database, "
                 "or set PGDATABASE=options_db when running this script."
             )
@@ -513,7 +506,7 @@ def main() -> int:
 
     # 1. Config
     ok, msg = check_config(config_path, verbose=verbose)
-    results.append(("Config", "status.sink + postgres", ok, msg))
+    results.append(("Config", "postgres", ok, msg))
 
     # 2. Sink interface
     ok, msg = check_sink_interface(verbose=verbose)

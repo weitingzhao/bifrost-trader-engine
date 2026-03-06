@@ -268,7 +268,7 @@ def release_pg_locks_for_tables(
 
 
 def _get_conn_params(config: dict) -> dict:
-    """Build connection params from status.postgres, with env overrides."""
+    """Build connection params from root postgres config, with env overrides."""
     pg = config.get("postgres", {}) or {}
     # Database: support database, Database, db, or any key that lower() in ("database", "db")
     db = pg.get("database") or pg.get("Database") or pg.get("db")
@@ -651,10 +651,12 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_min_symbol_expiry_strike_right_period_time ON option_min (symbol, expiry, strike, option_right, period, bar_time DESC)"
         )
-        _log("wishlist, bars_backfill_jobs")
+        # Release earlier DDL locks before the final watchlist/backfill DDL step.
+        conn.commit()
+        _log("watchlist, bars_backfill_jobs")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS wishlist (
+            CREATE TABLE IF NOT EXISTS watchlist (
                 id bigserial PRIMARY KEY,
                 contract_key text NOT NULL UNIQUE,
                 symbol text,
@@ -669,7 +671,7 @@ def _ensure_tables(conn, log=None) -> None:
         """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS wishlist_contract_key ON wishlist (contract_key)"
+            "CREATE INDEX IF NOT EXISTS watchlist_contract_key ON watchlist (contract_key)"
         )
         # 阶段 3 非实时拉取 Worker：backfill 任务队列表（见 docs/DATABASE.md §2.x bars_backfill_jobs）
         cur.execute(
@@ -1454,16 +1456,16 @@ class PostgreSQLSink(StatusSink):
             logger.debug("get_ib_connection_config failed: %s", e)
             return None
 
-    def get_wishlist_stk_symbols(self) -> List[str]:
-        """Return distinct symbol strings from wishlist where sec_type is STK (or null/empty).
-        Used by daemon to subscribe to market data for Wishlist stocks only (R-RM*)."""
+    def get_watchlist_stk_symbols(self) -> List[str]:
+        """Return distinct symbol strings from watchlist where sec_type is STK (or null/empty).
+        Used by daemon to subscribe to market data for Watchlist stocks only (R-RM*)."""
         if not self._ensure_conn():
             return []
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT DISTINCT TRIM(symbol) AS sym FROM wishlist
+                    SELECT DISTINCT TRIM(symbol) AS sym FROM watchlist
                     WHERE symbol IS NOT NULL AND TRIM(symbol) != ''
                     AND (sec_type IS NULL OR UPPER(TRIM(sec_type)) = 'STK')
                     ORDER BY sym
@@ -1472,7 +1474,7 @@ class PostgreSQLSink(StatusSink):
                 rows = cur.fetchall()
             return [str(r[0]) for r in rows if r and r[0]]
         except Exception as e:
-            logger.debug("get_wishlist_stk_symbols failed: %s", e)
+            logger.debug("get_watchlist_stk_symbols failed: %s", e)
             self._conn.rollback()
             return []
 

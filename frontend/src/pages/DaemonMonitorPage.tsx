@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Operation, RealtimeQuote, StatusResponse } from '../types'
-import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postCeleryConnect, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchQuotes, subscribeQuotes, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, trimCeleryLogs } from '../api'
+import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchQuotes, subscribeQuotes, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchBarsBenchmark, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 
 function fmtTs(ts: number | null | undefined): string {
   if (ts == null) return '--'
@@ -18,6 +19,7 @@ function fmtUsd(n: number | null | undefined): string {
   }).format(n)
 }
 
+/** 控制台日志行解析：提取级别与可选的时间前缀，用于控制台着色 */
 /** 根据 ts (Unix 秒) 与当前时间差显示：秒 → 分钟 → 小时 → 天 */
 function fmtSince(ts: number | null | undefined): string {
   if (ts == null || !Number.isFinite(ts)) return '—'
@@ -130,17 +132,28 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const [systemTab, setSystemTab] = useState<'daemon' | 'monitor' | 'celery' | 'strategy'>('daemon')
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [quoteTick, setQuoteTick] = useState(0)
-  const [celeryConsoleLines, setCeleryConsoleLines] = useState<string[]>([])
-  const [celeryConsoleStatus, setCeleryConsoleStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
-  const [celeryConsoleHeightPx, setCeleryConsoleHeightPx] = useState(260)
-  const [celeryConsoleMaxLines, setCeleryConsoleMaxLines] = useState(500)
-  const celeryConsoleMaxLinesRef = useRef(500)
+  const [celerySectionTab, setCelerySectionTab] = useState<'daemon-console' | 'server-console' | 'console' | 'operations' | 'events'>('daemon-console')
+  const [benchmarks, setBenchmarks] = useState<Record<string, { bar_time: number; close: number }>>({})
   const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTickerMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const monitorCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const celeryCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const celeryConsoleRef = useRef<HTMLPreElement | null>(null)
+  const daemonConsole = useLogConsole({
+    fetchLogs: fetchDaemonLogs,
+    subscribeLogs: subscribeDaemonLogs,
+    clearLogs: clearDaemonLogs,
+  })
+  const serverConsole = useLogConsole({
+    fetchLogs: fetchServerLogs,
+    subscribeLogs: subscribeServerLogs,
+    clearLogs: clearServerLogs,
+  })
+  const celeryConsole = useLogConsole({
+    fetchLogs: fetchCeleryLogs,
+    subscribeLogs: subscribeCeleryLogs,
+    clearLogs: clearCeleryLogs,
+  })
 
   const j = status
   const hb = j?.daemon_heartbeat
@@ -227,67 +240,6 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     return () => clearInterval(id)
   }, [quotesCount])
 
-  useEffect(() => {
-    celeryConsoleMaxLinesRef.current = celeryConsoleMaxLines
-  }, [celeryConsoleMaxLines])
-
-  // Celery Console: fetch initial lines + SSE stream (Redis Stream, Scheme B); trim to max lines
-  useEffect(() => {
-    let unsub: (() => void) | null = null
-    const maxLines = celeryConsoleMaxLinesRef.current
-    setCeleryConsoleStatus('connecting')
-    fetchCeleryLogs(maxLines)
-      .then((res) => {
-        const lines = res.lines ?? []
-        const trimmed = lines.length > maxLines ? lines.slice(-maxLines) : lines
-        setCeleryConsoleLines(trimmed)
-        setCeleryConsoleStatus(res.error ? 'error' : 'connected')
-        if (lines.length > maxLines) {
-          trimCeleryLogs(maxLines).catch(() => {})
-        }
-        if (!res.error) {
-          unsub = subscribeCeleryLogs(
-            (line) => {
-              const limit = celeryConsoleMaxLinesRef.current
-              setCeleryConsoleLines((prev) => [...prev, line].slice(-limit))
-            },
-            () => setCeleryConsoleStatus('error'),
-          )
-        }
-      })
-      .catch(() => setCeleryConsoleStatus('error'))
-    return () => {
-      if (unsub) unsub()
-    }
-  }, [])
-
-  // Auto-scroll Celery console to bottom when new lines arrive
-  useEffect(() => {
-    const el = celeryConsoleRef.current
-    const container = el?.parentElement
-    if (container) container.scrollTop = container.scrollHeight
-  }, [celeryConsoleLines.length])
-
-  const onCeleryConsoleResizeStart = (e: React.MouseEvent) => {
-    if (e.button !== 0) return
-    const startY = e.clientY
-    const startHeight = celeryConsoleHeightPx
-    const onMove = (ev: MouseEvent) => {
-      const next = Math.min(600, Math.max(120, startHeight + (ev.clientY - startY)))
-      setCeleryConsoleHeightPx(next)
-    }
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-    document.body.style.cursor = 'ns-resize'
-    document.body.style.userSelect = 'none'
-  }
-
   let daemonLabel = 'Not running (or single-process mode)'
   let daemonHint = 'Run run_engine.py on the trading machine to see "Running" here'
   let hedgeLabel = (j?.status?.ts != null && nowSec - (j.status.ts as number) < 90) ? 'Running (single-process)' : 'Not running'
@@ -362,8 +314,6 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const celeryWorkerIbClientId = j?.celery_worker_ib_client_id ?? null
   /** 与 Monitor 的轮询方式一致：仅以 GET /status 时对 Celery 的 inspect ping 结果判断 Worker 是否存活，不依赖“近期 job 更新” */
   const celeryWorkersAlive = (j?.celery_workers?.length ?? 0) > 0
-  const nowSecForCelery = Date.now() / 1000
-  const celeryWorkerRecent = celeryLastTs != null && Number.isFinite(celeryLastTs) && (nowSecForCelery - celeryLastTs) < 600
   const celeryLamp =
     !celeryBrokerConnected ? 'red' : celeryWorkersAlive ? 'green' : 'yellow'
 
@@ -378,8 +328,28 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const strategyGroupLamp = suspended ? 'red' : 'green'
 
   const s = j?.status ?? {}
-  /** Symbols to show: from status (Wishlist STK + strategy symbol) first; merge with any symbols that have quote data. */
-  const watchlistSymbols = [...new Set([...(j?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort()
+  /** Symbols to show: from status (Watchlist STK + strategy symbol) first; merge with any symbols that have quote data. */
+  const watchlistSymbols = useMemo(
+    () => [...new Set([...(j?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
+    [j?.subscribed_tickers, quotesMap],
+  )
+  useEffect(() => {
+    if (watchlistSymbols.length === 0) {
+      setBenchmarks({})
+      return
+    }
+    let cancelled = false
+    fetchBarsBenchmark(watchlistSymbols)
+      .then((r) => {
+        if (!cancelled) setBenchmarks(r.benchmarks ?? {})
+      })
+      .catch(() => {
+        if (!cancelled) setBenchmarks({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [watchlistSymbols.join(',')])
   /** Aggregate current stock positions per symbol for Watchlist (qty, cost, pnl). */
   const accountsList = j?.accounts ?? []
   const watchlistRows = watchlistSymbols.map((symbol) => {
@@ -402,11 +372,18 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     }
     const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
     const quote = quotesMap[symbol]
-    let pnl: number | null = null
-    if (quote && avgCost != null && Number.isFinite(quote.last) && qty !== 0) {
-      pnl = (quote.last - avgCost) * qty
+    const bench = benchmarks[symbol]
+    let changePct: number | null = null
+    let pnlVsBench: number | null = null
+    if (bench && quote && Number.isFinite(quote.last) && Number.isFinite(bench.close) && bench.close > 0) {
+      changePct = ((quote.last - bench.close) / bench.close) * 100
+      if (qty != null && Number.isFinite(qty)) pnlVsBench = (quote.last - bench.close) * qty
     }
-    return { symbol, quote, qty: qty || null, avgCost, pnl }
+    const pnlCost =
+      quote && avgCost != null && Number.isFinite(quote.last) && qty != null && Number.isFinite(qty) && qty !== 0
+        ? (quote.last - avgCost) * qty
+        : null
+    return { symbol, quote, qty: qty || null, avgCost, changePct, pnlVsBench, pnlCost }
   })
   const statusSummaryItems = STATUS_FIELDS.map(([k, label]) => {
     let v: string | number | undefined = (s as Record<string, unknown>)[k] as string | number | undefined
@@ -531,27 +508,6 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
     scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
   }
 
-  const onCeleryConnect = async () => {
-    setMsg(setCeleryCtrlMsg, 'Requesting Worker IB connection…', false)
-    const res = await postCeleryConnect()
-    setMsg(
-      setCeleryCtrlMsg,
-      res.ok ? 'Worker connect requested; status will update in a few seconds. (Ensure Celery worker is running: python scripts/run_celery.py)' : (res.error ?? ''),
-      !res.ok,
-    )
-    if (res.ok) {
-      loadStatus()
-      // Poll status every 2s for 12s so UI updates when Worker connects (worker polls every 5s)
-      for (let i = 0; i < 6; i++) {
-        await new Promise((r) => setTimeout(r, 2000))
-        loadStatus()
-        if (i === 2) scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
-      }
-    } else {
-      scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
-    }
-  }
-
   return (
     <>
       <div className="card process-section system-tabs-wrapper">
@@ -577,8 +533,8 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             className={`system-tab ${systemTab === 'monitor' ? 'active' : ''}`}
             onClick={() => setSystemTab('monitor')}
           >
-            <span className={`lamp lamp-sm ${monitorLamp}`} title="Monitor status" aria-hidden />
-            <span>Monitor</span>
+            <span className={`lamp lamp-sm ${monitorLamp}`} title="Management status" aria-hidden />
+            <span>Management</span>
           </button>
           <button
             type="button"
@@ -699,15 +655,21 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
               <span className="daemon-group-title">Database</span>
             </div>
             <div className="daemon-group-body">
-              <p className="section-hint">
-                Redis: {!hb?.daemon_alive ? '—' : hb.redis_quotes_connected ? 'Connected (writes quotes and publishes)' : 'Not connected or not configured'}
-              </p>
+              {!hb?.daemon_alive ? (
+                <p className="section-hint">Redis: —</p>
+              ) : hb.redis_quotes_connected ? (
+                <p className="section-hint countdown-line">
+                  Redis: <span className="countdown-num">Connected</span> <span>(writes quotes and publishes)</span>
+                </p>
+              ) : (
+                <p className="section-hint">Redis: Not connected or not configured</p>
+              )}
             </div>
           </div>
           <div className="daemon-group">
             <div className="daemon-group-header">
               <span className="daemon-group-title">Event Subscribe</span>
-              <InfoTooltip text="Daemon IB event subscription status: ticker (Wishlist STK), positions, fills, commission. Green = subscribed; red = not subscribed when daemon is running." />
+              <InfoTooltip text="Daemon IB event subscription status: ticker (Watchlist STK), positions, fills, commission. Green = subscribed; red = not subscribed when daemon is running." />
             </div>
             <div className="daemon-group-body">
               <ul className="event-subscribe-list">
@@ -780,7 +742,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
               <div className={`lamp lamp-sm ${monitorLamp}`} title="Monitor status lamp" />
             </div>
             <div>
-              <h2 className="daemon-card-title">Monitor</h2>
+              <h2 className="daemon-card-title">Management</h2>
               <div>
                 <strong>Status: {j ? `${monitorEnabled ? 'Running' : 'Stopped'} (${monitorSelfCheckText})` : 'Fetch failed'}</strong>
                 {j && monitorBlockReasons && monitorBlockReasons !== 'None' ? ` Block reasons: ${monitorBlockReasons}` : ''}
@@ -808,7 +770,17 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             </div>
             <div className="daemon-group-body">
               <p className="section-hint">
-                <strong>Status: {j ? `${monitorEnabled ? 'Running' : 'Stopped'} (${monitorSelfCheckText})` : 'Fetch failed'}</strong>
+                <strong>
+                  Status:{' '}
+                  {j ? (
+                    <>
+                      {monitorEnabled ? <span className="countdown-num">Running</span> : 'Stopped'}{' '}
+                      <span>({monitorSelfCheckText})</span>
+                    </>
+                  ) : (
+                    'Fetch failed'
+                  )}
+                </strong>
                 {j && monitorBlockReasons && monitorBlockReasons !== 'None' ? ` Block reasons: ${monitorBlockReasons}` : ''}
               </p>
               {healthCountdownSec != null ? (
@@ -878,9 +850,16 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
               <span className="daemon-group-title">Database</span>
             </div>
             <div className="daemon-group-body">
-              <p className="section-hint">
-                Redis: {!monitorEnabled ? '—' : j?.redis_quotes_connected ? 'Connected (GET /quotes available)' : 'Not connected or not configured'}
-              </p>
+              {!monitorEnabled ? (
+                <p className="section-hint">Redis: —</p>
+              ) : j?.redis_quotes_connected ? (
+                <p className="section-hint countdown-line">
+                  Redis: <span className="countdown-num">Connected</span>{' '}
+                  <InfoTooltip text="GET /quotes available" />
+                </p>
+              ) : (
+                <p className="section-hint">Redis: Not connected or not configured</p>
+              )}
             </div>
           </div>
         </div>
@@ -922,12 +901,16 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             <div className="daemon-group-header">
               <div className={`lamp lamp-sm ${celeryBrokerConnected ? 'green' : 'red'}`} title="Celery broker (Redis) status" />
               <span className="daemon-group-title">Broker (Redis)</span>
-              <InfoTooltip text="Celery broker and result backend. Same Redis as config.redis (db 1 for Celery). Required for queued bars backfill. Worker (Bars Backfill) status is shown in Recent operations." />
+              <InfoTooltip text="Celery broker and result backend. Same Redis as config.redis (db 1 for Celery). Required for queued bars backfill." />
             </div>
             <div className="daemon-group-body">
-              <p className="section-hint">
-                {celeryBrokerConnected ? 'Connected (bars queue available)' : 'Not connected or Redis not configured'}
-              </p>
+              {celeryBrokerConnected ? (
+                <p className="section-hint countdown-line">
+                  <span className="countdown-num">Connected</span> <span>(bars queue available)</span>
+                </p>
+              ) : (
+                <p className="section-hint">Not connected or Redis not configured</p>
+              )}
             </div>
           </div>
           <div className="daemon-group">
@@ -943,6 +926,12 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                   : 'None (start worker: python scripts/run_celery.py)'}
               </p>
               <p className="section-hint countdown-line">
+                Last job activity:{' '}
+                {celeryLastTs != null && Number.isFinite(celeryLastTs)
+                  ? `${fmtTs(celeryLastTs)} (${fmtSince(celeryLastTs)} ago)`
+                  : 'No job activity yet'}
+              </p>
+              <p className="section-hint countdown-line">
                 IB Client ID:{' '}
                 {celeryWorkerIbConnected ? (
                   <span className="countdown-num">Connected @ {celeryWorkerIbClientId ?? '—'}</span>
@@ -953,23 +942,6 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                   </>
                 )}
               </p>
-              <div className="controls" style={{ marginTop: '0.25rem' }}>
-                <button
-                  type="button"
-                  className="btn-resume"
-                  disabled={celeryWorkerIbConnected || (j?.celery_workers?.length ?? 0) === 0}
-                  title={
-                    (j?.celery_workers?.length ?? 0) === 0
-                      ? 'Start worker first (python scripts/run_celery.py); IB connection runs inside the worker process'
-                      : celeryWorkerIbConnected
-                        ? 'Already connected'
-                        : 'Request Worker to connect to IB (Settings → Celery worker_market)'
-                  }
-                  onClick={onCeleryConnect}
-                >
-                  Connect
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -1034,13 +1006,10 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           <div>
             <h2 className="daemon-card-title page-title-with-tooltip">
               Watchlist
-              <InfoTooltip text="Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Wishlist STK + strategy symbol. Requires Redis and daemon Event subscription." />
+              <InfoTooltip text={j?.redis_quotes_connected
+                ? `Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. SSE connected, ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
+                : 'Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. Redis not connected or monitor not subscribed; check config and daemon Event subscription.'} />
             </h2>
-            <p className="section-hint" style={{ margin: 0 }}>
-              {j?.redis_quotes_connected
-                ? `SSE connected, ${watchlistSymbols.length} symbol(s) (prices & PnL update when stream arrives)`
-                : 'Redis not connected or monitor not subscribed; check config and daemon Event subscription.'}
-            </p>
           </div>
         </div>
         <div className="realtime-quotes-table-wrap">
@@ -1050,7 +1019,10 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                 <th>Symbol</th>
                 <th>Qty</th>
                 <th>Cost</th>
-                <th>PnL</th>
+                <th>Daily %</th>
+                <th>Daily $</th>
+                <th>SINCE %</th>
+                <th>SINCE $</th>
                 <th>Last</th>
                 <th>Bid</th>
                 <th>Ask</th>
@@ -1060,20 +1032,49 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             <tbody>
               {watchlistRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>No symbols in watchlist (add symbols in Wishlist or ensure daemon is running)</td>
+                  <td colSpan={11}>No symbols in watchlist (add symbols in Watchlist or ensure daemon is running)</td>
                 </tr>
               ) : (
                 watchlistRows.map((row) => {
-                  const { symbol, quote: q, qty, avgCost, pnl } = row
+                  const { symbol, quote: q, qty, avgCost, changePct, pnlVsBench, pnlCost } = row
                   return (
                     <tr key={symbol}>
                       <td><strong>{symbol}</strong></td>
                       <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
                       <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
                       <td className="realtime-quote-num">
-                        {pnl != null && Number.isFinite(pnl) ? (
-                          <span className={pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsd(pnl)}
+                        {changePct != null && Number.isFinite(changePct) ? (
+                          <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
+                            {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="realtime-quote-num">
+                        {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
+                          <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
+                            {fmtUsd(pnlVsBench)}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="realtime-quote-num">
+                        {(() => {
+                          if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || !q?.last || !Number.isFinite(q.last)) return '—'
+                          const sincePct = ((q.last - avgCost) / avgCost) * 100
+                          return (
+                            <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
+                              {sincePct >= 0 ? '+' : ''}{sincePct.toFixed(2)}%
+                            </span>
+                          )
+                        })()}
+                      </td>
+                      <td className="realtime-quote-num">
+                        {pnlCost != null && Number.isFinite(pnlCost) ? (
+                          <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
+                            {fmtUsd(pnlCost)}
                           </span>
                         ) : (
                           '—'
@@ -1090,321 +1091,309 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div className="card card-operations card-event-subscribe">
-        <h2 className="daemon-card-title page-title-with-tooltip">
-          Event Subscribe
-          <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Wishlist STK + strategy symbol)." />
-          {hb?.daemon_alive != null && hb?.daemon_alive && (
-            <button
-              type="button"
-              className="btn-resume"
-              style={{ marginLeft: '0.5rem', verticalAlign: 'middle' }}
-              title="Sync Real-time ticker with Wishlist (subscribe/add, unsubscribe/remove); list updates on next heartbeat"
-              disabled={syncTickerLoading}
-              onClick={async () => {
-                setSyncTickerLoading(true)
-                try {
-                  const res = await postRefreshTickerSubscriptions()
-                  if (res.ok && typeof loadStatus === 'function') {
-                    setMsg(setSyncTickerMsg, 'Synced', false)
-                    scheduleMsgClear(setSyncTickerMsg, syncTickerMsgClearRef)
-                    setTimeout(() => loadStatus(), 1500)
-                  }
-                  if (!res.ok && res.error) setMsg(setSyncTickerMsg, res.error, true)
-                } finally {
-                  setSyncTickerLoading(false)
-                }
-              }}
-            >
-              {syncTickerLoading ? 'Syncing…' : 'Sync'}
-            </button>
-          )}
-        </h2>
-        <table className="table-operations">
-          <thead>
-            <tr>
-              <th>Subscription</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Real-time ticker</td>
-              <td>
-                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
-                <span className="event-subscribe-status-text">
-                  {hb?.daemon_alive && hb?.event_subscribe_ticker
-                    ? `Subscribed (${j?.subscribed_tickers?.length ?? 0} ticker${(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring)`
-                    : hb?.daemon_alive
-                      ? 'Not subscribed'
-                      : '—'}
+        {watchlistRows.length > 0 && (() => {
+          const totalCostPnl = watchlistRows.reduce((acc, row) => {
+            const v = row.pnlCost
+            return acc + (v != null && Number.isFinite(v) ? v : 0)
+          }, 0)
+          const totalCost = watchlistRows.reduce((acc, row) => {
+            const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
+            const cost = row.avgCost != null && Number.isFinite(row.avgCost) ? row.avgCost : 0
+            return acc + qty * cost
+          }, 0)
+          const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
+          const totalDailyDollar = watchlistRows.reduce((acc, row) => {
+            const v = row.pnlVsBench
+            return acc + (v != null && Number.isFinite(v) ? v : 0)
+          }, 0)
+          const sumLastQty = watchlistRows.reduce((acc, row) => {
+            const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
+            const last = row.quote?.last != null && Number.isFinite(row.quote.last) ? row.quote.last : 0
+            return acc + last * qty
+          }, 0)
+          const totalDailyDenom = sumLastQty - totalDailyDollar
+          const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar)
+            ? (totalDailyDollar / totalDailyDenom) * 100
+            : null
+          return (
+            <p className="replay-sync-hint watchlist-summary-row" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+              <span className="watchlist-summary-segment">
+                Total $:{' '}
+                <span className="watchlist-summary-value" style={{ color: totalCostPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
+                  {fmtUsd(totalCostPnl)}
                 </span>
-              </td>
-            </tr>
-            <tr>
-              <td>Position updates</td>
-              <td>
-                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
-                <span className="event-subscribe-status-text">
-                  {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+              </span>
+              {totalPct != null && Number.isFinite(totalPct) && (
+                <span className="watchlist-summary-segment">
+                  Total %:{' '}
+                  <span className="watchlist-summary-value watchlist-summary-value-pct" style={{ color: totalPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
+                    {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
+                  </span>
                 </span>
-              </td>
-            </tr>
-            <tr>
-              <td>Fill / execution report</td>
-              <td>
-                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
-                <span className="event-subscribe-status-text">
-                  {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td>Commission report</td>
-              <td>
-                <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
-                <span className="event-subscribe-status-text">
-                  {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        {syncTickerMsg.text ? (
-          <div className={`msg ${syncTickerMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
-            {syncTickerMsg.text}
-          </div>
-        ) : null}
-        {hb?.daemon_alive && hb?.event_subscribe_ticker && (
-          <div className="event-subscribe-tickers-block" style={{ marginTop: '1rem' }}>
-            <h3 className="daemon-group-title" style={{ marginBottom: '0.5rem' }}>Real-time ticker — subscribed symbols</h3>
-            <p className="section-hint" style={{ margin: 0, fontWeight: 600 }}>
-              {(j?.subscribed_tickers?.length ?? 0)} ticker{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring
+              )}
+              {(Number.isFinite(totalDailyDollar) || (totalDailyPct != null && Number.isFinite(totalDailyPct))) && (
+                <>
+                  <span className="watchlist-summary-segment">
+                    Daily $:{' '}
+                    <span className="watchlist-summary-value" style={{ color: totalDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
+                      {fmtUsd(totalDailyDollar)}
+                    </span>
+                  </span>
+                  {totalDailyPct != null && Number.isFinite(totalDailyPct) && (
+                    <span className="watchlist-summary-segment">
+                      Daily %:{' '}
+                      <span className="watchlist-summary-value watchlist-summary-value-pct" style={{ color: totalDailyPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
+                        {totalDailyPct >= 0 ? '+' : ''}{totalDailyPct.toFixed(2)}%
+                      </span>
+                    </span>
+                  )}
+                </>
+              )}
             </p>
-            <p className="section-hint" style={{ margin: '0.25rem 0 0 0' }}>
-              {j?.subscribed_tickers?.length ? j.subscribed_tickers.join(', ') : '—'}
-            </p>
-          </div>
-        )}
+          )
+        })()}
       </div>
 
       <div className="card card-operations celery-console-card">
-        <div className="celery-console-header">
-          <h2>Celery Console</h2>
-          <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center', flexShrink: 0 }}>
-            <label className="celery-console-max-lines-label" title="Keep at most this many lines; older lines are removed from display and Redis">
-              Max lines:
-              <select
-                className="celery-console-max-lines-select"
-                value={celeryConsoleMaxLines}
-                onChange={(e) => {
-                  const n = Number(e.target.value)
-                  if (!Number.isFinite(n) || n < 1) return
-                  setCeleryConsoleMaxLines(n)
-                  setCeleryConsoleLines((prev) => prev.slice(-n))
-                  trimCeleryLogs(n).catch(() => {})
-                }}
-                aria-label="Max lines to keep"
-              >
-                {[500, 1000, 2000, 5000].map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="btn-celery-console-clear"
-              onClick={() => {
-                const pre = celeryConsoleRef.current
-                if (!pre) return
-                const range = document.createRange()
-                range.selectNodeContents(pre)
-                const sel = window.getSelection()
-                if (sel) {
-                  sel.removeAllRanges()
-                  sel.addRange(range)
-                }
-              }}
-              title="Select all log text for copying"
-            >
-              Select All
-            </button>
-            <button
-              type="button"
-              className="btn-celery-console-clear"
-              onClick={async () => {
-                await clearCeleryLogs()
-                setCeleryConsoleLines([])
-              }}
-              title="Clear displayed log and Redis stream; new lines will continue to appear when Worker runs"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-        <p className="section-desc section-hint">
-          Real-time Worker log (Redis Stream). Run <code>python scripts/run_celery.py</code> to see output.
-        </p>
-        <div className="celery-console-wrap">
-          <div
-            className="celery-console-terminal"
-            role="log"
-            aria-live="polite"
-            style={{ height: celeryConsoleHeightPx, minHeight: 120, maxHeight: 600 }}
+        <div className="system-tabs" role="tablist" aria-label="Celery section" style={{ marginBottom: 'var(--space-3)' }}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={celerySectionTab === 'daemon-console'}
+            aria-controls="celery-section-panel-daemon-console"
+            id="celery-tab-daemon-console"
+            className={`system-tab ${celerySectionTab === 'daemon-console' ? 'active' : ''}`}
+            onClick={() => setCelerySectionTab('daemon-console')}
           >
-            <pre ref={celeryConsoleRef}>
-              {celeryConsoleStatus === 'connecting' && celeryConsoleLines.length === 0
-                ? 'Connecting…'
-                : celeryConsoleStatus === 'error'
-                  ? 'Unable to load (Redis/Celery broker may be down).'
-                  : celeryConsoleLines.length === 0
-                    ? 'No log lines yet. Start Worker: python scripts/run_celery.py'
-                    : celeryConsoleLines.join('\n')}
-            </pre>
-          </div>
-          <div
-            className="celery-console-resize-handle"
-            role="separator"
-            aria-label="Resize console height"
-            onMouseDown={onCeleryConsoleResizeStart}
-            title="Drag to resize height"
-          />
-          {celeryConsoleStatus !== 'idle' && celeryConsoleStatus !== 'connecting' && (
-            <p className="section-hint celery-console-status-line">
-              <span style={{ color: celeryConsoleStatus === 'connected' ? 'var(--color-lamp-green)' : 'var(--color-lamp-red)', fontWeight: 600 }}>
-                {celeryConsoleStatus === 'connected' ? '● Live' : '● Disconnected'}
-              </span>
-            </p>
-          )}
+            Daemon Console
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={celerySectionTab === 'server-console'}
+            aria-controls="celery-section-panel-server-console"
+            id="celery-tab-server-console"
+            className={`system-tab ${celerySectionTab === 'server-console' ? 'active' : ''}`}
+            onClick={() => setCelerySectionTab('server-console')}
+          >
+            Server Console
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={celerySectionTab === 'console'}
+            aria-controls="celery-section-panel-console"
+            id="celery-tab-console"
+            className={`system-tab ${celerySectionTab === 'console' ? 'active' : ''}`}
+            onClick={() => setCelerySectionTab('console')}
+          >
+            Celery Console
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={celerySectionTab === 'operations'}
+            aria-controls="celery-section-panel-operations"
+            id="celery-tab-operations"
+            className={`system-tab ${celerySectionTab === 'operations' ? 'active' : ''}`}
+            onClick={() => setCelerySectionTab('operations')}
+          >
+            Recent operations
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={celerySectionTab === 'events'}
+            aria-controls="celery-section-panel-events"
+            id="celery-tab-events"
+            className={`system-tab ${celerySectionTab === 'events' ? 'active' : ''}`}
+            onClick={() => setCelerySectionTab('events')}
+          >
+            Event Subscribe
+          </button>
         </div>
-      </div>
-
-      <div className="card card-operations">
-        <h2>Recent operations</h2>
-        <div className="daemon-groups" style={{ marginBottom: '1rem' }}>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${celeryWorkersAlive ? (celeryWorkerRecent || celeryWorkerIbConnected ? 'green' : 'yellow') : celeryBrokerConnected ? 'yellow' : 'none'}`} title="Worker (bars backfill): alive = ping responded; green = recent job or IB connected" />
-              <span className="daemon-group-title">Worker (Bars Backfill)</span>
-              <InfoTooltip text="Task runner for bars backfill. Run: python scripts/run_celery.py. Worker maintains IB connection (Settings → Celery worker_market)." />
-            </div>
-            <div className="daemon-group-body">
-              <p className="section-hint countdown-line">
-                Broker (Redis):{' '}
-                {celeryBrokerConnected ? (
-                  <span className="countdown-num">Connected</span>
-                ) : (
-                  'Not connected'
-                )}
-              </p>
-              <p className="section-hint countdown-line">
-                Last job activity:{' '}
-                {celeryLastTs != null && Number.isFinite(celeryLastTs)
-                  ? `${fmtTs(celeryLastTs)} (${fmtSince(celeryLastTs)} ago)`
-                  : 'No job activity yet'}
-              </p>
-              <p className="section-hint countdown-line">
-                IB Client ID:{' '}
-                {celeryWorkerIbConnected ? (
-                  <span className="countdown-num">Connected @ {celeryWorkerIbClientId ?? '—'}</span>
-                ) : (
-                  'Not connected'
-                )}
-              </p>
-            </div>
+        {celerySectionTab === 'daemon-console' && (
+          <div id="celery-section-panel-daemon-console" role="tabpanel" aria-labelledby="celery-tab-daemon-console"
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            <LogConsolePanel
+              controller={daemonConsole}
+              loadingText="Connecting…"
+              errorText="Unable to load (Redis may be down)."
+              emptyText="No log lines yet. Start daemon: python scripts/run_engine.py"
+              infoTooltipText="Real-time daemon log (Redis Stream). Run `python scripts/run_engine.py` to see output."
+              resizeAriaLabel="Resize daemon console height"
+              clearTitle="Clear displayed log and Redis stream; new lines will continue to appear when daemon runs"
+            />
           </div>
-        </div>
-        <table className="table-operations">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Type</th>
-              <th>Side</th>
-              <th>Qty</th>
-              <th>Price</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {operations.length === 0 ? (
-              <tr>
-                <td colSpan={6}>None</td>
-              </tr>
-            ) : (
-              operations.map((op, i) => (
-                <tr key={`${op.ts}-${i}`}>
-                  <td>{fmtTs(op.ts)}</td>
-                  <td>{op.type ?? ''}</td>
-                  <td>{op.side ?? ''}</td>
-                  <td>{op.quantity ?? ''}</td>
-                  <td>{fmtUsd(op.price)}</td>
-                  <td>{op.state_reason ?? ''}</td>
+        )}
+        {celerySectionTab === 'server-console' && (
+          <div id="celery-section-panel-server-console" role="tabpanel" aria-labelledby="celery-tab-server-console"
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            <LogConsolePanel
+              controller={serverConsole}
+              loadingText="Connecting…"
+              errorText="Unable to load (Redis may be down)."
+              emptyText="No log lines yet. Start server: python scripts/run_server.py"
+              infoTooltipText="Real-time server log (Redis Stream). Run `python scripts/run_server.py` to see output."
+              resizeAriaLabel="Resize server console height"
+              clearTitle="Clear displayed log and Redis stream; new lines will continue to appear when server runs"
+            />
+          </div>
+        )}
+        {celerySectionTab === 'console' && (
+          <div id="celery-section-panel-console" role="tabpanel" aria-labelledby="celery-tab-console"
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            <LogConsolePanel
+              controller={celeryConsole}
+              loadingText="Connecting…"
+              errorText="Unable to load (Redis/Celery broker may be down)."
+              emptyText="No log lines yet. Start Worker: python scripts/run_celery.py"
+              infoTooltipText="Real-time Worker log (Redis Stream). Run `python scripts/run_celery.py` to see output."
+              resizeAriaLabel="Resize console height"
+              clearTitle="Clear displayed log and Redis stream; new lines will continue to appear when Worker runs"
+            />
+          </div>
+        )}
+        {celerySectionTab === 'operations' && (
+          <div id="celery-section-panel-operations" role="tabpanel" aria-labelledby="celery-tab-operations"
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            <table className="table-operations">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Type</th>
+                  <th>Side</th>
+                  <th>Qty</th>
+                  <th>Price</th>
+                  <th>Reason</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* IB Pacing：历史数据用量与边界，显示在 Recent operations 下方 */}
-      <div className="card card-operations" style={{ marginTop: '1rem' }}>
-        <h2>IB Pacing (Market Data Usage)</h2>
-        <div className="daemon-groups" style={{ marginBottom: '0.5rem' }}>
-          {j?.ib_pacing_usage ? (
-            <>
-              <div className="daemon-group">
-                <div className="daemon-group-header">
-                  <div
-                    className={`lamp lamp-sm ${j.ib_pacing_usage.usage?.throttled ? 'yellow' : 'green'}`}
-                    title={j.ib_pacing_usage.usage?.throttled ? 'Currently throttled' : 'Within limits'}
-                  />
-                  <span className="daemon-group-title">10‑minute window</span>
-                  <InfoTooltip text="IB historical data: requests in the last 10 minutes vs configured limit. Throttled when limit reached; Worker/API will wait before next request." />
-                </div>
-                <div className="daemon-group-body">
-                  <p className="section-hint countdown-line">
-                    Requests (last 10 min):{' '}
-                    <strong>
-                      {j.ib_pacing_usage.usage?.requests_last_10min ?? '—'} / {j.ib_pacing_usage.config?.max_requests_per_10min ?? 60}
-                    </strong>
-                  </p>
-                  {j.ib_pacing_usage.usage?.throttled && (
-                    <p className="section-hint countdown-line">
-                      Throttled: {j.ib_pacing_usage.usage?.throttle_reason ?? 'limit reached'}
-                      {j.ib_pacing_usage.usage?.next_request_allowed_ts != null && Number.isFinite(j.ib_pacing_usage.usage.next_request_allowed_ts) && (
-                        <> — Next request in <strong>{Math.max(0, Math.ceil((j.ib_pacing_usage.usage.next_request_allowed_ts as number) - Date.now() / 1000))}s</strong></>
-                      )}
-                    </p>
-                  )}
-                  <p className="section-hint countdown-line">
-                    Same-request cooldown: <strong>{j.ib_pacing_usage.config?.min_interval_identical_sec ?? 15}s</strong>
-                  </p>
-                </div>
-              </div>
-              {j.ib_pacing_usage.last_by_key && Object.keys(j.ib_pacing_usage.last_by_key).length > 0 && (
-                <div className="daemon-group" style={{ marginTop: '0.5rem' }}>
-                  <div className="daemon-group-header">
-                    <span className="daemon-group-title">Recent keys (symbol|period|duration)</span>
-                  </div>
-                  <div className="daemon-group-body">
-                    <p className="section-hint" style={{ margin: 0, fontSize: '0.85rem' }}>
-                      {Object.entries(j.ib_pacing_usage.last_by_key)
-                        .slice(0, 5)
-                        .map(([key, ts]) => `${key} @ ${fmtTs(ts)}`)
-                        .join(' · ')}
-                    </p>
-                  </div>
-                </div>
+              </thead>
+              <tbody>
+                {operations.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>None</td>
+                  </tr>
+                ) : (
+                  operations.map((op, i) => (
+                    <tr key={`${op.ts}-${i}`}>
+                      <td>{fmtTs(op.ts)}</td>
+                      <td>{op.type ?? ''}</td>
+                      <td>{op.side ?? ''}</td>
+                      <td>{op.quantity ?? ''}</td>
+                      <td>{fmtUsd(op.price)}</td>
+                      <td>{op.state_reason ?? ''}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {celerySectionTab === 'events' && (
+          <div id="celery-section-panel-events" role="tabpanel" aria-labelledby="celery-tab-events"
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            <div className="daemon-card-title page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+              Event Subscribe
+              <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Watchlist STK + strategy symbol)." />
+              {hb?.daemon_alive != null && hb?.daemon_alive && (
+                <button
+                  type="button"
+                  className="btn-resume"
+                  style={{ marginLeft: '0.5rem', verticalAlign: 'middle' }}
+                  title="Sync Real-time ticker with Watchlist (subscribe/add, unsubscribe/remove); list updates on next heartbeat"
+                  disabled={syncTickerLoading}
+                  onClick={async () => {
+                    setSyncTickerLoading(true)
+                    try {
+                      const res = await postRefreshTickerSubscriptions()
+                      if (res.ok && typeof loadStatus === 'function') {
+                        setMsg(setSyncTickerMsg, 'Synced', false)
+                        scheduleMsgClear(setSyncTickerMsg, syncTickerMsgClearRef)
+                        setTimeout(() => loadStatus(), 1500)
+                      }
+                      if (!res.ok && res.error) setMsg(setSyncTickerMsg, res.error, true)
+                    } finally {
+                      setSyncTickerLoading(false)
+                    }
+                  }}
+                >
+                  {syncTickerLoading ? 'Syncing…' : 'Sync'}
+                </button>
               )}
-            </>
-          ) : (
-            <p className="section-hint" style={{ margin: 0 }}>
-              Not available (pacing not configured or Redis unavailable). See docs/plans/ib-pacing-implementation-plan.md.
-            </p>
-          )}
-        </div>
+            </div>
+            <table className="table-operations">
+              <thead>
+                <tr>
+                  <th>Subscription</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Real-time ticker</td>
+                  <td>
+                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
+                    <span className="event-subscribe-status-text">
+                      {hb?.daemon_alive && hb?.event_subscribe_ticker
+                        ? `Subscribed (${j?.subscribed_tickers?.length ?? 0} ticker${(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring)`
+                        : hb?.daemon_alive
+                          ? 'Not subscribed'
+                          : '—'}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Position updates</td>
+                  <td>
+                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
+                    <span className="event-subscribe-status-text">
+                      {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Fill / execution report</td>
+                  <td>
+                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
+                    <span className="event-subscribe-status-text">
+                      {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Commission report</td>
+                  <td>
+                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
+                    <span className="event-subscribe-status-text">
+                      {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            {syncTickerMsg.text ? (
+              <div className={`msg ${syncTickerMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
+                {syncTickerMsg.text}
+              </div>
+            ) : null}
+            {hb?.daemon_alive && hb?.event_subscribe_ticker && (
+              <div className="event-subscribe-tickers-block" style={{ marginTop: '1rem' }}>
+                <h3 className="daemon-group-title" style={{ marginBottom: '0.5rem' }}>Real-time ticker — subscribed symbols</h3>
+                <p className="section-hint" style={{ margin: 0, fontWeight: 600 }}>
+                  {(j?.subscribed_tickers?.length ?? 0)} ticker{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring
+                </p>
+                <p className="section-hint" style={{ margin: '0.25rem 0 0 0' }}>
+                  {j?.subscribed_tickers?.length ? j.subscribed_tickers.join(', ') : '—'}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
   )

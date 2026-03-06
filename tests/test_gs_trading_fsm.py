@@ -12,7 +12,6 @@ from src.core.state.enums import TradingState
 def minimal_config():
     return {
         "ib": {"host": "127.0.0.1", "port": 4001},
-        "symbol": "NVDA",
         "greeks": {"risk_free_rate": 0.05, "volatility": 0.35},
         "gates": {
             "structure": {"min_dte": 21, "max_dte": 35, "atm_band_pct": 0.03},
@@ -38,13 +37,17 @@ def minimal_config():
     }
 
 
+def _nvda_positions():
+    return [{"contract": {"symbol": "NVDA", "secType": "STK"}, "position": 0}]
+
+
 @pytest.mark.asyncio
 async def test_handle_connected_bootstraps_trading_fsm(minimal_config):
     """After _handle_connected, TradingFSM has left BOOT (START/SYNCED applied)."""
     app = GsTrading(minimal_config)
     app.connector = AsyncMock()
     app.connector.is_connected = True
-    app.connector.get_positions = AsyncMock(return_value=[])
+    app.connector.get_positions = AsyncMock(return_value=_nvda_positions())
     app.connector.get_underlying_price = AsyncMock(return_value=100.0)
     app.connector.get_managed_accounts = MagicMock(return_value=[])
     app.connector.get_account_summary = AsyncMock(return_value=[])
@@ -53,6 +56,7 @@ async def test_handle_connected_bootstraps_trading_fsm(minimal_config):
 
     next_state = await app._handle_connected()
     assert next_state == DaemonState.RUNNING
+    assert app.symbol == "NVDA"
     assert app._fsm_trading.state != TradingState.BOOT
     assert app._fsm_trading.state in (TradingState.IDLE, TradingState.SAFE, TradingState.SYNC)
 
@@ -63,12 +67,12 @@ async def test_eval_hedge_runs_without_error(minimal_config):
     app = GsTrading(minimal_config)
     app.connector = AsyncMock()
     app.connector.is_connected = True
-    app.connector.get_positions = AsyncMock(return_value=[])
+    app.connector.get_positions = AsyncMock(return_value=_nvda_positions())
     app.connector.get_underlying_price = AsyncMock(return_value=100.0)
     app.connector.get_managed_accounts = MagicMock(return_value=[])
     app.connector.get_account_summary = AsyncMock(return_value=[])
     app.store.set_underlying_price(100.0)
-    app.store.set_positions([], 0)
+    app.store.set_positions(_nvda_positions(), 0)
 
     await app._handle_connected()
     await app._eval_hedge()

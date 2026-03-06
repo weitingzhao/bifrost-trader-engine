@@ -201,7 +201,6 @@ gates:
 
 # 以下不变（非 gates）
 ib: { ... }
-symbol: "NVDA"
 greeks: { ... }
 order: { ... }
 ```

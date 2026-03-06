@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Start Celery worker for bars backfill.
 
-Requires Redis (config.redis or REDIS_* env) and status.postgres. Usage:
+Requires Redis (config.redis or REDIS_* env) and postgres. Usage:
 
   python scripts/run_celery.py [config_path]
 

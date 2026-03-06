@@ -1,6 +1,6 @@
 """Position book: wraps Store + get_option_legs for state space."""
 
-from typing import Any, List
+from typing import List
 
 from src.core.store import Store
 from src.positions.portfolio import OptionLeg, get_option_legs
@@ -22,6 +22,9 @@ class PositionBook:
         self._min_dte = min_dte
         self._max_dte = max_dte
         self._atm_band_pct = atm_band_pct
+
+    def set_symbol(self, symbol: str) -> None:
+        self._symbol = symbol
 
     @property
     def option_legs(self) -> List[OptionLeg]:

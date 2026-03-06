@@ -1,19 +1,17 @@
 # Gamma Scalping Engine MVP - copy to config.yaml and adjust
 
-# Status sink (Phase 1: PostgreSQL). Optional; omit to disable. See docs/DATABASE.md.
+# PostgreSQL (project default DB). See docs/DATABASE.md.
 # Optional: status.bars_skip_ib: true (or env BIFROST_BARS_SKIP_IB=1) so bars worker still connects to IB but skips fetch_bars_range (test mode).
-# status:
-#   sink: "postgres"
-#   postgres:
-#     host: "127.0.0.1"
-#     port: 5432
-#     database: "bifrost"
-#     user: "bifrost"
-#     password: ""   # or PGPASSWORD env
+# postgres:
+#   host: "127.0.0.1"
+#   port: 5432
+#   database: "bifrost"
+#   user: "bifrost"
+#   password: ""   # or PGPASSWORD env
 
 # Phase 2: control via PostgreSQL (daemon_control + daemon_run_status); Web UI at GET /
 # Status server runs on monitoring host; daemon on trading host (RE-5). Start daemon only on trading machine: python scripts/run_engine.py
-# status_server:
+# server:
 #   port: 8765
 
 # Real-time quotes (R-RM*): daemon writes to Redis; monitor subscribes and serves GET /quotes. Optional; omit or enabled: false to disable.
@@ -38,9 +36,6 @@ ib:
   port: 7497
   client_id: 1          # daemon (run_engine.py) uses this to connect to TWS
   connect_timeout: 60   # seconds; increase for slow/remote connections (default 4)
-
-# Single underlying (MVP: NVDA only)
-symbol: "NVDA"
 
 # Greeks (Black-Scholes) — model inputs, not gates
 greeks:

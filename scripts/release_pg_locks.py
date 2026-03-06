@@ -41,8 +41,7 @@ def _load_config(config_path: str) -> tuple[dict, dict]:
     import yaml
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
-    status = config.get("status") or {}
-    pg = status.get("postgres") or {}
+    pg = config.get("postgres") or {}
     return config, pg
 
 
@@ -75,7 +74,7 @@ def main() -> int:
 
     _, pg = _load_config(config_path)
     if not pg and not os.environ.get("PGHOST"):
-        print("status.postgres or PGHOST required in config.", file=sys.stderr)
+        print("postgres or PGHOST required in config.", file=sys.stderr)
         return 1
 
     params = _conn_params(pg)

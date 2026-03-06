@@ -4,7 +4,7 @@
 
 ## 已实现
 
-- **配置**：`status.postgres`（与 Phase 1 共用）、`status_server.port`（config/config.yaml 及示例）。控制通道为 PostgreSQL 表 `daemon_control`（见 DATABASE.md §2.4），无需 `control.file`。
+- **配置**：root `postgres`（与 Phase 1 共用）、`server.port`（config/config.yaml 及示例）。控制通道为 PostgreSQL 表 `daemon_control`（见 DATABASE.md §2.4），无需 `control.file`。
 - **守护进程**：heartbeat 内轮询表 `daemon_control`（poll_and_consume_control）；消费到 `stop` 即 `request_stop()`；消费到 `flatten` 仅打日志（R-C3 未实现）。
 - **独立应用**：`scripts/run_server.py`；`servers/`（reader、self_check、app）。FastAPI：GET /status（含 status_lamp、self_check、block_reasons）、GET /operations（since_ts、until_ts、type、limit）、POST /control/stop、POST /control/flatten（均向 `daemon_control` 表 INSERT）。
 - **文档**：README Phase 2 配置与 curl 示例；PLAN_NEXT_STEPS、DATABASE.md 控制通道说明；本文件验收记录。
@@ -24,7 +24,7 @@
 
 **R-C3**：本阶段未实现守护进程 flatten 逻辑；POST /control/flatten 向 daemon_control 表 INSERT 并返回 200，守护进程消费后打日志。
 
-验收执行说明：在项目根目录启动 `python scripts/run_server.py`，使用 `curl http://localhost:8765/status`、`curl http://localhost:8765/operations?limit=10`、`curl -X POST http://localhost:8765/control/stop` 验证；需配置 `status.sink: postgres` 与 `status.postgres`，并已运行 `scripts/refresh_db_schema.py` 创建 daemon_control 表；守护进程运行中验证 stop 生效。
+验收执行说明：在项目根目录启动 `python scripts/run_server.py`，使用 `curl http://localhost:8765/status`、`curl http://localhost:8765/operations?limit=10`、`curl -X POST http://localhost:8765/control/stop` 验证；需配置 root `postgres`，并已运行 `scripts/refresh_db_schema.py` 创建 daemon_control 表；守护进程运行中验证 stop 生效。
 
 ---
 
@@ -34,7 +34,7 @@
 
 ### 前置条件
 
-- 已配置 `status.sink: postgres`、`status.postgres`，并执行过 `python scripts/refresh_db_schema.py`（含 daemon_heartbeat 及 next_retry_ts 列）。
+- 已配置 root `postgres`，并执行过 `python scripts/refresh_db_schema.py`（含 daemon_heartbeat 及 next_retry_ts 列）。
 - 可选：`config/config.yaml` 中 `daemon.ib_retry_interval_sec: 30`（默认 30 秒）。
 
 ### 1. 单进程：不启动 TWS 时守护进程不退出、黄灯与下次重试时间

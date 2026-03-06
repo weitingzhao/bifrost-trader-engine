@@ -8,11 +8,9 @@
 
 ## 1. 连接与配置
 
-- **配置项**：在 `config/config.yaml` 的 `status` 下配置：
-  - `status.sink`: `"postgres"`（阶段 1 唯一实现的 sink 类型）。
-  - `status.postgres`: 连接参数，例如：
-    - `host`, `port`, `database`, `user`, `password`；或
-    - 使用环境变量（如 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`）或 DSN。
+- **配置项**：在 `config/config.yaml` 的 root 配置 `postgres`：
+  - `postgres.host`, `postgres.port`, `postgres.database`, `postgres.user`, `postgres.password`；或
+  - 使用环境变量（如 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`）或 DSN。
 - **代码入口**：`StatusSink` 实现（如 `PostgreSQLSink`）在守护程序启动时根据上述配置建立连接；需处理连接失败与重连（见各阶段实现说明）。
 - **引用**：阶段 1 执行计划 → [plans/phase1-execution-plan.md](plans/phase1-execution-plan.md) 步骤 1、2。
 
@@ -32,7 +30,7 @@
 |------|------|------|
 | daemon_state | text | DaemonFSM 状态，如 RUNNING |
 | trading_state | text | TradingFSM 状态，如 MONITOR |
-| symbol | text | 标的，如 NVDA |
+| symbol | text | 当前活跃标的；由守护进程根据持仓推导，无活跃标的时可为空 |
 | spot | double precision | 当前标的价格（每心跳从 IB 拉取并写入） |
 | bid | double precision | 买一 |
 | ask | double precision | 卖一 |
@@ -47,7 +45,7 @@
 
 - **主键/唯一**：单行表使用固定行 id=1，upsert 时更新该行。
 
-- **涉及库表**：上述列所在数据库与表为：配置中的 **status 用 PostgreSQL**（`config.status.postgres` 或环境变量 `PGHOST` 等，见 [ARCHITECTURE.md](ARCHITECTURE.md) §2 运行环境）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），status_current/status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
+- **涉及库表**：上述列所在数据库与表为：配置中的 **PostgreSQL**（`config.postgres` 或环境变量 `PGHOST` 等，见 [ARCHITECTURE.md](ARCHITECTURE.md) §2 运行环境）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），status_current/status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
 
 ### 2.2 表 `status_history`（状态历史）
 
@@ -92,7 +90,7 @@
 | created_at | timestamptz | 创建时间（默认 now()） |
 | consumed_at | timestamptz | 守护进程消费时间；NULL 表示待处理 |
 
-- **消费语义**：守护进程 `SELECT` 一条 `consumed_at IS NULL` 且 `id` 最小的行，执行对应 command 后 `UPDATE consumed_at = now()`，避免重复触发。监控与守护进程使用同一 PostgreSQL（status.postgres），故无跨机文件依赖。
+- **消费语义**：守护进程 `SELECT` 一条 `consumed_at IS NULL` 且 `id` 最小的行，执行对应 command 后 `UPDATE consumed_at = now()`，避免重复触发。监控与守护进程使用同一 PostgreSQL（root `postgres` 配置），故无跨机文件依赖。
 - **过期不执行**：若指令的 `created_at` 早于当前时间超过约 60 秒（如上次运行遗留的 stop），守护进程仍会**消费**该行（标记 `consumed_at`）以清空队列，但**不执行**该指令，避免新启动的守护进程误执行“上一次”的停止。
 
 ### 2.7 表 `accounts`（阶段 3.0 R-A1：多账户摘要，由 accounts_snapshot 规范化）
@@ -209,7 +207,7 @@
 ### 2.12 表 `ohlc_bars`（已弃用，由 stock_day / stock_min / option_day / option_min 替代）
 
 - **状态**：**弃用**。表名过于笼统，且股票与期权未区分。替代方案见 §2.13–§2.17。
-- **替代**：股票日线 → **stock_day**（§2.13）；股票分钟/小时线 → **stock_min**（§2.14）；期权日线 → **option_day**（§2.15）；期权分钟/小时线 → **option_min**（§2.16）；自选/待操作标的列表 → **wishlist**（§2.17）。
+- **替代**：股票日线 → **stock_day**（§2.13）；股票分钟/小时线 → **stock_min**（§2.14）；期权日线 → **option_day**（§2.15）；期权分钟/小时线 → **option_min**（§2.16）；自选/待操作标的列表 → **watchlist**（§2.17）。
 - 新部署不再创建本表；已有数据可通过迁移脚本写入 stock_day / stock_min（仅股票），再择机删除本表。
 
 ### 2.13 表 `stock_day`（阶段 3 R-A3 扩展：股票日 K 线）
@@ -306,10 +304,10 @@
 - **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, period, bar_time)`。
 - **索引**：建议 `(symbol, expiry, strike, option_right, period, bar_time DESC)`。
 
-### 2.17 表 `wishlist`（阶段 3 R-A3 扩展：自选/待操作标的）
+### 2.17 表 `watchlist`（阶段 3 R-A3 扩展：自选/待操作标的）
 
-- **用途**：存用户「想操作的标的」列表（Wishlist），可含股票与期权；用于市场数据页拉取报价与 K 线的标的集合，服务重启后不丢失。
-- **写入**：监控端通过 Wishlist CRUD API（POST/GET/DELETE /wishlist）增删改查；可从当前持仓、曾持仓或手动输入添加。
+- **用途**：存用户「想操作的标的」列表（Watchlist），可含股票与期权；用于市场数据页拉取报价与 K 线的标的集合，服务重启后不丢失。
+- **写入**：监控端通过 Watchlist CRUD API（POST/GET/DELETE /watchlist）增删改查；可从当前持仓、曾持仓或手动输入添加。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -325,7 +323,7 @@
 | source | text | 来源：manual \| position \| execution |
 | created_at | timestamptz | 创建时间（默认 now()） |
 
-- **读取**：GET /wishlist 供市场数据页与报价请求使用；Wishlist 标的的报价写入 **instrument_prices**（与持仓共用），监控端拉取报价后 UPSERT 到 instrument_prices，供前端统一展示。
+- **读取**：GET /watchlist 供市场数据页与报价请求使用；Watchlist 标的的报价写入 **instrument_prices**（与持仓共用），监控端拉取报价后 UPSERT 到 instrument_prices，供前端统一展示。
 
 ### 2.18 表 `bars_backfill_jobs`（阶段 3 非实时拉取 Worker：任务队列表）
 
@@ -417,7 +415,7 @@
 ## 4. 依赖与本地查看（Phase 1）
 
 - **Python 依赖**：阶段 1 使用 **psycopg2-binary** 连接 PostgreSQL，已在 `pyproject.toml` 中声明。安装环境后执行 `pip install -e .` 即可。
-- **PostgreSQL 实例**：需本地或 Docker 提供 PostgreSQL；创建数据库与用户后，在 `config/config.yaml` 中配置 `status.sink: "postgres"` 与 `status.postgres`（或使用环境变量 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`）。不配置或未连接时守护程序照常运行，仅不写入状态与操作。
+- **PostgreSQL 实例**：需本地或 Docker 提供 PostgreSQL；创建数据库与用户后，在 `config/config.yaml` 中配置 root `postgres`（或使用环境变量 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`）。不配置或未连接时守护程序照常运行，仅不写入状态与操作。
 - **用 psql 查看**：连接后可直接查询各表，例如：
   - 当前状态：`SELECT * FROM status_current;`
   - 最近历史：`SELECT * FROM status_history ORDER BY ts DESC LIMIT 20;`
@@ -460,7 +458,7 @@
 python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中 `status.postgres` 连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**wishlist** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
@@ -515,7 +513,7 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 
 - **阶段 2**：独立应用**只读** `status_current`、`operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
 - **阶段 3.1（历史统计）**：只读 `status_history`、`operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
-- **阶段 3 R-A2/R-A3（复盘与风控）**：**account_executions**（§2.11）存账户执行/成交；**stock_day**、**stock_min**、**option_day**、**option_min**（§2.13–§2.16）存股票与期权 K 线；**wishlist**（§2.17）存自选标的。GET /executions、GET /bars、GET/POST/DELETE /wishlist 与复盘/市场数据页读上述表；写入由监控端或独立脚本在阶段 3 实现时接入。
+- **阶段 3 R-A2/R-A3（复盘与风控）**：**account_executions**（§2.11）存账户执行/成交；**stock_day**、**stock_min**、**option_day**、**option_min**（§2.13–§2.16）存股票与期权 K 线；**watchlist**（§2.17）存自选标的。GET /executions、GET /bars、GET/POST/DELETE /watchlist 与复盘/市场数据页读上述表；写入由监控端或独立脚本在阶段 3 实现时接入。
 - **阶段 4（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
 - **其他**：控制指令、告警、用户配置等若未来落库，均在本文档中新增章节并注明引入阶段。
 
@@ -531,8 +529,8 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 | 挂起/恢复状态 | 新增 §2.5 表 daemon_run_status；监控机写入、交易机轮询，实现挂起/恢复对冲；监控机移除 subprocess/start。 | 阶段 2 |
 | 守护进程心跳 | 新增 §2.6 表 daemon_heartbeat；稳定守护进程每心跳写入，监控端区分守护/对冲并分开显示（RE-6）。 | 阶段 2 |
 | IB 连接状态（RE-7） | daemon_heartbeat 增加 ib_connected、ib_client_id；daemon_control 支持 command=retry_ib；守护程序不假定 IB 已运行，可观测与重试。 | 阶段 2 |
-| 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）；§2.12 弃用 ohlc_bars，新增 §2.13–§2.17 表 stock_day、stock_min、option_day、option_min、wishlist（股票/期权 K 线与自选标的）；供复盘与风控页及 GET /executions、GET /bars、Wishlist CRUD、报价落库使用。 | 阶段 3 |
-| 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、wishlist；K 线读写改为分表；Wishlist CRUD 与智能拉取 duration。 | 阶段 3 |
+| 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）；§2.12 弃用 ohlc_bars，新增 §2.13–§2.17 表 stock_day、stock_min、option_day、option_min、watchlist（股票/期权 K 线与自选标的）；供复盘与风控页及 GET /executions、GET /bars、Watchlist CRUD、报价落库使用。 | 阶段 3 |
+| 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、watchlist；K 线读写改为分表；Watchlist CRUD 与智能拉取 duration。 | 阶段 3 |
 
 ---
 

@@ -30,29 +30,27 @@ async def test_get_positions(connector: IBConnector):
 
 @pytest.mark.ib
 @pytest.mark.asyncio
-async def test_get_underlying_price(connector: IBConnector, config: dict):
+async def test_get_underlying_price(connector: IBConnector):
     """Connect, get NVDA price, assert float > 0 or None (outside hours), disconnect."""
     ok = await connector.connect()
     assert ok is True
-    symbol = config.get("symbol", "NVDA")
-    spot = await connector.get_underlying_price(symbol)
+    spot = await connector.get_underlying_price("NVDA")
     assert spot is None or (isinstance(spot, (int, float)) and spot >= 0)
     await connector.disconnect()
 
 
 @pytest.mark.ib
 @pytest.mark.asyncio
-async def test_subscribe_ticker(connector: IBConnector, config: dict):
+async def test_subscribe_ticker(connector: IBConnector):
     """Connect, subscribe, wait 2s for ticks, assert ticker received, disconnect."""
     ok = await connector.connect()
     assert ok is True
-    symbol = config.get("symbol", "NVDA")
     ticks_received = []
 
     def on_ticker(ticker):
         ticks_received.append(ticker)
 
-    ticker = connector.subscribe_ticker(symbol, on_ticker)
+    ticker = connector.subscribe_ticker("NVDA", on_ticker)
     assert ticker is not None
     await asyncio.sleep(2.0)
     await connector.disconnect()

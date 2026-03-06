@@ -1,10 +1,10 @@
 # Bifrost Trader Engine
 
-Gamma scalping trading daemon for **NVDA** 21–35 DTE near-ATM straddle on Interactive Brokers. Single-process, event-driven: rehedges when |portfolio delta| > 25 shares, with 60s cooldown and strict risk limits.
+Gamma scalping trading daemon for a 21–35 DTE near-ATM straddle on Interactive Brokers. Single-process, event-driven: rehedges when |portfolio delta| > 25 shares, with 60s cooldown and strict risk limits. The active symbol is inferred from current IB positions rather than a fixed top-level config key.
 
 ## Phase 1 MVP
 
-- **Single underlying**: NVDA only
+- **Single active underlying**: inferred from current IB positions
 - **Structure**: 21–35 DTE near ATM straddle (only these positions used for delta)
 - **Hedge**: |Δ| > 25 shares → hedge; 60s cooldown after each hedge
 - **Event window**: No hedge during earnings blackout (configurable days before/after)
@@ -33,7 +33,8 @@ python -m pip install -e .
 Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 
 - **ib**: host, port, client_id (or use env `IB_HOST`, `IB_PORT`, `IB_CLIENT_ID`)
-- **symbol**: `NVDA`
+- **postgres**: host, port, database, user, password (or use env `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`)
+- **server**: monitoring/control API port (default 8765)
 - **hedge**: threshold_hedge_shares (25), cooldown_sec (60), max_hedge_shares_per_order
 - **earnings.dates**: list of `YYYY-MM-DD` earnings dates for blackout
 - **risk**: max_daily_hedge_count, max_position_shares, max_daily_loss_usd, trading_hours_only, **paper_trade** (set `false` for live)
@@ -55,8 +56,8 @@ The **status server** (monitoring and control) is a **separate process** from th
 
 **Config** (in `config/config.yaml`):
 
-- `status.sink: "postgres"` and `status.postgres`: same as Phase 1; control uses the same DB and tables (see [docs/DATABASE.md](docs/DATABASE.md) §2.4–2.5).
-- `status_server.port`: HTTP port (default 8765).
+- `postgres`: same DB config as Phase 1; control uses the same DB and tables (see [docs/DATABASE.md](docs/DATABASE.md) §2.4–2.5).
+- `server.port`: HTTP port (default 8765).
 - **API only**: Port 8765 serves FastAPI (GET /status, GET /operations, POST /control/*). **Monitoring UI** is the separate frontend in `frontend/` (e.g. `cd frontend && npm run dev` then open the dev server URL, or build and deploy the frontend elsewhere; it calls this API). **Start** the daemon on the **daemon host** (Mac Mini or Linux server): run `python scripts/run_engine.py config/config.yaml`. TWS runs on a dedicated Mac Mini; the daemon connects to it (same machine or over network from Linux). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.1 and §2.3–2.4 (run environment).
 
 **Start**:

@@ -76,13 +76,13 @@
 
 | 步骤 | 内容 | 状态 | **完成时间** | 说明 |
 |------|------|------|--------------|------|
-| 1.1–1.3 | 配置与 StatusSink 接口 | ✅ | 2026-02-14 | `config.status.sink` / `status.postgres`，`src/sink/base.py`，GsTrading 按配置创建 sink |
+| 1.1–1.3 | 配置与 StatusSink 接口 | ✅ | 2026-02-14 | root `config.postgres`，`src/sink/base.py`，GsTrading 按 PostgreSQL 配置创建 sink |
 | 2.1–2.2 | PostgreSQLSink | ✅ | 2026-02-14 | `status_current` / `status_history` / `operations`，`write_snapshot(append_history)`、`write_operation` |
 | 3.1–3.3 | GsTrading 挂接快照 | ✅ | 2026-02-14 | heartbeat 写当前表；进入 RUNNING 立即写一次；spot 不可用时写 minimal；有操作时 append_history |
 | 4.1–4.2 | 操作记录写入 | ✅ | 2026-02-14 | hedge_intent、order_sent、fill、reject 处 `write_operation`，必要时 `write_snapshot(..., append_history=True)` |
 | 5.1 | 信号停止 | ✅ | 2026-02-14 | `run_engine.py` / `_run_daemon_main` 注册 SIGTERM/SIGINT → `app.stop()`，asyncio 安全退出 |
 | 6 | 控制文件 | ⏸️ | — | 按计划留给阶段 2 |
-| 7.1 | 文档 | ✅ | 2026-02-14 | 依赖 PostgreSQL、status 配置、查表示例已说明 |
+| 7.1 | 文档 | ✅ | 2026-02-14 | 依赖 PostgreSQL、连接配置、查表示例已说明 |
 | **7.2** | **正式验收** | ✅ | 2026-02-26 | 已按「检查方式」与 Test Case 清单执行，全部 TC-1-* 通过 |
 
 ### 2.3 运行环境与体验（近期补齐）
@@ -110,7 +110,7 @@
 | TC-1-R-M4a-3 | R-M4a | **自动化** | phase1.py 中 check_pg_schema：operations 表及列存在 |
 | TC-1-R-H1-1 | R-H1 | **自动化** | phase1.py 中 check_pg_schema：status_current + status_history 表及列 |
 | TC-1-R-H1-2 | R-H1 | 设计/文档 | 无需改写逻辑即可扩展历史读；无独立自动化 |
-| TC-1-R-H1-3 | R-H1 | **自动化** | phase1.py 中 check_config：status.sink + postgres 配置 |
+| TC-1-R-H1-3 | R-H1 | **自动化** | phase1.py 中 check_config：postgres 配置 |
 | TC-1-R-C1a-1 | R-C1a | **自动化** | phase1.py --signal-test：起 daemon、SIGTERM、断言退出 |
 | TC-1-R-C1a-2 | R-C1a | 不适用 | 控制文件按计划留阶段 2；当前为 DB 控制，无 1.3 |
 

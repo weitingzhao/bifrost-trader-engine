@@ -109,7 +109,7 @@
 | 联动通知 | Pub/Sub | Channel: `quotes` 或 `daemon:quotes` | 守护 PUBLISH symbol 或简短 JSON；监控 SUBSCRIBE。 |
 | 或：联动通知 | Streams | Stream: `quote_stream` | 守护 XADD；监控 XREAD 阻塞读；适合需多消费者或回溯时使用。 |
 
-**当前实现**（与代码一致）：行情缓存 key 为 `quote:{symbol}`（String，JSON 体含 symbol、bid、ask、last、ts）；TTL 默认 300 秒；Pub/Sub 频道为 `daemon:quotes`，消息体为 `{"symbol": "NVDA", "ts": 1234567890}`。监控端提供 `GET /quotes`（可选 query `symbols=NVDA,AAPL`；无参数时使用关注列表：status 标的 + 持仓 + wishlist），从 Redis 批量读取后返回 `{"quotes": [{...}]}`。配置：`config.config.yaml` 中 `redis.enabled: true`、`redis.host`、`redis.port`（默认 6379）、`redis.db`、`redis.password`（可选）、`redis.quote_ttl_sec`、`redis.channel`；未配置或 `enabled: false` 时守护与监控均不连 Redis，GET /quotes 返回空列表与提示。
+**当前实现**（与代码一致）：行情缓存 key 为 `quote:{symbol}`（String，JSON 体含 symbol、bid、ask、last、ts）；TTL 默认 300 秒；Pub/Sub 频道为 `daemon:quotes`，消息体示例为 `{"symbol": "AAPL", "ts": 1234567890}`。监控端提供 `GET /quotes`（可选 query `symbols=NVDA,AAPL`；无参数时使用关注列表：持仓 + watchlist），从 Redis 批量读取后返回 `{"quotes": [{...}]}`。配置：`config/config.yaml` 中 `redis.enabled: true`、`redis.host`、`redis.port`（默认 6379）、`redis.db`、`redis.password`（可选）、`redis.quote_ttl_sec`、`redis.channel`；未配置或 `enabled: false` 时守护与监控均不连 Redis，GET /quotes 返回空列表与提示。
 
 ### 2.4 与现有架构的关系
 
@@ -144,7 +144,7 @@
 |------|------|
 | **Key 设计与 TTL** | 建议每标的一个 key 或一个 Hash，并设置合理 TTL（如 5 分钟），避免长期残留。 |
 | **推送节流** | 监控端向前端推送时，可对短时间内的多次更新做合并/节流（如 100ms 内只推一次），降低前端刷新频率。 |
-| **订阅范围** | 守护进程仅对「策略相关」标的（如持仓 + wishlist）写 Redis 与发布，避免全市场刷量。 |
+| **订阅范围** | 守护进程仅对「策略相关」标的（如持仓 + watchlist）写 Redis 与发布，避免全市场刷量。 |
 
 ### 3.4 安全与边界
 

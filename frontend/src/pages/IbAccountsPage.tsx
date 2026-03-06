@@ -1,5 +1,17 @@
-import type { IbAccountSnapshot, StatusResponse } from '../types'
+import { useEffect, useMemo, useState } from 'react'
+import type { IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
+import { fetchBarsBenchmark, fetchQuotes, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+
+type DailyBenchmark = {
+  bar_time: number
+  close: number
+  prev_close?: number | null
+  is_today?: boolean
+  is_stale?: boolean
+}
+
+type PriceSource = 'live' | 'db' | 'daemon' | null
 
 function fmtUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—'
@@ -56,6 +68,72 @@ function optionMoneyness(isCall: boolean, k: number, s: number): string {
   return s < k ? 'ITM' : 'OTM'
 }
 
+function computeDailyChange(
+  bench: DailyBenchmark | undefined,
+  currPrice: number | null,
+  qty: number,
+): { changePct: number | null; pnlVsBench: number | null } {
+  if (!bench || !Number.isFinite(bench.close) || bench.close <= 0) {
+    return { changePct: null, pnlVsBench: null }
+  }
+  if (currPrice == null || !Number.isFinite(currPrice)) {
+    return { changePct: null, pnlVsBench: null }
+  }
+  const prevClose =
+    bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0
+      ? bench.prev_close
+      : null
+  const basePrice = bench.is_today && prevClose != null ? prevClose : bench.close
+  if (!Number.isFinite(basePrice) || basePrice <= 0) {
+    return { changePct: null, pnlVsBench: null }
+  }
+  return {
+    changePct: ((currPrice - basePrice) / basePrice) * 100,
+    pnlVsBench: Number.isFinite(qty) ? (currPrice - basePrice) * qty : null,
+  }
+}
+
+function resolvePreferredPrice(args: {
+  liveQuote?: RealtimeQuote
+  dbPrice?: number | null
+  dbUpdatedAt?: number | null
+  daemonSpot?: number | null
+  daemonUpdatedAt?: number | null
+}): { price: number | null; source: PriceSource; updatedAtSec: number | null } {
+  const liveLast = args.liveQuote?.last
+  if (liveLast != null && Number.isFinite(liveLast) && liveLast > 0) {
+    return {
+      price: liveLast,
+      source: 'live',
+      updatedAtSec:
+        args.liveQuote?.ts != null && Number.isFinite(args.liveQuote.ts)
+          ? args.liveQuote.ts
+          : null,
+    }
+  }
+  if (args.dbPrice != null && Number.isFinite(args.dbPrice) && args.dbPrice > 0) {
+    return {
+      price: args.dbPrice,
+      source: 'db',
+      updatedAtSec:
+        args.dbUpdatedAt != null && Number.isFinite(args.dbUpdatedAt)
+          ? args.dbUpdatedAt
+          : null,
+    }
+  }
+  if (args.daemonSpot != null && Number.isFinite(args.daemonSpot) && args.daemonSpot > 0) {
+    return {
+      price: args.daemonSpot,
+      source: 'daemon',
+      updatedAtSec:
+        args.daemonUpdatedAt != null && Number.isFinite(args.daemonUpdatedAt)
+          ? args.daemonUpdatedAt
+          : null,
+    }
+  }
+  return { price: null, source: null, updatedAtSec: null }
+}
+
 export interface IbAccountsPageProps {
   status: StatusResponse | null
   accountsDisplay: IbAccountSnapshot[] | null
@@ -80,6 +158,69 @@ export function IbAccountsPage({
   const rawAccounts = (accountsDisplay ?? j?.accounts) as IbAccountSnapshot[] | undefined
   const hasAccounts = Array.isArray(rawAccounts) && rawAccounts.length > 0
   const fetchedAt = j?.accounts_fetched_at
+  const accounts = hasAccounts ? [...rawAccounts!].sort((a, b) => getNetLiq(b) - getNetLiq(a)) : []
+  const selectedIndex = accounts.length > 0 ? Math.min(ibAccountIndex, accounts.length - 1) : 0
+  const acc = accounts[selectedIndex]
+  const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+
+  const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
+  const stockSymbols = useMemo(() => {
+    const positions = acc?.positions ?? []
+    return [
+      ...new Set(
+        positions
+          .filter((p) => (p.secType ?? '').toUpperCase() === 'STK')
+          .map((p) => (p.symbol ?? '').trim())
+          .filter(Boolean),
+      ),
+    ].map((s) => s.toUpperCase())
+  }, [acc])
+  useEffect(() => {
+    if (stockSymbols.length === 0) {
+      setBenchmarks({})
+      return
+    }
+    let cancelled = false
+    fetchBarsBenchmark(stockSymbols)
+      .then((r) => {
+        if (!cancelled) setBenchmarks(r.benchmarks ?? {})
+      })
+      .catch(() => {
+        if (!cancelled) setBenchmarks({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [stockSymbols.join(',')])
+  useEffect(() => {
+    if (stockSymbols.length === 0) {
+      setQuotesMap({})
+      return
+    }
+    let cancelled = false
+    fetchQuotes(stockSymbols)
+      .then((res) => {
+        if (cancelled || !res.quotes?.length) return
+        setQuotesMap((prev) => {
+          const next = { ...prev }
+          res.quotes.forEach((q) => {
+            next[q.symbol] = q
+          })
+          return next
+        })
+      })
+      .catch(() => {})
+    const symbolSet = new Set(stockSymbols.map((s) => s.toUpperCase()))
+    const unsub = subscribeQuotes((q) => {
+      const sym = (q.symbol || '').toUpperCase()
+      if (!sym || !symbolSet.has(sym)) return
+      setQuotesMap((prev) => ({ ...prev, [sym]: { ...q, symbol: sym } }))
+    })
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [stockSymbols.join(',')])
 
   if (!hasAccounts) {
     return (
@@ -111,9 +252,6 @@ export function IbAccountsPage({
     )
   }
 
-  const accounts = [...rawAccounts!].sort((a, b) => getNetLiq(b) - getNetLiq(a))
-  const selectedIndex = Math.min(ibAccountIndex, accounts.length - 1)
-  const acc = accounts[selectedIndex]
   const aid = acc.account_id ?? `Account-${selectedIndex + 1}`
   const sum = acc.summary ?? {}
   const netLiq = sum.NetLiquidation != null ? parseFloat(String(sum.NetLiquidation)) : undefined
@@ -125,6 +263,10 @@ export function IbAccountsPage({
   const spot =
     status?.status?.spot != null && Number.isFinite(Number(status.status.spot))
       ? Number(status.status.spot)
+      : null
+  const statusTs =
+    status?.status?.ts != null && Number.isFinite(Number(status.status.ts))
+      ? Number(status.status.ts)
       : null
 
   return (
@@ -227,7 +369,9 @@ export function IbAccountsPage({
                     <th>Cost</th>
                     <th>Total cost</th>
                     <th>Market</th>
-                    <th>PnL</th>
+                    <th>Daily %</th>
+                    <th>Daily $</th>
+                    <th>PnL (Cost)</th>
                     <th>Since</th>
                   </tr>
                 </thead>
@@ -241,22 +385,36 @@ export function IbAccountsPage({
                     const perPrice =
                       pos.price != null && Number.isFinite(Number(pos.price))
                         ? Number(pos.price)
-                        : NaN
+                        : null
                     const showSpotForRow =
                       spot != null &&
                       Number.isFinite(spot) &&
                       sym !== '' &&
                       mainSym !== '' &&
                       sym === mainSym
-                    const fallbackSpot = showSpotForRow ? spot : null
-                    const currPrice =
-                      Number.isFinite(perPrice) && perPrice > 0 ? perPrice : fallbackSpot
+                    const priceInfo = resolvePreferredPrice({
+                      liveQuote: quotesMap[sym],
+                      dbPrice: perPrice,
+                      dbUpdatedAt:
+                        pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at))
+                          ? Number(pos.price_updated_at)
+                          : null,
+                      daemonSpot: showSpotForRow ? spot : null,
+                      daemonUpdatedAt: showSpotForRow ? statusTs : null,
+                    })
+                    const currPrice = priceInfo.price
                     const pnl =
                       pos.unrealized_pnl != null && Number.isFinite(pos.unrealized_pnl)
-                        ? pos.unrealized_pnl
+                        ? (priceInfo.source === 'db' ? pos.unrealized_pnl : (
+                            currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)
+                              ? (currPrice - cost) * qty
+                              : pos.unrealized_pnl
+                          ))
                         : currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)
                           ? (currPrice - cost) * qty
                           : null
+                    const bench = benchmarks[sym]
+                    const { changePct, pnlVsBench } = computeDailyChange(bench, currPrice, qty)
                     const marketColor =
                       currPrice != null && Number.isFinite(cost)
                         ? (currPrice > cost ? 'var(--color-success, green)' : currPrice < cost ? 'var(--color-danger, #c00)' : undefined)
@@ -272,10 +430,30 @@ export function IbAccountsPage({
                         <td style={marketColor ? { color: marketColor, fontWeight: 600 } : undefined}>
                           {currPrice != null ? fmtUsd(currPrice) : '—'}
                         </td>
+                        <td>
+                          {changePct != null && Number.isFinite(changePct) ? (
+                            <span style={{ color: changePct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
+                              {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
+                            <span style={{ color: pnlVsBench >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
+                              {fmtUsd(pnlVsBench)}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                         <td style={pnlColor ? { color: pnlColor, fontWeight: 600 } : undefined}>
                           {pnl != null ? fmtUsd(pnl) : '—'}
                         </td>
-                        <td>{formatLastUpdate(pos.price_updated_at)}</td>
+                        <td>
+                          {priceInfo.updatedAtSec != null ? formatLastUpdate(priceInfo.updatedAtSec) : '—'}
+                        </td>
                       </tr>
                     )
                   })}
@@ -289,21 +467,82 @@ export function IbAccountsPage({
                   return acc
                 }, 0)
                 const sumPnl = stockPositions.reduce((acc, pos) => {
+                  const sym = (pos.symbol ?? '').toString().toUpperCase()
+                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                  const priceInfo = resolvePreferredPrice({
+                    liveQuote: quotesMap[sym],
+                    dbPrice:
+                      pos.price != null && Number.isFinite(Number(pos.price))
+                        ? Number(pos.price)
+                        : null,
+                    dbUpdatedAt:
+                      pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at))
+                        ? Number(pos.price_updated_at)
+                        : null,
+                    daemonSpot:
+                      spot != null && Number.isFinite(spot) && sym !== '' && mainSym !== '' && sym === mainSym
+                        ? spot
+                        : null,
+                    daemonUpdatedAt:
+                      spot != null && Number.isFinite(spot) && sym !== '' && mainSym !== '' && sym === mainSym
+                        ? statusTs
+                        : null,
+                  })
                   const p =
-                    pos.unrealized_pnl != null && Number.isFinite(pos.unrealized_pnl)
-                      ? pos.unrealized_pnl
-                      : (pos.price != null && pos.avgCost != null && pos.position != null &&
-                         Number.isFinite(pos.price) && Number.isFinite(pos.avgCost) && Number.isFinite(pos.position))
-                        ? (Number(pos.price) - Number(pos.avgCost)) * Number(pos.position)
-                        : NaN
+                    priceInfo.price != null && pos.avgCost != null && pos.position != null &&
+                    Number.isFinite(priceInfo.price) && Number.isFinite(pos.avgCost) && Number.isFinite(pos.position)
+                      ? (Number(priceInfo.price) - Number(pos.avgCost)) * Number(pos.position)
+                      : NaN
                   return Number.isFinite(p) ? acc + p : acc
                 }, 0)
+                const sumDailyDollar = stockPositions.reduce((acc, pos) => {
+                  const sym = (pos.symbol ?? '').toString().toUpperCase()
+                  const bench = benchmarks[sym]
+                  const qty = pos.position != null ? Number(pos.position) : NaN
+                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                  const currPrice = resolvePreferredPrice({
+                    liveQuote: quotesMap[sym],
+                    dbPrice:
+                      pos.price != null && Number.isFinite(Number(pos.price))
+                        ? Number(pos.price)
+                        : null,
+                    dbUpdatedAt:
+                      pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at))
+                        ? Number(pos.price_updated_at)
+                        : null,
+                    daemonSpot:
+                      spot != null && Number.isFinite(spot) && sym === mainSym
+                        ? spot
+                        : null,
+                    daemonUpdatedAt:
+                      spot != null && Number.isFinite(spot) && sym === mainSym
+                        ? statusTs
+                        : null,
+                  }).price
+                  const daily = computeDailyChange(bench, currPrice, qty)
+                  if (daily.pnlVsBench != null && Number.isFinite(daily.pnlVsBench))
+                    return acc + daily.pnlVsBench
+                  return acc
+                }, 0)
+                const totalPct = Number.isFinite(sumTotal) && sumTotal !== 0 && Number.isFinite(sumPnl)
+                  ? (sumPnl / sumTotal) * 100
+                  : null
                 return (
                   <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
                     Stock total cost: {fmtUsd(sumTotal)}
                     {Number.isFinite(sumPnl) && (
                       <span style={{ marginLeft: '1rem', color: sumPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                        Unrealized PnL: {fmtUsd(sumPnl)}
+                        PnL (Cost) Total $: {fmtUsd(sumPnl)}
+                      </span>
+                    )}
+                    {Number.isFinite(sumDailyDollar) && (
+                      <span style={{ marginLeft: '1rem', color: sumDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
+                        Daily $ Total: {fmtUsd(sumDailyDollar)}
+                      </span>
+                    )}
+                    {totalPct != null && Number.isFinite(totalPct) && (
+                      <span style={{ marginLeft: '1rem', color: totalPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
+                        Total %: {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
                       </span>
                     )}
                   </p>

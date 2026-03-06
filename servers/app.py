@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 import time
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 import asyncio
@@ -54,6 +55,28 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+DAEMON_LOG_STREAM_KEY = "bifrost:daemon_console"
+SERVER_LOG_STREAM_KEY = "bifrost:server_console"
+
+
+def _daemon_log_redis_url() -> str:
+    """Build Redis URL for daemon console stream from config/env. Falls back to local Redis."""
+    try:
+        from src.app.gs_trading import read_config
+
+        config, _ = read_config()
+        r = config.get("redis") or {}
+    except Exception as e:
+        logger.warning("read_config for daemon console failed: %s; using default Redis URL", e)
+        r = {}
+    host = (r.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1").strip()
+    port = int(r.get("port") or os.environ.get("REDIS_PORT") or 6379)
+    db = int(r.get("db") or os.environ.get("REDIS_DB") or 0)
+    password = (r.get("password") or os.environ.get("REDIS_PASSWORD") or "").strip()
+    if password:
+        return f"redis://:{password}@{host}:{port}/{db}"
+    return f"redis://{host}:{port}/{db}"
+
 
 class IbConfigBody(BaseModel):
     """POST /config/ib 请求体，保证 client_id 被正确解析并写入 DB。"""
@@ -92,6 +115,18 @@ def create_app(
     app.state.celery_log_lock = threading.Lock()
     app.state._celery_log_thread: Optional[threading.Thread] = None
     app.state._celery_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    # Daemon console log stream (Redis Stream): reader thread + per-connection queues
+    app.state.daemon_log_queues: list = []
+    app.state.daemon_log_lock = threading.Lock()
+    app.state._daemon_log_thread: Optional[threading.Thread] = None
+    app.state._daemon_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    # Server console log stream (Redis Stream): reader thread + per-connection queues
+    app.state.server_log_queues: list = []
+    app.state.server_log_lock = threading.Lock()
+    app.state._server_log_thread: Optional[threading.Thread] = None
+    app.state._server_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # Monitor-side IB state (for AccountIbClient / MarketIbClient).
     app.state.monitor_enabled = True
@@ -239,7 +274,7 @@ def create_app(
 
     @app.get("/quotes")
     def get_quotes(
-        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use focus list (status symbol + positions + wishlist)"),
+        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use focus list (positions + watchlist)"),
     ) -> Dict[str, Any]:
         """R-RM*: 从 Redis 读取当前行情缓存（守护进程写入）。无 Redis 或未启用时返回空列表。"""
         rq = getattr(app.state, "redis_quotes", None)
@@ -249,17 +284,14 @@ def create_app(
         if symbols and symbols.strip():
             symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
         else:
-            # Focus list: status symbol + account positions symbols + wishlist symbols
-            row = reader.get_status_current()
-            if row and row.get("symbol"):
-                symbol_list.append(str(row["symbol"]).strip())
+            # Focus list: account positions symbols + watchlist symbols
             accounts = reader.get_accounts_from_tables() or []
             for acc in accounts:
                 for pos in (acc.get("positions") or []):
                     sym = (pos.get("symbol") or "").strip()
                     if sym and sym not in symbol_list:
                         symbol_list.append(sym)
-            for w in reader.get_wishlist():
+            for w in reader.get_watchlist():
                 sym = (w.get("symbol") or "").strip()
                 if sym and sym not in symbol_list:
                     symbol_list.append(sym)
@@ -339,6 +371,266 @@ def create_app(
                     logger.debug("celery_log_reader_loop: %s", e)
         except Exception as e:
             logger.warning("celery_log_reader_loop exited: %s", e)
+
+    def _daemon_log_reader_loop() -> None:
+        """Background thread: XREAD Redis stream bifrost:daemon_console, push each line to all SSE queues (for Daemon console UI)."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            last_id = "$"
+            while True:
+                try:
+                    result = r.xread(block=5000, streams={DAEMON_LOG_STREAM_KEY: last_id}, count=100)
+                    if not result:
+                        continue
+                    for _stream_name, entries in result:
+                        for eid, fields in entries:
+                            last_id = eid
+                            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                            with app.state.daemon_log_lock:
+                                queues = list(app.state.daemon_log_queues)
+                            loop = getattr(app.state, "_daemon_log_loop", None)
+                            for q in queues:
+                                if loop and not loop.is_closed():
+                                    loop.call_soon_threadsafe(q.put_nowait, line)
+                except redis.ConnectionError:
+                    time.sleep(2)
+                except Exception as e:
+                    logger.debug("daemon_log_reader_loop: %s", e)
+        except Exception as e:
+            logger.warning("daemon_log_reader_loop exited: %s", e)
+
+    def _server_log_reader_loop() -> None:
+        """Background thread: XREAD Redis stream bifrost:server_console, push each line to all SSE queues (for Server console UI)."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            last_id = "$"
+            while True:
+                try:
+                    result = r.xread(block=5000, streams={SERVER_LOG_STREAM_KEY: last_id}, count=100)
+                    if not result:
+                        continue
+                    for _stream_name, entries in result:
+                        for eid, fields in entries:
+                            last_id = eid
+                            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                            with app.state.server_log_lock:
+                                queues = list(app.state.server_log_queues)
+                            loop = getattr(app.state, "_server_log_loop", None)
+                            for q in queues:
+                                if loop and not loop.is_closed():
+                                    loop.call_soon_threadsafe(q.put_nowait, line)
+                except redis.ConnectionError:
+                    time.sleep(2)
+                except Exception as e:
+                    logger.debug("server_log_reader_loop: %s", e)
+        except Exception as e:
+            logger.warning("server_log_reader_loop exited: %s", e)
+
+    @app.get("/api/daemon/logs")
+    def get_daemon_logs(
+        tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+    ) -> Dict[str, Any]:
+        """Return last N lines from daemon console Redis stream (for initial display in System → Daemon Console)."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            raw = r.xrevrange(DAEMON_LOG_STREAM_KEY, count=tail)
+            lines = []
+            for _eid, fields in reversed(raw):
+                line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                lines.append(line)
+            return {"lines": lines}
+        except Exception as e:
+            logger.warning("get_daemon_logs failed: %s", e)
+            return {"lines": [], "error": str(e)}
+
+    @app.get("/api/server/logs")
+    def get_server_logs(
+        tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+    ) -> Dict[str, Any]:
+        """Return last N lines from server console Redis stream (for initial display in System → Server Console)."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            raw = r.xrevrange(SERVER_LOG_STREAM_KEY, count=tail)
+            lines = []
+            for _eid, fields in reversed(raw):
+                line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                lines.append(line)
+            return {"lines": lines}
+        except Exception as e:
+            logger.warning("get_server_logs failed: %s", e)
+            return {"lines": [], "error": str(e)}
+
+    @app.delete("/api/daemon/logs")
+    def clear_daemon_logs() -> Dict[str, Any]:
+        """Delete the daemon console Redis stream so next fetch is empty. UI Clear button uses this."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            r.delete(DAEMON_LOG_STREAM_KEY)
+            return {"ok": True}
+        except Exception as e:
+            logger.warning("clear_daemon_logs failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    @app.delete("/api/server/logs")
+    def clear_server_logs() -> Dict[str, Any]:
+        """Delete the server console Redis stream so next fetch is empty. UI Clear button uses this."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            r.delete(SERVER_LOG_STREAM_KEY)
+            return {"ok": True}
+        except Exception as e:
+            logger.warning("clear_server_logs failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    @app.post("/api/daemon/logs/trim")
+    def trim_daemon_logs(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Trim daemon console Redis stream to at most max_lines (keep newest). UI uses this when max lines limit is set or changed."""
+        try:
+            max_lines = body.get("max_lines")
+            if max_lines is None:
+                return {"ok": False, "error": "max_lines required"}
+            max_lines = int(max_lines)
+            if max_lines < 1 or max_lines > 10000:
+                return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            r.xtrim(DAEMON_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+            return {"ok": True}
+        except Exception as e:
+            logger.warning("trim_daemon_logs failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    @app.post("/api/server/logs/trim")
+    def trim_server_logs(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Trim server console Redis stream to at most max_lines (keep newest). UI uses this when max lines limit is set or changed."""
+        try:
+            max_lines = body.get("max_lines")
+            if max_lines is None:
+                return {"ok": False, "error": "max_lines required"}
+            max_lines = int(max_lines)
+            if max_lines < 1 or max_lines > 10000:
+                return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            r.xtrim(SERVER_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+            return {"ok": True}
+        except Exception as e:
+            logger.warning("trim_server_logs failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/daemon/logs/stream")
+    async def get_daemon_logs_stream():
+        """SSE: stream new daemon console lines in real time (Redis XREAD). Connect after GET /api/daemon/logs for history."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            r.ping()
+        except Exception as e:
+            logger.warning("daemon_logs_stream check failed: %s", e)
+            return JSONResponse(status_code=503, content={"detail": str(e)})
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+        with app.state.daemon_log_lock:
+            app.state.daemon_log_queues.append(queue)
+            if app.state._daemon_log_loop is None:
+                app.state._daemon_log_loop = asyncio.get_running_loop()
+            if app.state._daemon_log_thread is None or not app.state._daemon_log_thread.is_alive():
+                app.state._daemon_log_thread = threading.Thread(
+                    target=_daemon_log_reader_loop,
+                    name="daemon-log-reader",
+                    daemon=True,
+                )
+                app.state._daemon_log_thread.start()
+
+        async def event_gen():
+            try:
+                while True:
+                    try:
+                        line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                        yield f"data: {json.dumps({'line': line})}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                with app.state.daemon_log_lock:
+                    if queue in app.state.daemon_log_queues:
+                        app.state.daemon_log_queues.remove(queue)
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/server/logs/stream")
+    async def get_server_logs_stream():
+        """SSE: stream new server console lines in real time (Redis XREAD). Connect after GET /api/server/logs for history."""
+        try:
+            import redis
+
+            r = redis.from_url(_daemon_log_redis_url())
+            r.ping()
+        except Exception as e:
+            logger.warning("server_logs_stream check failed: %s", e)
+            return JSONResponse(status_code=503, content={"detail": str(e)})
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+        with app.state.server_log_lock:
+            app.state.server_log_queues.append(queue)
+            if app.state._server_log_loop is None:
+                app.state._server_log_loop = asyncio.get_running_loop()
+            if app.state._server_log_thread is None or not app.state._server_log_thread.is_alive():
+                app.state._server_log_thread = threading.Thread(
+                    target=_server_log_reader_loop,
+                    name="server-log-reader",
+                    daemon=True,
+                )
+                app.state._server_log_thread.start()
+
+        async def event_gen():
+            try:
+                while True:
+                    try:
+                        line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                        yield f"data: {json.dumps({'line': line})}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                with app.state.server_log_lock:
+                    if queue in app.state.server_log_queues:
+                        app.state.server_log_queues.remove(queue)
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get("/api/celery/logs")
     def get_celery_logs(
@@ -493,11 +785,11 @@ def create_app(
                 payload["status"] = row
             else:
                 payload["status"] = None
-            # Subscribed tickers: Wishlist STK + strategy symbol (same set daemon subscribes to when RUNNING)
+            # Subscribed tickers: Watchlist STK + active position symbol (same set daemon subscribes to when RUNNING)
             symbols_set: set = set()
             if row and row.get("symbol"):
                 symbols_set.add(str(row.get("symbol", "") or "").strip())
-            for w in reader.get_wishlist():
+            for w in reader.get_watchlist():
                 st = (w.get("sec_type") or "").strip().upper()
                 sym = (w.get("symbol") or "").strip()
                 if sym and (st == "STK" or not st):
@@ -672,7 +964,7 @@ def create_app(
     def post_execution(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         """R-A2 扩展：手动添加一条执行记录（历史补录）。body: account_id, time(Unix s), symbol, sec_type, side, quantity, price；可选 source, exec_id, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, commission, realized_pnl, currency。"""
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。", "id": None}
+            return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "id": None}
         new_id = insert_one_execution(control_via_db, body)
         if new_id is None:
             return {"ok": False, "error": "添加执行记录失败（请检查必填项：symbol, quantity, price）。", "id": None}
@@ -682,7 +974,7 @@ def create_app(
     def put_execution(execution_id: int, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         """R-A2 扩展：按 id 更新一条执行记录（手动修正）。body 可含任意子集：time, symbol, sec_type, side, quantity, price, account_id, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, commission, realized_pnl, currency。"""
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。"}
+            return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
         if update_one_execution(control_via_db, execution_id, body):
             return {"ok": True, "message": "已更新执行记录。"}
         return {"ok": False, "error": "更新失败（id 不存在或数据库错误）。"}
@@ -691,7 +983,7 @@ def create_app(
     def delete_execution(execution_id: int) -> Dict[str, Any]:
         """R-A2 扩展：按 id 删除一条执行记录（逐笔操作）。"""
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。"}
+            return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
         if delete_one_execution(control_via_db, execution_id):
             return {"ok": True, "message": "已删除该条执行记录。"}
         return {"ok": False, "error": "删除失败（id 不存在或数据库错误）。"}
@@ -735,6 +1027,38 @@ def create_app(
         t = reader.get_bars_latest(symbol=sym, period=per)
         return {"latest": t}
 
+    @app.get("/bars/benchmark")
+    def get_bars_benchmark(
+        symbols: Optional[str] = Query(None, description="Comma-separated symbols"),
+        date_str: Optional[str] = Query(None, alias="date", description="YYYY-MM-DD; default today"),
+    ) -> Dict[str, Any]:
+        """Return latest daily bar on or before date per symbol (for Daily % / Daily $).
+        Keys: symbol -> { bar_time, close, prev_close?, is_today, is_stale }.
+        When is_today=True, frontend should compare instrument_prices.last vs prev_close.
+        When is_today=False, frontend should compare instrument_prices.last vs close."""
+        if not symbols or not str(symbols).strip():
+            return {"benchmarks": {}}
+        sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
+        ref = date.today()
+        if date_str and str(date_str).strip():
+            try:
+                ref = datetime.strptime(str(date_str).strip()[:10], "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        result = reader.get_bars_benchmark(symbols=sym_list, on_or_before=ref)
+        # Add is_stale: (ref - bar_date) > 1 day
+        out = {}
+        for sym, ent in result.items():
+            bar_time = ent.get("bar_time") or 0
+            try:
+                bar_date = datetime.fromtimestamp(bar_time).date()
+            except (TypeError, ValueError, OSError):
+                bar_date = ref
+            is_today = (ref - bar_date).days == 0
+            is_stale = (ref - bar_date).days > 1
+            out[sym] = {**ent, "is_today": is_today, "is_stale": is_stale}
+        return {"benchmarks": out}
+
     @app.get("/bars/stats")
     def get_bars_stats(
         symbol: Optional[str] = Query(None, description="Symbol, e.g. NVDA"),
@@ -748,15 +1072,15 @@ def create_app(
 
     @app.get("/bars/coverage")
     def get_bars_coverage(
-        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Wishlist stocks"),
+        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Watchlist stocks"),
     ) -> Dict[str, Any]:
         """Return coverage (count, min/max ts) plus target range from config and status: ok | gap_end | missing (only end gap is checked)."""
         if symbols is not None and str(symbols).strip():
             sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
         else:
-            wishlist = reader.get_wishlist()
+            watchlist = reader.get_watchlist()
             sym_list = []
-            for w in wishlist:
+            for w in watchlist:
                 sec = (w.get("sec_type") or "STK").strip().upper()
                 if sec == "OPT":
                     continue
@@ -852,7 +1176,7 @@ def create_app(
     ) -> Dict[str, Any]:
         """Delete stock_day and/or stock_min rows for the given symbol. body.periods: optional list; omit or empty to delete all."""
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以删除 K 线数据。"}
+            return {"ok": False, "error": "需要 postgres 配置以删除 K 线数据。"}
         sym = (symbol or "").strip().upper()
         if not sym:
             return {"ok": False, "error": "请提供 symbol 参数。"}
@@ -869,13 +1193,13 @@ def create_app(
             }
         return {"ok": False, "error": result.get("error", "删除失败")}
 
-    @app.get("/wishlist")
-    def get_wishlist() -> Dict[str, Any]:
-        """R-A3 扩展：返回 Wishlist 列表（自选/待操作标的）。"""
-        items = reader.get_wishlist()
+    @app.get("/watchlist")
+    def get_watchlist() -> Dict[str, Any]:
+        """R-A3 扩展：返回 Watchlist 列表（自选/待操作标的）。"""
+        items = reader.get_watchlist()
         return {"items": items}
 
-    class WishlistBody(BaseModel):
+    class WatchlistBody(BaseModel):
         contract_key: str
         symbol: Optional[str] = None
         sec_type: Optional[str] = None
@@ -885,13 +1209,13 @@ def create_app(
         display_label: Optional[str] = None
         source: Optional[str] = None
 
-    @app.post("/wishlist")
-    def post_wishlist(body: WishlistBody = Body(...)) -> Dict[str, Any]:
-        """R-A3 扩展：添加或更新 Wishlist 项（按 contract_key 唯一）。"""
+    @app.post("/watchlist")
+    def post_watchlist(body: WatchlistBody = Body(...)) -> Dict[str, Any]:
+        """R-A3 扩展：添加或更新 Watchlist 项（按 contract_key 唯一）。"""
         if not control_via_db:
-            logger.info("POST /wishlist rejected: 需要 status.postgres 配置以写入 wishlist")
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 wishlist。"}
-        ok = reader.add_wishlist(
+            logger.info("POST /watchlist rejected: 需要 postgres 配置以写入 watchlist")
+            return {"ok": False, "error": "需要 postgres 配置以写入 watchlist。"}
+        ok = reader.add_watchlist(
             contract_key=body.contract_key,
             symbol=body.symbol,
             sec_type=body.sec_type,
@@ -902,21 +1226,21 @@ def create_app(
             source=body.source or "manual",
         )
         if ok:
-            return {"ok": True, "message": "已添加或更新 Wishlist 项。"}
-        logger.warning("POST /wishlist 写入失败")
-        return {"ok": False, "error": "写入 wishlist 失败。"}
+            return {"ok": True, "message": "已添加或更新 Watchlist 项。"}
+        logger.warning("POST /watchlist 写入失败")
+        return {"ok": False, "error": "写入 watchlist 失败。"}
 
-    @app.delete("/wishlist")
-    def delete_wishlist(
+    @app.delete("/watchlist")
+    def delete_watchlist(
         contract_key: Optional[str] = Query(None, description="Delete by contract_key"),
         id: Optional[int] = Query(None, description="Delete by id"),
     ) -> Dict[str, Any]:
-        """R-A3 扩展：删除一条 Wishlist 项（传 contract_key 或 id 之一）。"""
+        """R-A3 扩展：删除一条 Watchlist 项（传 contract_key 或 id 之一）。"""
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以修改 wishlist。"}
+            return {"ok": False, "error": "需要 postgres 配置以修改 watchlist。"}
         if contract_key is None and id is None:
             return {"ok": False, "error": "请提供 contract_key 或 id 参数。"}
-        if reader.delete_wishlist(contract_key=contract_key, id_=id):
+        if reader.delete_watchlist(contract_key=contract_key, id_=id):
             return {"ok": True, "message": "已删除。"}
         return {"ok": False, "error": "删除失败（未找到或数据库错误）。"}
 
@@ -930,7 +1254,7 @@ def create_app(
     ) -> Dict[str, Any]:
         """R-A2: 通过监控端 AccountIbClient 拉取执行/成交记录并写入 account_executions。"""
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 account_executions。", "count": 0}
+            return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "count": 0}
         if not getattr(app.state, "monitor_enabled", True):
             return {"ok": False, "error": "监控已停止，无法拉取执行记录。", "count": 0}
         client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
@@ -979,7 +1303,7 @@ def create_app(
         if not sym:
             return {"ok": False, "error": "请提供 symbol 参数。", "bars": [], "count": 0}
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 K 线表。", "bars": [], "count": 0}
+            return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "bars": [], "count": 0}
         if not getattr(app.state, "monitor_enabled", True):
             return {"ok": False, "error": "监控已停止，无法拉取 K 线。", "bars": [], "count": 0}
         client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
@@ -1085,7 +1409,7 @@ def create_app(
         if not sym:
             return {"ok": False, "error": "请提供 symbol 参数。", "count": 0}
         if not control_via_db:
-            return {"ok": False, "error": "需要 status.postgres 配置以写入 K 线表。", "count": 0}
+            return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "count": 0}
         if not getattr(app.state, "monitor_enabled", True):
             return {"ok": False, "error": "监控已停止，无法补全 K 线。", "count": 0}
         per = (period or "1 D").strip()
@@ -1134,7 +1458,7 @@ def create_app(
         db_config = control_via_db or status_cfg_for_read
         if not db_config:
             logger.info("GET /bars/jobs: no Postgres config (control_via_db and status_cfg_for_read both None), returning empty list")
-            return {"jobs": [], "total": 0, "error": "No Postgres config. Set status.postgres in config or PGHOST."}
+            return {"jobs": [], "total": 0, "error": "No Postgres config. Set postgres in config or PGHOST."}
         # When limit=0 (e.g. old client or "get all"), return up to 500
         effective_limit = limit if limit and limit > 0 else 500
         try:
@@ -1247,19 +1571,6 @@ def create_app(
             logger.warning("celery_stop failed: %s", e)
             return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
-    @app.post("/control/celery_connect")
-    def post_celery_connect() -> JSONResponse:
-        """Set Redis key so Celery worker establishes IB connection (Worker Client). Worker polls every 5s; connect within a few seconds."""
-        try:
-            from servers.celery_app import broker_url, WORKER_CONNECT_REQUESTED_KEY
-            import redis
-            r = redis.from_url(broker_url)
-            r.setex(WORKER_CONNECT_REQUESTED_KEY, 120, "1")
-            return JSONResponse(status_code=200, content={"ok": True, "message": "Worker connect requested; connection may take a few seconds."})
-        except Exception as e:
-            logger.warning("celery_connect failed: %s", e)
-            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
-
     @app.post("/control/monitor_connect")
     async def post_monitor_connect() -> JSONResponse:
         """显式建立监控端 IB 连接（账户 + 行情），便于“随时可服务”。
@@ -1315,7 +1626,7 @@ def create_app(
     def post_control_stop() -> JSONResponse:
         """Insert 'stop' into daemon_control; daemon will request_stop() on next heartbeat (R-C1b)."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_control_command(control_via_db, "stop"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "stop written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
@@ -1324,7 +1635,7 @@ def create_app(
     def post_control_flatten() -> JSONResponse:
         """Insert 'flatten' into daemon_control. R-C3 not implemented in daemon yet; daemon logs and continues."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_control_command(control_via_db, "flatten"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "flatten written to daemon_control (daemon may not implement yet)"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
@@ -1333,7 +1644,7 @@ def create_app(
     def post_control_suspend() -> JSONResponse:
         """Set daemon_run_status.suspended=true; daemon will pause hedging until resume (R-C2-style)."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_run_status(control_via_db, suspended=True):
             return JSONResponse(status_code=200, content={"ok": True, "message": "trading suspended (daemon will not hedge until resume)"})
         return JSONResponse(status_code=500, content={"error": "failed to set run status"})
@@ -1342,7 +1653,7 @@ def create_app(
     def post_control_resume() -> JSONResponse:
         """Set daemon_run_status.suspended=false; daemon will resume hedging."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_run_status(control_via_db, suspended=False):
             return JSONResponse(status_code=200, content={"ok": True, "message": "trading resumed"})
         return JSONResponse(status_code=500, content={"error": "failed to set run status"})
@@ -1351,7 +1662,7 @@ def create_app(
     def post_control_retry_ib() -> JSONResponse:
         """Insert 'retry_ib' into daemon_control; daemon will attempt IB connect on next poll (RE-7)."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_control_command(control_via_db, "retry_ib"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "retry_ib written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
@@ -1360,7 +1671,7 @@ def create_app(
     def post_control_release_ib() -> JSONResponse:
         """Insert 'release_ib' into daemon_control; daemon will release IB connection on next heartbeat (disconnect → WAITING_IB)."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_control_command(control_via_db, "release_ib"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "release_ib written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
@@ -1369,7 +1680,7 @@ def create_app(
     async def post_control_refresh_accounts() -> JSONResponse:
         """仅通过监控端维护的 AccountIbClient 长连接从 IB 拉取账户/持仓并写库，不写 daemon_control。"""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         acc_client = getattr(app.state, "account_ib_client", None)
         if acc_client is None:
             return JSONResponse(
@@ -1406,16 +1717,16 @@ def create_app(
     def post_control_refresh_replay() -> JSONResponse:
         """Insert 'refresh_replay' into daemon_control; daemon will sync executions from IB to account_executions on next poll (R-A2, 复盘与风控 Tab 专用刷新)."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_control_command(control_via_db, "refresh_replay"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_replay written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
     @app.post("/control/refresh_ticker_subscriptions")
     def post_control_refresh_ticker_subscriptions() -> JSONResponse:
-        """Insert 'refresh_ticker_subscriptions' into daemon_control; daemon will sync Real-time ticker with Wishlist on next poll (多退少补，清除残留)."""
+        """Insert 'refresh_ticker_subscriptions' into daemon_control; daemon will sync Real-time ticker with Watchlist on next poll (多退少补，清除残留)."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         if write_control_command(control_via_db, "refresh_ticker_subscriptions"):
             return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_ticker_subscriptions written to daemon_control"})
         return JSONResponse(status_code=500, content={"error": "failed to write control command"})
@@ -1424,7 +1735,7 @@ def create_app(
     def post_set_heartbeat_interval(body: Dict[str, Any] = Body(...)) -> JSONResponse:
         """Set daemon_run_status.heartbeat_interval_sec (5–120). Daemon polls and uses this on next heartbeat."""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         sec = body.get("heartbeat_interval_sec")
         if sec is None:
             return JSONResponse(status_code=400, content={"error": "heartbeat_interval_sec required (5–120)"})
@@ -1440,7 +1751,7 @@ def create_app(
     def post_config_ib(body: IbConfigBody = Body(...)) -> JSONResponse:
         """Update settings: ib_host, ib_port_type, 以及多种 IB client_id（守护进程/监听进程/账户信息/市场数据）。守护进程下次启动时加载。"""
         if not control_via_db:
-            return JSONResponse(status_code=503, content={"error": "control via DB not available (status.postgres required)"})
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         current = reader.get_ib_config() or {
             "ib_host": "127.0.0.1",
             "ib_port_type": "tws_paper",
@@ -1494,18 +1805,11 @@ def run_server(config: dict) -> None:
     import os
     import uvicorn
 
-    status_cfg = config.get("status") or {}
-    use_db_control = status_cfg.get("sink") == "postgres" and (status_cfg.get("postgres") or os.environ.get("PGHOST"))
-    # Allow GET /bars/jobs to read from Postgres whenever postgres is configured (even if use_db_control is False, e.g. missing sink=postgres)
-    has_postgres = bool(status_cfg.get("postgres") or os.environ.get("PGHOST"))
-    if has_postgres:
-        status_cfg_for_read = dict(status_cfg)
-        if status_cfg_for_read.get("sink") != "postgres":
-            status_cfg_for_read.setdefault("sink", "postgres")
-    else:
-        status_cfg_for_read = None
+    has_postgres = bool(config.get("postgres") or os.environ.get("PGHOST"))
+    use_db_control = has_postgres
+    status_cfg_for_read = config if has_postgres else None
 
-    port = config.get("status_server", {}).get("port") or config.get("server", {}).get("port") or 8765
+    port = config.get("server", {}).get("port") or 8765
     data_lag_ms = None
     gates = config.get("gates") or {}
     state_cfg = gates.get("state") or {}
@@ -1513,12 +1817,12 @@ def run_server(config: dict) -> None:
     if "data_lag_threshold_ms" in system_cfg:
         data_lag_ms = system_cfg["data_lag_threshold_ms"]
 
-    reader = StatusReader(status_cfg)
-    control_via_db = status_cfg if use_db_control else None
+    reader = StatusReader(config)
+    control_via_db = config if use_db_control else None
     redis_quotes = None
     if create_redis_quotes:
         redis_quotes = create_redis_quotes(config)
     app = create_app(reader, control_via_db, data_lag_ms, redis_quotes=redis_quotes, status_cfg_for_read=status_cfg_for_read)
     host = "0.0.0.0"
     logger.info("Status server on %s:%s (control=daemon_control + daemon_run_status; start only on trading host)", host, port)
-    uvicorn.run(app, host=host, port=int(port), log_level="info")
+    uvicorn.run(app, host=host, port=int(port), log_level="info", log_config=None)

@@ -29,11 +29,7 @@ def _load_config(config_path: str | None) -> tuple[dict, str]:
 
 
 def _api_url_from_config(config: dict) -> str:
-    port = (
-        config.get("status_server", {}).get("port")
-        or config.get("server", {}).get("port")
-        or 8765
-    )
+    port = config.get("server", {}).get("port") or 8765
     return f"http://127.0.0.1:{int(port)}"
 
 
@@ -56,8 +52,7 @@ def fetch_via_db(config: dict) -> dict:
     """Read from PostgreSQL (same reader as FastAPI). Build payload compatible with API response."""
     import time
     from servers.reader import StatusReader
-    status_cfg = config.get("status") or {}
-    reader = StatusReader(status_cfg)
+    reader = StatusReader(config)
     row = reader.get_status_current()
     hb = reader.get_daemon_heartbeat()
     accounts_from_tables = reader.get_accounts_from_tables()

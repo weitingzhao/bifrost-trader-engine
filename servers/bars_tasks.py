@@ -13,6 +13,7 @@ import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
+from src.connector.ib import IBConnectionDroppedError
 
 # Project root for config
 _here = Path(__file__).resolve().parent
@@ -23,7 +24,6 @@ if str(_project_root) not in __import__("sys").path:
 from servers.celery_app import app  # noqa: E402
 from servers.celery_app import WORKER_IB_STATUS_KEY, WORKER_IB_STATUS_TTL_SEC  # noqa: E402
 from servers.celery_app import WORKER_STOP_REQUESTED_KEY  # noqa: E402
-from servers.celery_app import WORKER_CONNECT_REQUESTED_KEY  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +62,11 @@ def _connect_ib_at_startup() -> None:
             from src.app.gs_trading import read_config
             from servers.reader import StatusReader
             config, _ = read_config()
-            status_cfg = config.get("status") or {}
-            reader = StatusReader(status_cfg)
+            reader = StatusReader(config)
             ib_cfg = reader.get_ib_config() or {}
             await _get_or_create_worker_ib_client(ib_cfg)
         except Exception as e:
-            logger.warning("Worker startup IB connect failed: %s (poll loop will retry every 30s or use Connect in UI)", e)
+            logger.warning("Worker startup IB connect failed: %s (poll loop will retry every 30s)", e)
 
     try:
         asyncio.run_coroutine_threadsafe(_connect(), loop)
@@ -83,9 +82,8 @@ def _connect_ib_at_startup() -> None:
 
 
 async def _worker_connect_poll_loop() -> None:
-    """Poll Redis every 5s for connect_requested; when set and not connected, establish IB connection (for UI Connect button).
-    When not connected and no STOP requested, also retry connecting every 30s (startup connect may fail if TWS/DB not ready).
-    First iteration: wait 3s then try connect once (gives TWS/DB time to be ready after process init).
+    """When not connected and no STOP requested, retry establishing IB every 30s.
+    First iteration waits 3s so TWS/DB have time to be ready after process init.
     """
     global _worker_ib_client
     import time
@@ -111,21 +109,6 @@ async def _worker_connect_poll_loop() -> None:
                 _write_worker_ib_status(False, 0)
                 return
             connected = _worker_ib_client is not None and getattr(_worker_ib_client, "connected", False)
-            if not connected and r.get(WORKER_CONNECT_REQUESTED_KEY):
-                try:
-                    r.delete(WORKER_CONNECT_REQUESTED_KEY)
-                except Exception:
-                    pass
-                try:
-                    from src.app.gs_trading import read_config
-                    from servers.reader import StatusReader
-                    config, _ = read_config()
-                    status_cfg = config.get("status") or {}
-                    reader = StatusReader(status_cfg)
-                    ib_cfg = reader.get_ib_config() or {}
-                    await _get_or_create_worker_ib_client(ib_cfg)
-                except Exception as e:
-                    logger.warning("Worker connect (UI requested) failed: %s", e)
             # Auto-retry: if still not connected, try every 30s (e.g. startup failed because TWS was not ready)
             if not connected and (not _worker_ib_client or not getattr(_worker_ib_client, "connected", False)):
                 now = time.time()
@@ -135,8 +118,7 @@ async def _worker_connect_poll_loop() -> None:
                         from src.app.gs_trading import read_config
                         from servers.reader import StatusReader
                         config, _ = read_config()
-                        status_cfg = config.get("status") or {}
-                        reader = StatusReader(status_cfg)
+                        reader = StatusReader(config)
                         ib_cfg = reader.get_ib_config() or {}
                         await _get_or_create_worker_ib_client(ib_cfg)
                     except Exception as e:
@@ -198,20 +180,50 @@ def _ensure_worker_loop() -> None:
 async def _get_or_create_worker_ib_client(ib_cfg: Dict[str, Any]) -> Any:
     """Create or return the process-wide MarketIbClient. Must run inside worker loop."""
     global _worker_ib_client
-    if _worker_ib_client is not None and getattr(_worker_ib_client, "connected", False):
-        return _worker_ib_client
     from servers.ib_clients import MarketIbClient
     host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
     port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
     port_map = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
     port = port_map.get(port_type, 7497)
-    client_id = int(ib_cfg.get("ib_client_id_worker_market", 500))
-    _worker_ib_client = MarketIbClient(host=host, port=port, client_id=client_id, name="CeleryBarsWorker")
+    desired_client_id = int(ib_cfg.get("ib_client_id_worker_market", 500))
+    if _worker_ib_client is not None:
+        same_endpoint = (
+            getattr(_worker_ib_client, "host", None) == host
+            and getattr(_worker_ib_client, "port", None) == port
+            and int(getattr(_worker_ib_client, "client_id", desired_client_id)) == desired_client_id
+        )
+        if same_endpoint and getattr(_worker_ib_client, "connected", False):
+            return _worker_ib_client
+        reason = "stale disconnected worker client"
+        if not same_endpoint:
+            reason = (
+                f"worker IB settings changed "
+                f"(host={host} port={port} client_id={desired_client_id})"
+            )
+        await _reset_worker_ib_client(reason)
+    _worker_ib_client = MarketIbClient(host=host, port=port, client_id=desired_client_id, name="CeleryBarsWorker")
     await _worker_ib_client.ensure_connected()
-    _write_worker_ib_status(True, client_id)
-    _start_worker_ib_heartbeat(client_id)
-    logger.info("Celery worker IB client connected (host=%s port=%s client_id=%s), will reuse for subsequent jobs", host, port, client_id)
+    actual_client_id = int(getattr(_worker_ib_client, "client_id", desired_client_id))
+    _write_worker_ib_status(True, actual_client_id)
+    _start_worker_ib_heartbeat(actual_client_id)
+    logger.info("Celery worker IB client connected (host=%s port=%s client_id=%s), will reuse for subsequent jobs", host, port, actual_client_id)
     return _worker_ib_client
+
+
+async def _reset_worker_ib_client(reason: str) -> None:
+    """Drop the shared Worker IB client so the next use will reconnect from fresh settings."""
+    global _worker_ib_client
+    if _worker_ib_client is None:
+        _write_worker_ib_status(False, 0)
+        return
+    logger.warning("Resetting Celery worker IB client: %s", reason)
+    try:
+        await _worker_ib_client.disconnect()
+    except Exception as e:
+        logger.debug("_reset_worker_ib_client disconnect: %s", e)
+    finally:
+        _worker_ib_client = None
+        _write_worker_ib_status(False, 0)
 
 
 def _start_worker_ib_heartbeat(client_id: int) -> None:
@@ -300,7 +312,6 @@ async def _run_backfill_in_loop(
     from servers.reader import StatusReader, get_bars_backfill_job, update_bars_backfill_job_result
     from servers.bars_backfill import run_one_backfill
 
-    reader = StatusReader(status_cfg)
     update_bars_backfill_job_result(status_cfg, job_id, "running", None)
     job_row = get_bars_backfill_job(status_cfg, job_id) or {}
     # Prefer job row span params (what API stored when enqueueing) so Custom/Max/Min range is respected
@@ -316,23 +327,47 @@ async def _run_backfill_in_loop(
     api_interval_sec = job_row.get("api_interval_sec")
     if api_interval_sec is not None:
         api_interval_sec = max(0, min(300, int(api_interval_sec)))
-    ib_cfg = reader.get_ib_config() or {}
-    client = await _get_or_create_worker_ib_client(ib_cfg)
-    result = await run_one_backfill(
-        reader,
-        client,
-        status_cfg,
-        symbol=symbol,
-        period=period,
-        years=years,
-        days=days,
-        override_days=override_days,
-        span_hours=span_hours,
-        skip_fetch=skip_fetch,
-        api_interval_sec=api_interval_sec,
-    )
-    status = "done" if result.get("ok") else "failed"
-    update_bars_backfill_job_result(status_cfg, job_id, status, result)
+
+    last_disconnect_error: Optional[Exception] = None
+    for attempt in range(1, 3):
+        reader = StatusReader(status_cfg)
+        ib_cfg = reader.get_ib_config() or {}
+        try:
+            client = await _get_or_create_worker_ib_client(ib_cfg)
+            result = await run_one_backfill(
+                reader,
+                client,
+                status_cfg,
+                symbol=symbol,
+                period=period,
+                years=years,
+                days=days,
+                override_days=override_days,
+                span_hours=span_hours,
+                skip_fetch=skip_fetch,
+                api_interval_sec=api_interval_sec,
+            )
+            status = "done" if result.get("ok") else "failed"
+            update_bars_backfill_job_result(status_cfg, job_id, status, result)
+            return result
+        except IBConnectionDroppedError as e:
+            last_disconnect_error = e
+            logger.warning(
+                "Bars task job_id=%s IB connection dropped on attempt %s/2: %s",
+                job_id,
+                attempt,
+                e,
+            )
+            await _reset_worker_ib_client(f"connection dropped during backfill job_id={job_id}")
+            if attempt < 2:
+                continue
+            break
+
+    result = {
+        "ok": False,
+        "error": f"Worker IB connection dropped during backfill and reconnect retry failed: {last_disconnect_error}",
+    }
+    update_bars_backfill_job_result(status_cfg, job_id, "failed", result)
     return result
 
 
@@ -375,19 +410,18 @@ def backfill_bars(
         return {"ok": False, "error": "Config not found"}
 
     config, _ = read_config(config_path)
-    status_cfg = config.get("status") or {}
-    if status_cfg.get("sink") != "postgres" and not status_cfg.get("postgres") and not os.environ.get("PGHOST"):
-        _update_result(job_id, "failed", {"ok": False, "error": "status.postgres required"}, status_cfg=status_cfg)
-        return {"ok": False, "error": "status.postgres required"}
+    if not config.get("postgres") and not os.environ.get("PGHOST"):
+        _update_result(job_id, "failed", {"ok": False, "error": "postgres required"}, status_cfg=config)
+        return {"ok": False, "error": "postgres required"}
 
-    control_via_db = status_cfg
+    control_via_db = config
     sym = (symbol or "").strip().upper()
     per = (period or "1 D").strip()
 
     _ensure_worker_loop()
     loop = _worker_loop
     if loop is None or not loop.is_running():
-        _update_result(job_id, "failed", {"ok": False, "error": "Worker IB loop not running"}, status_cfg=status_cfg)
+        _update_result(job_id, "failed", {"ok": False, "error": "Worker IB loop not running"}, status_cfg=config)
         return {"ok": False, "error": "Worker IB loop not running"}
 
     logger.info("Bars task job_id=%s symbol=%s period=%s running (shared IB client)", job_id, sym, per)

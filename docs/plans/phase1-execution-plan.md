@@ -23,9 +23,9 @@
 
 ### 步骤 1：配置与接口
 
-- [x] **1.1** 在 `config/config.yaml` 中增加 `status.sink: "postgres"` 及 PostgreSQL 连接配置（如 `status.postgres`：host、port、database、user、password 或 DSN）；必要时更新 `config.yaml.example`。
+- [x] **1.1** 在 `config/config.yaml` 中增加 root `postgres` PostgreSQL 连接配置（如 `postgres.host`、`postgres.port`、`postgres.database`、`postgres.user`、`postgres.password` 或 DSN）；必要时更新 `config.yaml.example`。
 - [x] **1.2** 新建 `src/sink/` 包，定义抽象基类 `StatusSink`（`write_snapshot(snapshot: dict)`、`write_operation(record: dict)`），并约定 snapshot/operation 字段（见步骤 1 正文）。
-- [x] **1.3** 在 `GsTrading.__init__` 中读取 `config.get("status", {})`；未配置 sink 时 `self._status_sink = None`。
+- [x] **1.3** 在 `GsTrading.__init__` 中读取 root `postgres` 配置；未配置 PostgreSQL 且无 `PGHOST` 时 `self._status_sink = None`。
 
 ### 步骤 2：PostgreSQLSink
 
@@ -34,7 +34,7 @@
 
 ### 步骤 3：GsTrading 挂接快照（按写入策略）
 
-- [x] **3.1** 在 `GsTrading.__init__` 中若 `status.sink == "postgres"` 且连接配置存在则创建 `PostgreSQLSink(...)` 并赋给 `self._status_sink`。
+- [x] **3.1** 在 `GsTrading.__init__` 中若 root `postgres` 连接配置存在（或由 `PGHOST` 提供）则创建 `PostgreSQLSink(...)` 并赋给 `self._status_sink`。
 - [x] **3.2** 实现 `_build_snapshot_dict(snapshot, spot, cs, data_lag_ms)`，产出符合 R-M1a 的字典。
 - [x] **3.3** **当前表**：在 **heartbeat** 循环内（每次 sleep 醒来后、调用 `_eval_hedge_sync` 前或后）若 sink 存在则调用 `write_snapshot(..., append_history=False)`，仅更新当前视图。**历史表**：仅在发生对冲相关操作时（见步骤 4）或可选每心跳一次调用 `write_snapshot(..., append_history=True)`；纯无操作心跳不追加历史。
 
@@ -53,7 +53,7 @@
 
 ### 步骤 7：文档与验收
 
-- [x] **7.1** 在 README 或 docs 中增加：阶段 1 依赖 PostgreSQL；`status.sink`、`status.postgres` 配置说明；用 psql 或脚本查看 `status_current`/`operations` 的示例。
+- [x] **7.1** 在 README 或 docs 中增加：阶段 1 依赖 PostgreSQL；root `postgres` 配置说明；用 psql 或脚本查看 `status_current`/`operations` 的示例。
 - [ ] **7.2** 按分步计划阶段 1「检查方式」与「本阶段 Test Case 清单」执行验收，确认全部 TC-1-* 通过（R-C1a 仅验收信号停止）。
 
 ---
@@ -85,7 +85,7 @@ python scripts/check/phase1.py --signal-test
 
 | 自检项 | 对应 Test Case / 说明 |
 |--------|------------------------|
-| Config (status.sink + postgres) | TC-1-R-H1-3 |
+| Config (postgres) | TC-1-R-H1-3 |
 | Sink interface (SNAPSHOT/OPERATION keys) | TC-1-R-M1a-3、TC-1-R-M4a-2 |
 | PostgreSQL schema (tables + columns) | TC-1-R-M1a-2、TC-1-R-M4a-3、TC-1-R-H1-1 |
 | IB TWS/Gateway connect | **运行环境验证**（阶段 1 引入）；默认执行，`--skip-ib` 可跳过 |
@@ -104,21 +104,20 @@ python scripts/check/phase1.py --signal-test
 | 心跳 / 驱动 | [src/app/gs_trading.py](../../src/app/gs_trading.py) | `_heartbeat()` 若存在 sink 则先 `_refresh_and_build_snapshot()` 并 `write_snapshot(..., append_history=False)`，再 `_eval_hedge_sync()`。 |
 | 快照数据来源 | [src/app/gs_trading.py](../../src/app/gs_trading.py)、[src/core/store.py](../../src/core/store.py)、[src/core/state/snapshot.py](../../src/core/state/snapshot.py) | `_refresh_and_build_snapshot()` 返回 `(StateSnapshot, spot, CompositeState, data_lag_ms)`。Store 提供股票持仓、spot、bid/ask、daily_hedge_count、daily_pnl、last_hedge_*、spread_pct。 |
 | 对冲流程（操作事件） | [src/app/gs_trading.py](../../src/app/gs_trading.py) | `_eval_hedge`：在 `apply_hedge_gates` 通过后 `log_target_position`，再 `_fsm_trading.apply_transition(TARGET_EMITTED)` 并 `await self._hedge()`。`_hedge()`：纸交易路径打日志并调用 `on_order_placed` / `on_ack_ok` / `on_full_fill`；实盘路径 `place_order` 后走 `on_ack_ok`/`on_full_fill` 或 `on_ack_reject`。 |
-| 配置加载 | [src/app/gs_trading.py](../../src/app/gs_trading.py) | `read_config()` 返回 `(config, path)`。config 为 dict；目前无 `status`、`control` 段。 |
+| 配置加载 | [src/app/gs_trading.py](../../src/app/gs_trading.py) | `read_config()` 返回 `(config, path)`。config 为 dict；当前使用 root `postgres` 与 `server` 配置。 |
 | 停止 | [src/app/gs_trading.py](../../src/app/gs_trading.py) | `stop()` 调用 `self._fsm_daemon.request_stop()`。无进程外触发。 |
 
 ## 实施步骤
 
 ### 步骤 1：配置结构与 StatusSink 接口
 
-- **配置**：在 [config/config.yaml](../../config/config.yaml)（及示例）中增加可选顶层 `status`，例如：
-  - `status.sink`：`"postgres"`（阶段 1 仅实现 PostgreSQL）。
-  - `status.postgres`：连接参数，如 `host`、`port`、`database`、`user`、`password`（或使用环境变量 / DSN）。
+- **配置**：在 [config/config.yaml](../../config/config.yaml)（及示例）中增加 root `postgres`，例如：
+  - `postgres.host`、`postgres.port`、`postgres.database`、`postgres.user`、`postgres.password`（或使用环境变量 / DSN）。
 - **接口**：新建包 `src/sink/`：
   - 抽象基类 `StatusSink`，提供 `write_snapshot(snapshot: dict, append_history: bool = False) -> None` 与 `write_operation(record: dict) -> None`。snapshot / record 的字段形状见下（与 R-M1a / R-M4a 一致）。
   - Snapshot 字典（R-M1a 最少字段）：`daemon_state`、`trading_state`、`symbol`、`spot`、`bid`、`ask`、`net_delta`、`stock_position`、`option_legs_count`、`daily_hedge_count`、`daily_pnl`、`data_lag_ms`、`config_summary`（或等价）、`ts`。
   - 操作记录字典（R-M4a 最少）：`ts`、`type`（如 `hedge_intent` | `order_sent` | `fill` | `reject`/`cancel`）、`side`（BUY/SELL）、`quantity`、`price`（可选）、`state_reason`（如 D2/D3、block_reason）。
-- **配置读取**：在 `GsTrading.__init__` 中读取 `config.get("status", {})`；若未配置 `status.sink` 或非 `postgres` 则不创建 sink（`self._status_sink = None`）。
+- **配置读取**：在 `GsTrading.__init__` 中读取 root `postgres`；若未配置 PostgreSQL 且无 `PGHOST` 则不创建 sink（`self._status_sink = None`）。
 
 ### 步骤 2：PostgreSQLSink 实现（R-M1a、R-M4a、R-H1）
 
@@ -131,7 +130,7 @@ python scripts/check/phase1.py --signal-test
 
 ### 步骤 3：在 GsTrading 中挂接 sink（按写入策略）
 
-- **创建 sink**：在 `GsTrading.__init__` 中，若 `config.get("status", {}).get("sink") == "postgres"` 且连接配置存在，则创建 `PostgreSQLSink(...)` 并保存为 `self._status_sink`；否则 `self._status_sink = None`。
+- **创建 sink**：在 `GsTrading.__init__` 中，若 root `postgres` 连接配置存在（或由 `PGHOST` 提供），则创建 `PostgreSQLSink(...)` 并保存为 `self._status_sink`；否则 `self._status_sink = None`。
 - **构建快照字典**：新增辅助方法 `_build_snapshot_dict(snapshot, spot, cs, data_lag_ms)`，从 `self._fsm_daemon.current`、`self._fsm_trading.state`、`self.symbol`、store、cs 等组 dict；`ts = time.time()`。
 - **写入时机**：**当前表**：在 **heartbeat** 循环内（每次睡眠醒来后），若 sink 存在则先刷新一次 snapshot（可调用 `_refresh_and_build_snapshot()` 或使用最近一次结果）并调用 `write_snapshot(dict, append_history=False)`。**历史表**：仅在步骤 4 的写入点（对冲意图、下单、成交、拒绝）或可选每心跳一次调用 `write_snapshot(..., append_history=True)`。不在每次 _eval_hedge 都写历史，避免无操作心跳灌满历史表。
 
@@ -156,7 +155,7 @@ python scripts/check/phase1.py --signal-test
 
 ### 步骤 7：文档与验收
 
-- **README/docs**：说明阶段 1 依赖 PostgreSQL；`status.sink`、`status.postgres` 配置；用 psql 或脚本查询 `status_current`/`operations` 的示例。
+- **README/docs**：说明阶段 1 依赖 PostgreSQL；root `postgres` 配置；用 psql 或脚本查询 `status_current`/`operations` 的示例。
 - **验收清单**：按 [分步推进计划](../PLAN_NEXT_STEPS.md) 阶段 1「检查方式」与「本阶段 Test Case 清单」执行，确认全部 TC-1-* 通过（R-C1a 仅验收信号停止，不含控制文件）。
 
 ## 数据流（概念）
@@ -185,14 +184,14 @@ flowchart LR
 
 | 文件/路径 | 动作 |
 |-----------|------|
-| `config/config.yaml` | 增加 `status.sink: "postgres"` 及 `status.postgres`（host、port、database、user、password 等）。 |
+| `config/config.yaml` | 增加 root `postgres`（host、port、database、user、password 等）。 |
 | `src/sink/__init__.py` | 新建；导出 StatusSink、PostgreSQLSink。 |
 | `src/sink/base.py`（或 `interface.py`） | 新建；抽象 StatusSink，含 write_snapshot(snapshot, append_history)、write_operation。 |
 | `src/sink/postgres_sink.py` | 新建；PostgreSQLSink，含当前表、历史表、操作表；连接与重连。 |
-| `src/app/gs_trading.py` | 按配置创建 PostgreSQLSink；_build_snapshot_dict；heartbeat 时 write_snapshot(append_history=False)；在对冲意图/下单/成交/拒绝处 write_operation 及可选 write_snapshot(append_history=True)。 |
+| `src/app/gs_trading.py` | 按 root `postgres` 配置创建 PostgreSQLSink；_build_snapshot_dict；heartbeat 时 write_snapshot(append_history=False)；在对冲意图/下单/成交/拒绝处 write_operation 及可选 write_snapshot(append_history=True)。 |
 | `scripts/run_engine.py` 或 `src/app/gs_trading.py` | 注册 SIGTERM/SIGINT 并线程安全调用 app.stop()；调整 run_daemon 使 loop 与 app 在注册时可用。 |
 | [docs/DATABASE.md](../DATABASE.md) | 数据库设计唯一文档：连接配置、表结构、写入策略、后续阶段预留。 |
-| `docs/PLAN_NEXT_STEPS.md` 或 README | 说明阶段 1 依赖 PostgreSQL；status 配置及用 psql 查看表；表结构见 DATABASE.md。 |
+| `docs/PLAN_NEXT_STEPS.md` 或 README | 说明阶段 1 依赖 PostgreSQL；root `postgres` 配置及用 psql 查看表；表结构见 DATABASE.md。 |
 
 ## 风险与缓解
 

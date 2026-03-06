@@ -68,16 +68,14 @@ class GsTrading:
         self.config = config
         self._config_path = config_path
 
-        # 1.a Status sink early (so we can read last ib_client_id before connecting to IB)
-        status_cfg = config.get("status", {}) or {}
+        # 1.a PostgreSQL sink early (so we can read last ib_client_id before connecting to IB)
+        postgres_cfg = config.get("postgres", {}) or {}
         self._status_sink: Optional[StatusSink] = None
-        if status_cfg.get("sink") == "postgres" and (
-            status_cfg.get("postgres") or os.environ.get("PGHOST")
-        ):
+        if postgres_cfg or os.environ.get("PGHOST"):
             try:
-                self._status_sink = PostgreSQLSink(status_cfg)
+                self._status_sink = PostgreSQLSink(config)
             except Exception as e:
-                logger.warning("Status sink (postgres) init failed: %s", e)
+                logger.warning("PostgreSQL sink init failed: %s", e)
 
         # 1.b IB Connector: host/port from DB (settings) when present, else config; client_id from DB last+1 or settings.ib_client_id_daemon or config
         ib_cfg = config.get("ib", {})
@@ -132,8 +130,8 @@ class GsTrading:
         self._risk_cfg = get_risk_config(config)
         self._greeks_cfg = config.get("greeks", {})
 
-        # 1.c Symbol and Order Type
-        self.symbol = config.get("symbol", "NVDA")
+        # 1.c Active symbol is inferred from live positions; no fixed config symbol.
+        self.symbol = ""
         self.paper_trade = self._risk_cfg.get("paper_trade", True)
         self.order_type = config.get("order", {}).get("order_type", "market")
 
@@ -208,6 +206,57 @@ class GsTrading:
             logger.info(
                 "Redis quotes: disabled or unavailable (config redis.enabled and Redis server required for ticker→Redis)"
             )
+
+    @staticmethod
+    def _position_symbol_parts(item: Any) -> tuple[str, str]:
+        """Extract (symbol, sec_type) from one position item."""
+        contract = None
+        if hasattr(item, "contract"):
+            contract = item.contract
+        elif isinstance(item, dict):
+            contract = item.get("contract")
+        if contract is None:
+            return "", ""
+        if isinstance(contract, dict):
+            symbol = str(contract.get("symbol") or "").strip().upper()
+            sec_type = str(contract.get("secType") or contract.get("sec_type") or "").strip().upper()
+        else:
+            symbol = str(getattr(contract, "symbol", "") or "").strip().upper()
+            sec_type = str(getattr(contract, "secType", "") or "").strip().upper()
+        return symbol, sec_type
+
+    def _infer_active_symbol(self, positions: list[Any]) -> str:
+        """Prefer option underlying symbol, then stock symbol, from current positions."""
+        first_stock = ""
+        for item in positions:
+            symbol, sec_type = self._position_symbol_parts(item)
+            if not symbol:
+                continue
+            if sec_type == "OPT":
+                return symbol
+            if not first_stock and sec_type == "STK":
+                first_stock = symbol
+        return first_stock
+
+    def _set_active_symbol(self, symbol: Optional[str]) -> None:
+        """Switch the strategy symbol when live positions change."""
+        next_symbol = (symbol or "").strip().upper()
+        if next_symbol == self.symbol:
+            return
+        prev_symbol = self.symbol
+        self.symbol = next_symbol
+        self._position_book.set_symbol(next_symbol)
+        # Clear quote cache so we never reuse the previous symbol's market data.
+        self.store.set_underlying_quote(None, None)
+        self.store.set_underlying_price(None)
+        if next_symbol:
+            logger.info(
+                "Active symbol updated from positions: %s -> %s",
+                prev_symbol or "(none)",
+                next_symbol,
+            )
+        elif prev_symbol:
+            logger.info("Active symbol cleared (previous=%s)", prev_symbol)
 
     def _reload_config(self, config: dict) -> None:
         """Apply hot-reloadable config (IB host/port require restart)."""
@@ -376,7 +425,8 @@ class GsTrading:
         """Fetch positions from IB and update store (raw positions + stock_shares only). No option parse. R-A1: use account_id when available."""
         account = self.store.get_account_id()
         positions = await self.connector.get_positions(account=account)
-        stock_shares = get_stock_shares(positions, self.symbol)
+        self._set_active_symbol(self._infer_active_symbol(positions))
+        stock_shares = get_stock_shares(positions, self.symbol) if self.symbol else 0
         self.store.set_positions(positions, stock_shares)
 
     def _build_snapshot(
@@ -412,7 +462,7 @@ class GsTrading:
         d = {
             "daemon_state": self._fsm_daemon.current.value,
             "trading_state": self._fsm_trading.state.value,
-            "symbol": self.symbol,
+            "symbol": self.symbol or None,
             "spot": float(spot),
             "bid": self.store.get_bid(),
             "ask": self.store.get_ask(),
@@ -471,7 +521,7 @@ class GsTrading:
         d = {
             "daemon_state": self._fsm_daemon.current.value,
             "trading_state": self._fsm_trading.state.value,
-            "symbol": self.symbol,
+            "symbol": self.symbol or None,
             "spot": None,
             "bid": self.store.get_bid(),
             "ask": self.store.get_ask(),
@@ -538,6 +588,9 @@ class GsTrading:
         ):
             await self._refresh_positions()
             self._last_positions_refresh_ts = now_ts
+        if not self.symbol:
+            logger.debug("No active symbol in current positions, skip hedge evaluation")
+            return None
         # 1.b. Get stock shares and spot price
         stock_shares = self.store.get_stock_position()
         spot = self.store.get_underlying_price()
@@ -597,7 +650,7 @@ class GsTrading:
     def _on_ticker_for_symbol(self, symbol: str, ticker: Any) -> None:
         """Called on each ticker update from IB for a symbol (may be from IB thread).
         For strategy symbol: update store, write Redis, trigger hedge eval.
-        For other symbols (Wishlist STK): write Redis only."""
+        For other symbols (Watchlist STK): write Redis only."""
         try:
             if symbol == self.symbol:
                 self._market_data.touch_ts()
@@ -671,6 +724,8 @@ class GsTrading:
 
     def _quote_payload(self) -> Optional[dict]:
         """Build quote dict for Redis from store (symbol, bid, ask, last, ts). Returns None if price is NaN/inf/empty."""
+        if not self.symbol:
+            return None
         bid = self.store.get_bid()
         ask = self.store.get_ask()
         last = self.store.get_underlying_price()
@@ -1026,7 +1081,7 @@ class GsTrading:
                 and self.connector.is_connected
             ):
                 logger.info(
-                    "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Wishlist"
+                    "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Watchlist"
                 )
                 await self._refresh_ticker_subscriptions()
             suspended = self._apply_run_status_transition()
@@ -1106,7 +1161,7 @@ class GsTrading:
                 and self.connector.is_connected
             ):
                 logger.info(
-                    "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Wishlist"
+                    "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Watchlist"
                 )
                 await self._refresh_ticker_subscriptions()
             suspended = self._apply_run_status_transition()
@@ -1142,10 +1197,11 @@ class GsTrading:
             ):
                 await self._refresh_accounts_data()
                 self._last_accounts_refresh_ts = now_ts
-            # 每次心跳拉取标的现价，写入 status_current.spot，供监控页计算盈亏与期权内在价值/虚实
-            spot_fresh = await self.connector.get_underlying_price(self.symbol)
-            if spot_fresh is not None and spot_fresh > 0:
-                self.store.set_underlying_price(spot_fresh)
+            # 每次心跳拉取当前活跃标的现价，供监控页计算盈亏与期权内在价值/虚实。
+            if self.symbol:
+                spot_fresh = await self.connector.get_underlying_price(self.symbol)
+                if spot_fresh is not None and spot_fresh > 0:
+                    self.store.set_underlying_price(spot_fresh)
             if self._status_sink:
                 result = await self._refresh_and_build_snapshot()
                 if result is not None:
@@ -1201,7 +1257,7 @@ class GsTrading:
                         **self._event_subscribe_flags(),
                         **self._listener_heartbeat_kwargs(),
                     )
-            # 每次心跳同步 Real-time ticker 订阅：与 Wishlist STK + 策略标的 一致，多退少补
+            # 每次心跳同步 Real-time ticker 订阅：与 Watchlist STK + 策略标的 一致，多退少补
             await self._refresh_ticker_subscriptions()
             if not suspended:
                 logger.info(
@@ -1210,14 +1266,14 @@ class GsTrading:
                 await self._eval_hedge_sync()
 
     async def _refresh_ticker_subscriptions(self) -> None:
-        """每次心跳同步 Real-time ticker：应与 Wishlist STK + 策略标的 一致；多退少补，无需重启守护进程。"""
+        """每次心跳同步 Real-time ticker：应与 Watchlist STK + 当前活跃标的 一致；多退少补，无需重启守护进程。"""
         if not self.connector.is_connected:
             return
         desired: set = set()
         if self.symbol:
             desired.add(self.symbol.strip())
-        if self._status_sink and hasattr(self._status_sink, "get_wishlist_stk_symbols"):
-            for s in getattr(self._status_sink, "get_wishlist_stk_symbols")() or []:
+        if self._status_sink and hasattr(self._status_sink, "get_watchlist_stk_symbols"):
+            for s in getattr(self._status_sink, "get_watchlist_stk_symbols")() or []:
                 if s and str(s).strip():
                     desired.add(str(s).strip())
         current = set(self.connector.get_subscribed_ticker_symbols())
@@ -1531,25 +1587,23 @@ class GsTrading:
         return DaemonState.RUNNING
 
     async def _handle_running(self) -> DaemonState:
-        """RUNNING: subscribe to Wishlist STK + strategy symbol, start background tasks, loop until stop requested. May transition to RUNNING_SUSPENDED if daemon_run_status.suspended."""
-        logger.info("[Daemon] state=RUNNING | subscribing to tickers (Wishlist STK + strategy symbol) and positions...")
-        # Symbols to subscribe: Wishlist STK only + ensure strategy symbol is included for hedge
+        """RUNNING: subscribe to Watchlist STK + active symbol, start background tasks, loop until stop requested. May transition to RUNNING_SUSPENDED if daemon_run_status.suspended."""
+        logger.info("[Daemon] state=RUNNING | subscribing to tickers (Watchlist STK + active symbol) and positions...")
+        # Symbols to subscribe: Watchlist STK + current active symbol inferred from positions
         symbols_to_subscribe: list = []
-        if self._status_sink and hasattr(self._status_sink, "get_wishlist_stk_symbols"):
-            symbols_to_subscribe = getattr(self._status_sink, "get_wishlist_stk_symbols")() or []
-        logger.info("[Daemon] Wishlist STK symbols from DB: %s", symbols_to_subscribe)
+        if self._status_sink and hasattr(self._status_sink, "get_watchlist_stk_symbols"):
+            symbols_to_subscribe = getattr(self._status_sink, "get_watchlist_stk_symbols")() or []
+        logger.info("[Daemon] Watchlist STK symbols from DB: %s", symbols_to_subscribe)
         symbols_set = set(s.strip() for s in symbols_to_subscribe if s and str(s).strip())
-        symbols_set.add(self.symbol)
+        if self.symbol:
+            symbols_set.add(self.symbol)
         symbols_set = {s for s in symbols_set if s and str(s).strip()}
         symbols_list = sorted(symbols_set)
-        if not symbols_list and self.symbol:
-            symbols_list = [self.symbol]
         if symbols_list:
             await self.connector.subscribe_tickers(symbols_list, self._on_ticker_for_symbol)
             logger.info("[Daemon] subscribed to %s symbol(s): %s", len(symbols_list), symbols_list)
         else:
-            await self.connector.subscribe_ticker(self.symbol, self._on_ticker)
-            logger.info("[Daemon] subscribed to strategy symbol only: %s", self.symbol)
+            logger.info("[Daemon] no watchlist or active symbol available; skip ticker subscribe")
         self.connector.subscribe_positions(self._eval_hedge_threadsafe)
         # Connect listener with ib_client_id_listener so TWS shows the client ID
         listener_just_connected = False
