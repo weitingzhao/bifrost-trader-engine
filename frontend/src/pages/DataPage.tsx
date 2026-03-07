@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar, BarCoverageItem, BarsCoverageResponse, IbAccountSnapshot, StatusResponse } from '../types'
-import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, deleteBarsForSymbol, deleteBarsJob, deleteAllBarsJobs } from '../api'
+import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, postWatchlistEodRefresh, fetchWatchlistEodRefreshPreview, deleteBarsForSymbol, deleteBarsJob, deleteAllBarsJobs } from '../api'
+import type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
 const BAR_PERIODS = [
@@ -9,6 +10,17 @@ const BAR_PERIODS = [
   { value: '5 mins', label: '5 min' },
   { value: '1 hour', label: '1 hour' },
 ] as const
+
+const INSPECT_BARS_LIMIT_BY_PERIOD: Record<string, number> = {
+  '1 D': 126,
+  '1 min': 390,
+  '5 mins': 390,
+  '1 hour': 160,
+}
+
+function inspectBarsLimitForPeriod(period: string): number {
+  return INSPECT_BARS_LIMIT_BY_PERIOD[period] ?? 100
+}
 
 function fmtTs(ts: number | null | undefined): string {
   if (ts == null) return '--'
@@ -28,6 +40,17 @@ function fmtUsd(n: number | null | undefined): string {
 function fmtDate(ts: number | null | undefined): string {
   if (ts == null || !Number.isFinite(ts)) return '—'
   return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
+function fmtDurationSeconds(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '—'
+  const total = Math.round(seconds)
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor((total % 86400) / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
 }
 
 /** X-axis label by period: Daily → date only, intraday → time or short datetime. */
@@ -140,6 +163,36 @@ function BarsCandlestickChart({ bars, period = '1 D' }: BarsCandlestickChartProp
   const topLabel = maxPrice
   const midLabel = minPrice + priceRange / 2
   const bottomLabel = minPrice
+  const candleWidthFactor =
+    period === '1 min' ? 0.2
+      : period === '5 mins' ? 0.26
+        : period === '1 hour' ? 0.38
+          : 0.6
+  const candleWidthMin =
+    period === '1 min' ? 1.1
+      : period === '5 mins' ? 1.4
+        : period === '1 hour' ? 2
+          : 3
+  const candleWidthMax =
+    period === '1 min' ? 5
+      : period === '5 mins' ? 6.5
+        : period === '1 hour' ? 10
+          : 18
+  const volumeBarWidthFactor =
+    period === '1 min' ? 0.16
+      : period === '5 mins' ? 0.2
+        : period === '1 hour' ? 0.32
+          : 0.5
+  const volumeBarWidthMin =
+    period === '1 min' ? 0.7
+      : period === '5 mins' ? 0.9
+        : period === '1 hour' ? 1.2
+          : 1.5
+  const volumeBarWidthMax =
+    period === '1 min' ? 4
+      : period === '5 mins' ? 5
+        : period === '1 hour' ? 8
+          : 12
 
   const lastBar = bars[bars.length - 1]
 
@@ -216,7 +269,7 @@ function BarsCandlestickChart({ bars, period = '1 D' }: BarsCandlestickChartProp
           const color = isUp ? 'var(--success, #16a34a)' : 'var(--danger, #b91c1c)'
           const bodyTop = Math.min(openY, closeY)
           const bodyHeight = Math.max(Math.abs(closeY - openY), 2)
-          const candleWidth = Math.max(4, xStep > 0 ? Math.min(18, xStep * 0.6) : 10)
+          const candleWidth = Math.max(candleWidthMin, xStep > 0 ? Math.min(candleWidthMax, xStep * candleWidthFactor) : 8)
 
           return (
             <g key={i}>
@@ -270,7 +323,7 @@ function BarsCandlestickChart({ bars, period = '1 D' }: BarsCandlestickChartProp
           const x = xForIndex(i)
           const isUp = b.close >= b.open
           const color = isUp ? 'var(--success, #16a34a)' : 'var(--danger, #b91c1c)'
-          const barW = Math.max(2, xStep > 0 ? Math.min(12, xStep * 0.5) : 6)
+          const barW = Math.max(volumeBarWidthMin, xStep > 0 ? Math.min(volumeBarWidthMax, xStep * volumeBarWidthFactor) : 5)
           const y = yForVolume(v)
           const h = volumeBottom - y
           return (
@@ -357,12 +410,17 @@ export function DataPage({ status }: DataPageProps) {
   const [resetConfirmSymbol, setResetConfirmSymbol] = useState<string | null>(null)
   /** Periods to clear when Reset (1 D, 1 min, 5 mins, 1 hour); multi-select checkboxes */
   const [resetPeriods, setResetPeriods] = useState<string[]>(['1 D', '1 min', '5 mins', '1 hour'])
-  /** Backfill options: Is test (skip IB fetch), default off; API interval between requests (sec), default 10 */
+  /** Backfill options: fake IB call (skip IB fetch), default off; API interval between requests (sec), default 10 */
   const [backfillIsTest, setBackfillIsTest] = useState(false)
   const [backfillApiIntervalSec, setBackfillApiIntervalSec] = useState(10)
   /** Symbol for which we just enqueued backfill; show "Queued N jobs" and clear after a few seconds */
   const [backfillSymbol, setBackfillSymbol] = useState<string | null>(null)
   const [backfillMessage, setBackfillMessage] = useState<string | null>(null)
+  const [needWatchlistDryRun, setNeedWatchlistDryRun] = useState(false)
+  const [watchlistPreviewLoading, setWatchlistPreviewLoading] = useState(false)
+  const [watchlistRefreshRunning, setWatchlistRefreshRunning] = useState(false)
+  const [watchlistRefreshMessage, setWatchlistRefreshMessage] = useState<string | null>(null)
+  const [watchlistRefreshPreview, setWatchlistRefreshPreview] = useState<WatchlistEodRefreshPreviewResponse | null>(null)
   /** Pull range modal: when set, show modal to choose Max / Min / Custom before queuing */
   const [pullModalSymbol, setPullModalSymbol] = useState<string | null>(null)
   /** Selected periods to pull in the modal (multi-select; init from periods needing backfill when opening) */
@@ -378,7 +436,8 @@ export function DataPage({ status }: DataPageProps) {
   const [barsJobsError, setBarsJobsError] = useState<string | null>(null)
   const [barsJobsTotal, setBarsJobsTotal] = useState(0)
   const [barsJobsLimit, setBarsJobsLimit] = useState(5)
-  const [barsJobsStatusFilter, setBarsJobsStatusFilter] = useState<string>('all')
+  /** Selected statuses for filter and delete; default only done so Delete all only removes done jobs unless user adds more. */
+  const [barsJobsStatusSelected, setBarsJobsStatusSelected] = useState<Set<string>>(new Set(['done']))
   const [barsJobsSortKey, setBarsJobsSortKey] = useState<'job_id' | 'status' | 'created_ts' | 'updated_ts'>('updated_ts')
   const [barsJobsSortDir, setBarsJobsSortDir] = useState<'asc' | 'desc'>('desc')
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
@@ -422,10 +481,9 @@ export function DataPage({ status }: DataPageProps) {
   }, [barsJobs, barsJobsSortKey, barsJobsSortDir])
   const chartBars = useMemo(() => {
     if (bars.length === 0) return []
-    const sortedByTimeAsc = [...bars]
+    return [...bars]
       .filter(b => b.time != null)
       .sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
-    return sortedByTimeAsc.slice(-100)
   }, [bars])
   const tableBars = useMemo(() => {
     if (sortedBars.length === 0) return []
@@ -455,11 +513,18 @@ export function DataPage({ status }: DataPageProps) {
     setBarsJobsLoading(true)
     setBarsJobsError(null)
     try {
-      const statusParam = barsJobsStatusFilter === 'all' ? undefined : barsJobsStatusFilter
+      const selected = barsJobsStatusSelected
       const limit = Math.max(1, Math.min(500, barsJobsLimit || 50))
+      const statusParam = selected.size === 0 ? undefined : selected.size === 1 ? [...selected][0] : undefined
       const res = await fetchBarsJobs(limit, 0, statusParam)
-      setBarsJobs(Array.isArray(res.jobs) ? res.jobs : [])
-      setBarsJobsTotal(typeof res.total === 'number' ? res.total : 0)
+      let jobs = Array.isArray(res.jobs) ? res.jobs : []
+      let total = typeof res.total === 'number' ? res.total : 0
+      if (selected.size > 1) {
+        jobs = jobs.filter(j => selected.has(j.status))
+        total = jobs.length
+      }
+      setBarsJobs(jobs)
+      setBarsJobsTotal(total)
       setBarsJobsError(res.error ?? null)
     } catch (e) {
       setBarsJobs([])
@@ -468,7 +533,16 @@ export function DataPage({ status }: DataPageProps) {
     } finally {
       setBarsJobsLoading(false)
     }
-  }, [barsJobsLimit, barsJobsStatusFilter])
+  }, [barsJobsLimit, barsJobsStatusSelected])
+
+  const toggleBarsJobsStatus = useCallback((status: string) => {
+    setBarsJobsStatusSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(status)) next.delete(status)
+      else next.add(status)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     loadCoverage()
@@ -478,11 +552,67 @@ export function DataPage({ status }: DataPageProps) {
     loadBarsJobs()
   }, [loadBarsJobs])
 
+  const openWatchlistEodRefreshPreview = useCallback(async () => {
+    setWatchlistPreviewLoading(true)
+    setWatchlistRefreshMessage(null)
+    try {
+      const res = await fetchWatchlistEodRefreshPreview({
+        override_days: 1,
+        api_interval_sec: backfillApiIntervalSec,
+      })
+      if (!res.ok) {
+        setWatchlistRefreshMessage(res.error || 'Dry run failed')
+        return
+      }
+      setWatchlistRefreshPreview(res)
+    } catch (e) {
+      setWatchlistRefreshMessage(e instanceof Error ? e.message : 'Dry run failed')
+    } finally {
+      setWatchlistPreviewLoading(false)
+    }
+  }, [backfillApiIntervalSec])
+
+  const confirmWatchlistEodRefresh = useCallback(async () => {
+    setWatchlistRefreshRunning(true)
+    setWatchlistRefreshMessage(null)
+    try {
+      const res = await postWatchlistEodRefresh({
+        override_days: 1,
+        is_test: backfillIsTest,
+        api_interval_sec: backfillApiIntervalSec,
+      })
+      if (!res.ok) {
+        setWatchlistRefreshMessage(res.error || 'EOD refresh failed')
+        return
+      }
+      setWatchlistRefreshMessage(
+        res.message || `Queued ${res.queued_count ?? 0} EOD refresh job(s) for ${res.symbols_count ?? 0} symbol(s).`,
+      )
+      setWatchlistRefreshPreview(null)
+      if ((res.queued_count ?? 0) > 0) {
+        await loadBarsJobs()
+        await loadCoverage()
+      }
+    } catch (e) {
+      setWatchlistRefreshMessage(e instanceof Error ? e.message : 'EOD refresh failed')
+    } finally {
+      setWatchlistRefreshRunning(false)
+    }
+  }, [backfillApiIntervalSec, backfillIsTest, loadBarsJobs, loadCoverage])
+
+  const handleWatchlistEodRefreshClick = useCallback(async () => {
+    if (needWatchlistDryRun) {
+      await openWatchlistEodRefreshPreview()
+      return
+    }
+    await confirmWatchlistEodRefresh()
+  }, [confirmWatchlistEodRefresh, needWatchlistDryRun, openWatchlistEodRefreshPreview])
+
   const loadBarsFromApi = useCallback(async (symbol: string) => {
     if (!symbol.trim()) return
     setBarsLoading(true)
     try {
-      const res = await fetchBars(symbol, barPeriod, 100)
+      const res = await fetchBars(symbol, barPeriod, inspectBarsLimitForPeriod(barPeriod))
       setBars(res.bars || [])
     } catch {
       setBars([])
@@ -491,14 +621,14 @@ export function DataPage({ status }: DataPageProps) {
     }
   }, [barPeriod])
 
-  /** Click a Bars cell in Data Coverage: load that symbol+period in Bars (inspect) with top N (default 200). */
+  /** Click a Bars cell in Data Coverage: load period-specific default window in Bars (inspect). */
   const openBarsForSymbol = useCallback(async (symbol: string, period: string) => {
     if (!symbol.trim()) return
     setBarSymbol(symbol.trim().toUpperCase())
     setBarPeriod(period)
     setBarsLoading(true)
     try {
-      const res = await fetchBars(symbol.trim(), period, 100)
+      const res = await fetchBars(symbol.trim(), period, inspectBarsLimitForPeriod(period))
       setBars(res.bars || [])
     } catch {
       setBars([])
@@ -511,8 +641,10 @@ export function DataPage({ status }: DataPageProps) {
     <div className="card process-section market-data-page">
       <section className="replay-section" aria-labelledby="data-coverage-head">
         <h3 id="data-coverage-head" className="page-title-with-tooltip">
-          Data coverage (watchlist)
-          <InfoTooltip text="Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Empty when no Watchlist stocks." />
+          Watchlist data coverage
+          <InfoTooltip text={coveragePolicy
+            ? `Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Target range (current config): Daily ${coveragePolicy.daily_years}y, 1 min ${coveragePolicy.min_weeks}w, 5min ${coveragePolicy['5min_months']}mo, 1h ${coveragePolicy['1hour_months']}mo. Need backfill if status is not OK. Empty when no Watchlist stocks.`
+            : 'Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Target range from config: Daily 10y, 1 min 1w, 5min 1mo, 1h 3mo. Need backfill if status is not OK. Empty when no Watchlist stocks.'} />
         </h3>
         <div className="replay-toolbar data-backfill-options" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
           <label className="data-toggle-switch-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
@@ -520,8 +652,16 @@ export function DataPage({ status }: DataPageProps) {
               <span className="toggle-switch-track" />
               <span className={backfillIsTest ? 'toggle-switch-thumb on' : 'toggle-switch-thumb'} />
             </span>
-            <span>Is test</span>
+            <span>fake IB call</span>
             <InfoTooltip text="When on, pull will not call IB (test mode: only log planned requests). Default off." />
+          </label>
+          <label className="data-toggle-switch-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <span className="toggle-switch" role="switch" aria-checked={needWatchlistDryRun} tabIndex={0} onClick={() => setNeedWatchlistDryRun(!needWatchlistDryRun)} onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setNeedWatchlistDryRun(!needWatchlistDryRun) } }}>
+              <span className="toggle-switch-track" />
+              <span className={needWatchlistDryRun ? 'toggle-switch-thumb on' : 'toggle-switch-thumb'} />
+            </span>
+            <span>Dry run</span>
+            <InfoTooltip text="Default off. When off, clicking EOD Pull queues worker jobs immediately. When on, click first opens the dry-run preview; only the modal confirmation will queue jobs." />
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
             <span>API interval (sec):</span>
@@ -545,11 +685,26 @@ export function DataPage({ status }: DataPageProps) {
               {coverageLoading ? '…' : 'Refresh'}
             </button>
           </label>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={watchlistPreviewLoading || watchlistRefreshRunning}
+            onClick={() => { void handleWatchlistEodRefreshClick() }}
+            aria-label={needWatchlistDryRun ? 'Dry run end-of-day pull for all Watchlist symbols' : 'Queue end-of-day pull for all Watchlist symbols'}
+            title={needWatchlistDryRun
+              ? 'Dry run first: preview overwritten records, gap range, and IB request parameters before queueing worker jobs'
+              : 'Queue worker jobs immediately for all Watchlist stocks without opening dry-run preview'}
+          >
+            {watchlistPreviewLoading ? 'Dry run…' : watchlistRefreshRunning ? 'Queuing…' : 'EOD Pull'}
+          </button>
+          <InfoTooltip text={needWatchlistDryRun
+            ? 'Dry run is enabled. Clicking the button opens the preview first; only modal confirmation will queue jobs. EOD Pull runs once after market close: fills end gap and overrides latest bars with final close (override_days=1). Dry run is off by default.'
+            : 'Dry run is disabled. Clicking the button queues jobs immediately. EOD Pull runs once after market close: fills end gap and overrides latest bars with final close (override_days=1). A message like “Queued 48 EOD refresh job(s) for 12 watchlist symbol(s). override_days=1” means 48 worker jobs were enqueued (e.g. 4 periods × 12 symbols); only the latest bar per symbol/period is overwritten with end-of-day data.'} />
         </div>
-        {coveragePolicy && (
-          <p className="replay-sync-hint" style={{ marginBottom: '0.5rem' }}>
-            Target range: Daily {coveragePolicy.daily_years}y, 1 min {coveragePolicy.min_weeks}w, 5min {coveragePolicy['5min_months']}mo, 1h {coveragePolicy['1hour_months']}mo (from config). Need backfill if status is not OK.
-          </p>
+        {watchlistRefreshMessage && (
+          <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
+            {watchlistRefreshMessage}
+          </div>
         )}
         {coverageError && (
           <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
@@ -607,7 +762,7 @@ export function DataPage({ status }: DataPageProps) {
                     type="button"
                     className="data-coverage-bars-btn"
                     onClick={() => openBarsForSymbol(row.symbol, period)}
-                    title={`Show top 5 bars for ${row.symbol} (${period}) in Bars section`}
+                    title={`Show ${row.symbol} ${period} bars in Preview section`}
                     aria-label={`Show bars ${row.symbol} ${period}`}
                   >
                     {p.count === 0 ? '—' : `${p.count} bars`}
@@ -677,6 +832,113 @@ export function DataPage({ status }: DataPageProps) {
           </table>
         )}
       </section>
+
+      {watchlistRefreshPreview && (
+        <div className="data-reset-modal-overlay" onClick={() => { if (!watchlistRefreshRunning) setWatchlistRefreshPreview(null) }} role="dialog" aria-modal="true" aria-labelledby="eod-dry-run-title">
+          <div
+            className="data-reset-modal"
+            style={{ maxWidth: 'min(1100px, 92vw)', width: '92vw', maxHeight: '85vh', overflow: 'auto' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="eod-dry-run-title">Dry run: EOD Pull</h3>
+            <p>Review overwrite records, gap range, and IB request chunks before queueing worker jobs.</p>
+            <div className="replay-placeholder" role="status" style={{ marginBottom: '0.75rem' }}>
+              {(watchlistRefreshPreview.message || 'Dry run ready') +
+                ` Symbols: ${watchlistRefreshPreview.symbols_count ?? 0}, jobs if confirmed: ${watchlistRefreshPreview.queued_jobs_if_confirmed ?? 0}, override_days: ${watchlistRefreshPreview.override_days ?? 1}, API interval: ${watchlistRefreshPreview.api_interval_sec ?? backfillApiIntervalSec}s, mode: ${backfillIsTest ? 'test' : 'live'}.`}
+            </div>
+            {watchlistRefreshPreview.ready_to_enqueue === false && (
+              <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.75rem' }}>
+                Monitor is currently stopped, so this preview cannot be confirmed into worker jobs until monitor is available again.
+              </div>
+            )}
+            {(watchlistRefreshPreview.failures || []).length > 0 && (
+              <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.75rem' }}>
+                Preview failures: {(watchlistRefreshPreview.failures || []).map(f => `${f.symbol} ${f.period}: ${f.error}`).join(' | ')}
+              </div>
+            )}
+            {(watchlistRefreshPreview.items || []).length === 0 ? (
+              <div className="replay-placeholder">No preview items.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {(watchlistRefreshPreview.items || []).map((item: WatchlistEodRefreshPreviewItem, index) => (
+                  <details key={`${item.symbol}-${item.period}-${index}`} style={{ border: '1px solid var(--color-border)', borderRadius: '8px', padding: '0.75rem', background: 'var(--color-surface)' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                      {item.symbol} · {item.period} · overwrite {(item.override_records?.count ?? 0).toLocaleString()} · IB chunks {(item.ib_request_plan?.length ?? 0).toLocaleString()}
+                    </summary>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15rem, 1fr))', gap: '0.5rem', marginTop: '0.75rem' }}>
+                      <div><strong>Latest stored:</strong> {fmtTs(item.latest_ts)}</div>
+                      <div><strong>Fetch window:</strong> {fmtTs(item.fetch_start_ts)} ~ {fmtTs(item.fetch_end_ts)}</div>
+                      <div><strong>Gap to fill:</strong> {item.gap_to_fill?.has_gap ? `${fmtTs(item.gap_to_fill?.start_ts)} ~ ${fmtTs(item.gap_to_fill?.end_ts)}` : '—'}</div>
+                      <div><strong>Gap span:</strong> {fmtDurationSeconds(item.gap_to_fill?.span_seconds)}</div>
+                    </div>
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <strong>Records expected to be overwritten</strong>
+                      {item.override_records && item.override_records.count > 0 ? (
+                        <div style={{ marginTop: '0.4rem', maxHeight: '10rem', overflow: 'auto', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '0.5rem', background: 'var(--color-bg)' }}>
+                          {item.override_records.times.map((ts, tsIndex) => (
+                            <div key={`${item.symbol}-${item.period}-override-${tsIndex}`}>{fmtTs(ts)}</div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="replay-sync-hint" style={{ marginTop: '0.4rem' }}>No existing bars in the override window.</div>
+                      )}
+                    </div>
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <strong>IB request plan</strong>
+                      {item.ib_request_plan && item.ib_request_plan.length > 0 ? (
+                        <div style={{ overflowX: 'auto', marginTop: '0.4rem' }}>
+                          <table className="table-operations">
+                            <thead>
+                              <tr>
+                                <th>#</th>
+                                <th>barSizeSetting</th>
+                                <th>durationStr</th>
+                                <th>endDateTime</th>
+                                <th>Segment</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {item.ib_request_plan.map((req, reqIndex) => (
+                                <tr key={`${item.symbol}-${item.period}-req-${reqIndex}`}>
+                                  <td>{reqIndex + 1}</td>
+                                  <td>{req.barSizeSetting}</td>
+                                  <td>{req.durationStr}</td>
+                                  <td>{req.endDateTime}</td>
+                                  <td>{fmtTs(req.seg_start_ts)} ~ {fmtTs(req.seg_end_ts)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="replay-sync-hint" style={{ marginTop: '0.4rem' }}>No IB request would be needed for this item.</div>
+                      )}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            )}
+            <div className="data-reset-modal-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={watchlistRefreshRunning}
+                onClick={() => setWatchlistRefreshPreview(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={watchlistRefreshRunning || watchlistRefreshPreview.ready_to_enqueue === false || (watchlistRefreshPreview.items || []).length === 0}
+                onClick={() => { void confirmWatchlistEodRefresh() }}
+              >
+                {watchlistRefreshRunning ? 'Queuing…' : 'Confirm and Queue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reset confirmation modal */}
       {resetConfirmSymbol && (
@@ -904,7 +1166,7 @@ export function DataPage({ status }: DataPageProps) {
 
       <section className="replay-section" aria-labelledby="data-bars-head">
         <h3 id="data-bars-head" className="page-title-with-tooltip">
-          Bars (inspect)
+          Preview
           <InfoTooltip text="Load bars from DB for a symbol and period. Backfill is triggered per symbol in the coverage table above (uses config default ranges)." />
         </h3>
         <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
@@ -951,7 +1213,7 @@ export function DataPage({ status }: DataPageProps) {
           <div className="data-bars-chart-container">
             <div className="data-bars-chart-header">
               <span className="data-bars-chart-title">
-                {barSymbol || '—'} {barPeriod} · 100 bars
+                {barSymbol || '—'} {barPeriod} · {chartBars.length} bars
               </span>
             </div>
             <BarsCandlestickChart bars={chartBars} period={barPeriod} />
@@ -999,25 +1261,33 @@ export function DataPage({ status }: DataPageProps) {
 
       <section className="replay-section" aria-labelledby="data-jobs-head">
         <h3 id="data-jobs-head" className="page-title-with-tooltip">
-          Market data (jobs)
+          Celery jobs
           <InfoTooltip text="Recent bars backfill tasks sent to Celery. Each row = one period (1 D, 1 min, 5 mins, 1 hour). Check here to see if 1 hour or other periods were queued and their status." />
         </h3>
-        <div className="replay-toolbar" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span>Status:</span>
-            <select
-              value={barsJobsStatusFilter}
-              onChange={e => setBarsJobsStatusFilter(e.target.value)}
-              aria-label="Filter by status"
-              style={{ minWidth: '6rem' }}
+        <div className="replay-toolbar data-jobs-toolbar" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="data-jobs-status-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span className="data-jobs-status-label">Status:</span>
+            {(['pending', 'running', 'done', 'failed'] as const).map(s => (
+              <label key={s} className="data-jobs-status-checkbox" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={barsJobsStatusSelected.has(s)}
+                  onChange={() => toggleBarsJobsStatus(s)}
+                  aria-label={`Filter and delete ${s} jobs`}
+                />
+                <span>{s === 'done' ? 'Done' : s === 'failed' ? 'Failed' : s === 'pending' ? 'Pending' : 'Running'}</span>
+              </label>
+            ))}
+            <button
+              type="button"
+              className="btn btn-reset btn-sm"
+              disabled={barsJobsTotal === 0 || barsJobsLoading || barsJobsStatusSelected.size === 0}
+              onClick={() => setConfirmDeleteAll(true)}
+              aria-label="Delete jobs with selected status(es)"
             >
-              <option value="all">All</option>
-              <option value="pending">Pending</option>
-              <option value="running">Running</option>
-              <option value="done">Done</option>
-              <option value="failed">Failed</option>
-            </select>
-          </label>
+              Delete all
+            </button>
+          </div>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
             <span>Least:</span>
             <select
@@ -1043,15 +1313,6 @@ export function DataPage({ status }: DataPageProps) {
             aria-label="Refresh backfill jobs"
           >
             {barsJobsLoading ? '…' : 'Refresh'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-reset btn-sm"
-            disabled={barsJobsTotal === 0 || barsJobsLoading}
-            onClick={() => setConfirmDeleteAll(true)}
-            aria-label="Delete all backfill jobs"
-          >
-            Delete all
           </button>
           <span className="replay-sync-hint" style={{ marginLeft: 'auto' }}>
             {barsJobsTotal > 0 ? `${barsJobs.length} shown (${barsJobsTotal} total)` : '0 jobs'}
@@ -1178,18 +1439,24 @@ export function DataPage({ status }: DataPageProps) {
       {confirmDeleteAll && (
         <div className="data-reset-modal-overlay" onClick={() => setConfirmDeleteAll(false)} role="dialog" aria-modal="true" aria-labelledby="delete-all-jobs-title">
           <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="delete-all-jobs-title">Delete all backfill jobs?</h3>
-            <p>This will remove all jobs from the list{barsJobsStatusFilter !== 'all' ? ` with status &quot;${barsJobsStatusFilter}&quot;` : ''}. Cannot be undone.</p>
+            <h3 id="delete-all-jobs-title">Delete jobs by status?</h3>
+            <p>
+              This will remove jobs with selected status: {barsJobsStatusSelected.size === 0 ? 'none selected' : [...barsJobsStatusSelected].sort().join(', ')}. Cannot be undone.
+            </p>
             <div className="data-reset-modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setConfirmDeleteAll(false)}>Cancel</button>
               <button
                 type="button"
                 className="btn btn-reset"
+                disabled={barsJobsStatusSelected.size === 0}
                 onClick={async () => {
                   setConfirmDeleteAll(false)
-                  const statusParam = barsJobsStatusFilter === 'all' ? undefined : barsJobsStatusFilter
-                  const res = await deleteAllBarsJobs(statusParam)
-                  if (res.ok) await loadBarsJobs()
+                  let deleted = 0
+                  for (const s of barsJobsStatusSelected) {
+                    const res = await deleteAllBarsJobs(s)
+                    if (res.ok) deleted += res.deleted ?? 0
+                  }
+                  if (deleted > 0) await loadBarsJobs()
                 }}
               >
                 Delete all

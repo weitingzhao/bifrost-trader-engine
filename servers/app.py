@@ -1070,6 +1070,22 @@ def create_app(
         stats = reader.get_bars_stats(symbol=sym)
         return stats
 
+    def _get_watchlist_stock_symbols() -> List[str]:
+        """Return unique stock symbols from Watchlist in insertion order."""
+        watchlist = reader.get_watchlist()
+        sym_list: List[str] = []
+        for w in watchlist:
+            sec = (w.get("sec_type") or "STK").strip().upper()
+            if sec == "OPT":
+                continue
+            sym = (w.get("symbol") or "").strip()
+            if not sym and w.get("contract_key"):
+                parts = (w["contract_key"] or "").split("|")
+                sym = (parts[0] or "").strip() if parts else ""
+            if sym:
+                sym_list.append(sym.upper())
+        return list(dict.fromkeys(sym_list))
+
     @app.get("/bars/coverage")
     def get_bars_coverage(
         symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Watchlist stocks"),
@@ -1078,19 +1094,7 @@ def create_app(
         if symbols is not None and str(symbols).strip():
             sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
         else:
-            watchlist = reader.get_watchlist()
-            sym_list = []
-            for w in watchlist:
-                sec = (w.get("sec_type") or "STK").strip().upper()
-                if sec == "OPT":
-                    continue
-                sym = (w.get("symbol") or "").strip()
-                if not sym and w.get("contract_key"):
-                    parts = (w["contract_key"] or "").split("|")
-                    sym = (parts[0] or "").strip() if parts else ""
-                if sym:
-                    sym_list.append(sym)
-            sym_list = list(dict.fromkeys(sym_list))
+            sym_list = _get_watchlist_stock_symbols()
         coverage = reader.get_bars_coverage(symbols=sym_list)
 
         try:
@@ -1389,6 +1393,108 @@ def create_app(
             "updated_ts": updated_ts,
         }
 
+    def _enqueue_bars_backfill_job(
+        symbol: str,
+        period: str,
+        *,
+        years: Optional[float] = None,
+        days: Optional[int] = None,
+        override_days: Optional[float] = None,
+        span_hours: Optional[float] = None,
+        is_test: bool = False,
+        api_interval_sec: int = 10,
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """Insert one bars backfill job and enqueue the matching Celery task."""
+        jid = insert_bars_backfill_job(
+            control_via_db,
+            symbol,
+            period,
+            years,
+            days,
+            override_days,
+            span_hours=span_hours,
+            skip_ib=is_test,
+            api_interval_sec=api_interval_sec,
+        )
+        if jid is None:
+            return False, None, "入队失败。"
+        logger.info(
+            "bars/backfill enqueue job_id=%s symbol=%s period=%s years=%s days=%s override_days=%s span_hours=%s",
+            jid, symbol, period, years, days, override_days, span_hours,
+        )
+        try:
+            from servers.bars_tasks import backfill_bars
+
+            backfill_bars.apply_async(
+                args=[symbol, period],
+                kwargs={"years": years, "days": days, "override_days": override_days, "span_hours": span_hours},
+                task_id=str(jid),
+            )
+        except Exception as e:
+            logger.exception("Celery enqueue failed: %s", e)
+            from servers.reader import update_bars_backfill_job_result
+
+            update_bars_backfill_job_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
+            return False, None, f"Celery 入队失败: {e}"
+        return True, str(jid), None
+
+    _WATCHLIST_EOD_PERIODS = ["1 D", "1 hour", "5 mins", "1 min"]
+
+    @app.post("/bars/watchlist/eod-refresh/preview")
+    async def post_watchlist_eod_refresh_preview(
+        override_days: float = Query(1.0, ge=0, le=7, description="Re-fetch this many days before latest bar to preview overwrite/fill scope."),
+        api_interval_sec: int = Query(10, ge=0, le=300, description="Seconds to wait between each IB API request (chunk). Echoed in preview."),
+    ) -> Dict[str, Any]:
+        """Preview EOD refresh without enqueuing jobs."""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以读取 K 线表与 Watchlist。"}
+
+        from servers.bars_backfill import build_backfill_preview
+
+        symbols = _get_watchlist_stock_symbols()
+        periods = _WATCHLIST_EOD_PERIODS
+        items: List[Dict[str, Any]] = []
+        failures: List[Dict[str, str]] = []
+        total_override_records = 0
+        total_request_chunks = 0
+        for sym in symbols:
+            for per in periods:
+                item = build_backfill_preview(
+                    reader,
+                    sym,
+                    per,
+                    override_days=override_days,
+                )
+                if item.get("ok") is False:
+                    failures.append({"symbol": sym, "period": per, "error": item.get("error", "Preview failed")})
+                    continue
+                item["api_interval_sec"] = api_interval_sec
+                items.append(item)
+                total_override_records += int(((item.get("override_records") or {}).get("count")) or 0)
+                total_request_chunks += len(item.get("ib_request_plan") or [])
+
+        return {
+            "ok": True,
+            "preview_only": True,
+            "ready_to_enqueue": bool(getattr(app.state, "monitor_enabled", True)),
+            "symbols_count": len(symbols),
+            "queued_jobs_if_confirmed": len(symbols) * len(periods),
+            "override_days": override_days,
+            "api_interval_sec": api_interval_sec,
+            "periods": periods,
+            "symbols": symbols,
+            "items": items,
+            "total_override_records": total_override_records,
+            "total_request_chunks": total_request_chunks,
+            "failed_count": len(failures),
+            "failures": failures,
+            "message": (
+                f"Dry run ready: {len(items)} preview item(s), "
+                f"{total_override_records} existing record(s) may be overwritten, "
+                f"{total_request_chunks} IB request chunk(s)."
+            ),
+        }
+
     @app.post("/bars/backfill")
     async def post_bars_backfill(
         symbol: Optional[str] = Query(..., description="Symbol, e.g. NVDA"),
@@ -1417,33 +1523,97 @@ def create_app(
                 "error": "Backfill 仅支持 queue=true，由 Celery Worker 在后台拉取（IB 速率限制）。",
                 "count": 0,
             }
-
-        jid = insert_bars_backfill_job(
-            control_via_db, sym, per, years, days, override_days,
+        ok, job_id, error = _enqueue_bars_backfill_job(
+            sym,
+            per,
+            years=years,
+            days=days,
+            override_days=override_days,
             span_hours=span_hours,
-            skip_ib=is_test,
+            is_test=is_test,
             api_interval_sec=api_interval_sec,
         )
-        if jid is None:
-            return {"ok": False, "error": "入队失败。", "count": 0}
-        logger.info(
-            "bars/backfill enqueue job_id=%s symbol=%s period=%s years=%s days=%s override_days=%s span_hours=%s",
-            jid, sym, per, years, days, override_days, span_hours,
-        )
-        try:
-            from servers.bars_tasks import backfill_bars
-            backfill_bars.apply_async(
-                args=[sym, per],
-                kwargs={"years": years, "days": days, "override_days": override_days, "span_hours": span_hours},
-                task_id=str(jid),
-            )
-        except Exception as e:
-            logger.exception("Celery enqueue failed: %s", e)
-            from servers.reader import update_bars_backfill_job_result
-            update_bars_backfill_job_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
-            return {"ok": False, "error": f"Celery 入队失败: {e}", "count": 0}
+        if not ok or not job_id:
+            return {"ok": False, "error": error or "入队失败。", "count": 0}
         trim_bars_backfill_jobs(control_via_db, keep=200)
-        return {"ok": True, "job_id": str(jid), "message": "Queued (Celery). Poll GET /bars/jobs/{job_id} for status."}
+        return {"ok": True, "job_id": job_id, "message": "Queued (Celery). Poll GET /bars/jobs/{job_id} for status."}
+
+    @app.post("/bars/watchlist/eod-refresh")
+    async def post_watchlist_eod_refresh(
+        override_days: float = Query(1.0, ge=0, le=7, description="Re-fetch this many days before latest bar to overwrite the last bars with final close data."),
+        is_test: bool = Query(False, description="If true, skip IB fetch (test mode; only log planned requests). Default off."),
+        api_interval_sec: int = Query(10, ge=0, le=300, description="Seconds to wait between each IB API request (chunk). Default 10."),
+    ) -> Dict[str, Any]:
+        """Queue end-of-day refresh for every Watchlist stock and all coverage periods."""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "queued_count": 0}
+        if not getattr(app.state, "monitor_enabled", True):
+            return {"ok": False, "error": "监控已停止，无法补全 K 线。", "queued_count": 0}
+
+        symbols = _get_watchlist_stock_symbols()
+        periods = _WATCHLIST_EOD_PERIODS
+        if not symbols:
+            return {
+                "ok": True,
+                "queued_count": 0,
+                "failed_count": 0,
+                "symbols_count": 0,
+                "symbols": [],
+                "periods": periods,
+                "override_days": override_days,
+                "message": "Watchlist 中没有股票 symbol，无需执行收盘刷新。",
+            }
+
+        queued_jobs: List[Dict[str, str]] = []
+        failures: List[Dict[str, str]] = []
+        for sym in symbols:
+            for per in periods:
+                ok, job_id, error = _enqueue_bars_backfill_job(
+                    sym,
+                    per,
+                    override_days=override_days,
+                    is_test=is_test,
+                    api_interval_sec=api_interval_sec,
+                )
+                if ok and job_id:
+                    queued_jobs.append({"job_id": job_id, "symbol": sym, "period": per})
+                else:
+                    failures.append({"symbol": sym, "period": per, "error": error or "入队失败。"})
+
+        trim_bars_backfill_jobs(control_via_db, keep=200)
+        queued_count = len(queued_jobs)
+        failed_count = len(failures)
+        if queued_count == 0:
+            return {
+                "ok": False,
+                "error": "收盘刷新任务入队失败。",
+                "queued_count": 0,
+                "failed_count": failed_count,
+                "symbols_count": len(symbols),
+                "symbols": symbols,
+                "periods": periods,
+                "override_days": override_days,
+                "failures": failures,
+            }
+
+        message = (
+            f"Queued {queued_count} EOD refresh job(s) for {len(symbols)} watchlist symbol(s). "
+            f"override_days={override_days:g}."
+        )
+        if failed_count > 0:
+            message += f" Failed: {failed_count}."
+        return {
+            "ok": True,
+            "message": message,
+            "queued_count": queued_count,
+            "failed_count": failed_count,
+            "symbols_count": len(symbols),
+            "symbols": symbols,
+            "periods": periods,
+            "override_days": override_days,
+            "queued_jobs": queued_jobs,
+            "failures": failures,
+        }
 
     @app.get("/bars/jobs")
     def get_bars_jobs(

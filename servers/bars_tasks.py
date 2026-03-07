@@ -133,6 +133,45 @@ _worker_loop_ready = threading.Event()
 _loop_lock = threading.Lock()
 _worker_ib_client: Any = None  # MarketIbClient, only used from loop thread
 _worker_ib_heartbeat_task: Any = None  # asyncio.Task for periodic status write
+_worker_last_bars_job_finished_ts: Optional[float] = None
+_worker_last_bars_job_interval_sec: float = 0.0
+
+
+async def _wait_for_bars_job_cooldown(
+    job_id: int,
+    symbol: str,
+    period: str,
+    api_interval_sec: Optional[int],
+) -> None:
+    """Throttle gaps between consecutive bars jobs in the worker process.
+
+    `api_interval_sec` already spaces IB requests *within* one job. We also apply
+    a cooldown *between* jobs so a fast-finishing task does not let the next task
+    hit IB immediately and trip pacing limits.
+    """
+    global _worker_last_bars_job_finished_ts, _worker_last_bars_job_interval_sec
+
+    current_gap_sec = float(api_interval_sec) if api_interval_sec is not None and api_interval_sec > 0 else 0.0
+    required_gap_sec = max(current_gap_sec, _worker_last_bars_job_interval_sec)
+    if required_gap_sec <= 0 or _worker_last_bars_job_finished_ts is None:
+        return
+
+    elapsed_sec = max(0.0, __import__("time").time() - _worker_last_bars_job_finished_ts)
+    wait_sec = max(0.0, required_gap_sec - elapsed_sec)
+    if wait_sec <= 0:
+        return
+
+    logger.info(
+        "Bars task job_id=%s symbol=%s period=%s waiting %.2fs before start "
+        "(between-job cooldown, required_gap=%.2fs, elapsed=%.2fs)",
+        job_id,
+        symbol,
+        period,
+        wait_sec,
+        required_gap_sec,
+        elapsed_sec,
+    )
+    await asyncio.sleep(wait_sec)
 
 
 def _write_worker_ib_status(connected: bool, client_id: int) -> None:
@@ -309,6 +348,7 @@ async def _run_backfill_in_loop(
     """Run one backfill inside the worker loop using the shared IB client. All DB/reader use happens in this loop thread.
     Uses years/days/override_days/span_hours from the job row (DB) when present, so configured range is applied.
     """
+    global _worker_last_bars_job_finished_ts, _worker_last_bars_job_interval_sec
     from servers.reader import StatusReader, get_bars_backfill_job, update_bars_backfill_job_result
     from servers.bars_backfill import run_one_backfill
 
@@ -333,6 +373,7 @@ async def _run_backfill_in_loop(
         reader = StatusReader(status_cfg)
         ib_cfg = reader.get_ib_config() or {}
         try:
+            await _wait_for_bars_job_cooldown(job_id, symbol, period, api_interval_sec)
             client = await _get_or_create_worker_ib_client(ib_cfg)
             result = await run_one_backfill(
                 reader,
@@ -349,6 +390,8 @@ async def _run_backfill_in_loop(
             )
             status = "done" if result.get("ok") else "failed"
             update_bars_backfill_job_result(status_cfg, job_id, status, result)
+            _worker_last_bars_job_finished_ts = __import__("time").time()
+            _worker_last_bars_job_interval_sec = float(api_interval_sec) if api_interval_sec is not None and api_interval_sec > 0 else 0.0
             return result
         except IBConnectionDroppedError as e:
             last_disconnect_error = e
@@ -368,6 +411,8 @@ async def _run_backfill_in_loop(
         "error": f"Worker IB connection dropped during backfill and reconnect retry failed: {last_disconnect_error}",
     }
     update_bars_backfill_job_result(status_cfg, job_id, "failed", result)
+    _worker_last_bars_job_finished_ts = __import__("time").time()
+    _worker_last_bars_job_interval_sec = float(api_interval_sec) if api_interval_sec is not None and api_interval_sec > 0 else 0.0
     return result
 
 

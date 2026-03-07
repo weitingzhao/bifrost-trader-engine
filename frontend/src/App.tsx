@@ -7,6 +7,7 @@ import {
   fetchQuotes,
   subscribeQuotes,
   fetchBarsBenchmark,
+  fetchBarsJobs,
 } from './api'
 import { DaemonMonitorPage, type ConsoleSection, type OperationsSection } from './pages/DaemonMonitorPage'
 import { IbAccountsPage } from './pages/IbAccountsPage'
@@ -67,13 +68,19 @@ function fmtPctCompact(n: number | null | undefined): string {
 function SystemDashboard({
   items,
   onOpenSection,
+  onOpenSectionWithConsole,
   streamLamp,
   streamItems,
+  workerPending,
+  workerRunning,
 }: {
   items: DashboardItem[]
   onOpenSection: (section: OperationsSection) => void
+  onOpenSectionWithConsole?: (section: OperationsSection, consoleSection: ConsoleSection) => void
   streamLamp: LampId
   streamItems: StreamSummaryItem[]
+  workerPending?: number | null
+  workerRunning?: number | null
 }) {
   const tickerItems = streamItems.length > 0
     ? [...streamItems, ...streamItems]
@@ -100,6 +107,30 @@ function SystemDashboard({
                 <span className="dashboard-chip-label" aria-hidden>{item.label}</span>
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="dashboard-worker-cluster" aria-label="Celery bars worker queue">
+          <span className="dashboard-group-label">Worker</span>
+          <div className="dashboard-worker-counts">
+            <button
+              type="button"
+              className="dashboard-worker-item dashboard-worker-item-btn"
+              onClick={() => (onOpenSectionWithConsole ? onOpenSectionWithConsole('celery', 'console') : onOpenSection('celery'))}
+              aria-label="Open System and Celery Console"
+            >
+              <span className="dashboard-worker-label">Pending</span>
+              <span className="dashboard-worker-value">{workerPending != null ? String(workerPending) : '—'}</span>
+            </button>
+            <button
+              type="button"
+              className="dashboard-worker-item dashboard-worker-item-btn"
+              onClick={() => onOpenSection('celery')}
+              aria-label="Open System Celery detail"
+            >
+              <span className="dashboard-worker-label">Running</span>
+              <span className="dashboard-worker-value">{workerRunning != null ? String(workerRunning) : '—'}</span>
+            </button>
           </div>
         </div>
 
@@ -139,6 +170,9 @@ export default function App() {
   const [benchmarks, setBenchmarks] = useState<Record<string, { bar_time: number; close: number; prev_close?: number | null; is_today?: boolean; is_stale?: boolean }>>({})
   /** Short feedback after account refresh (success/fail/timeout); auto-cleared after a few seconds */
   const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
+  /** Celery bars worker queue counts (polled every 3s for dashboard) */
+  const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
+  const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
 
   useEffect(() => {
     applyTheme(theme)
@@ -177,6 +211,24 @@ export default function App() {
       clearInterval(t2)
     }
   }, [loadStatus, loadOperations])
+
+  useEffect(() => {
+    const pollWorkerJobs = () => {
+      Promise.all([
+        fetchBarsJobs(1, 0, 'pending'),
+        fetchBarsJobs(1, 0, 'running'),
+      ]).then(([pendingRes, runningRes]) => {
+        setWorkerJobPending(pendingRes.total)
+        setWorkerJobRunning(runningRes.total)
+      }).catch(() => {
+        setWorkerJobPending(null)
+        setWorkerJobRunning(null)
+      })
+    }
+    pollWorkerJobs()
+    const t = setInterval(pollWorkerJobs, 3000)
+    return () => clearInterval(t)
+  }, [])
 
   useEffect(() => {
     if (status?.accounts != null && accountsDisplay === null)
@@ -426,6 +478,12 @@ export default function App() {
     setOperationsSection(section)
   }
 
+  const openSystemSectionWithConsole = (section: OperationsSection, consoleSection: ConsoleSection) => {
+    setActiveTab('system')
+    setOperationsSection(section)
+    setConsoleSection(consoleSection)
+  }
+
   const showDashboard = activeTab !== 'system'
 
   const renderTabButton = (id: TabId, label: string, lamp?: 'green' | 'yellow' | 'red' | 'none') => (
@@ -507,8 +565,11 @@ export default function App() {
         <SystemDashboard
           items={dashboardItems}
           onOpenSection={openSystemSection}
+          onOpenSectionWithConsole={openSystemSectionWithConsole}
           streamLamp={liveLamp}
           streamItems={streamSummaryItems}
+          workerPending={workerJobPending}
+          workerRunning={workerJobRunning}
         />
       )}
 

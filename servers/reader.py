@@ -397,6 +397,57 @@ class StatusReader:
             self._conn = None
             return None
 
+    def get_bar_times_in_range(
+        self,
+        symbol: Optional[str] = None,
+        period: str = "1 D",
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
+    ) -> List[float]:
+        """Return bar timestamps within [start_ts, end_ts] ordered ascending."""
+        if not self._connect():
+            return []
+        if not symbol or not symbol.strip():
+            return []
+        if start_ts is None or end_ts is None:
+            return []
+        sym = symbol.strip()
+        per = (period or "1 D").strip()
+        table = "stock_day" if per.upper() == "1 D" else "stock_min"
+        try:
+            with self._conn.cursor() as cur:
+                if table == "stock_day":
+                    cur.execute(
+                        """
+                        SELECT extract(epoch from bar_time) AS t
+                        FROM stock_day
+                        WHERE symbol = %s
+                          AND bar_time >= to_timestamp(%s)
+                          AND bar_time <= to_timestamp(%s)
+                        ORDER BY bar_time ASC
+                        """,
+                        (sym, float(start_ts), float(end_ts)),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT extract(epoch from bar_time) AS t
+                        FROM stock_min
+                        WHERE symbol = %s
+                          AND period = %s
+                          AND bar_time >= to_timestamp(%s)
+                          AND bar_time <= to_timestamp(%s)
+                        ORDER BY bar_time ASC
+                        """,
+                        (sym, per, float(start_ts), float(end_ts)),
+                    )
+                rows = cur.fetchall()
+            return [float(row[0]) for row in rows if row and row[0] is not None]
+        except Exception as e:
+            logger.debug("get_bar_times_in_range failed: %s", e)
+            self._conn = None
+            return []
+
     def get_bars_benchmark(
         self,
         symbols: Optional[List[str]] = None,

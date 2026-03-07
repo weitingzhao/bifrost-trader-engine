@@ -92,6 +92,74 @@ def _backfill_resolve_span(
     return start_ts_out, end_ts_out
 
 
+def build_backfill_preview(
+    reader: "StatusReader",
+    symbol: str,
+    period: str,
+    years: Optional[float] = None,
+    days: Optional[int] = None,
+    override_days: Optional[float] = None,
+    span_hours: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Preview what a backfill would overwrite/fill and which IB requests it would use."""
+    sym = (symbol or "").strip().upper()
+    per = (period or "1 D").strip()
+    period_map = {"1 D": "1D", "1 min": "1min", "5 mins": "5min", "1 hour": "1h"}
+    period_key = period_map.get(per) or "1D"
+    try:
+        try:
+            from src.app.gs_trading import read_config
+
+            config, _ = read_config()
+        except Exception:
+            config = {}
+
+        latest_ts = reader.get_bars_latest(symbol=sym, period=per)
+        end_ts = time.time()
+        override_sec = (override_days or 0.0) * 86400.0
+        mode = "initial_backfill"
+        if latest_ts is not None:
+            mode = "incremental_override"
+            start_ts = float(latest_ts) - override_sec
+            if start_ts > end_ts:
+                start_ts = end_ts
+        else:
+            start_ts, end_ts = _backfill_resolve_span(period_key, config, years, days, span_hours=span_hours)
+
+        override_times = (
+            reader.get_bar_times_in_range(symbol=sym, period=per, start_ts=start_ts, end_ts=float(latest_ts))
+            if latest_ts is not None
+            else []
+        )
+        ib_request_plan = _backfill_ib_request_plan(sym, per, start_ts, end_ts) if end_ts > start_ts else []
+        gap_start_ts = float(latest_ts) if latest_ts is not None else start_ts
+        return {
+            "symbol": sym,
+            "period": per,
+            "mode": mode,
+            "latest_ts": float(latest_ts) if latest_ts is not None else None,
+            "fetch_start_ts": start_ts,
+            "fetch_end_ts": end_ts,
+            "override_days": float(override_days) if override_days is not None else None,
+            "override_records": {
+                "count": len(override_times),
+                "times": override_times,
+                "first_ts": override_times[0] if override_times else None,
+                "last_ts": override_times[-1] if override_times else None,
+            },
+            "gap_to_fill": {
+                "start_ts": gap_start_ts,
+                "end_ts": end_ts,
+                "has_gap": bool(end_ts > gap_start_ts),
+                "span_seconds": max(0.0, end_ts - gap_start_ts),
+            },
+            "ib_request_plan": ib_request_plan,
+        }
+    except Exception as e:
+        logger.warning("build_backfill_preview failed: %s", e, exc_info=True)
+        return {"symbol": sym, "period": per, "ok": False, "error": str(e)}
+
+
 async def run_one_backfill(
     reader: "StatusReader",
     ib_client: Optional["MarketIbClient"],
