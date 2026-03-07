@@ -36,6 +36,10 @@ export interface IbPositionRow {
   price_updated_at?: number | null
   /** 合约唯一键 symbol|sec_type|expiry|strike|right（若后端返回） */
   contract_key?: string | null
+  /** 持仓行最后更新时间（account_positions.updated_at，Unix 秒），供 Details TIME 列显示 */
+  updated_at?: number | null
+  /** 该持仓对应的 account_executions 最新一条的 exec_time（LEFT JOIN 按 account_id+contract_key，Unix 秒），供 Pool=On Details TIME 列优先使用 */
+  exec_time?: number | null
 }
 
 /** One account in GET /status accounts (R-A1 multi-account) */

@@ -752,6 +752,12 @@ class StatusReader:
                             ap.currency,
                             ap.position,
                             ap.avg_cost,
+                            ap.updated_at AS position_updated_at,
+                            (SELECT e.exec_time
+                             FROM account_executions e
+                             WHERE e.account_id = ap.account_id AND e.contract_key = ap.contract_key
+                             ORDER BY e.exec_time DESC NULLS LAST
+                             LIMIT 1) AS position_exec_time,
                             ap.expiry,
                             ap.strike,
                             ap.option_right,
@@ -786,6 +792,30 @@ class StatusReader:
                             pos_dict["strike"] = p.get("strike")
                         if p.get("option_right") is not None:
                             pos_dict["right"] = p.get("option_right")
+
+                        # 持仓行最后更新时间 → updated_at (Unix sec)；Details TIME 优先用 account_executions 最新一条 exec_time
+                        raw_pos_updated = p.get("position_updated_at")
+                        if raw_pos_updated is not None:
+                            try:
+                                if hasattr(raw_pos_updated, "timestamp"):
+                                    pos_dict["updated_at"] = raw_pos_updated.timestamp()
+                                elif isinstance(raw_pos_updated, (int, float)) and math.isfinite(float(raw_pos_updated)):
+                                    pos_dict["updated_at"] = float(raw_pos_updated)
+                            except (TypeError, ValueError):
+                                pass
+                        raw_exec_time = p.get("position_exec_time")
+                        if raw_exec_time is not None:
+                            try:
+                                if hasattr(raw_exec_time, "timestamp"):
+                                    t = raw_exec_time.timestamp()
+                                elif isinstance(raw_exec_time, (int, float)) and math.isfinite(float(raw_exec_time)):
+                                    t = float(raw_exec_time)
+                                else:
+                                    t = None
+                                if t is not None and math.isfinite(t):
+                                    pos_dict["exec_time"] = t
+                            except (TypeError, ValueError):
+                                pass
 
                         # 价格优先使用 instrument_prices.mid，其次 last；仅过滤 NaN/Inf
                         raw_mid = p.get("price_mid")
@@ -848,6 +878,7 @@ class StatusReader:
                             break
                         pos_qty = p.get("position")
                         pos_avg = p.get("avg_cost")
+                        sec_type = (p.get("sec_type") or "").strip().upper()
                         if (
                             price_for_pnl is not None
                             and pos_qty is not None
@@ -857,9 +888,15 @@ class StatusReader:
                                 q = float(pos_qty)
                                 c = float(pos_avg)
                                 if math.isfinite(q) and math.isfinite(c):
-                                    pos_dict["unrealized_pnl"] = round(
-                                        (price_for_pnl - c) * q, 2
-                                    )
+                                    # 期权 OPT：权利金为每股，持仓为合约数，盈亏 = (现价 - 成本) * 合约数 * 100
+                                    if sec_type == "OPT":
+                                        pos_dict["unrealized_pnl"] = round(
+                                            (price_for_pnl - c) * q * 100, 2
+                                        )
+                                    else:
+                                        pos_dict["unrealized_pnl"] = round(
+                                            (price_for_pnl - c) * q, 2
+                                        )
                             except (TypeError, ValueError):
                                 pass
 
