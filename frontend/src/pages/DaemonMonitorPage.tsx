@@ -117,9 +117,45 @@ export interface DaemonMonitorPageProps {
   loadStatus: () => Promise<StatusResponse | null>
   /** Navigate to Settings tab (for "edit in Settings" entry) */
   onNavigateToSettings?: () => void
+  currentSection?: OperationsSection
+  onSectionChange?: (section: OperationsSection) => void
+  showSectionTabs?: boolean
+  currentConsoleSection?: ConsoleSection
+  onConsoleSectionChange?: (section: ConsoleSection) => void
+  showConsoleTabs?: boolean
+  showAllSystemSections?: boolean
+  showSystemSection?: boolean
+  showWatchlistSection?: boolean
+  showConsoleSection?: boolean
+  watchlistCardTitle?: string
+  watchlistCardDescription?: string
+  consoleCardTitle?: string
+  consoleCardDescription?: string
 }
 
-export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateToSettings: _onNavigateToSettings }: DaemonMonitorPageProps) {
+export type OperationsSection = 'daemon' | 'monitor' | 'celery' | 'strategy'
+export type ConsoleSection = 'daemon-console' | 'server-console' | 'console' | 'operations' | 'events'
+
+export function DaemonMonitorPage({
+  status,
+  operations,
+  loadStatus,
+  onNavigateToSettings: _onNavigateToSettings,
+  currentSection,
+  onSectionChange,
+  showSectionTabs = true,
+  currentConsoleSection,
+  onConsoleSectionChange,
+  showConsoleTabs = true,
+  showAllSystemSections = false,
+  showSystemSection = true,
+  showWatchlistSection = true,
+  showConsoleSection = true,
+  watchlistCardTitle = 'Watchlist',
+  watchlistCardDescription,
+  consoleCardTitle,
+  consoleCardDescription,
+}: DaemonMonitorPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
@@ -129,10 +165,14 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   const [tick, setTick] = useState(0)
   const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
   const [healthTick, setHealthTick] = useState(0)
-  const [systemTab, setSystemTab] = useState<'daemon' | 'monitor' | 'celery' | 'strategy'>('daemon')
+  const [internalSystemTab, setInternalSystemTab] = useState<OperationsSection>('daemon')
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [quoteTick, setQuoteTick] = useState(0)
-  const [celerySectionTab, setCelerySectionTab] = useState<'daemon-console' | 'server-console' | 'console' | 'operations' | 'events'>('daemon-console')
+  const [internalConsoleTab, setInternalConsoleTab] = useState<ConsoleSection>('daemon-console')
+  const systemTab = currentSection ?? internalSystemTab
+  const setSystemTabSelected = onSectionChange ?? setInternalSystemTab
+  const consoleTab = currentConsoleSection ?? internalConsoleTab
+  const setConsoleTabSelected = onConsoleSectionChange ?? setInternalConsoleTab
   const [benchmarks, setBenchmarks] = useState<Record<string, { bar_time: number; close: number }>>({})
   const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -271,7 +311,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
   }
 
   const daemonLamp = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'none'
-  const hedgeLamp = (j?.status_lamp as 'green' | 'yellow' | 'red') || 'none'
+  const hedgeLamp: 'green' | 'yellow' | 'red' | 'none' = 'green'
   const monitorEnabled = j?.monitor_enabled !== false
   const monitorStatus = (j?.monitor_ib_status as any) || {}
   const monitorAccount = monitorStatus.account as { connected?: boolean; client_id?: number; last_error?: string } | undefined
@@ -510,7 +550,9 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
 
   return (
     <>
+      {showSystemSection && (
       <div className="card process-section system-tabs-wrapper">
+        {showSectionTabs && (
         <div className="system-tabs" role="tablist" aria-label="System sections">
           <button
             type="button"
@@ -519,7 +561,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             aria-controls="system-panel-daemon"
             id="tab-daemon"
             className={`system-tab ${systemTab === 'daemon' ? 'active' : ''}`}
-            onClick={() => setSystemTab('daemon')}
+            onClick={() => setSystemTabSelected('daemon')}
           >
             <span className={`lamp lamp-sm ${daemonLamp}`} title="Daemon status" aria-hidden />
             <span>Daemon</span>
@@ -531,7 +573,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             aria-controls="system-panel-monitor"
             id="tab-monitor"
             className={`system-tab ${systemTab === 'monitor' ? 'active' : ''}`}
-            onClick={() => setSystemTab('monitor')}
+            onClick={() => setSystemTabSelected('monitor')}
           >
             <span className={`lamp lamp-sm ${monitorLamp}`} title="Management status" aria-hidden />
             <span>Management</span>
@@ -543,7 +585,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             aria-controls="system-panel-celery"
             id="tab-celery"
             className={`system-tab ${systemTab === 'celery' ? 'active' : ''}`}
-            onClick={() => setSystemTab('celery')}
+            onClick={() => setSystemTabSelected('celery')}
           >
             <span className={`lamp lamp-sm ${celeryLamp}`} title="Celery (bars worker) status" aria-hidden />
             <span>Celery</span>
@@ -555,15 +597,17 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             aria-controls="system-panel-strategy"
             id="tab-strategy"
             className={`system-tab ${systemTab === 'strategy' ? 'active' : ''}`}
-            onClick={() => setSystemTab('strategy')}
+            onClick={() => setSystemTabSelected('strategy')}
           >
             <span className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status" aria-hidden />
             <span>Trading Strategy</span>
           </button>
         </div>
+        )}
 
-        {systemTab === 'daemon' && (
-      <div id="system-panel-daemon" role="tabpanel" aria-labelledby="tab-daemon" className="system-tab-panel">
+        <div className={showAllSystemSections ? 'system-stack' : undefined}>
+        {(showAllSystemSections || systemTab === 'daemon') && (
+      <div id="system-panel-daemon" role="tabpanel" aria-labelledby="tab-daemon" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
       <div className="daemon-header">
           <div className="daemon-header-main daemon-header-with-lamp">
             <div className="lamp-wrap-span">
@@ -734,8 +778,8 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       </div>
         )}
 
-        {systemTab === 'monitor' && (
-      <div id="system-panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" className="system-tab-panel">
+        {(showAllSystemSections || systemTab === 'monitor') && (
+      <div id="system-panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
         <div className="daemon-header">
           <div className="daemon-header-main daemon-header-with-lamp">
             <div className="lamp-wrap-span">
@@ -803,7 +847,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                 {monitorAccount?.connected ? (
                   <span className="countdown-num">Connected @ {monitorAccount?.client_id ?? '—'}</span>
                 ) : (
-                  'Not connected'
+                  `Not connected${monitorAccount?.last_error ? ` (${monitorAccount.last_error})` : ''}`
                 )}
               </p>
               <p className="section-hint countdown-line">
@@ -811,15 +855,9 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
                 {monitorMarket?.connected ? (
                   <span className="countdown-num">Connected @ {monitorMarket?.client_id ?? '—'}</span>
                 ) : (
-                  'Not connected'
+                  `Not connected${monitorMarket?.last_error ? ` (${monitorMarket.last_error})` : ''}`
                 )}
               </p>
-              {monitorAccount?.last_error && (
-                <p className="section-hint">Account client error: {monitorAccount.last_error}</p>
-              )}
-              {monitorMarket?.last_error && (
-                <p className="section-hint">Market client error: {monitorMarket.last_error}</p>
-              )}
               <div className="controls" style={{ marginTop: '0.25rem' }}>
                 {(monitorAccount?.connected || monitorMarket?.connected) ? (
                   <button
@@ -871,8 +909,8 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       </div>
         )}
 
-        {systemTab === 'celery' && (
-      <div id="system-panel-celery" role="tabpanel" aria-labelledby="tab-celery" className="system-tab-panel">
+        {(showAllSystemSections || systemTab === 'celery') && (
+      <div id="system-panel-celery" role="tabpanel" aria-labelledby="tab-celery" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
         <div className="daemon-header">
           <div className="daemon-header-main daemon-header-with-lamp">
             <div className="lamp-wrap-span">
@@ -953,8 +991,8 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
       </div>
         )}
 
-        {systemTab === 'strategy' && (
-      <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className="system-tab-panel">
+        {(showAllSystemSections || systemTab === 'strategy') && (
+      <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <div className="lamp-wrap-span">
             <div className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status lamp" />
@@ -996,8 +1034,11 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
         ) : null}
       </div>
         )}
+        </div>
       </div>
+      )}
 
+      {showWatchlistSection && (
       <div className="card card-operations realtime-quotes-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <div className="lamp-wrap-span">
@@ -1005,11 +1046,14 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           </div>
           <div>
             <h2 className="daemon-card-title page-title-with-tooltip">
-              Watchlist
+              {watchlistCardTitle}
               <InfoTooltip text={j?.redis_quotes_connected
                 ? `Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. SSE connected, ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
                 : 'Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. Redis not connected or monitor not subscribed; check config and daemon Event subscription.'} />
             </h2>
+            {watchlistCardDescription ? (
+              <p className="section-hint section-hint-tight">{watchlistCardDescription}</p>
+            ) : null}
           </div>
         </div>
         <div className="realtime-quotes-table-wrap">
@@ -1153,66 +1197,80 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           )
         })()}
       </div>
+      )}
 
+      {showConsoleSection && (
       <div className="card card-operations celery-console-card">
-        <div className="system-tabs" role="tablist" aria-label="Celery section" style={{ marginBottom: 'var(--space-3)' }}>
+        {consoleCardTitle ? (
+          <div className="console-card-header">
+            <div>
+              <h2 className="daemon-card-title">{consoleCardTitle}</h2>
+              {consoleCardDescription ? (
+                <p className="section-hint section-hint-tight">{consoleCardDescription}</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {showConsoleTabs && (
+        <div className="system-tabs" role="tablist" aria-label="Console section" style={{ marginBottom: 'var(--space-3)' }}>
           <button
             type="button"
             role="tab"
-            aria-selected={celerySectionTab === 'daemon-console'}
+            aria-selected={consoleTab === 'daemon-console'}
             aria-controls="celery-section-panel-daemon-console"
             id="celery-tab-daemon-console"
-            className={`system-tab ${celerySectionTab === 'daemon-console' ? 'active' : ''}`}
-            onClick={() => setCelerySectionTab('daemon-console')}
+            className={`system-tab ${consoleTab === 'daemon-console' ? 'active' : ''}`}
+            onClick={() => setConsoleTabSelected('daemon-console')}
           >
             Daemon Console
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={celerySectionTab === 'server-console'}
+            aria-selected={consoleTab === 'server-console'}
             aria-controls="celery-section-panel-server-console"
             id="celery-tab-server-console"
-            className={`system-tab ${celerySectionTab === 'server-console' ? 'active' : ''}`}
-            onClick={() => setCelerySectionTab('server-console')}
+            className={`system-tab ${consoleTab === 'server-console' ? 'active' : ''}`}
+            onClick={() => setConsoleTabSelected('server-console')}
           >
             Server Console
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={celerySectionTab === 'console'}
+            aria-selected={consoleTab === 'console'}
             aria-controls="celery-section-panel-console"
             id="celery-tab-console"
-            className={`system-tab ${celerySectionTab === 'console' ? 'active' : ''}`}
-            onClick={() => setCelerySectionTab('console')}
+            className={`system-tab ${consoleTab === 'console' ? 'active' : ''}`}
+            onClick={() => setConsoleTabSelected('console')}
           >
             Celery Console
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={celerySectionTab === 'operations'}
+            aria-selected={consoleTab === 'operations'}
             aria-controls="celery-section-panel-operations"
             id="celery-tab-operations"
-            className={`system-tab ${celerySectionTab === 'operations' ? 'active' : ''}`}
-            onClick={() => setCelerySectionTab('operations')}
+            className={`system-tab ${consoleTab === 'operations' ? 'active' : ''}`}
+            onClick={() => setConsoleTabSelected('operations')}
           >
             Recent operations
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={celerySectionTab === 'events'}
+            aria-selected={consoleTab === 'events'}
             aria-controls="celery-section-panel-events"
             id="celery-tab-events"
-            className={`system-tab ${celerySectionTab === 'events' ? 'active' : ''}`}
-            onClick={() => setCelerySectionTab('events')}
+            className={`system-tab ${consoleTab === 'events' ? 'active' : ''}`}
+            onClick={() => setConsoleTabSelected('events')}
           >
             Event Subscribe
           </button>
         </div>
-        {celerySectionTab === 'daemon-console' && (
+        )}
+        {consoleTab === 'daemon-console' && (
           <div id="celery-section-panel-daemon-console" role="tabpanel" aria-labelledby="celery-tab-daemon-console"
             style={{ marginTop: 'var(--space-3)' }}
           >
@@ -1227,7 +1285,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             />
           </div>
         )}
-        {celerySectionTab === 'server-console' && (
+        {consoleTab === 'server-console' && (
           <div id="celery-section-panel-server-console" role="tabpanel" aria-labelledby="celery-tab-server-console"
             style={{ marginTop: 'var(--space-3)' }}
           >
@@ -1242,7 +1300,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             />
           </div>
         )}
-        {celerySectionTab === 'console' && (
+        {consoleTab === 'console' && (
           <div id="celery-section-panel-console" role="tabpanel" aria-labelledby="celery-tab-console"
             style={{ marginTop: 'var(--space-3)' }}
           >
@@ -1257,7 +1315,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             />
           </div>
         )}
-        {celerySectionTab === 'operations' && (
+        {consoleTab === 'operations' && (
           <div id="celery-section-panel-operations" role="tabpanel" aria-labelledby="celery-tab-operations"
             style={{ marginTop: 'var(--space-3)' }}
           >
@@ -1293,7 +1351,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
             </table>
           </div>
         )}
-        {celerySectionTab === 'events' && (
+        {consoleTab === 'events' && (
           <div id="celery-section-panel-events" role="tabpanel" aria-labelledby="celery-tab-events"
             style={{ marginTop: 'var(--space-3)' }}
           >
@@ -1395,6 +1453,7 @@ export function DaemonMonitorPage({ status, operations, loadStatus, onNavigateTo
           </div>
         )}
       </div>
+      )}
     </>
   )
 }

@@ -1266,10 +1266,7 @@ def create_app(
             return {"ok": False, "error": f"连接 IB 失败：{e}", "count": 0}
 
         # 收到 commissionReport 事件时直接按 exec_id 更新 DB（仅 live 成交会触发；历史仍靠 get_executions_async 合并）
-        from src.connector.ib import IBConnector as _IBConnectorAlias
-        if not isinstance(client.connector, _IBConnectorAlias):
-            return {"ok": False, "error": "AccountIbClient connector 未就绪。", "count": 0}
-        client.connector.set_commission_report_callback(
+        await client.set_commission_report_callback(
             lambda eid, c, pnl, cur, y_, yrd: update_execution_commission(
                 control_via_db, eid, c, pnl, cur, y_, yrd
             )
@@ -1278,7 +1275,7 @@ def create_app(
             all_execs = await client.fetch_executions(days=days)
         finally:
             try:
-                client.connector.set_commission_report_callback(None)
+                await client.set_commission_report_callback(None)
             except Exception:
                 pass
         if not all_execs:

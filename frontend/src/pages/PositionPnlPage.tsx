@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   Execution,
-  Operation,
+  IbPositionRow,
   OptExecutionGroup,
   RiskSummaryResponse,
   StatusResponse,
@@ -84,12 +84,104 @@ function getContractLabelParts(contract_key: string): { symbol: string; rightLab
   return { symbol, rightLabel }
 }
 
+export type PortfolioView = 'overview' | 'open' | 'ledger'
+
 interface PositionPnlPageProps {
   status: StatusResponse | null
-  operations: Operation[]
+  currentView?: PortfolioView
+  onViewChange?: (view: PortfolioView) => void
+  showViewTabs?: boolean
 }
 
-export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
+type LivePositionRow = IbPositionRow & {
+  account_id: string
+}
+
+type OpenOptionGroup = {
+  kind: 'live' | 'offtrack'
+  contract_key: string
+  strike: number
+  expiry: string
+  net_qty: number
+  avg_cost: number | null
+  mark_price: number | null
+  unrealized_pnl: number | null
+  account_count: number
+  pool_label: 'On' | 'Off'
+  positions?: LivePositionRow[]
+  trades?: Execution[]
+}
+
+function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecutionGroup[] {
+  const opt = sourceExecutions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
+  const key = (e: Execution) => `${e.contract_key ?? ''}|${e.strike ?? 0}`
+  const groups = new Map<string, Execution[]>()
+  for (const e of opt) {
+    const k = key(e)
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k)!.push(e)
+  }
+  const result: OptExecutionGroup[] = []
+  for (const [, trades] of groups) {
+    if (trades.length === 0) continue
+    const first = trades[0]
+    const contract_key = first.contract_key ?? ''
+    const strike = Number(first.strike) ?? 0
+    const expiry = first.expiry ?? ''
+    let buy_qty = 0
+    let sell_qty = 0
+    let buy_value = 0
+    let sell_value = 0
+    let buy_value_raw = 0
+    let sell_value_raw = 0
+    for (const t of trades) {
+      const q = Number(t.quantity) || 0
+      const p = Number(t.price) || 0
+      const c = Number(t.commission) || 0
+      const v = p * q * 100 - c
+      const side = (t.side ?? '').toUpperCase()
+      if (side === 'BUY' || side === 'BOT' || side === 'B') {
+        buy_qty += q
+        buy_value += v
+        buy_value_raw += p * q
+      } else if (side === 'SELL' || side === 'SLD' || side === 'S') {
+        sell_qty += q
+        sell_value += v
+        sell_value_raw += p * q
+      }
+    }
+    const net_qty = buy_qty - sell_qty
+    const buy_cost = buy_value
+    const sell_premium = sell_value
+    const realized_pnl = sell_premium - buy_cost
+    const buy_avg_price = buy_qty > 0 ? buy_value_raw / buy_qty : null
+    const sell_avg_price = sell_qty > 0 ? sell_value_raw / sell_qty : null
+    result.push({
+      contract_key,
+      strike,
+      expiry,
+      net_qty,
+      buy_volume: buy_qty,
+      sell_volume: sell_qty,
+      buy_avg_price,
+      sell_avg_price,
+      buy_cost,
+      sell_premium,
+      realized_pnl,
+      status: net_qty === 0 ? 'realized' : 'unrealized',
+      trades: trades.slice().sort((a, b) => (b.time ?? 0) - (a.time ?? 0)),
+    })
+  }
+  result.sort((a, b) => (b.trades[0]?.time ?? 0) - (a.trades[0]?.time ?? 0))
+  return result
+}
+
+export function PositionPnlPage({
+  status,
+  currentView,
+  onViewChange,
+  showViewTabs = true,
+}: PositionPnlPageProps) {
   const [riskSummary, setRiskSummary] = useState<RiskSummaryResponse | null>(null)
   const [executions, setExecutions] = useState<Execution[]>([])
   const [replayLoading, setReplayLoading] = useState(false)
@@ -115,22 +207,33 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   })
   const OFF_TRACK_ACCOUNT_ID = 'Off-Track'
 
-  const [filterSymbol, setFilterSymbol] = useState('')
-  const [filterExpiryStart, setFilterExpiryStart] = useState('')
-  const [filterExpiryEnd, setFilterExpiryEnd] = useState('')
-  const [filterExecStart, setFilterExecStart] = useState('')
-  const [filterExecEnd, setFilterExecEnd] = useState('')
-  const [filterPool, setFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
+  const [openFilterSymbol, setOpenFilterSymbol] = useState('')
+  const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
+  const [openFilterExpiryEnd, setOpenFilterExpiryEnd] = useState('')
+  const [openFilterPool, setOpenFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
+  const [ledgerFilterSymbol, setLedgerFilterSymbol] = useState('')
+  const [ledgerFilterExpiryStart, setLedgerFilterExpiryStart] = useState('')
+  const [ledgerFilterExpiryEnd, setLedgerFilterExpiryEnd] = useState('')
+  const [ledgerFilterExecStart, setLedgerFilterExecStart] = useState('')
+  const [ledgerFilterExecEnd, setLedgerFilterExecEnd] = useState('')
+  const [ledgerFilterPool, setLedgerFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
+  const [internalPortfolioView, setInternalPortfolioView] = useState<PortfolioView>('overview')
+  const [ledgerTab, setLedgerTab] = useState<'options' | 'stocks'>('options')
+  const portfolioView = currentView ?? internalPortfolioView
+  const setPortfolioViewSelected = onViewChange ?? setInternalPortfolioView
 
   const getOptGroupKey = (g: OptExecutionGroup) => `${g.contract_key}-${g.strike}-${g.expiry}`
   const [expandedDetailKeys, setExpandedDetailKeys] = useState<string[]>([])
+  const getOpenOptGroupKey = (g: OpenOptionGroup) => `${g.contract_key}-${g.strike}-${g.expiry}`
+  const [expandedOpenDetailKeys, setExpandedOpenDetailKeys] = useState<string[]>([])
 
   /** true = 手风琴模式（一次只展开一个），false = 可展开多列 */
-  const [accordionMode, setAccordionMode] = useState<boolean>(false)
+  const [openAccordionMode, setOpenAccordionMode] = useState<boolean>(false)
+  const [ledgerAccordionMode, setLedgerAccordionMode] = useState<boolean>(false)
   const toggleDetailExpand = (key: string) => {
     setExpandedDetailKeys(prev => {
       const isOpen = prev.includes(key)
-      if (accordionMode) {
+      if (ledgerAccordionMode) {
         // 手风琴：点击已展开的就收起，点击未展开的只保留当前一个
         return isOpen ? [] : [key]
       }
@@ -139,11 +242,21 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
     })
   }
 
-  const filteredExecutions = useMemo(() => {
+  const toggleOpenDetailExpand = (key: string) => {
+    setExpandedOpenDetailKeys(prev => {
+      const isOpen = prev.includes(key)
+      if (openAccordionMode) {
+        return isOpen ? [] : [key]
+      }
+      return isOpen ? prev.filter(k => k !== key) : [...prev, key]
+    })
+  }
+
+  const ledgerBaseFilteredExecutions = useMemo(() => {
     let list = [...(executions || [])]
-    const sym = filterSymbol.trim().toUpperCase()
+    const sym = ledgerFilterSymbol.trim().toUpperCase()
     if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
-    const expStart = filterExpiryStart.trim().replace(/-/g, '')
+    const expStart = ledgerFilterExpiryStart.trim().replace(/-/g, '')
     if (expStart) {
       list = list.filter(e => {
         const ex = (e.expiry || '').trim().replace(/-/g, '')
@@ -151,7 +264,7 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
         return cmp >= expStart.slice(0, 8)
       })
     }
-    const expEnd = filterExpiryEnd.trim().replace(/-/g, '')
+    const expEnd = ledgerFilterExpiryEnd.trim().replace(/-/g, '')
     if (expEnd) {
       list = list.filter(e => {
         const ex = (e.expiry || '').trim().replace(/-/g, '')
@@ -159,31 +272,231 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
         return cmp <= expEnd.slice(0, 8)
       })
     }
-    if (filterExecStart.trim()) {
-      const t = datetimeLocalToUnix(filterExecStart)
+    if (ledgerFilterExecStart.trim()) {
+      const t = datetimeLocalToUnix(ledgerFilterExecStart)
       if (Number.isFinite(t)) list = list.filter(e => (e.time ?? 0) >= t)
     }
-    if (filterExecEnd.trim()) {
-      const t = datetimeLocalToUnix(filterExecEnd + 'T23:59:59')
+    if (ledgerFilterExecEnd.trim()) {
+      const t = datetimeLocalToUnix(ledgerFilterExecEnd + 'T23:59:59')
       if (Number.isFinite(t)) list = list.filter(e => (e.time ?? 0) <= t)
     }
-    if (filterPool === 'ON') list = list.filter(e => (e.account_id ?? '').trim() !== OFF_TRACK_ACCOUNT_ID)
-    else if (filterPool === 'Off') list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
     return list
-  }, [executions, filterSymbol, filterExpiryStart, filterExpiryEnd, filterExecStart, filterExecEnd, filterPool])
+  }, [executions, ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExpiryEnd, ledgerFilterExecStart, ledgerFilterExecEnd])
 
-  const filteredOperations = useMemo(() => {
-    let list = [...(operations || [])]
-    if (filterExecStart.trim()) {
-      const t = datetimeLocalToUnix(filterExecStart)
-      if (Number.isFinite(t)) list = list.filter(op => (op.ts ?? 0) >= t)
+  const filteredExecutions = useMemo(() => {
+    let list = [...ledgerBaseFilteredExecutions]
+    if (ledgerFilterPool === 'ON') list = list.filter(e => (e.account_id ?? '').trim() !== OFF_TRACK_ACCOUNT_ID)
+    else if (ledgerFilterPool === 'Off') list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
+    return list
+  }, [ledgerBaseFilteredExecutions, ledgerFilterPool])
+
+  const openOffTrackBaseExecutions = useMemo(() => {
+    let list = [...(executions || [])]
+    list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
+    const sym = openFilterSymbol.trim().toUpperCase()
+    if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
+    const expStart = openFilterExpiryStart.trim().replace(/-/g, '')
+    if (expStart) {
+      list = list.filter(e => {
+        const ex = (e.expiry || '').trim().replace(/-/g, '')
+        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex + '01'
+        return cmp >= expStart.slice(0, 8)
+      })
     }
-    if (filterExecEnd.trim()) {
-      const t = datetimeLocalToUnix(filterExecEnd + 'T23:59:59')
-      if (Number.isFinite(t)) list = list.filter(op => (op.ts ?? 0) <= t)
+    const expEnd = openFilterExpiryEnd.trim().replace(/-/g, '')
+    if (expEnd) {
+      list = list.filter(e => {
+        const ex = (e.expiry || '').trim().replace(/-/g, '')
+        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex.length === 6 ? ex + '31' : ex
+        return cmp <= expEnd.slice(0, 8)
+      })
     }
     return list
-  }, [operations, filterExecStart, filterExecEnd])
+  }, [executions, openFilterSymbol, openFilterExpiryStart, openFilterExpiryEnd])
+
+  const livePositions = useMemo((): LivePositionRow[] => {
+    if (openFilterPool === 'Off') return []
+    const accounts = status?.accounts ?? []
+    let rows = accounts.flatMap(account =>
+      (account.positions ?? [])
+        .filter(position => {
+          const qty = Number(position.position)
+          return Number.isFinite(qty) && qty !== 0
+        })
+        .map(position => ({
+          ...position,
+          account_id: (account.account_id ?? '').trim(),
+        })),
+    )
+
+    const sym = openFilterSymbol.trim().toUpperCase()
+    if (sym) {
+      rows = rows.filter(position => (position.symbol ?? '').toUpperCase() === sym)
+    }
+
+    const expStart = openFilterExpiryStart.trim().replace(/-/g, '')
+    if (expStart) {
+      rows = rows.filter(position => {
+        const secType = (position.secType ?? '').toUpperCase()
+        if (secType !== 'OPT') return true
+        const ex = (position.lastTradeDateOrContractMonth ?? position.expiry ?? '').trim().replace(/-/g, '')
+        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex + '01'
+        return cmp >= expStart.slice(0, 8)
+      })
+    }
+
+    const expEnd = openFilterExpiryEnd.trim().replace(/-/g, '')
+    if (expEnd) {
+      rows = rows.filter(position => {
+        const secType = (position.secType ?? '').toUpperCase()
+        if (secType !== 'OPT') return true
+        const ex = (position.lastTradeDateOrContractMonth ?? position.expiry ?? '').trim().replace(/-/g, '')
+        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex.length === 6 ? ex + '31' : ex
+        return cmp <= expEnd.slice(0, 8)
+      })
+    }
+
+    rows.sort((a, b) => {
+      const aSym = (a.symbol ?? '').toUpperCase()
+      const bSym = (b.symbol ?? '').toUpperCase()
+      if (aSym !== bSym) return aSym.localeCompare(bSym)
+      return (a.account_id ?? '').localeCompare(b.account_id ?? '')
+    })
+    return rows
+  }, [openFilterExpiryEnd, openFilterExpiryStart, openFilterPool, openFilterSymbol, status?.accounts])
+
+  const liveOptionPositions = useMemo(
+    () => livePositions.filter(position => (position.secType ?? '').toUpperCase() === 'OPT'),
+    [livePositions],
+  )
+
+  const openOptionGroups = useMemo((): OpenOptionGroup[] => {
+    const result: OpenOptionGroup[] = []
+
+    if (openFilterPool !== 'Off') {
+      const groups = new Map<string, LivePositionRow[]>()
+      for (const position of liveOptionPositions) {
+        const expiry = position.lastTradeDateOrContractMonth ?? position.expiry ?? ''
+        const strike = Number(position.strike) || 0
+        const right = (position.right ?? '').toUpperCase().slice(0, 1)
+        const contractKey = position.contract_key ?? `${position.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`
+        const key = `${contractKey}|${strike}`
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(position)
+      }
+
+      for (const [, positions] of groups) {
+        if (positions.length === 0) continue
+        const first = positions[0]
+        const expiry = first.lastTradeDateOrContractMonth ?? first.expiry ?? ''
+        const strike = Number(first.strike) || 0
+        const contract_key = first.contract_key ?? `${first.symbol ?? ''}|OPT|${expiry}|${strike}|${(first.right ?? '').toUpperCase().slice(0, 1)}`
+        let grossQty = 0
+        let netQty = 0
+        let costWeightedSum = 0
+        let markWeightedSum = 0
+        let unrealizedPnl = 0
+        for (const position of positions) {
+          const qty = Number(position.position) || 0
+          const absQty = Math.abs(qty)
+          const avgCost = position.avgCost != null && Number.isFinite(Number(position.avgCost))
+            ? Number(position.avgCost)
+            : null
+          const markPrice = position.price != null && Number.isFinite(Number(position.price))
+            ? Number(position.price)
+            : null
+          netQty += qty
+          grossQty += absQty
+          if (avgCost != null) costWeightedSum += avgCost * absQty
+          if (markPrice != null) markWeightedSum += markPrice * absQty
+          unrealizedPnl += Number(position.unrealized_pnl) || 0
+        }
+        result.push({
+          kind: 'live',
+          contract_key,
+          strike,
+          expiry,
+          net_qty: netQty,
+          avg_cost: grossQty > 0 ? costWeightedSum / grossQty : null,
+          mark_price: grossQty > 0 ? markWeightedSum / grossQty : null,
+          unrealized_pnl: unrealizedPnl,
+          account_count: new Set(positions.map(position => position.account_id || '—')).size,
+          pool_label: 'On',
+          positions: positions.slice().sort((a, b) => (b.account_id ?? '').localeCompare(a.account_id ?? '')),
+        })
+      }
+    }
+
+    if (openFilterPool !== 'ON') {
+      const openOffTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions).filter(group => group.status === 'unrealized')
+      for (const group of openOffTrackGroups) {
+        result.push({
+          kind: 'offtrack',
+          contract_key: group.contract_key,
+          strike: group.strike,
+          expiry: group.expiry,
+          net_qty: group.net_qty,
+          avg_cost: group.buy_avg_price,
+          mark_price: null,
+          unrealized_pnl: null,
+          account_count: new Set(group.trades.map(trade => (trade.account_id ?? '').trim() || '—')).size,
+          pool_label: 'Off',
+          trades: group.trades,
+        })
+      }
+    }
+
+    result.sort((a, b) => {
+      const aSymbol = getContractLabelParts(a.contract_key).symbol
+      const bSymbol = getContractLabelParts(b.contract_key).symbol
+      if (aSymbol !== bSymbol) return aSymbol.localeCompare(bSymbol)
+      if (a.expiry !== b.expiry) return a.expiry.localeCompare(b.expiry)
+      return a.pool_label.localeCompare(b.pool_label)
+    })
+    return result
+  }, [openFilterPool, liveOptionPositions, openOffTrackBaseExecutions])
+
+  const liveStockPositions = useMemo(
+    () => livePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT'),
+    [livePositions],
+  )
+
+  const overviewLivePositions = useMemo((): LivePositionRow[] => {
+    const accounts = status?.accounts ?? []
+    return accounts.flatMap(account =>
+      (account.positions ?? [])
+        .filter(position => {
+          const qty = Number(position.position)
+          return Number.isFinite(qty) && qty !== 0
+        })
+        .map(position => ({
+          ...position,
+          account_id: (account.account_id ?? '').trim(),
+        })),
+    )
+  }, [status?.accounts])
+
+  const overviewOptionContracts = useMemo(() => {
+    const keys = new Set<string>()
+    for (const position of overviewLivePositions) {
+      if ((position.secType ?? '').toUpperCase() !== 'OPT') continue
+      const expiry = position.lastTradeDateOrContractMonth ?? position.expiry ?? ''
+      const strike = Number(position.strike) || 0
+      const right = (position.right ?? '').toUpperCase().slice(0, 1)
+      keys.add(position.contract_key ?? `${position.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`)
+    }
+    return keys.size
+  }, [overviewLivePositions])
+
+  const overviewStockLines = useMemo(
+    () => overviewLivePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT').length,
+    [overviewLivePositions],
+  )
+
+  const overviewUnrealizedPnl = useMemo(
+    () => overviewLivePositions.reduce((acc, position) => acc + (Number(position.unrealized_pnl) || 0), 0),
+    [overviewLivePositions],
+  )
 
   const executionAccountOptions = useMemo(() => {
     const fromStatus = ((status?.accounts as { account_id?: string }[] | undefined) ?? [])
@@ -240,72 +553,31 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   }, [editExec])
 
   const optExecutionGroups = useMemo((): OptExecutionGroup[] => {
-    const opt = filteredExecutions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
-    const key = (e: Execution) => `${e.contract_key ?? ''}|${e.strike ?? 0}`
-    const groups = new Map<string, Execution[]>()
-    for (const e of opt) {
-      const k = key(e)
-      if (!groups.has(k)) groups.set(k, [])
-      groups.get(k)!.push(e)
-    }
-    const result: OptExecutionGroup[] = []
-    for (const [, trades] of groups) {
-      if (trades.length === 0) continue
-      const first = trades[0]
-      const contract_key = first.contract_key ?? ''
-      const strike = Number(first.strike) ?? 0
-      const expiry = first.expiry ?? ''
-      let buy_qty = 0
-      let sell_qty = 0
-      let buy_value = 0
-      let sell_value = 0
-      let buy_value_raw = 0
-      let sell_value_raw = 0
-      for (const t of trades) {
-        const q = Number(t.quantity) || 0
-        const p = Number(t.price) || 0
-        const c = Number(t.commission) || 0
-        const v = p * q * 100 - c
-        const side = (t.side ?? '').toUpperCase()
-        if (side === 'BUY' || side === 'BOT' || side === 'B') {
-          buy_qty += q
-          buy_value += v
-          buy_value_raw += p * q
-        } else if (side === 'SELL' || side === 'SLD' || side === 'S') {
-          sell_qty += q
-          sell_value += v
-          sell_value_raw += p * q
-        }
-      }
-      const net_qty = buy_qty - sell_qty
-      const buy_cost = buy_value
-      const sell_premium = sell_value
-      const realized_pnl = sell_premium - buy_cost
-      const buy_avg_price = buy_qty > 0 ? buy_value_raw / buy_qty : null
-      const sell_avg_price = sell_qty > 0 ? sell_value_raw / sell_qty : null
-      result.push({
-        contract_key,
-        strike,
-        expiry,
-        net_qty,
-        buy_volume: buy_qty,
-        sell_volume: sell_qty,
-        buy_avg_price,
-        sell_avg_price,
-        buy_cost,
-        sell_premium,
-        realized_pnl,
-        status: net_qty === 0 ? 'realized' : 'unrealized',
-        trades: trades.slice().sort((a, b) => (b.time ?? 0) - (a.time ?? 0)),
-      })
-    }
-    result.sort((a, b) => (b.trades[0]?.time ?? 0) - (a.trades[0]?.time ?? 0))
-    return result
+    return buildOptExecutionGroups(filteredExecutions)
   }, [filteredExecutions])
 
-  const optGroupsPnlSum = useMemo(() => {
-    return optExecutionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0)
-  }, [optExecutionGroups])
+  const closedOptionGroups = useMemo(
+    () => optExecutionGroups.filter(group => group.status === 'realized'),
+    [optExecutionGroups],
+  )
+  const closedOptGroupsPnlSum = useMemo(() => {
+    return closedOptionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0)
+  }, [closedOptionGroups])
+  const hasOptionExecutions = closedOptionGroups.length > 0
+  const hasStockExecutions = useMemo(
+    () => filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT'),
+    [filteredExecutions],
+  )
+
+  useEffect(() => {
+    if (ledgerTab === 'options' && !hasOptionExecutions && hasStockExecutions) {
+      setLedgerTab('stocks')
+      return
+    }
+    if (ledgerTab === 'stocks' && !hasStockExecutions && hasOptionExecutions) {
+      setLedgerTab('options')
+    }
+  }, [ledgerTab, hasOptionExecutions, hasStockExecutions])
 
   const loadReplayData = useCallback(async () => {
     setReplayLoading(true)
@@ -329,556 +601,901 @@ export function PositionPnlPage({ status, operations }: PositionPnlPageProps) {
   return (
     <div className="card process-section replay-page">
       <h2 className="page-title-with-tooltip">
-        Position & PnL
-        <InfoTooltip text="Option and hedge leg position structure and PnL analysis; separate from real-time monitor." />
+        Portfolio
+        <InfoTooltip text="Separate current open positions from closed trade history, while keeping PnL and execution tools in one portfolio workspace." />
       </h2>
-      <div className="replay-toolbar">
-        <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
-          <span className="replay-fetch-days-label">Fetch</span>
-          <label className="replay-fetch-radio">
-            <input
-              type="radio"
-              name="replay-fetch-days"
-              value={1}
-              checked={replayFetchDays === 1}
-              onChange={() => setReplayFetchDays(1)}
-              disabled={replaySyncing}
-            />
-            <span>Today</span>
-          </label>
-          <label className="replay-fetch-radio">
-            <input
-              type="radio"
-              name="replay-fetch-days"
-              value={3}
-              checked={replayFetchDays === 3}
-              onChange={() => setReplayFetchDays(3)}
-              disabled={replaySyncing}
-            />
-            <span>Last 3 days</span>
-          </label>
-          <label className="replay-fetch-radio">
-            <input
-              type="radio"
-              name="replay-fetch-days"
-              value={7}
-              checked={replayFetchDays === 7}
-              onChange={() => setReplayFetchDays(7)}
-              disabled={replaySyncing}
-            />
-            <span>Last 7 days</span>
-          </label>
-          <button
-            type="button"
-            className="btn btn-small replay-fetch-refresh-btn"
-            disabled={replaySyncing || replayLoading}
-            onClick={async () => {
-              setReplaySyncing(true)
-              const res = await postExecutionsFetch(replayFetchDays)
-              if (!res.ok) {
-                setReplaySyncing(false)
-                return
-              }
-              await loadReplayData()
-              setReplaySyncing(false)
-            }}
-            aria-label="Fetch executions from IB and write to DB"
-          >
-            {replaySyncing ? 'Fetching…' : 'Refresh'}
-          </button>
-        </div>
-        {replaySyncing && (
-          <span className="replay-sync-hint">Fetching executions from IB…</span>
-        )}
+      {showViewTabs && (
+      <div className="system-tabs replay-portfolio-view-tabs" role="tablist" aria-label="Portfolio view">
         <button
           type="button"
-          className="btn btn-secondary"
-          onClick={() => { setAddExecOpen(true); setExecFormError(null); }}
-          aria-label="Add execution record manually (historical)"
+          role="tab"
+          aria-selected={portfolioView === 'overview'}
+          className={`system-tab ${portfolioView === 'overview' ? 'active' : ''}`}
+          onClick={() => setPortfolioViewSelected('overview')}
         >
-          Add Trade
+          Overview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={portfolioView === 'open'}
+          className={`system-tab ${portfolioView === 'open' ? 'active' : ''}`}
+          onClick={() => setPortfolioViewSelected('open')}
+        >
+          Open Positions
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={portfolioView === 'ledger'}
+          className={`system-tab ${portfolioView === 'ledger' ? 'active' : ''}`}
+          onClick={() => setPortfolioViewSelected('ledger')}
+        >
+          Trade Ledger
         </button>
       </div>
+      )}
+      <p className="section-hint replay-portfolio-view-hint">
+        {portfolioView === 'overview'
+          ? 'Overview shows portfolio-level summary and risk model signals without trade-maintenance actions.'
+          : portfolioView === 'open'
+            ? 'Open Positions uses live account positions from IB snapshots, while Off-Track positions are inferred only for the open-position view.'
+            : 'Trade Ledger is the maintenance workspace for closed trades, execution imports, and manual trade corrections.'}
+      </p>
 
-      <section className="replay-section" aria-labelledby="risk-summary-head">
-        <h3 id="risk-summary-head">Risk model</h3>
-        {replayLoading ? (
-          <p className="section-hint">Loading…</p>
-        ) : riskSummary ? (
-          <div className="risk-summary-cards">
-            <div className="risk-card">
-              <span className="risk-card-label">Daily hedge count</span>
-              <span className="risk-card-value">{riskSummary.daily_hedge_count ?? '—'}</span>
+      {portfolioView === 'overview' ? (
+        <>
+          <section className="replay-section" aria-labelledby="portfolio-overview-head">
+            <h3 id="portfolio-overview-head">Portfolio overview</h3>
+            <div className="risk-summary-cards">
+              <div className="risk-card">
+                <span className="risk-card-label">Accounts</span>
+                <span className="risk-card-value">{status?.accounts?.length ?? 0}</span>
+              </div>
+              <div className="risk-card">
+                <span className="risk-card-label">Open option contracts</span>
+                <span className="risk-card-value">{overviewOptionContracts}</span>
+              </div>
+              <div className="risk-card">
+                <span className="risk-card-label">Stock lines</span>
+                <span className="risk-card-value">{overviewStockLines}</span>
+              </div>
+              <div className="risk-card">
+                <span className="risk-card-label">Unrealized PnL</span>
+                <span className="risk-card-value">{fmtUsd(overviewUnrealizedPnl)}</span>
+              </div>
             </div>
-            <div className="risk-card">
-              <span className="risk-card-label">Daily PnL (USD)</span>
-              <span className="risk-card-value">
-                {fmtUsd(riskSummary.daily_pnl)}
-              </span>
-            </div>
-            <div className="risk-card">
-              <span className="risk-card-label">Spot</span>
-              <span className="risk-card-value">
-                {fmtUsd(riskSummary.spot)}
-              </span>
-            </div>
-            <div className="risk-card">
-              <span className="risk-card-label">Ops (24h)</span>
-              <span className="risk-card-value">{riskSummary.operations_count_24h ?? 0}</span>
-            </div>
-          </div>
-        ) : (
-          <p className="section-hint">Unable to load risk summary (check API and DB).</p>
-        )}
-      </section>
-
-      <section className="replay-section replay-section-trade-records" aria-labelledby="trade-records-head">
-        <h3 id="trade-records-head">Trade records</h3>
-        <div className="replay-filters">
-          <label className="replay-filter-wrap-symbol">
-            <input
-              type="text"
-              placeholder="Symbol"
-              value={filterSymbol}
-              onChange={e => setFilterSymbol(e.target.value)}
-              className="replay-filter-input"
-            />
-          </label>
-          <label>
-            <span className="replay-filter-label">Expiry</span>
-            <input
-              type="date"
-              value={filterExpiryStart}
-              onChange={e => setFilterExpiryStart(e.target.value)}
-              className="replay-filter-input replay-filter-date"
-              title="Start"
-            />
-            <span className="replay-filter-sep">～</span>
-            <input
-              type="date"
-              value={filterExpiryEnd}
-              onChange={e => setFilterExpiryEnd(e.target.value)}
-              className="replay-filter-input replay-filter-date"
-              title="End"
-            />
-          </label>
-          <label>
-            <span className="replay-filter-label">Submit</span>
-            <input
-              type="date"
-              value={filterExecStart}
-              onChange={e => setFilterExecStart(e.target.value)}
-              className="replay-filter-input replay-filter-date"
-              title="Start"
-            />
-            <span className="replay-filter-sep">～</span>
-            <input
-              type="date"
-              value={filterExecEnd}
-              onChange={e => setFilterExecEnd(e.target.value)}
-              className="replay-filter-input replay-filter-date"
-              title="End"
-            />
-          </label>
-          <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
-            <span className="replay-fetch-days-label">Pool</span>
-            <label className="replay-fetch-radio">
-              <input
-                type="radio"
-                name="replay-pool"
-                value="Mix"
-                checked={filterPool === 'Mix'}
-                onChange={() => setFilterPool('Mix')}
-              />
-              <span>Mix</span>
-            </label>
-            <label className="replay-fetch-radio">
-              <input
-                type="radio"
-                name="replay-pool"
-                value="ON"
-                checked={filterPool === 'ON'}
-                onChange={() => setFilterPool('ON')}
-              />
-              <span>ON</span>
-            </label>
-            <label className="replay-fetch-radio">
-              <input
-                type="radio"
-                name="replay-pool"
-                value="Off"
-                checked={filterPool === 'Off'}
-                onChange={() => setFilterPool('Off')}
-              />
-              <span>Off</span>
-            </label>
-          </div>
-          <button
-            type="button"
-            className="btn btn-small replay-filter-clear"
-            onClick={() => {
-              setFilterSymbol('')
-              setFilterExpiryStart('')
-              setFilterExpiryEnd('')
-              setFilterExecStart('')
-              setFilterExecEnd('')
-              setFilterPool('Mix')
-            }}
-          >
-            Clear filters
-          </button>
-        </div>
-        <h4 className="replay-sub page-title-with-tooltip">
-          Strategy operations (hedge)
-          <InfoTooltip text={'From GET /operations; account-level executions (R-A2) shown in "Portfolio" below.'} />
-        </h4>
-        <div className="replay-portfolio-table-wrap">
-        <table className="table-operations">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Type</th>
-              <th>Side</th>
-              <th>Qty</th>
-              <th>Price</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredOperations.length === 0 ? (
-              <tr><td colSpan={6}>None</td></tr>
-            ) : (
-              filteredOperations.slice(0, 50).map((op, i) => (
-                <tr key={`${op.ts}-${i}`}>
-                  <td>{fmtTs(op.ts)}</td>
-                  <td>{op.type ?? ''}</td>
-                  <td>{op.side ?? ''}</td>
-                  <td>{op.quantity ?? ''}</td>
-                  <td>{fmtUsd(op.price)}</td>
-                  <td>{op.state_reason ?? ''}</td>
-                </tr>
-              ))
+            {status?.accounts_fetched_at != null && Number.isFinite(Number(status.accounts_fetched_at)) && (
+              <p className="section-hint replay-overview-fetched-at">
+                Live positions snapshot from {new Date(Number(status.accounts_fetched_at) * 1000).toLocaleString()}.
+              </p>
             )}
-          </tbody>
-        </table>
-        </div>
-        <div className="replay-portfolio-block">
-          <div className="replay-portfolio-header">
-            <h4 className="replay-sub page-title-with-tooltip" style={{ marginBottom: 0 }}>
-              Portfolio
-              <InfoTooltip text="Options grouped by contract_key and strike; Cost/Premium = Size×@×100−Commission; PnL = Premium − Cost; color by status (realized green, unrealized yellow)." />
-            </h4>
-            <div className="replay-portfolio-filters">
-              <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
-                <span className="replay-fetch-days-label">Pool</span>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-pool-header" value="Mix" checked={filterPool === 'Mix'} onChange={() => setFilterPool('Mix')} />
-                  <span>Mix</span>
-                </label>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-pool-header" value="ON" checked={filterPool === 'ON'} onChange={() => setFilterPool('ON')} />
-                  <span>On</span>
-                </label>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-pool-header" value="Off" checked={filterPool === 'Off'} onChange={() => setFilterPool('Off')} />
-                  <span>Off</span>
-                </label>
-              </div>
-              <div className="replay-fetch-range-group" role="radiogroup" aria-label="Detail view mode">
-                <span className="replay-fetch-days-label">Detail view</span>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-detail-view" value="accordion" checked={accordionMode} onChange={() => setAccordionMode(true)} />
-                  <span>Accordion</span>
-                </label>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-detail-view" value="multi" checked={!accordionMode} onChange={() => setAccordionMode(false)} />
-                  <span>Multi</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        {filteredExecutions.length === 0 ? (
-          <p className="section-hint">No data; click "Refresh replay data" to fetch from IB, or "Add history" to add manually.{([filterSymbol, filterExpiryStart, filterExpiryEnd, filterExecStart, filterExecEnd].some(Boolean) || filterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
-        ) : (
-          <>
-            {optExecutionGroups.length > 0 && (
-              <>
-                <div className="replay-portfolio-table-wrap">
-                <table className="table-operations replay-opt-groups">
-                  <thead>
-                    <tr>
-                      <th rowSpan={2} className="replay-opt-expand-col"></th>
-                      <th rowSpan={2}>Contract</th>
-                      <th rowSpan={2}>Expiry</th>
-                      <th rowSpan={2}>STRIKE</th>
-                      <th colSpan={3}>BUY</th>
-                      <th colSpan={3}>SELL</th>
-                      <th rowSpan={2}>Net</th>
-                      <th rowSpan={2}>Status</th>
-                      <th rowSpan={2}>PnL</th>
-                      <th rowSpan={2}>Pool</th>
-                    </tr>
-                    <tr>
-                      <th className="replay-th-sub">Size</th>
-                      <th className="replay-th-sub">@</th>
-                      <th className="replay-th-sub">Cost</th>
-                      <th className="replay-th-sub">Size</th>
-                      <th className="replay-th-sub">@</th>
-                      <th className="replay-th-sub">Premium</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {optExecutionGroups.map((g) => {
-                      const stateLabel = g.net_qty === 0 ? 'Realized' : g.net_qty > 0 ? 'Holding' : 'Selling'
-                      const hasOff = g.trades.some(t => (t.account_id ?? '').trim() === 'Off-Track')
-                      const hasOn = g.trades.some(t => (t.account_id ?? '').trim() !== 'Off-Track')
-                      const poolLabel = hasOff && hasOn ? 'Mix' : hasOff ? 'Off' : 'On'
-                      const groupKey = getOptGroupKey(g)
-                      const isExpanded = expandedDetailKeys.includes(groupKey)
-                      return (
-                        <tr
-                          key={groupKey}
-                          className="replay-opt-group-row"
-                          onClick={() => toggleDetailExpand(groupKey)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDetailExpand(groupKey); } }}
-                          aria-expanded={isExpanded}
-                          aria-label={isExpanded ? 'Collapse group details' : 'Expand group details'}
-                        >
-                          <td className="replay-opt-expand-col">
-                            <span
-                              className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`}
-                              aria-hidden
-                            >
-                              {isExpanded ? '▼' : '▶'}
-                            </span>
-                          </td>
-                          <td className="replay-opt-contract">
-                            {(() => {
-                              const p = getContractLabelParts(g.contract_key)
-                              return p.symbol ? (
-                                <>
-                                  <strong>{p.symbol}</strong> {p.rightLabel}
-                                </>
-                              ) : (
-                                g.contract_key
-                              )
-                            })()}
-                          </td>
-                          <td>{fmtExpiry(g.expiry)}</td>
-                          <td><strong>{fmtUsd(g.strike)}</strong></td>
-                          <td>{g.buy_volume}</td>
-                          <td>{fmtUsd(g.buy_avg_price)}</td>
-                          <td><span className="replay-cost">{fmtUsd(g.buy_cost)}</span></td>
-                          <td>{g.sell_volume}</td>
-                          <td>{fmtUsd(g.sell_avg_price)}</td>
-                          <td><span className="replay-premium">{fmtUsd(g.sell_premium)}</span></td>
-                          <td>{g.net_qty}</td>
-                          <td>
-                            <span className={g.status === 'realized' ? 'replay-status-realized' : 'replay-status-unrealized'}>
-                              {stateLabel}
-                            </span>
-                          </td>
-                          <td>
-                            <span className={g.status === 'realized' ? 'replay-pnl-realized' : 'replay-pnl-unrealized'}>
-                              {fmtUsd0(g.realized_pnl)}
-                            </span>
-                          </td>
-                          <td>{poolLabel}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr className="replay-opt-summary-row">
-                      <td colSpan={12}>Total</td>
-                      <td>
-                        <strong className={optGroupsPnlSum >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
-                          {fmtUsd0(optGroupsPnlSum)}
-                        </strong>
-                      </td>
-                      <td>—</td>
-                    </tr>
-                  </tfoot>
-                </table>
+          </section>
+
+          <section className="replay-section" aria-labelledby="risk-summary-head">
+            <h3 id="risk-summary-head">Risk model</h3>
+            {replayLoading ? (
+              <p className="section-hint">Loading…</p>
+            ) : riskSummary ? (
+              <div className="risk-summary-cards">
+                <div className="risk-card">
+                  <span className="risk-card-label">Daily hedge count</span>
+                  <span className="risk-card-value">{riskSummary.daily_hedge_count ?? '—'}</span>
                 </div>
-
-                <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
-                  Details (per trade)
-                  <InfoTooltip text="Click a group row above to load its trade details." />
-                </h5>
-                <table className="table-operations">
-                  <thead>
-                    <tr>
-                      <th>Contract</th>
-                      <th>Expiry</th>
-                      <th>STRIKE</th>
-                      <th>Time</th>
-                      <th>Side</th>
-                      <th>Qty</th>
-                      <th>Price</th>
-                      <th>Commission</th>
-                      <th>PnL</th>
-                      <th>Pool</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {expandedDetailKeys.length === 0 ? (
-                      <tr>
-                        <td colSpan={11} className="replay-detail-placeholder">Click a group row above to load details</td>
-                      </tr>
-                    ) : (
-                      optExecutionGroups
-                        .filter(g => expandedDetailKeys.includes(getOptGroupKey(g)))
-                        .flatMap((g) =>
-                          g.trades.map((ex, ti) => {
-                        const s = (ex.side ?? '').toUpperCase()
-                        const sideLabel =
-                          s === 'BUY' || s === 'BOT' || s === 'B'
-                            ? 'Buy'
-                            : s === 'SELL' || s === 'SLD' || s === 'S'
-                              ? 'Sell'
-                              : (ex.side ?? '—')
-                        const q = Number(ex.quantity) || 0
-                        const p = Number(ex.price) || 0
-                        const c = Number(ex.commission) || 0
-                        const value = q * p * 100 - c
-                        const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
-                        const pnl = isBuy ? -value : value
-                        const pnlClass =
-                          pnl < 0 ? 'replay-pnl-detail-negative' : pnl > 0 ? 'replay-pnl-detail-positive' : ''
-                        return (
-                          <tr key={`${getOptGroupKey(g)}-${ti}-${ex.time ?? ti}`}>
-                            <td>
-                              {(() => {
-                                const p_ = getContractLabelParts(g.contract_key)
-                                return p_.symbol ? (
-                                  <>
-                                    <strong>{p_.symbol}</strong> {p_.rightLabel}
-                                  </>
-                                ) : (
-                                  g.contract_key
-                                )
-                              })()}
-                            </td>
-                            <td>{fmtExpiry(ex.expiry ?? g.expiry)}</td>
-                            <td><strong>{fmtUsd(g.strike)}</strong></td>
-                            <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
-                            <td>{sideLabel}</td>
-                            <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
-                            <td>{fmtUsd(ex.price)}</td>
-                            <td>{fmtUsd(ex.commission)}</td>
-                            <td>
-                              <span className={pnlClass}>{fmtUsd(pnl)}</span>
-                            </td>
-                            <td>{(ex.account_id ?? '').trim() === 'Off-Track' ? 'Off' : 'On'}</td>
-                            <td>
-                              {ex.id != null ? (
-                                <span className="replay-exec-row-actions">
-                                  <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null); }}>Edit</button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-small btn-x"
-                                    onClick={async () => {
-                                      if (!window.confirm('Delete this execution?')) return
-                                      const res = await deleteExecution(ex.id!)
-                                      if (res.ok) {
-                                        if (editExec?.id === ex.id) setEditExec(null)
-                                        await loadReplayData()
-                                      } else {
-                                        setExecFormError(res.error ?? 'Delete failed')
-                                      }
-                                    }}
-                                    title="Delete"
-                                  >
-                                    X
-                                  </button>
-                                </span>
-                              ) : '—'}
-                            </td>
-                          </tr>
-                        )
-                          })
-                        )
-                    )}
-                  </tbody>
-                </table>
-              </>
+                <div className="risk-card">
+                  <span className="risk-card-label">Daily PnL (USD)</span>
+                  <span className="risk-card-value">{fmtUsd(riskSummary.daily_pnl)}</span>
+                </div>
+                <div className="risk-card">
+                  <span className="risk-card-label">Spot</span>
+                  <span className="risk-card-value">{fmtUsd(riskSummary.spot)}</span>
+                </div>
+                <div className="risk-card">
+                  <span className="risk-card-label">Ops (24h)</span>
+                  <span className="risk-card-value">{riskSummary.operations_count_24h ?? 0}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="section-hint">Unable to load risk summary (check API and DB).</p>
             )}
-
-            {filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT') && (
-              <>
-                <h5 className="replay-sub">Non-option (stock) details</h5>
-                <table className="table-operations">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Symbol</th>
-                      <th>Side</th>
-                      <th>Qty</th>
-                      <th>Price</th>
-                      <th>Commission</th>
-                      <th>Source</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredExecutions
-                      .filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
-                      .map((ex, i) => {
-                        const s = (ex.side ?? '').toUpperCase()
-                        const sideLabel =
-                          s === 'BUY' || s === 'BOT' || s === 'B'
-                            ? 'Buy'
-                            : s === 'SELL' || s === 'SLD' || s === 'S'
-                              ? 'Sell'
-                              : (ex.side ?? '—')
-                        return (
-                          <tr key={i}>
-                            <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
-                            <td>{ex.symbol ?? '—'}</td>
-                            <td>{sideLabel}</td>
-                            <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
-                            <td>{fmtUsd(ex.price)}</td>
-                            <td>{fmtUsd(ex.commission)}</td>
-                            <td>{ex.source ?? '—'}</td>
-                            <td>
-                              {ex.id != null ? (
-                                <span className="replay-exec-row-actions">
-                                  <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null); }}>Edit</button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-small btn-x"
-                                    onClick={async () => {
-                                      if (!window.confirm('Delete this execution?')) return
-                                      const res = await deleteExecution(ex.id!)
-                                      if (res.ok) {
-                                        if (editExec?.id === ex.id) setEditExec(null)
-                                        await loadReplayData()
-                                      } else {
-                                        setExecFormError(res.error ?? 'Delete failed')
-                                      }
-                                    }}
-                                    title="Delete"
-                                  >
-                                    X
-                                  </button>
+          </section>
+        </>
+      ) : portfolioView === 'open' ? (
+        <section className="replay-section replay-section-trade-records" aria-labelledby="open-positions-head">
+          <h3 id="open-positions-head">Open Positions</h3>
+          <div className="replay-filters">
+            <label className="replay-filter-wrap-symbol">
+              <input
+                type="text"
+                placeholder="Symbol"
+                value={openFilterSymbol}
+                onChange={e => setOpenFilterSymbol(e.target.value)}
+                className="replay-filter-input"
+              />
+            </label>
+            <label>
+              <span className="replay-filter-label">Expiry</span>
+              <input
+                type="date"
+                value={openFilterExpiryStart}
+                onChange={e => setOpenFilterExpiryStart(e.target.value)}
+                className="replay-filter-input replay-filter-date"
+                title="Start"
+              />
+              <span className="replay-filter-sep">～</span>
+              <input
+                type="date"
+                value={openFilterExpiryEnd}
+                onChange={e => setOpenFilterExpiryEnd(e.target.value)}
+                className="replay-filter-input replay-filter-date"
+                title="End"
+              />
+            </label>
+            <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
+              <span className="replay-fetch-days-label">Pool</span>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="portfolio-open-pool" value="Mix" checked={openFilterPool === 'Mix'} onChange={() => setOpenFilterPool('Mix')} />
+                <span>Mix</span>
+              </label>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="portfolio-open-pool" value="ON" checked={openFilterPool === 'ON'} onChange={() => setOpenFilterPool('ON')} />
+                <span>On</span>
+              </label>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="portfolio-open-pool" value="Off" checked={openFilterPool === 'Off'} onChange={() => setOpenFilterPool('Off')} />
+                <span>Off</span>
+              </label>
+            </div>
+            <div className="replay-fetch-range-group" role="radiogroup" aria-label="Open position detail view mode">
+              <span className="replay-fetch-days-label">Detail view</span>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="open-detail-view" value="accordion" checked={openAccordionMode} onChange={() => setOpenAccordionMode(true)} />
+                <span>Accordion</span>
+              </label>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="open-detail-view" value="multi" checked={!openAccordionMode} onChange={() => setOpenAccordionMode(false)} />
+                <span>Multi</span>
+              </label>
+            </div>
+            <button
+              type="button"
+              className="btn btn-small replay-filter-clear"
+              onClick={() => {
+                setOpenFilterSymbol('')
+                setOpenFilterExpiryStart('')
+                setOpenFilterExpiryEnd('')
+                setOpenFilterPool('Mix')
+                setExpandedOpenDetailKeys([])
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
+          {openOptionGroups.length === 0 && liveStockPositions.length === 0 ? (
+            <p className="section-hint">No open positions under the current filters. Position data comes from account snapshots in `Accounts`, while Off-Track options are inferred from execution history.</p>
+          ) : (
+            <>
+              <h5 className="replay-sub">Option positions</h5>
+              {openOptionGroups.length === 0 ? (
+                <p className="section-hint">No open option positions under the current filters.</p>
+              ) : (
+                <>
+                  <div className="replay-portfolio-table-wrap">
+                    <table className="table-operations replay-opt-groups">
+                      <thead>
+                        <tr>
+                          <th className="replay-opt-expand-col"></th>
+                          <th>Contract</th>
+                          <th>Expiry</th>
+                          <th>STRIKE</th>
+                          <th>Side</th>
+                          <th>Net</th>
+                          <th>Avg Cost</th>
+                          <th>Mark</th>
+                          <th>Unrealized PnL</th>
+                          <th>Accounts</th>
+                          <th>Pool</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {openOptionGroups.map(group => {
+                          const groupKey = getOpenOptGroupKey(group)
+                          const isExpanded = expandedOpenDetailKeys.includes(groupKey)
+                          const sideLabel = group.net_qty > 0 ? 'Long' : group.net_qty < 0 ? 'Short' : 'Flat'
+                          return (
+                            <tr
+                              key={groupKey}
+                              className="replay-opt-group-row"
+                              onClick={() => toggleOpenDetailExpand(groupKey)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOpenDetailExpand(groupKey) } }}
+                              aria-expanded={isExpanded}
+                              aria-label={isExpanded ? 'Collapse open position details' : 'Expand open position details'}
+                            >
+                              <td className="replay-opt-expand-col">
+                                <span className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`} aria-hidden>
+                                  {isExpanded ? '▼' : '▶'}
                                 </span>
-                              ) : '—'}
-                            </td>
+                              </td>
+                              <td className="replay-opt-contract">
+                                {(() => {
+                                  const p = getContractLabelParts(group.contract_key)
+                                  return p.symbol ? (
+                                    <>
+                                      <strong>{p.symbol}</strong> {p.rightLabel}
+                                    </>
+                                  ) : (
+                                    group.contract_key
+                                  )
+                                })()}
+                              </td>
+                              <td>{fmtExpiry(group.expiry)}</td>
+                              <td><strong>{fmtUsd(group.strike)}</strong></td>
+                              <td>{sideLabel}</td>
+                              <td>{group.net_qty}</td>
+                              <td>{fmtUsd(group.avg_cost)}</td>
+                              <td>{fmtUsd(group.mark_price)}</td>
+                              <td>
+                                {group.unrealized_pnl == null ? (
+                                  '—'
+                                ) : (
+                                  <span className={group.unrealized_pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                    {fmtUsd(group.unrealized_pnl)}
+                                  </span>
+                                )}
+                              </td>
+                              <td>{group.account_count}</td>
+                              <td>{group.pool_label}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
+                    Details
+                    <InfoTooltip text="Click a grouped option row above to inspect live account snapshots or Off-Track open trades for that contract." />
+                  </h5>
+                  <table className="table-operations">
+                    <thead>
+                      <tr>
+                        <th>Pool</th>
+                        <th>Account</th>
+                        <th>Contract</th>
+                        <th>Expiry</th>
+                        <th>STRIKE</th>
+                        <th>Time</th>
+                        <th>Side</th>
+                        <th>Qty</th>
+                        <th>Avg Cost</th>
+                        <th>Mark</th>
+                        <th>Unrealized PnL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expandedOpenDetailKeys.length === 0 ? (
+                        <tr>
+                          <td colSpan={11} className="replay-detail-placeholder">Click an open option row above to load details</td>
+                        </tr>
+                      ) : (
+                        openOptionGroups
+                          .filter(group => expandedOpenDetailKeys.includes(getOpenOptGroupKey(group)))
+                          .flatMap(group =>
+                            group.kind === 'live'
+                              ? (group.positions ?? []).map((position, index) => {
+                                  const qty = Number(position.position)
+                                  const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+                                    ? Number(position.unrealized_pnl)
+                                    : null
+                                  const pnlClass = pnl == null ? '' : pnl > 0 ? 'replay-pnl-detail-positive' : pnl < 0 ? 'replay-pnl-detail-negative' : ''
+                                  return (
+                                    <tr key={`${getOpenOptGroupKey(group)}-${position.account_id}-${index}`}>
+                                      <td>{group.pool_label}</td>
+                                      <td>{position.account_id || '—'}</td>
+                                      <td className="replay-opt-contract">
+                                        {(() => {
+                                          const p = getContractLabelParts(group.contract_key)
+                                          return p.symbol ? (
+                                            <>
+                                              <strong>{p.symbol}</strong> {p.rightLabel}
+                                            </>
+                                          ) : (
+                                            group.contract_key
+                                          )
+                                        })()}
+                                      </td>
+                                      <td>{fmtExpiry(position.lastTradeDateOrContractMonth ?? position.expiry ?? group.expiry)}</td>
+                                      <td><strong>{position.strike != null ? fmtUsd(position.strike) : fmtUsd(group.strike)}</strong></td>
+                                      <td>—</td>
+                                      <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+                                      <td>{Number.isFinite(qty) ? qty : '—'}</td>
+                                      <td>{fmtUsd(position.avgCost)}</td>
+                                      <td>{fmtUsd(position.price)}</td>
+                                      <td><span className={pnlClass}>{fmtUsd(pnl)}</span></td>
+                                    </tr>
+                                  )
+                                })
+                              : (group.trades ?? []).map((trade, index) => {
+                                  const s = (trade.side ?? '').toUpperCase()
+                                  const sideLabel =
+                                    s === 'BUY' || s === 'BOT' || s === 'B'
+                                      ? 'Buy'
+                                      : s === 'SELL' || s === 'SLD' || s === 'S'
+                                        ? 'Sell'
+                                        : (trade.side ?? '—')
+                                  return (
+                                    <tr key={`${getOpenOptGroupKey(group)}-${trade.exec_id ?? trade.id ?? index}`}>
+                                      <td>{group.pool_label}</td>
+                                      <td>{(trade.account_id ?? '').trim() || '—'}</td>
+                                      <td className="replay-opt-contract">
+                                        {(() => {
+                                          const p = getContractLabelParts(group.contract_key)
+                                          return p.symbol ? (
+                                            <>
+                                              <strong>{p.symbol}</strong> {p.rightLabel}
+                                            </>
+                                          ) : (
+                                            group.contract_key
+                                          )
+                                        })()}
+                                      </td>
+                                      <td>{fmtExpiry(trade.expiry ?? group.expiry)}</td>
+                                      <td><strong>{trade.strike != null ? fmtUsd(trade.strike) : fmtUsd(group.strike)}</strong></td>
+                                      <td>{trade.time != null ? fmtTs(trade.time) : '—'}</td>
+                                      <td>{sideLabel}</td>
+                                      <td>{trade.quantity != null ? Number(trade.quantity) : '—'}</td>
+                                      <td>{fmtUsd(trade.price)}</td>
+                                      <td>—</td>
+                                      <td>—</td>
+                                    </tr>
+                                  )
+                                }),
+                          )
+                      )}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              <h5 className="replay-sub">Stock positions</h5>
+              {liveStockPositions.length === 0 ? (
+                <p className="section-hint">No open stock positions under the current filters.</p>
+              ) : (
+                <div className="replay-portfolio-table-wrap">
+                  <table className="table-operations">
+                    <thead>
+                      <tr>
+                        <th>Account</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Qty</th>
+                        <th>Avg Cost</th>
+                        <th>Mark</th>
+                        <th>Unrealized PnL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {liveStockPositions.map((position, index) => {
+                        const qty = Number(position.position)
+                        const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+                          ? Number(position.unrealized_pnl)
+                          : null
+                        const pnlClass = pnl == null ? '' : pnl > 0 ? 'replay-pnl-detail-positive' : pnl < 0 ? 'replay-pnl-detail-negative' : ''
+                        return (
+                          <tr key={`open-stk-${position.account_id}-${position.symbol ?? index}`}>
+                            <td>{position.account_id || '—'}</td>
+                            <td><strong>{position.symbol ?? '—'}</strong></td>
+                            <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+                            <td>{Number.isFinite(qty) ? qty : '—'}</td>
+                            <td>{fmtUsd(position.avgCost)}</td>
+                            <td>{fmtUsd(position.price)}</td>
+                            <td><span className={pnlClass}>{fmtUsd(pnl)}</span></td>
                           </tr>
                         )
                       })}
-                  </tbody>
-                </table>
-              </>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      ) : (
+        <>
+          <div className="replay-toolbar">
+            <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
+              <span className="replay-fetch-days-label">Fetch</span>
+              <label className="replay-fetch-radio">
+                <input
+                  type="radio"
+                  name="replay-fetch-days"
+                  value={1}
+                  checked={replayFetchDays === 1}
+                  onChange={() => setReplayFetchDays(1)}
+                  disabled={replaySyncing}
+                />
+                <span>Today</span>
+              </label>
+              <label className="replay-fetch-radio">
+                <input
+                  type="radio"
+                  name="replay-fetch-days"
+                  value={3}
+                  checked={replayFetchDays === 3}
+                  onChange={() => setReplayFetchDays(3)}
+                  disabled={replaySyncing}
+                />
+                <span>Last 3 days</span>
+              </label>
+              <label className="replay-fetch-radio">
+                <input
+                  type="radio"
+                  name="replay-fetch-days"
+                  value={7}
+                  checked={replayFetchDays === 7}
+                  onChange={() => setReplayFetchDays(7)}
+                  disabled={replaySyncing}
+                />
+                <span>Last 7 days</span>
+              </label>
+              <button
+                type="button"
+                className="btn btn-small replay-fetch-refresh-btn"
+                disabled={replaySyncing || replayLoading}
+                onClick={async () => {
+                  setReplaySyncing(true)
+                  const res = await postExecutionsFetch(replayFetchDays)
+                  if (!res.ok) {
+                    setReplaySyncing(false)
+                    return
+                  }
+                  await loadReplayData()
+                  setReplaySyncing(false)
+                }}
+                aria-label="Fetch executions from IB and write to DB"
+              >
+                {replaySyncing ? 'Fetching…' : 'Refresh'}
+              </button>
+            </div>
+            {replaySyncing && (
+              <span className="replay-sync-hint">Fetching executions from IB…</span>
             )}
-          </>
-        )}
-        </div>
-      </section>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => { setAddExecOpen(true); setExecFormError(null) }}
+              aria-label="Add execution record manually (historical)"
+            >
+              Add Trade
+            </button>
+          </div>
+
+          <section className="replay-section replay-section-trade-records" aria-labelledby="trade-records-head">
+            <h3 id="trade-records-head">Trade Ledger</h3>
+            <div className="replay-filters">
+              <label className="replay-filter-wrap-symbol">
+                <input
+                  type="text"
+                  placeholder="Symbol"
+                  value={ledgerFilterSymbol}
+                  onChange={e => setLedgerFilterSymbol(e.target.value)}
+                  className="replay-filter-input"
+                />
+              </label>
+              <label>
+                <span className="replay-filter-label">Expiry</span>
+                <input
+                  type="date"
+                  value={ledgerFilterExpiryStart}
+                  onChange={e => setLedgerFilterExpiryStart(e.target.value)}
+                  className="replay-filter-input replay-filter-date"
+                  title="Start"
+                />
+                <span className="replay-filter-sep">～</span>
+                <input
+                  type="date"
+                  value={ledgerFilterExpiryEnd}
+                  onChange={e => setLedgerFilterExpiryEnd(e.target.value)}
+                  className="replay-filter-input replay-filter-date"
+                  title="End"
+                />
+              </label>
+              <label>
+                <span className="replay-filter-label">Submit</span>
+                <input
+                  type="date"
+                  value={ledgerFilterExecStart}
+                  onChange={e => setLedgerFilterExecStart(e.target.value)}
+                  className="replay-filter-input replay-filter-date"
+                  title="Start"
+                />
+                <span className="replay-filter-sep">～</span>
+                <input
+                  type="date"
+                  value={ledgerFilterExecEnd}
+                  onChange={e => setLedgerFilterExecEnd(e.target.value)}
+                  className="replay-filter-input replay-filter-date"
+                  title="End"
+                />
+              </label>
+              <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
+                <span className="replay-fetch-days-label">Pool</span>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-pool" value="Mix" checked={ledgerFilterPool === 'Mix'} onChange={() => setLedgerFilterPool('Mix')} />
+                  <span>Mix</span>
+                </label>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-pool" value="ON" checked={ledgerFilterPool === 'ON'} onChange={() => setLedgerFilterPool('ON')} />
+                  <span>ON</span>
+                </label>
+                <label className="replay-fetch-radio">
+                  <input type="radio" name="replay-pool" value="Off" checked={ledgerFilterPool === 'Off'} onChange={() => setLedgerFilterPool('Off')} />
+                  <span>Off</span>
+                </label>
+              </div>
+              <button
+                type="button"
+                className="btn btn-small replay-filter-clear"
+                onClick={() => {
+                  setLedgerFilterSymbol('')
+                  setLedgerFilterExpiryStart('')
+                  setLedgerFilterExpiryEnd('')
+                  setLedgerFilterExecStart('')
+                  setLedgerFilterExecEnd('')
+                  setLedgerFilterPool('Mix')
+                  setExpandedDetailKeys([])
+                }}
+              >
+                Clear filters
+              </button>
+            </div>
+            <div className="replay-portfolio-block">
+              <div className="replay-portfolio-header">
+                <div className="replay-portfolio-tabs-wrap">
+                  <div className="system-tabs replay-portfolio-tabs" role="tablist" aria-label="Closed trade asset sections">
+                    <button
+                      type="button"
+                      role="tab"
+                      id="replay-tab-options"
+                      aria-selected={ledgerTab === 'options'}
+                      aria-controls="replay-panel-options"
+                      className={`system-tab ${ledgerTab === 'options' ? 'active' : ''}`}
+                      onClick={() => setLedgerTab('options')}
+                      disabled={!hasOptionExecutions}
+                    >
+                      Options
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      id="replay-tab-stocks"
+                      aria-selected={ledgerTab === 'stocks'}
+                      aria-controls="replay-panel-stocks"
+                      className={`system-tab ${ledgerTab === 'stocks' ? 'active' : ''}`}
+                      onClick={() => setLedgerTab('stocks')}
+                      disabled={!hasStockExecutions}
+                    >
+                      Stocks
+                    </button>
+                  </div>
+                  <p className="section-hint replay-portfolio-tab-hint">
+                    {ledgerTab === 'options'
+                      ? 'Completed option trades are grouped by contract and strike so the page reads like a closed-trade ledger.'
+                      : 'Stock execution history stays available here for audit and manual correction.'}
+                    <InfoTooltip text={ledgerTab === 'options'
+                      ? 'Closed option trades only: groups with net quantity = 0. Cost/Premium = Size×@×100−Commission; Realized PnL = Premium − Cost.'
+                      : 'Shows non-option execution rows after current filters are applied.'} />
+                  </p>
+                </div>
+                <div className="replay-portfolio-filters">
+                  {ledgerTab === 'options' && (
+                    <div className="replay-fetch-range-group" role="radiogroup" aria-label="Detail view mode">
+                      <span className="replay-fetch-days-label">Detail view</span>
+                      <label className="replay-fetch-radio">
+                        <input type="radio" name="replay-detail-view" value="accordion" checked={ledgerAccordionMode} onChange={() => setLedgerAccordionMode(true)} />
+                        <span>Accordion</span>
+                      </label>
+                      <label className="replay-fetch-radio">
+                        <input type="radio" name="replay-detail-view" value="multi" checked={!ledgerAccordionMode} onChange={() => setLedgerAccordionMode(false)} />
+                        <span>Multi</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {filteredExecutions.length === 0 ? (
+                <p className="section-hint">No execution data. Click "Refresh" to fetch from IB, or "Add Trade" to add manual history.{([ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExpiryEnd, ledgerFilterExecStart, ledgerFilterExecEnd].some(Boolean) || ledgerFilterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
+              ) : (
+                <>
+                  {ledgerTab === 'options' ? (
+                    <div
+                      id="replay-panel-options"
+                      role="tabpanel"
+                      aria-labelledby="replay-tab-options"
+                      className="system-tab-panel"
+                    >
+                      {hasOptionExecutions ? (
+                        <>
+                          <div className="replay-portfolio-table-wrap">
+                            <table className="table-operations replay-opt-groups">
+                              <thead>
+                                <tr>
+                                  <th rowSpan={2} className="replay-opt-expand-col"></th>
+                                  <th rowSpan={2}>Contract</th>
+                                  <th rowSpan={2}>Expiry</th>
+                                  <th rowSpan={2}>STRIKE</th>
+                                  <th colSpan={3}>BUY</th>
+                                  <th colSpan={3}>SELL</th>
+                                  <th rowSpan={2}>Realized PnL</th>
+                                  <th rowSpan={2}>Pool</th>
+                                </tr>
+                                <tr>
+                                  <th className="replay-th-sub">Size</th>
+                                  <th className="replay-th-sub">@</th>
+                                  <th className="replay-th-sub">Cost</th>
+                                  <th className="replay-th-sub">Size</th>
+                                  <th className="replay-th-sub">@</th>
+                                  <th className="replay-th-sub">Premium</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {closedOptionGroups.map((g) => {
+                                  const hasOff = g.trades.some(t => (t.account_id ?? '').trim() === 'Off-Track')
+                                  const hasOn = g.trades.some(t => (t.account_id ?? '').trim() !== 'Off-Track')
+                                  const poolLabel = hasOff && hasOn ? 'Mix' : hasOff ? 'Off' : 'On'
+                                  const groupKey = getOptGroupKey(g)
+                                  const isExpanded = expandedDetailKeys.includes(groupKey)
+                                  return (
+                                    <tr
+                                      key={groupKey}
+                                      className="replay-opt-group-row"
+                                      onClick={() => toggleDetailExpand(groupKey)}
+                                      role="button"
+                                      tabIndex={0}
+                                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDetailExpand(groupKey) } }}
+                                      aria-expanded={isExpanded}
+                                      aria-label={isExpanded ? 'Collapse group details' : 'Expand group details'}
+                                    >
+                                      <td className="replay-opt-expand-col">
+                                        <span className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`} aria-hidden>
+                                          {isExpanded ? '▼' : '▶'}
+                                        </span>
+                                      </td>
+                                      <td className="replay-opt-contract">
+                                        {(() => {
+                                          const p = getContractLabelParts(g.contract_key)
+                                          return p.symbol ? (
+                                            <>
+                                              <strong>{p.symbol}</strong> {p.rightLabel}
+                                            </>
+                                          ) : (
+                                            g.contract_key
+                                          )
+                                        })()}
+                                      </td>
+                                      <td>{fmtExpiry(g.expiry)}</td>
+                                      <td><strong>{fmtUsd(g.strike)}</strong></td>
+                                      <td>{g.buy_volume}</td>
+                                      <td>{fmtUsd(g.buy_avg_price)}</td>
+                                      <td><span className="replay-cost">{fmtUsd(g.buy_cost)}</span></td>
+                                      <td>{g.sell_volume}</td>
+                                      <td>{fmtUsd(g.sell_avg_price)}</td>
+                                      <td><span className="replay-premium">{fmtUsd(g.sell_premium)}</span></td>
+                                      <td>
+                                        <span className={g.realized_pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                          {fmtUsd0(g.realized_pnl)}
+                                        </span>
+                                      </td>
+                                      <td>{poolLabel}</td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr className="replay-opt-summary-row">
+                                  <td colSpan={10}>Total</td>
+                                  <td>
+                                    <strong className={closedOptGroupsPnlSum >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                      {fmtUsd0(closedOptGroupsPnlSum)}
+                                    </strong>
+                                  </td>
+                                  <td>—</td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+
+                          <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
+                            Details (per trade)
+                            <InfoTooltip text="Click a closed trade row above to load its execution details." />
+                          </h5>
+                          <table className="table-operations">
+                            <thead>
+                              <tr>
+                                <th>Contract</th>
+                                <th>Expiry</th>
+                                <th>STRIKE</th>
+                                <th>Time</th>
+                                <th>Side</th>
+                                <th>Qty</th>
+                                <th>Price</th>
+                                <th>Commission</th>
+                                <th>PnL</th>
+                                <th>Pool</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {expandedDetailKeys.length === 0 ? (
+                                <tr>
+                                  <td colSpan={11} className="replay-detail-placeholder">Click a closed trade row above to load details</td>
+                                </tr>
+                              ) : (
+                                closedOptionGroups
+                                  .filter(g => expandedDetailKeys.includes(getOptGroupKey(g)))
+                                  .flatMap((g) =>
+                                    g.trades.map((ex, ti) => {
+                                      const s = (ex.side ?? '').toUpperCase()
+                                      const sideLabel =
+                                        s === 'BUY' || s === 'BOT' || s === 'B'
+                                          ? 'Buy'
+                                          : s === 'SELL' || s === 'SLD' || s === 'S'
+                                            ? 'Sell'
+                                            : (ex.side ?? '—')
+                                      const q = Number(ex.quantity) || 0
+                                      const p = Number(ex.price) || 0
+                                      const c = Number(ex.commission) || 0
+                                      const value = q * p * 100 - c
+                                      const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+                                      const pnl = isBuy ? -value : value
+                                      const pnlClass =
+                                        pnl < 0 ? 'replay-pnl-detail-negative' : pnl > 0 ? 'replay-pnl-detail-positive' : ''
+                                      return (
+                                        <tr key={`${getOptGroupKey(g)}-${ti}-${ex.time ?? ti}`}>
+                                          <td>
+                                            {(() => {
+                                              const p_ = getContractLabelParts(g.contract_key)
+                                              return p_.symbol ? (
+                                                <>
+                                                  <strong>{p_.symbol}</strong> {p_.rightLabel}
+                                                </>
+                                              ) : (
+                                                g.contract_key
+                                              )
+                                            })()}
+                                          </td>
+                                          <td>{fmtExpiry(ex.expiry ?? g.expiry)}</td>
+                                          <td><strong>{fmtUsd(g.strike)}</strong></td>
+                                          <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                          <td>{sideLabel}</td>
+                                          <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
+                                          <td>{fmtUsd(ex.price)}</td>
+                                          <td>{fmtUsd(ex.commission)}</td>
+                                          <td>
+                                            <span className={pnlClass}>{fmtUsd(pnl)}</span>
+                                          </td>
+                                          <td>{(ex.account_id ?? '').trim() === 'Off-Track' ? 'Off' : 'On'}</td>
+                                          <td>
+                                            {ex.id != null ? (
+                                              <span className="replay-exec-row-actions">
+                                                <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null) }}>Edit</button>
+                                                <button
+                                                  type="button"
+                                                  className="btn btn-small btn-x"
+                                                  onClick={async () => {
+                                                    if (!window.confirm('Delete this execution?')) return
+                                                    const res = await deleteExecution(ex.id!)
+                                                    if (res.ok) {
+                                                      if (editExec?.id === ex.id) setEditExec(null)
+                                                      await loadReplayData()
+                                                    } else {
+                                                      setExecFormError(res.error ?? 'Delete failed')
+                                                    }
+                                                  }}
+                                                  title="Delete"
+                                                >
+                                                  X
+                                                </button>
+                                              </span>
+                                            ) : '—'}
+                                          </td>
+                                        </tr>
+                                      )
+                                    }),
+                                  )
+                              )}
+                            </tbody>
+                          </table>
+                        </>
+                      ) : (
+                        <p className="section-hint">No closed option trades under the current filters.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      id="replay-panel-stocks"
+                      role="tabpanel"
+                      aria-labelledby="replay-tab-stocks"
+                      className="system-tab-panel"
+                    >
+                      {hasStockExecutions ? (
+                        <div className="replay-portfolio-table-wrap">
+                          <table className="table-operations">
+                            <thead>
+                              <tr>
+                                <th>Time</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>Qty</th>
+                                <th>Price</th>
+                                <th>Commission</th>
+                                <th>Source</th>
+                                <th>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredExecutions
+                                .filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
+                                .map((ex, i) => {
+                                  const s = (ex.side ?? '').toUpperCase()
+                                  const sideLabel =
+                                    s === 'BUY' || s === 'BOT' || s === 'B'
+                                      ? 'Buy'
+                                      : s === 'SELL' || s === 'SLD' || s === 'S'
+                                        ? 'Sell'
+                                        : (ex.side ?? '—')
+                                  return (
+                                    <tr key={i}>
+                                      <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                      <td>{ex.symbol ?? '—'}</td>
+                                      <td>{sideLabel}</td>
+                                      <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
+                                      <td>{fmtUsd(ex.price)}</td>
+                                      <td>{fmtUsd(ex.commission)}</td>
+                                      <td>{ex.source ?? '—'}</td>
+                                      <td>
+                                        {ex.id != null ? (
+                                          <span className="replay-exec-row-actions">
+                                            <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null) }}>Edit</button>
+                                            <button
+                                              type="button"
+                                              className="btn btn-small btn-x"
+                                              onClick={async () => {
+                                                if (!window.confirm('Delete this execution?')) return
+                                                const res = await deleteExecution(ex.id!)
+                                                if (res.ok) {
+                                                  if (editExec?.id === ex.id) setEditExec(null)
+                                                  await loadReplayData()
+                                                } else {
+                                                  setExecFormError(res.error ?? 'Delete failed')
+                                                }
+                                              }}
+                                              title="Delete"
+                                            >
+                                              X
+                                            </button>
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="section-hint">No stock executions under the current filters.</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+        </>
+      )}
 
       {(addExecOpen || editExec) && (
         <div className="modal-overlay" onClick={() => { setAddExecOpen(false); setEditExec(null); setExecFormError(null); }} role="dialog" aria-modal="true" aria-labelledby="exec-modal-title">
