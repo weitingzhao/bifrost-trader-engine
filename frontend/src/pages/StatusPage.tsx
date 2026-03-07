@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Operation, RealtimeQuote, StatusResponse } from '../types'
-import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchQuotes, subscribeQuotes, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchBarsBenchmark, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
+import type { Operation, StatusResponse } from '../types'
+import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 
@@ -111,7 +111,7 @@ function scheduleMsgClear(
   }, delayMs)
 }
 
-export interface DaemonMonitorPageProps {
+export interface StatusPageProps {
   status: StatusResponse | null
   operations: Operation[]
   loadStatus: () => Promise<StatusResponse | null>
@@ -125,10 +125,7 @@ export interface DaemonMonitorPageProps {
   showConsoleTabs?: boolean
   showAllSystemSections?: boolean
   showSystemSection?: boolean
-  showWatchlistSection?: boolean
   showConsoleSection?: boolean
-  watchlistCardTitle?: string
-  watchlistCardDescription?: string
   consoleCardTitle?: string
   consoleCardDescription?: string
 }
@@ -136,7 +133,7 @@ export interface DaemonMonitorPageProps {
 export type OperationsSection = 'daemon' | 'monitor' | 'celery' | 'strategy'
 export type ConsoleSection = 'daemon-console' | 'server-console' | 'console' | 'operations' | 'events'
 
-export function DaemonMonitorPage({
+export function StatusPage({
   status,
   operations,
   loadStatus,
@@ -149,13 +146,10 @@ export function DaemonMonitorPage({
   showConsoleTabs = true,
   showAllSystemSections = false,
   showSystemSection = true,
-  showWatchlistSection = true,
   showConsoleSection = true,
-  watchlistCardTitle = 'Watchlist',
-  watchlistCardDescription,
   consoleCardTitle,
   consoleCardDescription,
-}: DaemonMonitorPageProps) {
+}: StatusPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
@@ -166,14 +160,11 @@ export function DaemonMonitorPage({
   const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
   const [healthTick, setHealthTick] = useState(0)
   const [internalSystemTab, setInternalSystemTab] = useState<OperationsSection>('daemon')
-  const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
-  const [quoteTick, setQuoteTick] = useState(0)
   const [internalConsoleTab, setInternalConsoleTab] = useState<ConsoleSection>('daemon-console')
   const systemTab = currentSection ?? internalSystemTab
   const setSystemTabSelected = onSectionChange ?? setInternalSystemTab
   const consoleTab = currentConsoleSection ?? internalConsoleTab
   const setConsoleTabSelected = onConsoleSectionChange ?? setInternalConsoleTab
-  const [benchmarks, setBenchmarks] = useState<Record<string, { bar_time: number; close: number }>>({})
   const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTickerMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -198,12 +189,10 @@ export function DaemonMonitorPage({
   const j = status
   const hb = j?.daemon_heartbeat
   const hbForCountdown = hb
-  const quotesCount = Object.keys(quotesMap).length
   const intervalSec = hbForCountdown?.heartbeat_interval_sec ?? 10
   const nowSec = Date.now() / 1000
   void tick
   void healthTick
-  void quoteTick
   const secondsUntilNextHeartbeat =
     hbForCountdown?.daemon_alive && hbForCountdown?.last_ts != null
       ? Math.max(0, Math.ceil(hbForCountdown.last_ts + intervalSec - nowSec))
@@ -218,31 +207,6 @@ export function DaemonMonitorPage({
       if (syncTickerMsgClearRef.current != null) clearTimeout(syncTickerMsgClearRef.current)
       if (monitorCtrlMsgClearRef.current != null) clearTimeout(monitorCtrlMsgClearRef.current)
       if (celeryCtrlMsgClearRef.current != null) clearTimeout(celeryCtrlMsgClearRef.current)
-    }
-  }, [])
-
-  // 实时行情：初始拉取 + SSE 订阅（监听 Redis 推送）
-  useEffect(() => {
-    let cancelled = false
-    fetchQuotes()
-      .then((res) => {
-        if (!cancelled && res.quotes?.length) {
-          setQuotesMap((prev) => {
-            const next = { ...prev }
-            res.quotes!.forEach((q) => {
-              next[q.symbol] = q
-            })
-            return next
-          })
-        }
-      })
-      .catch(() => {})
-    const unsub = subscribeQuotes((q) => {
-      setQuotesMap((prev) => ({ ...prev, [q.symbol]: q }))
-    })
-    return () => {
-      cancelled = true
-      unsub()
     }
   }, [])
 
@@ -271,14 +235,6 @@ export function DaemonMonitorPage({
     }, 1000)
     return () => clearInterval(id)
   }, [lastHealthAt])
-
-  // Refresh "Since" column every second when we have quotes
-  useEffect(() => {
-    const count = Object.keys(quotesMap).length
-    if (count === 0) return
-    const id = setInterval(() => setQuoteTick((n) => n + 1), 1000)
-    return () => clearInterval(id)
-  }, [quotesCount])
 
   let daemonLabel = 'Not running (or single-process mode)'
   let daemonHint = 'Run run_engine.py on the trading machine to see "Running" here'
@@ -368,63 +324,6 @@ export function DaemonMonitorPage({
   const strategyGroupLamp = suspended ? 'red' : 'green'
 
   const s = j?.status ?? {}
-  /** Symbols to show: from status (Watchlist STK + strategy symbol) first; merge with any symbols that have quote data. */
-  const watchlistSymbols = useMemo(
-    () => [...new Set([...(j?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
-    [j?.subscribed_tickers, quotesMap],
-  )
-  useEffect(() => {
-    if (watchlistSymbols.length === 0) {
-      setBenchmarks({})
-      return
-    }
-    let cancelled = false
-    fetchBarsBenchmark(watchlistSymbols)
-      .then((r) => {
-        if (!cancelled) setBenchmarks(r.benchmarks ?? {})
-      })
-      .catch(() => {
-        if (!cancelled) setBenchmarks({})
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [watchlistSymbols.join(',')])
-  /** Aggregate current stock positions per symbol for Watchlist (qty, cost, pnl). */
-  const accountsList = j?.accounts ?? []
-  const watchlistRows = watchlistSymbols.map((symbol) => {
-    let qty = 0
-    let totalCost = 0
-    let hasCost = false
-    for (const acc of accountsList) {
-      const positions = acc?.positions ?? []
-      for (const p of positions) {
-        const sym = (p.symbol || '').trim()
-        const secType = (p.secType || '').toString().toUpperCase()
-        const posQty = typeof p.position === 'number' ? p.position : 0
-        if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
-        qty += posQty
-        if (p.avgCost != null && Number.isFinite(p.avgCost as number)) {
-          totalCost += (p.avgCost as number) * posQty
-          hasCost = true
-        }
-      }
-    }
-    const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
-    const quote = quotesMap[symbol]
-    const bench = benchmarks[symbol]
-    let changePct: number | null = null
-    let pnlVsBench: number | null = null
-    if (bench && quote && Number.isFinite(quote.last) && Number.isFinite(bench.close) && bench.close > 0) {
-      changePct = ((quote.last - bench.close) / bench.close) * 100
-      if (qty != null && Number.isFinite(qty)) pnlVsBench = (quote.last - bench.close) * qty
-    }
-    const pnlCost =
-      quote && avgCost != null && Number.isFinite(quote.last) && qty != null && Number.isFinite(qty) && qty !== 0
-        ? (quote.last - avgCost) * qty
-        : null
-    return { symbol, quote, qty: qty || null, avgCost, changePct, pnlVsBench, pnlCost }
-  })
   const statusSummaryItems = STATUS_FIELDS.map(([k, label]) => {
     let v: string | number | undefined = (s as Record<string, unknown>)[k] as string | number | undefined
     let out: string | number
@@ -1035,167 +934,6 @@ export function DaemonMonitorPage({
       </div>
         )}
         </div>
-      </div>
-      )}
-
-      {showWatchlistSection && (
-      <div className="card card-operations realtime-quotes-card">
-        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-          <div className="lamp-wrap-span">
-            <div className={`lamp lamp-sm ${j?.redis_quotes_connected ? 'green' : 'none'}`} title="Watchlist (Redis)" aria-hidden />
-          </div>
-          <div>
-            <h2 className="daemon-card-title page-title-with-tooltip">
-              {watchlistCardTitle}
-              <InfoTooltip text={j?.redis_quotes_connected
-                ? `Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. SSE connected, ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
-                : 'Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. Redis not connected or monitor not subscribed; check config and daemon Event subscription.'} />
-            </h2>
-            {watchlistCardDescription ? (
-              <p className="section-hint section-hint-tight">{watchlistCardDescription}</p>
-            ) : null}
-          </div>
-        </div>
-        <div className="realtime-quotes-table-wrap">
-          <table className="table-operations realtime-quotes-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Qty</th>
-                <th>Cost</th>
-                <th>Daily %</th>
-                <th>Daily $</th>
-                <th>SINCE %</th>
-                <th>SINCE $</th>
-                <th>Last</th>
-                <th>Bid</th>
-                <th>Ask</th>
-                <th>Since</th>
-              </tr>
-            </thead>
-            <tbody>
-              {watchlistRows.length === 0 ? (
-                <tr>
-                  <td colSpan={11}>No symbols in watchlist (add symbols in Watchlist or ensure daemon is running)</td>
-                </tr>
-              ) : (
-                watchlistRows.map((row) => {
-                  const { symbol, quote: q, qty, avgCost, changePct, pnlVsBench, pnlCost } = row
-                  return (
-                    <tr key={symbol}>
-                      <td><strong>{symbol}</strong></td>
-                      <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
-                      <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
-                      <td className="realtime-quote-num">
-                        {changePct != null && Number.isFinite(changePct) ? (
-                          <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
-                            {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="realtime-quote-num">
-                        {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
-                          <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsd(pnlVsBench)}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="realtime-quote-num">
-                        {(() => {
-                          if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || !q?.last || !Number.isFinite(q.last)) return '—'
-                          const sincePct = ((q.last - avgCost) / avgCost) * 100
-                          return (
-                            <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
-                              {sincePct >= 0 ? '+' : ''}{sincePct.toFixed(2)}%
-                            </span>
-                          )
-                        })()}
-                      </td>
-                      <td className="realtime-quote-num">
-                        {pnlCost != null && Number.isFinite(pnlCost) ? (
-                          <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsd(pnlCost)}
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td className="realtime-quote-num">{q ? fmtUsd(q.last) : '—'}</td>
-                      <td className="realtime-quote-num">{q ? fmtUsd(q.bid ?? null) : '—'}</td>
-                      <td className="realtime-quote-num">{q ? fmtUsd(q.ask ?? null) : '—'}</td>
-                      <td className="realtime-quote-since">{q ? fmtSince(q.ts) : '—'}</td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        {watchlistRows.length > 0 && (() => {
-          const totalCostPnl = watchlistRows.reduce((acc, row) => {
-            const v = row.pnlCost
-            return acc + (v != null && Number.isFinite(v) ? v : 0)
-          }, 0)
-          const totalCost = watchlistRows.reduce((acc, row) => {
-            const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
-            const cost = row.avgCost != null && Number.isFinite(row.avgCost) ? row.avgCost : 0
-            return acc + qty * cost
-          }, 0)
-          const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
-          const totalDailyDollar = watchlistRows.reduce((acc, row) => {
-            const v = row.pnlVsBench
-            return acc + (v != null && Number.isFinite(v) ? v : 0)
-          }, 0)
-          const sumLastQty = watchlistRows.reduce((acc, row) => {
-            const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
-            const last = row.quote?.last != null && Number.isFinite(row.quote.last) ? row.quote.last : 0
-            return acc + last * qty
-          }, 0)
-          const totalDailyDenom = sumLastQty - totalDailyDollar
-          const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar)
-            ? (totalDailyDollar / totalDailyDenom) * 100
-            : null
-          return (
-            <p className="replay-sync-hint watchlist-summary-row" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
-              <span className="watchlist-summary-segment">
-                Total $:{' '}
-                <span className="watchlist-summary-value" style={{ color: totalCostPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                  {fmtUsd(totalCostPnl)}
-                </span>
-              </span>
-              {totalPct != null && Number.isFinite(totalPct) && (
-                <span className="watchlist-summary-segment">
-                  Total %:{' '}
-                  <span className="watchlist-summary-value watchlist-summary-value-pct" style={{ color: totalPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                    {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
-                  </span>
-                </span>
-              )}
-              {(Number.isFinite(totalDailyDollar) || (totalDailyPct != null && Number.isFinite(totalDailyPct))) && (
-                <>
-                  <span className="watchlist-summary-segment">
-                    Daily $:{' '}
-                    <span className="watchlist-summary-value" style={{ color: totalDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                      {fmtUsd(totalDailyDollar)}
-                    </span>
-                  </span>
-                  {totalDailyPct != null && Number.isFinite(totalDailyPct) && (
-                    <span className="watchlist-summary-segment">
-                      Daily %:{' '}
-                      <span className="watchlist-summary-value watchlist-summary-value-pct" style={{ color: totalDailyPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                        {totalDailyPct >= 0 ? '+' : ''}{totalDailyPct.toFixed(2)}%
-                      </span>
-                    </span>
-                  )}
-                </>
-              )}
-            </p>
-          )
-        })()}
       </div>
       )}
 

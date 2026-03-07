@@ -960,6 +960,21 @@ def create_app(
         items = reader.get_executions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
         return {"executions": items}
 
+    @app.get("/performance")
+    def get_performance(
+        since_ts: Optional[float] = Query(None, description="Filter trades with time >= this (Unix s)"),
+        until_ts: Optional[float] = Query(None, description="Filter trades with time <= this"),
+        account_id: Optional[str] = Query(None, description="Filter by account ID"),
+        granularity: str = Query("day", description="Calendar bucket: day | week | month"),
+    ) -> Dict[str, Any]:
+        """Performance stats and calendar PnL from account_executions (PERFORMANCE_PAGE_DESIGN)."""
+        return reader.get_performance_stats(
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            granularity=granularity,
+        )
+
     @app.post("/executions")
     def post_execution(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         """R-A2 扩展：手动添加一条执行记录（历史补录）。body: account_id, time(Unix s), symbol, sec_type, side, quantity, price；可选 source, exec_id, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, commission, realized_pnl, currency。"""

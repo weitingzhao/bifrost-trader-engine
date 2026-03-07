@@ -223,6 +223,39 @@ export interface ExecutionsResponse {
   message?: string
 }
 
+/** GET /performance: summary + calendar PnL (PERFORMANCE_PAGE_DESIGN). */
+export interface PerformanceSummary {
+  total_pnl?: number
+  total_commission?: number
+  net_pnl?: number
+  trade_count?: number
+  win_count?: number
+  loss_count?: number
+  win_rate?: number | null
+  profit_factor?: number | null
+  avg_win?: number | null
+  avg_loss?: number | null
+  max_win?: number | null
+  max_loss?: number | null
+  max_drawdown?: number | null
+}
+
+export interface PerformanceCalendarEntry {
+  period_start_ts: number
+  period_label: string
+  pnl: number
+  commission: number
+  net_pnl: number
+  trade_count: number
+  win_rate?: number | null
+}
+
+export interface PerformanceResponse {
+  summary: PerformanceSummary
+  calendar: PerformanceCalendarEntry[]
+  cumulative_curve: { ts: number; cumulative_net_pnl: number }[]
+}
+
 /** K-line/OHLC bar (R-A3). Stub until stage 3. */
 export interface Bar {
   time: number

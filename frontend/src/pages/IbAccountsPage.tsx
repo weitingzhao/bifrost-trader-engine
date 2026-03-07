@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
-import { fetchBarsBenchmark, fetchQuotes, subscribeQuotes } from '../api'
+import { fetchBarsBenchmark, fetchQuotes, postExecutionsFetch, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
 type DailyBenchmark = {
@@ -162,6 +162,31 @@ export function IbAccountsPage({
   const selectedIndex = accounts.length > 0 ? Math.min(ibAccountIndex, accounts.length - 1) : 0
   const acc = accounts[selectedIndex]
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+  const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
+  const [replaySyncing, setReplaySyncing] = useState(false)
+
+  const overviewTotals = useMemo(() => {
+    const list = rawAccounts ?? []
+    const optKeys = new Set<string>()
+    let stockLines = 0
+    let unrealizedPnl = 0
+    for (const account of list) {
+      for (const position of account.positions ?? []) {
+        const qty = Number(position.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        if ((position.secType ?? '').toUpperCase() === 'OPT') {
+          const expiry = position.lastTradeDateOrContractMonth ?? position.expiry ?? ''
+          const strike = Number(position.strike) || 0
+          const right = (position.right ?? '').toUpperCase().slice(0, 1)
+          optKeys.add(position.contract_key ?? `${position.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`)
+        } else {
+          stockLines += 1
+        }
+        unrealizedPnl += Number(position.unrealized_pnl) || 0
+      }
+    }
+    return { optionContracts: optKeys.size, stockLines, unrealizedPnl }
+  }, [rawAccounts])
 
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const stockSymbols = useMemo(() => {
@@ -245,6 +270,69 @@ export function IbAccountsPage({
             {refreshFeedback}
           </p>
         )}
+
+        <section className="replay-section" aria-labelledby="ib-portfolio-overview-head">
+          <h3 id="ib-portfolio-overview-head">Portfolio overview</h3>
+          <div className="risk-summary-cards">
+            <div className="risk-card">
+              <span className="risk-card-label">Accounts</span>
+              <span className="risk-card-value">{status?.accounts?.length ?? 0}</span>
+            </div>
+            <div className="risk-card">
+              <span className="risk-card-label">Open option contracts</span>
+              <span className="risk-card-value">{overviewTotals.optionContracts}</span>
+            </div>
+            <div className="risk-card">
+              <span className="risk-card-label">Stock lines</span>
+              <span className="risk-card-value">{overviewTotals.stockLines}</span>
+            </div>
+            <div className="risk-card">
+              <span className="risk-card-label">Unrealized PnL</span>
+              <span className="risk-card-value">{fmtUsd(overviewTotals.unrealizedPnl)}</span>
+            </div>
+          </div>
+          {fetchedAt != null && Number.isFinite(fetchedAt) && (
+            <p className="section-hint replay-overview-fetched-at">
+              Live positions snapshot from {new Date(fetchedAt * 1000).toLocaleString()}.
+            </p>
+          )}
+        </section>
+
+        <section className="replay-section" aria-labelledby="ib-fetch-head">
+          <h3 id="ib-fetch-head">Fetch from IB</h3>
+          <div className="replay-toolbar">
+            <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
+              <span className="replay-fetch-days-label">Fetch</span>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="ib-replay-fetch-days" value={1} checked={replayFetchDays === 1} onChange={() => setReplayFetchDays(1)} disabled={replaySyncing} />
+                <span>Today</span>
+              </label>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="ib-replay-fetch-days" value={3} checked={replayFetchDays === 3} onChange={() => setReplayFetchDays(3)} disabled={replaySyncing} />
+                <span>Last 3 days</span>
+              </label>
+              <label className="replay-fetch-radio">
+                <input type="radio" name="ib-replay-fetch-days" value={7} checked={replayFetchDays === 7} onChange={() => setReplayFetchDays(7)} disabled={replaySyncing} />
+                <span>Last 7 days</span>
+              </label>
+              <button
+                type="button"
+                className="btn btn-small replay-fetch-refresh-btn"
+                disabled={replaySyncing}
+                onClick={async () => {
+                  setReplaySyncing(true)
+                  await postExecutionsFetch(replayFetchDays)
+                  setReplaySyncing(false)
+                }}
+                aria-label="Fetch executions from IB and write to DB"
+              >
+                {replaySyncing ? 'Fetching…' : 'Refresh'}
+              </button>
+            </div>
+            {replaySyncing && <span className="replay-sync-hint">Fetching executions from IB…</span>}
+          </div>
+        </section>
+
         <p className="section-hint">
           No account data (IB not connected or daemon has not written yet; after connection, data is pulled on heartbeat and written to accounts / account_positions)
         </p>
@@ -309,6 +397,69 @@ export function IbAccountsPage({
           Data time unknown (click "Refresh" to have monitor fetch from IB and write to DB; fetch time will appear here)
         </p>
       )}
+
+      <section className="replay-section" aria-labelledby="ib-portfolio-overview-head">
+        <h3 id="ib-portfolio-overview-head">Portfolio overview</h3>
+        <div className="risk-summary-cards">
+          <div className="risk-card">
+            <span className="risk-card-label">Accounts</span>
+            <span className="risk-card-value">{accounts.length}</span>
+          </div>
+          <div className="risk-card">
+            <span className="risk-card-label">Open option contracts</span>
+            <span className="risk-card-value">{overviewTotals.optionContracts}</span>
+          </div>
+          <div className="risk-card">
+            <span className="risk-card-label">Stock lines</span>
+            <span className="risk-card-value">{overviewTotals.stockLines}</span>
+          </div>
+          <div className="risk-card">
+            <span className="risk-card-label">Unrealized PnL</span>
+            <span className="risk-card-value">{fmtUsd(overviewTotals.unrealizedPnl)}</span>
+          </div>
+        </div>
+        {fetchedAt != null && Number.isFinite(fetchedAt) && (
+          <p className="section-hint replay-overview-fetched-at">
+            Live positions snapshot from {new Date(fetchedAt * 1000).toLocaleString()}.
+          </p>
+        )}
+      </section>
+
+      <section className="replay-section" aria-labelledby="ib-fetch-head">
+        <h3 id="ib-fetch-head">Fetch from IB</h3>
+        <div className="replay-toolbar">
+          <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
+            <span className="replay-fetch-days-label">Fetch</span>
+            <label className="replay-fetch-radio">
+              <input type="radio" name="ib-replay-fetch-days" value={1} checked={replayFetchDays === 1} onChange={() => setReplayFetchDays(1)} disabled={replaySyncing} />
+              <span>Today</span>
+            </label>
+            <label className="replay-fetch-radio">
+              <input type="radio" name="ib-replay-fetch-days" value={3} checked={replayFetchDays === 3} onChange={() => setReplayFetchDays(3)} disabled={replaySyncing} />
+              <span>Last 3 days</span>
+            </label>
+            <label className="replay-fetch-radio">
+              <input type="radio" name="ib-replay-fetch-days" value={7} checked={replayFetchDays === 7} onChange={() => setReplayFetchDays(7)} disabled={replaySyncing} />
+              <span>Last 7 days</span>
+            </label>
+            <button
+              type="button"
+              className="btn btn-small replay-fetch-refresh-btn"
+              disabled={replaySyncing}
+              onClick={async () => {
+                setReplaySyncing(true)
+                const res = await postExecutionsFetch(replayFetchDays)
+                if (res.ok) await onRefreshAccounts()
+                setReplaySyncing(false)
+              }}
+              aria-label="Fetch executions from IB and write to DB"
+            >
+              {replaySyncing ? 'Fetching…' : 'Refresh'}
+            </button>
+          </div>
+          {replaySyncing && <span className="replay-sync-hint">Fetching executions from IB…</span>}
+        </div>
+      </section>
 
       <div className="ib-accounts-wrap">
         {accounts.length > 1 && (

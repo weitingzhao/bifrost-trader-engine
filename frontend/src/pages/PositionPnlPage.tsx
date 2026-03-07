@@ -3,15 +3,12 @@ import type {
   Execution,
   IbPositionRow,
   OptExecutionGroup,
-  RiskSummaryResponse,
   StatusResponse,
 } from '../types'
 import {
   createExecution,
   deleteExecution,
   fetchExecutions,
-  fetchRiskSummary,
-  postExecutionsFetch,
   updateExecution,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -84,7 +81,7 @@ function getContractLabelParts(contract_key: string): { symbol: string; rightLab
   return { symbol, rightLabel }
 }
 
-export type PortfolioView = 'overview' | 'open' | 'ledger'
+export type PortfolioView = 'overview' | 'open' | 'ledger' | 'performance' | 'accounts' | 'transfer'
 
 interface PositionPnlPageProps {
   status: StatusResponse | null
@@ -190,11 +187,7 @@ export function PositionPnlPage({
   onViewChange,
   showViewTabs = true,
 }: PositionPnlPageProps) {
-  const [riskSummary, setRiskSummary] = useState<RiskSummaryResponse | null>(null)
   const [executions, setExecutions] = useState<Execution[]>([])
-  const [replayLoading, setReplayLoading] = useState(false)
-  const [replaySyncing, setReplaySyncing] = useState(false)
-  const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
   const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
   /** Pool=Off only: execution to close against; when set, show Quick Trade (Close) modal */
@@ -228,7 +221,7 @@ export function PositionPnlPage({
   const [ledgerFilterExecStart, setLedgerFilterExecStart] = useState('')
   const [ledgerFilterExecEnd, setLedgerFilterExecEnd] = useState('')
   const [ledgerFilterPool, setLedgerFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
-  const [internalPortfolioView, setInternalPortfolioView] = useState<PortfolioView>('overview')
+  const [internalPortfolioView, setInternalPortfolioView] = useState<PortfolioView>('open')
   const [ledgerTab, setLedgerTab] = useState<'options' | 'stocks'>('options')
   const [openTab, setOpenTab] = useState<'options' | 'stocks'>('options')
   const portfolioView = currentView ?? internalPortfolioView
@@ -522,43 +515,6 @@ export function PositionPnlPage({
     [livePositions],
   )
 
-  const overviewLivePositions = useMemo((): LivePositionRow[] => {
-    const accounts = status?.accounts ?? []
-    return accounts.flatMap(account =>
-      (account.positions ?? [])
-        .filter(position => {
-          const qty = Number(position.position)
-          return Number.isFinite(qty) && qty !== 0
-        })
-        .map(position => ({
-          ...position,
-          account_id: (account.account_id ?? '').trim(),
-        })),
-    )
-  }, [status?.accounts])
-
-  const overviewOptionContracts = useMemo(() => {
-    const keys = new Set<string>()
-    for (const position of overviewLivePositions) {
-      if ((position.secType ?? '').toUpperCase() !== 'OPT') continue
-      const expiry = position.lastTradeDateOrContractMonth ?? position.expiry ?? ''
-      const strike = Number(position.strike) || 0
-      const right = (position.right ?? '').toUpperCase().slice(0, 1)
-      keys.add(position.contract_key ?? `${position.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`)
-    }
-    return keys.size
-  }, [overviewLivePositions])
-
-  const overviewStockLines = useMemo(
-    () => overviewLivePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT').length,
-    [overviewLivePositions],
-  )
-
-  const overviewUnrealizedPnl = useMemo(
-    () => overviewLivePositions.reduce((acc, position) => acc + (Number(position.unrealized_pnl) || 0), 0),
-    [overviewLivePositions],
-  )
-
   const executionAccountOptions = useMemo(() => {
     const fromStatus = ((status?.accounts as { account_id?: string }[] | undefined) ?? [])
       .map(a => (a.account_id ?? '').trim())
@@ -679,17 +635,11 @@ export function PositionPnlPage({
   }, [openTab, hasOpenOptions, hasOpenStocks])
 
   const loadReplayData = useCallback(async () => {
-    setReplayLoading(true)
     try {
-      const summary = await fetchRiskSummary()
-      setRiskSummary(summary)
       const execRes = await fetchExecutions(undefined, undefined, 100)
       setExecutions(execRes.executions || [])
     } catch {
-      setRiskSummary(null)
       setExecutions([])
-    } finally {
-      setReplayLoading(false)
     }
   }, [])
 
@@ -708,7 +658,7 @@ export function PositionPnlPage({
             <button
               type="button"
               className="page-title-breadcrumb-link"
-              onClick={() => onViewChange?.('overview')}
+              onClick={() => onViewChange?.('accounts')}
             >
               Portfolio
             </button>
@@ -720,26 +670,17 @@ export function PositionPnlPage({
             <button
               type="button"
               className="page-title-breadcrumb-link"
-              onClick={() => onViewChange?.('overview')}
+              onClick={() => onViewChange?.('accounts')}
             >
               Portfolio
             </button>
-            {' / Trade Ledger'}
-            <InfoTooltip text="Trade Ledger is the maintenance workspace for closed trades, execution imports, and manual trade corrections." />
+            {' / Trade History'}
+            <InfoTooltip text="Trade History is the maintenance workspace for closed trades, execution imports, and manual trade corrections." />
           </>
         )}
       </h2>
       {showViewTabs && (
       <div className="system-tabs replay-portfolio-view-tabs" role="tablist" aria-label="Portfolio view">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={portfolioView === 'overview'}
-          className={`system-tab ${portfolioView === 'overview' ? 'active' : ''}`}
-          onClick={() => setPortfolioViewSelected('overview')}
-        >
-          Overview
-        </button>
         <button
           type="button"
           role="tab"
@@ -756,136 +697,18 @@ export function PositionPnlPage({
           className={`system-tab ${portfolioView === 'ledger' ? 'active' : ''}`}
           onClick={() => setPortfolioViewSelected('ledger')}
         >
-          Trade Ledger
+          Trade History
         </button>
       </div>
       )}
       {portfolioView === 'overview' && (
       <p className="section-hint replay-portfolio-view-hint">
-        Overview shows portfolio-level summary and risk model signals without trade-maintenance actions.
+        Portfolio summary, risk model and Fetch from IB are now under Portfolio → Accounts.
       </p>
       )}
 
       {portfolioView === 'overview' ? (
-        <>
-          <section className="replay-section" aria-labelledby="portfolio-overview-head">
-            <h3 id="portfolio-overview-head">Portfolio overview</h3>
-            <div className="risk-summary-cards">
-              <div className="risk-card">
-                <span className="risk-card-label">Accounts</span>
-                <span className="risk-card-value">{status?.accounts?.length ?? 0}</span>
-              </div>
-              <div className="risk-card">
-                <span className="risk-card-label">Open option contracts</span>
-                <span className="risk-card-value">{overviewOptionContracts}</span>
-              </div>
-              <div className="risk-card">
-                <span className="risk-card-label">Stock lines</span>
-                <span className="risk-card-value">{overviewStockLines}</span>
-              </div>
-              <div className="risk-card">
-                <span className="risk-card-label">Unrealized PnL</span>
-                <span className="risk-card-value">{fmtUsd(overviewUnrealizedPnl)}</span>
-              </div>
-            </div>
-            {status?.accounts_fetched_at != null && Number.isFinite(Number(status.accounts_fetched_at)) && (
-              <p className="section-hint replay-overview-fetched-at">
-                Live positions snapshot from {new Date(Number(status.accounts_fetched_at) * 1000).toLocaleString()}.
-              </p>
-            )}
-          </section>
-
-          <section className="replay-section" aria-labelledby="risk-summary-head">
-            <h3 id="risk-summary-head">Risk model</h3>
-            {replayLoading ? (
-              <p className="section-hint">Loading…</p>
-            ) : riskSummary ? (
-              <div className="risk-summary-cards">
-                <div className="risk-card">
-                  <span className="risk-card-label">Daily hedge count</span>
-                  <span className="risk-card-value">{riskSummary.daily_hedge_count ?? '—'}</span>
-                </div>
-                <div className="risk-card">
-                  <span className="risk-card-label">Daily PnL (USD)</span>
-                  <span className="risk-card-value">{fmtUsd(riskSummary.daily_pnl)}</span>
-                </div>
-                <div className="risk-card">
-                  <span className="risk-card-label">Spot</span>
-                  <span className="risk-card-value">{fmtUsd(riskSummary.spot)}</span>
-                </div>
-                <div className="risk-card">
-                  <span className="risk-card-label">Ops (24h)</span>
-                  <span className="risk-card-value">{riskSummary.operations_count_24h ?? 0}</span>
-                </div>
-              </div>
-            ) : (
-              <p className="section-hint">Unable to load risk summary (check API and DB).</p>
-            )}
-          </section>
-
-          <section className="replay-section" aria-labelledby="portfolio-fetch-head">
-            <h3 id="portfolio-fetch-head">Fetch from IB</h3>
-            <div className="replay-toolbar">
-              <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
-                <span className="replay-fetch-days-label">Fetch</span>
-                <label className="replay-fetch-radio">
-                  <input
-                    type="radio"
-                    name="replay-fetch-days"
-                    value={1}
-                    checked={replayFetchDays === 1}
-                    onChange={() => setReplayFetchDays(1)}
-                    disabled={replaySyncing}
-                  />
-                  <span>Today</span>
-                </label>
-                <label className="replay-fetch-radio">
-                  <input
-                    type="radio"
-                    name="replay-fetch-days"
-                    value={3}
-                    checked={replayFetchDays === 3}
-                    onChange={() => setReplayFetchDays(3)}
-                    disabled={replaySyncing}
-                  />
-                  <span>Last 3 days</span>
-                </label>
-                <label className="replay-fetch-radio">
-                  <input
-                    type="radio"
-                    name="replay-fetch-days"
-                    value={7}
-                    checked={replayFetchDays === 7}
-                    onChange={() => setReplayFetchDays(7)}
-                    disabled={replaySyncing}
-                  />
-                  <span>Last 7 days</span>
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-small replay-fetch-refresh-btn"
-                  disabled={replaySyncing || replayLoading}
-                  onClick={async () => {
-                    setReplaySyncing(true)
-                    const res = await postExecutionsFetch(replayFetchDays)
-                    if (!res.ok) {
-                      setReplaySyncing(false)
-                      return
-                    }
-                    await loadReplayData()
-                    setReplaySyncing(false)
-                  }}
-                  aria-label="Fetch executions from IB and write to DB"
-                >
-                  {replaySyncing ? 'Fetching…' : 'Refresh'}
-                </button>
-              </div>
-              {replaySyncing && (
-                <span className="replay-sync-hint">Fetching executions from IB…</span>
-              )}
-            </div>
-          </section>
-        </>
+        <p className="section-hint">Go to <strong>Portfolio → Accounts</strong> for portfolio overview, risk model and Fetch from IB.</p>
       ) : portfolioView === 'open' ? (
         <section className="replay-section replay-section-trade-records" aria-label="Open positions">
           <div className="replay-filters">
@@ -1324,7 +1147,7 @@ export function PositionPnlPage({
         </section>
       ) : (
         <>
-          <section className="replay-section replay-section-trade-records" aria-label="Trade Ledger">
+          <section className="replay-section replay-section-trade-records" aria-label="Trade History">
             <div className="replay-filters">
               <label className="replay-filter-wrap-symbol">
                 <input

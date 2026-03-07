@@ -45,6 +45,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **[配置安全分类（风险模型）](CONFIG_SAFETY_TAXONOMY.md)** | 配置中的安全边界分类与风险维度 |
 | **[Guard 微调与影响](GUARD_TUNING_AND_IMPACT.md)** | Guard/边界参数微调方法、后果分析、block reason 与回测验证 |
 | **[IB 数据获取服务边界](IB_MARKET_DATA_BOUNDARIES.md)** | IB 历史数据 Pacing、Step Size（duration/bar 合法组合）、不可用数据、行情订阅；Market 页 Fetch 逻辑需遵守 |
+| **[Performance 页面设计](PERFORMANCE_PAGE_DESIGN.md)** | 基于执行记录的绩效分析、Calendar PnL、评估指标与 API（R-M7 / R-H2） |
 | **[IB Pacing 实现方案](plans/ib-pacing-implementation-plan.md)** | 边界配置化、Worker/API 用量计量、Redis 限流、监控暴露的详细设计与分步实现 |
 
 ---

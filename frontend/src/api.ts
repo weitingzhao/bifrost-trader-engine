@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, PerformanceResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -577,6 +577,22 @@ export async function postMonitorConnect(): Promise<
 
 export async function fetchRiskSummary(): Promise<RiskSummaryResponse> {
   const r = await fetch(`${API}/risk_summary`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchPerformance(params?: {
+  since_ts?: number
+  until_ts?: number
+  account_id?: string
+  granularity?: 'day' | 'week' | 'month'
+}): Promise<PerformanceResponse> {
+  const search = new URLSearchParams()
+  if (params?.since_ts != null) search.set('since_ts', String(params.since_ts))
+  if (params?.until_ts != null) search.set('until_ts', String(params.until_ts))
+  if (params?.account_id) search.set('account_id', params.account_id)
+  if (params?.granularity) search.set('granularity', params.granularity)
+  const r = await fetch(`${API}/performance?${search}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }

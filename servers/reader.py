@@ -320,6 +320,157 @@ class StatusReader:
             self._conn = None
             return []
 
+    def get_performance_stats(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        granularity: str = "day",
+    ) -> Dict[str, Any]:
+        """Return performance summary and calendar PnL from account_executions + commissions (PERFORMANCE_PAGE_DESIGN).
+        granularity: 'day' | 'week' | 'month'. Calendar uses UTC for period boundaries."""
+        def _is_finite(x: Any) -> bool:
+            try:
+                return math.isfinite(float(x))
+            except (TypeError, ValueError):
+                return False
+
+        rows = self.get_executions(
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            limit=10000,
+        )
+        out: Dict[str, Any] = {
+            "summary": {
+                "total_pnl": 0.0,
+                "total_commission": 0.0,
+                "net_pnl": 0.0,
+                "trade_count": 0,
+                "win_count": 0,
+                "loss_count": 0,
+                "win_rate": None,
+                "profit_factor": None,
+                "avg_win": None,
+                "avg_loss": None,
+                "max_win": None,
+                "max_loss": None,
+                "max_drawdown": None,
+            },
+            "calendar": [],
+            "cumulative_curve": [],
+        }
+        if not rows:
+            return out
+
+        net_list: List[Tuple[float, float]] = []
+        total_pnl = 0.0
+        total_commission = 0.0
+        wins: List[float] = []
+        losses: List[float] = []
+
+        for r in rows:
+            t = r.get("time")
+            if t is None:
+                continue
+            try:
+                ts = float(t)
+            except (TypeError, ValueError):
+                continue
+            pnl = r.get("realized_pnl")
+            pnl_val = float(pnl) if pnl is not None and _is_finite(pnl) else 0.0
+            comm = r.get("commission")
+            comm_val = float(comm) if comm is not None and _is_finite(comm) else 0.0
+            net = pnl_val - comm_val
+            total_pnl += pnl_val
+            total_commission += comm_val
+            net_list.append((ts, net))
+            if pnl_val > 0:
+                wins.append(pnl_val)
+            elif pnl_val < 0:
+                losses.append(pnl_val)
+
+        net_list.sort(key=lambda x: x[0])
+        trade_count = len(net_list)
+        win_count = len(wins)
+        loss_count = len(losses)
+        total_wins = sum(wins)
+        total_losses = sum(losses)
+        abs_losses = abs(total_losses)
+
+        out["summary"]["total_pnl"] = round(total_pnl, 2)
+        out["summary"]["total_commission"] = round(total_commission, 2)
+        out["summary"]["net_pnl"] = round(total_pnl - total_commission, 2)
+        out["summary"]["trade_count"] = trade_count
+        out["summary"]["win_count"] = win_count
+        out["summary"]["loss_count"] = loss_count
+        if trade_count > 0:
+            out["summary"]["win_rate"] = round(100.0 * win_count / trade_count, 2)
+        if abs_losses > 0:
+            out["summary"]["profit_factor"] = round(total_wins / abs_losses, 2)
+        if wins:
+            out["summary"]["avg_win"] = round(total_wins / len(wins), 2)
+            out["summary"]["max_win"] = round(max(wins), 2)
+        if losses:
+            out["summary"]["avg_loss"] = round(total_losses / len(losses), 2)
+            out["summary"]["max_loss"] = round(min(losses), 2)
+
+        cum = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        for ts, net in net_list:
+            cum += net
+            out["cumulative_curve"].append({"ts": ts, "cumulative_net_pnl": round(cum, 2)})
+            if cum > peak:
+                peak = cum
+            dd = peak - cum
+            if dd > max_dd:
+                max_dd = dd
+        out["summary"]["max_drawdown"] = round(max_dd, 2) if max_dd else None
+
+        period_key = granularity.strip().lower() or "day"
+        if period_key not in ("day", "week", "month"):
+            period_key = "day"
+
+        def period_start(ts: float) -> Tuple[float, str]:
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            if period_key == "day":
+                start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                label = start.strftime("%Y-%m-%d")
+            elif period_key == "week":
+                start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                start = start - timedelta(days=dt.weekday())
+                label = start.strftime("%Y-%m-%d") + " (W)"
+            else:
+                start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                label = start.strftime("%Y-%m")
+            return start.timestamp(), label
+
+        buckets: Dict[Tuple[float, str], List[float]] = {}
+        for ts, net in net_list:
+            p_start, p_label = period_start(ts)
+            key = (p_start, p_label)
+            if key not in buckets:
+                buckets[key] = []
+            buckets[key].append(net)
+
+        for (p_start, p_label), nets in sorted(buckets.items(), key=lambda x: x[0][0]):
+            period_pnl = sum(nets)
+            period_comm = total_commission * (len(nets) / trade_count) if trade_count else 0
+            wins_p = sum(1 for n in nets if n > 0)
+            cal_entry: Dict[str, Any] = {
+                "period_start_ts": p_start,
+                "period_label": p_label,
+                "pnl": round(period_pnl + period_comm, 2),
+                "commission": round(period_comm, 2),
+                "net_pnl": round(period_pnl, 2),
+                "trade_count": len(nets),
+                "win_rate": round(100.0 * wins_p / len(nets), 2) if nets else None,
+            }
+            out["calendar"].append(cal_entry)
+
+        return out
+
     def get_bars(
         self,
         symbol: Optional[str] = None,

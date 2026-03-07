@@ -9,12 +9,17 @@ import {
   fetchBarsBenchmark,
   fetchBarsJobs,
 } from './api'
-import { DaemonMonitorPage, type ConsoleSection, type OperationsSection } from './pages/DaemonMonitorPage'
+import { StatusPage, type ConsoleSection, type OperationsSection } from './pages/StatusPage'
+import { LivePage } from './pages/LivePage'
 import { IbAccountsPage } from './pages/IbAccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
 import { DataPage } from './pages/DataPage'
 import { PositionPnlPage, type PortfolioView } from './pages/PositionPnlPage'
+import { PerformancePage } from './pages/PerformancePage'
+import { ResearchRiskAnalysisPage } from './pages/ResearchRiskAnalysisPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { TransferPayPage } from './pages/TransferPayPage'
+import { BacktestPage } from './pages/BacktestPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import './App.css'
 
@@ -33,7 +38,7 @@ function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
 }
 
-type TabId = 'system' | 'live' | 'watchlist' | 'ib' | 'replay' | 'market' | 'data' | 'settings'
+type TabId = 'system' | 'live' | 'watchlist' | 'replay' | 'research' | 'settings'
 type LampId = 'green' | 'yellow' | 'red' | 'none'
 
 interface DashboardItem {
@@ -90,10 +95,10 @@ function SystemDashboard({
       ]
 
   return (
-    <section className="card dashboard-strip" aria-label="System status dashboard">
+    <section className="card dashboard-strip" aria-label="Status dashboard">
       <div className="dashboard-strip-grid">
         <div className="dashboard-system-cluster">
-          <span className="dashboard-group-label">System</span>
+          <span className="dashboard-group-label">Status</span>
           <div className="dashboard-system-chips">
             {items.map((item) => (
               <button
@@ -101,7 +106,7 @@ function SystemDashboard({
                 type="button"
                 className="dashboard-chip"
                 onClick={() => onOpenSection(item.id)}
-                aria-label={`Open System detail for ${item.label}`}
+                aria-label={`Open Status detail for ${item.label}`}
               >
                 <span className={`lamp lamp-sm ${item.lamp}`} aria-hidden />
                 <span className="dashboard-chip-label" aria-hidden>{item.label}</span>
@@ -111,13 +116,12 @@ function SystemDashboard({
         </div>
 
         <div className="dashboard-worker-cluster" aria-label="Celery bars worker queue">
-          <span className="dashboard-group-label">Worker</span>
           <div className="dashboard-worker-counts">
             <button
               type="button"
               className="dashboard-worker-item dashboard-worker-item-btn"
               onClick={() => (onOpenSectionWithConsole ? onOpenSectionWithConsole('celery', 'console') : onOpenSection('celery'))}
-              aria-label="Open System and Celery Console"
+              aria-label="Open Status and Celery Console"
             >
               <span className="dashboard-worker-label">Pending</span>
               <span className="dashboard-worker-value">{workerPending != null ? String(workerPending) : '—'}</span>
@@ -126,7 +130,7 @@ function SystemDashboard({
               type="button"
               className="dashboard-worker-item dashboard-worker-item-btn"
               onClick={() => onOpenSection('celery')}
-              aria-label="Open System Celery detail"
+              aria-label="Open Celery detail"
             >
               <span className="dashboard-worker-label">Running</span>
               <span className="dashboard-worker-value">{workerRunning != null ? String(workerRunning) : '—'}</span>
@@ -159,7 +163,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('system')
   const [operationsSection, setOperationsSection] = useState<OperationsSection>('daemon')
   const [consoleSection, setConsoleSection] = useState<ConsoleSection>('daemon-console')
-  const [portfolioView, setPortfolioView] = useState<PortfolioView>('overview')
+  const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
+  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest'>('risk')
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
@@ -345,20 +350,27 @@ export default function App() {
   }, [watchlistSymbols.join(',')])
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'system', label: 'System', lamp: systemLamp },
+    { id: 'system', label: 'Status', lamp: systemLamp },
     { id: 'live', label: 'Live', lamp: liveLamp },
     { id: 'watchlist', label: 'Watchlist' },
     { id: 'replay', label: 'Portfolio' },
-    { id: 'ib', label: 'Accounts' },
-    { id: 'market', label: 'Market' },
-    { id: 'data', label: 'Data' },
+    { id: 'research', label: 'Research' },
     { id: 'settings', label: 'Settings' },
   ]
 
+  const researchSubtabs: { id: 'risk' | 'screener' | 'data' | 'backtest'; label: string }[] = [
+    { id: 'screener', label: 'Screener' },
+    { id: 'risk', label: 'Risk Model' },
+    { id: 'data', label: 'Data' },
+    { id: 'backtest', label: 'Back test' },
+  ]
+
   const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
+    { id: 'accounts', label: 'Accounts' },
     { id: 'open', label: 'Open Positions' },
-    { id: 'ledger', label: 'Trade Ledger' },
+    { id: 'performance', label: 'Performance' },
+    { id: 'ledger', label: 'Trade History' },
+    { id: 'transfer', label: 'Transfer & Pay' },
   ]
 
   const dashboardItems: DashboardItem[] = [
@@ -504,7 +516,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="System, Live, Watchlist, Portfolio, Accounts, Market, Data, Settings">
+          <nav className="app-tabs" aria-label="Status, Live, Watchlist, Portfolio, Research, Settings">
             {tabList.map(({ id, label, lamp }) => {
               if (id === 'replay') {
                 return (
@@ -530,6 +542,39 @@ export default function App() {
                           onClick={() => {
                             setActiveTab('replay')
                             setPortfolioView(viewId)
+                          }}
+                        >
+                          <span>{viewLabel}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              }
+              if (id === 'research') {
+                return (
+                  <div key={id} className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
+                    <button
+                      type="button"
+                      className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
+                      onClick={() => setActiveTab(id)}
+                      aria-current={activeTab === id ? 'page' : undefined}
+                      aria-haspopup="menu"
+                    >
+                      <span>{label}</span>
+                      <span className="app-tab-caret" aria-hidden>▾</span>
+                    </button>
+                    <div className="app-submenu" role="menu" aria-label="Research sections">
+                      {researchSubtabs.map(({ id: viewId, label: viewLabel }) => (
+                        <button
+                          key={viewId}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={activeTab === 'research' && researchView === viewId}
+                          className={`app-submenu-item ${activeTab === 'research' && researchView === viewId ? 'active' : ''}`}
+                          onClick={() => {
+                            setActiveTab('research')
+                            setResearchView(viewId)
                           }}
                         >
                           <span>{viewLabel}</span>
@@ -574,7 +619,7 @@ export default function App() {
       )}
 
       {activeTab === 'system' && (
-        <DaemonMonitorPage
+        <StatusPage
           status={status}
           operations={operations}
           loadStatus={loadStatus}
@@ -584,7 +629,6 @@ export default function App() {
           showSectionTabs={false}
           showAllSystemSections={true}
           showSystemSection={true}
-          showWatchlistSection={false}
           showConsoleSection={true}
           currentConsoleSection={consoleSection}
           onConsoleSectionChange={setConsoleSection}
@@ -594,49 +638,51 @@ export default function App() {
         />
       )}
 
-      {activeTab === 'ib' && (
-        <IbAccountsPage
-          status={status}
-          accountsDisplay={accountsDisplay}
-          ibAccountIndex={ibAccountIndex}
-          setIbAccountIndex={setIbAccountIndex}
-          ibAccountsRefreshing={ibAccountsRefreshing}
-          onRefreshAccounts={onRefreshAccounts}
-          refreshFeedback={accountsRefreshFeedback}
-        />
-      )}
-
       {activeTab === 'replay' && (
-        <PositionPnlPage
-          status={status}
-          currentView={portfolioView}
-          onViewChange={setPortfolioView}
-          showViewTabs={false}
-        />
+        <>
+          {portfolioView === 'accounts' ? (
+            <IbAccountsPage
+              status={status}
+              accountsDisplay={accountsDisplay}
+              ibAccountIndex={ibAccountIndex}
+              setIbAccountIndex={setIbAccountIndex}
+              ibAccountsRefreshing={ibAccountsRefreshing}
+              onRefreshAccounts={onRefreshAccounts}
+              refreshFeedback={accountsRefreshFeedback}
+            />
+          ) : portfolioView === 'performance' ? (
+            <PerformancePage status={status} />
+          ) : portfolioView === 'transfer' ? (
+            <TransferPayPage status={status} />
+          ) : (
+            <PositionPnlPage
+              status={status}
+              currentView={portfolioView}
+              onViewChange={setPortfolioView}
+              showViewTabs={false}
+            />
+          )}
+        </>
       )}
 
-      {activeTab === 'market' && (
+      {activeTab === 'research' && researchView === 'risk' && (
+        <ResearchRiskAnalysisPage />
+      )}
+
+      {activeTab === 'research' && researchView === 'screener' && (
         <MarketDataPage status={status} />
       )}
 
-      {activeTab === 'data' && (
+      {activeTab === 'research' && researchView === 'data' && (
         <DataPage status={status} />
       )}
 
+      {activeTab === 'research' && researchView === 'backtest' && (
+        <BacktestPage status={status} />
+      )}
+
       {activeTab === 'live' && (
-        <div className="app-page-stack">
-          <DaemonMonitorPage
-            status={status}
-            operations={operations}
-            loadStatus={loadStatus}
-            showSectionTabs={false}
-            showSystemSection={false}
-            showWatchlistSection={true}
-            showConsoleSection={false}
-            watchlistCardTitle="Market Streams"
-            watchlistCardDescription="这里集中显示系统正常运行过程中产生的实时行情流状态。"
-          />
-        </div>
+        <LivePage status={status} />
       )}
 
       {activeTab === 'watchlist' && (
