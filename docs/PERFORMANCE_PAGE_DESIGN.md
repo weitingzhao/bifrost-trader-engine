@@ -92,4 +92,32 @@
 
 ---
 
+## 7. 分步实现计划
+
+### 7.1 组成与数据源
+
+- **Realized**：`account_executions` + `account_execution_commissions`（exec_time、realized_pnl、commission、account_id、sec_type）。
+- **Unrealized**：`account_positions` + `instrument_prices`（当前持仓 + 当前价，按现有 reader 的 unrealized_pnl 逻辑）。
+- **Transaction**：资金流入/流出（数据源待定：IB Ledger 或新表 account_transactions）；用于收益率分母与「总资产变动 = 交易盈亏 + 资金流」展示。
+- **收益率**：Realized 用 capital_base（期初权益 ± 资金流调整）；Unrealized 用当前权益；口径见执行计划 Phase 0。
+
+### 7.2 分步顺序（与 Todo 一致）
+
+- **Phase 0**：Capital base 与 Transaction 数据源与口径（期初权益、净资金流、capital_base 公式）。
+- **Phase 1**：Realized 合计（金额）；校验 sum 与 get_executions 一致。
+- **Phase 2**：Realized 按账户；分账户之和 = 合计。
+- **Phase 3**：Realized 按 sec_type（STK/OPT）；分类型之和 = 合计。
+- **Phase 4**：Realized 按账户×sec_type；二维之和 = 合计。
+- **Phase 5**：Realized 日历（按日/周/月）；commission 按 period 真实汇总；各 period 之和 = 合计。
+- **Phase 6**：Unrealized 合计（金额）；数据来自持仓+价格。
+- **Phase 7**：Unrealized 按账户、按 sec_type、按账户×sec_type。
+- **Phase 8**：展示层：Realized + Unrealized 分块展示；Transaction 单独展示；总回报 %；胜率/Profit Factor/Max Drawdown 仅针对 Realized。
+
+### 7.3 与 R-M7、R-H2 的对应
+
+- **R-M7**：复盘页中的 Performance 子页，展示上述 Realized/Unrealized/Transaction 与 %。
+- **R-H2**：按日/周/月汇总、胜率、盈亏分布由 GET /performance 与 Performance 页实现，验收见 [performance-execution-plan.md](plans/performance-execution-plan.md)。
+
+---
+
 *文档版本：初版；与 REQUIREMENTS.md、DATABASE.md、PLAN_NEXT_STEPS.md 对齐。*

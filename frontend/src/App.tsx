@@ -70,6 +70,76 @@ function fmtPctCompact(n: number | null | undefined): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
 }
 
+/** Small outline icon for submenu items (Portfolio & Research). */
+function SubmenuIcon({ name }: { name: string }) {
+  const size = 16
+  const className = 'app-submenu-icon'
+  const icons: Record<string, JSX.Element> = {
+    accounts: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </svg>
+    ),
+    open: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+        <rect x="14" y="14" width="7" height="7" />
+      </svg>
+    ),
+    performance: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+        <polyline points="17 6 23 6 23 12" />
+      </svg>
+    ),
+    ledger: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <line x1="8" y1="6" x2="21" y2="6" />
+        <line x1="8" y1="12" x2="21" y2="12" />
+        <line x1="8" y1="18" x2="21" y2="18" />
+        <line x1="3" y1="6" x2="3.01" y2="6" />
+        <line x1="3" y1="12" x2="3.01" y2="12" />
+        <line x1="3" y1="18" x2="3.01" y2="18" />
+      </svg>
+    ),
+    transfer: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M7 17L17 7" />
+        <path d="M7 7h10v10" />
+      </svg>
+    ),
+    screener: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="14" y="14" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+      </svg>
+    ),
+    risk: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+    ),
+    data: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      </svg>
+    ),
+    backtest: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <polygon points="5 3 19 12 5 21 5 3" />
+      </svg>
+    ),
+  }
+  return <>{icons[name] ?? null}</>
+}
+
 function SystemDashboard({
   items,
   onOpenSection,
@@ -367,7 +437,7 @@ export default function App() {
 
   const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
     { id: 'accounts', label: 'Accounts' },
-    { id: 'open', label: 'Open Positions' },
+    { id: 'open', label: 'Positions' },
     { id: 'performance', label: 'Performance' },
     { id: 'ledger', label: 'Trade History' },
     { id: 'transfer', label: 'Transfer & Pay' },
@@ -544,6 +614,7 @@ export default function App() {
                             setPortfolioView(viewId)
                           }}
                         >
+                          <SubmenuIcon name={viewId} />
                           <span>{viewLabel}</span>
                         </button>
                       ))}
@@ -577,6 +648,7 @@ export default function App() {
                             setResearchView(viewId)
                           }}
                         >
+                          <SubmenuIcon name={viewId} />
                           <span>{viewLabel}</span>
                         </button>
                       ))}
@@ -634,7 +706,7 @@ export default function App() {
           onConsoleSectionChange={setConsoleSection}
           showConsoleTabs={true}
           consoleCardTitle="Console"
-          consoleCardDescription="这里集中放各个子系统的控制台、Recent Operations 和 Event Subscribe。"
+          consoleCardDescription="Consoles for each subsystem, Recent Operations, and Event Subscribe."
         />
       )}
 

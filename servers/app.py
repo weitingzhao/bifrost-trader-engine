@@ -954,10 +954,17 @@ def create_app(
         since_ts: Optional[float] = Query(None, description="Filter executions with time >= this (Unix s)"),
         until_ts: Optional[float] = Query(None, description="Filter executions with time <= this"),
         account_id: Optional[str] = Query(None, description="Filter by account ID"),
-        limit: int = Query(200, ge=1, le=1000),
+        limit: int = Query(200, ge=0, le=10000, description="Max rows to return; 0 = no limit"),
+        include_opt_pairs: bool = Query(False, description="Include C↔P pairing: each execution gets paired_execution_ids, response includes opt_pairs"),
     ) -> Dict[str, Any]:
-        """Account-level executions/trades (R-A2). Reads from account_executions table (daemon syncs from IB). Each item includes id for edit."""
-        items = reader.get_executions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        """Account-level executions/trades (R-A2). Reads from account_executions table (daemon syncs from IB). Each item includes id for edit.
+        If include_opt_pairs=true: backend finds pairs (same symbol, expiry, strike, account_id; option_right C↔P), returns executions with paired_execution_ids and opt_pairs list."""
+        effective_limit: Optional[int] = limit if limit > 0 else None
+        if include_opt_pairs:
+            return reader.get_executions_with_opt_pairs(
+                since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=effective_limit or 5000
+            )
+        items = reader.get_executions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=effective_limit)
         return {"executions": items}
 
     @app.get("/performance")

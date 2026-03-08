@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, PerformanceResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, ExecutionsResponseWithPairs, PerformanceResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -597,11 +597,17 @@ export async function fetchPerformance(params?: {
   return r.json()
 }
 
-export async function fetchExecutions(since_ts?: number, until_ts?: number, limit = 200): Promise<ExecutionsResponse> {
+export async function fetchExecutions(
+  since_ts?: number,
+  until_ts?: number,
+  limit = 200,
+  include_opt_pairs = false,
+): Promise<ExecutionsResponse | ExecutionsResponseWithPairs> {
   const params = new URLSearchParams()
   if (since_ts != null) params.set('since_ts', String(since_ts))
   if (until_ts != null) params.set('until_ts', String(until_ts))
   params.set('limit', String(limit))
+  if (include_opt_pairs) params.set('include_opt_pairs', 'true')
   const r = await fetch(`${API}/executions?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()

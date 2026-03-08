@@ -19,8 +19,8 @@ function fmtUsd(n: number | null | undefined): string {
   }).format(n)
 }
 
-/** 控制台日志行解析：提取级别与可选的时间前缀，用于控制台着色 */
-/** 根据 ts (Unix 秒) 与当前时间差显示：秒 → 分钟 → 小时 → 天 */
+/** Console log line parsing: extract level and optional timestamp prefix for console coloring */
+/** Format elapsed since ts (Unix sec): seconds → minutes → hours → days */
 function fmtSince(ts: number | null | undefined): string {
   if (ts == null || !Number.isFinite(ts)) return '—'
   const nowSec = Date.now() / 1000
@@ -161,6 +161,9 @@ export function StatusPage({
   const [healthTick, setHealthTick] = useState(0)
   const [internalSystemTab, setInternalSystemTab] = useState<OperationsSection>('daemon')
   const [internalConsoleTab, setInternalConsoleTab] = useState<ConsoleSection>('daemon-console')
+  const [shutdownAllLoading, setShutdownAllLoading] = useState(false)
+  const [shutdownAllMsg, setShutdownAllMsg] = useState({ text: '', isErr: false })
+  const [shutdownConfirmOpen, setShutdownConfirmOpen] = useState(false)
   const systemTab = currentSection ?? internalSystemTab
   const setSystemTabSelected = onSectionChange ?? setInternalSystemTab
   const consoleTab = currentConsoleSection ?? internalConsoleTab
@@ -308,7 +311,7 @@ export function StatusPage({
   const celeryLastTs = j?.celery_worker_last_updated_ts
   const celeryWorkerIbConnected = j?.celery_worker_ib_connected === true
   const celeryWorkerIbClientId = j?.celery_worker_ib_client_id ?? null
-  /** 与 Monitor 的轮询方式一致：仅以 GET /status 时对 Celery 的 inspect ping 结果判断 Worker 是否存活，不依赖“近期 job 更新” */
+  /** Same as Monitor polling: worker alive is determined only by Celery inspect ping in GET /status, not by recent job updates */
   const celeryWorkersAlive = (j?.celery_workers?.length ?? 0) > 0
   const celeryLamp =
     !celeryBrokerConnected ? 'red' : celeryWorkersAlive ? 'green' : 'yellow'
@@ -447,8 +450,82 @@ export function StatusPage({
     scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
   }
 
+  /** Shut down entire system: Celery first, then Daemon, then Management last (so others still receive messages). */
+  const doShutdownAll = async () => {
+    setShutdownConfirmOpen(false)
+    setShutdownAllLoading(true)
+    const errors: string[] = []
+    try {
+      setShutdownAllMsg({ text: 'Stopping Celery…', isErr: false })
+      const r3 = await postCeleryStop()
+      if (!r3.ok) errors.push(`Celery: ${r3.error ?? r3.statusText ?? 'failed'}`)
+      setShutdownAllMsg({ text: 'Stopping Daemon…', isErr: false })
+      const r1 = await postStop()
+      if (!r1.ok) errors.push(`Daemon: ${r1.error ?? r1.statusText ?? 'failed'}`)
+      setShutdownAllMsg({ text: 'Stopping Management…', isErr: false })
+      const r2 = await postMonitorStop()
+      if (!r2.ok) errors.push(`Management: ${r2.error ?? r2.statusText ?? 'failed'}`)
+      setShutdownAllMsg({
+        text: errors.length === 0 ? 'All systems shut down.' : `Shut down requested; some failed: ${errors.join('; ')}`,
+        isErr: errors.length > 0,
+      })
+      await loadStatus()
+    } finally {
+      setShutdownAllLoading(false)
+    }
+  }
+
+  const onShutdownAllClick = () => {
+    setShutdownConfirmOpen(true)
+  }
+
   return (
-    <>
+    <div className="status-page">
+      <header className="status-page-header" aria-label="Status page header">
+        <h1 className="status-page-title">System Status</h1>
+        <div className="status-page-actions">
+          <button
+            type="button"
+            className="btn-shutdown-all"
+            title="Stop Celery, then Daemon, then Management (in order)"
+            disabled={shutdownAllLoading}
+            onClick={onShutdownAllClick}
+          >
+            {shutdownAllLoading ? 'Shutting down…' : 'Shutdown'}
+          </button>
+          {shutdownAllMsg.text ? (
+            <span className={`status-page-msg ${shutdownAllMsg.isErr ? 'err' : 'ok'}`}>{shutdownAllMsg.text}</span>
+          ) : null}
+        </div>
+      </header>
+
+      {/* Shutdown confirmation modal — same style as Data page reset modal */}
+      {shutdownConfirmOpen && (
+        <div
+          className="data-reset-modal-overlay"
+          onClick={() => setShutdownConfirmOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="shutdown-modal-title"
+        >
+          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="shutdown-modal-title">Shutdown entire system?</h3>
+            <p>
+              Celery, then Daemon, then Management will be stopped in order. This cannot be undone.
+            </p>
+            <div className="data-reset-modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="btn-shutdown-all" onClick={doShutdownAll}>
+                Shutdown
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <>
       {showSystemSection && (
       <div className="card process-section system-tabs-wrapper">
         {showSectionTabs && (
@@ -1193,5 +1270,6 @@ export function StatusPage({
       </div>
       )}
     </>
+    </div>
   )
 }

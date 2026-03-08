@@ -126,3 +126,4 @@
 
 - **执行计划文档**：本文档即 `docs/plans/phase3-execution-plan.md`（阶段 3 数据获取），满足 [PHASE_ASSESSMENT.md](PHASE_ASSESSMENT.md)「五、阶段 3 执行计划与验收现状」中建议的 phase3-execution-plan。
 - **验收依据**：阶段 3 验收以本文档「验收清单」+ [PLAN_NEXT_STEPS 阶段 3](../PLAN_NEXT_STEPS.md#阶段-3数据获取账户持仓市值交易历史与统计) 的验证标准与 TC 清单为准；通过后更新 PLAN_NEXT_STEPS 中阶段 3 的**验收完成时间**与**项目里程碑时间线**。
+- **Performance 计算与展示**：R-M7/R-H2 下 Performance 页的计算逻辑与分步实现见 [performance-execution-plan.md](performance-execution-plan.md)，不并入本文档 Todo，由 PLAN_NEXT_STEPS 步骤 3.8 与文档索引引用。

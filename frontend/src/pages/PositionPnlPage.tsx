@@ -130,7 +130,14 @@ function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecutionGro
   for (const [, trades] of groups) {
     if (trades.length === 0) continue
     const first = trades[0]
-    const contract_key = first.contract_key ?? ''
+    let contract_key = first.contract_key ?? ''
+    if (!contract_key && (first.sec_type ?? '').toUpperCase() === 'OPT') {
+      const sym = (first.symbol ?? '').trim()
+      const exp = String(first.expiry ?? '').trim().replace(/-/g, '')
+      const str = first.strike != null ? String(first.strike) : ''
+      const right = ((first.option_right ?? 'C') + '').toUpperCase().slice(0, 1)
+      contract_key = `${sym}|OPT|${exp}|${str}|${right}`
+    }
     const strike = Number(first.strike) ?? 0
     const expiry = first.expiry ?? ''
     let buy_qty = 0
@@ -636,7 +643,7 @@ export function PositionPnlPage({
 
   const loadReplayData = useCallback(async () => {
     try {
-      const execRes = await fetchExecutions(undefined, undefined, 100)
+      const execRes = await fetchExecutions(undefined, undefined, 0)
       setExecutions(execRes.executions || [])
     } catch {
       setExecutions([])
@@ -662,7 +669,7 @@ export function PositionPnlPage({
             >
               Portfolio
             </button>
-            {' / Open Positions'}
+            {' / Positions'}
           </>
         )}
         {portfolioView === 'ledger' && (
@@ -688,7 +695,7 @@ export function PositionPnlPage({
           className={`system-tab ${portfolioView === 'open' ? 'active' : ''}`}
           onClick={() => setPortfolioViewSelected('open')}
         >
-          Open Positions
+          Positions
         </button>
         <button
           type="button"
@@ -883,9 +890,10 @@ export function PositionPnlPage({
                               <td className="replay-opt-contract">
                                 {(() => {
                                   const p = getContractLabelParts(group.contract_key)
+                                  const strikeStr = group.strike != null ? ` ${group.strike}` : ''
                                   return p.symbol ? (
                                     <>
-                                      <strong>{p.symbol}</strong> {p.rightLabel}
+                                      <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
                                     </>
                                   ) : (
                                     group.contract_key
@@ -970,9 +978,10 @@ export function PositionPnlPage({
                                       <td className="replay-opt-contract">
                                         {(() => {
                                           const p = getContractLabelParts(group.contract_key)
+                                          const strikeStr = group.strike != null ? ` ${group.strike}` : ''
                                           return p.symbol ? (
                                             <>
-                                              <strong>{p.symbol}</strong> {p.rightLabel}
+                                              <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
                                             </>
                                           ) : (
                                             group.contract_key
@@ -1038,9 +1047,10 @@ export function PositionPnlPage({
                                       <td className="replay-opt-contract">
                                         {(() => {
                                           const p_ = getContractLabelParts(group.contract_key)
+                                          const strikeStr = group.strike != null ? ` ${group.strike}` : ''
                                           return p_.symbol ? (
                                             <>
-                                              <strong>{p_.symbol}</strong> {p_.rightLabel}
+                                              <strong>{p_.symbol}</strong> {p_.rightLabel}{strikeStr}
                                             </>
                                           ) : (
                                             group.contract_key
@@ -1280,7 +1290,7 @@ export function PositionPnlPage({
                 </div>
               </div>
               {filteredExecutions.length === 0 ? (
-                <p className="section-hint">No execution data. Use Overview to fetch from IB (Refresh), or Open Positions to add manual history (Add Trade).{([ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExpiryEnd, ledgerFilterExecStart, ledgerFilterExecEnd].some(Boolean) || ledgerFilterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
+                <p className="section-hint">No execution data. Use Overview to fetch from IB (Refresh), or Positions to add manual history (Add Trade).{([ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExpiryEnd, ledgerFilterExecStart, ledgerFilterExecEnd].some(Boolean) || ledgerFilterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
               ) : (
                 <>
                   {ledgerTab === 'options' ? (
@@ -1340,9 +1350,10 @@ export function PositionPnlPage({
                                       <td className="replay-opt-contract">
                                         {(() => {
                                           const p = getContractLabelParts(g.contract_key)
+                                          const strikeStr = g.strike != null ? ` ${g.strike}` : ''
                                           return p.symbol ? (
                                             <>
-                                              <strong>{p.symbol}</strong> {p.rightLabel}
+                                              <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
                                             </>
                                           ) : (
                                             g.contract_key
@@ -1431,9 +1442,10 @@ export function PositionPnlPage({
                                           <td>
                                             {(() => {
                                               const p_ = getContractLabelParts(g.contract_key)
+                                              const strikeStr = g.strike != null ? ` ${g.strike}` : ''
                                               return p_.symbol ? (
                                                 <>
-                                                  <strong>{p_.symbol}</strong> {p_.rightLabel}
+                                                  <strong>{p_.symbol}</strong> {p_.rightLabel}{strikeStr}
                                                 </>
                                               ) : (
                                                 g.contract_key

@@ -87,6 +87,7 @@
 
 - **目标**：提供**独立于实时交易监控**的**复盘与风控分析**页面，用于事后查看账户执行交易、辅助行情（如 K 线）及风险模型评估，与当前“红绿灯 + 状态 + 操作列表”的监控页**分离**，避免实时监控与复盘分析混在同一视图。
 - **范围**：监控应用内新增页面或路由（如「复盘」/「风控」）；可查看账户执行交易记录（R-A2）、辅助行情（R-A3）、以及基于历史数据的风险/统计视图；不要求与 R-M5 同屏，通过导航切换。数据由阶段 3 的 R-A2、R-A3 及 R-H2 提供。
+- **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + instrument_prices；Transaction 与期初权益口径需单独定义（见 [PERFORMANCE_PAGE_DESIGN.md](PERFORMANCE_PAGE_DESIGN.md)）。分步实现顺序与验收见 [performance-execution-plan.md](plans/performance-execution-plan.md)。
 - **与分步计划**：阶段 3（与 R-A2、R-A3 数据能力一并交付）。
 
 ---
@@ -130,6 +131,7 @@
 
 - **目标**：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。
 - **形态**：存在**独立脚本或模块**（如 `scripts/stats_from_history.py` 或 `src/stats/`），**只读**阶段 1 sink 写入的历史表；**不跑** FSM/Guard/StateClassifier。输出至少包含按日/周对冲次数、盈亏分布或汇总；可离线运行，不依赖守护进程在线。
+- **Performance 计算逻辑**：按日/周/月汇总、胜率、盈亏分布及 Performance 页的**计算逻辑**与 R-M7 的 Performance 子页一致，按 [performance-execution-plan.md](plans/performance-execution-plan.md) 分阶段实现并验收。
 - **与分步计划**：阶段 3。
 
 ### 4.2 回测（R-B1、R-B2）

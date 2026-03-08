@@ -190,6 +190,8 @@ export interface Execution {
   contract_key?: string
   currency?: string
   raw_extra?: Record<string, unknown>
+  /** Set when GET /executions?include_opt_pairs=true: ids of the other leg(s) in C↔P pairs. */
+  paired_execution_ids?: number[]
 }
 
 /** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */
@@ -223,9 +225,33 @@ export interface ExecutionsResponse {
   message?: string
 }
 
+/** Response when GET /executions?include_opt_pairs=true: executions with paired_execution_ids and opt_pairs list from backend. */
+export interface ExecutionsResponseWithPairs extends ExecutionsResponse {
+  opt_pairs: BackendOptPair[]
+}
+
+/** One C↔P pair from backend (include_opt_pairs). */
+export interface BackendOptPair {
+  leg_c_execution_id: number
+  leg_p_execution_id: number
+  symbol: string
+  expiry: string
+  strike: string
+  account_id: string
+  quantity: number
+  c_side: string
+  c_price: number
+  p_side: string
+  p_price: number
+  commission: number
+  net_pnl: number
+}
+
 /** GET /performance: summary + calendar PnL (PERFORMANCE_PAGE_DESIGN). */
 export interface PerformanceSummary {
   total_pnl?: number
+  total_realized_pnl?: number
+  total_unrealized_pnl?: number
   total_commission?: number
   net_pnl?: number
   trade_count?: number
@@ -238,6 +264,7 @@ export interface PerformanceSummary {
   max_win?: number | null
   max_loss?: number | null
   max_drawdown?: number | null
+  return_pct?: number | null
 }
 
 export interface PerformanceCalendarEntry {
@@ -248,12 +275,43 @@ export interface PerformanceCalendarEntry {
   net_pnl: number
   trade_count: number
   win_rate?: number | null
+  return_pct?: number | null
+}
+
+/** One paired C↔P (same symbol, expiry, strike, account_id; option_right opposite) contributing to Option Realized for a day. */
+export interface OptRealizedPair {
+  symbol: string
+  expiry: string
+  strike: string
+  account_id?: string
+  right_c: string
+  right_p: string
+  quantity: number
+  c_side: string
+  c_price: number
+  p_side: string
+  p_price: number
+  commission: number
+  net_pnl: number
+}
+
+/** Per-period per sec_type (OPT/STK) for calendar-by-type view. OPT entries may include pairs (same-day BUY+SELL). */
+export interface PerformanceCalendarEntryBySecType extends PerformanceCalendarEntry {
+  sec_type: string
+  pairs?: OptRealizedPair[]
 }
 
 export interface PerformanceResponse {
+  transaction?: { net_cash_flow?: number; start_equity?: number | null; capital_base?: number | null }
   summary: PerformanceSummary
   calendar: PerformanceCalendarEntry[]
-  cumulative_curve: { ts: number; cumulative_net_pnl: number }[]
+  calendar_by_sec_type?: PerformanceCalendarEntryBySecType[]
+  cumulative_curve?: { ts: number; cumulative_net_pnl: number }[]
+  realized_by_account?: { account_id: string; total_pnl: number; commission: number; net_pnl: number; trade_count: number; return_pct?: number }[]
+  realized_by_sec_type?: { sec_type: string; total_pnl: number; commission: number; net_pnl: number; trade_count: number; return_pct?: number }[]
+  unrealized?: { total_pnl: number; return_pct?: number | null; current_equity?: number | null }
+  unrealized_by_account?: { account_id: string; total_pnl: number }[]
+  unrealized_by_sec_type?: { sec_type: string; total_pnl: number }[]
 }
 
 /** K-line/OHLC bar (R-A3). Stub until stage 3. */

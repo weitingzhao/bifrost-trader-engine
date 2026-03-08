@@ -190,6 +190,8 @@
 
 **影响**：阶段 3 的**正式验收**可依据 [phase3-execution-plan.md](phase3-execution-plan.md) 的 Todo/验收清单与 [PLAN_NEXT_STEPS 阶段 3](../PLAN_NEXT_STEPS.md#阶段-3数据获取账户持仓市值交易历史与统计) 的「检查方式」「验证标准」逐条执行并记录；目前**无** phase3_0.py，需人工执行 TC-3-* 或后续补充自检脚本。
 
+**Performance 计算与展示**：按 [performance-execution-plan.md](performance-execution-plan.md) 分步实施（R-M7/R-H2 细化）；当前 `get_performance_stats` 为 stub，待从 Phase 0（资本与资金流口径）/ Phase 1（Realized 合计）起实现；验收以 performance-execution-plan 的验收清单与各 Phase 校验条件为准。
+
 **建议**：按 phase3-execution-plan 执行阶段 3 验收并更新里程碑时间线；可选新增 `scripts/check/phase3_0.py`（如校验 GET /status 含 account、positions、spot 等字段）以便自动化部分 TC。
 
 ### 4.2 阶段 3 Test Case（TC-3-*）
