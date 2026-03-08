@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Execution, IbAccountSnapshot, PerformanceResponse, StatusResponse } from '../types'
+import { useCallback, useEffect, useState, Fragment } from 'react'
+import type { Execution, PerformanceResponse, StatusResponse } from '../types'
 import type { BackendOptPair } from '../types'
 import { fetchExecutions, fetchPerformance } from '../api'
+import { InfoTooltip } from '../components/InfoTooltip'
 
 function fmtChicagoTime(unixSec: number | string | null | undefined): string {
   let sec: number
@@ -41,6 +42,14 @@ function fmtPnl(n: number | null | undefined): string {
   const val = Number(n)
   if (Math.abs(val) < 0.005) return fmtUsd(0)
   return fmtUsd(val)
+}
+
+/** Format PnL for calendar cells: round to integer, no decimals. */
+function fmtPnlCalendar(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—'
+  const val = Number(n)
+  if (Math.abs(val) < 0.5) return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(0)
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Math.round(val))
 }
 
 /** Option right to full name: C/CALL -> CALL, P/PUT -> PUT. */
@@ -114,6 +123,52 @@ function unixTimeToChicagoDateStr(ts: number): string {
   return `${y}-${m}-${day}`
 }
 
+/** Time range to date range (Chicago calendar). calendarMonth = "YYYY-MM". Quarter = current month + 2 months back (3 months). */
+function getTimeRangeDates(
+  timeRange: 'quarter' | 'year' | '3year',
+  calendarMonth: string,
+): { sinceStr: string; untilStr: string } {
+  const [y, m] = calendarMonth.split('-').map(Number)
+  const monthsBack = timeRange === 'quarter' ? 2 : timeRange === 'year' ? 11 : 35
+  const startDate = new Date(y, m - 1 - monthsBack, 1)
+  const endDate = new Date(y, m, 0)
+  const sinceStr = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-01`
+  const untilStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
+  return { sinceStr, untilStr }
+}
+
+/** List all date strings YYYY-MM-DD from sinceStr to untilStr (inclusive). */
+function listDateStrings(sinceStr: string, untilStr: string): string[] {
+  const [sy, sm, sd] = sinceStr.split('-').map(Number)
+  const [ey, em, ed] = untilStr.split('-').map(Number)
+  const out: string[] = []
+  const d = new Date(sy, sm - 1, sd)
+  const end = new Date(ey, em - 1, ed)
+  while (d.getTime() <= end.getTime()) {
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
+    d.setDate(d.getDate() + 1)
+  }
+  return out
+}
+
+/** List month keys YYYY-MM from sinceStr to untilStr (inclusive), in ascending order. */
+function listMonthKeysInRange(sinceStr: string, untilStr: string): string[] {
+  const [sy, sm] = sinceStr.split('-').map(Number)
+  const [ey, em] = untilStr.split('-').map(Number)
+  const out: string[] = []
+  let y = sy
+  let m = sm
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`)
+    m += 1
+    if (m > 12) {
+      m = 1
+      y += 1
+    }
+  }
+  return out
+}
+
 /** Pair BUY↔SELL from the exact list of OPT executions (same symbol, expiry, strike, account_id).
  * Match rules (explicit):
  * 1. Opposite side only: if Execution is BUY, match with a SELL; if SELL, match with a BUY.
@@ -140,7 +195,6 @@ function computeOptPairsFromExecutions(
   }
   const pairs: { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] = []
   for (const list of Object.values(byKey)) {
-    // Process in time order so we only match with past (already-seen) executions.
     const sorted = [...list].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
     const buyQueue: { q: number; p: number; c: number; side: string }[] = []
     const sellQueue: { q: number; p: number; c: number; side: string }[] = []
@@ -157,7 +211,6 @@ function computeOptPairsFromExecutions(
       const side = (x.side ?? 'BUY').toString().trim().toUpperCase() || 'BUY'
 
       if (side === 'BUY') {
-        // Match this BUY only with past SELLs (already in sellQueue). Time does not go backward.
         let remaining = q
         while (remaining > 0 && sellQueue.length > 0) {
           const ss = sellQueue[0]
@@ -165,8 +218,8 @@ function computeOptPairsFromExecutions(
           if (qMatch <= 0) break
           const bAlloc = (qMatch / q) * comm
           const sAlloc = (qMatch / ss.q) * ss.c
-          const signB = -1 // BUY
-          const signS = 1  // SELL
+          const signB = -1
+          const signS = 1
           const legB = signB * qMatch * p * 100 - bAlloc
           const legS = signS * qMatch * ss.p * 100 - sAlloc
           pairs.push({
@@ -188,7 +241,6 @@ function computeOptPairsFromExecutions(
         }
         if (remaining > 0) buyQueue.push({ q: remaining, p, c: (remaining / q) * comm, side })
       } else {
-        // SELL: match only with past BUYs (already in buyQueue).
         let remaining = q
         while (remaining > 0 && buyQueue.length > 0) {
           const bb = buyQueue[0]
@@ -196,8 +248,8 @@ function computeOptPairsFromExecutions(
           if (qMatch <= 0) break
           const bAlloc = (qMatch / bb.q) * bb.c
           const sAlloc = (qMatch / q) * comm
-          const signB = -1 // BUY
-          const signS = 1  // SELL
+          const signB = -1
+          const signS = 1
           const legB = signB * qMatch * bb.p * 100 - bAlloc
           const legS = signS * qMatch * p * 100 - sAlloc
           pairs.push({
@@ -224,11 +276,11 @@ function computeOptPairsFromExecutions(
   return pairs
 }
 
-/** Same logic as Records day detail: from day's executions and opt_pairs return { realized, unrealized }. */
+/** Same logic as Records day detail: from day's executions and opt_pairs return { realized, unrealized, symbolsRealized, symbolsUnrealized }. */
 function computeDayRealizedUnrealized(
   executions: Execution[],
   optPairs: BackendOptPair[] | null,
-): { realized: number; unrealized: number } {
+): { realized: number; unrealized: number; symbolsRealized: string[]; symbolsUnrealized: string[] } {
   type DayPair = {
     account_id: string
     symbol: string
@@ -321,9 +373,14 @@ function computeDayRealizedUnrealized(
   const contractKeys = Array.from(allContractKeys)
   let totalRealizedSum = 0
   let totalUnrealizedSum = 0
+  const symbolsRealizedSet = new Set<string>()
+  const symbolsUnrealizedSet = new Set<string>()
   for (const key of contractKeys) {
     const pairs = pairByKey.get(key) ?? (key.startsWith('\t') ? pairByKeyNoAccount.get(key.slice(1)) ?? [] : [])
     const execs = byContract.get(key) ?? []
+    const first = execs[0]
+    const firstPair = pairs[0]
+    const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
     const sortedExecs = [...execs].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
     const pairedExecIds = new Set<number>()
     for (const p of pairs) {
@@ -336,24 +393,96 @@ function computeDayRealizedUnrealized(
       pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
     if (pairs.length > 0) {
       totalRealizedSum += groupSumPnl
+      symbolsRealizedSet.add(symbol)
     } else {
       totalUnrealizedSum += groupSumPnl
+      symbolsUnrealizedSet.add(symbol)
     }
   }
-  return { realized: totalRealizedSum, unrealized: totalUnrealizedSum }
+  return {
+    realized: totalRealizedSum,
+    unrealized: totalUnrealizedSum,
+    symbolsRealized: Array.from(symbolsRealizedSet).sort(),
+    symbolsUnrealized: Array.from(symbolsUnrealizedSet).sort(),
+  }
+}
+
+/** Per-day Stock realized/unrealized: FIFO match BUY↔SELL by symbol+account (no commission in display; PnL includes it). */
+function computeDayRealizedUnrealizedStock(
+  executions: Execution[],
+): { realized: number; unrealized: number } {
+  const stk = executions.filter((e) => (e.sec_type ?? '').toUpperCase() === 'STK')
+  const byKey: Record<string, Execution[]> = {}
+  for (const e of stk) {
+    const side = (e.side ?? 'BUY').toString().trim().toUpperCase()
+    if (side !== 'BUY' && side !== 'SELL') continue
+    const key = `${e.symbol ?? ''}\t${e.account_id ?? ''}`
+    if (!byKey[key]) byKey[key] = []
+    byKey[key].push(e)
+  }
+  let totalRealized = 0
+  let totalUnrealized = 0
+  for (const list of Object.values(byKey)) {
+    const sorted = [...list].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+    const buyQueue: { q: number; p: number; c: number }[] = []
+    const sellQueue: { q: number; p: number; c: number }[] = []
+
+    for (const x of sorted) {
+      const q = Number(x.quantity) || 0
+      const p = Number(x.price) || 0
+      const comm = Number(x.commission) || 0
+      if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p)) continue
+      const side = (x.side ?? 'BUY').toString().trim().toUpperCase()
+
+      if (side === 'BUY') {
+        let remaining = q
+        while (remaining > 0 && sellQueue.length > 0) {
+          const ss = sellQueue[0]
+          const qMatch = Math.min(remaining, ss.q)
+          if (qMatch <= 0) break
+          const bAlloc = (qMatch / q) * comm
+          const sAlloc = (qMatch / ss.q) * ss.c
+          const legB = -qMatch * p * 100 - bAlloc
+          const legS = qMatch * ss.p * 100 - sAlloc
+          totalRealized += legB + legS
+          remaining -= qMatch
+          if (qMatch >= ss.q) sellQueue.shift()
+          else sellQueue[0] = { q: ss.q - qMatch, p: ss.p, c: ss.c * (1 - qMatch / ss.q) }
+        }
+        if (remaining > 0) buyQueue.push({ q: remaining, p, c: (remaining / q) * comm })
+      } else {
+        let remaining = q
+        while (remaining > 0 && buyQueue.length > 0) {
+          const bb = buyQueue[0]
+          const qMatch = Math.min(remaining, bb.q)
+          if (qMatch <= 0) break
+          const bAlloc = (qMatch / bb.q) * bb.c
+          const sAlloc = (qMatch / q) * comm
+          const legB = -qMatch * bb.p * 100 - bAlloc
+          const legS = qMatch * p * 100 - sAlloc
+          totalRealized += legB + legS
+          remaining -= qMatch
+          if (qMatch >= bb.q) buyQueue.shift()
+          else buyQueue[0] = { q: bb.q - qMatch, p: bb.p, c: bb.c * (1 - qMatch / bb.q) }
+        }
+        if (remaining > 0) sellQueue.push({ q: remaining, p, c: (remaining / q) * comm })
+      }
+    }
+    for (const b of buyQueue) totalUnrealized += -b.q * b.p * 100 - b.c
+    for (const s of sellQueue) totalUnrealized += s.q * s.p * 100 - s.c
+  }
+  return { realized: totalRealized, unrealized: totalUnrealized }
 }
 
 interface PerformancePageProps {
   status: StatusResponse | null
 }
 
-export function PerformancePage({ status }: PerformancePageProps) {
+export function PerformancePage({ status: _status }: PerformancePageProps) {
   const [data, setData] = useState<PerformanceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [accountId, setAccountId] = useState<string>('')
-  const [granularity, setGranularity] = useState<'day' | 'week' | 'month'>('day')
-  const [daysBack, setDaysBack] = useState(90)
+  const [timeRange, setTimeRange] = useState<'quarter' | 'year' | '3year'>('quarter')
   const [calendarMonth, setCalendarMonth] = useState<string>(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -366,45 +495,28 @@ export function PerformancePage({ status }: PerformancePageProps) {
   const [selectedDayExecutionsLoading, setSelectedDayExecutionsLoading] = useState(false)
   const [calendarDayPnL, setCalendarDayPnL] = useState<Record<string, { realized: number; unrealized: number }> | null>(null)
   const [calendarDayPnLLoading, setCalendarDayPnLLoading] = useState(false)
+  const [calendarMonthPerformance, setCalendarMonthPerformance] = useState<PerformanceResponse | null>(null)
+  const [calendarMonthPerformanceLoading, setCalendarMonthPerformanceLoading] = useState(false)
+  const [byDayExpandedMonths, setByDayExpandedMonths] = useState<Set<string>>(new Set())
+  const [byDayRangeData, setByDayRangeData] = useState<{
+    opt: Record<string, { realized: number; unrealized: number }>
+    stock: Record<string, { realized: number; unrealized: number }>
+  } | null>(null)
+  const [byDayRangeLoading, setByDayRangeLoading] = useState(false)
   const [selectedDayComputedPnL, setSelectedDayComputedPnL] = useState<{ realized: number; unrealized: number } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const until = Math.floor(Date.now() / 1000)
-    let since = until - daysBack * 86400
-    // When showing Option PnL Calendar (granularity day), extend range to include the displayed month so we have data for every day in view
-    if (granularity === 'day' && calendarMonth) {
-      const [y, m] = calendarMonth.split('-').map(Number)
-      const firstOfMonth = new Date(y, m - 1, 1)
-      const lastOfMonth = new Date(y, m, 0, 23, 59, 59)
-      const monthStartTs = Math.floor(firstOfMonth.getTime() / 1000)
-      const monthEndTs = Math.min(Math.floor(lastOfMonth.getTime() / 1000), until)
-      since = Math.min(since, monthStartTs)
-      const untilExtended = Math.max(until, monthEndTs)
-      // use range that covers both the "days back" window and the calendar month
-      try {
-        const res = await fetchPerformance({
-          since_ts: since,
-          until_ts: untilExtended,
-          account_id: accountId || undefined,
-          granularity,
-        })
-        setData(res)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load performance')
-        setData(null)
-      } finally {
-        setLoading(false)
-      }
-      return
-    }
+    const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
+    const { since_ts } = getChicagoDayRange(sinceStr)
+    const { until_ts } = getChicagoDayRange(untilStr)
     try {
       const res = await fetchPerformance({
-        since_ts: since,
-        until_ts: until,
-        account_id: accountId || undefined,
-        granularity,
+        since_ts,
+        until_ts,
+        account_id: undefined,
+        granularity: 'day',
       })
       setData(res)
     } catch (e) {
@@ -413,11 +525,90 @@ export function PerformancePage({ status }: PerformancePageProps) {
     } finally {
       setLoading(false)
     }
-  }, [daysBack, accountId, granularity, calendarMonth])
+  }, [timeRange, calendarMonth])
 
   useEffect(() => {
     load()
   }, [load])
+
+  // By day: default all months collapsed (do not auto-expand current month)
+  // useEffect that auto-expanded calendarMonth removed so newest month is not expanded by default
+
+  // By day: fetch executions per month (same as Calendar logic) and merge for full range
+  useEffect(() => {
+    const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
+    const monthKeys = listMonthKeysInRange(sinceStr, untilStr)
+    if (monthKeys.length === 0) {
+      setByDayRangeData(null)
+      setByDayRangeLoading(false)
+      return
+    }
+    setByDayRangeLoading(true)
+    setByDayRangeData(null)
+
+    const fetchOneMonth = (monthKey: string): Promise<{ opt: Record<string, { realized: number; unrealized: number }>; stock: Record<string, { realized: number; unrealized: number }> }> => {
+      const [y, m] = monthKey.split('-').map(Number)
+      const firstDateStr = `${monthKey}-01`
+      const lastDay = new Date(y, m, 0).getDate()
+      const lastDateStr = `${monthKey}-${String(lastDay).padStart(2, '0')}`
+      const { since_ts } = getChicagoDayRange(firstDateStr)
+      const { until_ts } = getChicagoDayRange(lastDateStr)
+      return fetchExecutions(since_ts, until_ts, 5000, true)
+        .then((res) => {
+          const execs = res.executions ?? []
+          const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
+          const execById = new Map<number, Execution>()
+          for (const e of execs) {
+            if (e.id != null) execById.set(e.id, e)
+          }
+          const optMap: Record<string, { realized: number; unrealized: number }> = {}
+          const stockMap: Record<string, { realized: number; unrealized: number }> = {}
+          for (let day = 1; day <= lastDay; day++) {
+            const dateStr = `${monthKey}-${String(day).padStart(2, '0')}`
+            const dayExecs = execs.filter((e) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === dateStr)
+            const sameDayPairs =
+              optPairs == null
+                ? null
+                : optPairs.filter((p) => {
+                  const legP = execById.get(p.leg_p_execution_id)
+                  const pDate = legP?.time != null ? unixTimeToChicagoDateStr(Number(legP.time)) : ''
+                  return pDate === dateStr
+                })
+            const useBackendPairs = sameDayPairs != null && sameDayPairs.length > 0
+            const { realized: optR, unrealized: optU } = computeDayRealizedUnrealized(
+              dayExecs,
+              useBackendPairs ? sameDayPairs : null,
+            )
+            const { realized: stkR, unrealized: stkU } = computeDayRealizedUnrealizedStock(dayExecs)
+            optMap[dateStr] = { realized: optR, unrealized: optU }
+            stockMap[dateStr] = { realized: stkR, unrealized: stkU }
+          }
+          return { opt: optMap, stock: stockMap }
+        })
+    }
+
+    Promise.all(monthKeys.map(fetchOneMonth))
+      .then((results) => {
+        const optMap: Record<string, { realized: number; unrealized: number }> = {}
+        const stockMap: Record<string, { realized: number; unrealized: number }> = {}
+        for (const r of results) {
+          Object.assign(optMap, r.opt)
+          Object.assign(stockMap, r.stock)
+        }
+        setByDayRangeData({ opt: optMap, stock: stockMap })
+      })
+      .catch(() => {
+        const dateStrsList = listDateStrings(sinceStr, untilStr)
+        const fallbackOpt: Record<string, { realized: number; unrealized: number }> = {}
+        const fallbackStock: Record<string, { realized: number; unrealized: number }> = {}
+        for (const dateStr of dateStrsList) {
+          fallbackOpt[dateStr] = { realized: 0, unrealized: 0 }
+          fallbackStock[dateStr] = { realized: 0, unrealized: 0 }
+        }
+        setByDayRangeData({ opt: fallbackOpt, stock: fallbackStock })
+      })
+      .finally(() => setByDayRangeLoading(false))
+  }, [timeRange, calendarMonth])
 
   useEffect(() => {
     setSelectedDay(null)
@@ -435,7 +626,7 @@ export function PerformancePage({ status }: PerformancePageProps) {
 
   // Fetch executions for the calendar month and compute per-day Realized/Unrealized (same as Records)
   useEffect(() => {
-    if (granularity !== 'day' || !calendarMonth) {
+    if (!calendarMonth) {
       setCalendarDayPnL(null)
       return
     }
@@ -478,7 +669,32 @@ export function PerformancePage({ status }: PerformancePageProps) {
       })
       .catch(() => setCalendarDayPnL({}))
       .finally(() => setCalendarDayPnLLoading(false))
-  }, [granularity, calendarMonth])
+  }, [calendarMonth])
+
+  // Calendar PnL owns its own performance query for the displayed month (so Time Range does not trigger refetch)
+  useEffect(() => {
+    if (!calendarMonth) {
+      setCalendarMonthPerformance(null)
+      return
+    }
+    const [y, m] = calendarMonth.split('-').map(Number)
+    const firstDateStr = `${y}-${String(m).padStart(2, '0')}-01`
+    const lastDay = new Date(y, m, 0).getDate()
+    const lastDateStr = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+    const { since_ts } = getChicagoDayRange(firstDateStr)
+    const { until_ts } = getChicagoDayRange(lastDateStr)
+    setCalendarMonthPerformanceLoading(true)
+    setCalendarMonthPerformance(null)
+    fetchPerformance({
+      since_ts,
+      until_ts,
+      account_id: undefined,
+      granularity: 'day',
+    })
+      .then(setCalendarMonthPerformance)
+      .catch(() => setCalendarMonthPerformance(null))
+      .finally(() => setCalendarMonthPerformanceLoading(false))
+  }, [calendarMonth])
 
   // When a day is selected, fetch executions from start of that month through end of selected day
   // so we can match 3/6's execution with 3/4's (look back); then filter display to selected day only.
@@ -513,12 +729,15 @@ export function PerformancePage({ status }: PerformancePageProps) {
                   (legDate(p.leg_c_execution_id) === selectedDay || legDate(p.leg_p_execution_id) === selectedDay),
               )
             : null
-        const { realized, unrealized } = computeDayRealizedUnrealized(
+        const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeDayRealizedUnrealized(
           dayExecs,
           relevantPairs != null && relevantPairs.length > 0 ? relevantPairs : null,
         )
         setSelectedDayComputedPnL({ realized, unrealized })
         setCalendarDayPnL((prev) => (prev && selectedDay ? { ...prev, [selectedDay]: { realized, unrealized } } : prev))
+        if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
+          setSelectedDayPnLType('unrealized')
+        }
       })
       .catch(() => {
         setSelectedDayExecutions([])
@@ -528,63 +747,170 @@ export function PerformancePage({ status }: PerformancePageProps) {
       .finally(() => setSelectedDayExecutionsLoading(false))
   }, [selectedDay])
 
-  const accounts: IbAccountSnapshot[] = status?.accounts ?? []
   const summary = data?.summary
-  const calendar = data?.calendar ?? []
 
   return (
     <div className="app-page-stack performance-page">
-      <section className="card" aria-label="Performance filters">
+      <section className="card performance-summary-section" aria-label="Performance">
         <h2 className="card-title">Performance</h2>
-        <p className="section-hint">
-          Realized PnL and trading metrics (R-M7 / R-H2) from account executions. Data from GET /executions.
-        </p>
-        <div className="performance-filters">
-          <label className="performance-filter">
-            <span>Time range</span>
-            <select
-              value={daysBack}
-              onChange={(e) => setDaysBack(Number(e.target.value))}
-              aria-label="Days back"
-            >
-              <option value={7}>Last 7 days</option>
-              <option value={30}>Last 30 days</option>
-              <option value={90}>Last 90 days</option>
-              <option value={180}>Last 180 days</option>
-              <option value={365}>Last 1 year</option>
-            </select>
-          </label>
-          <label className="performance-filter">
-            <span>Account</span>
-            <select
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              aria-label="Account"
-            >
-              <option value="">All</option>
-              {accounts.map((acc) => (
-                <option key={acc.account_id ?? ''} value={acc.account_id ?? ''}>
-                  {acc.account_id ?? '—'}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="performance-filter">
-            <span>Granularity</span>
-            <select
-              value={granularity}
-              onChange={(e) => setGranularity(e.target.value as 'day' | 'week' | 'month')}
-              aria-label="Granularity"
-            >
-              <option value="day">By day</option>
-              <option value="week">By week</option>
-              <option value="month">By month</option>
-            </select>
-          </label>
-          <button type="button" className="btn btn-secondary" onClick={load} disabled={loading}>
-            {loading ? 'Loading…' : 'Refresh'}
-          </button>
+        <div className="performance-filters performance-filters-inline">
+          {loading && <p className="section-hint performance-filters-loading">Loading…</p>}
+          <div className="performance-filter-group">
+            <fieldset className="performance-filter performance-filter-time-range" aria-label="Time range">
+              <span className="performance-filter-legend-inline">Time range</span>
+              <div className="performance-time-range-radios">
+                <label className="performance-radio">
+                  <input
+                    type="radio"
+                    name="timeRange"
+                    value="quarter"
+                    checked={timeRange === 'quarter'}
+                    onChange={() => setTimeRange('quarter')}
+                    aria-label="Quarter"
+                  />
+                  <span>Quarter</span>
+                </label>
+                <label className="performance-radio">
+                  <input
+                    type="radio"
+                    name="timeRange"
+                    value="year"
+                    checked={timeRange === 'year'}
+                    onChange={() => setTimeRange('year')}
+                    aria-label="Year"
+                  />
+                  <span>Year</span>
+                </label>
+                <label className="performance-radio">
+                  <input
+                    type="radio"
+                    name="timeRange"
+                    value="3year"
+                    checked={timeRange === '3year'}
+                    onChange={() => setTimeRange('3year')}
+                    aria-label="3 Years"
+                  />
+                  <span>3 Years</span>
+                </label>
+              </div>
+            </fieldset>
+            {(() => {
+              const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
+              const fromFmt = sinceStr.replace(/-/g, '/')
+              const toFmt = untilStr.replace(/-/g, '/')
+              return (
+                <span className="performance-range-label" aria-label="Trade range">
+                  {fromFmt} ~ {toFmt}
+                </span>
+              )
+            })()}
+            {byDayRangeData && (() => {
+              const optMap = byDayRangeData.opt
+              const stockMap = byDayRangeData.stock
+              const dateStrs = Object.keys(optMap).sort()
+              const totalSum = dateStrs.reduce(
+                (a, dateStr) => {
+                  const opt = optMap[dateStr] ?? { realized: 0, unrealized: 0 }
+                  const stk = stockMap[dateStr] ?? { realized: 0, unrealized: 0 }
+                  return {
+                    optRealized: a.optRealized + opt.realized,
+                    optUnrealized: a.optUnrealized + opt.unrealized,
+                    stkRealized: a.stkRealized + stk.realized,
+                    stkUnrealized: a.stkUnrealized + stk.unrealized,
+                  }
+                },
+                { optRealized: 0, optUnrealized: 0, stkRealized: 0, stkUnrealized: 0 },
+              )
+              return (
+                <span className="by-day-total-summary-inline" aria-label="Total sum of all days">
+                  <span className="by-day-total-summary-kv">Option <span className={totalSum.optRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.optRealized)}</span> / <span className="by-day-sum-number">{fmtPnl(totalSum.optUnrealized)}</span></span>
+                  <span className="by-day-total-summary-kv">Stock <span className={totalSum.stkRealized >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtPnl(totalSum.stkRealized)}</span> / <span className="by-day-sum-number">{fmtPnl(totalSum.stkUnrealized)}</span></span>
+                </span>
+              )
+            })()}
+          </div>
         </div>
+        {byDayRangeLoading ? (
+          <p className="section-hint">Loading…</p>
+        ) : !byDayRangeData ? (
+          <p className="section-hint">Select time range above to load daily PnL.</p>
+        ) : (() => {
+          const optMap = byDayRangeData.opt
+          const stockMap = byDayRangeData.stock
+          const dateStrs = Object.keys(optMap).sort()
+          const rows: { dateStr: string; optRealized: number; optUnrealized: number; stkRealized: number; stkUnrealized: number }[] = dateStrs.map((dateStr) => {
+            const opt = optMap[dateStr] ?? { realized: 0, unrealized: 0 }
+            const stk = stockMap[dateStr] ?? { realized: 0, unrealized: 0 }
+            return { dateStr, optRealized: opt.realized, optUnrealized: opt.unrealized, stkRealized: stk.realized, stkUnrealized: stk.unrealized }
+          })
+          if (dateStrs.length === 0) return <p className="section-hint">No Option or Stock PnL in the selected range.</p>
+          const ZERO_THRESH = 0.005
+          const pnlTd = (val: number, col: 'optRealized' | 'optUnrealized' | 'stkRealized' | 'stkUnrealized') => {
+            if (Math.abs(val) < ZERO_THRESH) return <td>—</td>
+            const isUnrealized = col === 'optUnrealized' || col === 'stkUnrealized'
+            const cls = isUnrealized ? 'tone-unrealized' : (val >= 0 ? 'tone-positive' : 'tone-negative')
+            return <td className={cls}>{fmtPnl(val)}</td>
+          }
+          const pnlTdSum = (val: number, col: 'optRealized' | 'optUnrealized' | 'stkRealized' | 'stkUnrealized') => {
+            if (Math.abs(val) < ZERO_THRESH) return <td>—</td>
+            const isUnrealized = col === 'optUnrealized' || col === 'stkUnrealized'
+            const cls = isUnrealized ? 'tone-unrealized' : (val >= 0 ? 'tone-positive' : 'tone-negative')
+            return <td className={cls}>{fmtPnl(val)}</td>
+          }
+          const groups = new Map<string, { monthLabel: string; rows: typeof rows }>()
+          for (const r of rows) {
+            const monthKey = r.dateStr.slice(0, 7)
+            if (!groups.has(monthKey)) {
+              const [yy, mm] = monthKey.split('-').map(Number)
+              groups.set(monthKey, { monthLabel: new Date(yy, mm - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), rows: [] })
+            }
+            groups.get(monthKey)!.rows.push(r)
+          }
+          const groupEntriesNewestFirst = Array.from(groups.entries()).sort((a, b) => b[0].localeCompare(a[0]))
+          const toggleMonth = (key: string) => {
+            setByDayExpandedMonths((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next })
+          }
+          return (
+            <>
+            <div className="table-wrap">
+              <table className="data-table by-day-table" role="grid">
+                <thead><tr><th>Date</th><th>Option Realized</th><th>Option Unrealized</th><th>Stock Realized</th><th>Stock Unrealized</th></tr></thead>
+                <tbody>
+                  {groupEntriesNewestFirst.map(([monthKey, { monthLabel, rows: groupRows }]) => {
+                    const sum = groupRows.reduce((a, r) => ({
+                      optRealized: a.optRealized + r.optRealized,
+                      optUnrealized: a.optUnrealized + r.optUnrealized,
+                      stkRealized: a.stkRealized + r.stkRealized,
+                      stkUnrealized: a.stkUnrealized + r.stkUnrealized,
+                    }), { optRealized: 0, optUnrealized: 0, stkRealized: 0, stkUnrealized: 0 })
+                    const expanded = byDayExpandedMonths.has(monthKey)
+                    return (
+                      <Fragment key={monthKey}>
+                        <tr className="by-day-group-row" onClick={() => toggleMonth(monthKey)} role="button" tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMonth(monthKey) } }}
+                          aria-expanded={expanded} aria-label={`${monthLabel}, Sum. Click to ${expanded ? 'collapse' : 'expand'} days`}>
+                          <td className="by-day-group-label">
+                            <span className="by-day-group-expand" aria-hidden>{expanded ? '▼' : '▶'}</span>
+                            <strong>{monthLabel}</strong>
+                            <span className="by-day-group-sum-label"> Sum</span>
+                          </td>
+                          {pnlTdSum(sum.optRealized, 'optRealized')}{pnlTdSum(sum.optUnrealized, 'optUnrealized')}{pnlTdSum(sum.stkRealized, 'stkRealized')}{pnlTdSum(sum.stkUnrealized, 'stkUnrealized')}
+                        </tr>
+                        {expanded && [...groupRows].reverse().map((r) => (
+                          <tr key={r.dateStr} className="by-day-day-row">
+                            <td>{r.dateStr}</td>
+                            {pnlTd(r.optRealized, 'optRealized')}{pnlTd(r.optUnrealized, 'optUnrealized')}{pnlTd(r.stkRealized, 'stkRealized')}{pnlTd(r.stkUnrealized, 'stkUnrealized')}
+                          </tr>
+                        ))}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+          )
+        })()}
       </section>
 
       {error && (
@@ -595,74 +921,21 @@ export function PerformancePage({ status }: PerformancePageProps) {
 
       {data && summary && (
         <>
-          <section className="card" aria-label="PnL by type (Option vs Stock)">
-            <h3 className="card-subtitle">PnL by type (Option vs Stock)</h3>
-            <p className="section-hint">
-              <strong>Option (OPT)</strong>: Realized = sum of <code>realized_pnl</code> from executions (IB). Unrealized = (price − avg_cost) × contracts × 100 per position.
-              <br />
-              <strong>Stock (STK)</strong>: Unrealized = (price − avg_cost) × shares. Use this block to verify Option PnL first.
-            </p>
-            <div className="table-wrap">
-              <table className="data-table" role="grid">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Realized PnL</th>
-                    <th>Commission</th>
-                    <th>Realized Net</th>
-                    <th>Trades</th>
-                    <th>Unrealized PnL</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const realized = data.realized_by_sec_type ?? []
-                    const unrealized = data.unrealized_by_sec_type ?? []
-                    const types = new Set([...realized.map((r) => r.sec_type), ...unrealized.map((u) => u.sec_type)])
-                    const rows = Array.from(types).sort((a, b) => (a === 'OPT' ? -1 : a === 'STK' ? 1 : a.localeCompare(b)))
-                    return rows.map((secType) => {
-                      const r = realized.find((x) => x.sec_type === secType)
-                      const u = unrealized.find((x) => x.sec_type === secType)
-                      return (
-                        <tr key={secType}>
-                          <td><strong>{secType}</strong></td>
-                          <td>{fmtUsd(r?.total_pnl ?? 0)}</td>
-                          <td>{fmtUsd(r?.commission ?? 0)}</td>
-                          <td className={(r?.net_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(r?.net_pnl ?? 0)}</td>
-                          <td>{r?.trade_count ?? 0}</td>
-                          <td className={(u?.total_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(u?.total_pnl ?? 0)}</td>
-                        </tr>
-                      )
-                    })
-                  })()}
-                </tbody>
-              </table>
-            </div>
-            {(data.realized_by_sec_type ?? []).length === 0 && (data.unrealized_by_sec_type ?? []).length === 0 && (
-              <p className="section-hint">No executions or positions in the selected range.</p>
-            )}
-          </section>
-
-          {granularity === 'day' && (
-            <section className="card" aria-label="Option PnL Calendar">
-              <h3 className="card-subtitle">Option PnL Calendar</h3>
-              <p className="section-hint">
-                Daily Option Realized and Unrealized in calendar form. Set granularity to &quot;By day&quot;.
-              </p>
-              <details className="performance-calendar-how">
-                <summary>How we calculate Realized and Unrealized</summary>
-                <ul>
-                  <li><strong>Realized (per day, Option)</strong>: Pair BUY with SELL: same symbol, expiry, strike, account_id; side opposite (BUY↔SELL). FIFO match. Per pair: leg PnL = (SELL ? +1 : -1) × Q × P × 100 − commission; pair_net = sum of legs. Daily Option Realized = sum of these paired PnLs.</li>
-                  <li><strong>Unrealized</strong>: As of current time only. Sum over all Option positions of (current_price − avg_cost) × contracts × 100. Source: account_positions + instrument_prices. Not stored by day, so each cell shows &quot;—&quot; for Unrealized; total Option Unrealized is shown below.</li>
-                </ul>
-              </details>
+          <section className="card" aria-label="Calendar Option / Stock">
+            <h3 className="card-subtitle page-title-with-tooltip">
+              Calendar — Option / Stock
+              <InfoTooltip text="Daily Option Realized and Unrealized in calendar form." />
+            </h3>
+              {calendarMonthPerformanceLoading && (
+                <p className="section-hint performance-calendar-loading">Loading calendar…</p>
+              )}
               {(() => {
-                const bySec = data.calendar_by_sec_type ?? []
+                const bySec = calendarMonthPerformance?.calendar_by_sec_type ?? []
                 const optDays: Record<string, { net_pnl: number; pnl: number; commission: number; trade_count: number; pairs?: import('../types').OptRealizedPair[] }> = {}
                 bySec.filter((r) => r.sec_type === 'OPT').forEach((r) => {
                   optDays[r.period_label] = { net_pnl: r.net_pnl, pnl: r.pnl, commission: r.commission, trade_count: r.trade_count, pairs: r.pairs }
                 })
-                const optUnrealized = (data.unrealized_by_sec_type ?? []).find((u) => u.sec_type === 'OPT')?.total_pnl ?? null
+                const optUnrealized = (calendarMonthPerformance?.unrealized_by_sec_type ?? []).find((u) => u.sec_type === 'OPT')?.total_pnl ?? null
                 const [y, m] = calendarMonth.split('-').map(Number)
                 const first = new Date(y, m - 1, 1)
                 const last = new Date(y, m, 0)
@@ -694,6 +967,8 @@ export function PerformancePage({ status }: PerformancePageProps) {
                 const monthLabel = first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
                 return (
                   <>
+                    <div className="performance-calendar-with-summary">
+                      <div className="performance-calendar-left">
                     {optUnrealized != null && (
                       <p className="performance-calendar-total-unrealized">
                         Option Unrealized (as of now): <strong className={(optUnrealized ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(optUnrealized)}</strong>
@@ -753,12 +1028,12 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                   <div className="performance-calendar-pnl-lines">
                                     {showR && (
                                       <span className={`performance-calendar-pnl performance-calendar-realized ${toneR}`}>
-                                        R: {fmtPnl(realizedVal)}
+                                        R: {fmtPnlCalendar(realizedVal)}
                                       </span>
                                     )}
                                     {showU && (
                                       <span className={`performance-calendar-pnl performance-calendar-unrealized ${toneU}`}>
-                                        U: {fmtPnl(unrealizedVal)}
+                                        U: {fmtPnlCalendar(unrealizedVal)}
                                       </span>
                                     )}
                                   </div>
@@ -768,6 +1043,62 @@ export function PerformancePage({ status }: PerformancePageProps) {
                           })}
                         </div>
                       ))}
+                    </div>
+                      </div>
+                    <div className="performance-calendar-summary">
+                    <div className="performance-summary-rows performance-summary-inside-calendar">
+                      <div className="performance-summary-row performance-summary-row-summary">
+                        <span className="performance-summary-type">Summary</span>
+                        <span className="performance-summary-inline">
+                          <span className="performance-summary-kv">Total PnL <span className={(summary.total_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(summary.total_pnl)}</span></span>
+                          <span className="performance-summary-kv">Realized {fmtUsd(summary.total_realized_pnl ?? summary.total_pnl)}</span>
+                          <span className="performance-summary-kv">Net <span className={(summary.net_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(summary.net_pnl)}</span></span>
+                          <span className="performance-summary-kv">Unrealized {fmtUsd(summary.total_unrealized_pnl)}</span>
+                          <span className="performance-summary-kv">Comm {fmtUsd(summary.total_commission)}</span>
+                          <span className="performance-summary-kv">Trades {summary.trade_count ?? 0}</span>
+                          <span className="performance-summary-kv">Win rate {summary.win_rate != null ? `${(summary.win_rate * 100).toFixed(1)}%` : '—'}</span>
+                          <span className="performance-summary-kv">Return% {summary.return_pct != null ? `${summary.return_pct.toFixed(2)}%` : '—'}</span>
+                          <span className="performance-summary-kv">PF {summary.profit_factor != null ? (Number.isFinite(summary.profit_factor) ? summary.profit_factor.toFixed(2) : '∞') : '—'}</span>
+                          <span className="performance-summary-kv">Max DD {summary.max_drawdown != null ? fmtUsd(-summary.max_drawdown) : '—'}</span>
+                          <span className="performance-summary-kv">Avg W/L {fmtUsd(summary.avg_win)} / {fmtUsd(summary.avg_loss)}</span>
+                        </span>
+                      </div>
+                      {(() => {
+                        const realized = data.realized_by_sec_type ?? []
+                        const unrealized = data.unrealized_by_sec_type ?? []
+                        const hasCalendar = calendarDayPnL != null && Object.keys(calendarDayPnL).length > 0
+                        const optRealizedFromCalendar = Object.values(calendarDayPnL ?? {}).reduce((s, d) => s + (d.realized ?? 0), 0)
+                        const optUnrealizedFromCalendar = Object.values(calendarDayPnL ?? {}).reduce((s, d) => s + (d.unrealized ?? 0), 0)
+                        const rOpt = realized.find((x) => x.sec_type === 'OPT')
+                        const uOpt = unrealized.find((x) => x.sec_type === 'OPT')
+                        const rStk = realized.find((x) => x.sec_type === 'STK')
+                        const uStk = unrealized.find((x) => x.sec_type === 'STK')
+                        const optRealizedPnl = hasCalendar ? optRealizedFromCalendar : (rOpt?.total_pnl ?? 0)
+                        const optUnrealizedPnl = hasCalendar ? optUnrealizedFromCalendar : (uOpt?.total_pnl ?? 0)
+                        const optNetPnl = hasCalendar ? optRealizedFromCalendar - (rOpt?.commission ?? 0) : (rOpt?.net_pnl ?? 0)
+                        const hasOpt = hasCalendar || rOpt != null || uOpt != null
+                        const hasStk = rStk != null || uStk != null
+                        const InlineRow = ({ type, realized: rVal, commission, net, trades, unrealized: uVal, toneR, toneN, toneU }: { type: string; realized: string; commission: string; net: string; trades: string; unrealized: string; toneR: 'positive' | 'negative'; toneN: 'positive' | 'negative'; toneU: 'positive' | 'negative' }) => (
+                          <div className="performance-summary-row">
+                            <span className="performance-summary-type">{type}</span>
+                            <span className="performance-summary-inline">
+                              <span className="performance-summary-kv">Realized <span className={toneR === 'positive' ? 'tone-positive' : 'tone-negative'}>{rVal}</span></span>
+                              <span className="performance-summary-kv">Comm {commission}</span>
+                              <span className="performance-summary-kv">Net <span className={toneN === 'positive' ? 'tone-positive' : 'tone-negative'}>{net}</span></span>
+                              <span className="performance-summary-kv">Trades {trades}</span>
+                              <span className="performance-summary-kv">Unrealized <span className={toneU === 'positive' ? 'tone-positive' : 'tone-negative'}>{uVal}</span></span>
+                            </span>
+                          </div>
+                        )
+                        return (
+                          <>
+                            {hasOpt ? <InlineRow type="Option" realized={fmtUsd(optRealizedPnl)} commission={fmtUsd(rOpt?.commission ?? 0)} net={fmtUsd(optNetPnl)} trades={String(rOpt?.trade_count ?? 0)} unrealized={fmtUsd(optUnrealizedPnl)} toneR={(optRealizedPnl ?? 0) >= 0 ? 'positive' : 'negative'} toneN={(optNetPnl ?? 0) >= 0 ? 'positive' : 'negative'} toneU={(optUnrealizedPnl ?? 0) >= 0 ? 'positive' : 'negative'} /> : <div className="performance-summary-row"><span className="performance-summary-type">Option</span><span className="section-hint performance-summary-empty">No data in the selected range.</span></div>}
+                            {hasStk ? <InlineRow type="Stock" realized={fmtUsd(rStk?.total_pnl ?? 0)} commission={fmtUsd(rStk?.commission ?? 0)} net={fmtUsd(rStk?.net_pnl ?? 0)} trades={String(rStk?.trade_count ?? 0)} unrealized={fmtUsd(uStk?.total_pnl ?? 0)} toneR={((rStk?.total_pnl ?? 0) >= 0) ? 'positive' : 'negative'} toneN={((rStk?.net_pnl ?? 0) >= 0) ? 'positive' : 'negative'} toneU={((uStk?.total_pnl ?? 0) >= 0) ? 'positive' : 'negative'} /> : <div className="performance-summary-row"><span className="performance-summary-type">Stock</span><span className="section-hint performance-summary-empty">No data in the selected range.</span></div>}
+                          </>
+                        )
+                      })()}
+                    </div>
+                    </div>
                     </div>
                     {selectedDay != null && (
                       <div className="performance-calendar-day-detail" aria-live="polite">
@@ -1153,111 +1484,6 @@ export function PerformancePage({ status }: PerformancePageProps) {
                 )
               })()}
             </section>
-          )}
-
-          <section className="card" aria-label="Summary metrics">
-            <h3 className="card-subtitle">Summary metrics</h3>
-            <div className="performance-summary-grid">
-              <div className="performance-metric">
-                <span className="performance-metric-label">Total PnL</span>
-                <span
-                  className={`performance-metric-value tone-${(summary.total_pnl ?? 0) >= 0 ? 'positive' : 'negative'}`}
-                >
-                  {fmtUsd(summary.total_pnl)}
-                </span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Realized PnL</span>
-                <span className="performance-metric-value">{fmtUsd(summary.total_realized_pnl ?? summary.total_pnl)}</span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Realized Net</span>
-                <span
-                  className={`performance-metric-value tone-${(summary.net_pnl ?? 0) >= 0 ? 'positive' : 'negative'}`}
-                >
-                  {fmtUsd(summary.net_pnl)}
-                </span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Unrealized PnL</span>
-                <span className="performance-metric-value">{fmtUsd(summary.total_unrealized_pnl)}</span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Commission</span>
-                <span className="performance-metric-value">{fmtUsd(summary.total_commission)}</span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Trade count</span>
-                <span className="performance-metric-value">{summary.trade_count ?? 0}</span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Win rate</span>
-                <span className="performance-metric-value">
-                  {summary.win_rate != null ? `${(summary.win_rate * 100).toFixed(1)}%` : '—'}
-                </span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Return %</span>
-                <span className="performance-metric-value">
-                  {summary.return_pct != null ? `${summary.return_pct.toFixed(2)}%` : '—'}
-                </span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Profit Factor</span>
-                <span className="performance-metric-value">
-                  {summary.profit_factor != null ? (Number.isFinite(summary.profit_factor) ? summary.profit_factor.toFixed(2) : '∞') : '—'}
-                </span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Max drawdown</span>
-                <span className="performance-metric-value tone-negative">
-                  {summary.max_drawdown != null ? fmtUsd(-summary.max_drawdown) : '—'}
-                </span>
-              </div>
-              <div className="performance-metric">
-                <span className="performance-metric-label">Avg win / Avg loss</span>
-                <span className="performance-metric-value">
-                  {fmtUsd(summary.avg_win)} / {fmtUsd(summary.avg_loss)}
-                </span>
-              </div>
-            </div>
-          </section>
-
-          <section className="card" aria-label="Calendar PnL">
-            <h3 className="card-subtitle">Calendar PnL</h3>
-            {calendar.length === 0 ? (
-              <p className="section-hint">No executions in the selected range.</p>
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table" role="grid">
-                  <thead>
-                    <tr>
-                      <th>Period</th>
-                      <th>Net PnL</th>
-                      <th>Realized PnL</th>
-                      <th>Commission</th>
-                      <th>Trades</th>
-                      <th>Win rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {calendar.map((row) => (
-                      <tr key={row.period_label}>
-                        <td>{row.period_label}</td>
-                        <td className={row.net_pnl >= 0 ? 'tone-positive' : 'tone-negative'}>
-                          {fmtUsd(row.net_pnl)}
-                        </td>
-                        <td>{fmtUsd(row.pnl)}</td>
-                        <td>{fmtUsd(row.commission)}</td>
-                        <td>{row.trade_count}</td>
-                        <td>{row.win_rate != null ? `${(row.win_rate * 100).toFixed(1)}%` : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
         </>
       )}
     </div>

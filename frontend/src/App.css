@@ -475,6 +475,10 @@ body::before {
   margin: var(--space-4) 0 var(--space-2) 0;
 }
 
+.card-subtitle.card-subtitle-main {
+  color: var(--color-text-main);
+}
+
 .section-desc {
   font-weight: 400;
   font-size: var(--text-caption);
@@ -2205,7 +2209,176 @@ th {
   color: var(--color-text-main);
 }
 
-.performance-summary-grid {
+.performance-page .performance-filter-time-range {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.performance-page .performance-filter-legend-inline {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.performance-page .performance-filters-inline .performance-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.performance-page .performance-filters-inline .performance-filter-time-range {
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.performance-page .performance-filters-inline .performance-filter-time-range .performance-time-range-radios {
+  display: inline-flex;
+}
+
+.performance-page .performance-range-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.performance-page .performance-range-label-title {
+  font-weight: 600;
+  margin-right: var(--space-1);
+}
+
+.by-day-total-summary-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-3);
+}
+
+.performance-page .performance-filter-legend {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.performance-page .performance-time-range-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.performance-page .performance-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: var(--text-body);
+  color: var(--color-text-main);
+}
+
+.performance-page .performance-radio input {
+  margin: 0;
+  accent-color: var(--color-primary, #2563eb);
+}
+
+.performance-page .performance-filters-loading {
+  margin: 0;
+  width: 100%;
+}
+
+.by-day-table .by-day-group-row {
+  cursor: pointer;
+  background: var(--color-surface-elevated, rgba(255, 255, 255, 0.04));
+}
+
+.by-day-table .by-day-group-row:hover {
+  background: var(--color-surface, rgba(255, 255, 255, 0.06));
+}
+
+.by-day-table .by-day-group-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.by-day-table .by-day-group-expand {
+  font-size: 0.7em;
+  opacity: 0.8;
+}
+
+.by-day-table .by-day-group-sum-label {
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: var(--space-1);
+}
+
+.by-day-table .by-day-day-row td:first-child {
+  padding-left: calc(var(--space-3) + 1ch + var(--space-2));
+}
+
+.by-day-total-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) 0;
+  font-size: var(--text-body);
+}
+
+.by-day-total-summary-label {
+  font-weight: 600;
+  margin-right: var(--space-2);
+}
+
+.by-day-total-summary-kv {
+  margin-right: var(--space-2);
+}
+
+.performance-summary-section .tone-positive {
+  color: var(--color-success);
+}
+
+.performance-summary-section .tone-negative {
+  color: var(--color-danger);
+}
+
+.performance-calendar-pnl-section .tone-positive {
+  color: var(--color-success);
+}
+
+.performance-calendar-pnl-section .tone-negative {
+  color: var(--color-danger);
+}
+
+.by-day-table td.tone-positive {
+  color: var(--color-success);
+}
+
+.by-day-table td.tone-negative {
+  color: var(--color-danger);
+}
+
+.by-day-table td.tone-unrealized {
+  color: var(--color-lamp-yellow);
+}
+
+.by-day-total-summary .by-day-sum-number {
+  color: var(--color-lamp-yellow);
+}
+
+.performance-summary-section .performance-metrics-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: var(--space-3);
@@ -2242,6 +2415,102 @@ th {
   color: var(--color-danger);
 }
 
+/* Performance summary: Option and Stock as compact inline rows (inside top Performance section) */
+.performance-summary-section .performance-summary-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Two-column layout: calendar left, Summary/Option/Stock right */
+.performance-layout-two-col {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+.performance-layout-left {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.performance-layout-right {
+  flex: 1 1 280px;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface-elevated);
+}
+.performance-layout-right .performance-summary-rows {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Summary inside Calendar section: right column next to calendar */
+.performance-calendar-with-summary {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.performance-calendar-left {
+  flex: 0 1 50%;
+  min-width: 280px;
+}
+.performance-calendar-summary {
+  flex: 0 1 280px;
+  min-width: 0;
+}
+.performance-summary-inside-calendar.performance-summary-rows {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.performance-summary-row-summary .performance-summary-type {
+  font-weight: 700;
+}
+.performance-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.8125rem;
+}
+.performance-summary-row:last-child {
+  border-bottom: none;
+}
+.performance-summary-type {
+  font-weight: 600;
+  min-width: 4rem;
+  color: var(--color-text-main);
+}
+.performance-summary-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+  font-variant-numeric: tabular-nums;
+}
+.performance-summary-kv {
+  color: var(--color-text-dim);
+}
+.performance-summary-kv .tone-positive {
+  color: var(--color-success);
+}
+.performance-summary-kv .tone-negative {
+  color: var(--color-danger);
+}
+.performance-summary-empty {
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
 /* Option PnL Calendar grid */
 .performance-calendar-nav {
   display: flex;
@@ -2261,14 +2530,27 @@ th {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-width: 560px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.performance-layout-left .performance-calendar-grid {
+  margin: 0;
+}
+.performance-calendar-left .performance-calendar-grid {
+  margin: 0;
 }
 
 .performance-calendar-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
+}
+
+/* Uniform: every data row same height, every cell same width (1fr) and height (100%). Tall enough for 3 lines (day + R + U). */
+.performance-calendar-row:not(.performance-calendar-header) {
+  height: 4.25rem;
+  min-height: 4.25rem;
 }
 
 .performance-calendar-header {
@@ -2278,21 +2560,28 @@ th {
 }
 
 .performance-calendar-cell {
-  aspect-ratio: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  min-height: 0;
+  height: 100%;
   padding: var(--space-1);
-  background: var(--color-bg);
+  background: var(--color-surface-elevated);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: var(--text-caption);
+  overflow: hidden;
+}
+
+/* Rectangular cells: fill row height, no aspect-ratio so all rows stay same height */
+.performance-calendar-row:not(.performance-calendar-header) .performance-calendar-cell {
+  aspect-ratio: unset;
 }
 
 .performance-calendar-cell-outside {
-  background: var(--color-bg-subtle);
-  border-color: transparent;
+  background: transparent;
+  border-color: var(--color-border);
   color: var(--color-text-muted);
 }
 
@@ -2308,7 +2597,7 @@ th {
 
 .performance-calendar-pnl {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 0.875rem;
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -2352,10 +2641,21 @@ th {
   gap: 0;
   margin-top: 2px;
   line-height: 1.2;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .performance-calendar-pnl-lines .performance-calendar-pnl {
   margin-top: 0;
+}
+.performance-calendar-pnl-lines .performance-calendar-realized.tone-positive {
+  color: var(--color-success);
+}
+.performance-calendar-pnl-lines .performance-calendar-realized.tone-negative {
+  color: var(--color-danger);
+}
+.performance-calendar-pnl-lines .performance-calendar-unrealized.tone-unrealized {
+  color: var(--color-warning);
 }
 
 .performance-calendar-cell-clickable {
@@ -2363,7 +2663,7 @@ th {
 }
 
 .performance-calendar-cell-clickable:hover {
-  background: var(--color-bg-subtle);
+  background: var(--color-surface);
 }
 
 .performance-calendar-cell-selected {
@@ -2374,7 +2674,7 @@ th {
 .performance-calendar-day-detail {
   margin-top: var(--space-4);
   padding: var(--space-3);
-  background: var(--color-bg-subtle);
+  background: var(--color-surface-elevated);
   border-radius: 8px;
   border: 1px solid var(--color-border);
 }
@@ -2422,6 +2722,39 @@ th {
 }
 
 .performance-calendar-day-detail-subtitle:first-of-type {
+  margin-top: 0;
+}
+
+.performance-calendar-symbol-tabs {
+  flex-wrap: wrap;
+}
+.performance-calendar-pnl-type-tabs {
+  margin-bottom: var(--space-2);
+}
+.performance-calendar-pnl-type-tabs .system-tab {
+  font-weight: 600;
+}
+.performance-calendar-tab-count {
+  margin-left: var(--space-1);
+  font-weight: 400;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+.performance-calendar-tab-sum {
+  margin-left: var(--space-2);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.performance-calendar-tab-sum.tone-positive {
+  color: var(--color-success);
+}
+.performance-calendar-tab-sum.tone-negative {
+  color: var(--color-danger);
+}
+.performance-calendar-tab-sum.tone-unrealized {
+  color: var(--color-warning);
+}
+.performance-calendar-symbol-panel {
   margin-top: 0;
 }
 
