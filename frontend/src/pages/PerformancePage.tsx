@@ -35,6 +35,14 @@ function fmtUsd(n: number | null | undefined): string {
   }).format(n)
 }
 
+/** Format PnL: treat 0 (or rounding to 0) as $0.00 so we never show -$0.00. */
+function fmtPnl(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—'
+  const val = Number(n)
+  if (Math.abs(val) < 0.005) return fmtUsd(0)
+  return fmtUsd(val)
+}
+
 /** Option right to full name: C/CALL -> CALL, P/PUT -> PUT. */
 function optionRightToFull(r: string | null | undefined): string {
   if (r == null || String(r).trim() === '') return '—'
@@ -94,7 +102,25 @@ function getChicagoDayRange(dateStr: string): { since_ts: number; until_ts: numb
   }
 }
 
-/** Pair BUY↔SELL from the exact list of OPT executions (same symbol, expiry, strike, account_id; side opposite). FIFO. */
+/** Unix timestamp to YYYY-MM-DD in America/Chicago (for grouping executions by calendar day). */
+function unixTimeToChicagoDateStr(ts: number): string {
+  if (!Number.isFinite(ts)) return ''
+  const sec = ts > 1e12 ? ts / 1000 : ts
+  const d = new Date(sec * 1000)
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
+  const y = parts.find((p) => p.type === 'year')?.value ?? ''
+  const m = parts.find((p) => p.type === 'month')?.value ?? ''
+  const day = parts.find((p) => p.type === 'day')?.value ?? ''
+  return `${y}-${m}-${day}`
+}
+
+/** Pair BUY↔SELL from the exact list of OPT executions (same symbol, expiry, strike, account_id).
+ * Match rules (explicit):
+ * 1. Opposite side only: if Execution is BUY, match with a SELL; if SELL, match with a BUY.
+ * 2. Time only moves forward: when matching an Execution, only consider records that occurred
+ *    before it (already processed). So we process in time order and only match with the
+ *    opposite-side queue built from earlier executions.
+ * FIFO within the opposite-side queue. */
 function computeOptPairsFromExecutions(
   executions: Execution[],
 ): { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] {
@@ -114,60 +140,207 @@ function computeOptPairsFromExecutions(
   }
   const pairs: { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] = []
   for (const list of Object.values(byKey)) {
+    // Process in time order so we only match with past (already-seen) executions.
     const sorted = [...list].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
     const buyQueue: { q: number; p: number; c: number; side: string }[] = []
     const sellQueue: { q: number; p: number; c: number; side: string }[] = []
+    const sym = sorted[0]?.symbol ?? ''
+    const exp = sorted[0]?.expiry ?? ''
+    const str = String(sorted[0]?.strike ?? '')
+    const acc = sorted[0]?.account_id ?? ''
+
     for (const x of sorted) {
       const q = Number(x.quantity) || 0
       const p = Number(x.price) || 0
       const comm = Number(x.commission) || 0
       if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p)) continue
       const side = (x.side ?? 'BUY').toString().trim().toUpperCase() || 'BUY'
-      if (side === 'BUY') buyQueue.push({ q, p, c: comm, side })
-      else if (side === 'SELL') sellQueue.push({ q, p, c: comm, side })
-    }
-    let i = 0
-    let j = 0
-    const sym = sorted[0]?.symbol ?? ''
-    const exp = sorted[0]?.expiry ?? ''
-    const str = String(sorted[0]?.strike ?? '')
-    const acc = sorted[0]?.account_id ?? ''
-    while (i < buyQueue.length && j < sellQueue.length) {
-      const bb = buyQueue[i]
-      const ss = sellQueue[j]
-      const qMatch = Math.min(bb.q, ss.q)
-      if (qMatch <= 0) break
-      const bAlloc = (qMatch / bb.q) * bb.c
-      const sAlloc = (qMatch / ss.q) * ss.c
-      const signB = bb.side === 'SELL' ? 1 : -1
-      const signS = ss.side === 'SELL' ? 1 : -1
-      const legB = signB * qMatch * bb.p * 100 - bAlloc
-      const legS = signS * qMatch * ss.p * 100 - sAlloc
-      const net = legB + legS
-      pairs.push({
-        account_id: acc,
-        symbol: sym,
-        expiry: exp,
-        strike: str,
-        quantity: Math.round(qMatch * 1e4) / 1e4,
-        c_side: bb.side,
-        c_price: Math.round(bb.p * 1e4) / 1e4,
-        p_side: ss.side,
-        p_price: Math.round(ss.p * 1e4) / 1e4,
-        commission: Math.round((bAlloc + sAlloc) * 100) / 100,
-        net_pnl: Math.round(net * 100) / 100,
-      })
-      if (qMatch >= bb.q) {
-        i += 1
-        if (qMatch >= ss.q) j += 1
-        else sellQueue[j] = { ...ss, q: ss.q - qMatch, c: ss.c * (1 - qMatch / ss.q) }
+
+      if (side === 'BUY') {
+        // Match this BUY only with past SELLs (already in sellQueue). Time does not go backward.
+        let remaining = q
+        while (remaining > 0 && sellQueue.length > 0) {
+          const ss = sellQueue[0]
+          const qMatch = Math.min(remaining, ss.q)
+          if (qMatch <= 0) break
+          const bAlloc = (qMatch / q) * comm
+          const sAlloc = (qMatch / ss.q) * ss.c
+          const signB = -1 // BUY
+          const signS = 1  // SELL
+          const legB = signB * qMatch * p * 100 - bAlloc
+          const legS = signS * qMatch * ss.p * 100 - sAlloc
+          pairs.push({
+            account_id: acc,
+            symbol: sym,
+            expiry: exp,
+            strike: str,
+            quantity: Math.round(qMatch * 1e4) / 1e4,
+            c_side: ss.side,
+            c_price: Math.round(ss.p * 1e4) / 1e4,
+            p_side: side,
+            p_price: Math.round(p * 1e4) / 1e4,
+            commission: Math.round((bAlloc + sAlloc) * 100) / 100,
+            net_pnl: Math.round((legB + legS) * 100) / 100,
+          })
+          remaining -= qMatch
+          if (qMatch >= ss.q) sellQueue.shift()
+          else sellQueue[0] = { ...ss, q: ss.q - qMatch, c: ss.c * (1 - qMatch / ss.q) }
+        }
+        if (remaining > 0) buyQueue.push({ q: remaining, p, c: (remaining / q) * comm, side })
       } else {
-        buyQueue[i] = { ...bb, q: bb.q - qMatch, c: bb.c * (1 - qMatch / bb.q) }
-        j += 1
+        // SELL: match only with past BUYs (already in buyQueue).
+        let remaining = q
+        while (remaining > 0 && buyQueue.length > 0) {
+          const bb = buyQueue[0]
+          const qMatch = Math.min(remaining, bb.q)
+          if (qMatch <= 0) break
+          const bAlloc = (qMatch / bb.q) * bb.c
+          const sAlloc = (qMatch / q) * comm
+          const signB = -1 // BUY
+          const signS = 1  // SELL
+          const legB = signB * qMatch * bb.p * 100 - bAlloc
+          const legS = signS * qMatch * p * 100 - sAlloc
+          pairs.push({
+            account_id: acc,
+            symbol: sym,
+            expiry: exp,
+            strike: str,
+            quantity: Math.round(qMatch * 1e4) / 1e4,
+            c_side: bb.side,
+            c_price: Math.round(bb.p * 1e4) / 1e4,
+            p_side: side,
+            p_price: Math.round(p * 1e4) / 1e4,
+            commission: Math.round((bAlloc + sAlloc) * 100) / 100,
+            net_pnl: Math.round((legB + legS) * 100) / 100,
+          })
+          remaining -= qMatch
+          if (qMatch >= bb.q) buyQueue.shift()
+          else buyQueue[0] = { ...bb, q: bb.q - qMatch, c: bb.c * (1 - qMatch / bb.q) }
+        }
+        if (remaining > 0) sellQueue.push({ q: remaining, p, c: (remaining / q) * comm, side })
       }
     }
   }
   return pairs
+}
+
+/** Same logic as Records day detail: from day's executions and opt_pairs return { realized, unrealized }. */
+function computeDayRealizedUnrealized(
+  executions: Execution[],
+  optPairs: BackendOptPair[] | null,
+): { realized: number; unrealized: number } {
+  type DayPair = {
+    account_id: string
+    symbol: string
+    expiry: string
+    strike: string
+    quantity: number
+    c_side: string
+    c_price: number
+    p_side: string
+    p_price: number
+    commission: number
+    net_pnl: number
+    leg_c_execution_id?: number
+    leg_p_execution_id?: number
+  }
+  const allExecs = executions
+  const optExecs = allExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
+  const dayPairs: DayPair[] = (optPairs != null && optPairs.length > 0)
+    ? optPairs.map((p) => ({
+      account_id: p.account_id,
+      symbol: p.symbol,
+      expiry: p.expiry,
+      strike: p.strike,
+      quantity: p.quantity,
+      c_side: p.c_side,
+      c_price: p.c_price,
+      p_side: p.p_side,
+      p_price: p.p_price,
+      commission: p.commission,
+      net_pnl: p.net_pnl,
+      leg_c_execution_id: p.leg_c_execution_id,
+      leg_p_execution_id: p.leg_p_execution_id,
+    }))
+    : computeOptPairsFromExecutions(allExecs).map((p) => ({
+      ...p,
+      leg_c_execution_id: undefined,
+      leg_p_execution_id: undefined,
+    }))
+  const pairKey = (p: { account_id: string; symbol: string; expiry: string; strike: string | number }) =>
+    `${p.account_id}\t${p.symbol}\t${p.expiry}\t${normalizeStrike(p.strike)}`
+  const keyNoAccount = (sym: string, exp: string, str: string | number) =>
+    `${sym}\t${exp}\t${normalizeStrike(str)}`
+  const contractKey = (e: Execution) =>
+    `${e.account_id ?? ''}\t${e.symbol ?? ''}\t${e.expiry ?? ''}\t${normalizeStrike(e.strike)}`
+  const execById = new Map<number, Execution>()
+  for (const e of allExecs) {
+    if (e.id != null) execById.set(e.id, e)
+  }
+  const dayPairsEnriched: DayPair[] = dayPairs.map((p) => ({
+    ...p,
+    account_id: p.account_id ||
+      (p.leg_c_execution_id != null ? execById.get(p.leg_c_execution_id)?.account_id : undefined) ||
+      (p.leg_p_execution_id != null ? execById.get(p.leg_p_execution_id)?.account_id : undefined) ||
+      '',
+  }))
+  const pairByKey = new Map<string, DayPair[]>()
+  for (const p of dayPairsEnriched) {
+    const k = pairKey(p)
+    if (!pairByKey.has(k)) pairByKey.set(k, [])
+    pairByKey.get(k)!.push(p)
+  }
+  const pairByKeyNoAccount = new Map<string, DayPair[]>()
+  for (const p of dayPairsEnriched) {
+    const kNoAcc = keyNoAccount(p.symbol, p.expiry, p.strike)
+    if (!pairByKeyNoAccount.has(kNoAcc)) pairByKeyNoAccount.set(kNoAcc, [])
+    pairByKeyNoAccount.get(kNoAcc)!.push(p)
+  }
+  const byContract = new Map<string, Execution[]>()
+  for (const e of optExecs) {
+    const sym = e.symbol ?? ''
+    const exp = e.expiry ?? ''
+    const str = e.strike ?? ''
+    const acc = e.account_id ?? ''
+    let k: string
+    if (acc.trim() !== '') {
+      k = contractKey(e)
+    } else {
+      const pairList = pairByKeyNoAccount.get(keyNoAccount(sym, exp, str))
+      k = pairList?.length && pairList[0].account_id
+        ? pairKey(pairList[0])
+        : contractKey(e)
+    }
+    if (!byContract.has(k)) byContract.set(k, [])
+    byContract.get(k)!.push(e)
+  }
+  const allContractKeys = new Set<string>(byContract.keys())
+  for (const p of dayPairsEnriched) {
+    allContractKeys.add(pairKey(p))
+  }
+  const contractKeys = Array.from(allContractKeys)
+  let totalRealizedSum = 0
+  let totalUnrealizedSum = 0
+  for (const key of contractKeys) {
+    const pairs = pairByKey.get(key) ?? (key.startsWith('\t') ? pairByKeyNoAccount.get(key.slice(1)) ?? [] : [])
+    const execs = byContract.get(key) ?? []
+    const sortedExecs = [...execs].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+    const pairedExecIds = new Set<number>()
+    for (const p of pairs) {
+      if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
+      if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
+    }
+    const unmatchedExecs = sortedExecs.filter((e) => e.id == null || !pairedExecIds.has(e.id))
+    const groupSumPnl =
+      unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
+      pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+    if (pairs.length > 0) {
+      totalRealizedSum += groupSumPnl
+    } else {
+      totalUnrealizedSum += groupSumPnl
+    }
+  }
+  return { realized: totalRealizedSum, unrealized: totalUnrealizedSum }
 }
 
 interface PerformancePageProps {
@@ -186,9 +359,14 @@ export function PerformancePage({ status }: PerformancePageProps) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const [selectedDayPnLType, setSelectedDayPnLType] = useState<'realized' | 'unrealized'>('realized')
+  const [selectedDaySymbolTab, setSelectedDaySymbolTab] = useState<string | null>(null)
   const [selectedDayExecutions, setSelectedDayExecutions] = useState<Execution[] | null>(null)
   const [selectedDayOptPairs, setSelectedDayOptPairs] = useState<BackendOptPair[] | null>(null)
   const [selectedDayExecutionsLoading, setSelectedDayExecutionsLoading] = useState(false)
+  const [calendarDayPnL, setCalendarDayPnL] = useState<Record<string, { realized: number; unrealized: number }> | null>(null)
+  const [calendarDayPnLLoading, setCalendarDayPnLLoading] = useState(false)
+  const [selectedDayComputedPnL, setSelectedDayComputedPnL] = useState<{ realized: number; unrealized: number } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -243,41 +421,112 @@ export function PerformancePage({ status }: PerformancePageProps) {
 
   useEffect(() => {
     setSelectedDay(null)
+    setSelectedDayPnLType('realized')
+    setSelectedDaySymbolTab(null)
   }, [calendarMonth])
 
-  // When a day is selected, fetch executions for that day in SERVER timezone (America/Chicago)
-  // with backend BUY↔SELL pairing (include_opt_pairs=true) so each execution has paired_execution_ids and we get opt_pairs
+  // Reset PnL type and symbol tab when switching to another day
+  useEffect(() => {
+    if (selectedDay) {
+      setSelectedDayPnLType('realized')
+      setSelectedDaySymbolTab(null)
+    }
+  }, [selectedDay])
+
+  // Fetch executions for the calendar month and compute per-day Realized/Unrealized (same as Records)
+  useEffect(() => {
+    if (granularity !== 'day' || !calendarMonth) {
+      setCalendarDayPnL(null)
+      return
+    }
+    const [y, m] = calendarMonth.split('-').map(Number)
+    const firstDateStr = `${y}-${String(m).padStart(2, '0')}-01`
+    const lastDay = new Date(y, m, 0).getDate()
+    const lastDateStr = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+    const { since_ts } = getChicagoDayRange(firstDateStr)
+    const { until_ts } = getChicagoDayRange(lastDateStr)
+    setCalendarDayPnLLoading(true)
+    setCalendarDayPnL(null)
+    fetchExecutions(since_ts, until_ts, 5000, true)
+      .then((res) => {
+        const execs = res.executions ?? []
+        const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
+        const execById = new Map<number, Execution>()
+        for (const e of execs) {
+          if (e.id != null) execById.set(e.id, e)
+        }
+        const map: Record<string, { realized: number; unrealized: number }> = {}
+        for (let day = 1; day <= lastDay; day++) {
+          const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+          const dayExecs = execs.filter((e) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === dateStr)
+          const sameDayPairs =
+            optPairs == null
+              ? null
+              : optPairs.filter((p) => {
+                const legP = execById.get(p.leg_p_execution_id)
+                const pDate = legP?.time != null ? unixTimeToChicagoDateStr(Number(legP.time)) : ''
+                return pDate === dateStr
+              })
+          const useBackendPairs = sameDayPairs != null && sameDayPairs.length > 0
+          const { realized, unrealized } = computeDayRealizedUnrealized(
+            dayExecs,
+            useBackendPairs ? sameDayPairs : null,
+          )
+          map[dateStr] = { realized, unrealized }
+        }
+        setCalendarDayPnL(map)
+      })
+      .catch(() => setCalendarDayPnL({}))
+      .finally(() => setCalendarDayPnLLoading(false))
+  }, [granularity, calendarMonth])
+
+  // When a day is selected, fetch executions from start of that month through end of selected day
+  // so we can match 3/6's execution with 3/4's (look back); then filter display to selected day only.
   useEffect(() => {
     if (!selectedDay) {
       setSelectedDayExecutions(null)
       setSelectedDayOptPairs(null)
+      setSelectedDayComputedPnL(null)
       return
     }
-    const { since_ts: dayStartTs, until_ts: dayEndTs } = getChicagoDayRange(selectedDay)
+    const firstOfMonth = selectedDay.slice(0, 7) + '-01'
+    const { since_ts: monthStartTs } = getChicagoDayRange(firstOfMonth)
+    const { until_ts: dayEndTs } = getChicagoDayRange(selectedDay)
     setSelectedDayExecutionsLoading(true)
-    fetchExecutions(dayStartTs, dayEndTs, 500, true)
+    fetchExecutions(monthStartTs, dayEndTs, 5000, true)
       .then((res) => {
         setSelectedDayExecutions(res.executions ?? [])
         setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
+        const execs = res.executions ?? []
+        const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
+        const execByIdForDate = new Map(execs.map((e: Execution) => [e.id!, e]))
+        const legDate = (eid: number) => (execByIdForDate.get(eid)?.time != null ? unixTimeToChicagoDateStr(Number(execByIdForDate.get(eid)!.time)) : '')
+        const dayExecs = execs.filter((e: Execution) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === selectedDay)
+        const relevantPairs =
+          optPairs != null && optPairs.length > 0
+            ? optPairs.filter(
+                (p: { leg_c_execution_id?: number; leg_p_execution_id?: number }) =>
+                  p.leg_c_execution_id != null &&
+                  p.leg_p_execution_id != null &&
+                  execByIdForDate.has(p.leg_c_execution_id) &&
+                  execByIdForDate.has(p.leg_p_execution_id) &&
+                  (legDate(p.leg_c_execution_id) === selectedDay || legDate(p.leg_p_execution_id) === selectedDay),
+              )
+            : null
+        const { realized, unrealized } = computeDayRealizedUnrealized(
+          dayExecs,
+          relevantPairs != null && relevantPairs.length > 0 ? relevantPairs : null,
+        )
+        setSelectedDayComputedPnL({ realized, unrealized })
+        setCalendarDayPnL((prev) => (prev && selectedDay ? { ...prev, [selectedDay]: { realized, unrealized } } : prev))
       })
       .catch(() => {
         setSelectedDayExecutions([])
         setSelectedDayOptPairs(null)
+        setSelectedDayComputedPnL(null)
       })
       .finally(() => setSelectedDayExecutionsLoading(false))
   }, [selectedDay])
-
-  const selectedDayQueryParams = selectedDay
-    ? (() => {
-      const { since_ts, until_ts } = getChicagoDayRange(selectedDay)
-      return {
-        since_ts,
-        until_ts,
-        limit: 500,
-        note: 'Server calendar day (America/Chicago)',
-      }
-    })()
-    : null
 
   const accounts: IbAccountSnapshot[] = status?.accounts ?? []
   const summary = data?.summary
@@ -431,7 +680,9 @@ export function PerformancePage({ status }: PerformancePageProps) {
                     cells.push({ day: null, dateStr: null })
                   }
                 }
-                const hasAnyOptInMonth = cells.some((c) => c.dateStr && optDays[c.dateStr] != null)
+                const hasAnyOptInMonth = calendarDayPnL != null
+                  ? Object.keys(calendarDayPnL).length > 0
+                  : cells.some((c) => c.dateStr && optDays[c.dateStr] != null)
                 const goPrev = () => {
                   const d = new Date(y, m - 2, 1)
                   setCalendarMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
@@ -453,6 +704,9 @@ export function PerformancePage({ status }: PerformancePageProps) {
                         No Option realized in this month (only paired same-day BUY+SELL count). Try a larger range or another month.
                       </p>
                     )}
+                    {calendarDayPnLLoading && (
+                      <p className="section-hint performance-calendar-loading">Loading daily Realized/Unrealized…</p>
+                    )}
                     <div className="performance-calendar-nav">
                       <button type="button" className="btn btn-secondary" onClick={goPrev} aria-label="Previous month">← Prev</button>
                       <span className="performance-calendar-title">{monthLabel}</span>
@@ -467,14 +721,20 @@ export function PerformancePage({ status }: PerformancePageProps) {
                       {Array.from({ length: totalCells / 7 }, (_, rowIdx) => (
                         <div key={rowIdx} className="performance-calendar-row">
                           {cells.slice(rowIdx * 7, rowIdx * 7 + 7).map((c, colIdx) => {
-                            const info = c.dateStr ? optDays[c.dateStr] : null
+                            const dayPnL = c.dateStr && calendarDayPnL != null ? calendarDayPnL[c.dateStr] : null
+                            const legacyInfo = c.dateStr ? optDays[c.dateStr] : null
+                            const useDetailPnL = c.dateStr === selectedDay && selectedDayComputedPnL != null
+                            const realizedVal = useDetailPnL ? selectedDayComputedPnL.realized : (dayPnL != null ? dayPnL.realized : (legacyInfo?.net_pnl ?? null))
+                            const unrealizedVal = useDetailPnL ? selectedDayComputedPnL.unrealized : (dayPnL != null ? dayPnL.unrealized : null)
                             const showPnL = c.day != null
-                            const realizedVal = info ? info.net_pnl : null
-                            const toneR = showPnL && realizedVal != null ? (realizedVal >= 0 ? 'tone-positive' : 'tone-negative') : ''
+                            const showR = showPnL && realizedVal != null && Math.abs(Number(realizedVal)) >= 0.005
+                            const showU = showPnL && unrealizedVal != null && Math.abs(Number(unrealizedVal)) >= 0.005
+                            const toneR = showR && (realizedVal ?? 0) !== 0 ? ((realizedVal!) >= 0 ? 'tone-positive' : 'tone-negative') : ''
+                            const toneU = showU && (unrealizedVal ?? 0) !== 0 ? 'tone-unrealized' : ''
                             const titleParts: string[] = []
-                            if (info) {
-                              titleParts.push(`Realized: ${fmtUsd(info.net_pnl)} (${info.trade_count} trades)`)
-                              titleParts.push(`Unrealized: — (as of now only)`)
+                            if (useDetailPnL || dayPnL != null || legacyInfo != null) {
+                              titleParts.push(`Realized: ${fmtUsd(realizedVal ?? 0)}`)
+                              titleParts.push(unrealizedVal != null ? `Unrealized: ${fmtUsd(unrealizedVal)}` : 'Unrealized: —')
                             } else if (c.dateStr) {
                               titleParts.push('No Option trades that day')
                             }
@@ -489,14 +749,18 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                 title={titleParts.length ? titleParts.join('\n') : (c.dateStr ? 'Click to see contributing records' : undefined)}
                               >
                                 {c.day != null && <span className="performance-calendar-day">{c.day}</span>}
-                                {showPnL && (
+                                {(showR || showU) && (
                                   <div className="performance-calendar-pnl-lines">
-                                    <span className="performance-calendar-pnl performance-calendar-realized">
-                                      R: {realizedVal != null ? fmtUsd(realizedVal) : '—'}
-                                    </span>
-                                    <span className="performance-calendar-pnl performance-calendar-unrealized">
-                                      U: —
-                                    </span>
+                                    {showR && (
+                                      <span className={`performance-calendar-pnl performance-calendar-realized ${toneR}`}>
+                                        R: {fmtPnl(realizedVal)}
+                                      </span>
+                                    )}
+                                    {showU && (
+                                      <span className={`performance-calendar-pnl performance-calendar-unrealized ${toneU}`}>
+                                        U: {fmtPnl(unrealizedVal)}
+                                      </span>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -515,18 +779,25 @@ export function PerformancePage({ status }: PerformancePageProps) {
                           <p className="section-hint">Loading executions…</p>
                         ) : (
                           <>
-                            {selectedDayQueryParams && (
-                              <div className="performance-calendar-query-hint">
-                                <strong>Query:</strong>{' '}
-                                <code>GET /executions?since_ts={selectedDayQueryParams.since_ts}&amp;until_ts={selectedDayQueryParams.until_ts}&amp;limit={selectedDayQueryParams.limit}</code>
-                                <br />
-                                <small>{selectedDayQueryParams.note}: since_ts/until_ts = this date 00:00–23:59 in America/Chicago (server time).</small>
-                              </div>
-                            )}
                             {(() => {
                               const allExecs = selectedDayExecutions ?? []
-                              const optExecs = allExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
+                              const dayExecs = allExecs.filter((e) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === selectedDay)
+                              const optExecs = dayExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
                               const backendPairs = selectedDayOptPairs ?? []
+                              const execById = new Map<number, Execution>()
+                              for (const e of allExecs) {
+                                if (e.id != null) execById.set(e.id, e)
+                              }
+                              const legDateStr = (eid: number) => (execById.get(eid)?.time != null ? unixTimeToChicagoDateStr(Number(execById.get(eid)!.time)) : '')
+                              // Pairs that have at least one leg on the selected day (can look back to earlier days).
+                              const relevantPairs = backendPairs.filter(
+                                (p) =>
+                                  p.leg_c_execution_id != null &&
+                                  p.leg_p_execution_id != null &&
+                                  execById.has(p.leg_c_execution_id) &&
+                                  execById.has(p.leg_p_execution_id) &&
+                                  (legDateStr(p.leg_c_execution_id) === selectedDay || legDateStr(p.leg_p_execution_id) === selectedDay),
+                              )
                               type DayPair = {
                                 account_id: string
                                 symbol: string
@@ -542,8 +813,8 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                 leg_c_execution_id?: number
                                 leg_p_execution_id?: number
                               }
-                              const dayPairs: DayPair[] = backendPairs.length > 0
-                                ? backendPairs.map((p) => ({
+                              const dayPairs: DayPair[] = relevantPairs.length > 0
+                                ? relevantPairs.map((p) => ({
                                   account_id: p.account_id,
                                   symbol: p.symbol,
                                   expiry: p.expiry,
@@ -558,7 +829,7 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                   leg_c_execution_id: p.leg_c_execution_id,
                                   leg_p_execution_id: p.leg_p_execution_id,
                                 }))
-                                : computeOptPairsFromExecutions(allExecs).map((p) => ({
+                                : computeOptPairsFromExecutions(dayExecs).map((p) => ({
                                   ...p,
                                   leg_c_execution_id: undefined,
                                   leg_p_execution_id: undefined,
@@ -569,10 +840,6 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                 `${p.account_id}\t${p.symbol}\t${p.expiry}\t${normalizeStrike(p.strike)}`
                               const keyNoAccount = (sym: string, exp: string, str: string | number) =>
                                 `${sym}\t${exp}\t${normalizeStrike(str)}`
-                              const execById = new Map<number, Execution>()
-                              for (const e of allExecs) {
-                                if (e.id != null) execById.set(e.id, e)
-                              }
                               const dayPairsEnriched: (typeof dayPairs)[0][] = dayPairs.map((p) => ({
                                 ...p,
                                 account_id: p.account_id ||
@@ -635,16 +902,134 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                   : (() => { const lt = legTimes(pairsB); return lt.length > 0 ? Math.min(...lt) : 0 })()
                                 return tA - tB
                               })
+                              const keysBySymbol = new Map<string, string[]>()
+                              for (const key of contractKeys) {
+                                const execs = byContract.get(key) ?? []
+                                const pairs = pairByKey.get(key) ?? (key.startsWith('\t') ? pairByKeyNoAccount.get(key.slice(1)) ?? [] : [])
+                                const first = execs[0]
+                                const firstPair = pairs[0]
+                                const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
+                                if (!keysBySymbol.has(symbol)) keysBySymbol.set(symbol, [])
+                                keysBySymbol.get(symbol)!.push(key)
+                              }
+                              const keysBySymbolRealized = new Map<string, string[]>()
+                              const keysBySymbolUnrealized = new Map<string, string[]>()
+                              const symbolSumRealized = new Map<string, number>()
+                              const symbolSumUnrealized = new Map<string, number>()
+                              let totalRealizedSum = 0
+                              let totalUnrealizedSum = 0
+                              for (const key of contractKeys) {
+                                const pairs = pairByKey.get(key) ?? (key.startsWith('\t') ? pairByKeyNoAccount.get(key.slice(1)) ?? [] : [])
+                                const execs = byContract.get(key) ?? []
+                                const first = execs[0]
+                                const firstPair = pairs[0]
+                                const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
+                                const sortedExecs = [...execs].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+                                const pairedExecIds = new Set<number>()
+                                for (const p of pairs) {
+                                  if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
+                                  if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
+                                }
+                                const unmatchedExecs = sortedExecs.filter((e) => e.id == null || !pairedExecIds.has(e.id))
+                                const groupSumPnl =
+                                  unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
+                                  pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                if (pairs.length > 0) {
+                                  if (!keysBySymbolRealized.has(symbol)) keysBySymbolRealized.set(symbol, [])
+                                  keysBySymbolRealized.get(symbol)!.push(key)
+                                  symbolSumRealized.set(symbol, (symbolSumRealized.get(symbol) ?? 0) + groupSumPnl)
+                                  totalRealizedSum += groupSumPnl
+                                } else {
+                                  if (!keysBySymbolUnrealized.has(symbol)) keysBySymbolUnrealized.set(symbol, [])
+                                  keysBySymbolUnrealized.get(symbol)!.push(key)
+                                  symbolSumUnrealized.set(symbol, (symbolSumUnrealized.get(symbol) ?? 0) + groupSumPnl)
+                                  totalUnrealizedSum += groupSumPnl
+                                }
+                              }
+                              const symbolsRealized = Array.from(keysBySymbolRealized.keys()).sort()
+                              const symbolsUnrealized = Array.from(keysBySymbolUnrealized.keys()).sort()
+                              const keysBySymbolForType = selectedDayPnLType === 'realized' ? keysBySymbolRealized : keysBySymbolUnrealized
+                              const symbolsForType = selectedDayPnLType === 'realized' ? symbolsRealized : symbolsUnrealized
+                              const symbolSumForType = selectedDayPnLType === 'realized' ? symbolSumRealized : symbolSumUnrealized
+                              const effectiveSymbol = (selectedDaySymbolTab && symbolsForType.includes(selectedDaySymbolTab) ? selectedDaySymbolTab : symbolsForType[0]) ?? null
                               return (
                                 <>
-                                  <h5 className="performance-calendar-day-detail-subtitle">Option executions by contract (server: Chicago)</h5>
-                                  <p className="section-hint performance-calendar-count-hint">
-                                    {optExecs.length} Option execution(s) in {contractKeys.length} contract(s) (of {allExecs.length} total for this day). One table per contract: <strong>Execution</strong> = same-day trade row; <strong>Match</strong> = BUY↔SELL pair summary from backend.
-                                  </p>
+                                  <h5 className="performance-calendar-day-detail-subtitle">
+                                    Option executions by contract
+                                  </h5>
                                   {contractKeys.length === 0 ? (
                                     <p className="section-hint">No Option executions in DB for this day (exec_time in server Chicago range).</p>
                                   ) : (
-                                    contractKeys.map((key) => {
+                                    <>
+                                      <div className="performance-calendar-pnl-type-tabs system-tabs" role="tablist" aria-label="PnL type">
+                                        <button
+                                          type="button"
+                                          role="tab"
+                                          aria-selected={selectedDayPnLType === 'realized'}
+                                          className={`system-tab ${selectedDayPnLType === 'realized' ? 'active' : ''}`}
+                                          onClick={() => setSelectedDayPnLType('realized')}
+                                        >
+                                          Realized
+                                          {symbolsRealized.length > 0 && (
+                                            <>
+                                              <span className="performance-calendar-tab-count">({symbolsRealized.reduce((n, s) => n + (keysBySymbolRealized.get(s) ?? []).length, 0)})</span>
+                                              <span className={`performance-calendar-tab-sum ${totalRealizedSum >= 0 ? 'tone-positive' : 'tone-negative'}`}>
+                                                {fmtUsd(totalRealizedSum)}
+                                              </span>
+                                            </>
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          role="tab"
+                                          aria-selected={selectedDayPnLType === 'unrealized'}
+                                          className={`system-tab ${selectedDayPnLType === 'unrealized' ? 'active' : ''}`}
+                                          onClick={() => setSelectedDayPnLType('unrealized')}
+                                        >
+                                          Unrealized
+                                          {symbolsUnrealized.length > 0 && (
+                                            <>
+                                              <span className="performance-calendar-tab-count">({symbolsUnrealized.reduce((n, s) => n + (keysBySymbolUnrealized.get(s) ?? []).length, 0)})</span>
+                                              <span className="performance-calendar-tab-sum tone-unrealized">
+                                                {fmtUsd(totalUnrealizedSum)}
+                                              </span>
+                                            </>
+                                          )}
+                                        </button>
+                                      </div>
+                                      <div className="performance-calendar-symbol-tabs system-tabs" role="tablist" aria-label="Symbol">
+                                        {symbolsForType.map((sym) => {
+                                          const sum = symbolSumForType.get(sym) ?? 0
+                                          const sumClass = selectedDayPnLType === 'unrealized'
+                                            ? 'tone-unrealized'
+                                            : (sum >= 0 ? 'tone-positive' : 'tone-negative')
+                                          return (
+                                            <button
+                                              key={sym}
+                                              type="button"
+                                              role="tab"
+                                              aria-selected={sym === effectiveSymbol}
+                                              className={`system-tab ${sym === effectiveSymbol ? 'active' : ''}`}
+                                              onClick={() => setSelectedDaySymbolTab(sym)}
+                                            >
+                                              {sym}
+                                              <span className={`performance-calendar-tab-sum ${sumClass}`}>
+                                                {fmtUsd(sum)}
+                                              </span>
+                                            </button>
+                                          )
+                                        })}
+                                      </div>
+                                      <div className="system-tab-panel performance-calendar-symbol-panel" role="tabpanel">
+                                        {symbolsForType.length === 0 ? (
+                                          <p className="section-hint">
+                                            {selectedDayPnLType === 'realized'
+                                              ? 'No realized (matched BUY↔SELL) contracts for this day.'
+                                              : 'No unrealized (open) contracts for this day.'}
+                                          </p>
+                                        ) : (
+                                        <>
+                                          {(effectiveSymbol ? (keysBySymbolForType.get(effectiveSymbol) ?? []) : []).map((key) => {
                                       const execs = byContract.get(key) ?? []
                                       const pairs =
                                         pairByKey.get(key) ??
@@ -664,13 +1049,19 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                       )
                                       const sortedExecs = [...execs].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
                                       type Row = { type: 'Execution'; e: Execution } | { type: 'Match'; p: (typeof dayPairs)[0] }
+                                      const pairedExecIds = new Set<number>()
+                                      for (const p of pairs) {
+                                        if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
+                                        if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
+                                      }
+                                      const unmatchedExecs = sortedExecs.filter((e) => e.id == null || !pairedExecIds.has(e.id))
                                       const rows: Row[] = [
                                         ...sortedExecs.map((e) => ({ type: 'Execution' as const, e })),
                                         ...pairs.map((p) => ({ type: 'Match' as const, p })),
                                       ]
                                       const groupSumPnl =
-                                        sortedExecs.reduce((s, e) => s + execPnl(e), 0) +
-                                        pairs.reduce((s, p) => s + matchPnl(p), 0)
+                                        unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
+                                        pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
                                       return (
                                         <div key={key} className="performance-calendar-contract-group">
                                           <h6 className="performance-calendar-contract-title">
@@ -702,9 +1093,10 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                                 row.type === 'Match' ? (() => {
                                                   const legC = row.p.leg_c_execution_id != null ? execById.get(row.p.leg_c_execution_id) : undefined
                                                   const legP = row.p.leg_p_execution_id != null ? execById.get(row.p.leg_p_execution_id) : undefined
-                                                  const timeC = legC?.time != null ? fmtChicagoTime(legC.time) : null
-                                                  const timeP = legP?.time != null ? fmtChicagoTime(legP.time) : null
-                                                  const execTimeStr = timeC != null && timeP != null ? `${timeC} — ${timeP}` : timeC ?? timeP ?? '—'
+                                                  const tC = legC?.time != null ? Number(legC.time) : null
+                                                  const tP = legP?.time != null ? Number(legP.time) : null
+                                                  // Show the matched (opening) leg's time/side/price — leg_c is the earlier leg that was matched.
+                                                  const execTimeStr = tC != null ? fmtChicagoTime(tC) : (tP != null ? fmtChicagoTime(tP) : '—')
                                                   return (
                                                     <tr key={`match-${idx}`} className="performance-calendar-row-match">
                                                       <td>Match</td>
@@ -715,14 +1107,16 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                                       </td>
                                                       <td>{row.p.account_id || '—'}</td>
                                                       <td>{execTimeStr}</td>
-                                                      <td>{row.p.p_side}</td>
+                                                      <td>{row.p.c_side}</td>
                                                       <td>{row.p.quantity}</td>
-                                                      <td>{fmtUsd(row.p.p_price)}</td>
+                                                      <td>{fmtUsd(row.p.c_price)}</td>
                                                       <td>{fmtUsd(row.p.commission)}</td>
-                                                      <td className={(matchPnl(row.p) >= 0 ? 'tone-positive' : 'tone-negative')}>{fmtUsd(matchPnl(row.p))}</td>
+                                                      <td className={(() => { const mp = row.p.net_pnl ?? matchPnl(row.p); return Math.abs(mp) < 0.005 ? '' : (mp >= 0 ? 'tone-positive' : 'tone-negative'); })()}>{fmtPnl(row.p.net_pnl ?? matchPnl(row.p))}</td>
                                                     </tr>
                                                   )
                                                 })() : (
+                                                  (() => {
+                                                    return (
                                                   <tr key={row.e.id ?? idx} className="performance-calendar-row-execution">
                                                     <td>Execution</td>
                                                     <td>{row.e.id ?? '—'}</td>
@@ -732,15 +1126,21 @@ export function PerformancePage({ status }: PerformancePageProps) {
                                                     <td>{row.e.quantity ?? '—'}</td>
                                                     <td>{fmtUsd(row.e.price)}</td>
                                                     <td>{fmtUsd(row.e.commission)}</td>
-                                                    <td className={(execPnl(row.e) >= 0 ? 'tone-positive' : 'tone-negative')}>{fmtUsd(execPnl(row.e))}</td>
+                                                    <td className={(() => { const ep = execPnl(row.e); return Math.abs(ep) < 0.005 ? '' : (ep >= 0 ? 'tone-positive' : 'tone-negative'); })()}>{fmtPnl(execPnl(row.e))}</td>
                                                   </tr>
+                                                    );
+                                                  })()
                                                 )
                                               )}
                                             </tbody>
                                           </table>
                                         </div>
                                       )
-                                    })
+                                    })}
+                                        </>
+                                        )}
+                                      </div>
+                                    </>
                                   )}
                                 </>
                               )

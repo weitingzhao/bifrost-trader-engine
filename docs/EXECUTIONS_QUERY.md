@@ -27,7 +27,7 @@ ORDER BY e.exec_time DESC NULLS LAST;
 
 - **代码位置**：`servers/reader.py` 的 `get_executions`（按时间取当天）、`get_executions_with_opt_pairs_single_query`（一条 CTE+窗口 SQL）、`get_executions_with_opt_pairs`（串联并做配对）。
 - **第一条**：按时间取当天 executions（见下方「后端 SQL（第一条）」）。
-- **第二条（一条 SQL）**：CTE day_keys = 当天 OPT 的 (symbol, expiry, strike, account_id) 去重；all_legs = 这些合约的全部 OPT 腿（不限日期）+ in_selected_day、side_norm（BUY/SELL）；numbered = ROW_NUMBER() 按 side_norm 得 opt_pair_rn。配对为 BUY↔SELL（同一合约方向相反）。范围仅限「当天有 OPT 的合约」，不会过大。
+- **第二条（一条 SQL）**：CTE day_keys = 当天 OPT 的 (symbol, expiry, strike, account_id) 去重；all_legs = 这些合约的、**且 exec_time 在 [since_ts, until_ts] 内**的全部 OPT 腿（从 SQL 层保证 Match 的两条腿都在请求时间范围内）；numbered = ROW_NUMBER() 按 side_norm 得 opt_pair_rn。配对为 BUY↔SELL（同一合约方向相反）。
 
 ## 为什么用服务器（Chicago）时间？
 
@@ -81,6 +81,7 @@ all_legs AS (
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
   LEFT JOIN account_execution_commissions c ON ...
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
+    AND extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s  /* Match 的 exec time 限定在请求范围内 */
 ),
 numbered AS (
   SELECT all_legs.*,
@@ -97,6 +98,18 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
 | **exec_time** | 必须落在 `[since_ts, until_ts]`；前端按 **America/Chicago** 的该日 00:00～23:59 计算该范围，与服务器/DB 时区一致 |
 | **account_id** | API 传了才过滤；Performance 页点某日时**不传**，即查所有账户 |
 | **limit** | 单日请求用 500；该范围内记录超过 500 条时只返回按时间 **DESC** 的前 500 条 |
+
+## 根据「当天 Execution」找 Match 的 Query 与时间边界（Performance 页）
+
+- **问题**：根据当天的 Execution 记录去找 Match 时，Match 是否只用了「该日及之前」的数据，而没有用「该日之后」的数据？
+- **结论（当前实现）**：**有**对 Match 的候选腿做 Execution 时间过滤；Match 的两条腿都**必须**落在请求的 `[since_ts, until_ts]` 内。
+- **Query 位置**：`servers/reader.py` 的 `get_executions_with_opt_pairs_single_query`。
+- **具体逻辑**：
+  1. `day_keys`：在 `[since_ts, until_ts]` 内有 OPT 成交的合约的 `(symbol, expiry, strike, account_id)`。
+  2. `all_legs`：仅拉取这些合约的、且 **`extract(epoch from e.exec_time)` 在 `[since_ts, until_ts]` 内** 的 OPT 腿；**没有**再往该区间之后取数据。
+  3. 配对在内存中按 `time` 升序 FIFO，所以对每条 Execution 来说，Match 只来自「已经出现过的对侧腿」，等价于只往「该 Execution 之前」找，不会把未来的 SELL 配给今天的 BUY。
+
+因此：请求「某一天」时 `since_ts`/`until_ts` = 该日 00:00～23:59，Match 的两条腿都在该日内；请求「整月」时同理，Match 不会往该月之后找。若观察到某条 Match 的腿落在所选日期之后，可能是前端传的 `until_ts` 偏大或其它数据路径；可用调试日志核对请求的 `since_ts`/`until_ts` 与每条 pair 的腿时间。
 
 ## 前端展示的额外过滤
 

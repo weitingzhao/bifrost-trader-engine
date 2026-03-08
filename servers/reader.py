@@ -491,8 +491,18 @@ class StatusReader:
     def _compute_opt_pair_map_and_pairs(
         self, executions: List[Dict[str, Any]]
     ) -> Tuple[Dict[int, List[int]], List[Dict[str, Any]]]:
-        """Pair BUY↔SELL (same symbol, expiry, strike, account_id; side opposite). FIFO.
-        Returns (pair_map, opt_pairs): pair_map[exec_id] = list of paired execution ids; opt_pairs with leg_c_execution_id (buy leg), leg_p_execution_id (sell leg), c_side=BUY, p_side=SELL, etc."""
+        """Pair BUY↔SELL (same symbol, expiry, strike, account_id).
+
+        Match rules (explicit):
+        1. Opposite side only: if Execution is BUY, match with a SELL; if SELL, match with a BUY.
+        2. Time only moves forward: when matching an Execution, only consider records that
+           occurred before it (already processed). Process in time order; only match with
+           the opposite-side queue built from earlier executions.
+        FIFO within the opposite-side queue.
+
+        Returns (pair_map, opt_pairs): pair_map[exec_id] = list of paired execution ids;
+        opt_pairs with leg_c_execution_id (earlier leg), leg_p_execution_id (later leg),
+        c_side/c_price = earlier leg, p_side/p_price = later leg."""
         opt_only = [
             e
             for e in executions
@@ -529,86 +539,120 @@ class StatusReader:
             groups[key].append(e)
 
         for (sym, exp, strike_str, acc), group in groups.items():
+            # Process in time order so we only match with past (already-seen) executions.
             group_sorted = sorted(
                 group,
                 key=lambda x: float(x["time"]) if x.get("time") is not None else 0.0,
             )
+            # Queues of (q, p, c, side, eid) for unmatched lots; we only match with these (past).
+            buy_queue: List[Tuple[float, float, float, str, int]] = []
+            sell_queue: List[Tuple[float, float, float, str, int]] = []
 
-            def make_queue(
-                execs: List[Dict[str, Any]], want_side: str
-            ) -> List[Tuple[float, float, float, str, int]]:
-                out_q: List[Tuple[float, float, float, str, int]] = []
-                for x in execs:
-                    side = (x.get("side") or "").strip().upper() or "BUY"
-                    if side != want_side:
-                        continue
-                    q = float(x.get("quantity") or 0)
-                    p = float(x.get("price") or 0)
-                    c = (
-                        float(x.get("commission") or 0)
-                        if x.get("commission") is not None
-                        and math.isfinite(float(x.get("commission") or 0))
-                        else 0.0
-                    )
-                    if not math.isfinite(q) or q <= 0 or not math.isfinite(p):
-                        continue
-                    eid = int(x["id"])
-                    out_q.append((q, p, c, side, eid))
-                return out_q
+            for x in group_sorted:
+                side = (x.get("side") or "").strip().upper() or "BUY"
+                if side not in ("BUY", "SELL"):
+                    continue
+                q = float(x.get("quantity") or 0)
+                p = float(x.get("price") or 0)
+                c = (
+                    float(x.get("commission") or 0)
+                    if x.get("commission") is not None
+                    and math.isfinite(float(x.get("commission") or 0))
+                    else 0.0
+                )
+                if not math.isfinite(q) or q <= 0 or not math.isfinite(p):
+                    continue
+                eid = int(x["id"])
 
-            buy_list = make_queue(group_sorted, "BUY")
-            sell_list = make_queue(group_sorted, "SELL")
-            i_b, i_s = 0, 0
-            while i_b < len(buy_list) and i_s < len(sell_list):
-                q_b, p_b, c_b, side_b, b_id = buy_list[i_b]
-                q_s, p_s, c_s, side_s, s_id = sell_list[i_s]
-                q_match = min(q_b, q_s)
-                if q_match <= 0:
-                    break
-                c_b_alloc = (q_match / q_b) * c_b if q_b else 0.0
-                c_s_alloc = (q_match / q_s) * c_s if q_s else 0.0
-                sign_b = 1.0 if side_b == "SELL" else -1.0
-                sign_s = 1.0 if side_s == "SELL" else -1.0
-                leg_b = sign_b * q_match * p_b * 100.0 - c_b_alloc
-                leg_s = sign_s * q_match * p_s * 100.0 - c_s_alloc
-                pair_net = leg_b + leg_s
-                add_pair(b_id, s_id)
-                opt_pairs.append({
-                    "leg_c_execution_id": b_id,
-                    "leg_p_execution_id": s_id,
-                    "symbol": sym,
-                    "expiry": exp,
-                    "strike": strike_str,
-                    "account_id": acc,
-                    "quantity": round(q_match, 4),
-                    "c_side": "BUY",
-                    "c_price": round(p_b, 4),
-                    "p_side": "SELL",
-                    "p_price": round(p_s, 4),
-                    "commission": round(c_b_alloc + c_s_alloc, 2),
-                    "net_pnl": round(pair_net, 2),
-                })
-                if q_match >= q_b:
-                    i_b += 1
-                    if q_match >= q_s:
-                        i_s += 1
-                    else:
-                        sell_list[i_s] = (
-                            q_s - q_match,
-                            p_s,
-                            c_s * (1 - q_match / q_s),
-                            side_s,
-                            s_id,
-                        )
+                if side == "BUY":
+                    # Match this BUY only with past SELLs (already in sell_queue).
+                    remaining = q
+                    while remaining > 0 and sell_queue:
+                        q_s, p_s, c_s, side_s, s_id = sell_queue[0]
+                        q_match = min(remaining, q_s)
+                        if q_match <= 0:
+                            break
+                        c_b_alloc = (q_match / q) * c if q else 0.0
+                        c_s_alloc = (q_match / q_s) * c_s if q_s else 0.0
+                        sign_b = -1.0  # BUY
+                        sign_s = 1.0   # SELL
+                        leg_b = sign_b * q_match * p * 100.0 - c_b_alloc
+                        leg_s = sign_s * q_match * p_s * 100.0 - c_s_alloc
+                        pair_net = leg_b + leg_s
+                        add_pair(s_id, eid)
+                        opt_pairs.append({
+                            "leg_c_execution_id": s_id,
+                            "leg_p_execution_id": eid,
+                            "symbol": sym,
+                            "expiry": exp,
+                            "strike": strike_str,
+                            "account_id": acc,
+                            "quantity": round(q_match, 4),
+                            "c_side": side_s,
+                            "c_price": round(p_s, 4),
+                            "p_side": side,
+                            "p_price": round(p, 4),
+                            "commission": round(c_b_alloc + c_s_alloc, 2),
+                            "net_pnl": round(pair_net, 2),
+                        })
+                        remaining -= q_match
+                        if q_match >= q_s:
+                            sell_queue.pop(0)
+                        else:
+                            sell_queue[0] = (
+                                q_s - q_match,
+                                p_s,
+                                c_s * (1 - q_match / q_s),
+                                side_s,
+                                s_id,
+                            )
+                    if remaining > 0:
+                        buy_queue.append((remaining, p, (remaining / q) * c, side, eid))
+
                 else:
-                    buy_list[i_b] = (
-                        q_b - q_match,
-                        p_b,
-                        c_b * (1 - q_match / q_b),
-                        side_b,
-                        b_id,
-                    )
-                    i_s += 1
+                    # SELL: match only with past BUYs (already in buy_queue).
+                    remaining = q
+                    while remaining > 0 and buy_queue:
+                        q_b, p_b, c_b, side_b, b_id = buy_queue[0]
+                        q_match = min(remaining, q_b)
+                        if q_match <= 0:
+                            break
+                        c_b_alloc = (q_match / q_b) * c_b if q_b else 0.0
+                        c_s_alloc = (q_match / q) * c if q else 0.0
+                        sign_b = -1.0  # BUY
+                        sign_s = 1.0   # SELL
+                        leg_b = sign_b * q_match * p_b * 100.0 - c_b_alloc
+                        leg_s = sign_s * q_match * p * 100.0 - c_s_alloc
+                        pair_net = leg_b + leg_s
+                        add_pair(b_id, eid)
+                        opt_pairs.append({
+                            "leg_c_execution_id": b_id,
+                            "leg_p_execution_id": eid,
+                            "symbol": sym,
+                            "expiry": exp,
+                            "strike": strike_str,
+                            "account_id": acc,
+                            "quantity": round(q_match, 4),
+                            "c_side": side_b,
+                            "c_price": round(p_b, 4),
+                            "p_side": side,
+                            "p_price": round(p, 4),
+                            "commission": round(c_b_alloc + c_s_alloc, 2),
+                            "net_pnl": round(pair_net, 2),
+                        })
+                        remaining -= q_match
+                        if q_match >= q_b:
+                            buy_queue.pop(0)
+                        else:
+                            buy_queue[0] = (
+                                q_b - q_match,
+                                p_b,
+                                c_b * (1 - q_match / q_b),
+                                side_b,
+                                b_id,
+                            )
+                    if remaining > 0:
+                        sell_queue.append((remaining, p, (remaining / q) * c, side, eid))
 
         return (pair_map, opt_pairs)
 
@@ -645,13 +689,47 @@ class StatusReader:
             limit=5000,
         )
         pair_map, opt_pairs = self._compute_opt_pair_map_and_pairs(all_legs)
+        # Only return pairs whose both legs have exec_time in [since_ts, until_ts] (no matching with future).
+        id_to_time_filter: Dict[int, float] = {}
+        for leg in all_legs:
+            eid = leg.get("id")
+            t = leg.get("time")
+            if eid is not None and t is not None:
+                try:
+                    id_to_time_filter[int(eid)] = float(t)
+                except (TypeError, ValueError):
+                    pass
+        filtered_pairs = []
+        for p in opt_pairs:
+            cid = p.get("leg_c_execution_id")
+            pid = p.get("leg_p_execution_id")
+            tc = id_to_time_filter.get(int(cid)) if cid is not None else None
+            tp = id_to_time_filter.get(int(pid)) if pid is not None else None
+            if tc is None or tp is None:
+                continue
+            if tc < since_ts or tc > until_ts or tp < since_ts or tp > until_ts:
+                continue
+            filtered_pairs.append(p)
+        pair_map_filtered: Dict[int, List[int]] = {}
+        for p in filtered_pairs:
+            aid = p.get("leg_c_execution_id")
+            bid = p.get("leg_p_execution_id")
+            if aid is not None and bid is not None:
+                if aid not in pair_map_filtered:
+                    pair_map_filtered[aid] = []
+                if bid not in pair_map_filtered[aid]:
+                    pair_map_filtered[aid].append(bid)
+                if bid not in pair_map_filtered:
+                    pair_map_filtered[bid] = []
+                if aid not in pair_map_filtered[bid]:
+                    pair_map_filtered[bid].append(aid)
         for e in day_executions:
             eid = e.get("id")
             if eid is not None:
-                e["paired_execution_ids"] = pair_map.get(int(eid), [])
+                e["paired_execution_ids"] = pair_map_filtered.get(int(eid), [])
             else:
                 e["paired_execution_ids"] = []
-        return {"executions": day_executions, "opt_pairs": opt_pairs}
+        return {"executions": day_executions, "opt_pairs": filtered_pairs}
 
     def get_executions_with_opt_pairs_single_query(
         self,
@@ -660,10 +738,9 @@ class StatusReader:
         account_id: Optional[str] = None,
         limit: int = 5000,
     ) -> List[Dict[str, Any]]:
-        """一条 SQL（CTE + 窗口函数）取出「当天有 OPT 的合约」的全部 OPT 腿，并标 in_selected_day、opt_pair_rn。
-        配对按 side：PARTITION BY symbol, expiry, strike, account_id, side_norm（BUY/SELL），同组内 FIFO 配对 BUY↔SELL。
-        范围仅限当天出现过的 (symbol, expiry, strike, account_id)，不会过大。
-        返回每行含 in_selected_day (bool)、opt_pair_rn (int|null)、side_norm，以及 execution 所有字段。"""
+        """一条 SQL（CTE + 窗口函数）取出「当天有 OPT 的合约」的、且 exec_time 在 [since_ts, until_ts] 内的全部 OPT 腿。
+        这样从 SQL 层就保证 Match 的两条腿的 exec time 都在请求的时间范围内（时间不会倒流、配对只在本范围内）。
+        配对按 side：PARTITION BY symbol, expiry, strike, account_id, side_norm（BUY/SELL），同组内 FIFO 配对 BUY↔SELL。"""
         if since_ts is None or until_ts is None:
             return []
         if not self._connect():
@@ -673,7 +750,8 @@ class StatusReader:
         if account_id and account_id.strip():
             acc_cond = " AND e.account_id = %s"
             values.append(account_id.strip())
-        values2 = [since_ts, until_ts]
+        # values2: in_selected_day (2), all_legs time filter (2), optional account_id, limit
+        values2: List[Any] = [since_ts, until_ts, since_ts, until_ts]
         if account_id and account_id.strip():
             values2.append(account_id.strip())
         values2.append(limit)
@@ -698,6 +776,7 @@ all_legs AS (
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
   LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
+    AND extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s
     {acc_cond}
 ),
 numbered AS (
@@ -735,6 +814,7 @@ all_legs AS (
   INNER JOIN day_keys k ON e.symbol = k.symbol AND e.expiry = k.expiry
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
+    AND extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s
     {acc_cond}
 ),
 numbered AS (
