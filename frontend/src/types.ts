@@ -34,12 +34,18 @@ export interface IbPositionRow {
   unrealized_pnl?: number | null
   /** instrument_prices.updated_at 的 Unix 秒，用于 Last Update 显示 */
   price_updated_at?: number | null
+  /** 当 price 来自 stock_day fallback 时，前一根日线 close，用于 Daily % / Daily $ 计算 */
+  daily_prev_close?: number | null
   /** 合约唯一键 symbol|sec_type|expiry|strike|right（若后端返回） */
   contract_key?: string | null
   /** 持仓行最后更新时间（account_positions.updated_at，Unix 秒），供 Details TIME 列显示 */
   updated_at?: number | null
   /** 该持仓对应的 account_executions 最新一条的 exec_time（LEFT JOIN 按 account_id+contract_key，Unix 秒），供 Pool=On Details TIME 列优先使用 */
   exec_time?: number | null
+  /** 持仓分类（STK）：position_categories 的 id，用于按分类跟踪回报 */
+  category_id?: number | null
+  /** 持仓分类名称（STK），如 Dividend、Short-term */
+  category?: string | null
 }
 
 /** One account in GET /status accounts (R-A1 multi-account) */
@@ -394,4 +400,18 @@ export interface RealtimeQuote {
 export interface QuotesResponse {
   quotes: RealtimeQuote[]
   message?: string
+}
+
+/** Position category for STK tagging (e.g. Dividend, Short-term). */
+export interface PositionCategory {
+  id: number
+  name: string
+  description?: string | null
+  sort_order?: number | null
+  created_at?: number | null
+  updated_at?: number | null
+}
+
+export interface PositionCategoriesResponse {
+  items: PositionCategory[]
 }

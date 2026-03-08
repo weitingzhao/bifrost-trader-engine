@@ -699,6 +699,34 @@ def _ensure_tables(conn, log=None) -> None:
             )
         cur.execute("ALTER TABLE bars_backfill_jobs ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
         conn.commit()
+        _log("position_categories, position_category_tags")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS position_categories (
+                id bigserial PRIMARY KEY,
+                name text NOT NULL,
+                description text,
+                sort_order integer,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS position_category_tags (
+                account_id text NOT NULL,
+                contract_key text NOT NULL,
+                category_id integer NOT NULL REFERENCES position_categories(id) ON DELETE CASCADE,
+                created_at timestamptz DEFAULT now(),
+                PRIMARY KEY (account_id, contract_key)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS position_category_tags_category_id ON position_category_tags (category_id)"
+        )
+        conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
             with conn.cursor() as cur2:

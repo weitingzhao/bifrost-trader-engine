@@ -153,7 +153,7 @@
 | mid | double precision | 中间价：`(bid+ask)/2`，若无则回退为 last |
 | updated_at | timestamptz | 最后更新时间 |
 
-- **读取**：`servers/reader.get_accounts_from_tables()` 在读取 `account_positions` 时 LEFT JOIN 本表，将 `mid/last` 作为 `price` 字段下发到 `accounts[*].positions[*]`，前端据此逐行展示当前价并计算浮动盈亏；若某合约暂无价格，则对应行的 `price` 为 NULL，前端显示 `—`。
+- **读取**：`servers/reader.get_accounts_from_tables()` 在读取 `account_positions` 时 LEFT JOIN 本表，将 `mid/last` 作为 `price` 字段下发到 `accounts[*].positions[*]`，前端据此逐行展示当前价并计算浮动盈亏；若某合约暂无价格，则对应行的 `price` 为 NULL，前端显示 `—`。**STK 回退**：若本表无该合约价格，reader 会从 **stock_day** 取该 symbol 按 `bar_time` 倒序的最新一根日线；若该根日线的日期为**当日**，则用**前一根**的 `close`（避免未收完的当日 K 线），否则用最新一根的 `close`，作为 `price` 与 `price_updated_at` 下发，并参与浮动盈亏与 Daily % / Daily $ 计算。
 
 ### 2.11 表 `account_executions`（阶段 3 R-A2：账户执行/成交记录）
 
@@ -346,7 +346,41 @@
 | updated_at | timestamptz | 最后更新时间（默认 now()） |
 
 - **索引**：`(status, created_at)` 便于 Worker 按 pending 取最旧任务；GET /bars/jobs 按 id DESC 分页。
-- **Trim**：可选保留最近 200 条，删除更旧记录，与内存队列“保留 200”行为一致。
+- **Trim**：可选保留最近 200 条，删除更旧记录，与内存队列"保留 200"行为一致。
+
+### 2.19 表 `position_categories`（持仓分类：STK 分类标签定义）
+
+- **用途**：存用户定义的**持仓分类**（如「股息回报」「短期持仓」等），用于对 **STK 持仓** 打标签并后续按分类跟踪回报。
+- **写入**：监控端通过 GET/POST/PATCH/DELETE /position-categories 增删改查；分类可添加、修改、删除。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| name | text NOT NULL | 分类名称（如 Dividend、Short-term） |
+| description | text | 可选说明 |
+| sort_order | integer | 显示顺序（小者靠前），可选 |
+| created_at | timestamptz | 创建时间（默认 now()） |
+| updated_at | timestamptz | 最后更新时间（默认 now()） |
+
+- **读取**：GET /position-categories 供前端下拉与「管理分类」使用；GET /status 的 accounts.positions 中通过 position_category_tags 关联带出 category_id、category（名称）。
+
+### 2.20 表 `position_category_tags`（持仓→分类关联，一持仓一分类）
+
+- **用途**：将 **position_categories** 中的分类 **Tag** 到 **account_positions** 的某条持仓上；仅对 STK 持仓有意义，用于按分类跟踪回报。
+- **主键/唯一**：**(account_id, contract_key)** 唯一，即每条持仓至多一个分类。
+- **写入**：监控端 PUT /position-categories/tag 时 UPSERT 或 DELETE（category_id 为 null 时删除 tag）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| account_id | text NOT NULL | 账户（与 account_positions 一致） |
+| contract_key | text NOT NULL | 合约唯一键（与 account_positions 一致） |
+| category_id | integer NOT NULL | 关联 position_categories.id |
+| created_at | timestamptz | 创建时间（默认 now()） |
+
+- **外键**：category_id → position_categories(id)；account_id + contract_key 对应 account_positions 中存在的行（应用层保证，或可选 FK）。
+- **读取**：servers/reader.get_accounts_from_tables() 在读取 account_positions 时 LEFT JOIN 本表与 position_categories，将 category_id、category（名称）写入 positions[*]。
 
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
@@ -458,7 +492,7 @@
 python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
@@ -531,6 +565,7 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 | IB 连接状态（RE-7） | daemon_heartbeat 增加 ib_connected、ib_client_id；daemon_control 支持 command=retry_ib；守护程序不假定 IB 已运行，可观测与重试。 | 阶段 2 |
 | 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）；§2.12 弃用 ohlc_bars，新增 §2.13–§2.17 表 stock_day、stock_min、option_day、option_min、watchlist（股票/期权 K 线与自选标的）；供复盘与风控页及 GET /executions、GET /bars、Watchlist CRUD、报价落库使用。 | 阶段 3 |
 | 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、watchlist；K 线读写改为分表；Watchlist CRUD 与智能拉取 duration。 | 阶段 3 |
+| 2026-03-08 持仓分类 | 新增 §2.19 表 position_categories（STK 持仓分类定义）、§2.20 表 position_category_tags（持仓→分类 Tag）；GET /position-categories、PUT /position-categories/tag；GET /status 的 positions 带出 category_id/category。 | 阶段 3 扩展 |
 
 ---
 

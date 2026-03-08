@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, ExecutionsResponseWithPairs, PerformanceResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, ExecutionsResponseWithPairs, PerformanceResponse, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse, PositionCategory, PositionCategoriesResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -320,6 +320,53 @@ export async function deleteWatchlist(by: { contract_key?: string; id?: number }
   if (by.id != null) params.set('id', String(by.id))
   const r = await fetch(`${API}/watchlist?${params}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
+  return { ok: j.ok === true, error: j.error }
+}
+
+/** Position categories: list all (for dropdown and manage UI). */
+export async function fetchPositionCategories(): Promise<PositionCategoriesResponse> {
+  const r = await fetch(`${API}/position-categories`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Position categories: create one. */
+export async function postPositionCategory(item: { name: string; description?: string; sort_order?: number }): Promise<{ ok: boolean; id?: number; error?: string }> {
+  const res = await fetch(`${API}/position-categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  })
+  const j = await res.json().catch(() => ({}))
+  return { ok: j.ok === true, id: j.id, error: j.error }
+}
+
+/** Position categories: update one. */
+export async function patchPositionCategory(id: number, item: { name?: string; description?: string; sort_order?: number }): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${API}/position-categories/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  })
+  const j = await res.json().catch(() => ({}))
+  return { ok: j.ok === true, error: j.error }
+}
+
+/** Position categories: delete one (tags are removed by backend). */
+export async function deletePositionCategory(id: number): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${API}/position-categories/${id}`, { method: 'DELETE' })
+  const j = await res.json().catch(() => ({}))
+  return { ok: j.ok === true, error: j.error }
+}
+
+/** Tag a position with a category (STK). Pass category_id null to clear tag. */
+export async function putPositionCategoryTag(account_id: string, contract_key: string, category_id: number | null): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${API}/position-categories/tag`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account_id, contract_key, category_id }),
+  })
+  const j = await res.json().catch(() => ({}))
   return { ok: j.ok === true, error: j.error }
 }
 

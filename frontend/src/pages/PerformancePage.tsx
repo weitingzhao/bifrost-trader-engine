@@ -476,9 +476,10 @@ function computeDayRealizedUnrealizedStock(
 
 interface PerformancePageProps {
   status: StatusResponse | null
+  onViewChange?: (view: 'accounts') => void
 }
 
-export function PerformancePage({ status: _status }: PerformancePageProps) {
+export function PerformancePage({ status: _status, onViewChange }: PerformancePageProps) {
   const [data, setData] = useState<PerformanceResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -752,7 +753,16 @@ export function PerformancePage({ status: _status }: PerformancePageProps) {
   return (
     <div className="app-page-stack performance-page">
       <section className="card performance-summary-section" aria-label="Performance">
-        <h2 className="card-title">Performance</h2>
+        <h2 className="card-title page-title-with-tooltip">
+          <button
+            type="button"
+            className="page-title-breadcrumb-link"
+            onClick={() => onViewChange?.('accounts')}
+          >
+            Portfolio
+          </button>
+          {' / Performance'}
+        </h2>
         <div className="performance-filters performance-filters-inline">
           {loading && <p className="section-hint performance-filters-loading">Loading…</p>}
           <div className="performance-filter-group">

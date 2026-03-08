@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBarsBenchmark, fetchQuotes, postExecutionsFetch, subscribeQuotes } from '../api'
+import {
+  fetchPositionCategories,
+  postPositionCategory,
+  patchPositionCategory,
+  deletePositionCategory,
+  putPositionCategoryTag,
+} from '../api'
+import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
 
 type DailyBenchmark = {
@@ -21,6 +29,16 @@ function fmtUsd(n: number | null | undefined): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n)
+}
+
+function fmtUsdRound0(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—'
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Math.round(n))
 }
 
 function fmtExpiry(raw: string | undefined): string {
@@ -72,19 +90,23 @@ function computeDailyChange(
   bench: DailyBenchmark | undefined,
   currPrice: number | null,
   qty: number,
+  /** When price is from stock_day fallback (db), use this as base for daily %/$ instead of bench */
+  dailyPrevClose?: number | null,
 ): { changePct: number | null; pnlVsBench: number | null } {
-  if (!bench || !Number.isFinite(bench.close) || bench.close <= 0) {
-    return { changePct: null, pnlVsBench: null }
-  }
   if (currPrice == null || !Number.isFinite(currPrice)) {
     return { changePct: null, pnlVsBench: null }
   }
-  const prevClose =
-    bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0
-      ? bench.prev_close
-      : null
-  const basePrice = bench.is_today && prevClose != null ? prevClose : bench.close
-  if (!Number.isFinite(basePrice) || basePrice <= 0) {
+  let basePrice: number | null = null
+  if (dailyPrevClose != null && Number.isFinite(dailyPrevClose) && dailyPrevClose > 0) {
+    basePrice = dailyPrevClose
+  } else if (bench && Number.isFinite(bench.close) && bench.close > 0) {
+    const prevClose =
+      bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0
+        ? bench.prev_close
+        : null
+    basePrice = bench.is_today && prevClose != null ? prevClose : bench.close
+  }
+  if (basePrice == null || !Number.isFinite(basePrice) || basePrice <= 0) {
     return { changePct: null, pnlVsBench: null }
   }
   return {
@@ -134,7 +156,7 @@ function resolvePreferredPrice(args: {
   return { price: null, source: null, updatedAtSec: null }
 }
 
-export interface IbAccountsPageProps {
+export interface AccountsPageProps {
   status: StatusResponse | null
   accountsDisplay: IbAccountSnapshot[] | null
   ibAccountIndex: number
@@ -143,9 +165,11 @@ export interface IbAccountsPageProps {
   onRefreshAccounts: () => Promise<void>
   /** Short feedback after refresh (success/fail/timeout); cleared by parent after a few seconds */
   refreshFeedback?: string | null
+  /** Optional: navigate to Portfolio sub-view (e.g. back to Accounts); used for breadcrumb "Portfolio" link */
+  onViewChange?: (view: 'accounts') => void
 }
 
-export function IbAccountsPage({
+export function AccountsPage({
   status,
   accountsDisplay,
   ibAccountIndex,
@@ -153,7 +177,8 @@ export function IbAccountsPage({
   ibAccountsRefreshing,
   onRefreshAccounts,
   refreshFeedback,
-}: IbAccountsPageProps) {
+  onViewChange,
+}: AccountsPageProps) {
   const j = status
   const rawAccounts = (accountsDisplay ?? j?.accounts) as IbAccountSnapshot[] | undefined
   const hasAccounts = Array.isArray(rawAccounts) && rawAccounts.length > 0
@@ -164,6 +189,22 @@ export function IbAccountsPage({
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
   const [replaySyncing, setReplaySyncing] = useState(false)
+  const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  const [categoryError, setCategoryError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!hasAccounts) return
+    let cancelled = false
+    fetchPositionCategories()
+      .then((r) => {
+        if (!cancelled) setPositionCategories(r.items ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setPositionCategories([])
+      })
+    return () => { cancelled = true }
+  }, [hasAccounts])
 
   const overviewTotals = useMemo(() => {
     const list = rawAccounts ?? []
@@ -252,18 +293,35 @@ export function IbAccountsPage({
       <div className="card process-section">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
           <h2 style={{ margin: 0 }} className="page-title-with-tooltip">
-            IB Accounts{' '}
+            <button
+              type="button"
+              className="page-title-breadcrumb-link"
+              onClick={() => onViewChange?.('accounts')}
+            >
+              Portfolio
+            </button>
+            {' / Accounts'}
             <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
           </h2>
-          <button
-            type="button"
-            className="btn-resume"
-            disabled={ibAccountsRefreshing}
-            onClick={onRefreshAccounts}
-            title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
-          >
-            {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-small btn-size-default"
+              onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
+              aria-label="Manage position categories"
+            >
+              Categories
+            </button>
+            <button
+              type="button"
+              className="btn-resume"
+              disabled={ibAccountsRefreshing}
+              onClick={onRefreshAccounts}
+              title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
+            >
+              {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
         </div>
         {refreshFeedback != null && refreshFeedback !== '' && (
           <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
@@ -271,35 +329,17 @@ export function IbAccountsPage({
           </p>
         )}
 
-        <section className="replay-section" aria-labelledby="ib-portfolio-overview-head">
-          <h3 id="ib-portfolio-overview-head">Portfolio overview</h3>
-          <div className="risk-summary-cards">
-            <div className="risk-card">
-              <span className="risk-card-label">Accounts</span>
-              <span className="risk-card-value">{status?.accounts?.length ?? 0}</span>
-            </div>
-            <div className="risk-card">
-              <span className="risk-card-label">Open option contracts</span>
-              <span className="risk-card-value">{overviewTotals.optionContracts}</span>
-            </div>
-            <div className="risk-card">
-              <span className="risk-card-label">Stock lines</span>
-              <span className="risk-card-value">{overviewTotals.stockLines}</span>
-            </div>
-            <div className="risk-card">
-              <span className="risk-card-label">Unrealized PnL</span>
-              <span className="risk-card-value">{fmtUsd(overviewTotals.unrealizedPnl)}</span>
-            </div>
-          </div>
-          {fetchedAt != null && Number.isFinite(fetchedAt) && (
-            <p className="section-hint replay-overview-fetched-at">
-              Live positions snapshot from {new Date(fetchedAt * 1000).toLocaleString()}.
-            </p>
-          )}
-        </section>
+        <div className="ib-portfolio-overview-compact" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
+          <span><span className="ib-portfolio-overview-label">Accounts</span> {status?.accounts?.length ?? 0}</span>
+          <span className="ib-portfolio-overview-sep">·</span>
+          <span><span className="ib-portfolio-overview-label">Options</span> {overviewTotals.optionContracts}</span>
+          <span className="ib-portfolio-overview-sep">·</span>
+          <span><span className="ib-portfolio-overview-label">Stock lines</span> {overviewTotals.stockLines}</span>
+          <span className="ib-portfolio-overview-sep">·</span>
+          <span><span className="ib-portfolio-overview-label">Unrealized PnL</span> {fmtUsd(overviewTotals.unrealizedPnl)}</span>
+        </div>
 
-        <section className="replay-section" aria-labelledby="ib-fetch-head">
-          <h3 id="ib-fetch-head">Fetch from IB</h3>
+        <section className="replay-section" aria-label="Execution fetch range">
           <div className="replay-toolbar">
             <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
               <span className="replay-fetch-days-label">Fetch</span>
@@ -336,6 +376,82 @@ export function IbAccountsPage({
         <p className="section-hint">
           No account data (IB not connected or daemon has not written yet; after connection, data is pulled on heartbeat and written to accounts / account_positions)
         </p>
+
+        {categoryModalOpen && (
+          <div
+            className="modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="category-modal-title"
+            onClick={(e) => e.target === e.currentTarget && setCategoryModalOpen(false)}
+          >
+            <div className="modal-content card" style={{ maxWidth: '28rem' }} onClick={(e) => e.stopPropagation()}>
+              <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
+              {categoryError && (
+                <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
+                  {categoryError}
+                </p>
+              )}
+              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
+                Add or edit categories to tag STK positions (e.g. Dividend, Short-term). Use the Category column in the table to assign.
+              </p>
+              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1rem 0' }}>
+                {positionCategories.map((c) => (
+                  <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <span style={{ flex: 1 }}>{c.name}</span>
+                    {c.description && (
+                      <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      onClick={async () => {
+                        if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
+                        await deletePositionCategory(c.id)
+                        const r = await fetchPositionCategories()
+                        setPositionCategories(r.items ?? [])
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  setCategoryError(null)
+                  const form = e.currentTarget
+                  const name = (form.querySelector('input[name="newCategoryNameNoAcc"]') as HTMLInputElement)?.value?.trim()
+                  if (!name) return
+                  const res = await postPositionCategory({ name })
+                  if (res.ok) {
+                    const r = await fetchPositionCategories()
+                    setPositionCategories(r.items ?? [])
+                    form.reset()
+                  } else {
+                    setCategoryError(res.error ?? 'Failed to create category.')
+                  }
+                }}
+                style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}
+              >
+                <input
+                  type="text"
+                  name="newCategoryNameNoAcc"
+                  placeholder="New category name"
+                  required
+                  style={{ minWidth: '10rem' }}
+                />
+                <button type="submit" className="btn btn-small">Add</button>
+              </form>
+              <div style={{ marginTop: '1rem' }}>
+                <button type="button" className="btn btn-small" onClick={() => setCategoryModalOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -348,6 +464,24 @@ export function IbAccountsPage({
   const positions = acc.positions ?? []
   const stockPositions = positions.filter((p) => (p.secType ?? '').toUpperCase() !== 'OPT')
   const optionPositions = positions.filter((p) => (p.secType ?? '').toUpperCase() === 'OPT')
+  const stockByCategory = useMemo(() => {
+    const map: Record<string, typeof stockPositions> = {}
+    for (const p of stockPositions) {
+      const k = (p.category && String(p.category).trim()) || 'Uncategorized'
+      if (!map[k]) map[k] = []
+      map[k].push(p)
+    }
+    return map
+  }, [stockPositions])
+  const categoryOrder = useMemo(() => {
+    const keys = Object.keys(stockByCategory)
+    keys.sort((a, b) => {
+      if (a === 'Uncategorized') return -1
+      if (b === 'Uncategorized') return 1
+      return a.localeCompare(b)
+    })
+    return keys
+  }, [stockByCategory])
   const spot =
     status?.status?.spot != null && Number.isFinite(Number(status.status.spot))
       ? Number(status.status.spot)
@@ -361,18 +495,35 @@ export function IbAccountsPage({
     <div className="card process-section">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
         <h2 style={{ margin: 0 }} className="page-title-with-tooltip">
-          IB Accounts{' '}
+          <button
+            type="button"
+            className="page-title-breadcrumb-link"
+            onClick={() => onViewChange?.('accounts')}
+          >
+            Portfolio
+          </button>
+          {' / Accounts'}
           <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
         </h2>
-        <button
-          type="button"
-          className="btn-resume"
-          disabled={ibAccountsRefreshing}
-          onClick={onRefreshAccounts}
-          title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
-        >
-          {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-small btn-size-default"
+            onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
+            aria-label="Manage position categories"
+          >
+            Categories
+          </button>
+          <button
+            type="button"
+            className="btn-resume"
+            disabled={ibAccountsRefreshing}
+            onClick={onRefreshAccounts}
+            title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
+          >
+            {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {refreshFeedback != null && refreshFeedback !== '' && (
@@ -398,35 +549,17 @@ export function IbAccountsPage({
         </p>
       )}
 
-      <section className="replay-section" aria-labelledby="ib-portfolio-overview-head">
-        <h3 id="ib-portfolio-overview-head">Portfolio overview</h3>
-        <div className="risk-summary-cards">
-          <div className="risk-card">
-            <span className="risk-card-label">Accounts</span>
-            <span className="risk-card-value">{accounts.length}</span>
-          </div>
-          <div className="risk-card">
-            <span className="risk-card-label">Open option contracts</span>
-            <span className="risk-card-value">{overviewTotals.optionContracts}</span>
-          </div>
-          <div className="risk-card">
-            <span className="risk-card-label">Stock lines</span>
-            <span className="risk-card-value">{overviewTotals.stockLines}</span>
-          </div>
-          <div className="risk-card">
-            <span className="risk-card-label">Unrealized PnL</span>
-            <span className="risk-card-value">{fmtUsd(overviewTotals.unrealizedPnl)}</span>
-          </div>
-        </div>
-        {fetchedAt != null && Number.isFinite(fetchedAt) && (
-          <p className="section-hint replay-overview-fetched-at">
-            Live positions snapshot from {new Date(fetchedAt * 1000).toLocaleString()}.
-          </p>
-        )}
-      </section>
+      <div className="ib-portfolio-overview-compact" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
+        <span><span className="ib-portfolio-overview-label">Accounts</span> {accounts.length}</span>
+        <span className="ib-portfolio-overview-sep">·</span>
+        <span><span className="ib-portfolio-overview-label">Options</span> {overviewTotals.optionContracts}</span>
+        <span className="ib-portfolio-overview-sep">·</span>
+        <span><span className="ib-portfolio-overview-label">Stock lines</span> {overviewTotals.stockLines}</span>
+        <span className="ib-portfolio-overview-sep">·</span>
+        <span><span className="ib-portfolio-overview-label">Unrealized PnL</span> {fmtUsd(overviewTotals.unrealizedPnl)}</span>
+      </div>
 
-      <section className="replay-section" aria-labelledby="ib-fetch-head">
-        <h3 id="ib-fetch-head">Fetch from IB</h3>
+      <section className="replay-section" aria-label="Execution fetch range">
         <div className="replay-toolbar">
           <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
             <span className="replay-fetch-days-label">Fetch</span>
@@ -512,6 +645,7 @@ export function IbAccountsPage({
             <p className="ib-positions-empty">None</p>
           ) : (
             <>
+              <div style={{ marginBottom: '0.35rem' }} />
               <table className="ib-positions-table">
                 <thead>
                   <tr>
@@ -522,12 +656,26 @@ export function IbAccountsPage({
                     <th>Market</th>
                     <th>Daily %</th>
                     <th>Daily $</th>
-                    <th>PnL (Cost)</th>
-                    <th>Since</th>
+                    <th>CHANGE %</th>
+                    <th>CHANGE $</th>
+                    <th>Upd</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {stockPositions.map((pos, i) => {
+                {categoryOrder.map((catLabel) => (
+                  <tbody key={catLabel}>
+                    <tr className="ib-stock-group-header">
+                      <td colSpan={10}>
+                        <button
+                          type="button"
+                          className="ib-stock-group-header-btn"
+                          onClick={() => setCategoryModalOpen(true)}
+                          title="Manage categories and assign to positions"
+                        >
+                          {catLabel}
+                        </button>
+                      </td>
+                    </tr>
+                  {stockByCategory[catLabel].map((pos, i) => {
                     const qty = pos.position != null ? Number(pos.position) : NaN
                     const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
                     const totalCost = Number.isFinite(qty) && Number.isFinite(cost) ? qty * cost : null
@@ -565,15 +713,24 @@ export function IbAccountsPage({
                           ? (currPrice - cost) * qty
                           : null
                     const bench = benchmarks[sym]
-                    const { changePct, pnlVsBench } = computeDailyChange(bench, currPrice, qty)
+                    const { changePct, pnlVsBench } = computeDailyChange(
+                      bench,
+                      currPrice,
+                      qty,
+                      priceInfo.source === 'db' ? pos.daily_prev_close : undefined,
+                    )
                     const marketColor =
                       currPrice != null && Number.isFinite(cost)
                         ? (currPrice > cost ? 'var(--color-success, green)' : currPrice < cost ? 'var(--color-danger, #c00)' : undefined)
                         : undefined
                     const pnlColor =
                       pnl != null ? (pnl > 0 ? 'var(--color-success, green)' : pnl < 0 ? 'var(--color-danger, #c00)' : undefined) : undefined
+                    const changePctVsCost =
+                      cost > 0 && currPrice != null && Number.isFinite(currPrice)
+                        ? ((currPrice - cost) / cost) * 100
+                        : null
                     return (
-                      <tr key={`stk-${pos.symbol}-${i}`} className="ib-pos-stock">
+                      <tr key={`stk-${catLabel}-${pos.contract_key ?? pos.symbol}-${i}`} className="ib-pos-stock">
                         <td>{pos.symbol ?? '—'}</td>
                         <td>{pos.position != null ? pos.position : '—'}</td>
                         <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
@@ -593,14 +750,23 @@ export function IbAccountsPage({
                         <td>
                           {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
                             <span style={{ color: pnlVsBench >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
-                              {fmtUsd(pnlVsBench)}
+                              {fmtUsdRound0(pnlVsBench)}
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>
+                          {changePctVsCost != null && Number.isFinite(changePctVsCost) ? (
+                            <span style={{ color: changePctVsCost >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
+                              {changePctVsCost >= 0 ? '+' : ''}{changePctVsCost.toFixed(2)}%
                             </span>
                           ) : (
                             '—'
                           )}
                         </td>
                         <td style={pnlColor ? { color: pnlColor, fontWeight: 600 } : undefined}>
-                          {pnl != null ? fmtUsd(pnl) : '—'}
+                          {pnl != null ? fmtUsdRound0(pnl) : '—'}
                         </td>
                         <td>
                           {priceInfo.updatedAtSec != null ? formatLastUpdate(priceInfo.updatedAtSec) : '—'}
@@ -608,7 +774,84 @@ export function IbAccountsPage({
                       </tr>
                     )
                   })}
-                </tbody>
+                  {(() => {
+                    const groupTotalCost = stockByCategory[catLabel].reduce((acc, pos) => {
+                      const qty = pos.position != null ? Number(pos.position) : NaN
+                      const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
+                      if (Number.isFinite(qty) && Number.isFinite(cost)) return acc + qty * cost
+                      return acc
+                    }, 0)
+                    let groupDailyDollar = 0
+                    let groupChangeDollar = 0
+                    let groupDailyDenom = 0
+                    for (const pos of stockByCategory[catLabel]) {
+                      const qty = pos.position != null ? Number(pos.position) : NaN
+                      const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
+                      const sym = (pos.symbol ?? '').toString().toUpperCase()
+                      const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                      const perPrice = pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null
+                      const showSpot = spot != null && Number.isFinite(spot) && sym !== '' && mainSym !== '' && sym === mainSym
+                      const priceInfo = resolvePreferredPrice({
+                        liveQuote: quotesMap[sym],
+                        dbPrice: perPrice,
+                        dbUpdatedAt: pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at)) ? Number(pos.price_updated_at) : null,
+                        daemonSpot: showSpot ? spot : null,
+                        daemonUpdatedAt: showSpot ? statusTs : null,
+                      })
+                      const currPrice = priceInfo.price
+                      const bench = benchmarks[sym]
+                      const daily = computeDailyChange(bench, currPrice, qty, priceInfo.source === 'db' ? pos.daily_prev_close : undefined)
+                      if (daily.pnlVsBench != null && Number.isFinite(daily.pnlVsBench)) groupDailyDollar += daily.pnlVsBench
+                      if (currPrice != null && Number.isFinite(qty) && Number.isFinite(cost)) groupChangeDollar += (currPrice - cost) * qty
+                      else if (pos.unrealized_pnl != null && Number.isFinite(pos.unrealized_pnl)) groupChangeDollar += pos.unrealized_pnl
+                      let basePrice: number | null = null
+                      if (pos.daily_prev_close != null && Number.isFinite(pos.daily_prev_close) && pos.daily_prev_close > 0) basePrice = pos.daily_prev_close
+                      else if (bench && Number.isFinite(bench.close) && bench.close > 0) basePrice = (bench.is_today && bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0 ? bench.prev_close : bench.close)
+                      if (basePrice != null && Number.isFinite(qty) && qty !== 0) groupDailyDenom += basePrice * Math.abs(qty)
+                    }
+                    const groupChangePct = groupTotalCost !== 0 && Number.isFinite(groupChangeDollar) ? (groupChangeDollar / groupTotalCost) * 100 : null
+                    const groupDailyPct = groupDailyDenom !== 0 && Number.isFinite(groupDailyDollar) ? (groupDailyDollar / groupDailyDenom) * 100 : null
+                    return (
+                      <tr className="ib-stock-group-summary">
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                        <td>{fmtUsd(groupTotalCost)}</td>
+                        <td></td>
+                        <td>
+                          {groupDailyPct != null && Number.isFinite(groupDailyPct) ? (
+                            <span style={{ color: groupDailyPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
+                              {groupDailyPct >= 0 ? '+' : ''}{groupDailyPct.toFixed(2)}%
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td>
+                          {groupDailyDollar !== 0 || groupTotalCost !== 0 ? (
+                            <span style={{ color: groupDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
+                              {fmtUsdRound0(groupDailyDollar)}
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td>
+                          {groupChangePct != null && Number.isFinite(groupChangePct) ? (
+                            <span style={{ color: groupChangePct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
+                              {groupChangePct >= 0 ? '+' : ''}{groupChangePct.toFixed(2)}%
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td>
+                          {groupChangeDollar !== 0 || groupTotalCost !== 0 ? (
+                            <span style={{ color: groupChangeDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)', fontWeight: 600 }}>
+                              {fmtUsdRound0(groupChangeDollar)}
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td></td>
+                      </tr>
+                    )
+                  })()}
+                  </tbody>
+                ))}
               </table>
               {(() => {
                 const sumTotal = stockPositions.reduce((acc, pos) => {
@@ -670,7 +913,7 @@ export function IbAccountsPage({
                         ? statusTs
                         : null,
                   }).price
-                  const daily = computeDailyChange(bench, currPrice, qty)
+                  const daily = computeDailyChange(bench, currPrice, qty, pos.daily_prev_close ?? undefined)
                   if (daily.pnlVsBench != null && Number.isFinite(daily.pnlVsBench))
                     return acc + daily.pnlVsBench
                   return acc
@@ -678,24 +921,35 @@ export function IbAccountsPage({
                 const totalPct = Number.isFinite(sumTotal) && sumTotal !== 0 && Number.isFinite(sumPnl)
                   ? (sumPnl / sumTotal) * 100
                   : null
+                let dailyDenom = 0
+                stockPositions.forEach((pos) => {
+                  const sym = (pos.symbol ?? '').toString().toUpperCase()
+                  const bench = benchmarks[sym]
+                  const qty = pos.position != null ? Number(pos.position) : NaN
+                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                  const currPrice = resolvePreferredPrice({
+                    liveQuote: quotesMap[sym],
+                    dbPrice: pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null,
+                    dbUpdatedAt: pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at)) ? Number(pos.price_updated_at) : null,
+                    daemonSpot: spot != null && Number.isFinite(spot) && sym === mainSym ? spot : null,
+                    daemonUpdatedAt: spot != null && Number.isFinite(spot) && sym === mainSym ? statusTs : null,
+                  }).price
+                  const daily = computeDailyChange(bench, currPrice, qty, pos.daily_prev_close ?? undefined)
+                  let basePrice: number | null = null
+                  if (pos.daily_prev_close != null && Number.isFinite(pos.daily_prev_close) && pos.daily_prev_close > 0) basePrice = pos.daily_prev_close
+                  else if (bench && Number.isFinite(bench.close) && bench.close > 0) basePrice = (bench.is_today && bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0 ? bench.prev_close : bench.close)
+                  if (basePrice != null && Number.isFinite(qty) && qty !== 0) dailyDenom += basePrice * Math.abs(qty)
+                })
+                const dailyPct = dailyDenom !== 0 && Number.isFinite(sumDailyDollar) ? (sumDailyDollar / dailyDenom) * 100 : null
                 return (
                   <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
                     Stock total cost: {fmtUsd(sumTotal)}
-                    {Number.isFinite(sumPnl) && (
-                      <span style={{ marginLeft: '1rem', color: sumPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                        PnL (Cost) Total $: {fmtUsd(sumPnl)}
-                      </span>
-                    )}
-                    {Number.isFinite(sumDailyDollar) && (
-                      <span style={{ marginLeft: '1rem', color: sumDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                        Daily $ Total: {fmtUsd(sumDailyDollar)}
-                      </span>
-                    )}
-                    {totalPct != null && Number.isFinite(totalPct) && (
-                      <span style={{ marginLeft: '1rem', color: totalPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}>
-                        Total %: {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
-                      </span>
-                    )}
+                    <span style={{ marginLeft: '1rem', color: Number.isFinite(sumPnl) ? (sumPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)') : 'var(--color-text-muted)' }}>
+                      Change {Number.isFinite(sumPnl) ? fmtUsdRound0(sumPnl) : '—'} / {totalPct != null && Number.isFinite(totalPct) ? (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '%' : '—'}
+                    </span>
+                    <span style={{ marginLeft: '1rem', color: Number.isFinite(sumDailyDollar) ? (sumDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)') : 'var(--color-text-muted)' }}>
+                      Daily {Number.isFinite(sumDailyDollar) ? fmtUsdRound0(sumDailyDollar) : '—'} / {dailyPct != null && Number.isFinite(dailyPct) ? (dailyPct >= 0 ? '+' : '') + dailyPct.toFixed(2) + '%' : '—'}
+                    </span>
                   </p>
                 )
               })()}
@@ -774,6 +1028,124 @@ export function IbAccountsPage({
           )}
         </div>
       </div>
+
+      {categoryModalOpen && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="category-modal-title"
+          onClick={(e) => e.target === e.currentTarget && setCategoryModalOpen(false)}
+        >
+          <div className="modal-content card" style={{ maxWidth: '30rem' }} onClick={(e) => e.stopPropagation()}>
+            <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
+            {categoryError && (
+              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', color: 'var(--color-danger, #c00)' }}>
+                {categoryError}
+              </p>
+            )}
+            <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
+              Add or edit categories, then assign them to STK positions below. Positions are grouped by category in the table.
+            </p>
+            <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1rem 0' }}>
+              {positionCategories.map((c) => (
+                <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                  <span style={{ flex: 1 }}>{c.name}</span>
+                  {c.description && (
+                    <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    onClick={async () => {
+                      if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
+                      await deletePositionCategory(c.id)
+                      const r = await fetchPositionCategories()
+                      setPositionCategories(r.items ?? [])
+                    }}
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                setCategoryError(null)
+                const form = e.currentTarget
+                const name = (form.querySelector('input[name="newCategoryName"]') as HTMLInputElement)?.value?.trim()
+                if (!name) return
+                const res = await postPositionCategory({ name })
+                if (res.ok) {
+                  const r = await fetchPositionCategories()
+                  setPositionCategories(r.items ?? [])
+                  form.reset()
+                } else {
+                  setCategoryError(res.error ?? 'Failed to create category.')
+                }
+              }}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}
+            >
+              <input
+                type="text"
+                name="newCategoryName"
+                placeholder="New category name"
+                required
+                style={{ minWidth: '10rem' }}
+              />
+              <button type="submit" className="btn btn-small">Add</button>
+            </form>
+            <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
+              <strong style={{ display: 'block', marginBottom: '0.5rem' }}>Assign category to positions</strong>
+              <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                {acc?.account_id ? `Current account: ${acc.account_id}. Select a category per symbol.` : 'Select an account on the page first.'}
+              </p>
+              {(() => {
+                const stkPositions = (acc?.positions ?? []).filter(
+                  (p) => (p.secType ?? '').toUpperCase() === 'STK',
+                )
+                if (stkPositions.length === 0) {
+                  return <p className="section-hint" style={{ margin: 0, fontSize: '0.85rem' }}>No STK positions in this account.</p>
+                }
+                return (
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '12rem', overflowY: 'auto' }}>
+                    {stkPositions.map((pos) => {
+                      const ck = pos.contract_key ?? `${pos.symbol ?? ''}|STK|||`
+                      return (
+                        <li key={ck} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                          <span style={{ minWidth: '4rem', fontWeight: 500 }}>{pos.symbol ?? '—'}</span>
+                          <select
+                            className="ib-position-category-select ib-category-modal-select"
+                            value={pos.category_id ?? ''}
+                            onChange={async (e) => {
+                              const v = e.target.value
+                              await putPositionCategoryTag(acc!.account_id!, ck, v ? Number(v) : null)
+                              onRefreshAccounts()
+                            }}
+                            aria-label={`Category for ${pos.symbol ?? 'position'}`}
+                            style={{ flex: 1, minWidth: 0 }}
+                          >
+                            <option value="">Uncategorized</option>
+                            {positionCategories.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )
+              })()}
+            </div>
+            <div style={{ marginTop: '1rem' }}>
+              <button type="button" className="btn btn-small" onClick={() => setCategoryModalOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

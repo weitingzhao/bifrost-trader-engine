@@ -527,18 +527,23 @@ body::before {
   font-size: var(--text-body);
   font-weight: 500;
   color: #fff;
-  background: var(--color-danger, #c53030);
+  background: var(--color-danger);
   border: none;
-  border-radius: var(--radius);
+  border-radius: 10px;
   cursor: pointer;
-  transition: opacity var(--transition-fast), filter var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 .btn-shutdown-all:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: #dc2626;
+  transform: translateY(-1px);
+}
+.btn-shutdown-all:active:not(:disabled) {
+  transform: translateY(0);
 }
 .btn-shutdown-all:disabled {
-  opacity: 0.7;
+  opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 .status-page-msg {
   font-size: var(--text-small);
@@ -1707,6 +1712,68 @@ th {
 
 .ib-positions-table tr.ib-pos-stock:hover {
   background: rgba(74, 222, 128, 0.1);
+}
+
+.ib-positions-table tr.ib-stock-group-header td {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-caption);
+}
+
+.ib-stock-group-header-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.ib-stock-group-header-btn:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.ib-positions-table tr.ib-stock-group-summary td {
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-caption);
+}
+
+.ib-position-category-select,
+.ib-category-modal-select {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-body);
+  cursor: pointer;
+  min-height: 2rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ib-position-category-select:hover,
+.ib-category-modal-select:hover {
+  border-color: var(--color-primary, #3b82f6);
+}
+
+.ib-position-category-select:focus,
+.ib-category-modal-select:focus {
+  outline: none;
+  border-color: var(--color-primary, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
 }
 
 .ib-positions-table tr.ib-pos-opt {
@@ -3063,6 +3130,39 @@ th {
   gap: var(--space-4);
 }
 
+/* Compact one-line portfolio overview under Portfolio / Accounts */
+.ib-portfolio-overview-wrap.replay-section {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+.ib-portfolio-overview-wrap.replay-section h3 {
+  margin-bottom: var(--space-1);
+}
+
+.ib-portfolio-overview-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem var(--space-2);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+}
+
+.ib-portfolio-overview-label {
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-right: 0.2em;
+}
+
+.ib-portfolio-overview-sep {
+  color: var(--color-text-muted);
+  font-weight: 300;
+  user-select: none;
+}
+
 .risk-card {
   display: flex;
   flex-direction: column;
@@ -3102,6 +3202,12 @@ th {
 .btn-small {
   padding: var(--space-1) var(--space-2);
   font-size: var(--text-caption);
+}
+
+/* Same size as default button (e.g. Refresh) but keep .btn-small color */
+.btn-small.btn-size-default {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-body);
 }
 
 .btn-x {

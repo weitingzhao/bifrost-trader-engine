@@ -93,7 +93,8 @@ def main() -> int:
             "status_current, status_history, operations, daemon_control, "
             "daemon_run_status, daemon_heartbeat, settings, accounts, account_positions, "
             "instrument_prices, account_executions, account_execution_commissions, "
-            "stock_day, stock_min, option_day, option_min, watchlist, bars_backfill_jobs"
+            "stock_day, stock_min, option_day, option_min, watchlist, bars_backfill_jobs, "
+            "position_categories, position_category_tags"
         )
         print(f"Schema refreshed in database {dbname!r}.")
         print(f"  Tables: {tables_list}")

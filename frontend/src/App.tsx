@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { IbAccountSnapshot, StatusResponse, Operation, RealtimeQuote } from './types'
 import {
   fetchStatus,
@@ -11,10 +11,11 @@ import {
 } from './api'
 import { StatusPage, type ConsoleSection, type OperationsSection } from './pages/StatusPage'
 import { LivePage } from './pages/LivePage'
-import { IbAccountsPage } from './pages/IbAccountsPage'
+import { AccountsPage } from './pages/AccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
 import { DataPage } from './pages/DataPage'
-import { PositionPnlPage, type PortfolioView } from './pages/PositionPnlPage'
+import { PositionsPage, type PortfolioView } from './pages/PositionsPage'
+import { TradeHistoryPage } from './pages/TradeHistoryPage'
 import { PerformancePage } from './pages/PerformancePage'
 import { ResearchRiskAnalysisPage } from './pages/ResearchRiskAnalysisPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -168,7 +169,7 @@ function SystemDashboard({
     <section className="card dashboard-strip" aria-label="Status dashboard">
       <div className="dashboard-strip-grid">
         <div className="dashboard-system-cluster">
-          <span className="dashboard-group-label">Status</span>
+          <span className="dashboard-group-label">Sys</span>
           <div className="dashboard-system-chips">
             {items.map((item) => (
               <button
@@ -209,7 +210,6 @@ function SystemDashboard({
         </div>
 
         <div className="dashboard-streams-cluster" aria-label="Market streams summary">
-          <span className="dashboard-group-label">Streams</span>
           <div className="dashboard-streams-inline">
             <span className={`lamp lamp-sm ${streamLamp}`} aria-hidden />
             <div className="dashboard-streams-marquee">
@@ -310,6 +310,19 @@ export default function App() {
       setAccountsDisplay(status.accounts ? [...status.accounts] : [])
   }, [status?.accounts, accountsDisplay])
 
+  // Sync accounts when backend reports new data (e.g. after fallback prices applied) so Market/Daily %/Daily $ update
+  const lastAccountsFetchedAtRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (status?.accounts == null || status?.accounts_fetched_at == null) return
+    const fetchedAt = status.accounts_fetched_at
+    if (accountsDisplay !== null && fetchedAt !== lastAccountsFetchedAtRef.current) {
+      lastAccountsFetchedAtRef.current = fetchedAt
+      setAccountsDisplay([...status.accounts])
+    } else if (accountsDisplay === null) {
+      lastAccountsFetchedAtRef.current = fetchedAt
+    }
+  }, [status?.accounts, status?.accounts_fetched_at, accountsDisplay])
+
   useEffect(() => {
     const t = setInterval(() => {
       loadStatus().then((j) => setAccountsDisplay(j?.accounts ? [...j.accounts] : []))
@@ -392,56 +405,14 @@ export default function App() {
       ? ((status?.celery_workers?.length ?? 0) > 0 ? 'green' : 'yellow')
       : 'red'
   const daemonHeartbeat = status?.daemon_heartbeat
-  const liveLamp: LampId =
-    status?.redis_quotes_connected === true && daemonHeartbeat?.event_subscribe_ticker === true
-      ? 'green'
-      : 'red'
   const watchlistSymbols = useMemo(
     () => [...new Set([...(status?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
     [status?.subscribed_tickers, quotesMap],
   )
-
-  useEffect(() => {
-    if (watchlistSymbols.length === 0) {
-      setBenchmarks({})
-      return
-    }
-    let cancelled = false
-    fetchBarsBenchmark(watchlistSymbols)
-      .then((res) => {
-        if (!cancelled) setBenchmarks(res.benchmarks ?? {})
-      })
-      .catch(() => {
-        if (!cancelled) setBenchmarks({})
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [watchlistSymbols.join(',')])
-
-  const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'system', label: 'Status', lamp: systemLamp },
-    { id: 'live', label: 'Live', lamp: liveLamp },
-    { id: 'watchlist', label: 'Watchlist' },
-    { id: 'replay', label: 'Portfolio' },
-    { id: 'research', label: 'Research' },
-    { id: 'settings', label: 'Settings' },
-  ]
-
-  const researchSubtabs: { id: 'risk' | 'screener' | 'data' | 'backtest'; label: string }[] = [
-    { id: 'screener', label: 'Screener' },
-    { id: 'risk', label: 'Risk Model' },
-    { id: 'data', label: 'Data' },
-    { id: 'backtest', label: 'Back test' },
-  ]
-
-  const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'open', label: 'Positions' },
-    { id: 'performance', label: 'Performance' },
-    { id: 'ledger', label: 'Trade History' },
-    { id: 'transfer', label: 'Transfer & Pay' },
-  ]
+  const liveLamp: LampId =
+    status?.redis_quotes_connected === true && daemonHeartbeat?.event_subscribe_ticker === true
+      ? 'green'
+      : 'red'
 
   const dashboardItems: DashboardItem[] = [
     {
@@ -554,6 +525,48 @@ export default function App() {
       },
     ]
   }, [status?.accounts, watchlistSymbols, quotesMap, benchmarks, liveLamp])
+
+  useEffect(() => {
+    if (watchlistSymbols.length === 0) {
+      setBenchmarks({})
+      return
+    }
+    let cancelled = false
+    fetchBarsBenchmark(watchlistSymbols)
+      .then((res) => {
+        if (!cancelled) setBenchmarks(res.benchmarks ?? {})
+      })
+      .catch(() => {
+        if (!cancelled) setBenchmarks({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [watchlistSymbols.join(',')])
+
+  const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
+    { id: 'system', label: 'Status', lamp: systemLamp },
+    { id: 'live', label: 'Live', lamp: liveLamp },
+    { id: 'watchlist', label: 'Watchlist' },
+    { id: 'replay', label: 'Portfolio' },
+    { id: 'research', label: 'Research' },
+    { id: 'settings', label: 'Settings' },
+  ]
+
+  const researchSubtabs: { id: 'risk' | 'screener' | 'data' | 'backtest'; label: string }[] = [
+    { id: 'screener', label: 'Screener' },
+    { id: 'risk', label: 'Risk Model' },
+    { id: 'data', label: 'Data' },
+    { id: 'backtest', label: 'Back test' },
+  ]
+
+  const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
+    { id: 'accounts', label: 'Accounts' },
+    { id: 'open', label: 'Positions' },
+    { id: 'performance', label: 'Performance' },
+    { id: 'ledger', label: 'Trade History' },
+    { id: 'transfer', label: 'Transfer & Pay' },
+  ]
 
   const openSystemSection = (section: OperationsSection) => {
     setActiveTab('system')
@@ -712,8 +725,9 @@ export default function App() {
 
       {activeTab === 'replay' && (
         <>
+          {/* Portfolio sub-pages: each menu item → one page component (AccountsPage, PositionsPage, PerformancePage, TradeHistoryPage, TransferPayPage). */}
           {portfolioView === 'accounts' ? (
-            <IbAccountsPage
+            <AccountsPage
               status={status}
               accountsDisplay={accountsDisplay}
               ibAccountIndex={ibAccountIndex}
@@ -721,13 +735,20 @@ export default function App() {
               ibAccountsRefreshing={ibAccountsRefreshing}
               onRefreshAccounts={onRefreshAccounts}
               refreshFeedback={accountsRefreshFeedback}
+              onViewChange={setPortfolioView}
             />
           ) : portfolioView === 'performance' ? (
-            <PerformancePage status={status} />
+            <PerformancePage status={status} onViewChange={setPortfolioView} />
           ) : portfolioView === 'transfer' ? (
-            <TransferPayPage status={status} />
+            <TransferPayPage status={status} onViewChange={setPortfolioView} />
+          ) : portfolioView === 'ledger' ? (
+            <TradeHistoryPage
+              status={status}
+              onViewChange={setPortfolioView}
+              showViewTabs={false}
+            />
           ) : (
-            <PositionPnlPage
+            <PositionsPage
               status={status}
               currentView={portfolioView}
               onViewChange={setPortfolioView}

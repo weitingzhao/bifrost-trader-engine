@@ -1472,6 +1472,71 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
             self._conn = None
             return {}
 
+    def get_stock_day_fallback_price(
+        self,
+        symbol: str,
+    ) -> Optional[Tuple[float, float, Optional[float]]]:
+        """Return (close, bar_time_epoch, prev_close) from stock_day for display when instrument_prices has no row.
+        prev_close is the close of the bar immediately before the bar used for price (for Daily %/$ when not today).
+        If the latest bar's date is today, use the previous bar's close (incomplete day); otherwise use latest close.
+        Returns None if no usable row."""
+        if not self._connect() or not (symbol or "").strip():
+            return None
+        sym = (symbol or "").strip()
+        today = date.today()
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT bar_time, close,
+                           extract(epoch from bar_time) AS bar_time_epoch
+                    FROM stock_day
+                    WHERE symbol = %s
+                    ORDER BY bar_time DESC
+                    LIMIT 3
+                    """,
+                    (sym,),
+                )
+                rows = cur.fetchall()
+            if not rows:
+                return None
+            # Latest bar's date: bar_time may be date or datetime from driver
+            bt0 = rows[0].get("bar_time")
+            bar_date_0 = bt0.date() if hasattr(bt0, "date") else (bt0 if isinstance(bt0, date) else today)
+            if bar_date_0 == today:
+                if len(rows) < 2:
+                    return None
+                r = rows[1]
+                prev_close = rows[2].get("close") if len(rows) > 2 else None
+            else:
+                r = rows[0]
+                prev_close = rows[1].get("close") if len(rows) > 1 else None
+            close = r.get("close")
+            ts = r.get("bar_time_epoch")
+            if close is None or ts is None:
+                return None
+            try:
+                c = float(close)
+                t = float(ts)
+                if not math.isfinite(c) or not math.isfinite(t) or c <= 0:
+                    return None
+                pcl: Optional[float] = None
+                if prev_close is not None:
+                    try:
+                        pc = float(prev_close)
+                        if math.isfinite(pc) and pc > 0:
+                            pcl = pc
+                    except (TypeError, ValueError):
+                        pass
+                return (c, t, pcl)
+            except (TypeError, ValueError):
+                pass
+            return None
+        except Exception as e:
+            logger.debug("get_stock_day_fallback_price failed: %s", e)
+            self._conn = None
+            return None
+
     def get_bars_stats(
         self,
         symbol: Optional[str] = None,
@@ -1661,6 +1726,148 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
             self._conn = None
             return False
 
+    def get_position_categories(self) -> List[Dict[str, Any]]:
+        """Return all position_categories rows (id, name, description, sort_order, created_at, updated_at)."""
+        if not self._connect():
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, name, description, sort_order, created_at, updated_at
+                    FROM position_categories
+                    ORDER BY COALESCE(sort_order, 999), name
+                    """
+                )
+                rows = cur.fetchall()
+            return [dict(r) for r in rows] if rows else []
+        except Exception as e:
+            logger.debug("get_position_categories failed: %s", e)
+            self._conn = None
+            return []
+
+    def create_position_category(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        sort_order: Optional[int] = None,
+    ) -> Optional[int]:
+        """Insert a position category. Returns new id on success, None on failure."""
+        if not name or not str(name).strip():
+            return None
+        if not self._connect():
+            return None
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO position_categories (name, description, sort_order, updated_at)
+                    VALUES (%s, %s, %s, now())
+                    RETURNING id
+                    """,
+                    (str(name).strip(), (description or "").strip() or None, sort_order),
+                )
+                row = cur.fetchone()
+            self._conn.commit()
+            return int(row[0]) if row and row[0] is not None else None
+        except Exception as e:
+            logger.debug("create_position_category failed: %s", e)
+            self._conn.rollback()
+            self._conn = None
+            return None
+
+    def update_position_category(
+        self,
+        category_id: int,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        sort_order: Optional[int] = None,
+    ) -> bool:
+        """Update a position category by id. Returns True on success."""
+        if not self._connect():
+            return False
+        try:
+            updates = ["updated_at = now()"]
+            vals: List[Any] = []
+            if name is not None:
+                updates.append("name = %s")
+                vals.append(str(name).strip() if str(name).strip() else None)
+            if description is not None:
+                updates.append("description = %s")
+                vals.append(str(description).strip() or None)
+            if sort_order is not None:
+                updates.append("sort_order = %s")
+                vals.append(sort_order)
+            if not vals:
+                return True
+            vals.append(category_id)
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE position_categories SET {', '.join(updates)} WHERE id = %s",
+                    tuple(vals),
+                )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("update_position_category failed: %s", e)
+            self._conn.rollback()
+            self._conn = None
+            return False
+
+    def delete_position_category(self, category_id: int) -> bool:
+        """Delete a position category by id. Tags referencing it are removed by FK CASCADE. Returns True on success."""
+        if not self._connect():
+            return False
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute("DELETE FROM position_categories WHERE id = %s", (category_id,))
+            self._conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("delete_position_category failed: %s", e)
+            self._conn.rollback()
+            self._conn = None
+            return False
+
+    def set_position_category_tag(
+        self,
+        account_id: str,
+        contract_key: str,
+        category_id: Optional[int],
+    ) -> bool:
+        """Set or clear category tag for a position. category_id None => delete tag. Returns True on success."""
+        if not account_id or not str(account_id).strip():
+            return False
+        if not contract_key or not str(contract_key).strip():
+            return False
+        if not self._connect():
+            return False
+        try:
+            acc = str(account_id).strip()
+            ck = str(contract_key).strip()
+            with self._conn.cursor() as cur:
+                if category_id is None:
+                    cur.execute(
+                        "DELETE FROM position_category_tags WHERE account_id = %s AND contract_key = %s",
+                        (acc, ck),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO position_category_tags (account_id, contract_key, category_id)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (account_id, contract_key) DO UPDATE SET category_id = EXCLUDED.category_id
+                        """,
+                        (acc, ck, category_id),
+                    )
+            self._conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("set_position_category_tag failed: %s", e)
+            self._conn.rollback()
+            self._conn = None
+            return False
+
     def get_risk_summary(self) -> Dict[str, Any]:
         """Return risk/post-mortem summary for 复盘与风控 page: status_current (daily_hedge_count, daily_pnl) + operations count in last 24h + block_reasons. R-M7."""
         import time
@@ -1738,10 +1945,16 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                             ap.contract_key,
                             ip.mid AS price_mid,
                             ip.last AS price_last,
-                            ip.updated_at AS price_updated_at
+                            ip.updated_at AS price_updated_at,
+                            pct.category_id AS position_category_id,
+                            pc.name AS position_category_name
                         FROM account_positions ap
                         LEFT JOIN instrument_prices ip
                             ON ap.contract_key = ip.contract_key
+                        LEFT JOIN position_category_tags pct
+                            ON ap.account_id = pct.account_id AND ap.contract_key = pct.contract_key
+                        LEFT JOIN position_categories pc
+                            ON pct.category_id = pc.id
                         WHERE ap.account_id = %s
                         ORDER BY ap.contract_key
                         """,
@@ -1767,6 +1980,17 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                         if p.get("option_right") is not None:
                             pos_dict["right"] = p.get("option_right")
 
+                        # Position category (STK tagging for tracking by category)
+                        cat_id = p.get("position_category_id")
+                        if cat_id is not None:
+                            try:
+                                pos_dict["category_id"] = int(cat_id)
+                            except (TypeError, ValueError):
+                                pass
+                        cat_name = p.get("position_category_name")
+                        if cat_name is not None and str(cat_name).strip():
+                            pos_dict["category"] = str(cat_name).strip()
+
                         # 持仓行最后更新时间 → updated_at (Unix sec)；Details TIME 优先用 account_executions 最新一条 exec_time
                         raw_pos_updated = p.get("position_updated_at")
                         if raw_pos_updated is not None:
@@ -1791,7 +2015,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                             except (TypeError, ValueError):
                                 pass
 
-                        # 价格优先使用 instrument_prices.mid，其次 last；仅过滤 NaN/Inf
+                        # 价格优先使用 instrument_prices.mid，其次 last；仅过滤 NaN/Inf 及非正数（≤0 或 -1 等视为无价，触发 STK fallback）
                         raw_mid = p.get("price_mid")
                         raw_last = p.get("price_last")
                         price_val: Optional[float] = None
@@ -1802,12 +2026,24 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                                 v = float(candidate)
                             except (TypeError, ValueError):
                                 continue
-                            if not math.isfinite(v):
+                            if not math.isfinite(v) or v <= 0:
                                 continue
                             price_val = v
                             break
                         if price_val is not None:
                             pos_dict["price"] = price_val
+                        else:
+                            # Failover: STK with no instrument_prices → use stock_day latest close;
+                            # if latest bar is today, use previous bar (incomplete day).
+                            sec_typ = (p.get("sec_type") or "").strip().upper()
+                            if sec_typ == "STK":
+                                fallback = self.get_stock_day_fallback_price(p.get("symbol") or "")
+                                if fallback is not None:
+                                    price_val = fallback[0]
+                                    pos_dict["price"] = price_val
+                                    pos_dict["price_updated_at"] = fallback[1]
+                                    if fallback[2] is not None:
+                                        pos_dict["daily_prev_close"] = fallback[2]
 
                         # instrument_prices.updated_at → price_updated_at (Unix sec) for Since 显示（兼容列名大小写）
                         raw_updated = next(
@@ -1837,7 +2073,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                             except (TypeError, ValueError, OSError):
                                 pass
 
-                        # 持仓盈亏：用 instrument_prices.last（无则 mid）与 position/avg_cost 计算
+                        # 持仓盈亏：用 instrument_prices.last（无则 mid）与 position/avg_cost 计算；仅用正数价格
                         price_for_pnl: Optional[float] = None
                         for candidate in (raw_last, raw_mid):
                             if candidate is None:
@@ -1846,10 +2082,12 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                                 v = float(candidate)
                             except (TypeError, ValueError):
                                 continue
-                            if not math.isfinite(v):
+                            if not math.isfinite(v) or v <= 0:
                                 continue
                             price_for_pnl = v
                             break
+                        if price_for_pnl is None and price_val is not None:
+                            price_for_pnl = price_val
                         pos_qty = p.get("position")
                         pos_avg = p.get("avg_cost")
                         sec_type = (p.get("sec_type") or "").strip().upper()

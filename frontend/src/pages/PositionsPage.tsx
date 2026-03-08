@@ -83,7 +83,7 @@ function getContractLabelParts(contract_key: string): { symbol: string; rightLab
 
 export type PortfolioView = 'overview' | 'open' | 'ledger' | 'performance' | 'accounts' | 'transfer'
 
-interface PositionPnlPageProps {
+interface PositionsPageProps {
   status: StatusResponse | null
   currentView?: PortfolioView
   onViewChange?: (view: PortfolioView) => void
@@ -188,12 +188,12 @@ function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecutionGro
   return result
 }
 
-export function PositionPnlPage({
+export function PositionsPage({
   status,
   currentView,
   onViewChange,
   showViewTabs = true,
-}: PositionPnlPageProps) {
+}: PositionsPageProps) {
   const [executions, setExecutions] = useState<Execution[]>([])
   const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
@@ -710,12 +710,12 @@ export function PositionPnlPage({
       )}
       {portfolioView === 'overview' && (
       <p className="section-hint replay-portfolio-view-hint">
-        Portfolio summary, risk model and Fetch from IB are now under Portfolio → Accounts.
+        Portfolio summary, risk model and Fetch from IB are now under Portfolio / Accounts.
       </p>
       )}
 
       {portfolioView === 'overview' ? (
-        <p className="section-hint">Go to <strong>Portfolio → Accounts</strong> for portfolio overview, risk model and Fetch from IB.</p>
+        <p className="section-hint">Go to <strong>Portfolio / Accounts</strong> for portfolio overview, risk model and Fetch from IB.</p>
       ) : portfolioView === 'open' ? (
         <section className="replay-section replay-section-trade-records" aria-label="Open positions">
           <div className="replay-filters">

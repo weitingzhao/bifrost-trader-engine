@@ -1270,6 +1270,78 @@ def create_app(
             return {"ok": True, "message": "已删除。"}
         return {"ok": False, "error": "删除失败（未找到或数据库错误）。"}
 
+    # Position categories (STK tagging for tracking by category: dividend, short-term, etc.)
+    @app.get("/position-categories")
+    def get_position_categories() -> Dict[str, Any]:
+        """Return all position categories for dropdown and manage UI."""
+        items = reader.get_position_categories()
+        return {"items": items}
+
+    class PositionCategoryCreateBody(BaseModel):
+        name: str
+        description: Optional[str] = None
+        sort_order: Optional[int] = None
+
+    @app.post("/position-categories")
+    def post_position_category(body: PositionCategoryCreateBody = Body(...)) -> Dict[str, Any]:
+        """Create a position category."""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以写入 position_categories。"}
+        cid = reader.create_position_category(
+            name=body.name,
+            description=body.description,
+            sort_order=body.sort_order,
+        )
+        if cid is not None:
+            return {"ok": True, "id": cid, "message": "Category created."}
+        return {"ok": False, "error": "Failed to create category."}
+
+    class PositionCategoryUpdateBody(BaseModel):
+        name: Optional[str] = None
+        description: Optional[str] = None
+        sort_order: Optional[int] = None
+
+    @app.patch("/position-categories/{category_id:int}")
+    def patch_position_category(category_id: int, body: PositionCategoryUpdateBody = Body(...)) -> Dict[str, Any]:
+        """Update a position category."""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以修改 position_categories。"}
+        if reader.update_position_category(
+            category_id=category_id,
+            name=body.name,
+            description=body.description,
+            sort_order=body.sort_order,
+        ):
+            return {"ok": True, "message": "Category updated."}
+        return {"ok": False, "error": "Update failed."}
+
+    @app.delete("/position-categories/{category_id:int}")
+    def delete_position_category_route(category_id: int) -> Dict[str, Any]:
+        """Delete a position category (tags referencing it are removed)."""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以修改 position_categories。"}
+        if reader.delete_position_category(category_id):
+            return {"ok": True, "message": "Category deleted."}
+        return {"ok": False, "error": "Delete failed."}
+
+    class PositionCategoryTagBody(BaseModel):
+        account_id: str
+        contract_key: str
+        category_id: Optional[int] = None  # null to clear tag
+
+    @app.put("/position-categories/tag")
+    def put_position_category_tag(body: PositionCategoryTagBody = Body(...)) -> Dict[str, Any]:
+        """Set or clear category tag for a position (STK). category_id null => clear tag."""
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以修改 position_category_tags。"}
+        if reader.set_position_category_tag(
+            account_id=body.account_id,
+            contract_key=body.contract_key,
+            category_id=body.category_id,
+        ):
+            return {"ok": True, "message": "Tag updated."}
+        return {"ok": False, "error": "Failed to update tag."}
+
     # R-A3: 复盘 K 线由 API 直接连 IB 拉取并写库，不经过 daemon（历史数据一次性拉取更合适）
     # R-A2: 执行记录同样支持 API 直接连 IB 拉取并写库，无需 daemon
     _IB_PORT_MAP = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
