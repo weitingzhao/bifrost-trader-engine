@@ -868,6 +868,75 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
             self._conn = None
             return None
 
+    def get_net_cash_flow(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+    ) -> float:
+        """Sum of amount in account_transactions in the given time range (Performance Phase 0)."""
+        if not self._connect():
+            return 0.0
+        try:
+            with self._conn.cursor() as cur:
+                q = "SELECT COALESCE(SUM(amount), 0) AS total FROM account_transactions WHERE 1=1"
+                args: List[Any] = []
+                if since_ts is not None:
+                    q += " AND ts >= to_timestamp(%s)"
+                    args.append(since_ts)
+                if until_ts is not None:
+                    q += " AND ts <= to_timestamp(%s)"
+                    args.append(until_ts)
+                if account_id is not None and str(account_id).strip():
+                    q += " AND account_id = %s"
+                    args.append(str(account_id).strip())
+                cur.execute(q, args)
+                row = cur.fetchone()
+            if row and row[0] is not None:
+                v = float(row[0])
+                return v if math.isfinite(v) else 0.0
+            return 0.0
+        except Exception as e:
+            logger.debug("get_net_cash_flow failed: %s", e)
+            self._conn = None
+            return 0.0
+
+    def get_transactions(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """List account_transactions in time range for Performance/Transaction display."""
+        if not self._connect():
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                q = """
+                    SELECT id, account_id, extract(epoch from ts) AS ts, amount, type, currency, description, created_at
+                    FROM account_transactions WHERE 1=1
+                """
+                args: List[Any] = []
+                if since_ts is not None:
+                    q += " AND ts >= to_timestamp(%s)"
+                    args.append(since_ts)
+                if until_ts is not None:
+                    q += " AND ts <= to_timestamp(%s)"
+                    args.append(until_ts)
+                if account_id is not None and str(account_id).strip():
+                    q += " AND account_id = %s"
+                    args.append(str(account_id).strip())
+                q += " ORDER BY ts DESC LIMIT %s"
+                args.append(limit)
+                cur.execute(q, args)
+                rows = cur.fetchall()
+            return [dict(r) for r in rows] if rows else []
+        except Exception as e:
+            logger.debug("get_transactions failed: %s", e)
+            self._conn = None
+            return []
+
     def _compute_opt_realized_calendar(
         self,
         executions_sorted: List[Dict[str, Any]],
@@ -1026,7 +1095,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
     ) -> Dict[str, Any]:
         """Return performance summary and calendar PnL. Phase 0-8 per performance-execution-plan."""
         current_equity: Optional[float] = self._get_current_equity()
-        net_cash_flow = 0.0
+        net_cash_flow = self.get_net_cash_flow(since_ts=since_ts, until_ts=until_ts, account_id=account_id)
         start_equity: Optional[float] = current_equity
         capital_base: Optional[float] = (start_equity + 0.5 * net_cash_flow) if start_equity is not None else None
         if capital_base is not None and capital_base <= 0:
@@ -1264,6 +1333,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
 
         return {
             "transaction": {"net_cash_flow": net_cash_flow, "start_equity": round(start_equity, 2) if start_equity is not None else None, "capital_base": round(capital_base, 2) if capital_base is not None else None},
+            "transactions": self.get_transactions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=200),
             "summary": {
                 "total_pnl": round(total_pnl, 2),
                 "total_realized_pnl": round(total_realized_pnl, 2),
@@ -2522,6 +2592,59 @@ def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[
     except Exception as e:
         logger.warning("insert_one_execution failed: %s", e)
         return None
+
+
+def upsert_account_transactions(status_config: dict, rows: List[Dict[str, Any]]) -> int:
+    """Insert or update account_transactions from Flex cash transaction list. Returns number of rows processed.
+    Each row: account_id, ts (Unix float), amount, type, currency?, description?.
+    Uses ON CONFLICT (account_id, ts, amount, type) DO UPDATE to avoid duplicates."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return 0
+    if not rows:
+        return 0
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for r in rows:
+                    account_id = (r.get("account_id") or "").strip()
+                    ts = r.get("ts")
+                    amount = r.get("amount")
+                    tx_type = (r.get("type") or "other").strip() or "other"
+                    currency = (r.get("currency") or "").strip() or None
+                    description = (r.get("description") or "").strip() or None
+                    if not account_id and amount is None:
+                        continue
+                    if ts is None:
+                        continue
+                    try:
+                        ts_float = float(ts)
+                    except (TypeError, ValueError):
+                        continue
+                    if amount is None:
+                        amount = 0.0
+                    try:
+                        amount_float = float(amount)
+                    except (TypeError, ValueError):
+                        amount_float = 0.0
+                    cur.execute(
+                        """
+                        INSERT INTO account_transactions (account_id, ts, amount, type, currency, description)
+                        VALUES (%s, to_timestamp(%s), %s, %s, %s, %s)
+                        ON CONFLICT (account_id, ts, amount, type) DO UPDATE SET
+                            currency = COALESCE(EXCLUDED.currency, account_transactions.currency),
+                            description = COALESCE(EXCLUDED.description, account_transactions.description)
+                        """,
+                        (account_id, ts_float, amount_float, tx_type, currency, description),
+                    )
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("upsert_account_transactions failed: %s", e)
+        return 0
 
 
 def update_one_execution(status_config: dict, id_: int, body: Dict[str, Any]) -> bool:

@@ -564,6 +564,26 @@ def _ensure_tables(conn, log=None) -> None:
             )
         """
         )
+        # §2.21: account_transactions (Flex cash transactions for Performance Phase 0)
+        _log("account_transactions")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_transactions (
+                id bigserial PRIMARY KEY,
+                account_id text NOT NULL,
+                ts timestamptz NOT NULL,
+                amount double precision NOT NULL,
+                type text NOT NULL,
+                currency text,
+                description text,
+                created_at timestamptz DEFAULT now(),
+                UNIQUE(account_id, ts, amount, type)
+            )
+        """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_transactions_account_ts ON account_transactions (account_id, ts DESC)"
+        )
         _log("stock_day table + index (may block if API/worker use stock_day)")
         cur.execute(
             """

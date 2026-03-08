@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from servers.ib_clients import AccountIbClient, MarketIbClient
+from servers.flex_client import fetch_cash_transactions
 from servers.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
     StatusReader,
@@ -39,6 +39,7 @@ from servers.reader import (
     delete_all_bars_backfill_jobs,
     trim_bars_backfill_jobs,
     get_bars_backfill_last_updated,
+    upsert_account_transactions,
 )
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
@@ -981,6 +982,80 @@ def create_app(
             account_id=account_id,
             granularity=granularity,
         )
+
+    @app.get("/transactions")
+    def get_transactions(
+        since_ts: Optional[float] = Query(None, description="Filter with ts >= this (Unix s)"),
+        until_ts: Optional[float] = Query(None, description="Filter with ts <= this"),
+        account_id: Optional[str] = Query(None, description="Filter by account ID"),
+        limit: int = Query(500, description="Max rows"),
+    ) -> Dict[str, Any]:
+        """List account_transactions (Flex cash transactions) for Transfer & Pay page."""
+        items = reader.get_transactions(
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            limit=limit,
+        )
+        return {"transactions": items}
+
+    @app.post("/transactions/fetch")
+    def post_transactions_fetch(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Fetch cash transactions from IB Flex Web Service and upsert into account_transactions (Performance Phase 0).
+        Uses flex.accounts[].query_id_cash_transactions per account (legacy: query_id). Env: IB_FLEX_TOKEN, IB_FLEX_QUERY_ID_CASH_TRANSACTIONS or IB_FLEX_QUERY_ID for first entry."""
+        try:
+            flex_cfg = (control_via_db or {}).get("flex") or {}
+
+            def _qid_cash(a: dict, i: int) -> str:
+                env_qid = os.environ.get("IB_FLEX_QUERY_ID_CASH_TRANSACTIONS") or os.environ.get("IB_FLEX_QUERY_ID") if i == 0 else None
+                return (env_qid or a.get("query_id_cash_transactions") or a.get("query_id") or "").strip()
+
+            # Build list of (token, query_id) for cash transactions
+            accounts_list = flex_cfg.get("accounts")
+            if accounts_list and isinstance(accounts_list, list) and len(accounts_list) > 0:
+                entries = []
+                for i, a in enumerate(accounts_list):
+                    if not isinstance(a, dict):
+                        continue
+                    tok = (os.environ.get("IB_FLEX_TOKEN") if i == 0 else None) or (a.get("token") or "").strip()
+                    qid = _qid_cash(a, i)
+                    if tok and qid:
+                        entries.append((tok, qid))
+            else:
+                tok = (os.environ.get("IB_FLEX_TOKEN") or flex_cfg.get("token") or "").strip()
+                qid = _qid_cash(flex_cfg, 0)
+                entries = [(tok, qid)] if tok and qid else []
+            if not entries:
+                return {
+                    "ok": False,
+                    "error": "No Flex credentials: set flex.accounts[] with token and query_id_cash_transactions per IB account, or flex.token and flex.query_id_cash_transactions, or env IB_FLEX_TOKEN and IB_FLEX_QUERY_ID_CASH_TRANSACTIONS.",
+                    "count": 0,
+                }
+            if not control_via_db:
+                return {"ok": False, "error": "Postgres config required to write account_transactions.", "count": 0}
+            payload = body or {}
+            from_date = (payload.get("from_date") or "").strip() or None
+            to_date = (payload.get("to_date") or "").strip() or None
+            all_rows: List[Dict[str, Any]] = []
+            errors: List[str] = []
+            for token, query_id in entries:
+                try:
+                    rows = fetch_cash_transactions(token, query_id, from_date=from_date, to_date=to_date)
+                    all_rows.extend(rows)
+                except ValueError as e:
+                    errors.append(str(e))
+            if errors and not all_rows:
+                return {"ok": False, "error": "; ".join(errors), "count": 0}
+            if not all_rows:
+                return {"ok": True, "count": 0, "message": "No cash transactions in report.", "by_account": len(entries)}
+            n = upsert_account_transactions(control_via_db, all_rows)
+            msg = f"Upserted {n} transaction(s) from {len(entries)} Flex account(s)."
+            if errors:
+                msg += " Partial errors: " + "; ".join(errors)
+            return {"ok": True, "count": n, "message": msg, "by_account": len(entries)}
+        except Exception as e:
+            logger.exception("POST /transactions/fetch failed: %s", e)
+            return {"ok": False, "error": str(e), "count": 0}
 
     @app.post("/executions")
     def post_execution(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:

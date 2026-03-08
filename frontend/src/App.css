@@ -3102,6 +3102,11 @@ th {
   font-weight: 600;
 }
 
+/* Transfer & Pay uses card process-section + title row + replay-section (see TransferPayPage) */
+.transfer-pay-page .replay-section {
+  margin-top: var(--space-2);
+}
+
 .replay-cost {
   color: var(--color-danger);
   font-weight: 700;

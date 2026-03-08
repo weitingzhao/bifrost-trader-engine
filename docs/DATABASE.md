@@ -204,6 +204,27 @@
 
 - **读取**：GET /executions 通过 LEFT JOIN 本表将 commission、realized_pnl、currency 拼回执行记录返回前端。
 
+### 2.21 表 `account_transactions`（阶段 3 Performance Phase 0：资金流水，来自 IB Flex）
+
+- **用途**：存**账户资金流水**（存款、取款、转账、股息等），数据来源为 **IB Flex Web Service**（Activity Flex Query 的 Cash Transactions 节）；供 Performance 页计算净资金流（net_cash_flow）、capital_base 与收益率分母。
+- **写入**：监控端 **POST /transactions/fetch** 时，使用配置的 Flex Token 与 Query ID 请求 Flex 报表，解析 Cash Transactions 后 UPSERT 到本表（按 account_id + ts + amount + type 去重，避免重复拉取导致重复计入）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 自增主键 |
+| account_id | text NOT NULL | 账户标识 |
+| ts | timestamptz NOT NULL | 交易时间（Flex Date/Time） |
+| amount | double precision NOT NULL | 金额（正为流入、负为流出，与 Flex 一致） |
+| type | text NOT NULL | 类型：deposit / withdrawal / transfer / dividend / other（由 Flex Type 或 Code 映射） |
+| currency | text | 币种 |
+| description | text | Flex Description（可选） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(account_id, ts, amount, type)`，便于 UPSERT 去重。
+- **索引**：`(account_id, ts DESC)`，供按账户与时间范围查询净资金流。
+- **读取**：`servers/reader.get_net_cash_flow(since_ts, until_ts, account_id)` 对本表 SUM(amount)；`get_transactions(...)` 返回明细供 Performance 页展示；GET /performance 的 net_cash_flow、capital_base 使用本表数据。
+
 ### 2.12 表 `ohlc_bars`（已弃用，由 stock_day / stock_min / option_day / option_min 替代）
 
 - **状态**：**弃用**。表名过于笼统，且股票与期权未区分。替代方案见 §2.13–§2.17。
@@ -492,7 +513,7 @@
 python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
    或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
@@ -566,6 +587,7 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 | 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）；§2.12 弃用 ohlc_bars，新增 §2.13–§2.17 表 stock_day、stock_min、option_day、option_min、watchlist（股票/期权 K 线与自选标的）；供复盘与风控页及 GET /executions、GET /bars、Watchlist CRUD、报价落库使用。 | 阶段 3 |
 | 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、watchlist；K 线读写改为分表；Watchlist CRUD 与智能拉取 duration。 | 阶段 3 |
 | 2026-03-08 持仓分类 | 新增 §2.19 表 position_categories（STK 持仓分类定义）、§2.20 表 position_category_tags（持仓→分类 Tag）；GET /position-categories、PUT /position-categories/tag；GET /status 的 positions 带出 category_id/category。 | 阶段 3 扩展 |
+| 2026-03-08 Flex Transaction | 新增 §2.21 表 account_transactions（IB Flex 资金流水）；POST /transactions/fetch 拉取 Flex Cash Transactions 写入；get_net_cash_flow/get_transactions 供 GET /performance 使用。 | 阶段 3 Performance Phase 0 |
 
 ---
 

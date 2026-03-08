@@ -51,7 +51,7 @@
 
 ### Phase 0：Capital base 与 Transaction
 
-- [ ] **0.1** 定义 Transaction 数据源（IB Ledger 或新表 account_transactions：account_id, ts, amount, type=deposit/withdrawal/transfer, currency 等）。
+- [ ] **0.1** 定义 Transaction 数据源：**IB Flex Web Service**（Activity Flex Query，勾选 Cash Transactions 节）；拉取结果解析后写入表 **account_transactions**（account_id, ts, amount, type=deposit/withdrawal/transfer/dividend/other, currency, description 等）；配置：Token 与 Query ID 由环境变量或配置提供（见文档 FLEX_TRANSACTIONS.md 或等价说明）。
 - [ ] **0.2** 按时间范围 + 账户查询净资金流（net_cash_flow）；支持按 account_id 拆分、可选按 period 聚合。
 - [ ] **0.3** 期初权益口径（start_equity）：历史快照（status_history 或权益快照表）或近似（current_equity - 期间 PnL）；文档约定选用方式。
 - [ ] **0.4** 定义 capital_base 公式（用于 return %），如 start_equity + 0.5 * net_cash_flow 或 start_equity；全量/分账户/分类型/日历的 % 均基于同一口径。

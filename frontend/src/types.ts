@@ -253,6 +253,18 @@ export interface BackendOptPair {
   net_pnl: number
 }
 
+/** One row from account_transactions (Flex cash transactions). GET /transactions, GET /performance.transactions */
+export interface AccountTransaction {
+  id?: number
+  account_id: string
+  ts: number
+  amount: number
+  type: string
+  currency?: string | null
+  description?: string | null
+  created_at?: number
+}
+
 /** GET /performance: summary + calendar PnL (PERFORMANCE_PAGE_DESIGN). */
 export interface PerformanceSummary {
   total_pnl?: number
@@ -309,6 +321,7 @@ export interface PerformanceCalendarEntryBySecType extends PerformanceCalendarEn
 
 export interface PerformanceResponse {
   transaction?: { net_cash_flow?: number; start_equity?: number | null; capital_base?: number | null }
+  transactions?: AccountTransaction[]
   summary: PerformanceSummary
   calendar: PerformanceCalendarEntry[]
   calendar_by_sec_type?: PerformanceCalendarEntryBySecType[]

@@ -98,7 +98,7 @@
 
 - **Realized**：`account_executions` + `account_execution_commissions`（exec_time、realized_pnl、commission、account_id、sec_type）。
 - **Unrealized**：`account_positions` + `instrument_prices`（当前持仓 + 当前价，按现有 reader 的 unrealized_pnl 逻辑）。
-- **Transaction**：资金流入/流出（数据源待定：IB Ledger 或新表 account_transactions）；用于收益率分母与「总资产变动 = 交易盈亏 + 资金流」展示。
+- **Transaction**：资金流入/流出；数据来源为 **IB Flex Web Service**（Activity Flex Query 的 **Cash Transactions** 节），拉取后写入 **account_transactions** 表；用于收益率分母与「总资产变动 = 交易盈亏 + 资金流」展示。
 - **收益率**：Realized 用 capital_base（期初权益 ± 资金流调整）；Unrealized 用当前权益；口径见执行计划 Phase 0。
 
 ### 7.2 分步顺序（与 Todo 一致）

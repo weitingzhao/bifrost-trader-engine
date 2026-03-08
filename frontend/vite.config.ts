@@ -14,6 +14,7 @@ export default defineConfig({
       '/risk_summary': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/executions': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/performance': { target: 'http://127.0.0.1:8765', changeOrigin: true },
+      '/transactions': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/bars': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/watchlist': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/position-categories': { target: 'http://127.0.0.1:8765', changeOrigin: true },
