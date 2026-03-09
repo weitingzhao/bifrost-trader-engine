@@ -1,0 +1,12 @@
+---
+description: Language and locale — use Chinese for communication, English for UI and code; docs may stay Chinese
+alwaysApply: true
+---
+
+# Language (沟通与界面 / 代码 / 文档)
+
+- **Communication with the user**: Use **Chinese** (e.g. in chat, explanations, summaries).
+- **UI and code**: Use **English** for all user-facing strings (labels, buttons, tooltips, placeholders, error messages), code identifiers, and comments. No Chinese in the frontend UI or in source code that ships.
+- **Documentation** (e.g. docs/, README, .md in the repo): May remain **Chinese** where it already is; new or updated docs can be in Chinese or English as the project owner prefers.
+
+When adding or changing UI text, error messages, or code comments, write them in English.

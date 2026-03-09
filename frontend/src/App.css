@@ -970,6 +970,32 @@ body::before {
   }
 }
 
+/* ---------- Table pagination (Transfer & Pay, etc.) ---------- */
+.table-pagination {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+}
+
+.table-pagination-label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.table-pagination-info {
+  font-size: var(--text-caption);
+  color: var(--color-text-main);
+}
+
+.table-pagination button.btn-small {
+  min-height: 1.9rem;
+  padding-inline: 0.5rem;
+}
+
 /* ---------- Celery Console（嵌入式终端样式） ---------- */
 .celery-console-wrap {
   margin-top: var(--space-2);
@@ -2071,9 +2097,6 @@ th {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: var(--space-2);
 }
 
 .ib-accounts-tab {
@@ -2728,9 +2751,32 @@ th {
   min-width: 0;
 }
 
+.replay-filter-input-symbol {
+  max-width: 7rem;
+}
+
 .replay-filter-sep {
   margin: 0 var(--space-1);
   color: var(--color-text-muted);
+}
+
+.replay-filter-range {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.replay-filter-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.replay-filter-label-month {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .replay-filter-clear {

@@ -220,11 +220,10 @@ export function PositionsPage({
 
   const [openFilterSymbol, setOpenFilterSymbol] = useState('')
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
-  const [openFilterExpiryEnd, setOpenFilterExpiryEnd] = useState('')
   const [openFilterPool, setOpenFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
+  const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
   const [ledgerFilterSymbol, setLedgerFilterSymbol] = useState('')
   const [ledgerFilterExpiryStart, setLedgerFilterExpiryStart] = useState('')
-  const [ledgerFilterExpiryEnd, setLedgerFilterExpiryEnd] = useState('')
   const [ledgerFilterExecStart, setLedgerFilterExecStart] = useState('')
   const [ledgerFilterExecEnd, setLedgerFilterExecEnd] = useState('')
   const [ledgerFilterPool, setLedgerFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
@@ -268,20 +267,12 @@ export function PositionsPage({
     let list = [...(executions || [])]
     const sym = ledgerFilterSymbol.trim().toUpperCase()
     if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
-    const expStart = ledgerFilterExpiryStart.trim().replace(/-/g, '')
-    if (expStart) {
+    const expMonth = ledgerFilterExpiryStart.trim().replace(/-/g, '').slice(0, 6)
+    if (expMonth) {
       list = list.filter(e => {
         const ex = (e.expiry || '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex + '01'
-        return cmp >= expStart.slice(0, 8)
-      })
-    }
-    const expEnd = ledgerFilterExpiryEnd.trim().replace(/-/g, '')
-    if (expEnd) {
-      list = list.filter(e => {
-        const ex = (e.expiry || '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex.length === 6 ? ex + '31' : ex
-        return cmp <= expEnd.slice(0, 8)
+        const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
+        return cmp === expMonth
       })
     }
     if (ledgerFilterExecStart.trim()) {
@@ -293,7 +284,7 @@ export function PositionsPage({
       if (Number.isFinite(t)) list = list.filter(e => (e.time ?? 0) <= t)
     }
     return list
-  }, [executions, ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExpiryEnd, ledgerFilterExecStart, ledgerFilterExecEnd])
+  }, [executions, ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExecStart, ledgerFilterExecEnd])
 
   const filteredExecutions = useMemo(() => {
     let list = [...ledgerBaseFilteredExecutions]
@@ -307,64 +298,47 @@ export function PositionsPage({
     list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
     const sym = openFilterSymbol.trim().toUpperCase()
     if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
-    const expStart = openFilterExpiryStart.trim().replace(/-/g, '')
-    if (expStart) {
+    const expMonth = openFilterExpiryStart.trim().replace(/-/g, '').slice(0, 6)
+    if (expMonth) {
       list = list.filter(e => {
         const ex = (e.expiry || '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex + '01'
-        return cmp >= expStart.slice(0, 8)
-      })
-    }
-    const expEnd = openFilterExpiryEnd.trim().replace(/-/g, '')
-    if (expEnd) {
-      list = list.filter(e => {
-        const ex = (e.expiry || '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex.length === 6 ? ex + '31' : ex
-        return cmp <= expEnd.slice(0, 8)
+        const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
+        return cmp === expMonth
       })
     }
     return list
-  }, [executions, openFilterSymbol, openFilterExpiryStart, openFilterExpiryEnd])
+  }, [executions, openFilterSymbol, openFilterExpiryStart])
 
   const livePositions = useMemo((): LivePositionRow[] => {
     if (openFilterPool === 'Off') return []
     const accounts = status?.accounts ?? []
-    let rows = accounts.flatMap(account =>
-      (account.positions ?? [])
+    let rows = accounts.flatMap(account => {
+      const accId = (account.account_id ?? '').trim()
+      if (openFilterAccountId !== 'all' && accId !== openFilterAccountId) return []
+      return (account.positions ?? [])
         .filter(position => {
           const qty = Number(position.position)
           return Number.isFinite(qty) && qty !== 0
         })
         .map(position => ({
           ...position,
-          account_id: (account.account_id ?? '').trim(),
-        })),
-    )
+          account_id: accId,
+        }))
+    })
 
     const sym = openFilterSymbol.trim().toUpperCase()
     if (sym) {
       rows = rows.filter(position => (position.symbol ?? '').toUpperCase() === sym)
     }
 
-    const expStart = openFilterExpiryStart.trim().replace(/-/g, '')
-    if (expStart) {
+    const expMonth = openFilterExpiryStart.trim().replace(/-/g, '').slice(0, 6)
+    if (expMonth) {
       rows = rows.filter(position => {
         const secType = (position.secType ?? '').toUpperCase()
         if (secType !== 'OPT') return true
         const ex = (position.lastTradeDateOrContractMonth ?? position.expiry ?? '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex + '01'
-        return cmp >= expStart.slice(0, 8)
-      })
-    }
-
-    const expEnd = openFilterExpiryEnd.trim().replace(/-/g, '')
-    if (expEnd) {
-      rows = rows.filter(position => {
-        const secType = (position.secType ?? '').toUpperCase()
-        if (secType !== 'OPT') return true
-        const ex = (position.lastTradeDateOrContractMonth ?? position.expiry ?? '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 8 ? ex.slice(0, 8) : ex.length === 6 ? ex + '31' : ex
-        return cmp <= expEnd.slice(0, 8)
+        const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
+        return cmp === expMonth
       })
     }
 
@@ -375,7 +349,7 @@ export function PositionsPage({
       return (a.account_id ?? '').localeCompare(b.account_id ?? '')
     })
     return rows
-  }, [openFilterExpiryEnd, openFilterExpiryStart, openFilterPool, openFilterSymbol, status?.accounts])
+  }, [openFilterAccountId, openFilterExpiryStart, openFilterPool, openFilterSymbol, status?.accounts])
 
   const liveOptionPositions = useMemo(
     () => livePositions.filter(position => (position.secType ?? '').toUpperCase() === 'OPT'),
@@ -522,6 +496,13 @@ export function PositionsPage({
     [livePositions],
   )
 
+  const openFilterAccountOptions = useMemo(() => {
+    const accounts = (status?.accounts ?? []).map(a => (a.account_id ?? '').trim()).filter(Boolean)
+    const unique = Array.from(new Set(accounts))
+    unique.sort()
+    return unique
+  }, [status?.accounts])
+
   const executionAccountOptions = useMemo(() => {
     const fromStatus = ((status?.accounts as { account_id?: string }[] | undefined) ?? [])
       .map(a => (a.account_id ?? '').trim())
@@ -656,36 +637,48 @@ export function PositionsPage({
 
   return (
     <div className="card process-section replay-page">
-      <h2 className="page-title-with-tooltip">
-        {portfolioView === 'overview' && (
-          <>Portfolio<InfoTooltip text="Separate current open positions from closed trade history, while keeping PnL and execution tools in one portfolio workspace." /></>
-        )}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
+          {portfolioView === 'overview' && (
+            <>Portfolio<InfoTooltip text="Separate current open positions from closed trade history, while keeping PnL and execution tools in one portfolio workspace." /></>
+          )}
+          {portfolioView === 'open' && (
+            <>
+              <button
+                type="button"
+                className="page-title-breadcrumb-link"
+                onClick={() => onViewChange?.('accounts')}
+              >
+                Portfolio
+              </button>
+              {' / Positions'}
+            </>
+          )}
+          {portfolioView === 'ledger' && (
+            <>
+              <button
+                type="button"
+                className="page-title-breadcrumb-link"
+                onClick={() => onViewChange?.('accounts')}
+              >
+                Portfolio
+              </button>
+              {' / Trade History'}
+              <InfoTooltip text="Trade History is the maintenance workspace for closed trades, execution imports, and manual trade corrections." />
+            </>
+          )}
+        </h2>
         {portfolioView === 'open' && (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={() => onViewChange?.('accounts')}
-            >
-              Portfolio
-            </button>
-            {' / Positions'}
-          </>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => { setAddExecOpen(true); setExecFormError(null) }}
+            aria-label="Add execution record manually (historical)"
+          >
+            Add Trade
+          </button>
         )}
-        {portfolioView === 'ledger' && (
-          <>
-            <button
-              type="button"
-              className="page-title-breadcrumb-link"
-              onClick={() => onViewChange?.('accounts')}
-            >
-              Portfolio
-            </button>
-            {' / Trade History'}
-            <InfoTooltip text="Trade History is the maintenance workspace for closed trades, execution imports, and manual trade corrections." />
-          </>
-        )}
-      </h2>
+      </div>
       {showViewTabs && (
       <div className="system-tabs replay-portfolio-view-tabs" role="tablist" aria-label="Portfolio view">
         <button
@@ -709,43 +702,47 @@ export function PositionsPage({
       </div>
       )}
       {portfolioView === 'overview' && (
-      <p className="section-hint replay-portfolio-view-hint">
-        Portfolio summary, risk model and Fetch from IB are now under Portfolio / Accounts.
-      </p>
+        <>
+          <p className="section-hint replay-portfolio-view-hint">
+            Portfolio summary, risk model and Fetch from IB are now under Portfolio / Accounts.
+          </p>
+          <p className="section-hint" style={{ marginTop: '0.25rem' }}>
+            Go to <strong>Portfolio / Accounts</strong> for portfolio overview, risk model and Fetch from IB.
+          </p>
+        </>
       )}
 
-      {portfolioView === 'overview' ? (
-        <p className="section-hint">Go to <strong>Portfolio / Accounts</strong> for portfolio overview, risk model and Fetch from IB.</p>
-      ) : portfolioView === 'open' ? (
+      {portfolioView === 'open' ? (
         <section className="replay-section replay-section-trade-records" aria-label="Open positions">
-          <div className="replay-filters">
-            <label className="replay-filter-wrap-symbol">
+          <div className="replay-toolbar">
+            <div className="replay-fetch-range-group" aria-label="Position filters">
               <input
                 type="text"
                 placeholder="Symbol"
                 value={openFilterSymbol}
                 onChange={e => setOpenFilterSymbol(e.target.value)}
-                className="replay-filter-input"
+                className="replay-filter-input replay-filter-input-symbol"
               />
-            </label>
-            <label>
-              <span className="replay-filter-label">Expiry</span>
-              <input
-                type="date"
-                value={openFilterExpiryStart}
-                onChange={e => setOpenFilterExpiryStart(e.target.value)}
-                className="replay-filter-input replay-filter-date"
-                title="Start"
-              />
-              <span className="replay-filter-sep">～</span>
-              <input
-                type="date"
-                value={openFilterExpiryEnd}
-                onChange={e => setOpenFilterExpiryEnd(e.target.value)}
-                className="replay-filter-input replay-filter-date"
-                title="End"
-              />
-            </label>
+            </div>
+            <div className="ib-accounts-tabs">
+              <button
+                type="button"
+                className={`ib-accounts-tab ${openFilterAccountId === 'all' ? 'active' : ''}`}
+                onClick={() => setOpenFilterAccountId('all')}
+              >
+                All
+              </button>
+              {openFilterAccountOptions.map(id => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`ib-accounts-tab ${openFilterAccountId === id ? 'active' : ''}`}
+                  onClick={() => setOpenFilterAccountId(id)}
+                >
+                  {id}
+                </button>
+              ))}
+            </div>
             <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
               <span className="replay-fetch-days-label">Pool</span>
               <label className="replay-fetch-radio">
@@ -772,27 +769,6 @@ export function PositionsPage({
                 <span>Multi</span>
               </label>
             </div>
-            <button
-              type="button"
-              className="btn btn-small replay-filter-clear"
-              onClick={() => {
-                setOpenFilterSymbol('')
-                setOpenFilterExpiryStart('')
-                setOpenFilterExpiryEnd('')
-                setOpenFilterPool('Mix')
-                setExpandedOpenDetailKeys([])
-              }}
-            >
-              Clear filters
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => { setAddExecOpen(true); setExecFormError(null) }}
-              aria-label="Add execution record manually (historical)"
-            >
-              Add Trade
-            </button>
           </div>
           {openOptionGroups.length === 0 && liveStockPositions.length === 0 ? (
             <p className="section-hint">No open positions under the current filters. Position data comes from account snapshots in `Accounts`, while Off-Track options are inferred from execution history.</p>
@@ -856,6 +832,7 @@ export function PositionsPage({
                           <th colSpan={3}>BUY</th>
                           <th colSpan={3}>SELL</th>
                           <th rowSpan={2}>Unrealized PnL</th>
+                            <th rowSpan={2}>Account</th>
                           <th rowSpan={2}>Pool</th>
                         </tr>
                         <tr>
@@ -913,6 +890,31 @@ export function PositionsPage({
                                   {fmtUsd(group.unrealized_pnl ?? 0)}
                                 </span>
                               </td>
+                              <td>
+                                {(() => {
+                                  if (group.kind === 'live') {
+                                    const accounts = Array.from(
+                                      new Set(
+                                        (group.positions ?? []).map(p => (p.account_id ?? '').trim()).filter(Boolean),
+                                      ),
+                                    )
+                                    if (accounts.length === 0) return '—'
+                                    if (accounts.length === 1) return accounts[0]
+                                    return 'Multi'
+                                  }
+                                  if (group.kind === 'offtrack') {
+                                    const accounts = Array.from(
+                                      new Set(
+                                        (group.trades ?? []).map(t => (t.account_id ?? '').trim()).filter(Boolean),
+                                      ),
+                                    )
+                                    if (accounts.length === 0) return '—'
+                                    if (accounts.length === 1) return accounts[0]
+                                    return 'Multi'
+                                  }
+                                  return '—'
+                                })()}
+                              </td>
                               <td>{group.pool_label}</td>
                             </tr>
                           )
@@ -932,37 +934,34 @@ export function PositionsPage({
                     </table>
                   </div>
 
-                  <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
-                    Details (per trade)
-                    <InfoTooltip text="Click a grouped option row above to inspect live account snapshots or Off-Track open trades for that contract." />
-                  </h5>
-                  <table className="table-operations">
-                    <thead>
-                      <tr>
-                        <th>Contract</th>
-                        <th>Expiry</th>
-                        <th>STRIKE</th>
-                        <th>Time</th>
-                        <th>Side</th>
-                        <th>Qty</th>
-                        <th>Price</th>
-                        <th>Commission</th>
-                        <th>PnL</th>
-                        <th>Pool</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {expandedOpenDetailKeys.length === 0 ? (
-                        <tr>
-                          <td colSpan={11} className="replay-detail-placeholder">Click an open option row above to load details</td>
-                        </tr>
-                      ) : (
-                        openOptionGroups
-                          .filter(group => expandedOpenDetailKeys.includes(getOpenOptGroupKey(group)))
-                          .flatMap(group =>
-                            group.kind === 'live'
-                              ? (group.positions ?? []).map((position, index) => {
+                  {expandedOpenDetailKeys.length > 0 && (
+                    <>
+                      <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
+                        Details (per trade)
+                        <InfoTooltip text="Click a grouped option row above to inspect live account snapshots or Off-Track open trades for that contract." />
+                      </h5>
+                      <table className="table-operations">
+                        <thead>
+                          <tr>
+                            <th>Contract</th>
+                            <th>Expiry</th>
+                            <th>STRIKE</th>
+                            <th>Time</th>
+                            <th>Side</th>
+                            <th>Qty</th>
+                            <th>Price</th>
+                            <th>Commission</th>
+                            <th>PnL</th>
+                            <th>Pool</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {openOptionGroups
+                            .filter(group => expandedOpenDetailKeys.includes(getOpenOptGroupKey(group)))
+                            .flatMap(group =>
+                              group.kind === 'live'
+                                ? (group.positions ?? []).map((position, index) => {
                                   const qty = Number(position.position)
                                   const absQty = Math.abs(qty)
                                   const pricePerShare = position.avgCost != null && Number.isFinite(Number(position.avgCost))
@@ -1027,7 +1026,7 @@ export function PositionsPage({
                                     </tr>
                                   )
                                 })
-                              : (group.trades ?? []).map((ex, ti) => {
+                                : (group.trades ?? []).map((ex, ti) => {
                                   const s = (ex.side ?? '').toUpperCase()
                                   const sideLabel =
                                     s === 'BUY' || s === 'BOT' || s === 'B'
@@ -1096,10 +1095,11 @@ export function PositionsPage({
                                     </tr>
                                   )
                                 }),
-                          )
-                      )}
-                    </tbody>
-                  </table>
+                            )}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
                 </>
               )}
                 </div>
@@ -1114,42 +1114,62 @@ export function PositionsPage({
                   {liveStockPositions.length === 0 ? (
                     <p className="section-hint">No open stock positions under the current filters.</p>
                   ) : (
-                <div className="replay-portfolio-table-wrap">
-                  <table className="table-operations">
-                    <thead>
-                      <tr>
-                        <th>Account</th>
-                        <th>Symbol</th>
-                        <th>Side</th>
-                        <th>Qty</th>
-                        <th>Avg Cost</th>
-                        <th>Mark</th>
-                        <th>Unrealized PnL</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {liveStockPositions.map((position, index) => {
-                        const qty = Number(position.position)
-                        const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
-                          ? Number(position.unrealized_pnl)
-                          : null
-                        const pnlClass = pnl == null ? '' : 'replay-pnl-unrealized'
-                        return (
-                          <tr key={`open-stk-${position.account_id}-${position.symbol ?? index}`}>
-                            <td>{position.account_id || '—'}</td>
-                            <td><strong>{position.symbol ?? '—'}</strong></td>
-                            <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
-                            <td>{Number.isFinite(qty) ? qty : '—'}</td>
-                            <td>{fmtUsd(position.avgCost)}</td>
-                            <td>{fmtUsd(position.price)}</td>
-                            <td><span className={pnlClass}>{fmtUsd(pnl ?? 0)}</span></td>
+                    <div className="replay-portfolio-table-wrap">
+                      <table className="table-operations">
+                        <thead>
+                          <tr>
+                            <th>Account</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Qty</th>
+                            <th>Avg Cost</th>
+                            <th>Mark</th>
+                            <th>Unrealized PnL</th>
                           </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const byAccount: Record<string, typeof liveStockPositions> = {}
+                            for (const position of liveStockPositions) {
+                              const accId = (position.account_id ?? '').trim() || '—'
+                              if (!byAccount[accId]) byAccount[accId] = []
+                              byAccount[accId].push(position)
+                            }
+                            const accountIds = Object.keys(byAccount).sort()
+                            const rows: JSX.Element[] = []
+                            for (const accId of accountIds) {
+                              rows.push(
+                                <tr key={`open-stk-header-${accId}`} className="replay-portfolio-group-header">
+                                  <td colSpan={7}>
+                                    <strong>{accId}</strong>
+                                  </td>
+                                </tr>,
+                              )
+                              for (const position of byAccount[accId]) {
+                                const qty = Number(position.position)
+                                const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+                                  ? Number(position.unrealized_pnl)
+                                  : null
+                                const pnlClass = pnl == null ? '' : 'replay-pnl-unrealized'
+                                rows.push(
+                                  <tr key={`open-stk-${accId}-${position.symbol ?? ''}-${position.contract_key ?? ''}`}>
+                                    <td>{accId}</td>
+                                    <td><strong>{position.symbol ?? '—'}</strong></td>
+                                    <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+                                    <td>{Number.isFinite(qty) ? qty : '—'}</td>
+                                    <td>{fmtUsd(position.avgCost)}</td>
+                                    <td>{fmtUsd(position.price)}</td>
+                                    <td><span className={pnlClass}>{fmtUsd(pnl ?? 0)}</span></td>
+                                  </tr>,
+                                )
+                              }
+                            }
+                            return rows
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1162,28 +1182,20 @@ export function PositionsPage({
               <label className="replay-filter-wrap-symbol">
                 <input
                   type="text"
-                  placeholder="Symbol"
+                  placeholder="Sym"
                   value={ledgerFilterSymbol}
                   onChange={e => setLedgerFilterSymbol(e.target.value)}
                   className="replay-filter-input"
                 />
               </label>
-              <label>
-                <span className="replay-filter-label">Expiry</span>
+              <label className="replay-filter-label-month">
+                <span className="replay-filter-label">Exp</span>
                 <input
-                  type="date"
+                  type="month"
                   value={ledgerFilterExpiryStart}
                   onChange={e => setLedgerFilterExpiryStart(e.target.value)}
                   className="replay-filter-input replay-filter-date"
-                  title="Start"
-                />
-                <span className="replay-filter-sep">～</span>
-                <input
-                  type="date"
-                  value={ledgerFilterExpiryEnd}
-                  onChange={e => setLedgerFilterExpiryEnd(e.target.value)}
-                  className="replay-filter-input replay-filter-date"
-                  title="End"
+                  title="Expiry month"
                 />
               </label>
               <label>
@@ -1290,7 +1302,7 @@ export function PositionsPage({
                 </div>
               </div>
               {filteredExecutions.length === 0 ? (
-                <p className="section-hint">No execution data. Use Overview to fetch from IB (Refresh), or Positions to add manual history (Add Trade).{([ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExpiryEnd, ledgerFilterExecStart, ledgerFilterExecEnd].some(Boolean) || ledgerFilterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
+                <p className="section-hint">No execution data. Use Overview to fetch from IB (Refresh), or Positions to add manual history (Add Trade).{([ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExecStart, ledgerFilterExecEnd].some(Boolean) || ledgerFilterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
               ) : (
                 <>
                   {ledgerTab === 'options' ? (
