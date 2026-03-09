@@ -121,6 +121,22 @@ class StatusReader:
             self._conn = None
             return None
 
+    def get_is_us_trading_day(self, date_str: str) -> bool:
+        """Return True if the given date (YYYY-MM-DD) is a US (NYSE) trading day. Uses us_market_holidays table."""
+        return get_is_us_trading_day(self._config, date_str)
+
+    def get_market_holidays(self, exchange: str = "NYSE", year: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Return list of holidays from us_market_holidays. Optional year filter."""
+        return get_market_holidays(self._config, exchange=exchange, year=year)
+
+    def add_market_holiday(self, date_str: str, label: Optional[str] = None, exchange: str = "NYSE") -> bool:
+        """Insert or update one holiday. Returns True on success."""
+        return add_market_holiday(self._config, date_str, label=label, exchange=exchange)
+
+    def delete_market_holiday(self, date_str: str, exchange: str = "NYSE") -> bool:
+        """Delete one holiday. Returns True on success."""
+        return delete_market_holiday(self._config, date_str, exchange=exchange)
+
     def get_daemon_heartbeat(self) -> Optional[Dict[str, Any]]:
         """Return daemon_heartbeat row id=1: last_ts, hedge_running, ib_connected, ib_client_id, next_retry_ts (RE-6/RE-7). None if table missing."""
         if not self._connect():
@@ -2208,7 +2224,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
             return None
 
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
-        """Return settings row id=1: ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market (for GET /status and UI). None if table missing."""
+        """Return settings row id=1: ib_host, port_type, client_ids (Daemon: Trading/Listener, Monitor: Account/Market data, Celery: Market Data), ib2_* (Listener/Account only; no market data). See DATABASE.md §2.9 Client ID 使用场景. None if table missing."""
         if not self._connect():
             return None
         try:
@@ -2219,13 +2235,14 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                     "COALESCE(ib_client_id_listener, 2) AS ib_client_id_listener, "
                     "COALESCE(ib_client_id_account, 100) AS ib_client_id_account, "
                     "COALESCE(ib_client_id_markets, 101) AS ib_client_id_markets, "
-                    "COALESCE(ib_client_id_worker_market, 500) AS ib_client_id_worker_market "
+                    "COALESCE(ib_client_id_worker_market, 500) AS ib_client_id_worker_market, "
+                    "ib_primary_account_id "
                     "FROM settings WHERE id = 1"
                 )
                 row = cur.fetchone()
             if row is None:
                 return None
-            return {
+            out = {
                 "ib_host": (row.get("ib_host") or "127.0.0.1").strip(),
                 "ib_port_type": (row.get("ib_port_type") or "tws_paper").strip().lower(),
                 "ib_client_id_daemon": int(row["ib_client_id_daemon"]) if row.get("ib_client_id_daemon") is not None else 1,
@@ -2234,6 +2251,32 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                 "ib_client_id_markets": int(row["ib_client_id_markets"]) if row.get("ib_client_id_markets") is not None else 10,
                 "ib_client_id_worker_market": int(row["ib_client_id_worker_market"]) if row.get("ib_client_id_worker_market") is not None else 500,
             }
+            if row.get("ib_primary_account_id") is not None and str(row.get("ib_primary_account_id")).strip():
+                out["ib_primary_account_id"] = str(row["ib_primary_account_id"]).strip()
+            else:
+                out["ib_primary_account_id"] = None
+            try:
+                with self._conn.cursor(cursor_factory=RealDictCursor) as cur2:
+                    cur2.execute(
+                        "SELECT ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account FROM settings WHERE id = 1"
+                    )
+                    r2 = cur2.fetchone()
+                if r2 and (r2.get("ib2_host") or "").strip():
+                    out["ib2_host"] = (r2.get("ib2_host") or "").strip()
+                    out["ib2_port_type"] = (r2.get("ib2_port_type") or "tws_paper").strip().lower()
+                    out["ib2_client_id_listener"] = int(r2.get("ib2_client_id_listener") or 3)
+                    out["ib2_client_id_account"] = int(r2.get("ib2_client_id_account") or 102)
+                else:
+                    out["ib2_host"] = None
+                    out["ib2_port_type"] = None
+                    out["ib2_client_id_listener"] = 3
+                    out["ib2_client_id_account"] = 102
+            except Exception:
+                out["ib2_host"] = None
+                out["ib2_port_type"] = None
+                out["ib2_client_id_listener"] = 3
+                out["ib2_client_id_account"] = 102
+            return out
         except Exception as e:
             # 旧库可能尚无 client_id 列，仅查 host/port_type
             try:
@@ -2250,11 +2293,68 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                     "ib_client_id_account": 100,
                     "ib_client_id_markets": 101,
                     "ib_client_id_worker_market": 500,
+                    "ib_primary_account_id": None,
+                    "ib2_host": None,
+                    "ib2_port_type": None,
+                    "ib2_client_id_listener": 3,
+                    "ib2_client_id_account": 102,
                 }
             except Exception as e2:
                 logger.debug("get_ib_config failed: %s", e2)
                 self._conn = None
                 return None
+
+    def get_flex_config(self, purpose: Optional[str] = None):
+        """If purpose is None: return { host_token, secondary_token, rows } for GET /status. rows have query_label, purpose, query_host_id, query_secondary_id.
+        If purpose is set: return list of { token, query_id } to call: (host_token, query_host_id) and (secondary_token, query_secondary_id) per row, so both accounts are called."""
+        if not self._connect():
+            return [] if purpose is not None else {"host_token": None, "secondary_token": None, "rows": []}
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT ib_flex_host_token, ib_flex_secondary_token FROM settings WHERE id = 1"
+                )
+                settings_row = cur.fetchone()
+            host_tok = (settings_row.get("ib_flex_host_token") or "").strip() if settings_row else ""
+            sec_tok = (settings_row.get("ib_flex_secondary_token") or "").strip() if settings_row else ""
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if purpose is not None:
+                    cur.execute(
+                        "SELECT query_host_id, query_secondary_id, query_label, purpose FROM flex_accounts WHERE purpose = %s ORDER BY sort_order, id",
+                        (purpose,),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT query_host_id, query_secondary_id, query_label, purpose FROM flex_accounts ORDER BY sort_order, id"
+                    )
+                rows = cur.fetchall()
+            if purpose is not None:
+                out: List[Dict[str, Any]] = []
+                for r in rows:
+                    qh = (r.get("query_host_id") or "").strip()
+                    qs = (r.get("query_secondary_id") or "").strip()
+                    if host_tok and qh:
+                        out.append({"token": host_tok, "query_id": qh})
+                    if sec_tok and qs:
+                        out.append({"token": sec_tok, "query_id": qs})
+                return out
+            # purpose is None: return full config for Settings UI
+            out_rows: List[Dict[str, Any]] = []
+            for r in rows:
+                item: Dict[str, Any] = {
+                    "query_host_id": (r.get("query_host_id") or "").strip(),
+                    "query_secondary_id": (r.get("query_secondary_id") or "").strip() or None,
+                }
+                if r.get("query_label") is not None and str(r.get("query_label")).strip():
+                    item["query_label"] = str(r["query_label"]).strip()
+                if r.get("purpose") is not None and str(r.get("purpose")).strip():
+                    item["purpose"] = str(r["purpose"]).strip()
+                out_rows.append(item)
+            return {"host_token": host_tok or None, "secondary_token": sec_tok or None, "rows": out_rows}
+        except Exception as e:
+            logger.debug("get_flex_config failed: %s", e)
+            self._conn = None
+            return [] if purpose is not None else {"host_token": None, "secondary_token": None, "rows": []}
 
     def close(self) -> None:
         if self._conn:
@@ -3166,6 +3266,118 @@ def get_bars_backfill_last_updated(status_config: dict) -> Optional[float]:
         return None
 
 
+def get_is_us_trading_day(status_config: dict, date_str: str) -> bool:
+    """Return True if the given date (YYYY-MM-DD) is a US market (NYSE) trading day: not weekend, not in us_market_holidays.
+    Used by frontend to show '(end)' in yellow only on trading days when Pull is needed."""
+    try:
+        d = date.fromisoformat(date_str)
+        if d.weekday() >= 5:
+            return False
+    except (ValueError, TypeError):
+        return False
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return True
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM us_market_holidays WHERE exchange = 'NYSE' AND holiday_date = %s LIMIT 1",
+                    (d,),
+                )
+                row = cur.fetchone()
+            return row is None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_is_us_trading_day failed: %s", e)
+        return True
+
+
+def get_market_holidays(status_config: dict, exchange: str = "NYSE", year: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Return list of { exchange, holiday_date (YYYY-MM-DD), label } from us_market_holidays. Optional year filter."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if year is not None:
+                    cur.execute(
+                        """SELECT exchange, holiday_date::text AS holiday_date, label
+                           FROM us_market_holidays WHERE exchange = %s AND EXTRACT(YEAR FROM holiday_date) = %s
+                           ORDER BY holiday_date""",
+                        (exchange, year),
+                    )
+                else:
+                    cur.execute(
+                        """SELECT exchange, holiday_date::text AS holiday_date, label
+                           FROM us_market_holidays WHERE exchange = %s ORDER BY holiday_date""",
+                        (exchange,),
+                    )
+                rows = cur.fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_market_holidays failed: %s", e)
+        return []
+
+
+def add_market_holiday(
+    status_config: dict, date_str: str, label: Optional[str] = None, exchange: str = "NYSE"
+) -> bool:
+    """Insert one row into us_market_holidays. date_str YYYY-MM-DD. Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        d = date.fromisoformat(date_str)
+    except (ValueError, TypeError):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO us_market_holidays (exchange, holiday_date, label)
+                       VALUES (%s, %s, %s) ON CONFLICT (exchange, holiday_date) DO UPDATE SET label = EXCLUDED.label""",
+                    (exchange, d, (label or "").strip() or None),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("add_market_holiday failed: %s", e)
+        return False
+
+
+def delete_market_holiday(status_config: dict, date_str: str, exchange: str = "NYSE") -> bool:
+    """Delete one row from us_market_holidays. Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        d = date.fromisoformat(date_str)
+    except (ValueError, TypeError):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM us_market_holidays WHERE exchange = %s AND holiday_date = %s", (exchange, d))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("delete_market_holiday failed: %s", e)
+        return False
+
+
 def write_run_status(status_config: dict, suspended: bool) -> bool:
     """Update daemon_run_status row id=1 (suspended=true/false). Daemon polls this to pause/resume hedging. Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
@@ -3227,8 +3439,13 @@ def write_ib_config(
     ib_client_id_account: int = 100,
     ib_client_id_markets: int = 101,
     ib_client_id_worker_market: int = 500,
+    ib_primary_account_id: Optional[str] = None,
+    ib2_host: Optional[str] = None,
+    ib2_port_type: Optional[str] = None,
+    ib2_client_id_listener: Optional[int] = None,
+    ib2_client_id_account: Optional[int] = None,
 ) -> bool:
-    """Update settings (id=1): ib_host, ib_port_type, 以及多种用途的 client_id（守护进程/监听进程/账户信息/市场数据/Celery worker_market）。守护进程/API 下次使用时会加载。Returns True on success."""
+    """Update settings (id=1): ib_host, port_type, client_ids (Trading/Listener/Account/Market data/Celery Market Data; see DATABASE.md §2.9), ib_primary_account_id, ib2_* (no ib2_client_id_markets). Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     host = (ib_host or "").strip() or "127.0.0.1"
@@ -3257,9 +3474,30 @@ def write_ib_config(
                         f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
                     )
                 cur.execute(
+                    "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_primary_account_id text"
+                )
+                primary_val = (ib_primary_account_id or "").strip() or None
+                for col, default in (
+                    ("ib2_host", "text"),
+                    ("ib2_port_type", "text DEFAULT 'tws_paper'"),
+                    ("ib2_client_id_listener", "integer DEFAULT 3"),
+                    ("ib2_client_id_account", "integer DEFAULT 102"),
+                ):
+                    cur.execute(
+                        f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {default}"
+                    )
+                # Second IB has no market data; drop column if present (DATABASE.md §2.9)
+                cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS ib2_client_id_markets")
+                ib2_h = (ib2_host or "").strip() or None
+                ib2_pt = (ib2_port_type or "").strip().lower() or None
+                if ib2_pt and ib2_pt not in _VALID_IB_PORT_TYPES:
+                    ib2_pt = "tws_paper"
+                cid2_l = int(ib2_client_id_listener) if ib2_client_id_listener is not None else 3
+                cid2_a = int(ib2_client_id_account) if ib2_client_id_account is not None else 102
+                cur.execute(
                     """
-                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market)
-                    VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market, ib_primary_account_id, ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account)
+                    VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         ib_host = EXCLUDED.ib_host,
                         ib_port_type = EXCLUDED.ib_port_type,
@@ -3267,13 +3505,18 @@ def write_ib_config(
                         ib_client_id_listener = EXCLUDED.ib_client_id_listener,
                         ib_client_id_account = EXCLUDED.ib_client_id_account,
                         ib_client_id_markets = EXCLUDED.ib_client_id_markets,
-                        ib_client_id_worker_market = EXCLUDED.ib_client_id_worker_market
+                        ib_client_id_worker_market = EXCLUDED.ib_client_id_worker_market,
+                        ib_primary_account_id = EXCLUDED.ib_primary_account_id,
+                        ib2_host = EXCLUDED.ib2_host,
+                        ib2_port_type = EXCLUDED.ib2_port_type,
+                        ib2_client_id_listener = EXCLUDED.ib2_client_id_listener,
+                        ib2_client_id_account = EXCLUDED.ib2_client_id_account
                     """,
-                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w),
+                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_val, ib2_h, ib2_pt, cid2_l, cid2_a),
                 )
             conn.commit()
             logger.info(
-                "[R-A3] write_ib_config: wrote settings id=1 host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s ib_client_id_worker_market=%s",
+                "[R-A3] write_ib_config: wrote settings id=1 host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s ib_client_id_worker_market=%s ib_primary_account_id=%s",
                 host,
                 port_type,
                 cid_d,
@@ -3281,10 +3524,53 @@ def write_ib_config(
                 cid_a,
                 cid_m,
                 cid_w,
+                primary_val,
             )
             return True
         finally:
             conn.close()
     except Exception as e:
         logger.warning("write_ib_config failed: %s", e)
+        return False
+
+
+def write_flex_config(
+    status_config: dict,
+    host_token: Optional[str],
+    secondary_token: Optional[str],
+    accounts: List[Dict[str, Any]],
+) -> bool:
+    """Write Flex tokens to settings and replace flex_accounts with rows (query_host_id, query_secondary_id, query_label, purpose). Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE settings SET ib_flex_host_token = %s, ib_flex_secondary_token = %s WHERE id = 1",
+                    ((host_token or "").strip() or None, (secondary_token or "").strip() or None),
+                )
+                cur.execute("DELETE FROM flex_accounts")
+                for i, a in enumerate(accounts):
+                    if not isinstance(a, dict):
+                        continue
+                    qh = (a.get("query_host_id") or "").strip()
+                    if not qh:
+                        continue
+                    qs = (a.get("query_secondary_id") or "").strip() or None
+                    query_label = (a.get("query_label") or "").strip() or None
+                    purpose = (a.get("purpose") or "cash_transactions").strip() or "cash_transactions"
+                    cur.execute(
+                        "INSERT INTO flex_accounts (sort_order, query_label, purpose, query_host_id, query_secondary_id) VALUES (%s, %s, %s, %s, %s)",
+                        (i, query_label, purpose, qh, qs),
+                    )
+            conn.commit()
+            logger.info("write_flex_config: wrote tokens to settings and %d Flex row(s)", len([x for x in accounts if isinstance(x, dict) and (x.get("query_host_id") or "").strip()]))
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_flex_config failed: %s", e)
         return False

@@ -447,6 +447,26 @@ def _ensure_tables(conn, log=None) -> None:
             cur.execute(
                 f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
             )
+        cur.execute(
+            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_primary_account_id text"
+        )
+        cur.execute(
+            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib2_host text"
+        )
+        cur.execute(
+            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib2_port_type text DEFAULT 'tws_paper'"
+        )
+        for col, default in (
+            ("ib2_client_id_listener", 3),
+            ("ib2_client_id_account", 102),
+        ):
+            cur.execute(
+                f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
+            )
+        # Second IB has no market data subscription; remove column if present (see DATABASE.md §2.9)
+        cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS ib2_client_id_markets")
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_host_token text")
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_secondary_token text")
         _log("accounts, account_positions, instrument_prices")
         cur.execute(
             """
@@ -747,6 +767,154 @@ def _ensure_tables(conn, log=None) -> None:
             "CREATE INDEX IF NOT EXISTS position_category_tags_category_id ON position_category_tags (category_id)"
         )
         conn.commit()
+        _log("us_market_holidays")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS us_market_holidays (
+                exchange text NOT NULL DEFAULT 'NYSE',
+                holiday_date date NOT NULL,
+                label text,
+                created_at timestamptz DEFAULT now(),
+                PRIMARY KEY (exchange, holiday_date)
+            )
+            """
+        )
+        _log("flex_accounts")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS flex_accounts (
+                id serial PRIMARY KEY,
+                sort_order integer NOT NULL DEFAULT 0,
+                query_label text,
+                purpose text DEFAULT 'cash_transactions',
+                query_host_id text NOT NULL,
+                query_secondary_id text
+            )
+            """
+        )
+        # Migrate from old schema: query_id_cash_transactions -> query_id, add query_label/purpose
+        try:
+            with conn.cursor() as cur2:
+                cur2.execute(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'flex_accounts' AND column_name = 'query_id_cash_transactions'
+                    """
+                )
+                if cur2.fetchone():
+                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_id text")
+                    cur2.execute("UPDATE flex_accounts SET query_id = query_id_cash_transactions WHERE query_id IS NULL OR query_id = ''")
+                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_label text")
+                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS purpose text DEFAULT 'cash_transactions'")
+                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS query_id_cash_transactions")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # Ensure new columns exist for tables created before migration
+        for col_def in [
+            ("query_id", "text"),
+            ("query_label", "text"),
+            ("purpose", "text DEFAULT 'cash_transactions'"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        # Migrate: token -> settings (ib_flex_host_token, ib_flex_secondary_token); account_label -> account_is_host (bool); drop token, account_label
+        try:
+            with conn.cursor() as cur2:
+                cur2.execute(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'flex_accounts' AND column_name = 'token'
+                    """
+                )
+                if cur2.fetchone():
+                    cur2.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_host_token text")
+                    cur2.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_secondary_token text")
+                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS account_is_host boolean NOT NULL DEFAULT true")
+                    # Backfill settings: first two distinct tokens by sort_order, id
+                    cur2.execute(
+                        """
+                        UPDATE settings SET
+                          ib_flex_host_token = (SELECT token FROM (
+                            SELECT token, ROW_NUMBER() OVER (ORDER BY min_so, min_id) AS rn
+                            FROM (SELECT token, MIN(sort_order) AS min_so, MIN(id) AS min_id FROM flex_accounts GROUP BY token) x
+                          ) y WHERE rn = 1),
+                          ib_flex_secondary_token = (SELECT token FROM (
+                            SELECT token, ROW_NUMBER() OVER (ORDER BY min_so, min_id) AS rn
+                            FROM (SELECT token, MIN(sort_order) AS min_so, MIN(id) AS min_id FROM flex_accounts GROUP BY token) x
+                          ) y WHERE rn = 2)
+                        WHERE id = 1
+                        """
+                    )
+                    cur2.execute(
+                        "UPDATE flex_accounts SET account_is_host = (token = (SELECT ib_flex_host_token FROM settings WHERE id = 1))"
+                    )
+                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS token")
+                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS account_label")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # Ensure account_is_host exists (for tables created before token migration)
+        try:
+            cur.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS account_is_host boolean NOT NULL DEFAULT true")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # Migrate: account_is_host + query_id -> query_host_id + query_secondary_id (one row per label/purpose, both IDs)
+        try:
+            with conn.cursor() as cur2:
+                cur2.execute(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'flex_accounts' AND column_name = 'account_is_host'
+                    """
+                )
+                if cur2.fetchone():
+                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_host_id text")
+                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_secondary_id text")
+                    cur2.execute("UPDATE flex_accounts SET query_host_id = query_id WHERE account_is_host = true AND (query_host_id IS NULL OR query_host_id = '')")
+                    cur2.execute("UPDATE flex_accounts SET query_secondary_id = query_id WHERE account_is_host = false AND (query_secondary_id IS NULL OR query_secondary_id = '')")
+                    # Collapse to one row per purpose: keep min(sort_order), merge query_host_id and query_secondary_id
+                    cur2.execute(
+                        """
+                        CREATE TEMP TABLE flex_accounts_merged AS
+                        SELECT MIN(sort_order) AS sort_order, purpose,
+                               MAX(query_label) AS query_label,
+                               MAX(query_host_id) AS query_host_id,
+                               MAX(query_secondary_id) AS query_secondary_id
+                        FROM flex_accounts
+                        GROUP BY purpose
+                        """
+                    )
+                    cur2.execute("DELETE FROM flex_accounts")
+                    cur2.execute(
+                        """
+                        INSERT INTO flex_accounts (sort_order, query_label, purpose, query_host_id, query_secondary_id)
+                        SELECT sort_order, query_label, purpose,
+                               COALESCE(NULLIF(TRIM(query_host_id), ''), ''),
+                               NULLIF(TRIM(query_secondary_id), '')
+                        FROM flex_accounts_merged
+                        WHERE NULLIF(TRIM(query_host_id), '') IS NOT NULL
+                        """
+                    )
+                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS account_is_host")
+                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS query_id")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # Ensure query_host_id / query_secondary_id exist for tables created before this migration
+        for col_def in [
+            ("query_host_id", "text"),
+            ("query_secondary_id", "text"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
             with conn.cursor() as cur2:
@@ -1472,9 +1640,7 @@ class PostgreSQLSink(StatusSink):
             return None
 
     def get_ib_connection_config(self) -> Optional[Dict[str, Any]]:
-        """Read settings (id=1): ib_host, ib_port_type, ib_client_id_daemon. Returns dict with host, port_type, port (resolved), client_id_daemon.
-        Used by daemon at startup to connect to IB; if None or table missing, daemon falls back to config file.
-        """
+        """Read settings (id=1): host, port_type, client_id (Trading/Listener/Account/Market data). Used by daemon at startup. See DATABASE.md §2.9 Client ID 使用场景."""
         if not self._ensure_conn():
             return None
         try:
@@ -1490,7 +1656,7 @@ class PostgreSQLSink(StatusSink):
             host = (row[0] or "").strip() or "127.0.0.1"
             port_type = (row[1] or "").strip().lower() or "tws_paper"
             port = IB_PORT_TYPE_TO_PORT.get(port_type, 7497)
-            return {
+            out = {
                 "host": host,
                 "port_type": port_type,
                 "port": port,
@@ -1499,6 +1665,17 @@ class PostgreSQLSink(StatusSink):
                 "ib_client_id_account": int(row[4]) if row[4] is not None else 4,
                 "ib_client_id_markets": int(row[5]) if row[5] is not None else 10,
             }
+            try:
+                with self._conn.cursor() as cur2:
+                    cur2.execute(
+                        "SELECT ib_primary_account_id FROM settings WHERE id = 1"
+                    )
+                    r2 = cur2.fetchone()
+                    if r2 and r2[0] is not None and str(r2[0]).strip():
+                        out["primary_account_id"] = str(r2[0]).strip()
+            except Exception:
+                pass
+            return out
         except Exception as e:
             self._conn.rollback()
             logger.debug("get_ib_connection_config failed: %s", e)

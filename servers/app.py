@@ -11,7 +11,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 import asyncio
-from fastapi import Body, FastAPI, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -23,6 +23,7 @@ from servers.reader import (
     write_run_status,
     write_heartbeat_interval,
     write_ib_config,
+    write_flex_config,
     write_ohlc_bars_to_db,
     write_stock_bars,
     delete_stock_bars_for_symbol,
@@ -80,7 +81,7 @@ def _daemon_log_redis_url() -> str:
 
 
 class IbConfigBody(BaseModel):
-    """POST /config/ib 请求体，保证 client_id 被正确解析并写入 DB。"""
+    """POST /config/ib body. Client IDs: Daemon (Trading, Listener), Monitor (Account, Market data), Celery (Market Data). Second IB: Listener + Account only (no market data). See DATABASE.md §2.9 Client ID 使用场景."""
     ib_host: Optional[str] = None
     ib_port_type: Optional[str] = None
     ib_client_id_daemon: Optional[int] = None
@@ -88,9 +89,35 @@ class IbConfigBody(BaseModel):
     ib_client_id_account: Optional[int] = None
     ib_client_id_markets: Optional[int] = None
     ib_client_id_worker_market: Optional[int] = None
+    ib_primary_account_id: Optional[str] = None
+    ib2_host: Optional[str] = None
+    ib2_port_type: Optional[str] = None
+    ib2_client_id_listener: Optional[int] = None
+    ib2_client_id_account: Optional[int] = None
 
     class Config:
         extra = "ignore"  # 忽略多余字段，避免解析错误
+
+
+class FlexAccountItem(BaseModel):
+    """One Flex row: same label/purpose for both accounts; query_host_id (Host IB), query_secondary_id (Second IB, optional)."""
+    query_host_id: str
+    query_secondary_id: Optional[str] = None
+    query_label: Optional[str] = None
+    purpose: Optional[str] = "cash_transactions"
+
+    class Config:
+        extra = "ignore"
+
+
+class FlexConfigBody(BaseModel):
+    """POST /config/flex body: host_token, secondary_token (settings), and rows (query_host_id, query_secondary_id?, query_label?, purpose?)."""
+    host_token: Optional[str] = None
+    secondary_token: Optional[str] = None
+    accounts: List[FlexAccountItem] = []
+
+    class Config:
+        extra = "ignore"
 
 
 def create_app(
@@ -133,6 +160,7 @@ def create_app(
     app.state.monitor_enabled = True
     app.state.account_ib_client = None
     app.state.market_ib_client = None
+    app.state.account_ib_client_2 = None  # Second TWS (manual-only account, R-A4)
 
     @app.on_event("startup")
     async def startup_event() -> None:
@@ -147,6 +175,10 @@ def create_app(
                 "ib_client_id_account": 100,
                 "ib_client_id_markets": 101,
                 "ib_client_id_worker_market": 500,
+                "ib2_host": None,
+                "ib2_port_type": None,
+                "ib2_client_id_listener": 3,
+                "ib2_client_id_account": 102,
             }
             host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
             port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
@@ -165,6 +197,25 @@ def create_app(
                 client_id=int(ib_cfg.get("ib_client_id_markets", 101)),
                 name="MarketIbClient",
             )
+            # Second IB (manual-only account): different host = different TWS machine
+            ib2_host = (ib_cfg.get("ib2_host") or "").strip()
+            if ib2_host:
+                port_type_2 = (ib_cfg.get("ib2_port_type") or "tws_paper").strip().lower()
+                port_2 = port_map.get(port_type_2, 7497)
+                app.state.account_ib_client_2 = AccountIbClient(
+                    host=ib2_host,
+                    port=port_2,
+                    client_id=int(ib_cfg.get("ib2_client_id_account", 102)),
+                    name="AccountIbClient2",
+                )
+                logger.info(
+                    "Monitor AccountIbClient2 (second IB) initialized host=%s port=%s client_id=%s",
+                    ib2_host,
+                    port_2,
+                    ib_cfg.get("ib2_client_id_account", 102),
+                )
+            else:
+                app.state.account_ib_client_2 = None
             logger.info(
                 "Monitor IB clients initialized (host=%s port=%s account_id=%s market_id=%s)",
                 host,
@@ -796,6 +847,8 @@ def create_app(
                 if sym and (st == "STK" or not st):
                     symbols_set.add(sym)
             payload["subscribed_tickers"] = sorted(s for s in symbols_set if s)
+            # Reference indices (US market) for watchlist comparison; frontend uses symbol + label for benchmark row. See docs/INDEX_DATA_SOURCES.md.
+            payload["reference_indices"] = (control_via_db or {}).get("reference_indices") or []
             # R-A1: 始终从 DB (accounts + account_positions) 读账户并返回
             payload["accounts"] = reader.get_accounts_from_tables()
             if payload["accounts"] is None:
@@ -811,6 +864,7 @@ def create_app(
                 "ib_client_id_markets": 101,
                 "ib_client_id_worker_market": 500,
             }
+            payload["flex_config"] = reader.get_flex_config()
             # Monitor-side IB client status for UI.
             try:
                 monitor_ib_status: Dict[str, Any] = {}
@@ -919,6 +973,7 @@ def create_app(
                     "ib_client_id_markets": 101,
                     "ib_client_id_worker_market": 500,
                 },
+                "flex_config": {"host_token": None, "secondary_token": None, "rows": []},
                 "monitor_ib_status": None,
                 "monitor_enabled": False,
                 "monitor_health": "ok",
@@ -1002,33 +1057,19 @@ def create_app(
     @app.post("/transactions/fetch")
     def post_transactions_fetch(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
         """Fetch cash transactions from IB Flex Web Service and upsert into account_transactions (Performance Phase 0).
-        Uses flex.accounts[].query_id_cash_transactions per account (legacy: query_id). Env: IB_FLEX_TOKEN, IB_FLEX_QUERY_ID_CASH_TRANSACTIONS or IB_FLEX_QUERY_ID for first entry."""
+        Uses flex_accounts rows with purpose=cash_transactions (Settings → IB Connection → Flex). One token can have multiple queries; only cash_transactions queries are used here."""
         try:
-            flex_cfg = (control_via_db or {}).get("flex") or {}
-
-            def _qid_cash(a: dict, i: int) -> str:
-                env_qid = os.environ.get("IB_FLEX_QUERY_ID_CASH_TRANSACTIONS") or os.environ.get("IB_FLEX_QUERY_ID") if i == 0 else None
-                return (env_qid or a.get("query_id_cash_transactions") or a.get("query_id") or "").strip()
-
-            # Build list of (token, query_id) for cash transactions
-            accounts_list = flex_cfg.get("accounts")
-            if accounts_list and isinstance(accounts_list, list) and len(accounts_list) > 0:
-                entries = []
-                for i, a in enumerate(accounts_list):
-                    if not isinstance(a, dict):
-                        continue
-                    tok = (os.environ.get("IB_FLEX_TOKEN") if i == 0 else None) or (a.get("token") or "").strip()
-                    qid = _qid_cash(a, i)
-                    if tok and qid:
-                        entries.append((tok, qid))
-            else:
-                tok = (os.environ.get("IB_FLEX_TOKEN") or flex_cfg.get("token") or "").strip()
-                qid = _qid_cash(flex_cfg, 0)
-                entries = [(tok, qid)] if tok and qid else []
+            entries: List[tuple] = []
+            flex_list = reader.get_flex_config(purpose="cash_transactions")
+            for a in flex_list:
+                tok = (a.get("token") or "").strip()
+                qid = (a.get("query_id") or "").strip()
+                if tok and qid:
+                    entries.append((tok, qid))
             if not entries:
                 return {
                     "ok": False,
-                    "error": "No Flex credentials: set flex.accounts[] with token and query_id_cash_transactions per IB account, or flex.token and flex.query_id_cash_transactions, or env IB_FLEX_TOKEN and IB_FLEX_QUERY_ID_CASH_TRANSACTIONS.",
+                    "error": "No Flex credentials: configure in Settings → IB Connection → Flex (token and query_id with purpose cash_transactions).",
                     "count": 0,
                 }
             if not control_via_db:
@@ -1183,15 +1224,68 @@ def create_app(
                 sym_list.append(sym.upper())
         return list(dict.fromkeys(sym_list))
 
+    @app.get("/market/trading-day")
+    def get_market_trading_day(
+        date_param: Optional[str] = Query(None, alias="date", description="Date YYYY-MM-DD; default today in America/New_York"),
+    ) -> Dict[str, Any]:
+        """Return whether the given date is a US (NYSE) trading day (not weekend, not in us_market_holidays). Used by Data page for '(end)' yellow highlight."""
+        if date_param and date_param.strip():
+            date_str = date_param.strip()
+        else:
+            from zoneinfo import ZoneInfo
+            date_str = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        is_trading = reader.get_is_us_trading_day(date_str)
+        return {"date": date_str, "is_trading_day": is_trading}
+
+    @app.get("/market/holidays")
+    def get_market_holidays(
+        year: Optional[int] = Query(None, description="Filter by year"),
+        exchange: str = Query("NYSE", description="Exchange (e.g. NYSE)"),
+    ) -> List[Dict[str, Any]]:
+        """Return US market holidays from us_market_holidays. Used by Settings page."""
+        return reader.get_market_holidays(exchange=exchange, year=year)
+
+    @app.post("/market/holidays")
+    def post_market_holiday(body: Dict[str, Any]) -> Dict[str, Any]:
+        """Add or update one holiday. Body: date (YYYY-MM-DD), label (optional), exchange (optional, default NYSE)."""
+        date_str = (body.get("date") or "").strip()
+        if not date_str:
+            raise HTTPException(status_code=400, detail="date is required")
+        label = (body.get("label") or "").strip() or None
+        exchange = (body.get("exchange") or "NYSE").strip() or "NYSE"
+        ok = reader.add_market_holiday(date_str, label=label, exchange=exchange)
+        if not ok:
+            raise HTTPException(status_code=400, detail="Invalid date or failed to add holiday")
+        return {"date": date_str, "exchange": exchange, "label": label}
+
+    @app.delete("/market/holidays")
+    def delete_market_holiday(
+        date_param: str = Query(..., alias="date", description="Date YYYY-MM-DD"),
+        exchange: str = Query("NYSE", description="Exchange"),
+    ) -> Dict[str, Any]:
+        """Delete one holiday."""
+        date_str = date_param.strip()
+        if not date_str:
+            raise HTTPException(status_code=400, detail="date is required")
+        ok = reader.delete_market_holiday(date_str, exchange=exchange)
+        if not ok:
+            raise HTTPException(status_code=400, detail="Invalid date or failed to delete")
+        return {"date": date_str, "exchange": exchange, "deleted": True}
+
     @app.get("/bars/coverage")
     def get_bars_coverage(
-        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Watchlist stocks"),
+        symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Watchlist stocks + reference indices"),
     ) -> Dict[str, Any]:
         """Return coverage (count, min/max ts) plus target range from config and status: ok | gap_end | missing (only end gap is checked)."""
         if symbols is not None and str(symbols).strip():
             sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
         else:
-            sym_list = _get_watchlist_stock_symbols()
+            sym_list = list(_get_watchlist_stock_symbols())
+            # Include reference indices (IND) so they appear in Watchlist data coverage with same style
+            for ref in (control_via_db or {}).get("reference_indices") or []:
+                s = (ref.get("symbol") or "").strip()
+                if s and s not in sym_list:
+                    sym_list.append(s)
         coverage = reader.get_bars_coverage(symbols=sym_list)
 
         try:
@@ -1266,6 +1360,30 @@ def create_app(
                 "stock_min": stock_min_enriched,
             })
         return {"coverage": enriched, "policy": policy}
+
+    @app.post("/indices/refresh")
+    def post_indices_refresh(
+        symbol: Optional[str] = Query(None, description="Refresh only this index (e.g. ^GSPC); omit to refresh all"),
+        days: Optional[int] = Query(None, description="For single-symbol refresh: number of days to fetch"),
+    ) -> Dict[str, Any]:
+        """Refresh reference index daily bars from TradingView. If symbol is set, refresh only that index (optional days).
+        Otherwise same as scripts/refresh_indices.py (all indices). Returns ok, updated[], errors[]."""
+        if not control_via_db:
+            return {"ok": False, "updated": [], "errors": ["Postgres config required."]}
+        try:
+            from servers.index_data_client import refresh_reference_indices, refresh_one_index
+            if symbol and (symbol := symbol.strip()):
+                result = refresh_one_index(control_via_db, symbol, days=days, reader=reader)
+            else:
+                result = refresh_reference_indices(control_via_db, reader=reader)
+            return {
+                "ok": result.get("ok", True),
+                "updated": result.get("updated", []),
+                "errors": result.get("errors", []),
+            }
+        except Exception as e:
+            logger.warning("POST /indices/refresh failed: %s", e, exc_info=True)
+            return {"ok": False, "updated": [], "errors": [str(e)]}
 
     class DeleteBarsBody(BaseModel):
         periods: Optional[List[str]] = None  # e.g. ["1 D", "1 min"]; omit or empty = delete all
@@ -1451,6 +1569,15 @@ def create_app(
                 await client.set_commission_report_callback(None)
             except Exception:
                 pass
+        client_2 = getattr(app.state, "account_ib_client_2", None)
+        if client_2 is not None:
+            try:
+                await client_2.ensure_connected()
+                execs_2 = await client_2.fetch_executions(days=days)
+                if execs_2:
+                    all_execs = (all_execs or []) + execs_2
+            except Exception as e2:
+                logger.warning("executions/fetch AccountIbClient2: %s", e2)
         if not all_execs:
             return {
                 "ok": True,
@@ -1868,13 +1995,19 @@ def create_app(
 
     @app.post("/control/monitor_release_ib")
     async def post_monitor_release_ib() -> JSONResponse:
-        """Release Monitor IB connections only (Account + Market client_id). Monitor process keeps running; use Connect to reconnect."""
+        """Release Monitor IB connections only (Account + Market + Account2 client_id). Monitor process keeps running; use Connect to reconnect."""
         try:
             acc_client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
             if acc_client is not None:
                 await acc_client.disconnect()
         except Exception as e:
             logger.warning("monitor_release_ib account disconnect: %s", e)
+        try:
+            acc_client_2 = getattr(app.state, "account_ib_client_2", None)
+            if acc_client_2 is not None:
+                await acc_client_2.disconnect()
+        except Exception as e:
+            logger.warning("monitor_release_ib account2 disconnect: %s", e)
         try:
             mkt_client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
             if mkt_client is not None:
@@ -2014,7 +2147,7 @@ def create_app(
 
     @app.post("/control/refresh_accounts")
     async def post_control_refresh_accounts() -> JSONResponse:
-        """仅通过监控端维护的 AccountIbClient 长连接从 IB 拉取账户/持仓并写库，不写 daemon_control。"""
+        """通过监控端 AccountIbClient（及 AccountIbClient2 若配置第二 IB）从 IB 拉取账户/持仓并写库。"""
         if not control_via_db:
             return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
         acc_client = getattr(app.state, "account_ib_client", None)
@@ -2025,6 +2158,14 @@ def create_app(
             )
         try:
             accounts_list = await acc_client.fetch_accounts_snapshot()
+            acc_client_2 = getattr(app.state, "account_ib_client_2", None)
+            if acc_client_2 is not None:
+                try:
+                    accounts_list_2 = await acc_client_2.fetch_accounts_snapshot()
+                    if accounts_list_2:
+                        accounts_list = (accounts_list or []) + accounts_list_2
+                except Exception as e2:
+                    logger.warning("refresh_accounts AccountIbClient2 failed: %s", e2)
             if not accounts_list:
                 return JSONResponse(
                     status_code=200,
@@ -2096,6 +2237,11 @@ def create_app(
             "ib_client_id_account": 100,
             "ib_client_id_markets": 101,
             "ib_client_id_worker_market": 500,
+            "ib_primary_account_id": None,
+            "ib2_host": None,
+            "ib2_port_type": None,
+            "ib2_client_id_listener": 3,
+            "ib2_client_id_account": 102,
         }
         host = (str(body.ib_host or current.get("ib_host", "127.0.0.1"))).strip() or "127.0.0.1"
         port_type = (str(body.ib_port_type or current.get("ib_port_type", "tws_paper"))).strip().lower() or "tws_paper"
@@ -2107,17 +2253,27 @@ def create_app(
         cid_m = body.ib_client_id_markets if body.ib_client_id_markets is not None else current.get("ib_client_id_markets", 101)
         cid_w = body.ib_client_id_worker_market if body.ib_client_id_worker_market is not None else current.get("ib_client_id_worker_market", 500)
         cid_d, cid_l, cid_a, cid_m, cid_w = int(cid_d), int(cid_l), int(cid_a), int(cid_m), int(cid_w)
+        primary_id = body.ib_primary_account_id if body.ib_primary_account_id is not None else current.get("ib_primary_account_id")
+        if primary_id is not None:
+            primary_id = (str(primary_id)).strip() or None
+        ib2_h = body.ib2_host if body.ib2_host is not None else current.get("ib2_host")
+        if ib2_h is not None:
+            ib2_h = (str(ib2_h)).strip() or None
+        ib2_pt = body.ib2_port_type if body.ib2_port_type is not None else current.get("ib2_port_type")
+        if ib2_pt is not None:
+            ib2_pt = (str(ib2_pt)).strip().lower() or None
+        cid2_l = body.ib2_client_id_listener if body.ib2_client_id_listener is not None else current.get("ib2_client_id_listener", 3)
+        cid2_a = body.ib2_client_id_account if body.ib2_client_id_account is not None else current.get("ib2_client_id_account", 102)
+        cid2_l = int(cid2_l) if cid2_l is not None else 3
+        cid2_a = int(cid2_a) if cid2_a is not None else 102
         logger.info(
-            "[config/ib] writing settings: host=%r port_type=%r ib_client_id_daemon=%s ib_client_id_listener=%s ib_client_id_account=%s ib_client_id_markets=%s ib_client_id_worker_market=%s",
+            "[config/ib] writing settings: host=%r port_type=%r ... ib2_host=%r ib2_port_type=%r",
             host,
             port_type,
-            cid_d,
-            cid_l,
-            cid_a,
-            cid_m,
-            cid_w,
+            ib2_h,
+            ib2_pt,
         )
-        if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w):
+        if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_id, ib2_h, ib2_pt, cid2_l, cid2_a):
             return JSONResponse(
                 status_code=200,
                 content={
@@ -2129,9 +2285,34 @@ def create_app(
                     "ib_client_id_account": cid_a,
                     "ib_client_id_markets": cid_m,
                     "ib_client_id_worker_market": cid_w,
+                    "ib_primary_account_id": primary_id,
+                    "ib2_host": ib2_h,
+                    "ib2_port_type": ib2_pt,
+                    "ib2_client_id_listener": cid2_l,
+                    "ib2_client_id_account": cid2_a,
                 },
             )
         return JSONResponse(status_code=500, content={"error": "failed to write settings"})
+
+    @app.post("/config/flex")
+    def post_config_flex(body: FlexConfigBody = Body(...)) -> JSONResponse:
+        """Update settings (ib_flex_host_token, ib_flex_secondary_token) and flex_accounts rows (query_host_id, query_secondary_id, query_label, purpose). POST /transactions/fetch calls both Host and Secondary per row."""
+        if not control_via_db:
+            return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
+        accounts = []
+        for a in body.accounts or []:
+            qh = (a.query_host_id or "").strip()
+            if not qh:
+                continue
+            accounts.append({
+                "query_host_id": qh,
+                "query_secondary_id": (a.query_secondary_id or "").strip() or None,
+                "query_label": (a.query_label or "").strip() or None,
+                "purpose": (a.purpose or "cash_transactions").strip() or "cash_transactions",
+            })
+        if write_flex_config(control_via_db, body.host_token, body.secondary_token, accounts):
+            return JSONResponse(status_code=200, content={"ok": True, "host_token": body.host_token, "secondary_token": body.secondary_token, "accounts": accounts})
+        return JSONResponse(status_code=500, content={"error": "failed to write flex config"})
 
     return app
 

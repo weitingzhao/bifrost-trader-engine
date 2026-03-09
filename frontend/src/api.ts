@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, RiskSummaryResponse, ExecutionsResponse, ExecutionsResponseWithPairs, PerformanceResponse, AccountTransaction, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse, PositionCategory, PositionCategoriesResponse } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, FlexAccountItem, RiskSummaryResponse, ExecutionsResponse, ExecutionsResponseWithPairs, PerformanceResponse, AccountTransaction, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse, PositionCategory, PositionCategoriesResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -415,7 +415,7 @@ export async function postSetHeartbeatInterval(heartbeat_interval_sec: number): 
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** 保存 IB 与 client_id 设置（POST /config/ib）。不传的 client_id 保持库中原值。 */
+/** 保存 IB 与 client_id 设置（POST /config/ib）。不传的字段保持库中原值。R-A4: ib_primary_account_id、ib2_* 可选。 */
 export async function postIbConfig(
   ib_host: string,
   ib_port_type: 'tws_live' | 'tws_paper' | 'gateway',
@@ -425,15 +425,25 @@ export async function postIbConfig(
     ib_client_id_account?: number
     ib_client_id_markets?: number
     ib_client_id_worker_market?: number
+    ib_primary_account_id?: string | null
+    ib2_host?: string | null
+    ib2_port_type?: string | null
+    ib2_client_id_listener?: number
+    ib2_client_id_account?: number
   }
 ): Promise<ControlResponse & Partial<IbConfig>> {
-  const body: Record<string, string | number> = { ib_host, ib_port_type }
+  const body: Record<string, string | number | null> = { ib_host, ib_port_type }
   if (clientIds) {
     if (clientIds.ib_client_id_daemon != null) body.ib_client_id_daemon = clientIds.ib_client_id_daemon
     if (clientIds.ib_client_id_listener != null) body.ib_client_id_listener = clientIds.ib_client_id_listener
     if (clientIds.ib_client_id_account != null) body.ib_client_id_account = clientIds.ib_client_id_account
     if (clientIds.ib_client_id_markets != null) body.ib_client_id_markets = clientIds.ib_client_id_markets
     if (clientIds.ib_client_id_worker_market != null) body.ib_client_id_worker_market = clientIds.ib_client_id_worker_market
+    if (clientIds.ib_primary_account_id !== undefined) body.ib_primary_account_id = clientIds.ib_primary_account_id
+    if (clientIds.ib2_host !== undefined) body.ib2_host = clientIds.ib2_host
+    if (clientIds.ib2_port_type !== undefined) body.ib2_port_type = clientIds.ib2_port_type
+    if (clientIds.ib2_client_id_listener != null) body.ib2_client_id_listener = clientIds.ib2_client_id_listener
+    if (clientIds.ib2_client_id_account != null) body.ib2_client_id_account = clientIds.ib2_client_id_account
   }
   const r = await fetch(`${API}/config/ib`, {
     method: 'POST',
@@ -442,6 +452,21 @@ export async function postIbConfig(
   })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** Save Flex config: host_token and secondary_token to settings, accounts (query_host_id, query_secondary_id, query_label, purpose) to flex_accounts. POST /config/flex. */
+export async function postFlexConfig(
+  hostToken?: string | null,
+  secondaryToken?: string | null,
+  accounts: FlexAccountItem[] = []
+): Promise<ControlResponse & { accounts?: FlexAccountItem[]; host_token?: string; secondary_token?: string }> {
+  const r = await fetch(`${API}/config/flex`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host_token: hostToken ?? undefined, secondary_token: secondaryToken ?? undefined, accounts }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), accounts: j.accounts, host_token: j.host_token, secondary_token: j.secondary_token }
 }
 
 export async function postMonitorStop(): Promise<ControlResponse & { monitor_enabled?: boolean }> {
@@ -773,6 +798,54 @@ export async function fetchBarStats(symbol: string): Promise<BarStatsResponse> {
   return r.json()
 }
 
+/** GET /market/trading-day: whether the given date (default today America/New_York) is a US (NYSE) trading day. Used for Data page "(end)" yellow. */
+export async function fetchMarketTradingDay(dateStr?: string): Promise<{ date: string; is_trading_day: boolean }> {
+  const params = new URLSearchParams()
+  if (dateStr && dateStr.trim()) params.set('date', dateStr.trim().slice(0, 10))
+  const r = await fetch(`${API}/market/trading-day?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export interface MarketHolidayRow {
+  exchange: string
+  holiday_date: string
+  label: string | null
+}
+
+/** GET /market/holidays: list US market holidays; optional year filter. */
+export async function fetchMarketHolidays(year?: number, exchange?: string): Promise<MarketHolidayRow[]> {
+  const params = new URLSearchParams()
+  if (year != null) params.set('year', String(year))
+  if (exchange && exchange.trim()) params.set('exchange', exchange.trim())
+  const r = await fetch(`${API}/market/holidays?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** POST /market/holidays: add or update one holiday. */
+export async function postMarketHoliday(payload: { date: string; label?: string; exchange?: string }): Promise<{ date: string; exchange: string; label: string | null }> {
+  const r = await fetch(`${API}/market/holidays`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      date: (payload.date || '').trim().slice(0, 10),
+      label: payload.label != null ? String(payload.label).trim() || undefined : undefined,
+      exchange: (payload.exchange || 'NYSE').trim() || undefined,
+    }),
+  })
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? r.statusText)
+  return r.json()
+}
+
+/** DELETE /market/holidays: delete one holiday by date (and exchange). */
+export async function deleteMarketHoliday(dateStr: string, exchange?: string): Promise<void> {
+  const params = new URLSearchParams({ date: (dateStr || '').trim().slice(0, 10) })
+  if (exchange && exchange.trim()) params.set('exchange', exchange.trim())
+  const r = await fetch(`${API}/market/holidays?${params}`, { method: 'DELETE' })
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? r.statusText)
+}
+
 /** 获取 Watchlist 股票（或指定 symbols）在 stock_day / stock_min 的覆盖情况；不传 symbols 时使用服务端 Watchlist。 */
 export async function fetchBarsCoverage(symbols?: string[]): Promise<BarsCoverageResponse> {
   const params = new URLSearchParams()
@@ -780,6 +853,26 @@ export async function fetchBarsCoverage(symbols?: string[]): Promise<BarsCoverag
   const r = await fetch(`${API}/bars/coverage?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
+}
+
+/** Refresh reference index daily bars from TradingView into stock_day.
+ * With no args: same as scripts/refresh_indices.py (all indices).
+ * With symbol (+ optional days): refresh only that index with given day count. */
+export async function postIndicesRefresh(options?: { symbol?: string; days?: number }): Promise<{
+  ok: boolean
+  updated: string[]
+  errors: string[]
+}> {
+  const params = new URLSearchParams()
+  if (options?.symbol != null && options.symbol.trim()) params.set('symbol', options.symbol.trim())
+  if (options?.days != null && options.days > 0) params.set('days', String(options.days))
+  const r = await fetch(`${API}/indices/refresh?${params}`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: j.ok === true,
+    updated: Array.isArray(j.updated) ? j.updated : [],
+    errors: Array.isArray(j.errors) ? j.errors : [],
+  }
 }
 
 /** 获取各 symbol 在 stock_day 中「当日及之前最近一条」日线作为基准（用于 Daily % / Daily $）。

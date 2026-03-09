@@ -1,17 +1,41 @@
-/** IB connection config (from DB, daemon loads on start). client_id_* 供不同用途使用，避免冲突。 */
+/** IB connection config (from DB). Client IDs: Daemon (Trading, Listener), Monitor (Account, Market data), Celery (Market Data). Second IB: Listener + Account only (no market data). See DATABASE.md §2.9. */
 export interface IbConfig {
   ib_host?: string
   ib_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
-  /** 守护进程连接 IB 使用的 Client ID（默认 1） */
+  /** Daemon: Trading (default 1) */
   ib_client_id_daemon?: number
-  /** 守护侧监听进程使用的 Client ID（预留，默认 2） */
+  /** Daemon: Listener (default 2) */
   ib_client_id_listener?: number
-  /** 监控端拉取账户信息/执行记录（POST /executions/fetch）使用的 Client ID（默认 4） */
+  /** Monitor: Account (default 4) */
   ib_client_id_account?: number
-  /** 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 10） */
+  /** Monitor: Market data (default 10); Host only */
   ib_client_id_markets?: number
-  /** Celery worker（如 Bars 补全）连接 IB 使用的 Client ID（默认 500），worker_market，与 Daemon/Monitor 隔离 */
+  /** Celery: Market Data / worker_market (default 500) */
   ib_client_id_worker_market?: number
+  /** 主账户 account_id（多账户时用于对冲与行情），R-A4 */
+  ib_primary_account_id?: string | null
+  /** 第二 IB 主机（不同 TWS 机器，手动交易账户），空则未配置 */
+  ib2_host?: string | null
+  ib2_port_type?: string | null
+  /** Second IB: Listener (default 3) */
+  ib2_client_id_listener?: number
+  /** Second IB: Account (default 102); no market data column */
+  ib2_client_id_account?: number
+}
+
+/** One Flex row: same label/purpose for both; query_host_id (Host IB), query_secondary_id (Second IB, optional). Tokens in settings. */
+export interface FlexAccountItem {
+  query_host_id: string
+  query_secondary_id?: string | null
+  query_label?: string | null
+  purpose?: string | null
+}
+
+/** GET /status flex_config: tokens in settings, rows from flex_accounts. */
+export interface FlexConfig {
+  host_token?: string | null
+  secondary_token?: string | null
+  rows?: FlexAccountItem[]
 }
 
 /** One position row from IB (R-A1 multi-account) */
@@ -73,6 +97,8 @@ export interface StatusResponse {
   /** 账户/持仓数据最后从 IB 拉取并写入 DB 的时间（Unix 秒），供监控页显示数据新鲜度 */
   accounts_fetched_at?: number | null
   ib_config?: IbConfig | null
+  /** Flex config: tokens in settings (ib_flex_host_token, ib_flex_secondary_token), rows in flex_accounts. Configure in Settings → IB Connection → Flex. */
+  flex_config?: FlexConfig | null
   /** 监控端 IB 状态：AccountIbClient/MarketIbClient 的连接情况与错误信息 */
   monitor_ib_status?: {
     account?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
@@ -100,6 +126,8 @@ export interface StatusResponse {
   celery_workers?: string[]
   /** 当前守护进程订阅的 Real-time ticker 标的（Watchlist STK + strategy symbol），与 Event Subscribe 一致 */
   subscribed_tickers?: string[]
+  /** US market indices for watchlist comparison (e.g. S&P 500, Dow, Nasdaq). Used for benchmark row and /bars/benchmark. */
+  reference_indices?: { symbol: string; label?: string }[]
 }
 
 export interface DaemonHeartbeat {

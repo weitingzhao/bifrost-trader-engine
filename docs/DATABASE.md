@@ -95,7 +95,7 @@
 
 ### 2.7 表 `accounts`（阶段 3.0 R-A1：多账户摘要，由 accounts_snapshot 规范化）
 
-- **用途**：存 IB 多账户摘要，便于按账户查询、更新与后续账户操作；由守护进程在写入 snapshot 时从内存中的 accounts_snapshot 同步写入（每账户一行）。
+- **用途**：存 IB 多账户摘要，便于按账户查询、更新与后续账户操作；由守护进程在写入 snapshot 时从内存中的 accounts_snapshot 同步写入（每账户一行）。**多账户时**：主账户用于守护进程对冲与行情（由 config 或 settings 的 `primary_account_id` 指定）；**所有账户**均写入本表，供统一 Portfolio 展示。
 - **写入**：按 **account_id** 唯一键 upsert（`ON CONFLICT (account_id) DO UPDATE`），不删整表、不整表重插；仅更新该账户行。
 - **列**：
 
@@ -110,7 +110,7 @@
 
 ### 2.8 表 `account_positions`（阶段 3 R-A1：多账户持仓，由 accounts_snapshot 规范化）
 
-- **用途**：存每个账户的持仓明细，便于按账户/标的查询与后续风控、对冲逻辑。
+- **用途**：存每个账户的持仓明细，便于按账户/标的查询与后续风控、对冲逻辑。**多账户时**：主账户用于守护进程对冲与行情；**所有账户**的持仓均写入本表，供统一 Portfolio 展示。
 - **主键**：**(account_id, contract_key)**，无自增 id；据此判断插入新行或更新现有行。
 - **contract_key** 格式为 `symbol|sec_type|expiry|strike|right`，期权（OPT）用到期/行权价/权利区分合约，股票（STK）为 `symbol|STK|||`。
 - **写入**：与 `accounts` 同步；对 snapshot 中每条持仓计算 contract_key 后 `INSERT ... ON CONFLICT (account_id, contract_key) DO UPDATE`；仅删除该账户下**不在当前 snapshot** 的行（平仓或移除的持仓），不整表清空。
@@ -207,7 +207,7 @@
 ### 2.21 表 `account_transactions`（阶段 3 Performance Phase 0：资金流水，来自 IB Flex）
 
 - **用途**：存**账户资金流水**（存款、取款、转账、股息等），数据来源为 **IB Flex Web Service**（Activity Flex Query 的 Cash Transactions 节）；供 Performance 页计算净资金流（net_cash_flow）、capital_base 与收益率分母。
-- **写入**：监控端 **POST /transactions/fetch** 时，使用配置的 Flex Token 与 Query ID 请求 Flex 报表，解析 Cash Transactions 后 UPSERT 到本表（按 account_id + ts + amount + type 去重，避免重复拉取导致重复计入）。
+- **写入**：监控端 **POST /transactions/fetch** 时，从 **flex_accounts** 与 **settings** 通过 `get_flex_config(purpose='cash_transactions')` 得到 (token, query_id) 列表（Host 与 Secondary 各 call），请求 Flex 报表，解析 Cash Transactions 后 UPSERT 到本表（按 account_id + ts + amount + type 去重，避免重复拉取导致重复计入）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -224,6 +224,39 @@
 - **唯一约束**：`UNIQUE(account_id, ts, amount, type)`，便于 UPSERT 去重。
 - **索引**：`(account_id, ts DESC)`，供按账户与时间范围查询净资金流。
 - **读取**：`servers/reader.get_net_cash_flow(since_ts, until_ts, account_id)` 对本表 SUM(amount)；`get_transactions(...)` 返回明细供 Performance 页展示；GET /performance 的 net_cash_flow、capital_base 使用本表数据。
+
+### 2.22 表 `us_market_holidays`（美股交易日历：NYSE 休市日）
+
+- **用途**：存**美股（NYSE）休市日**，供 GET /market/trading-day 判断某日是否为交易日；Data 页据此仅在交易日将「(end)」标黄（需 Pull 时）。数据来源见 [INDEX_DATA_SOURCES.md](INDEX_DATA_SOURCES.md) § US market holidays。
+- **写入**：通过 **Settings 页「US market holidays (NYSE)」** 或 API POST /market/holidays 添加/删除；亦可手动 INSERT。每年 NYSE 公布日历时在 Settings 中追加新年度。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| exchange | text NOT NULL | 交易所，默认 'NYSE' |
+| holiday_date | date NOT NULL | 休市日期 |
+| label | text | 可选说明（如 New Year's Day） |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **主键**：**(exchange, holiday_date)**。
+- **读取**：`servers/reader.get_is_us_trading_day(status_config, date_str)` 先判断周末再查本表；GET /market/trading-day 供前端 Data 页使用。
+
+### 2.23 表 `flex_accounts`（Performance Phase 0：IB Flex 配置，Token 在 settings）
+
+- **用途**：存 **Flex Query 行**（每行同一 Label/Purpose，对应 Host 与 Secondary 各一个 Query ID）；**Token 不存本表**，存于 **settings** 的 `ib_flex_host_token`（主 IB）、`ib_flex_secondary_token`（第二 IB）。每行 **query_host_id**（必填，用 Host token 拉取）、**query_secondary_id**（可选，用 Secondary token 拉取）；同一用途下系统会对两个 Query 各 call 一次，拿回相同结构的 response。供 POST /transactions/fetch 等按 purpose 拉取（如仅使用 purpose=cash_transactions 的行）。
+- **写入**：通过 **Settings 页「IB Connection → Flex」** 或 API POST /config/flex 写入；Token 写入 settings，本表**整表替换**。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | serial PRIMARY KEY | 自增主键 |
+| sort_order | integer NOT NULL DEFAULT 0 | 显示与拉取顺序 |
+| query_label | text | Query 标签（如 "Cash Transactions"），可选 |
+| purpose | text DEFAULT 'cash_transactions' | 用途：cash_transactions（资金流水）、trades（成交）等；POST /transactions/fetch 仅使用 purpose= cash_transactions 的行 |
+| query_host_id | text NOT NULL | Flex Query ID（Host IB，用 settings.ib_flex_host_token 拉取） |
+| query_secondary_id | text | Flex Query ID（第二 IB，用 settings.ib_flex_secondary_token 拉取）；可空表示该行仅拉 Host |
+
+- **读取**：`servers.reader.get_flex_config(purpose=None)` 返回 `{ host_token, secondary_token, rows }`（rows 每项含 query_host_id、query_secondary_id、query_label、purpose）；`get_flex_config(purpose='cash_transactions')` 返回 `[{ token, query_id }, ...]`，每行若 query_host_id 非空则一条 (host_token, query_host_id)、若 query_secondary_id 非空则一条 (secondary_token, query_secondary_id)，供 POST /transactions/fetch 对 Host 与 Secondary 各 call。
 
 ### 2.12 表 `ohlc_bars`（已弃用，由 stock_day / stock_min / option_day / option_min 替代）
 
@@ -438,8 +471,8 @@
 
 ### 2.9 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
 
-- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。当前包含 IB 连接配置（主机、端口类型）以及**多种用途的 IB Client ID**，供监控页「设置」与「守护程序」区编辑；守护进程**每次启动时**从该表读取并连接 IB；API 拉取账户信息/成交与 K 线时按用途使用对应 client_id。后续新增设置时在此表**增加列**即可。
-- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入 `ib_host`、`ib_port_type` 及可选的 `ib_client_id_daemon`、`ib_client_id_listener`、`ib_client_id_account`、`ib_client_id_markets`、`ib_client_id_worker_market`；StatusReader 的 `write_ib_config(...)` 执行 UPDATE。
+- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。**IB 配置**（host、port_type、client_id、primary_account_id、第二 IB）**全部在 DB**，config.yaml 不再定义 client_id 或 primary_account_id；host/port 仅作 DB 无数据时的 fallback。**主账户**由 `ib_primary_account_id` 指定；**第二 IB**（不同 TWS 机器，手动交易账户）由 `ib2_*` 指定，用于统一 Portfolio（R-A4）。
+- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入；StatusReader 的 `write_ib_config(...)` 执行 UPDATE。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -452,8 +485,25 @@
 | ib_client_id_account | integer | 监控端拉取账户信息/执行记录（POST /executions/fetch）使用的 Client ID（默认 100） |
 | ib_client_id_markets | integer | 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 101） |
 | ib_client_id_worker_market | integer | Celery worker（如 Bars 补全，worker_market）连接 IB 使用的 Client ID（默认 500），与 Daemon/Monitor 隔离，避免冲突 |
+| ib_primary_account_id | text | 主账户 account_id（如 U17113214），用于对冲与行情；空则使用 TWS managed accounts 首个（R-A4） |
+| ib2_host | text | 第二 IB 主机（不同 TWS 机器，手动交易账户）；空则未配置 |
+| ib2_port_type | text | 第二 IB 端口类型（tws_live/tws_paper/gateway），默认 tws_paper |
+| ib2_client_id_listener | integer | 第二 IB 监听 Client ID（默认 3），用于获取更新 |
+| ib2_client_id_account | integer | 第二 IB 账户拉取 Client ID（默认 102） |
+| ib_flex_host_token | text | IB Flex Web Service Token（主 IB）；与 flex_accounts 的 query_host_id 配合使用 |
+| ib_flex_secondary_token | text | IB Flex Token（第二 IB）；与 flex_accounts 的 query_secondary_id 配合使用 |
 
-- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`（监听进程如需连接可使用 `ib_client_id_listener`）；否则使用 config 中的 `ib.host`、`ib.port`、`ib.client_id`。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`，避免与守护进程或彼此占用同一 client_id。**Celery**（Celery worker，`scripts/run_celery.py`）使用 `ib_client_id_worker_market`（默认 500），与 Daemon、Monitor 的 client_id 完全隔离。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
+- **Client ID 使用场景**（与 Settings 页 Client IDs 表一致；双 IB 时 Host 与 Secondary 各一套，**市场数据仅 Host 有**，故无 `ib2_client_id_markets` 列）：
+
+| 分组 | 角色 | 列名（Host） | 列名（Secondary） | 使用场景 |
+|------|------|--------------|-------------------|----------|
+| Daemon | Trading | ib_client_id_daemon | — | 守护进程交易连接 IB（下单、持仓、行情） |
+| Daemon | Listener | ib_client_id_listener | ib2_client_id_listener | 守护进程/监控端第二条连接（事件、订阅） |
+| Monitor | Account | ib_client_id_account | ib2_client_id_account | 监控端拉取账户摘要、执行记录（POST /executions/fetch 等） |
+| Monitor | Market data | ib_client_id_markets | — | 监控端拉取市场数据/K 线（POST /bars/fetch）；仅主账户有数据订阅，第二 IB 无此列 |
+| Celery | Market Data | ib_client_id_worker_market | — | Celery worker（如 Bars 补全）连接 IB，与 Daemon/Monitor 隔离 |
+
+- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。**config.yaml 不再定义 client_id 或 primary_account_id**，均由本表提供。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`；否则使用 config 的 `ib.host`、`ib.port`（client_id 默认 1）。**主账户**：若本表 `ib_primary_account_id` 非空，守护进程使用该 account_id 作为对冲与行情账户；否则使用 TWS managed accounts 首个（R-A4）。**第二 IB**：若 `ib2_host` 非空，监控端创建 AccountIbClient2 连接第二 TWS，用于拉取该账户的持仓/执行，供统一 Portfolio；第二 IB 无 daemon、无 market data（无 `ib2_client_id_markets` 列）。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`（仅 Host）；**Celery** 使用 `ib_client_id_worker_market`。**Flex**：`ib_flex_host_token` 与 `ib_flex_secondary_token` 由 Settings 页 Flex 区块或 POST /config/flex 写入。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
 
 ---
 
@@ -507,14 +557,13 @@
 
 ### 4.2 表不存在或自检报 "Table 'status_current' missing or empty columns"
 
-若数据库已能连接，但 `python scripts/check/phase1.py` 报 **PostgreSQL schema (tables + columns)** 失败，说明当前库中尚未创建阶段 1/2 所需的表（或列不一致）。在项目根目录执行：
+若数据库已能连接，但 **PostgreSQL schema（表或列）** 不符合要求，说明当前库中尚未创建阶段 1/2 所需的表（或列不一致）。在项目根目录执行：
 
 ```bash
 python scripts/refresh_db_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后再次运行 `scripts/check/phase1.py` 即可通过 schema 检查。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, DROP COLUMN IF EXISTS account_net_liquidation, ...` 等清理（不执行也可，代码已不再读写这些列）。
-   或（若用 pg_ctl）：`pg_ctl reload -D /path/to/data`。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, ...` 等清理（不执行也可，代码已不再读写这些列）。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
 
@@ -588,6 +637,10 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 | 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、watchlist；K 线读写改为分表；Watchlist CRUD 与智能拉取 duration。 | 阶段 3 |
 | 2026-03-08 持仓分类 | 新增 §2.19 表 position_categories（STK 持仓分类定义）、§2.20 表 position_category_tags（持仓→分类 Tag）；GET /position-categories、PUT /position-categories/tag；GET /status 的 positions 带出 category_id/category。 | 阶段 3 扩展 |
 | 2026-03-08 Flex Transaction | 新增 §2.21 表 account_transactions（IB Flex 资金流水）；POST /transactions/fetch 拉取 Flex Cash Transactions 写入；get_net_cash_flow/get_transactions 供 GET /performance 使用。 | 阶段 3 Performance Phase 0 |
+| 2026-03-08 US market holidays | 新增 §2.22 表 us_market_holidays（NYSE 休市日）；GET /market/trading-day 判断是否交易日；Settings 页 US market holidays 管理添加/删除；Data 页「(end)」标黄仅交易日。 | 阶段 3 扩展 |
+| 2026-03-08 Flex 一行双 Query ID | §2.23 flex_accounts 去掉 account_is_host、query_id，改为 query_host_id（必填）+ query_secondary_id（可选）；同一行同一 Label/Purpose，Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |
+| 2026-03-08 Flex 一 Token 多 Query | §2.23 flex_accounts 改为「一 Token 多 Query ID + Label」：列 query_id、query_label、purpose；同一 token 可多行；POST /transactions/fetch 仅用 purpose=cash_transactions；reader.get_flex_config(purpose) 支持按用途过滤。 | 阶段 3 Performance Phase 0 |
+| 2026-03-08 Flex Token 入 settings | settings 增加 ib_flex_host_token、ib_flex_secondary_token；flex_accounts 去掉 token、account_label，改为 account_is_host (boolean)；GET /status flex_config 为 { host_token, secondary_token, rows }。 | 阶段 3 Performance Phase 0 |
 
 ---
 
