@@ -36,14 +36,19 @@ export function LivePage({ status }: LivePageProps) {
     () => [...new Set([...(j?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
     [j?.subscribed_tickers, quotesMap],
   )
+  const benchmarkSymbols = useMemo(
+    () =>
+      [...new Set([...watchlistSymbols, ...(j?.reference_indices?.map((r: { symbol: string }) => r.symbol) ?? [])])].sort(),
+    [watchlistSymbols, j?.reference_indices],
+  )
 
   useEffect(() => {
-    if (watchlistSymbols.length === 0) {
+    if (benchmarkSymbols.length === 0) {
       setBenchmarks({})
       return
     }
     let cancelled = false
-    fetchBarsBenchmark(watchlistSymbols)
+    fetchBarsBenchmark(benchmarkSymbols)
       .then((r) => {
         if (!cancelled) setBenchmarks(r.benchmarks ?? {})
       })
@@ -53,7 +58,7 @@ export function LivePage({ status }: LivePageProps) {
     return () => {
       cancelled = true
     }
-  }, [watchlistSymbols.join(',')])
+  }, [benchmarkSymbols.join(',')])
 
   useEffect(() => {
     let cancelled = false

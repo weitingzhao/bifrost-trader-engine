@@ -2,7 +2,7 @@
 
 from src.sink.base import OPERATION_KEYS, SNAPSHOT_KEYS, StatusSink
 
-# Lazy import so the package loads without psycopg2 (e.g. scripts/check/phase1.py --skip-db)
+# Lazy import so the package loads without psycopg2 when it is optional.
 def __getattr__(name: str):
     if name == "PostgreSQLSink":
         from src.sink.postgres_sink import PostgreSQLSink

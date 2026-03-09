@@ -58,40 +58,19 @@
 
 ---
 
-## 阶段 1 自检脚本
+## 阶段 1 验收方式
 
-运行自检可验证配置、Sink 接口、PostgreSQL 表结构、**运行环境（IB 连通性）**与可选信号停止，满足阶段 1 验收要求。与 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md) 阶段 1 Test Case 清单及「运行环境验证」对应。
+**说明**：原 `scripts/check/` 目录已移除，阶段 1 验收改为**按验收清单人工执行**。
 
-**脚本**：[scripts/check/phase1.py](../../scripts/check/phase1.py)
+**验收项**（在项目根目录或能连 PostgreSQL/IB 的环境下）：
 
-**用法**（在项目根目录执行）：
+- **Config**：确认 `config/config.yaml` 中 root `postgres` 配置正确。
+- **Sink 接口**：核对 `src/sink/base.py` 中 SNAPSHOT_KEYS、OPERATION_KEYS 与 [DATABASE.md](../DATABASE.md) §2 一致。
+- **PostgreSQL schema**：执行 `python scripts/refresh_db_schema.py` 后，用 psql 或启动守护进程确认 `status_current`、`status_history`、`operations`、`daemon_heartbeat`、`settings` 等表及列存在且符合 DATABASE.md。
+- **IB 连通性**：启动守护进程或直连 TWS/Gateway，确认能连接（IB 配置来自 PostgreSQL settings）。
+- **SIGTERM 停止**（可选）：启动 `python scripts/run_engine.py config/config.yaml`，对其发 SIGTERM，确认数秒内退出。
 
-```bash
-# 完整自检（含 Config、Sink、PostgreSQL、IB、可选 Signal）
-# 默认执行 IB 连接检查，需 TWS/Gateway 已启动
-python scripts/check/phase1.py
-
-# 无 TWS 时跳过 IB 检查（如 CI 或仅验配置）
-python scripts/check/phase1.py --skip-ib
-
-# 仅检查配置与 Sink 接口（无需 PostgreSQL）
-python scripts/check/phase1.py --skip-db --skip-ib
-
-# 含信号测试：启动守护进程、发 SIGTERM、断言数秒内退出（需可运行环境）
-python scripts/check/phase1.py --signal-test
-```
-
-**检查项与 TC 对应**：
-
-| 自检项 | 对应 Test Case / 说明 |
-|--------|------------------------|
-| Config (postgres) | TC-1-R-H1-3 |
-| Sink interface (SNAPSHOT/OPERATION keys) | TC-1-R-M1a-3、TC-1-R-M4a-2 |
-| PostgreSQL schema (tables + columns) | TC-1-R-M1a-2、TC-1-R-M4a-3、TC-1-R-H1-1 |
-| IB TWS/Gateway connect | **运行环境验证**（阶段 1 引入）；默认执行，`--skip-ib` 可跳过 |
-| SIGTERM → daemon exit | TC-1-R-C1a-1；可选，`--signal-test` 时执行 |
-
-**运行环境验证**：阶段 1 在「状态 sink + 最小控制」之外，于本环节正式引入并验收运行环境——PostgreSQL 表结构 + **IB TWS/Gateway 连通性**（项目已包含 IB 连接代码）。自检脚本默认执行 IB 检查，建议在具备 TWS 的环境下执行完整自检；无 TWS 或 CI 时使用 `--skip-ib`。无 PostgreSQL 时使用 `--skip-db`；不测信号退出时省略 `--signal-test`。
+与 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md) 阶段 1 Test Case 清单及「运行环境验证」对应。运行环境：PostgreSQL 表结构 + **IB TWS/Gateway 连通性**；建议在具备 TWS 的环境下执行验收。
 
 ---
 

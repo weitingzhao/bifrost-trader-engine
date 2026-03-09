@@ -18,7 +18,7 @@
 | **[系统架构设计](ARCHITECTURE.md)** | 全盘架构：**运行环境与部署约束**（§2）、三大组成部分、**非实时数据拉取 Worker**（§2.7、§4.4）、组件划分、数据流、部署视图、需求→组件→阶段映射 |
 | **[分步推进计划](PLAN_NEXT_STEPS.md)** | 与需求对比的阶段划分、需求与阶段对应表、每阶段验收标准与 Test Case、阶段步骤与检查方式；**稳定文档**，仅在需求或架构变更时修改 |
 | **[阶段评估与下一步](plans/PHASE_ASSESSMENT.md)** | 阶段完成度评估、**当前项目进展（阶段完成状态）**、**项目里程碑时间线**、评估结论与待办；每次阶段评估时更新 |
-| **分阶段执行现状** | 各阶段详细 Todo、验收清单、代码锚点：**[阶段 1](plans/phase1-execution-plan.md)** · **[阶段 2](plans/phase2-execution-plan.md)** · **[阶段 3](plans/phase3-execution-plan.md)** · **[Performance 执行计划](plans/performance-execution-plan.md)** |
+| **分阶段执行现状** | 各阶段详细 Todo、验收清单、代码锚点：**[阶段 1](plans/phase1-execution-plan.md)** · **[阶段 2](plans/phase2-execution-plan.md)** · **[阶段 3](plans/phase3-execution-plan.md)** · **[Performance 执行计划](plans/performance-execution-plan.md)** · **[Settings IB 分层与 Flex 迁移](plans/settings-ib-flex-plan.md)** |
 
 ---
 
@@ -44,6 +44,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **[状态空间](STATE_SPACE_MAPPING.md)** | O、D、M、L、E、S 与代码/配置的对应关系 |
 | **[配置安全分类（风险模型）](CONFIG_SAFETY_TAXONOMY.md)** | 配置中的安全边界分类与风险维度 |
 | **[Guard 微调与影响](GUARD_TUNING_AND_IMPACT.md)** | Guard/边界参数微调方法、后果分析、block reason 与回测验证 |
+| **[US 指数数据源（参考指数）](INDEX_DATA_SOURCES.md)** | TradingView 指数日线、配置、定时拉取、gap-fill、GET /status 与 benchmark |
 | **[IB 数据获取服务边界](IB_MARKET_DATA_BOUNDARIES.md)** | IB 历史数据 Pacing、Step Size（duration/bar 合法组合）、不可用数据、行情订阅；Market 页 Fetch 逻辑需遵守 |
 | **[Performance 页面设计](PERFORMANCE_PAGE_DESIGN.md)** | 基于执行记录的绩效分析、Calendar PnL、评估指标与 API（R-M7 / R-H2）；**执行计划**见 [plans/performance-execution-plan.md](plans/performance-execution-plan.md) |
 | **[IB Pacing 实现方案](plans/ib-pacing-implementation-plan.md)** | 边界配置化、Worker/API 用量计量、Redis 限流、监控暴露的详细设计与分步实现 |
@@ -62,4 +63,4 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **Frontend** | 监控 UI，调用 Server API。 | **[scripts/run_frontend.sh](../scripts/run_frontend.sh)**：`./scripts/run_frontend.sh dev`（开发，端口见 `config/config.yaml` 的 `frontend.port`，默认 5173）、`./scripts/run_frontend.sh build`（构建到 `frontend/dist`）、`./scripts/run_frontend.sh install`（仅安装依赖） |
 | **Docs** | 文档站点（MkDocs）。 | 生成 FSM：`python scripts/build_fsm_docs.py` → `mkdocs build`；本地预览：`mkdocs serve` 或 `python scripts/run_docs.py`（默认 http://127.0.0.1:8000） |
 
-其他常用脚本（均在 `scripts/` 下）：`refresh_db_schema.py`、`release_pg_locks.py`、`check_ib_connect.py`、`check/phase1.py` 等；详见 [README.md](../README.md) 与各阶段执行计划。
+其他常用脚本（均在 `scripts/` 下）：`refresh_db_schema.py`、`release_pg_locks.py`、`check_ib_connect.py` 等；详见 [README.md](../README.md) 与各阶段执行计划。

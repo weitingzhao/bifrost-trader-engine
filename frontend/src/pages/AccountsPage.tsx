@@ -241,13 +241,18 @@ export function AccountsPage({
       ),
     ].map((s) => s.toUpperCase())
   }, [acc])
+  const benchmarkSymbols = useMemo(
+    () =>
+      [...new Set([...stockSymbols, ...(status?.reference_indices?.map((r) => r.symbol) ?? [])])].sort(),
+    [stockSymbols, status?.reference_indices],
+  )
   useEffect(() => {
-    if (stockSymbols.length === 0) {
+    if (benchmarkSymbols.length === 0) {
       setBenchmarks({})
       return
     }
     let cancelled = false
-    fetchBarsBenchmark(stockSymbols)
+    fetchBarsBenchmark(benchmarkSymbols)
       .then((r) => {
         if (!cancelled) setBenchmarks(r.benchmarks ?? {})
       })
@@ -257,7 +262,7 @@ export function AccountsPage({
     return () => {
       cancelled = true
     }
-  }, [stockSymbols.join(',')])
+  }, [benchmarkSymbols.join(',')])
   useEffect(() => {
     if (stockSymbols.length === 0) {
       setQuotesMap({})

@@ -22,6 +22,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { TransferPayPage } from './pages/TransferPayPage'
 import { BacktestPage } from './pages/BacktestPage'
 import { WatchlistPage } from './pages/WatchlistPage'
+import logoImg from '../img/logo.png'
 import './App.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
@@ -141,6 +142,51 @@ function SubmenuIcon({ name }: { name: string }) {
   return <>{icons[name] ?? null}</>
 }
 
+/** Icon for primary nav tabs (Status, Live, Watchlist, Portfolio, Research). Same stroke style as SubmenuIcon. */
+function MainTabIcon({ id }: { id: TabId }) {
+  const size = 18
+  const className = 'app-tab-icon'
+  const svgProps = { width: size, height: size, className, fill: 'none' as const, stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
+  const icons: Record<TabId, JSX.Element> = {
+    system: (
+      <svg viewBox="0 0 24 24" {...svgProps}>
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <line x1="8" y1="21" x2="16" y2="21" />
+        <line x1="12" y1="17" x2="12" y2="21" />
+      </svg>
+    ),
+    live: (
+      <svg viewBox="0 0 24 24" {...svgProps}>
+        <polygon points="5 3 19 12 5 21 5 3" />
+      </svg>
+    ),
+    watchlist: (
+      <svg viewBox="0 0 24 24" {...svgProps}>
+        <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+      </svg>
+    ),
+    replay: (
+      <svg viewBox="0 0 24 24" {...svgProps}>
+        <rect x="2" y="7" width="20" height="14" rx="2" />
+        <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+      </svg>
+    ),
+    research: (
+      <svg viewBox="0 0 24 24" {...svgProps}>
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    ),
+    settings: (
+      <svg viewBox="0 0 24 24" {...svgProps}>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    ),
+  }
+  return <>{icons[id] ?? null}</>
+}
+
 function SystemDashboard({
   items,
   onOpenSection,
@@ -248,6 +294,17 @@ export default function App() {
   /** Celery bars worker queue counts (polled every 3s for dashboard) */
   const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
   const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const headerMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!headerMenuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target as Node)) setHeaderMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [headerMenuOpen])
 
   useEffect(() => {
     applyTheme(theme)
@@ -409,6 +466,11 @@ export default function App() {
     () => [...new Set([...(status?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
     [status?.subscribed_tickers, quotesMap],
   )
+  const benchmarkSymbols = useMemo(
+    () =>
+      [...new Set([...watchlistSymbols, ...(status?.reference_indices?.map((r) => r.symbol) ?? [])])].sort(),
+    [watchlistSymbols, status?.reference_indices],
+  )
   const liveLamp: LampId =
     status?.redis_quotes_connected === true && daemonHeartbeat?.event_subscribe_ticker === true
       ? 'green'
@@ -527,12 +589,12 @@ export default function App() {
   }, [status?.accounts, watchlistSymbols, quotesMap, benchmarks, liveLamp])
 
   useEffect(() => {
-    if (watchlistSymbols.length === 0) {
+    if (benchmarkSymbols.length === 0) {
       setBenchmarks({})
       return
     }
     let cancelled = false
-    fetchBarsBenchmark(watchlistSymbols)
+    fetchBarsBenchmark(benchmarkSymbols)
       .then((res) => {
         if (!cancelled) setBenchmarks(res.benchmarks ?? {})
       })
@@ -542,7 +604,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [watchlistSymbols.join(',')])
+  }, [benchmarkSymbols.join(',')])
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
     { id: 'system', label: 'Status', lamp: systemLamp },
@@ -550,7 +612,6 @@ export default function App() {
     { id: 'watchlist', label: 'Watchlist' },
     { id: 'replay', label: 'Portfolio' },
     { id: 'research', label: 'Research' },
-    { id: 'settings', label: 'Settings' },
   ]
 
   const researchSubtabs: { id: 'risk' | 'screener' | 'data' | 'backtest'; label: string }[] = [
@@ -589,6 +650,7 @@ export default function App() {
       onClick={() => setActiveTab(id)}
       aria-current={activeTab === id ? 'page' : undefined}
     >
+      <MainTabIcon id={id} />
       {lamp != null && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
       <span>{label}</span>
     </button>
@@ -598,8 +660,8 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="app-header-left">
-          <h1>Bifrost Trader</h1>
-          <nav className="app-tabs" aria-label="Status, Live, Watchlist, Portfolio, Research, Settings">
+          <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
+          <nav className="app-tabs" aria-label="Status, Live, Watchlist, Portfolio, Research">
             {tabList.map(({ id, label, lamp }) => {
               if (id === 'replay') {
                 return (
@@ -611,6 +673,7 @@ export default function App() {
                       aria-current={activeTab === id ? 'page' : undefined}
                       aria-haspopup="menu"
                     >
+                      <MainTabIcon id={id} />
                       <span>{label}</span>
                       <span className="app-tab-caret" aria-hidden>▾</span>
                     </button>
@@ -645,6 +708,7 @@ export default function App() {
                       aria-current={activeTab === id ? 'page' : undefined}
                       aria-haspopup="menu"
                     >
+                      <MainTabIcon id={id} />
                       <span>{label}</span>
                       <span className="app-tab-caret" aria-hidden>▾</span>
                     </button>
@@ -674,20 +738,68 @@ export default function App() {
             })}
           </nav>
         </div>
-        <div className="app-header-right">
-          <label className="theme-switch">
-            <span className="api-status-label" style={{ marginRight: '0.25rem' }}>Theme</span>
-            <select
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as ThemeId)}
-              title="Switch dark/light theme"
-              className="theme-select"
-            >
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
-          </label>
-          <a href="/docs" target="_blank" rel="noopener noreferrer" className="api-docs-link">Docs</a>
+        <div className="app-header-right" ref={headerMenuRef}>
+          <button
+            type="button"
+            className={`app-header-icon-btn ${headerMenuOpen ? 'active' : ''} ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setHeaderMenuOpen((o) => !o)}
+            title="Menu"
+            aria-label="Open menu"
+            aria-expanded={headerMenuOpen}
+            aria-haspopup="menu"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="12" cy="12" r="1" />
+              <circle cx="12" cy="5" r="1" />
+              <circle cx="12" cy="19" r="1" />
+            </svg>
+          </button>
+          {headerMenuOpen && (
+            <div className="app-header-menu" role="menu" aria-label="App menu">
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item ${activeTab === 'settings' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('settings'); setHeaderMenuOpen(false) }}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden style={{ flexShrink: 0 }}>
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+                Settings
+              </button>
+              <div className="app-header-menu-label" role="presentation">Theme</div>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={theme === 'dark'}
+                className={`app-header-menu-item ${theme === 'dark' ? 'active' : ''}`}
+                onClick={() => { setTheme('dark'); setHeaderMenuOpen(false) }}
+              >
+                Dark
+              </button>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={theme === 'light'}
+                className={`app-header-menu-item ${theme === 'light' ? 'active' : ''}`}
+                onClick={() => { setTheme('light'); setHeaderMenuOpen(false) }}
+              >
+                Light
+              </button>
+              <div className="app-header-menu-divider" role="separator" />
+              <a
+                href="/docs"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="app-header-menu-item"
+                role="menuitem"
+                onClick={() => setHeaderMenuOpen(false)}
+              >
+                Docs
+              </a>
+            </div>
+          )}
         </div>
       </header>
 
@@ -759,19 +871,34 @@ export default function App() {
       )}
 
       {activeTab === 'research' && researchView === 'risk' && (
-        <ResearchRiskAnalysisPage />
+        <ResearchRiskAnalysisPage
+          onGoToScreener={() => setResearchView('screener')}
+          breadcrumbLabel="Risk Model"
+        />
       )}
 
       {activeTab === 'research' && researchView === 'screener' && (
-        <MarketDataPage status={status} />
+        <MarketDataPage
+          status={status}
+          onGoToScreener={() => setResearchView('screener')}
+          breadcrumbLabel="Screener"
+        />
       )}
 
       {activeTab === 'research' && researchView === 'data' && (
-        <DataPage status={status} />
+        <DataPage
+          status={status}
+          onGoToScreener={() => setResearchView('screener')}
+          breadcrumbLabel="Data"
+        />
       )}
 
       {activeTab === 'research' && researchView === 'backtest' && (
-        <BacktestPage status={status} />
+        <BacktestPage
+          status={status}
+          onGoToScreener={() => setResearchView('screener')}
+          breadcrumbLabel="Back test"
+        />
       )}
 
       {activeTab === 'live' && (

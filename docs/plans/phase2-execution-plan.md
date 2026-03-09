@@ -90,4 +90,4 @@
 ### 7. 数据库与 API
 
 - `GET /status` 中 `daemon_heartbeat` 含 `ib_connected`、`ib_client_id`、`next_retry_ts`（未连接时 next_retry_ts 为 Unix 时间戳，已连接时可为 null）。
-- `python scripts/check/phase1.py` 通过（含 daemon_heartbeat 表及 next_retry_ts 列）。
+- 阶段 1 验收通过（sink 与信号已就绪）；PostgreSQL schema 含 daemon_heartbeat 表及 next_retry_ts 列（可运行 `python scripts/refresh_db_schema.py` 后启动守护进程验证）。

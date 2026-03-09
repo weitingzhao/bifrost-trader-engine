@@ -13,7 +13,12 @@ function fmtUsd(n: number | null | undefined): string {
   }).format(n)
 }
 
-export function ResearchRiskAnalysisPage() {
+interface ResearchBreadcrumbProps {
+  onGoToScreener?: () => void
+  breadcrumbLabel?: string
+}
+
+export function ResearchRiskAnalysisPage({ onGoToScreener, breadcrumbLabel = 'Risk Model' }: ResearchBreadcrumbProps = {}) {
   const [riskSummary, setRiskSummary] = useState<RiskSummaryResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -37,8 +42,24 @@ export function ResearchRiskAnalysisPage() {
 
   return (
     <div className="card process-section">
-      <h2 className="page-title-with-tooltip">
-        Risk Model{' '}
+      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+        {onGoToScreener ? (
+          <>
+            <button
+              type="button"
+              className="page-title-breadcrumb-link"
+              onClick={onGoToScreener}
+              aria-label="Go to Screener"
+            >
+              Research
+            </button>
+            {' / '}
+            {breadcrumbLabel}
+            {' '}
+          </>
+        ) : (
+          <>Risk Model{' '}</>
+        )}
         <InfoTooltip text="Risk model summary from status_current and operations (daily hedge count, daily PnL, spot, ops 24h). Data from GET /risk_summary." />
       </h2>
       <p className="section-hint">

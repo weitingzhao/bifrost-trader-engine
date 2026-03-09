@@ -82,7 +82,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
             Portfolio
           </button>
           {' / Transfer & Pay'}
-          <InfoTooltip text="Data is stored in account_transactions and used for Performance net cash flow. Configure flex.accounts in config.yaml." />
+          <InfoTooltip text="Data is stored in account_transactions and used for Performance net cash flow. Configure in Settings → IB Connection → Flex." />
         </h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button

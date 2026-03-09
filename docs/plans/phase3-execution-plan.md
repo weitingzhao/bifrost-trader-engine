@@ -92,7 +92,7 @@
 
 ## 自检脚本（可选）
 
-若已新增 `scripts/check/phase3_0.py`，可执行自动化校验（如 GET /status 含 account_id、spot、accounts_fetched_at 等字段）。当前**无** phase3_0.py 时，阶段 3 验收依赖上述验收清单**人工执行并记录**。
+若已新增阶段 3 验收脚本，可执行自动化校验（如 GET /status 含 account_id、spot、accounts_fetched_at 等字段）。**无专用脚本时**，阶段 3 验收依赖上述验收清单**人工执行并记录**。
 
 **建议**：编写 phase3_0.py 时至少校验：(1) GET /status 返回结构中含 `status.spot`；(2) 含 account 相关字段或 accounts_fetched_at；(3) 可选：在 daemon 运行且已连接 IB 时断言 spot 为合理数值、accounts 有数据。
 

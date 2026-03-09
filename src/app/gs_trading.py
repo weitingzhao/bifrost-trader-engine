@@ -77,53 +77,54 @@ class GsTrading:
             except Exception as e:
                 logger.warning("PostgreSQL sink init failed: %s", e)
 
-        # 1.b IB Connector: host/port from DB (settings) when present, else config; client_id from DB last+1 or settings.ib_client_id_daemon or config
+        # 1.b IB Connector: host/port/client_id 仅来自 PostgreSQL settings（系统默认使用数据库）.
         ib_cfg = config.get("ib", {})
-        config_client_id = int(ib_cfg.get("client_id") or 1)
-        last_ib = None
-        if self._status_sink and hasattr(self._status_sink, "get_last_ib_client_id"):
-            last_ib = self._status_sink.get_last_ib_client_id()
+        db_ib = None
         if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
             db_ib = self._status_sink.get_ib_connection_config()
-            if db_ib and db_ib.get("client_id_daemon") is not None:
-                config_client_id = int(db_ib["client_id_daemon"])
-        client_id = (last_ib + 1) if last_ib is not None else config_client_id
+        if not db_ib:
+            raise RuntimeError(
+                "IB connection config must be set in PostgreSQL settings (public.settings). "
+                "Use Settings page or ensure settings row exists with ib_host, ib_port_type, ib_client_id_*."
+            )
+        host = db_ib.get("host", "127.0.0.1")
+        port = int(db_ib.get("port", 7497))
+        last_ib = None
+        if hasattr(self._status_sink, "get_last_ib_client_id"):
+            last_ib = self._status_sink.get_last_ib_client_id()
+        client_id_daemon = int(db_ib.get("client_id_daemon", 1))
+        client_id = (last_ib + 1) if last_ib is not None else client_id_daemon
         if last_ib is not None:
             logger.info(
                 "IB client_id from DB last_ib_client_id=%s → using %s (avoid in-use after crash)",
                 last_ib,
                 client_id,
             )
-        host = ib_cfg.get("host", "127.0.0.1")
-        port = int(ib_cfg.get("port", 4001))
-        if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
-            db_ib = self._status_sink.get_ib_connection_config()
-            if db_ib:
-                host = db_ib.get("host", host)
-                port = int(db_ib.get("port", port))
-                logger.info(
-                    "IB connection from DB: host=%s port=%s (port_type=%s)",
-                    host,
-                    port,
-                    db_ib.get("port_type", ""),
-                )
+        logger.info(
+            "IB connection from DB: host=%s port=%s (port_type=%s)",
+            host,
+            port,
+            db_ib.get("port_type", ""),
+        )
         self.connector = IBConnector(
             host=host,
             port=port,
             client_id=client_id,
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
-        listener_client_id = 2
-        if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
-            db_ib = self._status_sink.get_ib_connection_config()
-            if db_ib:
-                listener_client_id = int(db_ib.get("client_id_listener", 2))
+        listener_client_id = int(db_ib.get("client_id_listener", 2))
         self.listener_connector = IBConnector(
             host=host,
             port=port,
             client_id=listener_client_id,
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
+
+        # Primary account for hedging/market data when multiple IB accounts exist (R-A4). From DB only.
+        self._primary_account_id: Optional[str] = None
+        if db_ib and db_ib.get("primary_account_id"):
+            self._primary_account_id = str(db_ib["primary_account_id"]).strip()
+            logger.info("[R-A4] primary_account_id=%s (for hedging and market data)", self._primary_account_id)
 
         # 1.b Config sections (unified _*_cfg naming)
         self._structure_cfg = get_structure_config(config)
@@ -333,6 +334,9 @@ class GsTrading:
             accounts_list: list = []
             primary_id: Optional[str] = None
             primary_summary: Optional[dict] = None
+            # R-A4: use configured primary_account_id if it is in the managed list; otherwise first account
+            if self._primary_account_id and self._primary_account_id in account_ids:
+                primary_id = self._primary_account_id
             for account_id in account_ids:
                 values = await self.connector.get_account_summary(account=account_id)
                 summary = {}
@@ -360,6 +364,8 @@ class GsTrading:
                 )
                 if primary_id is None and account_id:
                     primary_id = account_id
+                    primary_summary = summary if summary else None
+                elif primary_id == account_id:
                     primary_summary = summary if summary else None
             self.store.set_accounts_data(accounts_list)
             self.store.set_account_summary(primary_id, primary_summary)

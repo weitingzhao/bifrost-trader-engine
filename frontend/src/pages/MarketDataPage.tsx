@@ -27,6 +27,8 @@ function fmtUsd(n: number | null | undefined): string {
 
 interface MarketDataPageProps {
   status: StatusResponse | null
+  onGoToScreener?: () => void
+  breadcrumbLabel?: string
 }
 
 /** 从持仓汇总可拉取 K 线的标的候选（后续可合并 Watchlist） */
@@ -39,7 +41,7 @@ function useBarCandidateSymbols(status: StatusResponse | null): string[] {
   }, [status?.accounts])
 }
 
-export function MarketDataPage({ status }: MarketDataPageProps) {
+export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Screener' }: MarketDataPageProps) {
   const [bars, setBars] = useState<Bar[]>([])
   const [barsLoading, setBarsLoading] = useState(false)
   const [barSymbol, setBarSymbol] = useState('')
@@ -79,9 +81,27 @@ export function MarketDataPage({ status }: MarketDataPageProps) {
 
   return (
     <div className="card process-section market-data-page">
-      <h2 className="page-title-with-tooltip">
-        Market data
-        <InfoTooltip text="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk." />
+      <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+        {onGoToScreener ? (
+          <>
+            <button
+              type="button"
+              className="page-title-breadcrumb-link"
+              onClick={onGoToScreener}
+              aria-label="Go to Screener"
+            >
+              Research
+            </button>
+            {' / '}
+            {breadcrumbLabel}
+            <InfoTooltip text="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk." />
+          </>
+        ) : (
+          <>
+            Market data
+            <InfoTooltip text="Manage bars and market data: fetch by symbol and write to DB (stock_day / stock_min) for replay and risk." />
+          </>
+        )}
       </h2>
 
       {quotes.length > 0 && (

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, Fragment, type ReactNode } from 'react'
 import type { Bar, BarCoverageItem, BarsCoverageResponse, IbAccountSnapshot, StatusResponse } from '../types'
-import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, postWatchlistEodRefresh, fetchWatchlistEodRefreshPreview, deleteBarsForSymbol, deleteBarsJob, deleteAllBarsJobs } from '../api'
+import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, postWatchlistEodRefresh, fetchWatchlistEodRefreshPreview, postIndicesRefresh, deleteBarsForSymbol, deleteBarsJob, deleteAllBarsJobs } from '../api'
 import type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { fetchMarketTradingDay } from '../api'
 
 const BAR_PERIODS = [
   { value: '1 D', label: 'Daily' },
@@ -83,6 +84,19 @@ function coverageRange(p: { count: number; min_ts: number | null; max_ts: number
   return '— ~ ' + fmtDate(p.max_ts!)
 }
 
+/** Bars column: no gap → show count only. Gap and trading day → show count + orange (end). Weekend/holiday with gap → show count only (no new data expected). */
+function coverageCompact(p: { count: number; min_ts: number | null; max_ts: number | null }, needPull: boolean, isTradingDay: boolean | null): ReactNode {
+  if (p.count === 0) return '—'
+  const showEnd = needPull && (isTradingDay !== false)
+  if (!showEnd) return <>{p.count}</>
+  return (
+    <>
+      {p.count}{' '}
+      <span className="data-coverage-end-warning">(end)</span>
+    </>
+  )
+}
+
 /** Status label and style for need-backfill indicator. */
 function coverageStatusDisplay(status: string | undefined): { label: string; needBackfill: boolean; severity: 'ok' | 'gap' | 'missing' } {
   switch (status) {
@@ -103,12 +117,14 @@ function coverageStatusDisplay(status: string | undefined): { label: string; nee
 
 function statusColor(severity: 'ok' | 'gap' | 'missing'): string {
   if (severity === 'missing') return 'var(--danger, #c00)'
-  if (severity === 'gap') return 'var(--warning, #b8860b)'
+  if (severity === 'gap') return 'var(--color-warning, #b8860b)'
   return 'var(--success, green)'
 }
 
 interface DataPageProps {
   status: StatusResponse | null
+  onGoToScreener?: () => void
+  breadcrumbLabel?: string
 }
 
 /** Lightweight SVG K-line chart for Bars (inspect). Shows price + volume and period-aware X-axis. */
@@ -392,7 +408,7 @@ function useBarCandidateSymbols(status: StatusResponse | null): string[] {
 }
 
 /** Data page: backfill per symbol from coverage, inspect bars. */
-export function DataPage({ status }: DataPageProps) {
+export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: DataPageProps) {
   const [bars, setBars] = useState<Bar[]>([])
   const [barsLoading, setBarsLoading] = useState(false)
   const [barSymbol, setBarSymbol] = useState('')
@@ -408,7 +424,9 @@ export function DataPage({ status }: DataPageProps) {
   const [deleteSymbolError, setDeleteSymbolError] = useState<string | null>(null)
   /** Reset confirmation modal: symbol to reset, or null when closed */
   const [resetConfirmSymbol, setResetConfirmSymbol] = useState<string | null>(null)
-  /** Periods to clear when Reset (1 D, 1 min, 5 mins, 1 hour); multi-select checkboxes */
+  /** True when Reset was opened from an Index row (daily only); false for Watchlist (multi-period). */
+  const [resetConfirmIsIndex, setResetConfirmIsIndex] = useState(false)
+  /** Periods to clear when Reset (1 D, 1 min, 5 mins, 1 hour); multi-select checkboxes; ignored when resetConfirmIsIndex */
   const [resetPeriods, setResetPeriods] = useState<string[]>(['1 D', '1 min', '5 mins', '1 hour'])
   /** Backfill options: fake IB call (skip IB fetch), default off; API interval between requests (sec), default 10 */
   const [backfillIsTest, setBackfillIsTest] = useState(false)
@@ -420,12 +438,16 @@ export function DataPage({ status }: DataPageProps) {
   const [watchlistPreviewLoading, setWatchlistPreviewLoading] = useState(false)
   const [watchlistRefreshRunning, setWatchlistRefreshRunning] = useState(false)
   const [watchlistRefreshMessage, setWatchlistRefreshMessage] = useState<string | null>(null)
-  const [watchlistRefreshPreview, setWatchlistRefreshPreview] = useState<WatchlistEodRefreshPreviewResponse | null>(null)
+  const [indicesRefreshLoading, setIndicesRefreshLoading] = useState(false)
+  const [indicesRefreshMessage, setIndicesRefreshMessage] = useState<string | null>(null)
   /** Pull range modal: when set, show modal to choose Max / Min / Custom before queuing */
   const [pullModalSymbol, setPullModalSymbol] = useState<string | null>(null)
+  /** True when Pull modal was opened from an Index row (TradingView daily only); false for Watchlist (IB, all periods). */
+  const [pullModalIsIndex, setPullModalIsIndex] = useState(false)
   /** Selected periods to pull in the modal (multi-select; init from periods needing backfill when opening) */
   const [pullSelectedPeriods, setPullSelectedPeriods] = useState<string[]>(['1 D', '1 min', '5 mins', '1 hour'])
   const [pullRangeMode, setPullRangeMode] = useState<'max' | 'min' | 'custom' | null>('max')
+  const [watchlistRefreshPreview, setWatchlistRefreshPreview] = useState<WatchlistEodRefreshPreviewResponse | null>(null)
   /** Custom span per period: Daily/5min/1h use days; 1 min uses hours */
   const [pullCustomDailyDays, setPullCustomDailyDays] = useState(30)
   const [pullCustom1minHours, setPullCustom1minHours] = useState(24)
@@ -442,8 +464,16 @@ export function DataPage({ status }: DataPageProps) {
   const [barsJobsSortDir, setBarsJobsSortDir] = useState<'asc' | 'desc'>('desc')
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
+  /** Whether today (America/New_York) is a US market trading day; from GET /market/trading-day. null = not yet loaded. */
+  const [isTradingDay, setIsTradingDay] = useState<boolean | null>(null)
 
   const candidateSymbols = useBarCandidateSymbols(status)
+
+  useEffect(() => {
+    fetchMarketTradingDay()
+      .then((r) => setIsTradingDay(r.is_trading_day))
+      .catch(() => setIsTradingDay(true))
+  }, [])
 
   const sortedBars = useMemo(() => {
     if (bars.length === 0) return []
@@ -489,6 +519,19 @@ export function DataPage({ status }: DataPageProps) {
     if (sortedBars.length === 0) return []
     return sortedBars.slice(0, 5)
   }, [sortedBars])
+
+  /** Data coverage rows: always grouped as Indices then Watchlist */
+  const coverageGroups = useMemo((): { label: string; rows: BarCoverageItem[] }[] => {
+    if (!coverage || coverage.length === 0) return []
+    const refSymbols = new Set((status?.reference_indices ?? []).map((r) => r.symbol))
+    const indices = coverage.filter((r) => refSymbols.has(r.symbol))
+    const watchlist = coverage.filter((r) => !refSymbols.has(r.symbol))
+    const out: { label: string; rows: BarCoverageItem[] }[] = []
+    if (indices.length > 0) out.push({ label: 'Indices', rows: indices })
+    if (watchlist.length > 0) out.push({ label: 'Watchlist', rows: watchlist })
+    return out.length > 0 ? out : [{ label: '', rows: coverage }]
+  }, [coverage, status?.reference_indices])
+
   useEffect(() => {
     if (candidateSymbols.length > 0 && !barSymbol.trim()) setBarSymbol(candidateSymbols[0])
   }, [candidateSymbols.join(','), barSymbol])
@@ -600,6 +643,28 @@ export function DataPage({ status }: DataPageProps) {
     }
   }, [backfillApiIntervalSec, backfillIsTest, loadBarsJobs, loadCoverage])
 
+  const handleRefreshIndices = useCallback(async () => {
+    setIndicesRefreshLoading(true)
+    setIndicesRefreshMessage(null)
+    try {
+      const res = await postIndicesRefresh()
+      if (res.ok) {
+        setIndicesRefreshMessage(
+          res.updated.length > 0
+            ? `Refreshed ${res.updated.length} index(s): ${res.updated.join(', ')}.`
+            : 'No reference indices in config.',
+        )
+        await loadCoverage()
+      } else {
+        setIndicesRefreshMessage(res.errors?.length ? res.errors.join('; ') : 'Refresh failed.')
+      }
+    } catch (e) {
+      setIndicesRefreshMessage(e instanceof Error ? e.message : 'Refresh failed.')
+    } finally {
+      setIndicesRefreshLoading(false)
+    }
+  }, [loadCoverage])
+
   const handleWatchlistEodRefreshClick = useCallback(async () => {
     if (needWatchlistDryRun) {
       await openWatchlistEodRefreshPreview()
@@ -639,9 +704,23 @@ export function DataPage({ status }: DataPageProps) {
 
   return (
     <div className="card process-section market-data-page">
+      {onGoToScreener && (
+        <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+          <button
+            type="button"
+            className="page-title-breadcrumb-link"
+            onClick={onGoToScreener}
+            aria-label="Go to Screener"
+          >
+            Research
+          </button>
+          {' / '}
+          {breadcrumbLabel}
+        </h2>
+      )}
       <section className="replay-section" aria-labelledby="data-coverage-head">
         <h3 id="data-coverage-head" className="page-title-with-tooltip">
-          Watchlist data coverage
+          Coverage
           <InfoTooltip text={coveragePolicy
             ? `Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Target range (current config): Daily ${coveragePolicy.daily_years}y, 1 min ${coveragePolicy.min_weeks}w, 5min ${coveragePolicy['5min_months']}mo, 1h ${coveragePolicy['1hour_months']}mo. Need backfill if status is not OK. Empty when no Watchlist stocks.`
             : 'Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Target range from config: Daily 10y, 1 min 1w, 5min 1mo, 1h 3mo. Need backfill if status is not OK. Empty when no Watchlist stocks.'} />
@@ -700,7 +779,23 @@ export function DataPage({ status }: DataPageProps) {
           <InfoTooltip text={needWatchlistDryRun
             ? 'Dry run is enabled. Clicking the button opens the preview first; only modal confirmation will queue jobs. EOD Pull runs once after market close: fills end gap and overrides latest bars with final close (override_days=1). Dry run is off by default.'
             : 'Dry run is disabled. Clicking the button queues jobs immediately. EOD Pull runs once after market close: fills end gap and overrides latest bars with final close (override_days=1). A message like “Queued 48 EOD refresh job(s) for 12 watchlist symbol(s). override_days=1” means 48 worker jobs were enqueued (e.g. 4 periods × 12 symbols); only the latest bar per symbol/period is overwritten with end-of-day data.'} />
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={indicesRefreshLoading || (status?.reference_indices?.length ?? 0) === 0}
+            onClick={() => { void handleRefreshIndices() }}
+            aria-label="Refresh reference indices"
+            title="Pull daily bars for reference indices from TradingView into stock_day."
+          >
+            {indicesRefreshLoading ? 'Refreshing…' : 'Refresh indices'}
+          </button>
+          <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC) from TradingView. Daily only." />
         </div>
+        {indicesRefreshMessage && (
+          <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
+            {indicesRefreshMessage}
+          </div>
+        )}
         {watchlistRefreshMessage && (
           <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
             {watchlistRefreshMessage}
@@ -717,9 +812,11 @@ export function DataPage({ status }: DataPageProps) {
           </div>
         )}
         {coverage && coverage.length === 0 && !coverageLoading && (
-          <div className="replay-placeholder">No stocks in Watchlist or not loaded yet. Add stocks on the Watchlist tab and refresh.</div>
+          <div className="replay-placeholder">No stocks in Watchlist and no reference indices configured. Add stocks on the Watchlist tab or configure reference_indices, then refresh.</div>
         )}
         {coverage && coverage.length > 0 && (
+          <>
+            <div className="data-coverage-table-wrap">
           <table className="table-operations data-coverage-table">
             <thead>
               <tr>
@@ -744,7 +841,17 @@ export function DataPage({ status }: DataPageProps) {
               </tr>
             </thead>
             <tbody>
-              {coverage.map((row) => {
+              {coverageGroups.map((group) => (
+                <Fragment key={group.label || 'all'}>
+                  {group.label ? (
+                    <tr className="data-coverage-group-header-row">
+                      <th colSpan={10} className="data-coverage-group-header">
+                        {group.label}
+                      </th>
+                    </tr>
+                  ) : null}
+                  {group.rows.map((row) => {
+                const isIndex = status?.reference_indices?.some((r) => r.symbol === row.symbol)
                 const dayStatus = coverageStatusDisplay(row.stock_day.status)
                 const min1Status = coverageStatusDisplay(row.stock_min['1 min']?.status)
                 const min5Status = coverageStatusDisplay(row.stock_min['5 mins']?.status)
@@ -756,47 +863,96 @@ export function DataPage({ status }: DataPageProps) {
                 if (min5Status.needBackfill) periodsNeedingBackfill.push('5 mins')
                 if (min1hStatus.needBackfill) periodsNeedingBackfill.push('1 hour')
                 const isBackfilling = backfillSymbol === row.symbol
-                const canBackfill = periodsNeedingBackfill.length > 0 && !isBackfilling && !isDeleting
-                const renderBarsCell = (p: { count: number; min_ts: number | null; max_ts: number | null }, label: string, severity: 'ok' | 'gap' | 'missing', period: string) => (
+                const canBackfill = periodsNeedingBackfill.length > 0 && !isBackfilling && !isDeleting && !isIndex
+                const renderBarsCell = (p: { count: number; min_ts: number | null; max_ts: number | null }, needPull: boolean, period: string, titleStr: string) => (
                   <button
                     type="button"
                     className="data-coverage-bars-btn"
                     onClick={() => openBarsForSymbol(row.symbol, period)}
-                    title={`Show ${row.symbol} ${period} bars in Preview section`}
+                    title={titleStr}
                     aria-label={`Show bars ${row.symbol} ${period}`}
                   >
-                    {p.count === 0 ? '—' : `${p.count} bars`}
-                    {label !== '' && label !== 'OK' && (
-                      <span className="data-coverage-status" style={{ color: statusColor(severity) }}>[{label}]</span>
-                    )}
+                    {coverageCompact(p, needPull, isTradingDay)}
                   </button>
                 )
                 return (
                   <tr key={row.symbol}>
-                    <td><strong>{row.symbol}</strong></td>
+                    <td>
+                      {isIndex ? (() => {
+                        const ref = status?.reference_indices?.find((r) => r.symbol === row.symbol)
+                        const label = ref?.label || row.symbol
+                        return (
+                          <>
+                            <strong>{label}</strong>
+                            <span className="data-coverage-status" style={{ marginLeft: '0.35rem', color: 'var(--color-text-muted)', fontWeight: 'normal', fontSize: '0.9em' }} title="Reference index symbol">{row.symbol}</span>
+                          </>
+                        )
+                      })() : (
+                        <strong>{row.symbol}</strong>
+                      )}
+                    </td>
                     <td className="data-coverage-bars" title={coverageCell(row.stock_day)}>
-                      {renderBarsCell(row.stock_day, dayStatus.label, dayStatus.severity, '1 D')}
+                      {renderBarsCell(row.stock_day, dayStatus.needBackfill, '1 D', coverageCell(row.stock_day))}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_day)}</td>
-                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 min'])}>
-                      {renderBarsCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null }, min1Status.label, min1Status.severity, '1 min')}
+                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null })}>
+                      {renderBarsCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null }, min1Status.needBackfill, '1 min', coverageCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null }))}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null })}</td>
-                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['5 mins'])}>
-                      {renderBarsCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null }, min5Status.label, min5Status.severity, '5 mins')}
+                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null })}>
+                      {renderBarsCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null }, min5Status.needBackfill, '5 mins', coverageCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null }))}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null })}</td>
-                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 hour'])}>
-                      {renderBarsCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null }, min1hStatus.label, min1hStatus.severity, '1 hour')}
+                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null })}>
+                      {renderBarsCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null }, min1hStatus.needBackfill, '1 hour', coverageCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null }))}
                     </td>
                     <td className="data-coverage-range">{coverageRange(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null })}</td>
                     <td className="data-coverage-actions data-coverage-actions-nowrap">
+                      {isIndex ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-reset btn-sm"
+                            disabled={isDeleting}
+                            onClick={() => {
+                              setResetConfirmSymbol(row.symbol)
+                              setResetConfirmIsIndex(true)
+                              setResetPeriods(['1 D'])
+                            }}
+                            title="Reset daily bars for this index"
+                            aria-label={`Reset ${row.symbol}`}
+                          >
+                            {isDeleting ? '…' : 'Reset'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={indicesRefreshLoading || (backfillSymbol === row.symbol)}
+                            title="Pull daily bars for this index from TradingView (same range modal as Watchlist)"
+                            aria-label={`Pull ${row.symbol}`}
+                            onClick={() => {
+                              setPullModalSymbol(row.symbol)
+                              setPullModalIsIndex(true)
+                              setPullSelectedPeriods(['1 D'])
+                              setPullRangeMode('max')
+                              setPullCustomDailyDays(30)
+                              setPullCustom1minHours(24)
+                              setPullCustom5minDays(7)
+                              setPullCustom1hourDays(7)
+                            }}
+                          >
+                            {backfillSymbol === row.symbol ? (backfillMessage || 'Pulling…') : 'Pull'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
                       <button
                         type="button"
                         className="btn btn-reset btn-sm"
                         disabled={isDeleting}
                         onClick={() => {
                           setResetConfirmSymbol(row.symbol)
+                          setResetConfirmIsIndex(false)
                           setResetPeriods(['1 D', '1 min', '5 mins', '1 hour'])
                         }}
                         title="Reset all bars for this symbol (stock_day + stock_min); then you can Pull from scratch"
@@ -813,6 +969,7 @@ export function DataPage({ status }: DataPageProps) {
                           aria-label={`Pull ${row.symbol}`}
                           onClick={() => {
                             setPullModalSymbol(row.symbol)
+                            setPullModalIsIndex(false)
                             setPullSelectedPeriods(['1 D', '1 min', '5 mins', '1 hour'])
                             setPullRangeMode('max')
                             setPullCustomDailyDays(30)
@@ -824,12 +981,18 @@ export function DataPage({ status }: DataPageProps) {
                           {isBackfilling ? (backfillMessage || 'Queuing…') : 'Pull'}
                         </button>
                       )}
+                        </>
+                      )}
                     </td>
                   </tr>
                 )
-              })}
+                  })}
+                </Fragment>
+              ))}
             </tbody>
           </table>
+            </div>
+          </>
         )}
       </section>
 
@@ -942,41 +1105,48 @@ export function DataPage({ status }: DataPageProps) {
 
       {/* Reset confirmation modal */}
       {resetConfirmSymbol && (
-        <div className="data-reset-modal-overlay" onClick={() => setResetConfirmSymbol(null)} role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+        <div className="data-reset-modal-overlay" onClick={() => { setResetConfirmSymbol(null); setResetConfirmIsIndex(false) }} role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
           <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="reset-modal-title">Reset data</h3>
-            <p>Select periods to clear (cannot be undone):</p>
-            <div className="data-reset-periods">
-              {[
-                { value: '1 D', label: 'Daily' },
-                { value: '1 min', label: '1 Min' },
-                { value: '5 mins', label: '5 Mins' },
-                { value: '1 hour', label: '1 Hour' },
-              ].map(({ value, label }) => (
-                <label key={value} className="data-reset-period-check">
-                  <input
-                    type="checkbox"
-                    checked={resetPeriods.includes(value)}
-                    onChange={e => {
-                      if (e.target.checked) setResetPeriods(p => [...p, value])
-                      else setResetPeriods(p => p.filter(x => x !== value))
-                    }}
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
+            <h3 id="reset-modal-title">{resetConfirmIsIndex ? 'Reset index data' : 'Reset data'}</h3>
+            {resetConfirmIsIndex ? (
+              <p>Clear daily bars for this index only (cannot be undone).</p>
+            ) : (
+              <>
+                <p>Select periods to clear (cannot be undone):</p>
+                <div className="data-reset-periods">
+                  {[
+                    { value: '1 D', label: 'Daily' },
+                    { value: '1 min', label: '1 Min' },
+                    { value: '5 mins', label: '5 Mins' },
+                    { value: '1 hour', label: '1 Hour' },
+                  ].map(({ value, label }) => (
+                    <label key={value} className="data-reset-period-check">
+                      <input
+                        type="checkbox"
+                        checked={resetPeriods.includes(value)}
+                        onChange={e => {
+                          if (e.target.checked) setResetPeriods(p => [...p, value])
+                          else setResetPeriods(p => p.filter(x => x !== value))
+                        }}
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
             <div className="data-reset-modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setResetConfirmSymbol(null)}>No</button>
+              <button type="button" className="btn btn-secondary" onClick={() => { setResetConfirmSymbol(null); setResetConfirmIsIndex(false) }}>No</button>
               <button
                 type="button"
                 className="btn btn-reset"
-                disabled={resetPeriods.length === 0}
-                title={resetPeriods.length === 0 ? 'Select at least one period' : undefined}
+                disabled={!resetConfirmIsIndex && resetPeriods.length === 0}
+                title={!resetConfirmIsIndex && resetPeriods.length === 0 ? 'Select at least one period' : undefined}
                 onClick={async () => {
                   const sym = resetConfirmSymbol
-                  const periods = [...resetPeriods]
+                  const periods = resetConfirmIsIndex ? ['1 D'] : [...resetPeriods]
                   setResetConfirmSymbol(null)
+                  setResetConfirmIsIndex(false)
                   if (!sym || periods.length === 0) return
                   setDeleteSymbolError(null)
                   setDeletingSymbol(sym)
@@ -1000,10 +1170,17 @@ export function DataPage({ status }: DataPageProps) {
 
       {/* Pull time range modal */}
       {pullModalSymbol && (
-        <div className="data-reset-modal-overlay" onClick={() => setPullModalSymbol(null)} role="dialog" aria-modal="true" aria-labelledby="pull-range-modal-title">
+        <div className="data-reset-modal-overlay" onClick={() => { setPullModalSymbol(null); setPullModalIsIndex(false) }} role="dialog" aria-modal="true" aria-labelledby="pull-range-modal-title">
           <div className="data-reset-modal data-pull-range-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="pull-range-modal-title">Time range for backfill</h3>
-            <p className="data-pull-range-desc">Choose how much history to fetch for {pullModalSymbol}.</p>
+            <h3 id="pull-range-modal-title">{pullModalIsIndex ? 'Pull index (TradingView)' : 'Time range for backfill'}</h3>
+            <p className="data-pull-range-desc">
+              {pullModalIsIndex
+                ? `Choose how many days to fetch for ${pullModalSymbol}. Index data is Daily only from TradingView.`
+                : `Choose how much history to fetch for ${pullModalSymbol}.`}
+            </p>
+            {pullModalIsIndex && (
+              <p className="replay-sync-hint" style={{ marginBottom: '0.75rem' }}>Same range options as Watchlist; only Daily period is used for indices.</p>
+            )}
             <div className="data-pull-range-options">
               <label className="data-pull-range-option">
                 <input
@@ -1045,6 +1222,8 @@ export function DataPage({ status }: DataPageProps) {
                     onChange={e => setPullCustomDailyDays(Math.max(1, Number(e.target.value) || 1))}
                   />
                 </label>
+                {!pullModalIsIndex && (
+                  <>
                 <label className="data-pull-range-custom-row">
                   <span>1 min (hours):</span>
                   <input
@@ -1075,8 +1254,11 @@ export function DataPage({ status }: DataPageProps) {
                     onChange={e => setPullCustom1hourDays(Math.max(1, Number(e.target.value) || 1))}
                   />
                 </label>
+                  </>
+                )}
               </div>
             )}
+            {!pullModalIsIndex && (
             <div className="data-pull-range-periods">
               <span className="data-pull-range-periods-label">Periods to pull:</span>
               <label className="data-pull-range-period-check">
@@ -1101,14 +1283,38 @@ export function DataPage({ status }: DataPageProps) {
                 </label>
               ))}
             </div>
+            )}
             <div className="data-reset-modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setPullModalSymbol(null)}>Cancel</button>
+              <button type="button" className="btn btn-secondary" onClick={() => { setPullModalSymbol(null); setPullModalIsIndex(false) }}>Cancel</button>
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={pullRangeMode === null || pullSelectedPeriods.length === 0}
+                disabled={pullRangeMode === null || (!pullModalIsIndex && pullSelectedPeriods.length === 0)}
                 onClick={async () => {
-                  if (!pullModalSymbol || pullSelectedPeriods.length === 0 || pullRangeMode === null) return
+                  if (!pullModalSymbol || pullRangeMode === null) return
+                  if (pullModalIsIndex) {
+                    const sym = pullModalSymbol
+                    const days = pullRangeMode === 'max' ? 365 : pullRangeMode === 'min' ? 30 : pullCustomDailyDays
+                    setPullModalSymbol(null)
+                    setPullModalIsIndex(false)
+                    setBackfillSymbol(sym)
+                    setBackfillMessage(null)
+                    try {
+                      const res = await postIndicesRefresh({ symbol: sym, days })
+                      if (res.ok && res.updated.length > 0) {
+                        setBackfillMessage(`Pulled ${res.updated.length} index: ${res.updated.join(', ')}.`)
+                        loadCoverage()
+                      } else {
+                        setBackfillMessage(res.errors?.length ? res.errors.join('; ') : 'Pull failed')
+                      }
+                    } catch (e) {
+                      setBackfillMessage(e instanceof Error ? e.message : 'Request failed')
+                    } finally {
+                      setTimeout(() => { setBackfillSymbol(null); setBackfillMessage(null) }, 4000)
+                    }
+                    return
+                  }
+                  if (pullSelectedPeriods.length === 0) return
                   const sym = pullModalSymbol
                   const periods = [...pullSelectedPeriods]
                   const getOptions = (period: string) => {
@@ -1131,6 +1337,7 @@ export function DataPage({ status }: DataPageProps) {
                     return base
                   }
                   setPullModalSymbol(null)
+                  setPullModalIsIndex(false)
                   setBackfillSymbol(sym)
                   setBackfillMessage(null)
                   try {

@@ -8,7 +8,7 @@
 
 ## 评估结论（结论先行）
 
-**当前项目进度**：阶段 1、2 **已验收完成**；阶段 3（数据获取）**已完成实现**（R-A1、R-M6、R-H2 已落地），待正式验收；阶段 4（策略与回测）、阶段 5（自动对冲与监控）**未开始**。R-C3（一键平敞口）已明确延后至阶段 5。
+**当前项目进度**：阶段 1、2 **已验收完成**；阶段 3（数据获取）**已完成实现**（R-A1、R-M6、R-H2 已落地），待正式验收；阶段 4（策略与回测）、阶段 5（自动对冲与监控）**未开始**。R-C3（一键平敞口）已明确延后至阶段 5。**双 IB 账户（R-A4）** 已纳入需求与阶段 3 范围，实现与验收随阶段 3 一并完成（不单独设阶段）。
 
 **当前里程碑状态**：阶段 1/2 验收完成日 2026-02-26；阶段 3 部分实现 2026-02-14，项目**当前处于阶段 3 工作状态**；2026-02-26 需求/计划变更（R-M6 加入、阶段重组为 3=数据获取、4=策略与回测、5=自动对冲与监控）。详见下文「当前项目进展」与「项目里程碑时间线」表。
 
@@ -42,7 +42,7 @@
 | **2026-02-26** | 需求/计划 | **R-M6** 需求加入；**阶段重组**：阶段 3=数据获取、阶段 4=策略与回测、阶段 5=自动对冲与监控 |
 | **2026-02-26** | 阶段验收 | **阶段 1** 正式验收通过（全部 TC-1-* 通过并记录） |
 | **2026-02-26** | 阶段验收 | **阶段 2** 正式验收通过（全部 TC-2-* 通过并记录） |
-| — | 阶段验收 | 阶段 3 正式验收通过（R-A1、R-M6、R-H2 全部验收条通过） |
+| — | 阶段验收 | 阶段 3 正式验收通过（R-A1、**R-A4**、R-M6、R-H2 全部验收条通过） |
 
 **使用说明**：阶段实现完成或正式验收通过后，将上表对应行日期更新为实际完成日（YYYY-MM-DD），并同步更新「当前项目进展」表中的**实现完成时间**或**验收完成时间**。是否进入下一阶段或是否调整需求/架构，由负责人在评估后给出结论，见 [项目工作流](PROJECT_WORKFLOW.md)。
 
@@ -54,8 +54,8 @@
 
 | 优先级 | 待办项 | 说明 |
 |--------|--------|------|
-| **必选** | **阶段 3 执行计划与验收** | 已有 [phase3-execution-plan.md](phase3-execution-plan.md)（阶段 3 数据获取）。按该执行计划或 PLAN_NEXT_STEPS 的 TC-3-* 逐条执行阶段 3 验收并记录（含 R-H2 实现后）；可选新增 `scripts/check/phase3_0.py` 做 GET /status 字段与账户/持仓/spot 的校验。 |
-| 可选 | phase2 自检脚本 | 新增 `scripts/check/phase2.py`：请求 GET /status、GET /operations，校验 status_lamp、self_check 等字段存在；可与已运行 daemon 配合测 POST /control/stop。 |
+| **必选** | **阶段 3 执行计划与验收** | 已有 [phase3-execution-plan.md](phase3-execution-plan.md)（阶段 3 数据获取）。按该执行计划或 PLAN_NEXT_STEPS 的 TC-3-* 逐条执行阶段 3 验收并记录（含 R-H2 实现后）；可选新增验收脚本做 GET /status 字段与账户/持仓/spot 的校验。 |
+| 可选 | phase2 自检脚本 | 可新增脚本：请求 GET /status、GET /operations，校验 status_lamp、self_check 等字段存在；可与已运行 daemon 配合测 POST /control/stop。 |
 
 **结论**：阶段 3 已有 [phase3-execution-plan.md](phase3-execution-plan.md)，可按其验收清单与 PLAN_NEXT_STEPS 的 TC-3-* 执行正式验收（R-H2 实现后；无 phase3_0.py 时需人工执行并记录）。
 
@@ -102,19 +102,19 @@
 
 | Test Case ID | 对应需求 | 覆盖方式 | 说明 |
 |--------------|----------|----------|------|
-| TC-1-R-M1a-1 | R-M1a | 人工 | 需启动守护程序后查 sink 是否有新 snapshot；phase1.py 不启动 daemon |
-| TC-1-R-M1a-2 | R-M1a | **自动化** | `scripts/check/phase1.py` 中 check_pg_schema：表存在且可读 |
-| TC-1-R-M1a-3 | R-M1a | **自动化** | phase1.py 中 check_sink_interface：SNAPSHOT_KEYS 与 DATABASE.md 一致 |
+| TC-1-R-M1a-1 | R-M1a | 人工 | 需启动守护程序后查 sink 是否有新 snapshot |
+| TC-1-R-M1a-2 | R-M1a | **人工** | 从 sink（PostgreSQL）查表存在且可读，列符合 DATABASE.md §2 |
+| TC-1-R-M1a-3 | R-M1a | **人工** | 核对 SNAPSHOT_KEYS 与 DATABASE.md 一致 |
 | TC-1-R-M4a-1 | R-M4a | 人工 | 需有对冲/下单/成交发生后再查 operations 表 |
-| TC-1-R-M4a-2 | R-M4a | **自动化** | phase1.py 中 check_sink_interface：OPERATION_KEYS 一致 |
-| TC-1-R-M4a-3 | R-M4a | **自动化** | phase1.py 中 check_pg_schema：operations 表及列存在 |
-| TC-1-R-H1-1 | R-H1 | **自动化** | phase1.py 中 check_pg_schema：status_current + status_history 表及列 |
+| TC-1-R-M4a-2 | R-M4a | **人工** | 核对 OPERATION_KEYS 一致 |
+| TC-1-R-M4a-3 | R-M4a | **人工** | 核对 operations 表及列存在 |
+| TC-1-R-H1-1 | R-H1 | **人工** | 核对 status_current + status_history 表及列 |
 | TC-1-R-H1-2 | R-H1 | 设计/文档 | 无需改写逻辑即可扩展历史读；无独立自动化 |
-| TC-1-R-H1-3 | R-H1 | **自动化** | phase1.py 中 check_config：postgres 配置 |
-| TC-1-R-C1a-1 | R-C1a | **自动化** | phase1.py --signal-test：起 daemon、SIGTERM、断言退出 |
+| TC-1-R-H1-3 | R-H1 | **人工** | 核对 postgres 配置 |
+| TC-1-R-C1a-1 | R-C1a | **人工** | 起 daemon、发 SIGTERM、断言数秒内退出 |
 | TC-1-R-C1a-2 | R-C1a | 不适用 | 控制文件按计划留阶段 2；当前为 DB 控制，无 1.3 |
 
-**阶段 1 小结**：约 **6 个 TC** 由 `scripts/check/phase1.py` 覆盖；**3 个**需人工；**1 个**为设计验证；**1 个**不适用。
+**阶段 1 小结**：**scripts/check/ 已移除**，阶段 1 验收改为按上述清单**人工执行**；约 6 个 TC 为人工核对 schema/配置/信号，3 个为人工操作验证，1 个为设计验证，1 个不适用。
 
 ---
 
@@ -172,7 +172,7 @@
 
 *R-C3 不纳入阶段 2 验收，TC-2-R-C3-* 已移除；R-C3 待阶段 5 规划。*
 
-**阶段 2 小结**：**全部 TC-2-*（8 项）目前为人工验收**；无 `scripts/check/phase2.py` 或 pytest 集成。
+**阶段 2 小结**：**全部 TC-2-*（8 项）目前为人工验收**；无专用 phase2 自检脚本或 pytest 集成。
 
 ---
 
@@ -185,14 +185,14 @@
 | 项目 | 阶段 1 | 阶段 2 | 阶段 3（数据获取） |
 |------|--------|--------|------------------|
 | **执行计划文档** | ✅ [phase1-execution-plan.md](phase1-execution-plan.md) | ✅ [phase2-execution-plan.md](phase2-execution-plan.md) | ✅ [phase3-execution-plan.md](phase3-execution-plan.md)（Todo、验收清单、代码锚点） |
-| **自检/验收脚本** | ✅ `scripts/check/phase1.py` | ⏳ 无 phase2.py（可选） | ❌ **无** scripts/check/phase3_0.py 或等价脚本 |
+| **自检/验收脚本** | 已移除 scripts/check/；阶段 1 人工验收 | ⏳ 无 phase2 脚本（可选） | ❌ 无 phase3_0 或等价脚本 |
 | **验收依据** | 执行计划 + PLAN_NEXT_STEPS TC-1-* | phase2 验收清单 + PLAN_NEXT_STEPS TC-2-* | phase3-execution-plan + PLAN_NEXT_STEPS 阶段 3 验证标准与 TC-3-* |
 
 **影响**：阶段 3 的**正式验收**可依据 [phase3-execution-plan.md](phase3-execution-plan.md) 的 Todo/验收清单与 [PLAN_NEXT_STEPS 阶段 3](../PLAN_NEXT_STEPS.md#阶段-3数据获取账户持仓市值交易历史与统计) 的「检查方式」「验证标准」逐条执行并记录；目前**无** phase3_0.py，需人工执行 TC-3-* 或后续补充自检脚本。
 
 **Performance 计算与展示**：按 [performance-execution-plan.md](performance-execution-plan.md) 分步实施（R-M7/R-H2 细化）；当前 `get_performance_stats` 为 stub，待从 Phase 0（资本与资金流口径）/ Phase 1（Realized 合计）起实现；验收以 performance-execution-plan 的验收清单与各 Phase 校验条件为准。
 
-**建议**：按 phase3-execution-plan 执行阶段 3 验收并更新里程碑时间线；可选新增 `scripts/check/phase3_0.py`（如校验 GET /status 含 account、positions、spot 等字段）以便自动化部分 TC。
+**建议**：按 phase3-execution-plan 执行阶段 3 验收并更新里程碑时间线；可选新增验收脚本（如校验 GET /status 含 account、positions、spot 等字段）以便自动化部分 TC。
 
 ### 4.2 阶段 3 Test Case（TC-3-*）
 
@@ -225,6 +225,6 @@
 | 项目     | 结论 |
 |----------|------|
 | **结论位置** | 本文档**开头「评估结论」**已给出当前进度、里程碑状态与建议下一步；每次评估时优先更新该节及「当前项目进展」「项目里程碑时间线」表。 |
-| **阶段 1/2** | 已实现（2026-02-14），**验收完成**（2026-02-26）；有 phase1/phase2 执行计划与 phase1.py。 |
+| **阶段 1/2** | 已实现（2026-02-14），**验收完成**（2026-02-26）；有 phase1/phase2 执行计划，验收为人工执行。 |
 | **阶段 3** | **当前项目工作阶段**；R-A1、R-M6、R-H2 已实现；有 phase3-execution-plan，无 phase3_0.py。 |
 | **阶段 4/5** | 未开始。 |
