@@ -251,9 +251,7 @@ export function PositionsPage({
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
   const [ledgerFilterSymbol, setLedgerFilterSymbol] = useState('')
   const [ledgerFilterExpiryStart, setLedgerFilterExpiryStart] = useState('')
-  const [ledgerFilterExecStart, setLedgerFilterExecStart] = useState('')
-  const [ledgerFilterExecEnd, setLedgerFilterExecEnd] = useState('')
-  const [ledgerFilterPool, setLedgerFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
+  const [ledgerFilterAccount, setLedgerFilterAccount] = useState<string>('')
   const [internalPortfolioView, setInternalPortfolioView] = useState<PortfolioView>('open')
   const [ledgerTab, setLedgerTab] = useState<'options' | 'stocks'>('options')
   const [openTab, setOpenTab] = useState<'options' | 'stocks'>('options')
@@ -268,6 +266,10 @@ export function PositionsPage({
   /** true = 手风琴模式（一次只展开一个），false = 可展开多列 */
   const [openAccordionMode, setOpenAccordionMode] = useState<boolean>(false)
   const [ledgerAccordionMode, setLedgerAccordionMode] = useState<boolean>(false)
+  /** Trade History Stocks: group rows by (account_id, symbol) and show category under each position */
+  const [ledgerStockGroupByPosition, setLedgerStockGroupByPosition] = useState<boolean>(false)
+  /** Trade History Stocks: filter by position category tab (All | category name | Uncategorized) */
+  const [ledgerStockCategoryTab, setLedgerStockCategoryTab] = useState<string>('All')
   const toggleDetailExpand = (key: string) => {
     setExpandedDetailKeys(prev => {
       const isOpen = prev.includes(key)
@@ -293,7 +295,17 @@ export function PositionsPage({
   const ledgerBaseFilteredExecutions = useMemo(() => {
     let list = [...(executions || [])]
     const sym = ledgerFilterSymbol.trim().toUpperCase()
-    if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
+    if (sym) {
+      list = list.filter(e => {
+        const directSymbol = (e.symbol || '').toUpperCase().trim()
+        if (directSymbol === sym || directSymbol.startsWith(sym)) return true
+        const ck = (e.contract_key ?? '').trim()
+        if (!ck) return false
+        const partSymbol = getContractLabelParts(ck).symbol.toUpperCase().trim()
+        if (!partSymbol) return false
+        return partSymbol === sym || partSymbol.startsWith(sym)
+      })
+    }
     const expMonth = ledgerFilterExpiryStart.trim().replace(/-/g, '').slice(0, 6)
     if (expMonth) {
       list = list.filter(e => {
@@ -302,23 +314,15 @@ export function PositionsPage({
         return cmp === expMonth
       })
     }
-    if (ledgerFilterExecStart.trim()) {
-      const t = datetimeLocalToUnix(ledgerFilterExecStart)
-      if (Number.isFinite(t)) list = list.filter(e => (e.time ?? 0) >= t)
-    }
-    if (ledgerFilterExecEnd.trim()) {
-      const t = datetimeLocalToUnix(ledgerFilterExecEnd + 'T23:59:59')
-      if (Number.isFinite(t)) list = list.filter(e => (e.time ?? 0) <= t)
-    }
     return list
-  }, [executions, ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExecStart, ledgerFilterExecEnd])
+  }, [executions, ledgerFilterSymbol, ledgerFilterExpiryStart])
 
   const filteredExecutions = useMemo(() => {
     let list = [...ledgerBaseFilteredExecutions]
-    if (ledgerFilterPool === 'ON') list = list.filter(e => (e.account_id ?? '').trim() !== OFF_TRACK_ACCOUNT_ID)
-    else if (ledgerFilterPool === 'Off') list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
+    const acc = ledgerFilterAccount.trim()
+    if (acc && acc !== 'All') list = list.filter(e => (e.account_id ?? '').trim() === acc)
     return list
-  }, [ledgerBaseFilteredExecutions, ledgerFilterPool])
+  }, [ledgerBaseFilteredExecutions, ledgerFilterAccount])
 
   const openOffTrackBaseExecutions = useMemo(() => {
     let list = [...(executions || [])]
@@ -545,6 +549,51 @@ export function PositionsPage({
     return merged
   }, [status?.accounts, executions])
 
+  /** (account_id, contract_key) -> category name for STK positions (Trade History Stocks category column and group headers) */
+  const positionCategoryByAccountContract = useMemo(() => {
+    const map = new Map<string, string>()
+    const accounts = status?.accounts ?? []
+    for (const acc of accounts) {
+      const accountId = (acc.account_id ?? '').trim()
+      const positions = (acc as { positions?: { account_id?: string; contract_key?: string; category?: string }[] }).positions ?? []
+      for (const p of positions) {
+        const ck = (p.contract_key ?? '').trim()
+        if (accountId && ck) {
+          const key = `${accountId}|${ck}`
+          const name = (p as { category?: string }).category
+          if (typeof name === 'string' && name.trim()) map.set(key, name.trim())
+        }
+      }
+    }
+    return map
+  }, [status?.accounts])
+
+  /** STK contract_key for lookup: symbol|STK||| */
+  const stkContractKey = useCallback((sym: string, accId: string) =>
+    `${(accId ?? '').trim()}|${(sym ?? '').toString().trim().toUpperCase()}|STK|||`, [])
+
+  /** Category label for a stock execution (from position tag); '—' when no category */
+  const getStockExecCategory = useCallback((ex: Execution) =>
+    positionCategoryByAccountContract.get(stkContractKey(ex.symbol ?? '', ex.account_id ?? '')) ?? '—',
+  [positionCategoryByAccountContract, stkContractKey])
+
+  /** Trade History Stocks: unique category tabs from current stock executions (All + categories + Uncategorized) */
+  const ledgerStockCategoryTabs = useMemo(() => {
+    const stockExecs = (executions ?? []).filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
+    const set = new Set<string>()
+    for (const ex of stockExecs) {
+      const cat = positionCategoryByAccountContract.get(stkContractKey(ex.symbol ?? '', ex.account_id ?? ''))
+      if (typeof cat === 'string' && cat.trim()) set.add(cat.trim())
+    }
+    const list = Array.from(set).sort((a, b) => a.localeCompare(b))
+    return ['All', ...list, 'Uncategorized']
+  }, [executions, positionCategoryByAccountContract, stkContractKey])
+
+  useEffect(() => {
+    if (ledgerTab !== 'stocks') return
+    if (!ledgerStockCategoryTabs.includes(ledgerStockCategoryTab)) setLedgerStockCategoryTab('All')
+  }, [ledgerTab, ledgerStockCategoryTab, ledgerStockCategoryTabs])
+
   /** Pool=On Details: (account_id, contract_key) -> latest execution with id; only show Actions when this position has a matching account_execution. */
   const livePositionExecutionMap = useMemo(() => {
     const map = new Map<string, Execution>()
@@ -638,6 +687,46 @@ export function PositionsPage({
   const closedOptGroupsPnlSum = useMemo(() => {
     return closedOptionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0)
   }, [closedOptionGroups])
+
+  /** Options: by-month summary (month YYYY-MM -> { count, realizedPnl }) for Summary section */
+  const ledgerOptionsSummaryByMonth = useMemo(() => {
+    const byMonth = new Map<string, { count: number; realizedPnl: number }>()
+    for (const g of closedOptionGroups) {
+      const times = (g.trades ?? []).map(t => t.time ?? 0).filter(Boolean)
+      const ts = times.length > 0 ? Math.max(...times) : 0
+      const monthStr = ts ? new Date(ts * 1000).toISOString().slice(0, 7) : ''
+      if (!monthStr) continue
+      const cur = byMonth.get(monthStr) ?? { count: 0, realizedPnl: 0 }
+      cur.count += 1
+      cur.realizedPnl += Number(g.realized_pnl) || 0
+      byMonth.set(monthStr, cur)
+    }
+    return Array.from(byMonth.entries()).sort(([a], [b]) => b.localeCompare(a))
+  }, [closedOptionGroups])
+
+  /** Stocks: by-month summary (month YYYY-MM -> { count, notional }) for Summary section; respects category tab filter */
+  const ledgerStocksSummaryByMonth = useMemo(() => {
+    let stockExecs = filteredExecutions.filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
+    if (ledgerStockCategoryTab !== 'All') {
+      stockExecs = ledgerStockCategoryTab === 'Uncategorized'
+        ? stockExecs.filter(ex => getStockExecCategory(ex) === '—')
+        : stockExecs.filter(ex => getStockExecCategory(ex) === ledgerStockCategoryTab)
+    }
+    const byMonth = new Map<string, { count: number; notional: number }>()
+    for (const ex of stockExecs) {
+      const ts = ex.time ?? 0
+      const monthStr = ts ? new Date(ts * 1000).toISOString().slice(0, 7) : ''
+      if (!monthStr) continue
+      const cur = byMonth.get(monthStr) ?? { count: 0, notional: 0 }
+      cur.count += 1
+      const q = Number(ex.quantity) || 0
+      const p = Number(ex.price) || 0
+      cur.notional += Math.abs(q) * p
+      byMonth.set(monthStr, cur)
+    }
+    return Array.from(byMonth.entries()).sort(([a], [b]) => b.localeCompare(a))
+  }, [filteredExecutions, ledgerStockCategoryTab, getStockExecCategory])
+
   const hasOptionExecutions = closedOptionGroups.length > 0 || expiredUnrealizedOptionGroups.length > 0
   const hasStockExecutions = useMemo(
     () => filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT'),
@@ -787,8 +876,8 @@ export function PositionsPage({
                 </button>
               ))}
             </div>
-            <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
-              <span className="replay-fetch-days-label">Pool</span>
+            <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Account filter">
+              <span className="replay-fetch-days-label">Account</span>
               <label className="replay-fetch-radio">
                 <input type="radio" name="portfolio-open-pool" value="Mix" checked={openFilterPool === 'Mix'} onChange={() => setOpenFilterPool('Mix')} />
                 <span>Mix</span>
@@ -876,8 +965,7 @@ export function PositionsPage({
                           <th colSpan={3}>BUY</th>
                           <th colSpan={3}>SELL</th>
                           <th rowSpan={2}>Unrealized PnL</th>
-                            <th rowSpan={2}>Account</th>
-                          <th rowSpan={2}>Pool</th>
+                          <th rowSpan={2}>Account</th>
                         </tr>
                         <tr>
                           <th className="replay-th-sub">Size</th>
@@ -959,7 +1047,6 @@ export function PositionsPage({
                                   return '—'
                                 })()}
                               </td>
-                              <td>{group.pool_label}</td>
                             </tr>
                           )
                         })}
@@ -972,7 +1059,6 @@ export function PositionsPage({
                               {fmtUsd(openOptionGroups.reduce((acc, g) => acc + (g.unrealized_pnl ?? 0), 0))}
                             </span>
                           </td>
-                          <td></td>
                         </tr>
                       </tfoot>
                     </table>
@@ -994,9 +1080,9 @@ export function PositionsPage({
                             <th>Side</th>
                             <th>Qty</th>
                             <th>Price</th>
-                            <th>Commission</th>
+                            <th>Comm.</th>
                             <th>PnL</th>
-                            <th>Pool</th>
+                            <th>Account</th>
                             <th>Actions</th>
                           </tr>
                         </thead>
@@ -1042,7 +1128,7 @@ export function PositionsPage({
                                       <td>{fmtUsd(pricePerShare)}</td>
                                       <td>{fmtUsd(0)}</td>
                                       <td><span className={pnlClass}>{fmtUsd(rowPnl)}</span></td>
-                                      <td>{group.pool_label}</td>
+                                      <td>{position.account_id ?? '—'}</td>
                                       <td>
                                         {execForRow?.id != null ? (
                                           <span className="replay-exec-row-actions">
@@ -1110,7 +1196,7 @@ export function PositionsPage({
                                       <td>
                                         <span className={pnlClass}>{fmtUsd(pnl)}</span>
                                       </td>
-                                      <td>{group.pool_label}</td>
+                                      <td>{ex.account_id ?? '—'}</td>
                                       <td>
                                         {ex.id != null ? (
                                           <span className="replay-exec-row-actions">
@@ -1222,14 +1308,15 @@ export function PositionsPage({
       ) : (
         <>
           <section className="replay-section replay-section-trade-records" aria-label="Trade History">
-            <div className="replay-filters">
+            <div className="replay-filters replay-filters--bar">
               <label className="replay-filter-wrap-symbol">
                 <input
                   type="text"
-                  placeholder="Sym"
+                  placeholder="e.g. NV → NVDA"
                   value={ledgerFilterSymbol}
                   onChange={e => setLedgerFilterSymbol(e.target.value)}
-                  className="replay-filter-input"
+                  className="replay-filter-input replay-filter-input--symbol"
+                  aria-label="Symbol filter"
                 />
               </label>
               <label className="replay-filter-label-month">
@@ -1242,54 +1329,25 @@ export function PositionsPage({
                   title="Expiry month"
                 />
               </label>
-              <label>
-                <span className="replay-filter-label">Submit</span>
-                <input
-                  type="date"
-                  value={ledgerFilterExecStart}
-                  onChange={e => setLedgerFilterExecStart(e.target.value)}
-                  className="replay-filter-input replay-filter-date"
-                  title="Start"
-                />
-                <span className="replay-filter-sep">～</span>
-                <input
-                  type="date"
-                  value={ledgerFilterExecEnd}
-                  onChange={e => setLedgerFilterExecEnd(e.target.value)}
-                  className="replay-filter-input replay-filter-date"
-                  title="End"
-                />
-              </label>
-              <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Pool filter">
-                <span className="replay-fetch-days-label">Pool</span>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-pool" value="Mix" checked={ledgerFilterPool === 'Mix'} onChange={() => setLedgerFilterPool('Mix')} />
-                  <span>Mix</span>
-                </label>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-pool" value="ON" checked={ledgerFilterPool === 'ON'} onChange={() => setLedgerFilterPool('ON')} />
-                  <span>ON</span>
-                </label>
-                <label className="replay-fetch-radio">
-                  <input type="radio" name="replay-pool" value="Off" checked={ledgerFilterPool === 'Off'} onChange={() => setLedgerFilterPool('Off')} />
-                  <span>Off</span>
-                </label>
+              <div className="ib-accounts-tabs" role="group" aria-label="Account filter">
+                <button
+                  type="button"
+                  className={`ib-accounts-tab ${!ledgerFilterAccount || ledgerFilterAccount === 'All' ? 'active' : ''}`}
+                  onClick={() => setLedgerFilterAccount('')}
+                >
+                  All
+                </button>
+                {executionAccountOptions.map(accId => (
+                  <button
+                    key={accId}
+                    type="button"
+                    className={`ib-accounts-tab ${ledgerFilterAccount === accId ? 'active' : ''}`}
+                    onClick={() => setLedgerFilterAccount(accId)}
+                  >
+                    {accId}
+                  </button>
+                ))}
               </div>
-              <button
-                type="button"
-                className="btn btn-small replay-filter-clear"
-                onClick={() => {
-                  setLedgerFilterSymbol('')
-                  setLedgerFilterExpiryStart('')
-                  setLedgerFilterExpiryEnd('')
-                  setLedgerFilterExecStart('')
-                  setLedgerFilterExecEnd('')
-                  setLedgerFilterPool('Mix')
-                  setExpandedDetailKeys([])
-                }}
-              >
-                Clear filters
-              </button>
             </div>
             <div className="replay-portfolio-block">
               <div className="replay-portfolio-header">
@@ -1320,19 +1378,12 @@ export function PositionsPage({
                       Stocks
                     </button>
                   </div>
-                  <p className="section-hint replay-portfolio-tab-hint">
-                    {ledgerTab === 'options'
-                      ? 'Completed option trades are grouped by contract and strike so the page reads like a closed-trade ledger.'
-                      : 'Stock execution history stays available here for audit and manual correction.'}
-                    <InfoTooltip text={ledgerTab === 'options'
-                      ? 'Closed option trades only: groups with net quantity = 0. Cost/Premium = Size×@×100−Commission; Realized PnL = Premium − Cost.'
-                      : 'Shows non-option execution rows after current filters are applied.'} />
-                  </p>
                 </div>
                 <div className="replay-portfolio-filters">
                   {ledgerTab === 'options' && (
                     <div className="replay-fetch-range-group" role="radiogroup" aria-label="Detail view mode">
                       <span className="replay-fetch-days-label">Detail view</span>
+                      <InfoTooltip text="Completed option trades are grouped by contract and strike so the page reads like a closed-trade ledger." />
                       <label className="replay-fetch-radio">
                         <input type="radio" name="replay-detail-view" value="accordion" checked={ledgerAccordionMode} onChange={() => setLedgerAccordionMode(true)} />
                         <span>Accordion</span>
@@ -1343,12 +1394,93 @@ export function PositionsPage({
                       </label>
                     </div>
                   )}
+                  {ledgerTab === 'stocks' && (
+                    <>
+                      <div className="system-tabs replay-stock-group-tabs" role="tablist" aria-label="Stock view mode">
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={!ledgerStockGroupByPosition}
+                          className={`system-tab ${!ledgerStockGroupByPosition ? 'active' : ''}`}
+                          onClick={() => setLedgerStockGroupByPosition(false)}
+                        >
+                          Flat
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={ledgerStockGroupByPosition}
+                          className={`system-tab ${ledgerStockGroupByPosition ? 'active' : ''}`}
+                          onClick={() => setLedgerStockGroupByPosition(true)}
+                        >
+                          Position
+                        </button>
+                      </div>
+                      <div className="system-tabs replay-stock-category-tabs" role="tablist" aria-label="Position category filter">
+                        {ledgerStockCategoryTabs.map(cat => (
+                          <button
+                            key={cat}
+                            type="button"
+                            role="tab"
+                            aria-selected={ledgerStockCategoryTab === cat}
+                            className={`system-tab ${ledgerStockCategoryTab === cat ? 'active' : ''}`}
+                            onClick={() => setLedgerStockCategoryTab(cat)}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
               {filteredExecutions.length === 0 ? (
-                <p className="section-hint">No execution data. Use Overview to fetch from IB (Refresh), or Positions to add manual history (Add Trade).{([ledgerFilterSymbol, ledgerFilterExpiryStart, ledgerFilterExecStart, ledgerFilterExecEnd].some(Boolean) || ledgerFilterPool !== 'Mix') ? ' Filters applied; clear to see all.' : ''}</p>
+                <p className="section-hint">No execution data. Use Overview to fetch from IB (Refresh), or Positions to add manual history (Add Trade).{([ledgerFilterSymbol, ledgerFilterExpiryStart].some(Boolean) || (ledgerFilterAccount && ledgerFilterAccount !== 'All')) ? ' Filters applied.' : ''}</p>
               ) : (
                 <>
+                  <section className="replay-ledger-summary" aria-label="Summary by month">
+                    {ledgerTab === 'options' ? (
+                      <>
+                        <span className="replay-ledger-summary-label">Summary</span>
+                        <span className="replay-ledger-summary-inline">
+                          {ledgerOptionsSummaryByMonth.map(([month, { count, realizedPnl }], i) => (
+                            <span key={month}>
+                              {i > 0 && <span className="replay-ledger-summary-sep"> | </span>}
+                              <span className="replay-ledger-summary-item">
+                                {month}: {count} groups, <span className={realizedPnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>{fmtUsd0(realizedPnl)}</span>
+                              </span>
+                            </span>
+                          ))}
+                          {ledgerOptionsSummaryByMonth.length > 0 && <span className="replay-ledger-summary-sep"> | </span>}
+                          <span className="replay-ledger-summary-total">
+                            Total: {ledgerOptionsSummaryByMonth.reduce((s, [, d]) => s + d.count, 0)} groups,{' '}
+                            <span className={closedOptGroupsPnlSum >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                              {fmtUsd0(closedOptGroupsPnlSum)}
+                            </span>
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="replay-ledger-summary-label">Summary</span>
+                        <span className="replay-ledger-summary-inline">
+                          {ledgerStocksSummaryByMonth.map(([month, { count, notional }], i) => (
+                            <span key={month}>
+                              {i > 0 && <span className="replay-ledger-summary-sep"> | </span>}
+                              <span className="replay-ledger-summary-item">
+                                {month}: {count} trades, {fmtUsd0(notional)}
+                              </span>
+                            </span>
+                          ))}
+                          {ledgerStocksSummaryByMonth.length > 0 && <span className="replay-ledger-summary-sep"> | </span>}
+                          <span className="replay-ledger-summary-total">
+                            Total: {ledgerStocksSummaryByMonth.reduce((s, [, d]) => s + d.count, 0)} trades,{' '}
+                            {fmtUsd0(ledgerStocksSummaryByMonth.reduce((s, [, d]) => s + d.notional, 0))}
+                          </span>
+                        </span>
+                      </>
+                    )}
+                  </section>
                   {ledgerTab === 'options' ? (
                     <div
                       id="replay-panel-options"
@@ -1369,7 +1501,7 @@ export function PositionsPage({
                                   <th colSpan={3}>BUY</th>
                                   <th colSpan={3}>SELL</th>
                                   <th rowSpan={2}>Realized PnL</th>
-                                  <th rowSpan={2}>Pool</th>
+                                  <th rowSpan={2}>Account</th>
                                 </tr>
                                 <tr>
                                   <th className="replay-th-sub">Size</th>
@@ -1382,9 +1514,12 @@ export function PositionsPage({
                               </thead>
                               <tbody>
                                 {closedOptionGroups.map((g) => {
-                                  const hasOff = g.trades.some(t => (t.account_id ?? '').trim() === 'Off-Track')
-                                  const hasOn = g.trades.some(t => (t.account_id ?? '').trim() !== 'Off-Track')
-                                  const poolLabel = hasOff && hasOn ? 'Mix' : hasOff ? 'Off' : 'On'
+                                  const uniqueAccounts = Array.from(
+                                    new Set(
+                                      (g.trades ?? []).map(t => (t.account_id ?? '').trim()).filter(Boolean),
+                                    ),
+                                  )
+                                  const accountLabel = uniqueAccounts.length === 0 ? '—' : uniqueAccounts.length === 1 ? uniqueAccounts[0] : 'Mix'
                                   const groupKey = getOptGroupKey(g)
                                   const isExpanded = expandedDetailKeys.includes(groupKey)
                                   return (
@@ -1429,7 +1564,7 @@ export function PositionsPage({
                                           {fmtUsd0(g.realized_pnl)}
                                         </span>
                                       </td>
-                                      <td>{poolLabel}</td>
+                                      <td>{accountLabel}</td>
                                     </tr>
                                   )
                                 })}
@@ -1442,7 +1577,6 @@ export function PositionsPage({
                                       {fmtUsd0(closedOptGroupsPnlSum)}
                                     </strong>
                                   </td>
-                                  <td>—</td>
                                 </tr>
                               </tfoot>
                             </table>
@@ -1561,9 +1695,9 @@ export function PositionsPage({
                                 <th>Side</th>
                                 <th>Qty</th>
                                 <th>Price</th>
-                                <th>Commission</th>
+                                <th>Comm.</th>
                                 <th>PnL</th>
-                                <th>Pool</th>
+                                <th>Account</th>
                                 <th>Actions</th>
                               </tr>
                             </thead>
@@ -1617,7 +1751,7 @@ export function PositionsPage({
                                           <td>
                                             <span className={pnlClass}>{fmtUsd(pnl)}</span>
                                           </td>
-                                          <td>{(ex.account_id ?? '').trim() === 'Off-Track' ? 'Off' : 'On'}</td>
+                                          <td>{ex.account_id ?? '—'}</td>
                                           <td>
                                             {ex.id != null ? (
                                               <span className="replay-exec-row-actions">
@@ -1646,7 +1780,7 @@ export function PositionsPage({
                                       )
                                     }),
                                   )
-                              )}
+                                )}
                             </tbody>
                           </table>
                         </>
@@ -1668,61 +1802,150 @@ export function PositionsPage({
                               <tr>
                                 <th>Time</th>
                                 <th>Symbol</th>
+                                <th>Account</th>
+                                <th>Category</th>
                                 <th>Side</th>
                                 <th>Qty</th>
                                 <th>Price</th>
-                                <th>Commission</th>
+                                <th>Comm.</th>
                                 <th>Source</th>
                                 <th>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {filteredExecutions
-                                .filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
-                                .map((ex, i) => {
-                                  const s = (ex.side ?? '').toUpperCase()
-                                  const sideLabel =
-                                    s === 'BUY' || s === 'BOT' || s === 'B'
-                                      ? 'Buy'
-                                      : s === 'SELL' || s === 'SLD' || s === 'S'
-                                        ? 'Sell'
-                                        : (ex.side ?? '—')
-                                  return (
-                                    <tr key={i}>
-                                      <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
-                                      <td>{ex.symbol ?? '—'}</td>
-                                      <td>{sideLabel}</td>
-                                      <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
-                                      <td>{fmtUsd(ex.price)}</td>
-                                      <td>{fmtUsd(ex.commission ?? 0)}</td>
-                                      <td>{ex.source ?? '—'}</td>
-                                      <td>
-                                        {ex.id != null ? (
-                                          <span className="replay-exec-row-actions">
-                                            <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null) }}>Edit</button>
-                                            <button
-                                              type="button"
-                                              className="btn btn-small btn-x"
-                                              onClick={async () => {
-                                                if (!window.confirm('Delete this execution?')) return
-                                                const res = await deleteExecution(ex.id!)
-                                                if (res.ok) {
-                                                  if (editExec?.id === ex.id) setEditExec(null)
-                                                  await loadReplayData()
-                                                } else {
-                                                  setExecFormError(res.error ?? 'Delete failed')
-                                                }
-                                              }}
-                                              title="Delete"
-                                            >
-                                              X
-                                            </button>
-                                          </span>
-                                        ) : '—'}
+                              {(() => {
+                                let stockExecs = filteredExecutions.filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
+                                if (ledgerStockCategoryTab !== 'All') {
+                                  stockExecs = ledgerStockCategoryTab === 'Uncategorized'
+                                    ? stockExecs.filter(ex => getStockExecCategory(ex) === '—')
+                                    : stockExecs.filter(ex => getStockExecCategory(ex) === ledgerStockCategoryTab)
+                                }
+                                if (!ledgerStockGroupByPosition) {
+                                  return stockExecs.map((ex, i) => {
+                                    const s = (ex.side ?? '').toUpperCase()
+                                    const sideLabel =
+                                      s === 'BUY' || s === 'BOT' || s === 'B'
+                                        ? 'Buy'
+                                        : s === 'SELL' || s === 'SLD' || s === 'S'
+                                          ? 'Sell'
+                                          : (ex.side ?? '—')
+                                    return (
+                                      <tr key={i}>
+                                        <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                        <td>{ex.symbol ?? '—'}</td>
+                                        <td>{ex.account_id ?? '—'}</td>
+                                        <td>{getStockExecCategory(ex)}</td>
+                                        <td>{sideLabel}</td>
+                                        <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
+                                        <td>{fmtUsd(ex.price)}</td>
+                                        <td>{fmtUsd(ex.commission ?? 0)}</td>
+                                        <td>{ex.source ?? '—'}</td>
+                                        <td>
+                                          {ex.id != null ? (
+                                            <span className="replay-exec-row-actions">
+                                              <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null) }}>Edit</button>
+                                              <button
+                                                type="button"
+                                                className="btn btn-small btn-x"
+                                                onClick={async () => {
+                                                  if (!window.confirm('Delete this execution?')) return
+                                                  const res = await deleteExecution(ex.id!)
+                                                  if (res.ok) {
+                                                    if (editExec?.id === ex.id) setEditExec(null)
+                                                    await loadReplayData()
+                                                  } else {
+                                                    setExecFormError(res.error ?? 'Delete failed')
+                                                  }
+                                                }}
+                                                title="Delete"
+                                              >
+                                                X
+                                              </button>
+                                            </span>
+                                          ) : '—'}
+                                        </td>
+                                      </tr>
+                                    )
+                                  })
+                                }
+                                const groups = new Map<string, Execution[]>()
+                                for (const ex of stockExecs) {
+                                  const acc = (ex.account_id ?? '').trim()
+                                  const sym = (ex.symbol ?? '').toString().trim().toUpperCase()
+                                  const key = `${acc}|${sym}`
+                                  if (!groups.has(key)) groups.set(key, [])
+                                  groups.get(key)!.push(ex)
+                                }
+                                const groupEntries = Array.from(groups.entries()).sort(([a], [b]) => {
+                                  const [accA, symA] = a.split('|')
+                                  const [accB, symB] = b.split('|')
+                                  if (symA !== symB) return (symA || '').localeCompare(symB || '')
+                                  return (accA || '').localeCompare(accB || '')
+                                })
+                                const rows: JSX.Element[] = []
+                                let rowIdx = 0
+                                for (const [groupKey, execs] of groupEntries) {
+                                  const [accId, sym] = groupKey.split('|')
+                                  const category = positionCategoryByAccountContract.get(stkContractKey(sym, accId)) ?? '—'
+                                  rows.push(
+                                    <tr key={`h-${groupKey}`} className="replay-stock-group-header">
+                                      <td colSpan={10}>
+                                        <span className="replay-stock-group-symbol">{sym || '—'}</span>
+                                        <span className="replay-stock-group-account">{accId || '—'}</span>
+                                        <span className="replay-stock-group-category">{category}</span>
                                       </td>
-                                    </tr>
+                                    </tr>,
                                   )
-                                })}
+                                  for (const ex of execs) {
+                                    const s = (ex.side ?? '').toUpperCase()
+                                    const sideLabel =
+                                      s === 'BUY' || s === 'BOT' || s === 'B'
+                                        ? 'Buy'
+                                        : s === 'SELL' || s === 'SLD' || s === 'S'
+                                          ? 'Sell'
+                                          : (ex.side ?? '—')
+                                    rows.push(
+                                      <tr key={rowIdx}>
+                                        <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                        <td>{ex.symbol ?? '—'}</td>
+                                        <td>{ex.account_id ?? '—'}</td>
+                                        <td>{getStockExecCategory(ex)}</td>
+                                        <td>{sideLabel}</td>
+                                        <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
+                                        <td>{fmtUsd(ex.price)}</td>
+                                        <td>{fmtUsd(ex.commission ?? 0)}</td>
+                                        <td>{ex.source ?? '—'}</td>
+                                        <td>
+                                          {ex.id != null ? (
+                                            <span className="replay-exec-row-actions">
+                                              <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setExecFormError(null) }}>Edit</button>
+                                              <button
+                                                type="button"
+                                                className="btn btn-small btn-x"
+                                                onClick={async () => {
+                                                  if (!window.confirm('Delete this execution?')) return
+                                                  const res = await deleteExecution(ex.id!)
+                                                  if (res.ok) {
+                                                    if (editExec?.id === ex.id) setEditExec(null)
+                                                    await loadReplayData()
+                                                  } else {
+                                                    setExecFormError(res.error ?? 'Delete failed')
+                                                  }
+                                                }}
+                                                title="Delete"
+                                              >
+                                                X
+                                              </button>
+                                            </span>
+                                          ) : '—'}
+                                        </td>
+                                      </tr>,
+                                    )
+                                    rowIdx += 1
+                                  }
+                                }
+                                return rows
+                              })()}
                             </tbody>
                           </table>
                         </div>

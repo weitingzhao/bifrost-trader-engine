@@ -471,8 +471,11 @@ export default function App() {
       [...new Set([...watchlistSymbols, ...(status?.reference_indices?.map((r) => r.symbol) ?? [])])].sort(),
     [watchlistSymbols, status?.reference_indices],
   )
+  // Market Streams: green only when daemon is alive, subscribed to ticker, and monitor can read Redis quotes
   const liveLamp: LampId =
-    status?.redis_quotes_connected === true && daemonHeartbeat?.event_subscribe_ticker === true
+    status?.redis_quotes_connected === true &&
+    daemonHeartbeat?.daemon_alive === true &&
+    daemonHeartbeat?.event_subscribe_ticker === true
       ? 'green'
       : 'red'
 

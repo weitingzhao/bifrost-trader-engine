@@ -84,6 +84,9 @@ export function LivePage({ status }: LivePageProps) {
     }
   }, [])
 
+  const hb = j?.daemon_heartbeat
+  const marketStreamsOk =
+    j?.redis_quotes_connected === true && hb?.daemon_alive === true && hb?.event_subscribe_ticker === true
   const accountsList = j?.accounts ?? []
   const watchlistRows = watchlistSymbols.map((symbol) => {
     let qty = 0
@@ -124,16 +127,16 @@ export function LivePage({ status }: LivePageProps) {
       <div className="card card-operations realtime-quotes-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <div className="lamp-wrap-span">
-            <div className={`lamp lamp-sm ${j?.redis_quotes_connected ? 'green' : 'none'}`} title="Watchlist (Redis)" aria-hidden />
+            <div className={`lamp lamp-sm ${marketStreamsOk ? 'green' : 'red'}`} title="Market streams: green when daemon alive, subscribed to ticker, and monitor reads Redis" aria-hidden />
           </div>
           <div>
             <h2 className="daemon-card-title page-title-with-tooltip">
               Market Streams
               <InfoTooltip
                 text={
-                  j?.redis_quotes_connected
-                    ? `Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. SSE connected, ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
-                    : 'Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires Redis and daemon Event subscription. Redis not connected or monitor not subscribed; check config and daemon Event subscription.'
+                  marketStreamsOk
+                    ? `Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Daemon alive and Event subscription active. SSE connected, ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
+                    : 'Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
                 }
               />
             </h2>
