@@ -49,6 +49,8 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **[Performance 页面设计](PERFORMANCE_PAGE_DESIGN.md)** | 基于执行记录的绩效分析、Calendar PnL、评估指标与 API（R-M7 / R-H2）；**执行计划**见 [plans/performance-execution-plan.md](plans/performance-execution-plan.md) |
 | **[IB Pacing 实现方案](plans/ib-pacing-implementation-plan.md)** | 边界配置化、Worker/API 用量计量、Redis 限流、监控暴露的详细设计与分步实现 |
 
+**Reference（部署初始化数据）**：**reference/init/** 目录可放置一次性 SQL 脚本；执行顺序见 [reference/init/README.md](../reference/init/README.md)。当前无必跑脚本，仅需执行 `refresh_db_schema.py`；Flex 默认范围由 settings.flex_default_range_days 控制。
+
 ---
 
 ## 项目组成与启动

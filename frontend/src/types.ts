@@ -16,6 +16,10 @@ export interface IbConfig {
   ib_primary_account_id?: string | null
   /** 第二 IB 主机（不同 TWS 机器，手动交易账户），空则未配置 */
   ib2_host?: string | null
+  /** Default Flex Query range in days (e.g. 30). Stored in settings.flex_default_range_days. */
+  flex_default_range_days?: number | null
+  /** Init Flex Query range in days (e.g. 360) for initial/full pull. Stored in settings.flex_init_range_days. */
+  flex_init_range_days?: number | null
   ib2_port_type?: string | null
   /** Second IB: Listener (default 3) */
   ib2_client_id_listener?: number
@@ -259,9 +263,33 @@ export interface ExecutionsResponse {
   message?: string
 }
 
+/** One row of execution freshness per (account_id, source) from account_executions. */
+export interface ExecutionFreshnessItem {
+  account_id: string
+  source: string | null
+  /** Latest exec_time for this (account_id, source), Unix seconds (NULL if unknown). */
+  latest_exec_ts: number | null
+  /** Days difference between now() and latest_exec_ts (float, may be fractional). */
+  days_since_latest: number | null
+}
+
+/** GET /executions/freshness response. */
+export interface ExecutionsFreshnessResponse {
+  items: ExecutionFreshnessItem[]
+}
+
 /** Response when GET /executions?include_opt_pairs=true: executions with paired_execution_ids and opt_pairs list from backend. */
 export interface ExecutionsResponseWithPairs extends ExecutionsResponse {
   opt_pairs: BackendOptPair[]
+}
+
+/** Response from POST /executions/fetch-flex-upload. */
+export interface ExecutionsFlexUploadResponse {
+  ok: boolean
+  error?: string
+  count?: number
+  updated_accounts?: number
+  message?: string
 }
 
 /** One C↔P pair from backend (include_opt_pairs). */

@@ -117,6 +117,27 @@ type OpenOptionGroup = {
   trades?: Execution[]
 }
 
+function isOptionExpired(expiryRaw: string | undefined | null): boolean {
+  if (!expiryRaw) return false
+  const s = String(expiryRaw).trim().replace(/-/g, '')
+  if (s.length !== 6 && s.length !== 8) return false
+  const year = Number(s.slice(0, 4))
+  const month = Number(s.slice(4, 6))
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return false
+  let day = 1
+  if (s.length === 8) {
+    day = Number(s.slice(6, 8))
+    if (!Number.isFinite(day) || day < 1 || day > 31) return false
+  } else {
+    // yyyyMM: approximate as last day of that month (sufficient to detect "already expired" vs "not yet")
+    const lastDay = new Date(year, month, 0).getDate()
+    day = lastDay
+  }
+  const expDate = new Date(Date.UTC(year, month - 1, day, 23, 59, 59))
+  const now = new Date()
+  return now.getTime() > expDate.getTime()
+}
+
 function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecutionGroup[] {
   const opt = sourceExecutions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
   const key = (e: Execution) => `${e.contract_key ?? ''}|${e.strike ?? 0}`
@@ -146,23 +167,25 @@ function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecutionGro
     let sell_value = 0
     let buy_value_raw = 0
     let sell_value_raw = 0
+    let net_qty = 0
     for (const t of trades) {
-      const q = Number(t.quantity) || 0
+      const rawQty = Number(t.quantity) || 0
+      const q = Math.abs(rawQty)
       const p = Number(t.price) || 0
       const c = Number(t.commission) || 0
-      const v = p * q * 100 - c
       const side = (t.side ?? '').toUpperCase()
       if (side === 'BUY' || side === 'BOT' || side === 'B') {
         buy_qty += q
-        buy_value += v
+        buy_value += p * q * 100 + c
         buy_value_raw += p * q
+        net_qty += q
       } else if (side === 'SELL' || side === 'SLD' || side === 'S') {
         sell_qty += q
-        sell_value += v
+        sell_value += p * q * 100 - c
         sell_value_raw += p * q
+        net_qty -= q
       }
     }
-    const net_qty = buy_qty - sell_qty
     const buy_cost = buy_value
     const sell_premium = sell_value
     const realized_pnl = sell_premium - buy_cost
@@ -561,7 +584,7 @@ export function PositionsPage({
         symbol: editExec.symbol ?? '',
         sec_type: (editExec.sec_type ?? 'STK').toUpperCase(),
         side: (editExec.side ?? 'BUY').toUpperCase(),
-        quantity: String(editExec.quantity ?? ''),
+        quantity: editExec.quantity != null ? String(Math.abs(Number(editExec.quantity))) : '',
         price: String(editExec.price ?? ''),
         expiry: editExec.expiry ?? '',
         strike: String(editExec.strike ?? ''),
@@ -591,10 +614,14 @@ export function PositionsPage({
     () => optExecutionGroups.filter(group => group.status === 'realized'),
     [optExecutionGroups],
   )
+  const expiredUnrealizedOptionGroups = useMemo(
+    () => optExecutionGroups.filter(group => group.status === 'unrealized' && isOptionExpired(group.expiry)),
+    [optExecutionGroups],
+  )
   const closedOptGroupsPnlSum = useMemo(() => {
     return closedOptionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0)
   }, [closedOptionGroups])
-  const hasOptionExecutions = closedOptionGroups.length > 0
+  const hasOptionExecutions = closedOptionGroups.length > 0 || expiredUnrealizedOptionGroups.length > 0
   const hasStockExecutions = useMemo(
     () => filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT'),
     [filteredExecutions],
@@ -1404,6 +1431,71 @@ export function PositionsPage({
                             </table>
                           </div>
 
+                          {expiredUnrealizedOptionGroups.length > 0 && (
+                            <div className="replay-portfolio-table-wrap">
+                              <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
+                                Expired but not closed
+                                <InfoTooltip text="These option contracts have expired but net quantity is not zero. This usually means some executions are missing in Trade History; please add the missing trades to close the position." />
+                              </h5>
+                              <table className="table-operations replay-opt-groups">
+                                <thead>
+                                  <tr>
+                                    <th>Contract</th>
+                                    <th>Expiry</th>
+                                    <th>STRIKE</th>
+                                    <th>Net qty</th>
+                                    <th>Trades (side / qty / price / id)</th>
+                                    <th>Note</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {expiredUnrealizedOptionGroups.map((g) => {
+                                    const p = getContractLabelParts(g.contract_key)
+                                    const strikeStr = g.strike != null ? ` ${g.strike}` : ''
+                                    const tradesSummary = (g.trades ?? []).map((ex) => {
+                                      const s = (ex.side ?? '').toUpperCase()
+                                      const sideLabel =
+                                        s === 'BUY' || s === 'BOT' || s === 'B'
+                                          ? 'Buy'
+                                          : s === 'SELL' || s === 'SLD' || s === 'S'
+                                            ? 'Sell'
+                                            : (ex.side ?? '—')
+                                      const q = ex.quantity != null ? Number(ex.quantity) : NaN
+                                      const p_ = ex.price != null ? Number(ex.price) : NaN
+                                      const idLabel = ex.id != null ? `#${ex.id}` : 'id?'
+                                      const parts: string[] = []
+                                      parts.push(sideLabel)
+                                      if (Number.isFinite(q)) parts.push(String(q))
+                                      if (Number.isFinite(p_)) parts.push(`@${p_}`)
+                                      parts.push(`(${idLabel})`)
+                                      return parts.join(' ')
+                                    }).join('; ')
+                                    return (
+                                      <tr key={`expired-${getOptGroupKey(g)}`}>
+                                        <td>
+                                          {p.symbol ? (
+                                            <>
+                                              <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
+                                            </>
+                                          ) : (
+                                            g.contract_key
+                                          )}
+                                        </td>
+                                        <td>{fmtExpiry(g.expiry)}</td>
+                                        <td><strong>{fmtUsd(g.strike)}</strong></td>
+                                        <td>{g.net_qty}</td>
+                                        <td>{tradesSummary || '—'}</td>
+                                        <td>
+                                          This option has expired but net quantity is not zero. Please add the missing trade(s) to close this position.
+                                        </td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
                           <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
                             Details (per trade)
                             <InfoTooltip text="Click a closed trade row above to load its execution details." />
@@ -1606,10 +1698,11 @@ export function PositionsPage({
                 e.preventDefault()
                 setExecFormError(null)
                 const sym = execForm.symbol.trim()
-                const q = Number(execForm.quantity)
+                const qRaw = Number(execForm.quantity)
+                const q = Math.abs(qRaw)
                 const p = Number(execForm.price)
-                if (!sym || !Number.isFinite(q) || !Number.isFinite(p)) {
-                  setExecFormError('Fill symbol, quantity, and price.')
+                if (!sym || !Number.isFinite(q) || q <= 0 || !Number.isFinite(p)) {
+                  setExecFormError('Fill symbol, quantity (> 0), and price.')
                   return
                 }
                 const timeUnix = datetimeLocalToUnix(execForm.time)
@@ -1629,13 +1722,15 @@ export function PositionsPage({
                 } else {
                   contract_key = undefined
                 }
+                const sideUpper = (execForm.side || 'BUY').toUpperCase()
+                const quantityForDb = sideUpper === 'SELL' ? -q : q
                 if (editExec?.id != null) {
                   const body: Record<string, unknown> = {
                     exec_time: timeUnix,
                     symbol: sym,
                     sec_type: execForm.sec_type || 'STK',
-                    side: (execForm.side || 'BUY').toUpperCase(),
-                    quantity: q,
+                    side: sideUpper,
+                    quantity: quantityForDb,
                     price: p,
                     account_id: execForm.account_id.trim(),
                     strike: execForm.strike ? Number(execForm.strike) : undefined,
@@ -1663,8 +1758,8 @@ export function PositionsPage({
                     time: timeUnix,
                     symbol: sym,
                     sec_type: execForm.sec_type || 'STK',
-                    side: (execForm.side || 'BUY').toUpperCase(),
-                    quantity: q,
+                    side: sideUpper,
+                    quantity: quantityForDb,
                     price: p,
                     source: 'manual',
                     expiry: execForm.expiry.trim() || undefined,
@@ -1734,14 +1829,39 @@ export function PositionsPage({
               </div>
               <div className="replay-exec-form-row">
                 <label>Side</label>
-                <select value={execForm.side} onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))}>
-                  <option value="BUY">Buy</option>
-                  <option value="SELL">Sell</option>
-                </select>
+                <div className="replay-exec-type-radios">
+                  <label>
+                    <input
+                      type="radio"
+                      name="exec-side"
+                      value="BUY"
+                      checked={(execForm.side || 'BUY').toUpperCase() === 'BUY'}
+                      onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))}
+                    />
+                    Buy
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="exec-side"
+                      value="SELL"
+                      checked={(execForm.side || 'BUY').toUpperCase() === 'SELL'}
+                      onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))}
+                    />
+                    Sell
+                  </label>
+                </div>
               </div>
               <div className="replay-exec-form-row">
                 <label>Quantity</label>
-                <input type="number" step="any" value={execForm.quantity} onChange={e => setExecForm(f => ({ ...f, quantity: e.target.value }))} required />
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={execForm.quantity}
+                  onChange={e => setExecForm(f => ({ ...f, quantity: e.target.value }))}
+                  required
+                />
               </div>
               <div className="replay-exec-form-row">
                 <label>Price</label>

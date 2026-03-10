@@ -1775,7 +1775,6 @@ button:disabled {
   flex: 1;
   min-width: 0;
   padding: var(--space-4) var(--space-6);
-  overflow-y: auto;
 }
 
 .settings-page-card {

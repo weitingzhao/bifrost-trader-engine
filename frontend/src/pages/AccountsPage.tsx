@@ -1,13 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
-import { fetchBarsBenchmark, fetchQuotes, postExecutionsFetch, subscribeQuotes } from '../api'
-import {
-  fetchPositionCategories,
-  postPositionCategory,
-  patchPositionCategory,
-  deletePositionCategory,
-  putPositionCategoryTag,
-} from '../api'
+import { useEffect, useMemo, useState } from 'react'
+import type { ExecutionFreshnessItem, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
+import { fetchBarsBenchmark, fetchQuotes, fetchExecutionsFreshness, postExecutionsFetch, postExecutionsFetchFlex, postExecutionsFetchFlexUpload, subscribeQuotes } from '../api'
+import { fetchPositionCategories, postPositionCategory, deletePositionCategory, putPositionCategoryTag } from '../api'
 import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
 
@@ -189,6 +183,12 @@ export function AccountsPage({
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
   const [replaySyncing, setReplaySyncing] = useState(false)
+  const [flexSyncing, setFlexSyncing] = useState(false)
+  const [flexMessage, setFlexMessage] = useState<string | null>(null)
+  const [flexUseUpload, setFlexUseUpload] = useState(false)
+  const [execFreshness, setExecFreshness] = useState<ExecutionFreshnessItem[]>([])
+  // Reserved for future Flex range preset UI (currently unused).
+  // const [flexRangePreset, setFlexRangePreset] = useState<null | string>(null)
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
   const [categoryModalOpen, setCategoryModalOpen] = useState(false)
   const [categoryError, setCategoryError] = useState<string | null>(null)
@@ -292,6 +292,20 @@ export function AccountsPage({
       unsub()
     }
   }, [stockSymbols.join(',')])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchExecutionsFreshness()
+      .then((res) => {
+        if (!cancelled) setExecFreshness(res.items ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setExecFreshness([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   if (!hasAccounts) {
     return (
@@ -583,20 +597,258 @@ export function AccountsPage({
             <button
               type="button"
               className="btn btn-small replay-fetch-refresh-btn"
-              disabled={replaySyncing}
+              disabled={replaySyncing || flexSyncing}
               onClick={async () => {
                 setReplaySyncing(true)
-                const res = await postExecutionsFetch(replayFetchDays)
-                if (res.ok) await onRefreshAccounts()
-                setReplaySyncing(false)
+                setFlexMessage(null)
+                try {
+                  const res = await postExecutionsFetch(replayFetchDays)
+                  if (res.ok) await onRefreshAccounts()
+                } finally {
+                  setReplaySyncing(false)
+                }
               }}
               aria-label="Fetch executions from IB and write to DB"
             >
               {replaySyncing ? 'Fetching…' : 'Refresh'}
             </button>
           </div>
-          {replaySyncing && <span className="replay-sync-hint">Fetching executions from IB…</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <input
+                id="flex-use-upload"
+                type="checkbox"
+                checked={flexUseUpload}
+                onChange={(e) => setFlexUseUpload(e.target.checked)}
+                disabled={replaySyncing || flexSyncing}
+              />
+              <label htmlFor="flex-use-upload" className="section-hint">
+                Use local Flex Trades XML (upload instead of Web Service)
+              </label>
+            </div>
+            <button
+              type="button"
+              className="btn btn-small replay-fetch-refresh-btn"
+              disabled={replaySyncing || flexSyncing}
+              onClick={async () => {
+                if (flexUseUpload) {
+                  // 上传本地 Flex XML：打开文件选择框，读取内容后 POST /executions/fetch-flex-upload
+                  const input = document.createElement('input')
+                  input.type = 'file'
+                  input.accept = '.xml,text/xml,application/xml'
+                  input.onchange = async () => {
+                    const file = input.files && input.files[0]
+                    if (!file) return
+                    setFlexSyncing(true)
+                    setFlexMessage(null)
+                    try {
+                      const text = await file.text()
+                      const res = await postExecutionsFetchFlexUpload(text)
+                      if (res.ok) {
+                        await onRefreshAccounts()
+                        const n = res.count ?? 0
+                        const accCount = res.updated_accounts ?? 0
+                        const parts: string[] = []
+                        if (n > 0) {
+                          parts.push(
+                            `Upserted ${n} execution(s) from uploaded Flex XML for ${accCount} account(s).`,
+                          )
+                        } else {
+                          parts.push('No executions parsed from uploaded Flex XML.')
+                        }
+                        if (res.message && res.message.trim()) {
+                          parts.push(res.message.trim())
+                        }
+                        setFlexMessage(parts.join(' '))
+                      } else {
+                        setFlexMessage(res.error || 'Failed to import executions from uploaded Flex XML.')
+                      }
+                    } finally {
+                      setFlexSyncing(false)
+                    }
+                  }
+                  input.click()
+                  return
+                }
+
+                setFlexSyncing(true)
+                setFlexMessage(null)
+                try {
+                  const res = await postExecutionsFetchFlex()
+                  const {
+                    ok,
+                    count,
+                    raw_count,
+                    updated_accounts,
+                    last_flex_date_after,
+                    range_from,
+                    range_to,
+                    data_from,
+                    data_to,
+                    message,
+                    error,
+                    per_query,
+                  } = res
+
+                  if (ok) {
+                    await onRefreshAccounts()
+                    const n = count ?? 0
+                    const accCount = updated_accounts ?? 0
+                    const latest = last_flex_date_after ?? null
+                    const rangeFrom = range_from ?? null
+                    const rangeTo = range_to ?? null
+                    const rowsInFlex = raw_count ?? n
+
+                    const parts: string[] = []
+                    if (n > 0) {
+                      parts.push(
+                        `Upserted ${n} execution(s) from IB Flex for ${accCount} account(s).`,
+                      )
+                    } else {
+                      parts.push(
+                        'Fetched 0 executions from IB Flex (no new trades written to DB).',
+                      )
+                    }
+                    if (rowsInFlex != null && rowsInFlex >= 0) {
+                      parts.push(`Flex report had ${rowsInFlex} execution row(s).`)
+                    }
+                    if (data_from && data_to) {
+                      parts.push(`Flex data time span: ${data_from} .. ${data_to}.`)
+                    }
+                    if (rangeFrom && rangeTo) {
+                      parts.push(`Request range used: ${rangeFrom} .. ${rangeTo}.`)
+                    }
+                    if (latest) {
+                      parts.push(`Latest Flex execution date in DB is ${latest}.`)
+                    }
+                    if (Array.isArray(per_query) && per_query.length > 0) {
+                      const perParts = per_query.map((q) => {
+                        const roleLabel =
+                          (q.role === 'primary' && 'Primary') ||
+                          (q.role === 'secondary' && 'Secondary') ||
+                          'Flex'
+                        const label = q.label ? ` ${q.label}` : ''
+                        const rows = q.rows ?? 0
+                        const span =
+                          q.data_from && q.data_to
+                            ? `, span ${q.data_from} .. ${q.data_to}`
+                            : ''
+                        return `${roleLabel}${label} [${q.query_id}]: ${rows} row(s)${span}`
+                      })
+                      parts.push(`Per Flex ID: ${perParts.join('; ')}.`)
+                    }
+                    if (message && message.trim()) {
+                      parts.push(message.trim())
+                    }
+
+                    setFlexMessage(parts.join(' '))
+                  } else {
+                    const rowsInFlex = raw_count ?? count ?? 0
+                    const span =
+                      data_from && data_to
+                        ? ` Flex data time span: ${data_from} .. ${data_to}.`
+                        : ''
+                    const rowsText =
+                      rowsInFlex > 0
+                        ? ` Flex report had ${rowsInFlex} execution row(s).`
+                        : ''
+                    const reqRange =
+                      range_from && range_to
+                        ? ` Request range used: ${range_from} .. ${range_to}.`
+                        : ''
+                    const perDetail =
+                      Array.isArray(per_query) && per_query.length > 0
+                        ? ' ' +
+                          per_query
+                            .map((q) => {
+                              const roleLabel =
+                                (q.role === 'primary' && 'Primary') ||
+                                (q.role === 'secondary' && 'Secondary') ||
+                                'Flex'
+                              const label = q.label ? ` ${q.label}` : ''
+                              const rows = q.rows ?? 0
+                              const subSpan =
+                                q.data_from && q.data_to
+                                  ? `, span ${q.data_from} .. ${q.data_to}`
+                                  : ''
+                              return `${roleLabel}${label} [${q.query_id}]: ${rows} row(s)${subSpan}`
+                            })
+                            .join('; ')
+                        : ''
+                    setFlexMessage(
+                      `${error || 'Failed to fetch executions from IB Flex.'}${rowsText}${span}${reqRange}${perDetail}`,
+                    )
+                  }
+                } finally {
+                  setFlexSyncing(false)
+                }
+              }}
+              aria-label="Fetch executions from IB Flex Trades and write to DB"
+            >
+              {flexSyncing ? 'Fetching…' : 'Fetch from IB (Flex)'}
+            </button>
+            {(replaySyncing || flexSyncing) && (
+              <span className="replay-sync-hint">
+                {replaySyncing ? 'Fetching executions from IB (TWS)…' : 'Fetching executions from IB Flex…'}
+              </span>
+            )}
+          </div>
+          {execFreshness.length > 0 && (
+            <div className="replay-exec-freshness">
+              <div className="section-hint" style={{ marginTop: '0.25rem', marginBottom: '0.25rem' }}>
+                Execution data status by source &amp; account (latest row per group).
+              </div>
+              <div style={{ maxHeight: '10rem', overflowY: 'auto' }}>
+                <table className="ib-positions-table">
+                  <thead>
+                    <tr>
+                      <th>Account</th>
+                      <th>Source</th>
+                      <th>Latest execution time</th>
+                      <th>Gap (days)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {execFreshness.map((row, idx) => {
+                      const days = row.days_since_latest
+                      let gapLabel = '—'
+                      if (days != null && Number.isFinite(days)) {
+                        if (days < 0.5) {
+                          gapLabel = 'Today'
+                        } else if (days < 1.5) {
+                          gapLabel = '1 day'
+                        } else {
+                          gapLabel = `${Math.round(days)} days`
+                        }
+                      }
+                      const tsSec = row.latest_exec_ts
+                      const tsLabel =
+                        tsSec != null && Number.isFinite(tsSec)
+                          ? new Date(tsSec * 1000).toLocaleString('en-US', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })
+                          : '—'
+                      return (
+                        <tr key={`${row.account_id || 'unknown'}-${row.source || 'unknown'}-${idx}`}>
+                          <td>{row.account_id || '—'}</td>
+                          <td>{row.source || '—'}</td>
+                          <td>{tsLabel}</td>
+                          <td>{gapLabel}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
+        {flexMessage && (
+          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+            {flexMessage}
+          </p>
+        )}
       </section>
 
       <div className="ib-accounts-wrap">
@@ -898,7 +1150,6 @@ export function AccountsPage({
                   const sym = (pos.symbol ?? '').toString().toUpperCase()
                   const bench = benchmarks[sym]
                   const qty = pos.position != null ? Number(pos.position) : NaN
-                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
                   const currPrice = resolvePreferredPrice({
                     liveQuote: quotesMap[sym],
                     dbPrice:
@@ -909,18 +1160,18 @@ export function AccountsPage({
                       pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at))
                         ? Number(pos.price_updated_at)
                         : null,
-                    daemonSpot:
-                      spot != null && Number.isFinite(spot) && sym === mainSym
-                        ? spot
-                        : null,
-                    daemonUpdatedAt:
-                      spot != null && Number.isFinite(spot) && sym === mainSym
-                        ? statusTs
-                        : null,
+                    daemonSpot: null,
+                    daemonUpdatedAt: null,
                   }).price
-                  const daily = computeDailyChange(bench, currPrice, qty, pos.daily_prev_close ?? undefined)
-                  if (daily.pnlVsBench != null && Number.isFinite(daily.pnlVsBench))
-                    return acc + daily.pnlVsBench
+                  const dailyChange = computeDailyChange(
+                    bench,
+                    currPrice,
+                    qty,
+                    pos.daily_prev_close ?? undefined,
+                  )
+                  if (dailyChange.pnlVsBench != null && Number.isFinite(dailyChange.pnlVsBench)) {
+                    return acc + dailyChange.pnlVsBench
+                  }
                   return acc
                 }, 0)
                 const totalPct = Number.isFinite(sumTotal) && sumTotal !== 0 && Number.isFinite(sumPnl)
@@ -931,15 +1182,6 @@ export function AccountsPage({
                   const sym = (pos.symbol ?? '').toString().toUpperCase()
                   const bench = benchmarks[sym]
                   const qty = pos.position != null ? Number(pos.position) : NaN
-                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
-                  const currPrice = resolvePreferredPrice({
-                    liveQuote: quotesMap[sym],
-                    dbPrice: pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null,
-                    dbUpdatedAt: pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at)) ? Number(pos.price_updated_at) : null,
-                    daemonSpot: spot != null && Number.isFinite(spot) && sym === mainSym ? spot : null,
-                    daemonUpdatedAt: spot != null && Number.isFinite(spot) && sym === mainSym ? statusTs : null,
-                  }).price
-                  const daily = computeDailyChange(bench, currPrice, qty, pos.daily_prev_close ?? undefined)
                   let basePrice: number | null = null
                   if (pos.daily_prev_close != null && Number.isFinite(pos.daily_prev_close) && pos.daily_prev_close > 0) basePrice = pos.daily_prev_close
                   else if (bench && Number.isFinite(bench.close) && bench.close > 0) basePrice = (bench.is_today && bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0 ? bench.prev_close : bench.close)

@@ -1,4 +1,4 @@
-import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, FlexAccountItem, RiskSummaryResponse, ExecutionsResponse, ExecutionsResponseWithPairs, PerformanceResponse, AccountTransaction, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse, PositionCategory, PositionCategoriesResponse } from './types'
+import type { StatusResponse, OperationsResponse, ControlResponse, IbConfig, FlexAccountItem, RiskSummaryResponse, ExecutionsResponse, ExecutionsResponseWithPairs, PerformanceResponse, AccountTransaction, BarsResponse, Bar, BarStatsResponse, BarsCoverageResponse, WatchlistItem, RealtimeQuote, QuotesResponse, PositionCategoriesResponse, ExecutionsFreshnessResponse, ExecutionsFlexUploadResponse } from './types'
 
 const API = '' // same origin; Vite proxy forwards /status, /operations, /control
 
@@ -77,6 +77,63 @@ export async function postExecutionsFetch(days: 1 | 3 | 7 = 1): Promise<ControlR
   const r = await fetch(`${API}/executions/fetch?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), count: j.count }
+}
+
+/** R-A2 扩展：通过 IB Flex Trades 报表拉取执行记录并写库，作为 account_executions 的历史补充。
+ *  Range is determined on the backend based on existing Flex executions and Settings (flex_default_range_days, flex_init_range_days).
+ */
+export async function postExecutionsFetchFlex(
+  body?: { from_date?: string; to_date?: string }
+): Promise<
+  ControlResponse & {
+    count?: number
+    /** Total rows parsed from Flex XML before any DB write. */
+    raw_count?: number
+    updated_accounts?: number
+    range_mode?: string
+    range_days?: number | null
+    range_from?: string | null
+    range_to?: string | null
+    last_flex_date_after?: string | null
+    /** Date span of Flex executions in report (YYYY-MM-DD). */
+    data_from?: string | null
+    data_to?: string | null
+    by_account?: number
+    by_account_counts?: number[]
+    per_query?: Array<{
+      role?: string
+      query_id: string
+      label?: string | null
+      rows?: number
+      data_from?: string | null
+      data_to?: string | null
+    }>
+  }
+> {
+  const r = await fetch(`${API}/executions/fetch-flex`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ...j,
+    ok: r.ok && j.ok !== false,
+    error: j.error || (r.ok ? undefined : r.statusText),
+    count: j.count,
+    updated_accounts: j.updated_accounts,
+    raw_count: j.raw_count,
+    range_mode: j.range_mode,
+    range_days: j.range_days,
+    range_from: j.range_from,
+    range_to: j.range_to,
+    last_flex_date_after: j.last_flex_date_after,
+    data_from: j.data_from,
+    data_to: j.data_to,
+    by_account: j.by_account,
+    by_account_counts: j.by_account_counts,
+    per_query: j.per_query,
+  }
 }
 
 /** R-A3: 直接由 API 连 IB 拉取 K 线并写库，返回 bars（不经过 daemon）。smart_duration 为 true 时由服务端根据最新 K 线计算 duration。 */
@@ -454,19 +511,95 @@ export async function postIbConfig(
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** Save Flex config: host_token and secondary_token to settings, accounts (query_host_id, query_secondary_id, query_label, purpose) to flex_accounts. POST /config/flex. */
+/** Save Flex config: host_token and secondary_token to settings, accounts to flex_accounts, and optional flex_default_range_days, flex_init_range_days (integers) to settings. POST /config/flex. */
 export async function postFlexConfig(
   hostToken?: string | null,
   secondaryToken?: string | null,
-  accounts: FlexAccountItem[] = []
-): Promise<ControlResponse & { accounts?: FlexAccountItem[]; host_token?: string; secondary_token?: string }> {
+  accounts: FlexAccountItem[] = [],
+  flexDefaultRangeDays?: number | null,
+  flexInitRangeDays?: number | null
+): Promise<ControlResponse & { accounts?: FlexAccountItem[]; host_token?: string; secondary_token?: string; flex_default_range_days?: number; flex_init_range_days?: number }> {
   const r = await fetch(`${API}/config/flex`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ host_token: hostToken ?? undefined, secondary_token: secondaryToken ?? undefined, accounts }),
+    body: JSON.stringify({
+      host_token: hostToken ?? undefined,
+      secondary_token: secondaryToken ?? undefined,
+      accounts,
+      flex_default_range_days: flexDefaultRangeDays != null && Number.isFinite(flexDefaultRangeDays) ? Math.max(1, Math.round(flexDefaultRangeDays)) : undefined,
+      flex_init_range_days: flexInitRangeDays != null && Number.isFinite(flexInitRangeDays) ? Math.max(1, Math.round(flexInitRangeDays)) : undefined,
+    }),
   })
   const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), accounts: j.accounts, host_token: j.host_token, secondary_token: j.secondary_token }
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), accounts: j.accounts, host_token: j.host_token, secondary_token: j.secondary_token, flex_default_range_days: j.flex_default_range_days, flex_init_range_days: j.flex_init_range_days }
+}
+
+/** GET /config/key-value: list by key (single) or by group_name. Returns { ok, items }. Match by group name only (not id). */
+export async function fetchKeyValueConfig(params?: { key?: string; group_name?: string }): Promise<{ ok: boolean; items: Array<{ key: string; value: string; description?: string | null; updated_at?: string; group_id?: number }>; error?: string }> {
+  const p = params || {}
+  const q = new URLSearchParams()
+  if (p.key) q.set('key', p.key)
+  if (p.group_name) q.set('group_name', p.group_name)
+  const url = q.toString() ? `${API}/config/key-value?${q}` : `${API}/config/key-value`
+  const r = await fetch(url)
+  const j = await r.json().catch(() => ({ ok: false, items: [] }))
+  return { ...j, ok: r.ok && j.ok !== false, items: j.items ?? [] }
+}
+
+/** GET /config/key-value/groups: list all groups. */
+export async function fetchKeyValueGroups(): Promise<{ ok: boolean; items: Array<{ id: number; name: string; description?: string | null; sort_order?: number; created_at?: string; updated_at?: string }>; error?: string }> {
+  const r = await fetch(`${API}/config/key-value/groups`)
+  const j = await r.json().catch(() => ({ ok: false, items: [] }))
+  return { ...j, ok: r.ok && j.ok !== false, items: j.items ?? [] }
+}
+
+/** POST /config/key-value/groups: create group. body: { name, description?, sort_order? }. */
+export async function postKeyValueGroup(body: { name: string; description?: string; sort_order?: number }): Promise<{ ok: boolean; id?: number; name?: string; error?: string }> {
+  const r = await fetch(`${API}/config/key-value/groups`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** PATCH /config/key-value/groups/:group_name: update group. Match by name only (not id). */
+export async function patchKeyValueGroup(groupName: string, body: { name?: string; description?: string; sort_order?: number }): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/config/key-value/groups/${encodeURIComponent(groupName)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** DELETE /config/key-value/groups/:group_name: delete group and all its key-values. Match by name only (not id). */
+export async function deleteKeyValueGroup(groupName: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/config/key-value/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** POST /config/key-value: upsert one row. body: group_name (default flex_range_options), key, value?, description?. */
+export async function postKeyValueConfig(body: { group_name?: string; key: string; value?: string; description?: string }): Promise<{ ok: boolean; key?: string; value?: string; error?: string }> {
+  const r = await fetch(`${API}/config/key-value`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
+}
+
+/** DELETE /config/key-value: delete one row. key + group_name (default flex_range_options). */
+export async function deleteKeyValueConfig(key: string, groupName?: string): Promise<{ ok: boolean; key?: string; error?: string }> {
+  const q = new URLSearchParams({ key })
+  if (groupName) q.set('group_name', groupName)
+  const r = await fetch(`${API}/config/key-value?${q}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function postMonitorStop(): Promise<ControlResponse & { monitor_enabled?: boolean }> {
@@ -719,6 +852,30 @@ export async function fetchExecutions(
   const r = await fetch(`${API}/executions?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
+}
+
+/** GET /executions/freshness: latest exec_time per (account_id, source) from account_executions. */
+export async function fetchExecutionsFreshness(): Promise<ExecutionsFreshnessResponse> {
+  const r = await fetch(`${API}/executions/freshness`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** POST /executions/fetch-flex-upload: upsert executions from manually uploaded Flex Trades XML. */
+export async function postExecutionsFetchFlexUpload(xml: string): Promise<ExecutionsFlexUploadResponse> {
+  const r = await fetch(`${API}/executions/fetch-flex-upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ xml }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean((j as any).ok) && r.ok,
+    error: (j as any).error,
+    count: (j as any).count,
+    updated_accounts: (j as any).updated_accounts,
+    message: (j as any).message,
+  }
 }
 
 /** R-A2 扩展：手动添加一条执行记录（历史补录） */

@@ -467,6 +467,9 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS ib2_client_id_markets")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_host_token text")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_secondary_token text")
+        cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS flex_default_range_preset")
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_default_range_days integer DEFAULT 30")
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_init_range_days integer DEFAULT 360")
         _log("accounts, account_positions, instrument_prices")
         cur.execute(
             """
@@ -596,11 +599,46 @@ def _ensure_tables(conn, log=None) -> None:
                 type text NOT NULL,
                 currency text,
                 description text,
+                flex_transaction_id text,
+                flex_type text,
+                flex_code text,
+                asset_category text,
+                asset_subcategory text,
+                symbol text,
+                conid bigint,
+                security_id text,
+                security_id_type text,
+                listing_exchange text,
+                report_date date,
+                available_for_trading_date date,
+                fx_rate_to_base double precision,
+                raw_extra jsonb,
                 created_at timestamptz DEFAULT now(),
                 UNIQUE(account_id, ts, amount, type)
             )
         """
         )
+        # Backwards-compatible schema evolution: add new columns if table already existed without them.
+        for col_def in (
+            "flex_transaction_id text",
+            "flex_type text",
+            "flex_code text",
+            "asset_category text",
+            "asset_subcategory text",
+            "symbol text",
+            "conid bigint",
+            "security_id text",
+            "security_id_type text",
+            "listing_exchange text",
+            "report_date date",
+            "available_for_trading_date date",
+            "fx_rate_to_base double precision",
+            "raw_extra jsonb",
+        ):
+            col_name = col_def.split()[0]
+            cur.execute(
+                f"ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS {col_def}"
+            )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS account_transactions_account_ts ON account_transactions (account_id, ts DESC)"
         )
@@ -915,6 +953,92 @@ def _ensure_tables(conn, log=None) -> None:
                 conn.commit()
             except Exception:
                 conn.rollback()
+        _log("key_value_config")
+        # 1) Group table first
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS key_value_group (
+                id serial PRIMARY KEY,
+                name text UNIQUE NOT NULL,
+                description text,
+                sort_order integer NOT NULL DEFAULT 0,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now()
+            )
+            """
+        )
+        conn.commit()
+        # Ensure at least one key_value_group exists for migration (no Flex-specific seed)
+        cur.execute(
+            """
+            INSERT INTO key_value_group (name, description, sort_order)
+            VALUES ('default', 'Default group for key-value config', 0)
+            ON CONFLICT (name) DO NOTHING
+            """
+        )
+        conn.commit()
+        # Ensure sequence is at least 2 for future groups
+        try:
+            cur.execute("SELECT setval(pg_get_serial_sequence('key_value_group', 'id'), GREATEST(1, (SELECT COALESCE(MAX(id), 1) FROM key_value_group)))")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # 2) key_value_config: create with group_id or migrate existing
+        cur.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'key_value_config' AND column_name = 'group_id'
+            """
+        )
+        has_group_id = cur.fetchone() is not None
+        cur.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'key_value_config'"
+        )
+        table_exists = cur.fetchone() is not None
+        if not table_exists:
+            cur.execute(
+                """
+                CREATE TABLE key_value_config (
+                    group_id integer NOT NULL REFERENCES key_value_group(id) ON DELETE CASCADE,
+                    key text NOT NULL,
+                    value text NOT NULL DEFAULT '',
+                    description text,
+                    updated_at timestamptz DEFAULT now(),
+                    PRIMARY KEY (group_id, key)
+                )
+                """
+            )
+            conn.commit()
+        elif not has_group_id:
+            # Existing table without group_id: add column, backfill, change PK
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS key_value_config (
+                    key text PRIMARY KEY,
+                    value text NOT NULL DEFAULT '',
+                    description text,
+                    updated_at timestamptz DEFAULT now()
+                )
+                """
+            )
+            conn.commit()
+            cur.execute("ALTER TABLE key_value_config ADD COLUMN IF NOT EXISTS group_id integer")
+            conn.commit()
+            cur.execute(
+                "UPDATE key_value_config SET group_id = (SELECT id FROM key_value_group WHERE name = 'default' LIMIT 1) WHERE group_id IS NULL"
+            )
+            conn.commit()
+            cur.execute("ALTER TABLE key_value_config ALTER COLUMN group_id SET NOT NULL")
+            conn.commit()
+            cur.execute("ALTER TABLE key_value_config DROP CONSTRAINT IF EXISTS key_value_config_pkey")
+            conn.commit()
+            cur.execute(
+                "ALTER TABLE key_value_config ADD CONSTRAINT key_value_config_group_id_fkey "
+                "FOREIGN KEY (group_id) REFERENCES key_value_group(id) ON DELETE CASCADE"
+            )
+            conn.commit()
+            cur.execute("ALTER TABLE key_value_config ADD PRIMARY KEY (group_id, key)")
+            conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
             with conn.cursor() as cur2:
@@ -927,7 +1051,7 @@ def _ensure_tables(conn, log=None) -> None:
             conn.commit()
         except Exception:
             conn.rollback()
-        # R-A2 extended: add columns to account_executions for full IB data (expiry, strike, option_right, etc.)
+        # R-A2 extended: add columns to account_executions for full IB / Flex data（含期权字段与 Flex Trades 字段）
         # 不再在 account_executions 添加 commission/realized_pnl/currency，已迁至 account_execution_commissions
         for _col, sql in [
             ("expiry", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS expiry text"),
@@ -937,6 +1061,44 @@ def _ensure_tables(conn, log=None) -> None:
             ("order_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS order_id bigint"),
             ("cum_qty", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS cum_qty double precision"),
             ("contract_key", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS contract_key text"),
+            ("currency", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS currency text"),
+            ("asset_category", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS asset_category text"),
+            ("sub_category", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS sub_category text"),
+            ("description", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS description text"),
+            ("conid", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS conid bigint"),
+            ("security_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS security_id text"),
+            ("security_id_type", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS security_id_type text"),
+            ("cusip", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS cusip text"),
+            ("isin", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS isin text"),
+            ("figi", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS figi text"),
+            ("listing_exchange", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS listing_exchange text"),
+            ("underlying_conid", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_conid bigint"),
+            ("underlying_symbol", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_symbol text"),
+            ("underlying_security_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_security_id text"),
+            ("underlying_listing_exchange", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_listing_exchange text"),
+            ("issuer", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS issuer text"),
+            ("issuer_country_code", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS issuer_country_code text"),
+            ("trade_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS trade_id text"),
+            ("related_trade_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS related_trade_id text"),
+            ("report_date", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS report_date date"),
+            ("trade_date", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS trade_date date"),
+            ("settle_date_target", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS settle_date_target date"),
+            ("transaction_type", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS transaction_type text"),
+            ("multiplier", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS multiplier double precision"),
+            ("principal_adjust_factor", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS principal_adjust_factor text"),
+            ("proceeds", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS proceeds double precision"),
+            ("taxes", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS taxes double precision"),
+            ("net_cash", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS net_cash double precision"),
+            ("close_price", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS close_price double precision"),
+            ("open_close_indicator", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS open_close_indicator text"),
+            ("notes", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS notes text"),
+            ("cost", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS cost double precision"),
+            ("fifo_pnl_realized", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS fifo_pnl_realized double precision"),
+            ("mtm_pnl", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS mtm_pnl double precision"),
+            ("trade_money", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS trade_money double precision"),
+            ("fx_rate_to_base", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS fx_rate_to_base double precision"),
+            ("acct_alias", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS acct_alias text"),
+            ("model", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS model text"),
         ]:
             try:
                 cur.execute(sql)
@@ -1260,6 +1422,44 @@ class PostgreSQLSink(StatusSink):
                     order_id = r.get("order_id")
                     cum_qty = r.get("cum_qty")
                     contract_key = r.get("contract_key")
+                    currency = r.get("currency")
+                    asset_category = r.get("asset_category")
+                    sub_category = r.get("sub_category")
+                    description = r.get("description")
+                    conid = r.get("conid")
+                    security_id = r.get("security_id")
+                    security_id_type = r.get("security_id_type")
+                    cusip = r.get("cusip")
+                    isin = r.get("isin")
+                    figi = r.get("figi")
+                    listing_exchange = r.get("listing_exchange")
+                    underlying_conid = r.get("underlying_conid")
+                    underlying_symbol = r.get("underlying_symbol")
+                    underlying_security_id = r.get("underlying_security_id")
+                    underlying_listing_exchange = r.get("underlying_listing_exchange")
+                    issuer = r.get("issuer")
+                    issuer_country_code = r.get("issuer_country_code")
+                    trade_id = r.get("trade_id")
+                    related_trade_id = r.get("related_trade_id")
+                    report_date = r.get("report_date")
+                    trade_date = r.get("trade_date")
+                    settle_date_target = r.get("settle_date_target")
+                    transaction_type = r.get("transaction_type")
+                    multiplier = r.get("multiplier")
+                    principal_adjust_factor = r.get("principal_adjust_factor")
+                    proceeds = r.get("proceeds")
+                    taxes = r.get("taxes")
+                    net_cash = r.get("net_cash")
+                    close_price = r.get("close_price")
+                    open_close_indicator = r.get("open_close_indicator")
+                    notes = r.get("notes")
+                    cost = r.get("cost")
+                    fifo_pnl_realized = r.get("fifo_pnl_realized")
+                    mtm_pnl = r.get("mtm_pnl")
+                    trade_money = r.get("trade_money")
+                    fx_rate_to_base = r.get("fx_rate_to_base")
+                    acct_alias = r.get("acct_alias")
+                    model = r.get("model")
                     raw_extra = r.get("raw_extra")
                     if raw_extra is not None and not isinstance(raw_extra, str):
                         raw_extra = json.dumps(raw_extra) if raw_extra else None
@@ -1274,9 +1474,74 @@ class PostgreSQLSink(StatusSink):
                             exec_dt = None
                     else:
                         exec_dt = None
-                    cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra"
-                    placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
-                    vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra)
+                    cols = (
+                        "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, "
+                        "expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, "
+                        "asset_category, sub_category, description, conid, security_id, security_id_type, "
+                        "cusip, isin, figi, listing_exchange, underlying_conid, underlying_symbol, "
+                        "underlying_security_id, underlying_listing_exchange, issuer, issuer_country_code, "
+                        "trade_id, related_trade_id, report_date, trade_date, settle_date_target, "
+                        "transaction_type, multiplier, principal_adjust_factor, proceeds, taxes, net_cash, "
+                        "close_price, open_close_indicator, notes, cost, fifo_pnl_realized, mtm_pnl, "
+                        "trade_money, fx_rate_to_base, acct_alias, model, raw_extra"
+                    )
+                    placeholders = ", ".join(["%s"] * 54)
+                    vals = (
+                        account_id,
+                        exec_id,
+                        exec_dt,
+                        symbol,
+                        sec_type,
+                        side,
+                        quantity,
+                        price,
+                        source,
+                        expiry,
+                        strike,
+                        option_right,
+                        exchange,
+                        order_id,
+                        cum_qty,
+                        contract_key,
+                        asset_category,
+                        sub_category,
+                        description,
+                        conid,
+                        security_id,
+                        security_id_type,
+                        cusip,
+                        isin,
+                        figi,
+                        listing_exchange,
+                        underlying_conid,
+                        underlying_symbol,
+                        underlying_security_id,
+                        underlying_listing_exchange,
+                        issuer,
+                        issuer_country_code,
+                        trade_id,
+                        related_trade_id,
+                        report_date,
+                        trade_date,
+                        settle_date_target,
+                        transaction_type,
+                        multiplier,
+                        principal_adjust_factor,
+                        proceeds,
+                        taxes,
+                        net_cash,
+                        close_price,
+                        open_close_indicator,
+                        notes,
+                        cost,
+                        fifo_pnl_realized,
+                        mtm_pnl,
+                        trade_money,
+                        fx_rate_to_base,
+                        acct_alias,
+                        model,
+                        raw_extra,
+                    )
                     if exec_id:
                         cur.execute(
                             f"""

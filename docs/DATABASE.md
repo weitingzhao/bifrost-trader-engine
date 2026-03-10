@@ -165,22 +165,60 @@
 |------|------|------|
 | id | bigserial | 自增主键 |
 | account_id | text | 账户标识 |
-| exec_id | text | IB 执行 id（若有，用于去重） |
-| exec_time | timestamptz | 成交时间 |
+| exec_id | text | IB 执行 id（若有，用于去重，Flex 中为 ibExecID） |
+| exec_time | timestamptz | 成交时间（TWS/Flex dateTime 解析后） |
 | symbol | text | 标的 |
-| sec_type | text | 类型（STK/OPT 等） |
-| side | text | BUY / SELL（由 IB BOT/SLD 映射） |
+| sec_type | text | 类型（STK/OPT 等；Flex assetCategory 映射） |
+| side | text | BUY / SELL（由 IB BOT/SLD 或 Flex buySell 映射） |
 | quantity | double precision | 数量 |
-| price | double precision | 成交价 |
-| source | text | 来源（manual / daemon，若可区分） |
-| expiry | text | 期权到期（YYYYMMDD，OPT 时） |
-| strike | double precision | 期权行权价（OPT 时） |
-| option_right | text | 期权权利 C/P（OPT 时） |
-| exchange | text | 交易所 |
-| order_id | bigint | IB 订单 id |
-| cum_qty | double precision | 累计成交量 |
+| price | double precision | 成交价（TWS/Flex tradePrice） |
+| source | text | 来源：**tws_event**（通过 IB TWS 事件流/reqExecutions 拉取的成交）、**flex_trades**（Flex Trades 报表）、**manual**（前端 Add Trade 手动补录）等 |
+| expiry | text | 期权到期（YYYYMMDD，OPT 时；来自 TWS/Flex expiry） |
+| strike | double precision | 期权行权价（OPT 时；来自 strike） |
+| option_right | text | 期权权利 C/P（OPT 时；来自 right/putCall） |
+| exchange | text | 交易所（Execution.exchange 或 Flex exchange） |
+| order_id | bigint | IB 订单 id（Execution.orderId 或 Flex ibOrderID） |
+| cum_qty | double precision | 累计成交量（仅 TWS live 提供时写入） |
 | contract_key | text | 合约唯一键 symbol\|sec_type\|expiry\|strike\|right |
-| raw_extra | jsonb | 其他 IB 字段（permId、clientId、conId 等） |
+| currency | text | 成交货币（Flex currency） |
+| asset_category | text | 资产大类（Flex assetCategory，如 STK/OPT） |
+| sub_category | text | 资产子类（Flex subCategory，如 COMMON/ETF） |
+| description | text | 标的描述（Flex description） |
+| conid | bigint | IB 合约 ID（Flex conid） |
+| security_id | text | 证券 ID（如 ISIN/CUSIP/FIGI，对应 securityID） |
+| security_id_type | text | 证券 ID 类型（securityIDType，如 ISIN/CUSIP/FIGI） |
+| cusip | text | CUSIP（若有） |
+| isin | text | ISIN（若有） |
+| figi | text | FIGI（若有） |
+| listing_exchange | text | 上市交易所（Flex listingExchange） |
+| underlying_conid | bigint | 标的合约 conid（期权等，Flex underlyingConid） |
+| underlying_symbol | text | 标的代码（Flex underlyingSymbol） |
+| underlying_security_id | text | 标的证券 ID（Flex underlyingSecurityID） |
+| underlying_listing_exchange | text | 标的上市交易所（Flex underlyingListingExchange） |
+| issuer | text | 发行人名称（Flex issuer，若有） |
+| issuer_country_code | text | 发行人国家代码（Flex issuerCountryCode） |
+| trade_id | text | Flex tradeID（成交行唯一 ID） |
+| related_trade_id | text | Flex relatedTradeID（关联成交 ID） |
+| report_date | date | 报表日期（Flex reportDate，YYYYMMDD） |
+| trade_date | date | 交易日期（Flex tradeDate，YYYYMMDD） |
+| settle_date_target | date | 目标结算日（Flex settleDateTarget） |
+| transaction_type | text | 成交类型（Flex transactionType，如 ExchTrade） |
+| multiplier | double precision | 合约乘数（Flex multiplier） |
+| principal_adjust_factor | text | principalAdjustFactor（字符串保留原值） |
+| proceeds | double precision | 收入（Flex proceeds，含符号） |
+| taxes | double precision | 税费（Flex taxes） |
+| net_cash | double precision | 净现金流（Flex netCash） |
+| close_price | double precision | 成交时收盘价/参考价（Flex closePrice） |
+| open_close_indicator | text | 开/平仓标记（Flex openCloseIndicator，O/C 等） |
+| notes | text | 备注（Flex notes，用于 DRIP/特殊标记） |
+| cost | double precision | 成本（Flex cost，含佣金） |
+| fifo_pnl_realized | double precision | 实现盈亏（Flex fifoPnlRealized） |
+| mtm_pnl | double precision | 市值盈亏（Flex mtmPnl） |
+| trade_money | double precision | 成交金额（Flex tradeMoney） |
+| fx_rate_to_base | double precision | 折算到基准货币的汇率（Flex fxRateToBase） |
+| acct_alias | text | 账户别名（Flex acctAlias） |
+| model | text | 账户/组合模型名称（Flex model） |
+| raw_extra | jsonb | 其余 Execution/Flex 字段（permId、clientId、origTrade* 等）打包存入 |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
 - **索引**：建议 `(account_id, exec_time DESC)`、若用 exec_id 去重则 `UNIQUE(exec_id)` 或唯一索引。
@@ -216,9 +254,23 @@
 | account_id | text NOT NULL | 账户标识 |
 | ts | timestamptz NOT NULL | 交易时间（Flex Date/Time） |
 | amount | double precision NOT NULL | 金额（正为流入、负为流出，与 Flex 一致） |
-| type | text NOT NULL | 类型：deposit / withdrawal / transfer / dividend / other（由 Flex Type 或 Code 映射） |
+| type | text NOT NULL | 规范化类型：deposit / withdrawal / transfer / dividend / other（由 Flex Type 或 Code 映射） |
 | currency | text | 币种 |
 | description | text | Flex Description（可选） |
+| flex_transaction_id | text | Flex transactionID（唯一流水 ID），用于对账与去重（辅助字段） |
+| flex_type | text | 原始 Flex Type 文本（如 Payment In Lieu Of Dividends, Other Fees 等） |
+| flex_code | text | 原始 Flex Code（如 WTH/DEP 等），若有 |
+| asset_category | text | 资产大类（如 STK、OPT、CASH 等） |
+| asset_subcategory | text | 资产子类（如 ETF 等） |
+| symbol | text | 标的代码（如 PFF），若有 |
+| conid | bigint | IB 合约 ID（conid），若有 |
+| security_id | text | 证券 ID（如 ISIN/CUSIP/FIGI 等，对应 securityID） |
+| security_id_type | text | 证券 ID 类型（securityIDType，如 ISIN/CUSIP/FIGI） |
+| listing_exchange | text | 上市交易所（listingExchange），若有 |
+| report_date | date | 报表日期（reportDate，通常为 YYYYMMDD） |
+| available_for_trading_date | date | 资金可用日期（availableForTradingDate），若有 |
+| fx_rate_to_base | double precision | Flex 报表中的 fxRateToBase，用于从币种折算到基准货币（若有多币种账户时有用） |
+| raw_extra | jsonb | 其余 Flex 字段（如 acctAlias、model、issuerCountryCode 等）打包存入，便于未来扩展 |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
 - **唯一约束**：`UNIQUE(account_id, ts, amount, type)`，便于 UPSERT 去重。
@@ -257,6 +309,41 @@
 | query_secondary_id | text | Flex Query ID（第二 IB，用 settings.ib_flex_secondary_token 拉取）；可空表示该行仅拉 Host |
 
 - **读取**：`servers.reader.get_flex_config(purpose=None)` 返回 `{ host_token, secondary_token, rows }`（rows 每项含 query_host_id、query_secondary_id、query_label、purpose）；`get_flex_config(purpose='cash_transactions')` 返回 `[{ token, query_id }, ...]`，每行若 query_host_id 非空则一条 (host_token, query_host_id)、若 query_secondary_id 非空则一条 (secondary_token, query_secondary_id)，供 POST /transactions/fetch 对 Host 与 Secondary 各 call。
+
+### 2.24 表 `key_value_config`（Key-Value 映射，按 Group 分组供各下拉/选项复用）
+
+- **用途**：存**按 Group 分组的 key-value**，供 Flex 默认区间、各类下拉选项等复用。每个 **Group**（见 §2.24.1）对应一个“选项集”（如 Flex range preset、未来其他下拉）；组内每条记录为 key（选项值）+ value（显示或存储值）+ 可选 description。
+- **写入**：通过 **Settings 页「Key-Value Config」** 先维护 Group 列表，再在选中 Group 下增删改 key-value；或 API POST /config/key-value（需带 group_id 或 group_name）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| group_id | integer NOT NULL | 所属 Group（FK → key_value_group.id） |
+| key | text NOT NULL | 键（组内唯一） |
+| value | text NOT NULL | 值 |
+| description | text | 可选说明 |
+| updated_at | timestamptz | 最后更新时间（默认 now()） |
+
+- **主键**：**(group_id, key)**。同一 key 可出现在不同 Group 中。
+- **常用**：任意 Group 下键值对；后台 `get_key_value(key)` 按 key 查（任意组），`get_key_values_by_group(group_name)` 按组名查。Flex 默认范围已改为 settings.flex_default_range_days（整数天），不再用本表。
+- **读取**：`get_key_value(key)`、`get_key_values_by_group(group_id)`、`get_all_key_values(group_id=None)`；GET /config/key-value/groups、GET /config/key-value?group_id=。
+
+### 2.24.1 表 `key_value_group`（Key-Value 分组，供下拉/选项集复用）
+
+- **用途**：存 **Group 列表**，每个 Group 对应一个选项集；Group 下有若干 key_value_config 行。Flex 默认范围已改为 settings.flex_default_range_days，不再用本表。
+- **写入**：Settings 页 Key-Value Config 或 API POST/DELETE /config/key-value/groups。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | serial PRIMARY KEY | 自增主键 |
+| name | text UNIQUE NOT NULL | 组名，供 API 与下拉识别 |
+| description | text | 可选说明 |
+| sort_order | integer DEFAULT 0 | 显示顺序（小者靠前） |
+| created_at | timestamptz | 创建时间（默认 now()） |
+| updated_at | timestamptz | 最后更新时间（默认 now()） |
+
+- **读取**：`get_key_value_groups()`；GET /config/key-value/groups。删除 Group 时需同时删除该组下所有 key_value_config 行（或 CASCADE）。
 
 ### 2.12 表 `ohlc_bars`（已弃用，由 stock_day / stock_min / option_day / option_min 替代）
 
@@ -492,6 +579,8 @@
 | ib2_client_id_account | integer | 第二 IB 账户拉取 Client ID（默认 102） |
 | ib_flex_host_token | text | IB Flex Web Service Token（主 IB）；与 flex_accounts 的 query_host_id 配合使用 |
 | ib_flex_secondary_token | text | IB Flex Token（第二 IB）；与 flex_accounts 的 query_secondary_id 配合使用 |
+| flex_default_range_days | integer | Default Flex Query 天数（如 30）；未传 from_date/to_date 时由后台按「昨日 − N 天」计算；默认 30 |
+| flex_init_range_days | integer | Init Flex Query 天数（如 360），用于首次/全量拉取；默认 360 |
 
 - **Client ID 使用场景**（与 Settings 页 Client IDs 表一致；双 IB 时 Host 与 Secondary 各一套，**市场数据仅 Host 有**，故无 `ib2_client_id_markets` 列）：
 
@@ -641,6 +730,8 @@ python scripts/release_pg_locks.py --yes         # 不确认，直接终止
 | 2026-03-08 Flex 一行双 Query ID | §2.23 flex_accounts 去掉 account_is_host、query_id，改为 query_host_id（必填）+ query_secondary_id（可选）；同一行同一 Label/Purpose，Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex 一 Token 多 Query | §2.23 flex_accounts 改为「一 Token 多 Query ID + Label」：列 query_id、query_label、purpose；同一 token 可多行；POST /transactions/fetch 仅用 purpose=cash_transactions；reader.get_flex_config(purpose) 支持按用途过滤。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex Token 入 settings | settings 增加 ib_flex_host_token、ib_flex_secondary_token；flex_accounts 去掉 token、account_label，改为 account_is_host (boolean)；GET /status flex_config 为 { host_token, secondary_token, rows }。 | 阶段 3 Performance Phase 0 |
+| 2026-03-10 key_value_config | 新增 §2.24 表 key_value_config（Key-Value 映射）；Settings 页 Key-Value Config 维护；Flex 默认范围已改为 settings.flex_default_range_days（整数天），不再用本表。 | 阶段 3 扩展 |
+| 2026-03-10 key_value_group | 新增 §2.24.1 表 key_value_group（Key-Value 分组）；key_value_config 增加 group_id，(group_id, key) 为主键；Settings 页 Key-Value Config 先维护 Group 列表，再按组维护 key-value；供未来各类下拉/选项集复用。 | 阶段 3 扩展 |
 
 ---
 

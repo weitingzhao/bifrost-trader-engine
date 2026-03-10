@@ -137,9 +137,6 @@ export function LivePage({ status }: LivePageProps) {
                 }
               />
             </h2>
-            <p className="section-hint section-hint-tight">
-              这里集中显示系统正常运行过程中产生的实时行情流状态。
-            </p>
           </div>
         </div>
         <div className="realtime-quotes-table-wrap">

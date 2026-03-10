@@ -70,6 +70,10 @@ class StatusReader:
         self._config = status_config
         self._conn: Any = None
 
+    def _ensure_conn(self) -> bool:
+        """Compat helper mirroring PostgreSQLSink._ensure_conn()."""
+        return self._connect()
+
     def _connect(self) -> bool:
         if self._conn is not None:
             try:
@@ -372,6 +376,53 @@ class StatusReader:
             return out
         except Exception as e:
             logger.debug("get_executions failed: %s", e)
+            self._conn = None
+            return []
+
+    def get_executions_freshness(self) -> List[Dict[str, Any]]:
+        """Return latest exec_time per (account_id, source) from account_executions.
+
+        Used by Accounts page to show how fresh executions data is for each account/source
+        (e.g. tws_event vs flex_trades). exec_time is converted to Unix seconds; days_since_latest
+        is days difference between now() and latest exec_time.
+        """
+        if not self._connect():
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Group by account_id + source to get latest exec_time and staleness in days.
+                cur.execute(
+                    """
+                    SELECT
+                        account_id,
+                        source,
+                        extract(epoch from max(exec_time)) AS latest_exec_ts,
+                        extract(epoch from (now() - max(exec_time))) / 86400.0 AS days_since_latest
+                    FROM account_executions
+                    WHERE exec_time IS NOT NULL
+                    GROUP BY account_id, source
+                    ORDER BY account_id, source
+                    """
+                )
+                rows = cur.fetchall()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                d = dict(r)
+                # Normalize numeric fields to float or None
+                ts_val = d.get("latest_exec_ts")
+                days_val = d.get("days_since_latest")
+                try:
+                    d["latest_exec_ts"] = float(ts_val) if ts_val is not None else None
+                except (TypeError, ValueError):
+                    d["latest_exec_ts"] = None
+                try:
+                    d["days_since_latest"] = float(days_val) if days_val is not None else None
+                except (TypeError, ValueError):
+                    d["days_since_latest"] = None
+                out.append(d)
+            return out
+        except Exception as e:
+            logger.debug("get_executions_freshness failed: %s", e)
             self._conn = None
             return []
 
@@ -2236,7 +2287,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                     "COALESCE(ib_client_id_account, 100) AS ib_client_id_account, "
                     "COALESCE(ib_client_id_markets, 101) AS ib_client_id_markets, "
                     "COALESCE(ib_client_id_worker_market, 500) AS ib_client_id_worker_market, "
-                    "ib_primary_account_id "
+                    "ib_primary_account_id, flex_default_range_days, flex_init_range_days "
                     "FROM settings WHERE id = 1"
                 )
                 row = cur.fetchone()
@@ -2251,6 +2302,20 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                 "ib_client_id_markets": int(row["ib_client_id_markets"]) if row.get("ib_client_id_markets") is not None else 10,
                 "ib_client_id_worker_market": int(row["ib_client_id_worker_market"]) if row.get("ib_client_id_worker_market") is not None else 500,
             }
+            if row.get("flex_default_range_days") is not None:
+                try:
+                    out["flex_default_range_days"] = max(1, int(row["flex_default_range_days"]))
+                except (TypeError, ValueError):
+                    out["flex_default_range_days"] = 30
+            else:
+                out["flex_default_range_days"] = 30
+            if row.get("flex_init_range_days") is not None:
+                try:
+                    out["flex_init_range_days"] = max(1, int(row["flex_init_range_days"]))
+                except (TypeError, ValueError):
+                    out["flex_init_range_days"] = 360
+            else:
+                out["flex_init_range_days"] = 360
             if row.get("ib_primary_account_id") is not None and str(row.get("ib_primary_account_id")).strip():
                 out["ib_primary_account_id"] = str(row["ib_primary_account_id"]).strip()
             else:
@@ -2294,6 +2359,8 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                     "ib_client_id_markets": 101,
                     "ib_client_id_worker_market": 500,
                     "ib_primary_account_id": None,
+                    "flex_default_range_days": 30,
+                    "flex_init_range_days": 360,
                     "ib2_host": None,
                     "ib2_port_type": None,
                     "ib2_client_id_listener": 3,
@@ -2306,7 +2373,8 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
 
     def get_flex_config(self, purpose: Optional[str] = None):
         """If purpose is None: return { host_token, secondary_token, rows } for GET /status. rows have query_label, purpose, query_host_id, query_secondary_id.
-        If purpose is set: return list of { token, query_id } to call: (host_token, query_host_id) and (secondary_token, query_secondary_id) per row, so both accounts are called."""
+        If purpose is set: return list of { token, query_id, role, query_label, purpose } to call:
+        (host_token, query_host_id, role='primary') and (secondary_token, query_secondary_id, role='secondary') per row, so both accounts are called."""
         if not self._connect():
             return [] if purpose is not None else {"host_token": None, "secondary_token": None, "rows": []}
         try:
@@ -2331,12 +2399,35 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
             if purpose is not None:
                 out: List[Dict[str, Any]] = []
                 for r in rows:
-                    qh = (r.get("query_host_id") or "").strip()
-                    qs = (r.get("query_secondary_id") or "").strip()
-                    if host_tok and qh:
-                        out.append({"token": host_tok, "query_id": qh})
-                    if sec_tok and qs:
-                        out.append({"token": sec_tok, "query_id": qs})
+                    qh_raw = (r.get("query_host_id") or "").strip()
+                    qs_raw = (r.get("query_secondary_id") or "").strip()
+                    label = (r.get("query_label") or "").strip()
+                    purp = (r.get("purpose") or "").strip()
+                    # Support multiple Query IDs per row (comma-separated), e.g. Primary with two accounts
+                    qh_ids = [x.strip() for x in qh_raw.split(",") if x.strip()]
+                    qs_ids = [x.strip() for x in qs_raw.split(",") if x.strip()]
+                    if host_tok:
+                        for qid in qh_ids:
+                            out.append(
+                                {
+                                    "token": host_tok,
+                                    "query_id": qid,
+                                    "role": "primary",
+                                    "query_label": label or None,
+                                    "purpose": purp or None,
+                                }
+                            )
+                    if sec_tok:
+                        for qid in qs_ids:
+                            out.append(
+                                {
+                                    "token": sec_tok,
+                                    "query_id": qid,
+                                    "role": "secondary",
+                                    "query_label": label or None,
+                                    "purpose": purp or None,
+                                }
+                            )
                 return out
             # purpose is None: return full config for Settings UI
             out_rows: List[Dict[str, Any]] = []
@@ -2355,6 +2446,161 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
             logger.debug("get_flex_config failed: %s", e)
             self._conn = None
             return [] if purpose is not None else {"host_token": None, "secondary_token": None, "rows": []}
+
+    def get_key_value(self, key: str) -> Optional[str]:
+        """Return value for key from key_value_config (any group). For scoped lookup use get_key_value_in_group or get_key_values_by_group."""
+        if not self._connect():
+            return None
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute("SELECT value FROM key_value_config WHERE key = %s LIMIT 1", (key,))
+                row = cur.fetchone()
+                return (row[0].strip() if row and row[0] else None) if row else None
+        except Exception as e:
+            logger.debug("get_key_value failed: %s", e)
+            self._conn = None
+            return None
+
+    def get_key_value_in_group(self, key: str, group_name: str) -> Optional[str]:
+        """Return value for key in the group with given name. Match by group name only (not id)."""
+        if not self._connect():
+            return None
+        name = (group_name or "").strip()
+        if not name or not (key or "").strip():
+            return None
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT c.value FROM key_value_config c JOIN key_value_group g ON g.id = c.group_id WHERE g.name = %s AND c.key = %s LIMIT 1",
+                    (name, key.strip()),
+                )
+                row = cur.fetchone()
+                return (row[0].strip() if row and row[0] else None) if row else None
+        except Exception as e:
+            logger.debug("get_key_value_in_group failed: %s", e)
+            self._conn = None
+            return None
+
+    def get_key_value_groups(self) -> List[Dict[str, Any]]:
+        """Return list of {id, name, description, sort_order, created_at, updated_at} from key_value_group."""
+        if not self._connect():
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT id, name, description, sort_order, created_at, updated_at FROM key_value_group ORDER BY sort_order, id"
+                )
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.debug("get_key_value_groups failed: %s", e)
+            self._conn = None
+            return []
+
+    def get_key_values_by_group(self, group_name: str) -> List[Dict[str, Any]]:
+        """Return list of {group_id, key, value, description, updated_at} for the group with given name. Match by name only (id may change)."""
+        if not self._connect():
+            return []
+        name = (group_name or "").strip()
+        if not name:
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT c.group_id, c.key, c.value, c.description, c.updated_at FROM key_value_config c "
+                    "JOIN key_value_group g ON g.id = c.group_id WHERE g.name = %s ORDER BY c.key",
+                    (name,),
+                )
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.debug("get_key_values_by_group failed: %s", e)
+            self._conn = None
+            return []
+
+    def get_all_key_values(self, group_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return list of {group_id, key, value, description, updated_at}. If group_name given, filter by it (match by name)."""
+        if not self._connect():
+            return []
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if (group_name or "").strip():
+                    cur.execute(
+                        "SELECT c.group_id, c.key, c.value, c.description, c.updated_at FROM key_value_config c "
+                        "JOIN key_value_group g ON g.id = c.group_id WHERE g.name = %s ORDER BY c.key",
+                        (group_name.strip(),),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT group_id, key, value, description, updated_at FROM key_value_config ORDER BY group_id, key"
+                    )
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.debug("get_all_key_values failed: %s", e)
+            self._conn = None
+            return []
+
+    def get_flex_default_range_dates(self) -> Tuple[str, str]:
+        """Return (from_date, to_date) in yyyyMMdd for Flex default range. Uses settings.flex_default_range_days (integer days); to_date = yesterday."""
+        days = 30
+        try:
+            ib = self.get_ib_config()
+            if ib and ib.get("flex_default_range_days") is not None:
+                days = max(1, int(ib["flex_default_range_days"]))
+        except Exception:
+            pass
+        yesterday = date.today() - timedelta(days=1)
+        start = yesterday - timedelta(days=days)
+        return start.strftime("%Y%m%d"), yesterday.strftime("%Y%m%d")
+
+    def get_flex_executions_stats(self) -> Dict[str, Any]:
+        """Return basic stats for executions imported from Flex (source='flex_trades').
+
+        Result shape: {
+          "count": int,
+          "accounts": int,
+          "min_date": date | None,
+          "max_date": date | None,
+        }
+        """
+        if not self._ensure_conn():
+            self._conn = None
+            return {"count": 0, "accounts": 0, "min_date": None, "max_date": None}
+        try:
+            with self._conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS count,
+                        COUNT(DISTINCT account_id) AS accounts,
+                        MIN(exec_time)::date AS min_date,
+                        MAX(exec_time)::date AS max_date
+                    FROM account_executions
+                    WHERE source = %s
+                    """,
+                    ("flex_trades",),
+                )
+                row = cur.fetchone() or {}
+            return {
+                "count": int(row.get("count") or 0),
+                "accounts": int(row.get("accounts") or 0),
+                "min_date": row.get("min_date"),
+                "max_date": row.get("max_date"),
+            }
+        except Exception as e:
+            logger.warning("get_flex_executions_stats failed: %s", e)
+            return {"count": 0, "accounts": 0, "min_date": None, "max_date": None}
+
+    def get_flex_init_range_dates(self) -> Tuple[str, str]:
+        """Return (from_date, to_date) in yyyyMMdd for Flex initial/full pull. Uses settings.flex_init_range_days (integer days); to_date = yesterday."""
+        days = 360
+        try:
+            ib = self.get_ib_config()
+            if ib and ib.get("flex_init_range_days") is not None:
+                days = max(1, int(ib["flex_init_range_days"]))
+        except Exception:
+            pass
+        yesterday = date.today() - timedelta(days=1)
+        start = yesterday - timedelta(days=days)
+        return start.strftime("%Y%m%d"), yesterday.strftime("%Y%m%d")
 
     def close(self) -> None:
         if self._conn:
@@ -2446,6 +2692,54 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                     order_id = r.get("order_id")
                     cum_qty = r.get("cum_qty")
                     contract_key = r.get("contract_key")
+                    currency = r.get("currency")
+                    asset_category = r.get("asset_category")
+                    sub_category = r.get("sub_category")
+                    description = r.get("description")
+                    conid = r.get("conid")
+                    security_id = r.get("security_id")
+                    security_id_type = r.get("security_id_type")
+                    cusip = r.get("cusip")
+                    isin = r.get("isin")
+                    figi = r.get("figi")
+                    listing_exchange = r.get("listing_exchange")
+                    underlying_conid = r.get("underlying_conid")
+                    underlying_symbol = r.get("underlying_symbol")
+                    underlying_security_id = r.get("underlying_security_id")
+                    underlying_listing_exchange = r.get("underlying_listing_exchange")
+                    issuer = r.get("issuer")
+                    issuer_country_code = r.get("issuer_country_code")
+                    trade_id = r.get("trade_id")
+                    related_trade_id = r.get("related_trade_id")
+                    report_date = r.get("report_date")
+                    # Flex Trades 去重：无 exec_id 时用 account_id+trade_id 合成 exec_id，使 ON CONFLICT 生效
+                    if (
+                        source == "flex_trades"
+                        and (not exec_id or not str(exec_id).strip())
+                        and account_id
+                        and trade_id
+                    ):
+                        exec_id = f"flex_{account_id}_{trade_id}"
+                    elif not exec_id or not str(exec_id).strip():
+                        exec_id = None
+                    trade_date = r.get("trade_date")
+                    settle_date_target = r.get("settle_date_target")
+                    transaction_type = r.get("transaction_type")
+                    multiplier = r.get("multiplier")
+                    principal_adjust_factor = r.get("principal_adjust_factor")
+                    proceeds = r.get("proceeds")
+                    taxes = r.get("taxes")
+                    net_cash = r.get("net_cash")
+                    close_price = r.get("close_price")
+                    open_close_indicator = r.get("open_close_indicator")
+                    notes = r.get("notes")
+                    cost = r.get("cost")
+                    fifo_pnl_realized = r.get("fifo_pnl_realized")
+                    mtm_pnl = r.get("mtm_pnl")
+                    trade_money = r.get("trade_money")
+                    fx_rate_to_base = r.get("fx_rate_to_base")
+                    acct_alias = r.get("acct_alias")
+                    model = r.get("model")
                     raw_extra = r.get("raw_extra")
                     if raw_extra is not None and not isinstance(raw_extra, str):
                         raw_extra = json.dumps(raw_extra) if raw_extra else None
@@ -2459,18 +2753,99 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                             exec_dt = None
                     else:
                         exec_dt = None
-                    cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra"
-                    placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
-                    vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra)
+                    cols = (
+                        "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, "
+                        "expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, "
+                        "asset_category, sub_category, description, conid, security_id, security_id_type, "
+                        "cusip, isin, figi, listing_exchange, underlying_conid, underlying_symbol, "
+                        "underlying_security_id, underlying_listing_exchange, issuer, issuer_country_code, "
+                        "trade_id, related_trade_id, report_date, trade_date, settle_date_target, "
+                        "transaction_type, multiplier, principal_adjust_factor, proceeds, taxes, net_cash, "
+                        "close_price, open_close_indicator, notes, cost, fifo_pnl_realized, mtm_pnl, "
+                        "trade_money, fx_rate_to_base, acct_alias, model, raw_extra"
+                    )
+                    placeholders = ", ".join(["%s"] * 54)
+                    vals = (
+                        account_id,
+                        exec_id,
+                        exec_dt,
+                        symbol,
+                        sec_type,
+                        side,
+                        quantity,
+                        price,
+                        source,
+                        expiry,
+                        strike,
+                        option_right,
+                        exchange,
+                        order_id,
+                        cum_qty,
+                        contract_key,
+                        asset_category,
+                        sub_category,
+                        description,
+                        conid,
+                        security_id,
+                        security_id_type,
+                        cusip,
+                        isin,
+                        figi,
+                        listing_exchange,
+                        underlying_conid,
+                        underlying_symbol,
+                        underlying_security_id,
+                        underlying_listing_exchange,
+                        issuer,
+                        issuer_country_code,
+                        trade_id,
+                        related_trade_id,
+                        report_date,
+                        trade_date,
+                        settle_date_target,
+                        transaction_type,
+                        multiplier,
+                        principal_adjust_factor,
+                        proceeds,
+                        taxes,
+                        net_cash,
+                        close_price,
+                        open_close_indicator,
+                        notes,
+                        cost,
+                        fifo_pnl_realized,
+                        mtm_pnl,
+                        trade_money,
+                        fx_rate_to_base,
+                        acct_alias,
+                        model,
+                        raw_extra,
+                    )
                     if exec_id:
-                        cur.execute(
-                            f"""
-                            INSERT INTO account_executions ({cols})
-                            VALUES ({placeholders})
-                            ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
-                            """,
-                            vals,
-                        )
+                        # Flex is authoritative but lagging: when same exec_id exists with source != flex_trades, override in place (keep id).
+                        is_flex = (source == "flex_trades")
+                        if is_flex:
+                            update_set = ", ".join(
+                                f"{c.strip()} = EXCLUDED.{c.strip()}" for c in cols.split(",")
+                            )
+                            cur.execute(
+                                f"""
+                                INSERT INTO account_executions ({cols})
+                                VALUES ({placeholders})
+                                ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != ''
+                                DO UPDATE SET {update_set}
+                                """,
+                                vals,
+                            )
+                        else:
+                            cur.execute(
+                                f"""
+                                INSERT INTO account_executions ({cols})
+                                VALUES ({placeholders})
+                                ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                                """,
+                                vals,
+                            )
                     else:
                         cur.execute(
                             f"""
@@ -2696,7 +3071,10 @@ def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[
 
 def upsert_account_transactions(status_config: dict, rows: List[Dict[str, Any]]) -> int:
     """Insert or update account_transactions from Flex cash transaction list. Returns number of rows processed.
-    Each row: account_id, ts (Unix float), amount, type, currency?, description?.
+    Each row at minimum: account_id, ts (Unix float), amount, type, currency?, description?.
+    Extended fields (when present): flex_transaction_id, flex_type, flex_code, asset_category, asset_subcategory,
+    symbol, conid, security_id, security_id_type, listing_exchange, report_date, available_for_trading_date,
+    fx_rate_to_base, raw_extra.
     Uses ON CONFLICT (account_id, ts, amount, type) DO UPDATE to avoid duplicates."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return 0
@@ -2714,7 +3092,7 @@ def upsert_account_transactions(status_config: dict, rows: List[Dict[str, Any]])
                     tx_type = (r.get("type") or "other").strip() or "other"
                     currency = (r.get("currency") or "").strip() or None
                     description = (r.get("description") or "").strip() or None
-                    if not account_id and amount is None:
+                    if not account_id:
                         continue
                     if ts is None:
                         continue
@@ -2728,15 +3106,88 @@ def upsert_account_transactions(status_config: dict, rows: List[Dict[str, Any]])
                         amount_float = float(amount)
                     except (TypeError, ValueError):
                         amount_float = 0.0
+
+                    flex_transaction_id = (r.get("flex_transaction_id") or "").strip() or None
+                    flex_type = (r.get("flex_type") or "").strip() or None
+                    flex_code = (r.get("flex_code") or "").strip() or None
+                    asset_category = (r.get("asset_category") or "").strip() or None
+                    asset_subcategory = (r.get("asset_subcategory") or "").strip() or None
+                    symbol = (r.get("symbol") or "").strip() or None
+                    conid = r.get("conid")
+                    try:
+                        conid_int = int(conid) if conid is not None else None
+                    except (TypeError, ValueError):
+                        conid_int = None
+                    security_id = (r.get("security_id") or "").strip() or None
+                    security_id_type = (r.get("security_id_type") or "").strip() or None
+                    listing_exchange = (r.get("listing_exchange") or "").strip() or None
+                    report_date = (r.get("report_date") or "").strip() or None
+                    available_for_trading_date = (r.get("available_for_trading_date") or "").strip() or None
+                    fx_rate_to_base = r.get("fx_rate_to_base")
+                    try:
+                        fx_rate_to_base_float = float(fx_rate_to_base) if fx_rate_to_base is not None else None
+                    except (TypeError, ValueError):
+                        fx_rate_to_base_float = None
+                    raw_extra = r.get("raw_extra")
+
                     cur.execute(
                         """
-                        INSERT INTO account_transactions (account_id, ts, amount, type, currency, description)
-                        VALUES (%s, to_timestamp(%s), %s, %s, %s, %s)
+                        INSERT INTO account_transactions (
+                            account_id, ts, amount, type, currency, description,
+                            flex_transaction_id, flex_type, flex_code,
+                            asset_category, asset_subcategory,
+                            symbol, conid, security_id, security_id_type,
+                            listing_exchange, report_date, available_for_trading_date,
+                            fx_rate_to_base, raw_extra
+                        )
+                        VALUES (
+                            %s, to_timestamp(%s), %s, %s, %s, %s,
+                            %s, %s, %s,
+                            %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s,
+                            %s, %s
+                        )
                         ON CONFLICT (account_id, ts, amount, type) DO UPDATE SET
                             currency = COALESCE(EXCLUDED.currency, account_transactions.currency),
-                            description = COALESCE(EXCLUDED.description, account_transactions.description)
+                            description = COALESCE(EXCLUDED.description, account_transactions.description),
+                            flex_transaction_id = COALESCE(EXCLUDED.flex_transaction_id, account_transactions.flex_transaction_id),
+                            flex_type = COALESCE(EXCLUDED.flex_type, account_transactions.flex_type),
+                            flex_code = COALESCE(EXCLUDED.flex_code, account_transactions.flex_code),
+                            asset_category = COALESCE(EXCLUDED.asset_category, account_transactions.asset_category),
+                            asset_subcategory = COALESCE(EXCLUDED.asset_subcategory, account_transactions.asset_subcategory),
+                            symbol = COALESCE(EXCLUDED.symbol, account_transactions.symbol),
+                            conid = COALESCE(EXCLUDED.conid, account_transactions.conid),
+                            security_id = COALESCE(EXCLUDED.security_id, account_transactions.security_id),
+                            security_id_type = COALESCE(EXCLUDED.security_id_type, account_transactions.security_id_type),
+                            listing_exchange = COALESCE(EXCLUDED.listing_exchange, account_transactions.listing_exchange),
+                            report_date = COALESCE(EXCLUDED.report_date, account_transactions.report_date),
+                            available_for_trading_date = COALESCE(EXCLUDED.available_for_trading_date, account_transactions.available_for_trading_date),
+                            fx_rate_to_base = COALESCE(EXCLUDED.fx_rate_to_base, account_transactions.fx_rate_to_base),
+                            raw_extra = COALESCE(EXCLUDED.raw_extra, account_transactions.raw_extra)
                         """,
-                        (account_id, ts_float, amount_float, tx_type, currency, description),
+                        (
+                            account_id,
+                            ts_float,
+                            amount_float,
+                            tx_type,
+                            currency,
+                            description,
+                            flex_transaction_id,
+                            flex_type,
+                            flex_code,
+                            asset_category,
+                            asset_subcategory,
+                            symbol,
+                            conid_int,
+                            security_id,
+                            security_id_type,
+                            listing_exchange,
+                            report_date,
+                            available_for_trading_date,
+                            fx_rate_to_base_float,
+                            json.dumps(raw_extra) if raw_extra is not None else None,
+                        ),
                     )
             conn.commit()
             return len(rows)
@@ -3539,8 +3990,10 @@ def write_flex_config(
     host_token: Optional[str],
     secondary_token: Optional[str],
     accounts: List[Dict[str, Any]],
+    flex_default_range_days: Optional[int] = None,
+    flex_init_range_days: Optional[int] = None,
 ) -> bool:
-    """Write Flex tokens to settings and replace flex_accounts with rows (query_host_id, query_secondary_id, query_label, purpose). Returns True on success."""
+    """Write Flex tokens to settings and replace flex_accounts with rows. Optionally write settings.flex_default_range_days and flex_init_range_days (integers). Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     try:
@@ -3548,9 +4001,16 @@ def write_flex_config(
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
+                days_val = None
+                if flex_default_range_days is not None:
+                    days_val = max(1, int(flex_default_range_days))
+                init_val = None
+                if flex_init_range_days is not None:
+                    init_val = max(1, int(flex_init_range_days))
                 cur.execute(
-                    "UPDATE settings SET ib_flex_host_token = %s, ib_flex_secondary_token = %s WHERE id = 1",
-                    ((host_token or "").strip() or None, (secondary_token or "").strip() or None),
+                    "UPDATE settings SET ib_flex_host_token = %s, ib_flex_secondary_token = %s, "
+                    "flex_default_range_days = COALESCE(%s, flex_default_range_days), flex_init_range_days = COALESCE(%s, flex_init_range_days) WHERE id = 1",
+                    ((host_token or "").strip() or None, (secondary_token or "").strip() or None, days_val, init_val),
                 )
                 cur.execute("DELETE FROM flex_accounts")
                 for i, a in enumerate(accounts):
@@ -3573,4 +4033,206 @@ def write_flex_config(
             conn.close()
     except Exception as e:
         logger.warning("write_flex_config failed: %s", e)
+        return False
+
+
+def set_key_value(
+    status_config: dict,
+    key: str,
+    value: str,
+    description: Optional[str] = None,
+    group_name: Optional[str] = None,
+) -> bool:
+    """Upsert one row in key_value_config. group_name required (match by name only). Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    key = (key or "").strip()
+    if not key:
+        return False
+    name = (group_name or "").strip()
+    if not name:
+        return False
+    value = (value or "").strip() if value is not None else ""
+    gid = None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM key_value_group WHERE name = %s", (name,))
+                row = cur.fetchone()
+                gid = int(row[0]) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("set_key_value resolve group_name failed: %s", e)
+        return False
+    if gid is None:
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO key_value_config (group_id, key, value, description, updated_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (group_id, key) DO UPDATE SET value = EXCLUDED.value,
+                        description = COALESCE(NULLIF(EXCLUDED.description, ''), key_value_config.description),
+                        updated_at = now()
+                    """,
+                    (gid, key, value, (description or "").strip() or None),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("set_key_value failed: %s", e)
+        return False
+
+
+def delete_key_value(
+    status_config: dict,
+    key: str,
+    group_name: Optional[str] = None,
+) -> bool:
+    """Delete one row from key_value_config. group_name required (match by name only). Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    key = (key or "").strip()
+    if not key:
+        return False
+    name = (group_name or "").strip()
+    if not name:
+        return False
+    gid = None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM key_value_group WHERE name = %s", (name,))
+                row = cur.fetchone()
+                gid = int(row[0]) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_key_value resolve group_name failed: %s", e)
+        return False
+    if gid is None:
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM key_value_config WHERE group_id = %s AND key = %s", (gid, key))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_key_value failed: %s", e)
+        return False
+
+
+def create_key_value_group(
+    status_config: dict,
+    name: str,
+    description: Optional[str] = None,
+    sort_order: int = 0,
+) -> Optional[int]:
+    """Insert one row in key_value_group. Returns new id on success, None on failure."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    name = (name or "").strip()
+    if not name:
+        return None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO key_value_group (name, description, sort_order) VALUES (%s, %s, %s) RETURNING id",
+                    (name, (description or "").strip() or None, sort_order),
+                )
+                row = cur.fetchone()
+                new_id = int(row[0]) if row else None
+            conn.commit()
+            return new_id
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("create_key_value_group failed: %s", e)
+        return None
+
+
+def update_key_value_group(
+    status_config: dict,
+    group_name: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    sort_order: Optional[int] = None,
+) -> bool:
+    """Update one row in key_value_group. group_name = existing group name (match by name only). Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    gname = (group_name or "").strip()
+    if not gname:
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                updates = []
+                args = []
+                if name is not None:
+                    updates.append("name = %s")
+                    args.append(name.strip())
+                if description is not None:
+                    updates.append("description = %s")
+                    args.append(description.strip() or None)
+                if sort_order is not None:
+                    updates.append("sort_order = %s")
+                    args.append(sort_order)
+                if not updates:
+                    return True
+                updates.append("updated_at = now()")
+                args.append(gname)
+                cur.execute(
+                    f"UPDATE key_value_group SET {', '.join(updates)} WHERE name = %s",
+                    args,
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("update_key_value_group failed: %s", e)
+        return False
+
+
+def delete_key_value_group(status_config: dict, group_name: str) -> bool:
+    """Delete one group and its key_value_config rows (CASCADE). group_name = name to match (not id). Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    name = (group_name or "").strip()
+    if not name:
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM key_value_group WHERE name = %s", (name,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_key_value_group failed: %s", e)
         return False

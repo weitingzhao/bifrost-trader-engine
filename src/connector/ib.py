@@ -677,6 +677,8 @@ class IBConnector:
                     raw_extra["conId"] = con_id
                 if local_symbol:
                     raw_extra["localSymbol"] = local_symbol
+                # 标记为来自 IB TWS 事件流的执行记录
+                source_val = "tws_event"
                 out.append({
                     "exec_id": exec_id,
                     "time": ts,
@@ -687,7 +689,7 @@ class IBConnector:
                     "quantity": float(shares) if shares is not None else None,
                     "price": float(price) if price is not None else None,
                     "commission": float(commission) if commission is not None else None,
-                    "source": "daemon" if (ex and getattr(ex, "clientId", None) == self.client_id) else "manual",
+                    "source": source_val,
                     "expiry": expiry or None,
                     "strike": float(strike) if strike is not None else None,
                     "option_right": option_right or None,
@@ -745,6 +747,8 @@ class IBConnector:
                         wts = wtime.timestamp()
                     except Exception:
                         pass
+                # 标记为来自 IB TWS 事件流的执行记录
+                source_val2 = "tws_event"
                 out.append({
                     "exec_id": weid,
                     "time": wts,
@@ -755,7 +759,7 @@ class IBConnector:
                     "quantity": float(wex.shares) if wex and wex.shares is not None else None,
                     "price": float(wex.price) if wex and wex.price is not None else None,
                     "commission": float(wcommission) if wcommission is not None else None,
-                    "source": "daemon" if (wex and getattr(wex, "clientId", None) == self.client_id) else "manual",
+                    "source": source_val2,
                     "expiry": getattr(wcontract, "lastTradeDateOrContractMonth", "") or None if wcontract else None,
                     "strike": float(getattr(wcontract, "strike", None)) if wcontract and getattr(wcontract, "strike", None) is not None else None,
                     "option_right": getattr(wcontract, "right", "") or None if wcontract else None,

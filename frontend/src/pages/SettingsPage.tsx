@@ -7,6 +7,13 @@ import {
   fetchMarketHolidays,
   postMarketHoliday,
   deleteMarketHoliday,
+  fetchKeyValueConfig,
+  fetchKeyValueGroups,
+  postKeyValueGroup,
+  patchKeyValueGroup,
+  deleteKeyValueGroup,
+  postKeyValueConfig,
+  deleteKeyValueConfig,
   type MarketHolidayRow,
 } from '../api'
 import type { FlexAccountItem } from '../types'
@@ -30,6 +37,7 @@ const SETTINGS_SECTIONS = [
   { id: 'settings-heartbeat', label: 'Daemon App', icon: 'heartbeat' },
   { id: 'settings-ib-connection', label: 'IB Settings', icon: 'plug' },
   { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' },
+  { id: 'settings-key-value', label: 'Key-Value Config', icon: 'key-value' },
 ] as const
 
 const IB_CONNECTION_SUBSECTIONS = [
@@ -37,7 +45,7 @@ const IB_CONNECTION_SUBSECTIONS = [
   { id: 'ib-second', label: 'Second User', icon: 'user-second' },
   { id: 'ib-trading-account', label: 'Trading account', icon: 'user-host' },
   { id: 'ib-client-ids', label: 'Client IDs', icon: 'id' },
-  { id: 'ib-flex', label: 'Flex', icon: 'flex' },
+  { id: 'ib-flex', label: 'Flex Settings', icon: 'flex' },
 ] as const
 
 /** Fixed Flex query types: one row per type, no add/remove. Each maps to a future feature. */
@@ -94,6 +102,11 @@ function SettingsSectionIcon({ name }: { name: string }) {
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8" /><path d="M16 17H8" /><path d="M10 9H8" />
       </svg>
     ),
+    'key-value': (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 2v4" /><path d="M12 18v4" /><path d="m4.93 4.93 2.83 2.83" /><path d="m16.24 16.24 2.83 2.83" /><path d="M2 12h4" /><path d="M18 12h4" /><path d="m4.93 19.07 2.83-2.83" /><path d="m16.24 7.76 2.83-2.83" /><circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
   }
   return icons[name] ?? null
 }
@@ -128,6 +141,26 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
   const [flexSecondaryToken, setFlexSecondaryToken] = useState('')
   const [flexAccounts, setFlexAccounts] = useState<FlexAccountItem[]>(getDefaultFlexRows)
   const [flexInitialized, setFlexInitialized] = useState(false)
+  /** Default Flex Query range in days (e.g. 30). Stored in settings.flex_default_range_days. */
+  const [defaultFlexRangeDays, setDefaultFlexRangeDays] = useState<number>(30)
+  /** Init Flex Query range in days (e.g. 360) for initial/full pull. Stored in settings.flex_init_range_days. */
+  const [initFlexRangeDays, setInitFlexRangeDays] = useState<number>(360)
+  const [keyValueItems, setKeyValueItems] = useState<Array<{ key: string; value: string; description?: string | null; updated_at?: string; group_id?: number }>>([])
+  const [keyValueLoading, setKeyValueLoading] = useState(false)
+  const [keyValueMsg, setKeyValueMsg] = useState({ text: '', isErr: false })
+  const [keyValueGroups, setKeyValueGroups] = useState<Array<{ id: number; name: string; description?: string | null; sort_order?: number }>>([])
+  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupDesc, setNewGroupDesc] = useState('')
+  const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
+  const [editGroupName, setEditGroupName] = useState('')
+  const [editGroupDesc, setEditGroupDesc] = useState('')
+  const [newKey, setNewKey] = useState('')
+  const [newValue, setNewValue] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [editDesc, setEditDesc] = useState('')
 
   useEffect(() => {
     const c = status?.ib_config
@@ -144,6 +177,10 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     if (c.ib2_port_type != null) setIb2PortType(c.ib2_port_type as 'tws_live' | 'tws_paper' | 'gateway')
     if (c.ib2_client_id_listener != null) setIb2ClientIdListener(c.ib2_client_id_listener)
     if (c.ib2_client_id_account != null) setIb2ClientIdAccount(c.ib2_client_id_account)
+    const days = (c as { flex_default_range_days?: number }).flex_default_range_days
+    if (typeof days === 'number' && Number.isFinite(days) && days >= 1) setDefaultFlexRangeDays(Math.round(days))
+    const initDays = (c as { flex_init_range_days?: number }).flex_init_range_days
+    if (typeof initDays === 'number' && Number.isFinite(initDays) && initDays >= 1) setInitFlexRangeDays(Math.round(initDays))
     setIbConfigInitialized(true)
   }, [status?.ib_config, ibConfigInitialized])
 
@@ -155,7 +192,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
       setFlexSecondaryToken((fc.secondary_token ?? '') || '')
       setFlexAccounts(
         FLEX_QUERY_TYPES.map(({ purpose, label }) => {
-          const row = fc.rows!.find((r: { purpose?: string }) => (r.purpose || 'cash_transactions') === purpose)
+          const row = fc.rows!.find((r: FlexAccountItem) => (r.purpose || 'cash_transactions') === purpose)
           return {
             purpose,
             query_label: row?.query_label ?? label,
@@ -171,6 +208,21 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     }
     setFlexInitialized(true)
   }, [status, status?.flex_config, flexInitialized])
+
+  const loadKeyValueItemsForGroup = async (groupName: string) => {
+    setKeyValueLoading(true)
+    setKeyValueMsg({ text: '', isErr: false })
+    try {
+      const r = await fetchKeyValueConfig({ group_name: groupName })
+      if (r.ok) setKeyValueItems(r.items ?? [])
+      else setKeyValueItems([])
+    } catch (e) {
+      setKeyValueMsg({ text: (e as Error).message, isErr: true })
+      setKeyValueItems([])
+    } finally {
+      setKeyValueLoading(false)
+    }
+  }
 
   useEffect(() => {
     const sec = status?.daemon_heartbeat?.heartbeat_interval_sec
@@ -219,6 +271,18 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     if (window.location.hash) setActiveSectionId(hashToSectionId(window.location.hash))
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
+
+  useEffect(() => {
+    if (activeSectionId === 'settings-key-value') {
+      fetchKeyValueGroups().then((r) => {
+        if (r.ok) setKeyValueGroups(r.items ?? [])
+      })
+    }
+  }, [activeSectionId])
+
+  useEffect(() => {
+    if (activeSectionId === 'settings-key-value' && selectedGroupName != null) loadKeyValueItemsForGroup(selectedGroupName)
+  }, [activeSectionId, selectedGroupName])
 
   const onAddHoliday = async () => {
     const d = addDate.trim().slice(0, 10)
@@ -272,7 +336,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
         ib2_client_id_account: ib2ClientIdAccount,
       }),
       postSetHeartbeatInterval(sec),
-      postFlexConfig(flexHostToken.trim() || undefined, flexSecondaryToken.trim() || undefined, flexToSave),
+      postFlexConfig(flexHostToken.trim() || undefined, flexSecondaryToken.trim() || undefined, flexToSave, defaultFlexRangeDays, initFlexRangeDays),
     ])
     const ok = resIb.ok && resHb.ok && resFlex.ok
     const err = !resIb.ok ? resIb.error : !resHb.ok ? resHb.error : !resFlex.ok ? resFlex.error : undefined
@@ -624,10 +688,39 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
         </div>
         <div className="daemon-group" id="ib-flex">
           <div className="daemon-group-header">
-            <span className="daemon-group-title">Flex (Query rows)</span>
-            <InfoTooltip text="One row per query type. Fill in Query IDs for Host and (optional) Second IB. Each type maps to a feature (e.g. Cash Transactions → Transfer & Pay Fetch). Tokens set above. See docs/FLEX_TRANSACTIONS.md." />
+            <span className="daemon-group-title">Flex Settings</span>
+            <InfoTooltip text="One row per query type. Fill in Query IDs for Host and (optional) Second IB. Default Flex Query range is used when Fetch from IB (Flex) is called without a date range (e.g. from script or API). Tokens set above. See docs/FLEX_TRANSACTIONS.md." />
           </div>
           <div className="daemon-group-body">
+            <div className="controls" style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <label>
+                Default Flex Query range (days):
+                <input
+                  type="number"
+                  min={1}
+                  max={9999}
+                  value={defaultFlexRangeDays}
+                  onChange={(e) => setDefaultFlexRangeDays(Math.max(1, Math.min(9999, Math.round(Number(e.target.value) || 30))))}
+                  className="settings-flex-range-select"
+                  style={{ width: '5rem', marginLeft: '0.35rem' }}
+                  aria-label="Default Flex Query range in days"
+                />
+              </label>
+              <label>
+                Init Flex Query range (days):
+                <input
+                  type="number"
+                  min={1}
+                  max={9999}
+                  value={initFlexRangeDays}
+                  onChange={(e) => setInitFlexRangeDays(Math.max(1, Math.min(9999, Math.round(Number(e.target.value) || 360))))}
+                  className="settings-flex-range-select"
+                  style={{ width: '5rem', marginLeft: '0.35rem' }}
+                  aria-label="Init Flex Query range in days"
+                />
+              </label>
+              <span className="section-hint" style={{ margin: 0 }}>Default: used when no from_date/to_date is sent (from_date = yesterday − N days, to_date = yesterday). Init: for initial/full pull (e.g. 360 days).</span>
+            </div>
             <div className="flex-query-table-wrap">
               <table className="flex-query-table" aria-label="Flex Query IDs by type">
                 <thead>
@@ -762,6 +855,179 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+        </div>
+        <div className="daemon-group" id="settings-key-value">
+          <div className="daemon-group-header">
+            <span className="daemon-group-title">Key-Value Config</span>
+            <InfoTooltip text="Key-value options are grouped by Group. Each group can back a dropdown or option set (e.g. flex_settings for Flex default range). Add groups first, then select a group to add/edit key-value rows." />
+          </div>
+          <div className="daemon-group-body">
+            <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Groups</h4>
+            <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <input
+                type="text"
+                placeholder="Group name"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                className="settings-key-value-input"
+                aria-label="New group name"
+                style={{ width: '10rem' }}
+              />
+              <input
+                type="text"
+                placeholder="Description (optional)"
+                value={newGroupDesc}
+                onChange={(e) => setNewGroupDesc(e.target.value)}
+                className="settings-key-value-input"
+                aria-label="Group description"
+                style={{ width: '14rem' }}
+              />
+              <button
+                type="button"
+                className="btn-resume"
+                onClick={async () => {
+                  const name = newGroupName.trim()
+                  if (!name) return
+                  const r = await postKeyValueGroup({ name, description: newGroupDesc.trim() || undefined })
+                  if (r.ok) {
+                    setNewGroupName('')
+                    setNewGroupDesc('')
+                    setKeyValueMsg({ text: 'Group added.', isErr: false })
+                    const r2 = await fetchKeyValueGroups()
+                    if (r2.ok) setKeyValueGroups(r2.items ?? [])
+                  } else setKeyValueMsg({ text: r.error ?? 'Failed', isErr: true })
+                }}
+              >
+                Add group
+              </button>
+              <button type="button" className="btn-pause" onClick={async () => { const r = await fetchKeyValueGroups(); if (r.ok) setKeyValueGroups(r.items ?? []) }} disabled={keyValueLoading}>
+                Refresh groups
+              </button>
+            </div>
+            {keyValueGroups.length === 0 && !keyValueLoading ? (
+              <p className="section-hint">No groups yet. Add a group name above (e.g. flex_range_options).</p>
+            ) : (
+              <table className="settings-key-value-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', marginBottom: '1rem' }} aria-label="Key-Value Groups">
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem' }}>Name</th>
+                    <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem' }}>Description</th>
+                    <th style={{ width: '10rem' }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {keyValueGroups.map((g) => (
+                    <tr key={g.id}>
+                      <td style={{ padding: '0.25rem 0.5rem', fontFamily: 'monospace' }}>
+                        {editingGroupName === g.name ? (
+                          <input type="text" value={editGroupName} onChange={(e) => setEditGroupName(e.target.value)} className="settings-key-value-input" style={{ width: '100%' }} aria-label="Edit group name" />
+                        ) : (
+                          g.name
+                        )}
+                      </td>
+                      <td style={{ padding: '0.25rem 0.5rem' }}>
+                        {editingGroupName === g.name ? (
+                          <input type="text" value={editGroupDesc} onChange={(e) => setEditGroupDesc(e.target.value)} placeholder="Optional" className="settings-key-value-input" style={{ width: '100%' }} aria-label="Edit group description" />
+                        ) : (
+                          g.description ?? '—'
+                        )}
+                      </td>
+                      <td style={{ padding: '0.25rem' }}>
+                        {editingGroupName === g.name ? (
+                          <>
+                            <button type="button" className="btn-resume" onClick={async () => { const r = await patchKeyValueGroup(g.name, { name: editGroupName.trim(), description: editGroupDesc.trim() || undefined }); if (r.ok) { setEditingGroupName(null); const r2 = await fetchKeyValueGroups(); if (r2.ok) setKeyValueGroups(r2.items ?? []); if (selectedGroupName === g.name) setSelectedGroupName(editGroupName.trim() || null) } else setKeyValueMsg({ text: r.error ?? 'Failed', isErr: true }) }} style={{ marginRight: '0.25rem', padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Save</button>
+                            <button type="button" className="btn-pause" onClick={() => setEditingGroupName(null)} style={{ padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" className="btn-resume" onClick={() => { setSelectedGroupName(g.name); loadKeyValueItemsForGroup(g.name) }} style={{ marginRight: '0.25rem', padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Select</button>
+                            <button type="button" className="btn-resume" onClick={() => { setEditingGroupName(g.name); setEditGroupName(g.name); setEditGroupDesc(g.description ?? '') }} style={{ marginRight: '0.25rem', padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Edit</button>
+                            <button type="button" className="btn-pause" onClick={async () => { if (!window.confirm(`Delete group "${g.name}" and all its key-values?`)) return; const r = await deleteKeyValueGroup(g.name); if (r.ok) { setKeyValueGroups(prev => prev.filter(x => x.name !== g.name)); if (selectedGroupName === g.name) { setSelectedGroupName(null); setKeyValueItems([]) }; setKeyValueMsg({ text: 'Group deleted.', isErr: false }) } else setKeyValueMsg({ text: r.error ?? 'Delete failed', isErr: true }) }} style={{ padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Delete</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {selectedGroupName != null && (
+              <>
+                <h4 style={{ marginBottom: '0.5rem' }}>Key-Values for group: {keyValueGroups.find(g => g.name === selectedGroupName)?.name ?? selectedGroupName}</h4>
+                <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <input type="text" placeholder="Key" value={newKey} onChange={(e) => setNewKey(e.target.value)} className="settings-key-value-input" aria-label="New key" style={{ width: '12rem' }} />
+                  <input type="text" placeholder="Value" value={newValue} onChange={(e) => setNewValue(e.target.value)} className="settings-key-value-input" aria-label="New value" style={{ width: '10rem' }} />
+                  <input type="text" placeholder="Description (optional)" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} className="settings-key-value-input" aria-label="Description" style={{ width: '14rem' }} />
+                  <button
+                    type="button"
+                    className="btn-resume"
+                    onClick={async () => {
+                      const k = newKey.trim()
+                      if (!k) return
+                      const r = await postKeyValueConfig({ group_name: selectedGroupName, key: k, value: newValue.trim(), description: newDesc.trim() || undefined })
+                      if (r.ok) { setNewKey(''); setNewValue(''); setNewDesc(''); loadKeyValueItemsForGroup(selectedGroupName); setKeyValueMsg({ text: 'Saved.', isErr: false }) } else setKeyValueMsg({ text: r.error ?? 'Save failed', isErr: true })
+                    }}
+                  >
+                    Add key-value
+                  </button>
+                  <button type="button" className="btn-pause" onClick={() => { setSelectedGroupName(null); setKeyValueItems([]) }}>Clear selection</button>
+                </div>
+                {keyValueMsg.text && (
+                  <div className={keyValueMsg.isErr ? 'msg-error' : 'msg-ok'} style={{ marginBottom: '0.5rem' }}>{keyValueMsg.text}</div>
+                )}
+                {keyValueLoading ? (
+                  <p>Loading…</p>
+                ) : keyValueItems.length === 0 ? (
+                  <p className="section-hint">No key-values in this group. Add key/value above.</p>
+                ) : (
+                  <table className="settings-key-value-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }} aria-label="Key-Values in group">
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem' }}>Key</th>
+                        <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem' }}>Value</th>
+                        <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem' }}>Description</th>
+                        <th style={{ width: '9rem', minWidth: '9rem', textAlign: 'left', padding: '0.25rem 0.5rem' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {keyValueItems.map((row) => (
+                        <tr key={`${selectedGroupName}-${row.key}`}>
+                          <td style={{ padding: '0.25rem 0.5rem', fontFamily: 'monospace' }}>{row.key}</td>
+                          <td style={{ padding: '0.25rem 0.5rem' }}>
+                            {editingKey === row.key ? (
+                              <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="settings-key-value-input" style={{ width: '100%', maxWidth: '14rem' }} aria-label={`Edit value for ${row.key}`} />
+                            ) : (
+                              <span>{row.value}</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.25rem 0.5rem' }}>
+                            {editingKey === row.key ? (
+                              <input type="text" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Optional" className="settings-key-value-input" style={{ width: '100%', maxWidth: '12rem' }} aria-label={`Edit description for ${row.key}`} />
+                            ) : (
+                              <span>{row.description ?? '—'}</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.25rem 0.5rem', whiteSpace: 'nowrap' }}>
+                            {editingKey === row.key ? (
+                              <>
+                                <button type="button" className="btn-resume" onClick={async () => { const r = await postKeyValueConfig({ group_name: selectedGroupName, key: row.key, value: editValue, description: editDesc.trim() || undefined }); if (r.ok) { setEditingKey(null); loadKeyValueItemsForGroup(selectedGroupName); setKeyValueMsg({ text: 'Saved.', isErr: false }) } else setKeyValueMsg({ text: r.error ?? 'Failed', isErr: true }) }} style={{ marginRight: '0.25rem', padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Save</button>
+                                <button type="button" className="btn-pause" onClick={() => setEditingKey(null)} style={{ padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Cancel</button>
+                              </>
+                            ) : (
+                              <>
+                                <button type="button" className="btn-resume" onClick={() => { setEditingKey(row.key); setEditValue(row.value); setEditDesc(row.description ?? '') }} style={{ marginRight: '0.25rem', padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Edit</button>
+                                <button type="button" className="btn-pause" onClick={async () => { if (!window.confirm(`Delete key "${row.key}"?`)) return; const r = await deleteKeyValueConfig(row.key, selectedGroupName); if (r.ok) { loadKeyValueItemsForGroup(selectedGroupName); setKeyValueMsg({ text: 'Deleted.', isErr: false }); if (editingKey === row.key) setEditingKey(null) } else setKeyValueMsg({ text: r.error ?? 'Delete failed', isErr: true }) }} style={{ padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>Delete</button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
             )}
           </div>
         </div>

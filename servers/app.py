@@ -7,15 +7,15 @@ import logging
 import os
 import threading
 import time
-from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 import asyncio
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from servers.flex_client import fetch_cash_transactions
+from servers.flex_client import fetch_cash_transactions, fetch_trades
 from servers.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
     StatusReader,
@@ -24,6 +24,11 @@ from servers.reader import (
     write_heartbeat_interval,
     write_ib_config,
     write_flex_config,
+    set_key_value,
+    delete_key_value,
+    create_key_value_group,
+    update_key_value_group,
+    delete_key_value_group,
     write_ohlc_bars_to_db,
     write_stock_bars,
     delete_stock_bars_for_symbol,
@@ -42,6 +47,7 @@ from servers.reader import (
     get_bars_backfill_last_updated,
     upsert_account_transactions,
 )
+from servers.flex_client import parse_trades_xml
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
 try:
@@ -111,10 +117,12 @@ class FlexAccountItem(BaseModel):
 
 
 class FlexConfigBody(BaseModel):
-    """POST /config/flex body: host_token, secondary_token (settings), and rows (query_host_id, query_secondary_id?, query_label?, purpose?)."""
+    """POST /config/flex body: host_token, secondary_token (settings), accounts, and optional flex_default_range_days, flex_init_range_days (integers, saved to settings)."""
     host_token: Optional[str] = None
     secondary_token: Optional[str] = None
     accounts: List[FlexAccountItem] = []
+    flex_default_range_days: Optional[int] = None
+    flex_init_range_days: Optional[int] = None
 
     class Config:
         extra = "ignore"
@@ -1023,6 +1031,17 @@ def create_app(
         items = reader.get_executions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=effective_limit)
         return {"executions": items}
 
+    @app.get("/executions/freshness")
+    def get_executions_freshness() -> Dict[str, Any]:
+        """Execution data freshness per (account_id, source).
+
+        Returns latest exec_time (Unix seconds) for each (account_id, source) combination
+        in account_executions, plus days_since_latest (now - exec_time in days).
+        Used by Accounts page to show whether TWS/Flex/manual executions are up to date.
+        """
+        items = reader.get_executions_freshness()
+        return {"items": items}
+
     @app.get("/performance")
     def get_performance(
         since_ts: Optional[float] = Query(None, description="Filter trades with time >= this (Unix s)"),
@@ -1077,6 +1096,8 @@ def create_app(
             payload = body or {}
             from_date = (payload.get("from_date") or "").strip() or None
             to_date = (payload.get("to_date") or "").strip() or None
+            if from_date is None and to_date is None:
+                from_date, to_date = reader.get_flex_default_range_dates()
             all_rows: List[Dict[str, Any]] = []
             errors: List[str] = []
             for token, query_id in entries:
@@ -1096,6 +1117,305 @@ def create_app(
             return {"ok": True, "count": n, "message": msg, "by_account": len(entries)}
         except Exception as e:
             logger.exception("POST /transactions/fetch failed: %s", e)
+            return {"ok": False, "error": str(e), "count": 0}
+
+    @app.post("/executions/fetch-flex")
+    def post_executions_fetch_flex(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Fetch executions/trades from IB Flex Web Service (Trades report) and upsert into account_executions.
+
+        使用 flex_accounts 中 purpose=trades 的 Query 行（Settings → IB Connection → Flex）。
+        Flex Trades 作为 account_executions 的历史补充来源，字段映射见 DATABASE.md §2.11。
+        """
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "count": 0}
+        try:
+            entries: List[Dict[str, Any]] = []
+            flex_list = reader.get_flex_config(purpose="trades")
+            for a in flex_list:
+                tok = (a.get("token") or "").strip()
+                qid = (a.get("query_id") or "").strip()
+                if tok and qid:
+                    role = (a.get("role") or "").strip() or "unknown"
+                    label = (a.get("query_label") or "").strip() or None
+                    entries.append(
+                        {
+                            "token": tok,
+                            "query_id": qid,
+                            "role": role,
+                            "query_label": label,
+                        }
+                    )
+            if not entries:
+                return {
+                    "ok": False,
+                    "error": "No Flex credentials for trades: configure in Settings → IB Connection → Flex (token and query_id with purpose=trades).",
+                    "count": 0,
+                }
+            payload = body or {}
+            from_date = (payload.get("from_date") or "").strip() or None
+            to_date = (payload.get("to_date") or "").strip() or None
+
+            # Determine Flex date range:
+            # - If caller did not specify from_date/to_date, choose based on existing flex_trades data:
+            #   - No existing Flex executions → use settings.flex_init_range_days (initial/full pull).
+            #   - Has existing Flex executions → use days_since_last + settings.flex_default_range_days.
+            range_mode = "manual" if from_date or to_date else "auto"
+            range_days = None
+            if from_date is None and to_date is None:
+                from datetime import date, timedelta
+
+                stats_before = reader.get_flex_executions_stats()
+                ib_cfg = reader.get_ib_config() or {}
+                try:
+                    default_days = max(1, int(ib_cfg.get("flex_default_range_days", 30)))
+                except Exception:
+                    default_days = 30
+                try:
+                    init_days = max(1, int(ib_cfg.get("flex_init_range_days", 360)))
+                except Exception:
+                    init_days = 360
+
+                yesterday = date.today() - timedelta(days=1)
+                to_date = yesterday.strftime("%Y%m%d")
+                max_date = stats_before.get("max_date") if stats_before else None
+
+                if not stats_before or (stats_before.get("count") or 0) == 0 or max_date is None:
+                    # Initial/full import from Flex: use init range.
+                    start = yesterday - timedelta(days=init_days)
+                    from_date = start.strftime("%Y%m%d")
+                    range_mode = "init"
+                    range_days = init_days
+                else:
+                    # Incremental import: extend backwards by days_since_last + default_days.
+                    try:
+                        last_date = max_date
+                        # max_date may be a datetime.date or datetime; normalize to date
+                        last_date = getattr(last_date, "date", lambda: last_date)()
+                    except Exception:
+                        last_date = yesterday
+                    days_since_last = max(0, (yesterday - last_date).days)
+                    total_days = days_since_last + default_days
+                    start = yesterday - timedelta(days=total_days)
+                    from_date = start.strftime("%Y%m%d")
+                    range_mode = "incremental"
+                    range_days = total_days
+
+            all_rows: List[Dict[str, Any]] = []
+            errors: List[str] = []
+            rows_per_fetch: List[int] = []
+            per_query: List[Dict[str, Any]] = []
+
+            from datetime import datetime, date as _date, timezone as _tz
+
+            def _rows_span(rows: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
+                min_d: Optional[_date] = None
+                max_d: Optional[_date] = None
+                for r in rows:
+                    d: Optional[_date] = None
+                    t_val = r.get("time")
+                    if isinstance(t_val, (int, float)):
+                        try:
+                            d = datetime.fromtimestamp(float(t_val), tz=_tz.utc).date()
+                        except Exception:
+                            d = None
+                    elif isinstance(t_val, datetime):
+                        try:
+                            d = t_val.date()
+                        except Exception:
+                            d = None
+                    if d is None:
+                        td = r.get("trade_date") or r.get("report_date")
+                        if isinstance(td, _date):
+                            d = td
+                    if d is None:
+                        continue
+                    if min_d is None or d < min_d:
+                        min_d = d
+                    if max_d is None or d > max_d:
+                        max_d = d
+                return (min_d.isoformat() if min_d is not None else None, max_d.isoformat() if max_d is not None else None)
+
+            for i, entry in enumerate(entries):
+                token = entry["token"]
+                query_id = entry["query_id"]
+                role = entry.get("role") or "unknown"
+                label = entry.get("query_label")
+                try:
+                    rows = fetch_trades(token, query_id, from_date=from_date, to_date=to_date)
+                    used_fallback = False
+                    # If no rows for this Query ID in the computed date range, try a fallback with period=5 (Last 365 days)
+                    # to mimic scripts/flex_pull_*.py behavior and verify whether trades exist outside the chosen range.
+                    if not rows:
+                        try:
+                            rows_fallback = fetch_trades(token, query_id, period=5)
+                            if rows_fallback:
+                                rows = rows_fallback
+                                used_fallback = True
+                        except ValueError as e_fallback:
+                            # Treat fallback failure as part of errors but do not stop other queries.
+                            errors.append(f"Flex fallback (period=5) {i + 1}/{len(entries)} ({role} {query_id}): {e_fallback}")
+                    rows_per_fetch.append(len(rows))
+                    all_rows.extend(rows)
+                    span_from, span_to = _rows_span(rows)
+                    per_query.append(
+                        {
+                            "role": role,
+                            "query_id": query_id,
+                            "label": label,
+                            "rows": len(rows),
+                            "data_from": span_from,
+                            "data_to": span_to,
+                            "used_fallback": used_fallback,
+                        }
+                    )
+                except ValueError as e:
+                    rows_per_fetch.append(-1)  # failed
+                    errors.append(f"Flex query {i + 1}/{len(entries)} ({role} {query_id}): {e}")
+                except Exception:
+                    # Bubble up unexpected errors so the outer handler can log them.
+                    raise
+
+            if errors and not all_rows:
+                return {
+                    "ok": False,
+                    "error": "; ".join(errors),
+                    "count": 0,
+                    "by_account": len(entries),
+                    "by_account_counts": rows_per_fetch,
+                }
+
+            data_from: Optional[str] = None
+            data_to: Optional[str] = None
+            if all_rows:
+                min_d: Optional[_date] = None
+                max_d: Optional[_date] = None
+                for item in per_query:
+                    s_from = item.get("data_from")
+                    s_to = item.get("data_to")
+                    try:
+                        if s_from:
+                            d_from = datetime.strptime(s_from, "%Y-%m-%d").date()
+                            if min_d is None or d_from < min_d:
+                                min_d = d_from
+                        if s_to:
+                            d_to = datetime.strptime(s_to, "%Y-%m-%d").date()
+                            if max_d is None or d_to > max_d:
+                                max_d = d_to
+                    except Exception:
+                        continue
+                if min_d is not None:
+                    data_from = min_d.isoformat()
+                if max_d is not None:
+                    data_to = max_d.isoformat()
+
+            if not all_rows:
+                return {
+                    "ok": True,
+                    "count": 0,
+                    "message": "No trades in Flex report.",
+                    "by_account": len(entries),
+                    "by_account_counts": rows_per_fetch,
+                    "data_from": data_from,
+                    "data_to": data_to,
+                    "raw_count": 0,
+                    "per_query": per_query,
+                }
+
+            raw_count = len(all_rows)
+
+            if not write_account_executions_to_db(control_via_db, all_rows):
+                # Even when DB write fails, still return Flex stats so frontend can display debug info.
+                return {
+                    "ok": False,
+                    "error": "Failed to write account_executions.",
+                    "count": 0,
+                    "raw_count": raw_count,
+                    "data_from": data_from,
+                    "data_to": data_to,
+                    "by_account": len(entries),
+                    "by_account_counts": rows_per_fetch,
+                    "per_query": per_query,
+                    "range_mode": range_mode,
+                    "range_days": range_days,
+                    "range_from": from_date,
+                    "range_to": to_date,
+                }
+            # Summary statistics for updated executions/accounts and latest Flex date after upsert.
+            updated_accounts = len({(r.get("account_id") or "").strip() for r in all_rows if (r.get("account_id") or "").strip()})
+            stats_after = reader.get_flex_executions_stats()
+            last_date_after = stats_after.get("max_date") if stats_after else None
+            last_date_after_str = None
+            if last_date_after is not None:
+                try:
+                    # Normalize to date string YYYY-MM-DD
+                    d = getattr(last_date_after, "date", lambda: last_date_after)()
+                    last_date_after_str = d.isoformat()
+                except Exception:
+                    last_date_after_str = str(last_date_after)
+
+            msg = f"Upserted {len(all_rows)} execution(s) from {len(entries)} Flex account config row(s); affected {updated_accounts} account(s)."
+            if last_date_after_str:
+                msg += f" Latest Flex execution date after update: {last_date_after_str}."
+            if data_from and data_to:
+                msg += f" Flex data time span: {data_from} .. {data_to}."
+            if rows_per_fetch and len(rows_per_fetch) > 0 and rows_per_fetch[0] == 0 and (len(rows_per_fetch) == 1 or any(c > 0 for c in rows_per_fetch[1:])):
+                msg += " Primary (Query ID " + str(entries[0][1]) + ") returned 0 trades; in Settings > IB Connection > Flex ensure the purpose=trades row uses a Query that includes Activity > Trades and the date range covers your trades."
+            if errors:
+                msg += " Partial errors: " + "; ".join(errors)
+            return {
+                "ok": True,
+                "count": len(all_rows),
+                "raw_count": raw_count,
+                "message": msg,
+                "by_account": len(entries),
+                "by_account_counts": rows_per_fetch,
+                "per_query": per_query,
+                "updated_accounts": updated_accounts,
+                "range_mode": range_mode,
+                "range_days": range_days,
+                "range_from": from_date,
+                "range_to": to_date,
+                "last_flex_date_after": last_date_after_str,
+                "data_from": data_from,
+                "data_to": data_to,
+            }
+        except Exception as e:
+            logger.exception("POST /executions/fetch-flex failed: %s", e)
+            return {"ok": False, "error": str(e), "count": 0}
+
+    @app.post("/executions/fetch-flex-upload")
+    def post_executions_fetch_flex_upload(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Upload Flex Trades XML manually and upsert into account_executions.
+
+        前端场景：用户从 IB 网站下载 Trades Flex 报表（XML），在 Accounts 页选择「Upload XML」模式，
+        点击 Fetch from IB 后将整个 XML 文本 POST 到本接口。
+
+        Body: { "xml": "<FlexStatement ...>...</FlexStatement>" }
+        """
+        if not control_via_db:
+            return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "count": 0}
+        try:
+            raw_xml = (body.get("xml") or "").strip()
+            if not raw_xml:
+                return {"ok": False, "error": "Missing xml field in request body.", "count": 0}
+            rows = parse_trades_xml(raw_xml)
+            if not rows:
+                return {
+                    "ok": False,
+                    "error": "No Trade rows parsed from XML. Ensure this is a Flex Trades report (Activity → Trades).",
+                    "count": 0,
+                }
+            if not write_account_executions_to_db(control_via_db, rows):
+                return {"ok": False, "error": "Failed to write account_executions.", "count": 0}
+            updated_accounts = len({(r.get("account_id") or "").strip() for r in rows if (r.get("account_id") or "").strip()})
+            return {
+                "ok": True,
+                "count": len(rows),
+                "updated_accounts": updated_accounts,
+                "message": f"Upserted {len(rows)} execution(s) from uploaded Flex XML for {updated_accounts} account(s).",
+            }
+        except Exception as e:
+            logger.exception("POST /executions/fetch-flex-upload failed: %s", e)
             return {"ok": False, "error": str(e), "count": 0}
 
     @app.post("/executions")
@@ -2310,9 +2630,109 @@ def create_app(
                 "query_label": (a.query_label or "").strip() or None,
                 "purpose": (a.purpose or "cash_transactions").strip() or "cash_transactions",
             })
-        if write_flex_config(control_via_db, body.host_token, body.secondary_token, accounts):
-            return JSONResponse(status_code=200, content={"ok": True, "host_token": body.host_token, "secondary_token": body.secondary_token, "accounts": accounts})
+        if write_flex_config(control_via_db, body.host_token, body.secondary_token, accounts, body.flex_default_range_days, body.flex_init_range_days):
+            return JSONResponse(status_code=200, content={"ok": True, "host_token": body.host_token, "secondary_token": body.secondary_token, "accounts": accounts, "flex_default_range_days": body.flex_default_range_days, "flex_init_range_days": body.flex_init_range_days})
         return JSONResponse(status_code=500, content={"error": "failed to write flex config"})
+
+    @app.get("/config/key-value/groups")
+    def get_config_key_value_groups() -> Dict[str, Any]:
+        """List all key-value groups (for Settings Key-Value Config)."""
+        groups = reader.get_key_value_groups()
+        return {"ok": True, "items": groups}
+
+    @app.post("/config/key-value/groups")
+    def post_config_key_value_group(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Create one key-value group. body: name (required), description, sort_order."""
+        if not control_via_db:
+            return {"ok": False, "error": "Postgres required.", "id": None}
+        b = body or {}
+        name = (b.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "error": "name is required.", "id": None}
+        gid = create_key_value_group(control_via_db, name, b.get("description"), b.get("sort_order", 0))
+        if gid is not None:
+            return {"ok": True, "id": gid, "name": name}
+        return {"ok": False, "error": "Failed to create group (name may already exist).", "id": None}
+
+    @app.patch("/config/key-value/groups/{group_name:path}")
+    def patch_config_key_value_group(group_name: str, body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Update one key-value group. Match by group_name only (not id). body: name, description, sort_order (optional)."""
+        if not control_via_db:
+            return {"ok": False, "error": "Postgres required."}
+        b = body or {}
+        if update_key_value_group(
+            control_via_db,
+            group_name.strip(),
+            b.get("name"),
+            b.get("description"),
+            b.get("sort_order"),
+        ):
+            return {"ok": True, "group_name": group_name.strip()}
+        return {"ok": False, "error": "Failed to update group."}
+
+    @app.delete("/config/key-value/groups/{group_name:path}")
+    def delete_config_key_value_group(group_name: str) -> Dict[str, Any]:
+        """Delete one group and all its key-values (CASCADE). Match by group_name only (not id)."""
+        if not control_via_db:
+            return {"ok": False, "error": "Postgres required."}
+        name = group_name.strip()
+        if delete_key_value_group(control_via_db, name):
+            return {"ok": True, "group_name": name}
+        return {"ok": False, "error": "Failed to delete group."}
+
+    @app.get("/config/key-value")
+    def get_config_key_value(
+        key: Optional[str] = None,
+        group_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List key-value rows: by key (single), or by group_name. When both given, match by group name only."""
+        if key and (group_name or "").strip():
+            val = reader.get_key_value_in_group(key.strip(), group_name.strip())
+            return {"ok": True, "items": [{"key": key.strip(), "value": val or ""}]}
+        if key:
+            val = reader.get_key_value(key.strip())
+            return {"ok": True, "items": [{"key": key.strip(), "value": val or ""}] if key.strip() else [], "key": key.strip()}
+        if (group_name or "").strip():
+            items = reader.get_key_values_by_group(group_name.strip())
+            return {"ok": True, "items": items}
+        items = reader.get_all_key_values()
+        return {"ok": True, "items": items}
+
+    @app.post("/config/key-value")
+    def post_config_key_value(body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
+        """Upsert one key-value row. body: group_name (required), key (required), value, description. Default group_name=flex_range_options."""
+        if not control_via_db:
+            return {"ok": False, "error": "Postgres required to write key_value_config."}
+        b = body or {}
+        k = (b.get("key") or "").strip()
+        if not k:
+            return {"ok": False, "error": "key is required."}
+        gname = (b.get("group_name") or "").strip() or "flex_range_options"
+        v = b.get("value")
+        v = (v.strip() if isinstance(v, str) else str(v)) if v is not None else ""
+        desc = (b.get("description") or "").strip() or None
+        if set_key_value(control_via_db, k, v, desc, group_name=gname):
+            return {"ok": True, "key": k, "value": v, "group_name": gname}
+        return {"ok": False, "error": "Failed to write key_value_config."}
+
+    @app.delete("/config/key-value")
+    def delete_config_key_value(
+        key: Optional[str] = None,
+        group_name: Optional[str] = None,
+        body: Optional[Dict[str, Any]] = Body(default=None),
+    ) -> Dict[str, Any]:
+        """Delete one key-value row. key + group_name required (match by name only). Default group_name=flex_range_options."""
+        if not control_via_db:
+            return {"ok": False, "error": "Postgres required to delete from key_value_config."}
+        bod = body or {}
+        k = (key or "").strip() or (bod.get("key") or "").strip()
+        k = (k.strip() if isinstance(k, str) else str(k)).strip() if k else ""
+        gname = (group_name or "").strip() or (bod.get("group_name") or "").strip() or "flex_range_options"
+        if not k:
+            return {"ok": False, "error": "key is required."}
+        if delete_key_value(control_via_db, k, group_name=gname):
+            return {"ok": True, "key": k}
+        return {"ok": False, "error": "Failed to delete key."}
 
     return app
 
