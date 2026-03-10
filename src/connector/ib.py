@@ -677,8 +677,8 @@ class IBConnector:
                     raw_extra["conId"] = con_id
                 if local_symbol:
                     raw_extra["localSymbol"] = local_symbol
-                # 标记为来自 IB TWS 事件流的执行记录
-                source_val = "tws_event"
+                # 标记为通过 AccountIbClient/TWS 客户端拉取的执行记录
+                source_val = "tws_client"
                 out.append({
                     "exec_id": exec_id,
                     "time": ts,
@@ -747,8 +747,8 @@ class IBConnector:
                         wts = wtime.timestamp()
                     except Exception:
                         pass
-                # 标记为来自 IB TWS 事件流的执行记录
-                source_val2 = "tws_event"
+                # 标记为通过 AccountIbClient/TWS 客户端拉取的执行记录
+                source_val2 = "tws_client"
                 out.append({
                     "exec_id": weid,
                     "time": wts,

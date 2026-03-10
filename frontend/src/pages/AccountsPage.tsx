@@ -798,7 +798,7 @@ export function AccountsPage({
               <div className="section-hint" style={{ marginTop: '0.25rem', marginBottom: '0.25rem' }}>
                 Execution data status by source &amp; account (latest row per group).
               </div>
-              <div style={{ maxHeight: '10rem', overflowY: 'auto' }}>
+              <div style={{ overflowX: 'auto' }}>
                 <table className="ib-positions-table">
                   <thead>
                     <tr>

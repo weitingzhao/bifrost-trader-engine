@@ -1463,6 +1463,88 @@ class PostgreSQLSink(StatusSink):
                     raw_extra = r.get("raw_extra")
                     if raw_extra is not None and not isinstance(raw_extra, str):
                         raw_extra = json.dumps(raw_extra) if raw_extra else None
+
+                    # 对于期权，从 TWS 侧写入前先补齐/重建 contract_key。
+                    # Flex Trades 侧仍使用 symbol|OPT|expiry|strike|right；TWS 侧（tws_event/tws_client）
+                    # 则改为以 IB localSymbol 样式为前缀：
+                    #   local_symbol = symbol + "  " + yymmdd + right + strike8
+                    #   contract_key = local_symbol|sec_type|expiry|strike|option_right
+                    sec_type_norm = (sec_type or "").strip().upper()
+                    if sec_type_norm == "OPT":
+                        sym_key = (symbol or "").strip()
+                        exp_val = expiry
+                        if isinstance(exp_val, (int, float)) and math.isfinite(exp_val):
+                            exp_key = str(int(exp_val))
+                        else:
+                            exp_key = (exp_val or "").strip().replace("-", "")
+                        strike_raw = strike
+                        try:
+                            strike_key = float(strike_raw) if strike_raw not in ("", None) else None
+                        except (TypeError, ValueError):
+                            strike_key = None
+                        right_key = (option_right or "").strip().upper()
+                        if len(right_key) > 1:
+                            right_key = "C" if right_key.startswith("C") else "P" if right_key.startswith("P") else right_key[:1]
+
+                        # 若来源是 TWS（tws_event / tws_client），则按 localSymbol 规则重建 contract_key
+                        source_norm = (source or "").strip()
+                        if (
+                            source_norm in ("tws_event", "tws_client")
+                            and sym_key
+                            and exp_key
+                            and strike_key is not None
+                            and right_key
+                        ):
+                            # expiry 期望为 YYYYMMDD；取 yymmdd
+                            exp_digits = "".join(ch for ch in exp_key if ch.isdigit())
+                            yymmdd = exp_digits[2:8] if len(exp_digits) >= 8 else exp_digits[-6:]
+                            try:
+                                strike_int = int(round(strike_key * 1000.0))
+                            except (TypeError, ValueError, OverflowError):
+                                strike_int = None
+                            if yymmdd and strike_int is not None:
+                                strike_8 = f"{strike_int:08d}"
+                                local_symbol = f"{sym_key}  {yymmdd}{right_key}{strike_8}"
+                                contract_key = "|".join(
+                                    [
+                                        local_symbol,
+                                        "OPT",
+                                        exp_key,
+                                        str(strike_key),
+                                        right_key,
+                                    ]
+                                )
+                        # 非 TWS 来源或上面没能成功重建时，回退到 symbol|OPT|expiry|strike|right 规范
+                        if not contract_key and sym_key:
+                            contract_key = "|".join(
+                                [
+                                    sym_key,
+                                    "OPT",
+                                    exp_key,
+                                    str(strike_key) if strike_key is not None else "",
+                                    right_key,
+                                ]
+                            )
+                    # 若当前账户下已存在同一 contract_key 且 source=flex_trades，则认为 Flex 已覆盖，
+                    # 不再写入 TWS 侧记录（无论是 tws_client 还是 tws_event），避免重复。
+                    if (
+                        account_id
+                        and contract_key
+                        and (source or "").strip() != "flex_trades"
+                    ):
+                        cur.execute(
+                            """
+                            SELECT 1
+                            FROM account_executions
+                            WHERE account_id = %s
+                              AND contract_key = %s
+                              AND source = 'flex_trades'
+                            LIMIT 1
+                            """,
+                            (account_id, contract_key),
+                        )
+                        if cur.fetchone():
+                            continue
                     if exec_time is not None:
                         try:
                             from datetime import datetime, timezone

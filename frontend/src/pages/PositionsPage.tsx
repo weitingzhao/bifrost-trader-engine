@@ -239,6 +239,10 @@ export function PositionsPage({
     realized_pnl: '',
     currency: 'USD',
   })
+  const [expiredCloseKey, setExpiredCloseKey] = useState<string | null>(null)
+  const [expiredCloseForm, setExpiredCloseForm] = useState({ quantity: '', price: '', commission: '' })
+  const [expiredCloseError, setExpiredCloseError] = useState<string | null>(null)
+  const [expiredCloseSubmitting, setExpiredCloseSubmitting] = useState(false)
   const OFF_TRACK_ACCOUNT_ID = 'Off-Track'
 
   const [openFilterSymbol, setOpenFilterSymbol] = useState('')
@@ -618,6 +622,19 @@ export function PositionsPage({
     () => optExecutionGroups.filter(group => group.status === 'unrealized' && isOptionExpired(group.expiry)),
     [optExecutionGroups],
   )
+  const expiredCloseGroup = expiredCloseKey
+    ? expiredUnrealizedOptionGroups.find(g => getOptGroupKey(g) === expiredCloseKey) ?? null
+    : null
+  const expiredCloseBaseExec = expiredCloseGroup
+    ? (expiredCloseGroup.trades ?? []).find(ex => (ex.account_id ?? '').trim()) || (expiredCloseGroup.trades ?? [])[0]
+    : null
+  const expiredCloseSide: 'BUY' | 'SELL' | null = expiredCloseGroup
+    ? (Number(expiredCloseGroup.net_qty) || 0) > 0
+      ? 'SELL'
+      : (Number(expiredCloseGroup.net_qty) || 0) < 0
+        ? 'BUY'
+        : null
+    : null
   const closedOptGroupsPnlSum = useMemo(() => {
     return closedOptionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0)
   }, [closedOptionGroups])
@@ -1432,7 +1449,7 @@ export function PositionsPage({
                           </div>
 
                           {expiredUnrealizedOptionGroups.length > 0 && (
-                            <div className="replay-portfolio-table-wrap">
+                          <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
                               <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
                                 Expired but not closed
                                 <InfoTooltip text="These option contracts have expired but net quantity is not zero. This usually means some executions are missing in Trade History; please add the missing trades to close the position." />
@@ -1441,11 +1458,13 @@ export function PositionsPage({
                                 <thead>
                                   <tr>
                                     <th>Contract</th>
+                                    <th>Account</th>
                                     <th>Expiry</th>
                                     <th>STRIKE</th>
                                     <th>Net qty</th>
                                     <th>Trades (side / qty / price / id)</th>
-                                    <th>Note</th>
+                                    <th>Source</th>
+                                    <th>Actions</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1470,8 +1489,23 @@ export function PositionsPage({
                                       parts.push(`(${idLabel})`)
                                       return parts.join(' ')
                                     }).join('; ')
+                                    const uniqueSources = Array.from(
+                                      new Set(
+                                        (g.trades ?? [])
+                                          .map(ex => (ex.source ?? '').trim())
+                                          .filter(src => src.length > 0),
+                                      ),
+                                    )
+                                    const groupKey = getOptGroupKey(g)
+                                    const uniqueAccounts = Array.from(
+                                      new Set(
+                                        (g.trades ?? [])
+                                          .map(ex => (ex.account_id ?? '').trim())
+                                          .filter(acc => acc.length > 0),
+                                      ),
+                                    )
                                     return (
-                                      <tr key={`expired-${getOptGroupKey(g)}`}>
+                                      <tr key={`expired-${groupKey}`}>
                                         <td>
                                           {p.symbol ? (
                                             <>
@@ -1481,12 +1515,29 @@ export function PositionsPage({
                                             g.contract_key
                                           )}
                                         </td>
+                                        <td>{uniqueAccounts.length > 0 ? uniqueAccounts.join(', ') : '—'}</td>
                                         <td>{fmtExpiry(g.expiry)}</td>
                                         <td><strong>{fmtUsd(g.strike)}</strong></td>
                                         <td>{g.net_qty}</td>
                                         <td>{tradesSummary || '—'}</td>
+                                        <td>{uniqueSources.length > 0 ? uniqueSources.join(', ') : '—'}</td>
                                         <td>
-                                          This option has expired but net quantity is not zero. Please add the missing trade(s) to close this position.
+                                          <button
+                                            type="button"
+                                            className="btn btn-small"
+                                            onClick={() => {
+                                              const defaultQty = Math.abs(Number(g.net_qty) || 0)
+                                              setExpiredCloseKey(groupKey)
+                                              setExpiredCloseError(null)
+                                              setExpiredCloseForm({
+                                                quantity: defaultQty > 0 ? String(defaultQty) : '',
+                                                price: '',
+                                                commission: '',
+                                              })
+                                            }}
+                                          >
+                                            Close
+                                          </button>
                                         </td>
                                       </tr>
                                     )
@@ -1927,6 +1978,158 @@ export function PositionsPage({
               <div className="replay-exec-form-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => { setAddExecOpen(false); setEditExec(null); setExecFormError(null); }}>Cancel</button>
                 <button type="submit" className="btn btn-primary">{editExec ? 'Save' : 'Add'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {expiredCloseGroup && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            setExpiredCloseKey(null)
+            setExpiredCloseError(null)
+            setExpiredCloseForm({ quantity: '', price: '', commission: '' })
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="expired-close-modal-title"
+        >
+          <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="expired-close-modal-title">Close expired option</h3>
+            {expiredCloseError && <p className="section-hint replay-form-error">{expiredCloseError}</p>}
+            <p className="section-hint">
+              This will add a closing trade with source = journal_closed for this expired option group.
+            </p>
+            <div className="replay-expired-close-summary">
+              <div>
+                <strong>Contract:</strong>{' '}
+                {(() => {
+                  const p = getContractLabelParts(expiredCloseGroup.contract_key)
+                  const strikeStr = expiredCloseGroup.strike != null ? ` ${expiredCloseGroup.strike}` : ''
+                  return p.symbol ? (
+                    <>
+                      <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
+                    </>
+                  ) : (
+                    expiredCloseGroup.contract_key
+                  )
+                })()}
+              </div>
+              <div>
+                <strong>Expiry:</strong> {fmtExpiry(expiredCloseGroup.expiry)} &nbsp;|&nbsp; <strong>STRIKE:</strong>{' '}
+                {fmtUsd(expiredCloseGroup.strike)} &nbsp;|&nbsp; <strong>Net qty:</strong> {expiredCloseGroup.net_qty}
+              </div>
+              <div>
+                <strong>Side:</strong> {expiredCloseSide ?? '—'}
+              </div>
+            </div>
+            <form
+              className="replay-expired-close-form"
+              onSubmit={async e => {
+                e.preventDefault()
+                setExpiredCloseError(null)
+                if (!expiredCloseSide || !expiredCloseBaseExec || !expiredCloseGroup) {
+                  setExpiredCloseError('Cannot determine side or base execution for this group.')
+                  return
+                }
+                const qRaw = Number(expiredCloseForm.quantity)
+                const q = Math.abs(qRaw)
+                const priceNum = Number(expiredCloseForm.price)
+                if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(priceNum)) {
+                  setExpiredCloseError('Fill quantity (> 0) and price.')
+                  return
+                }
+                const accountId = (expiredCloseBaseExec.account_id ?? '').trim()
+                if (!accountId) {
+                  setExpiredCloseError('Account is missing for this group; cannot create closing trade.')
+                  return
+                }
+                const quantityForDb = expiredCloseSide === 'SELL' ? -q : q
+                const nowUnix = Math.floor(Date.now() / 1000)
+                const body: Record<string, unknown> = {
+                  account_id: accountId,
+                  time: nowUnix,
+                  symbol: (expiredCloseBaseExec.symbol ?? '').trim() || getContractLabelParts(expiredCloseGroup.contract_key).symbol || undefined,
+                  sec_type: (expiredCloseBaseExec.sec_type || 'OPT').toUpperCase(),
+                  side: expiredCloseSide,
+                  quantity: quantityForDb,
+                  price: priceNum,
+                  source: 'journal_closed',
+                  expiry: expiredCloseGroup.expiry,
+                  strike: expiredCloseGroup.strike,
+                  option_right: expiredCloseBaseExec.option_right || undefined,
+                  contract_key: expiredCloseGroup.contract_key,
+                  commission: expiredCloseForm.commission ? Number(expiredCloseForm.commission) : undefined,
+                  currency: expiredCloseBaseExec.currency || undefined,
+                }
+                try {
+                  setExpiredCloseSubmitting(true)
+                  const res = await createExecution(body)
+                  if (res.ok) {
+                    setExpiredCloseKey(null)
+                    setExpiredCloseForm({ quantity: '', price: '', commission: '' })
+                    await loadReplayData()
+                  } else {
+                    setExpiredCloseError(res.error ?? 'Add failed')
+                  }
+                } finally {
+                  setExpiredCloseSubmitting(false)
+                }
+              }}
+            >
+              <div className="replay-expired-close-row">
+                <label>
+                  Qty
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={expiredCloseForm.quantity}
+                    onChange={e => setExpiredCloseForm(f => ({ ...f, quantity: e.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  Price
+                  <input
+                    type="number"
+                    step="any"
+                    value={expiredCloseForm.price}
+                    onChange={e => setExpiredCloseForm(f => ({ ...f, price: e.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  Commission
+                  <input
+                    type="number"
+                    step="any"
+                    value={expiredCloseForm.commission}
+                    onChange={e => setExpiredCloseForm(f => ({ ...f, commission: e.target.value }))}
+                  />
+                </label>
+              </div>
+              <div className="replay-expired-close-actions">
+                <button
+                  type="submit"
+                  className="btn btn-small btn-primary"
+                  disabled={expiredCloseSubmitting}
+                >
+                  {expiredCloseSubmitting ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-small btn-secondary"
+                  onClick={() => {
+                    setExpiredCloseKey(null)
+                    setExpiredCloseError(null)
+                    setExpiredCloseForm({ quantity: '', price: '', commission: '' })
+                  }}
+                >
+                  Cancel
+                </button>
               </div>
             </form>
           </div>
