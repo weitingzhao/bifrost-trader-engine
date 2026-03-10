@@ -7,7 +7,7 @@ account_execution_commissions、stock_day、stock_min、option_day、option_min�
 不再创建 ohlc_bars（已弃用）。从项目根目录执行。
 
 Usage:
-  python scripts/refresh_db_schema.py [--config PATH]
+  python scripts/db_refresh_schema.py [--config PATH]
   --config  配置文件路径（默认 config/config.yaml）
 """
 
@@ -104,7 +104,7 @@ def main() -> int:
         if "lock_timeout" in err or "timeout" in err.lower():
             print(
                 "Schema refresh timed out (another backend is holding locks).\n"
-                "  Stop the API server, daemon, and bars worker; or run: python scripts/release_pg_locks.py [--yes]",
+                "  Stop the API server, daemon, and bars worker; or run: python scripts/db_release_dblock.py [--yes]",
                 file=sys.stderr,
             )
         print(f"Schema refresh failed: {e}", file=sys.stderr)

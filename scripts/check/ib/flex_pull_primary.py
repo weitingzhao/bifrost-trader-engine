@@ -5,10 +5,10 @@ Use this to verify that the Flex API returns data for Query ID 1428383 (or anoth
 with the token stored in Settings (or passed via env). Run from project root.
 
 Usage:
-  python scripts/flex_pull_primary.py [QUERY_ID]
-  python scripts/flex_pull_primary.py 1428383 --last-365
-  python scripts/flex_pull_primary.py 1428383 --mimic-web
-  python scripts/flex_pull_primary.py 1428383 --from-date 20250307 --to-date 20260306
+  python scripts/check/ib/flex_pull_primary.py [QUERY_ID]
+  python scripts/check/ib/flex_pull_primary.py 1428383 --last-365
+  python scripts/check/ib/flex_pull_primary.py 1428383 --mimic-web
+  python scripts/check/ib/flex_pull_primary.py 1428383 --from-date 20250307 --to-date 20260306
 
   QUERY_ID     Default: 1428383.
   --last-365   Use Flex period p=5 (Last 365 Calendar Days). Does not send fd/td.
@@ -29,7 +29,7 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)

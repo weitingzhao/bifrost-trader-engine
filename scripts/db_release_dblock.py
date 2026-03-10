@@ -6,7 +6,7 @@ normal operation is blocked. Finds backends holding or waiting for locks on thes
 tables and terminates them (pg_terminate_backend). Run from project root.
 
 Usage:
-  python scripts/release_pg_locks.py [--config PATH] [--yes]
+  python scripts/db_release_dblock.py [--config PATH] [--yes]
   --config   Config file (default: config/config.yaml)
   --yes      Skip confirmation and terminate all listed backends
   --dry-run  Only list locking backends, do not terminate

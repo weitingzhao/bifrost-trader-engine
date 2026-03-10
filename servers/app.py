@@ -1687,7 +1687,7 @@ def create_app(
         days: Optional[int] = Query(None, description="For single-symbol refresh: number of days to fetch"),
     ) -> Dict[str, Any]:
         """Refresh reference index daily bars from TradingView. If symbol is set, refresh only that index (optional days).
-        Otherwise same as scripts/refresh_indices.py (all indices). Returns ok, updated[], errors[]."""
+        Omit symbol to refresh all reference indices (from DB config). Returns ok, updated[], errors[]."""
         if not control_via_db:
             return {"ok": False, "updated": [], "errors": ["Postgres config required."]}
         try:

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Generate FSM linkage diagram: Daemon ↔ Trading ↔ Hedge interaction.
 
-Run: python scripts/fsm_linkage_diagram.py [mermaid|html]
+Run: python scripts/fsm/fsm_linkage_diagram.py [mermaid|html]
 Output: Mermaid sequence diagram showing how the three FSMs interact.
 """
 import sys
 from pathlib import Path
 
-_project_root = Path(__file__).resolve().parent.parent
+_project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_project_root))
 
 
@@ -124,7 +124,7 @@ def main() -> None:
         out = emit_html()
         print(f"Wrote {out} - open in browser")
     else:
-        print("Usage: python scripts/fsm_linkage_diagram.py [mermaid|md|html]")
+        print("Usage: python scripts/fsm/fsm_linkage_diagram.py [mermaid|md|html]")
         print("  mermaid - sequence diagram (paste into https://mermaid.live)")
         print("  md     - generate docs/fsm/linkage.md for MkDocs")
         print("  html   - generate docs/fsm/fsm_linkage_diagram.html")

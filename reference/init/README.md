@@ -1,6 +1,6 @@
 # Initialization scripts (deployment)
 
-One-time SQL scripts for system deployment. Run **after** `python scripts/refresh_db_schema.py` (so tables exist).
+One-time SQL scripts for system deployment. Run **after** `python scripts/db_refresh_schema.py` (so tables exist).
 
 Currently there are no required init scripts: Flex default range is `settings.flex_default_range_days` (default 30), init range is `settings.flex_init_range_days` (default 360), both managed via Settings page; key_value data is optional and maintained in Settings → Key-Value Config.
 

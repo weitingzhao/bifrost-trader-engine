@@ -36,7 +36,7 @@ For comparing watchlist stocks with US indices (S&P 500 ^GSPC, Dow 30 ^DJI, Nasd
 
 - **Config**: `config/config.yaml` → `reference_indices` (see example below).
 - **Fetch + write**: `servers/index_data_client.py` — fetch from tvDatafeed, gap-fill from DB max(bar_time), convert to rows with `symbol`, `period: "1 D"`, write via `write_ohlc_bars_to_db` (reader) or sink `write_ohlc_bars`.
-- **Scheduled job**: `scripts/refresh_indices.py` — load config, run fetch for all indices (2s between symbols), then write. Run via cron (e.g. `0 22 * * *` daily after US close) or manually.
+- **Refresh**: Use **POST /indices/refresh** (Server API). Omit `symbol` to refresh all reference indices from DB config; optional `symbol` to refresh one. Run via cron (e.g. `curl -X POST http://localhost:8765/indices/refresh`) or from frontend/Settings.
 - **API**: Server includes `reference_indices` in GET /status from config; frontend merges these symbols into the benchmark request so `/bars/benchmark` returns index closes; Live/Overview can show a "market" row.
 
 ## Config example
@@ -57,11 +57,13 @@ reference_indices:
     tv_exchange: "INDEX"
 ```
 
-## Cron example
+## Cron example (optional)
+
+To refresh indices daily without using the UI, call the API (Server must be running):
 
 ```cron
 # Daily after US market close (e.g. 22:00 local)
-0 22 * * * cd /path/to/bifrost-trader-engine && python scripts/refresh_indices.py config/config.yaml
+0 22 * * * curl -s -X POST http://localhost:8765/indices/refresh
 ```
 
 ## US market holidays (for "need Pull" display)

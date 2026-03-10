@@ -61,7 +61,7 @@
 
 ### 步骤 3.5a：非实时市场数据拉取 Worker（R-A3 验收条 ⑥）
 
-- [x] **3.5a.1** 表 `bars_backfill_jobs` 已加入 DATABASE.md 与 postgres_sink._ensure_tables；`scripts/refresh_db_schema.py` 可创建表。
+- [x] **3.5a.1** 表 `bars_backfill_jobs` 已加入 DATABASE.md 与 postgres_sink._ensure_tables；`scripts/db_refresh_schema.py` 可创建表。
 - [x] **3.5a.2** API：POST /bars/backfill（queue=1）入队写入 PG 并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 从 PG 读取；queue=0 时同步执行共用 `run_one_backfill_impl`。
 - [x] **3.5a.3** 共用 backfill 逻辑：`servers/bars_backfill.run_one_backfill`；reader 层：`insert_bars_backfill_job`、`get_bars_backfill_jobs`、`get_bars_backfill_job`、`claim_next_pending_bars_backfill_job`、`update_bars_backfill_job_result`、`trim_bars_backfill_jobs`。
 - [x] **3.5a.4** 独立 Worker 进程：Celery worker（`scripts/run_celery.py`）；从 Redis 队列取任务（task_id = bars_backfill_jobs.id），执行 backfill，更新 PG 行 status/result，任务间由 Celery 串行。

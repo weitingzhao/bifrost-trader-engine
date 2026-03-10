@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build FSM docs: run all fsm_* scripts in md mode, then optionally mkdocs build.
+"""Build FSM docs: run all scripts in scripts/fsm/ (fsm_*.py) in md mode, then optionally mkdocs build.
 
-Run: python scripts/build_fsm_docs.py [--mkdocs]
+Run: python scripts/fsm_build_docs.py [--mkdocs]
   Without --mkdocs: only generate MD files.
   With --mkdocs: generate MD then run mkdocs build.
 """
@@ -15,8 +15,8 @@ sys.path.insert(0, str(_project_root))
 
 
 def run_script(name: str, mode: str = "md") -> bool:
-    """Run scripts/{name} {mode}. Return True on success."""
-    script = _project_root / "scripts" / name
+    """Run scripts/fsm/{name} {mode}. Return True on success."""
+    script = _project_root / "scripts" / "fsm" / name
     result = subprocess.run(
         [sys.executable, str(script), mode],
         cwd=str(_project_root),

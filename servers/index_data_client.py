@@ -1,6 +1,6 @@
 """Fetch US index daily bars from TradingView (tvDatafeed) and write to stock_day.
 
-Used by scripts/refresh_indices.py. Rate limit: >=2s between symbols; gap-fill from DB
+Used by POST /indices/refresh. Rate limit: >=2s between symbols; gap-fill from DB
 max(bar_time) then fetch last N bars; UPSERT so head bar is always final value.
 """
 

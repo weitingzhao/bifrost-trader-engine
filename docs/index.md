@@ -50,7 +50,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **[Performance Match / Realized 逻辑](PERFORMANCE_MATCH_LOGIC.md)** | Match（R）与 Realized 的判定流程、后端 opt_pairs 与 filtered_pairs、前端 relevantPairs；全为 Unrealized 时的排查步骤 |
 | **[IB Pacing 实现方案](plans/ib-pacing-implementation-plan.md)** | 边界配置化、Worker/API 用量计量、Redis 限流、监控暴露的详细设计与分步实现 |
 
-**Reference（部署初始化数据）**：**reference/init/** 目录可放置一次性 SQL 脚本；执行顺序见 [reference/init/README.md](../reference/init/README.md)。当前无必跑脚本，仅需执行 `refresh_db_schema.py`；Flex 默认范围由 settings.flex_default_range_days 控制。
+**Reference（部署初始化数据）**：**reference/init/** 目录可放置一次性 SQL 脚本；执行顺序见 [reference/init/README.md](../reference/init/README.md)。当前无必跑脚本，仅需执行 `db_refresh_schema.py`；Flex 默认范围由 settings.flex_default_range_days 控制。
 
 ---
 
@@ -64,6 +64,6 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **Server** | 监控与控制独立进程，读 PostgreSQL，提供 GET /status、GET /operations、POST /control/*；默认运行在**监控机**，端口 8765。 | **[scripts/run_server.py](../scripts/run_server.py)**：`python scripts/run_server.py` 或 `python scripts/run_server.py config/config.yaml` |
 | **Bars Worker（可选）** | 非实时 K 线拉取（backfill）的独立 Worker，使用 **Celery + Redis**；任务仍写入 bars_backfill_jobs 表，API 入队后返回 job_id，前端轮询 GET /bars/jobs/{id}。需 Redis（config.redis）与 root `postgres` 配置。**须单进程启动**（`--concurrency=1`）以便复用同一 IB client_id。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。 | **[scripts/run_celery.py](../scripts/run_celery.py)**：`python scripts/run_celery.py` 或 `celery -A servers.celery_app worker -l info -Q bars --concurrency=1`。 |
 | **Frontend** | 监控 UI，调用 Server API。 | **[scripts/run_frontend.sh](../scripts/run_frontend.sh)**：`./scripts/run_frontend.sh dev`（开发，端口见 `config/config.yaml` 的 `frontend.port`，默认 5173）、`./scripts/run_frontend.sh build`（构建到 `frontend/dist`）、`./scripts/run_frontend.sh install`（仅安装依赖） |
-| **Docs** | 文档站点（MkDocs）。 | 生成 FSM：`python scripts/build_fsm_docs.py` → `mkdocs build`；本地预览：`mkdocs serve` 或 `python scripts/run_docs.py`（默认 http://127.0.0.1:8000） |
+| **Docs** | 文档站点（MkDocs）。 | 生成 FSM：`python scripts/fsm_build_docs.py` → `mkdocs build`；本地预览：`mkdocs serve` 或 `python scripts/run_docs.py`（默认 http://127.0.0.1:8000） |
 
-其他常用脚本（均在 `scripts/` 下）：`refresh_db_schema.py`、`release_pg_locks.py`、`check_ib_connect.py` 等；详见 [README.md](../README.md) 与各阶段执行计划。
+其他常用脚本（均在 `scripts/` 下）：`db_refresh_schema.py`、`db_release_dblock.py`、`scripts/check/ib/check_ib_connect.py` 等；详见 [README.md](../README.md) 与各阶段执行计划。

@@ -13,8 +13,10 @@ stateDiagram-v2
 
     idle
     connecting
+    waiting_ib
     connected
     running
+    running_suspended
     stopping
     stopped
 

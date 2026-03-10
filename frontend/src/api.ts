@@ -1013,7 +1013,7 @@ export async function fetchBarsCoverage(symbols?: string[]): Promise<BarsCoverag
 }
 
 /** Refresh reference index daily bars from TradingView into stock_day.
- * With no args: same as scripts/refresh_indices.py (all indices).
+ * With no args: refresh all reference indices (from DB config).
  * With symbol (+ optional days): refresh only that index with given day count. */
 export async function postIndicesRefresh(options?: { symbol?: string; days?: number }): Promise<{
   ok: boolean

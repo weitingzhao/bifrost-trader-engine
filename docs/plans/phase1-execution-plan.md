@@ -66,7 +66,7 @@
 
 - **Config**：确认 `config/config.yaml` 中 root `postgres` 配置正确。
 - **Sink 接口**：核对 `src/sink/base.py` 中 SNAPSHOT_KEYS、OPERATION_KEYS 与 [DATABASE.md](../DATABASE.md) §2 一致。
-- **PostgreSQL schema**：执行 `python scripts/refresh_db_schema.py` 后，用 psql 或启动守护进程确认 `status_current`、`status_history`、`operations`、`daemon_heartbeat`、`settings` 等表及列存在且符合 DATABASE.md。
+- **PostgreSQL schema**：执行 `python scripts/db_refresh_schema.py` 后，用 psql 或启动守护进程确认 `status_current`、`status_history`、`operations`、`daemon_heartbeat`、`settings` 等表及列存在且符合 DATABASE.md。
 - **IB 连通性**：启动守护进程或直连 TWS/Gateway，确认能连接（IB 配置来自 PostgreSQL settings）。
 - **SIGTERM 停止**（可选）：启动 `python scripts/run_engine.py config/config.yaml`，对其发 SIGTERM，确认数秒内退出。
 

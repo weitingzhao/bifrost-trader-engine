@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Generate Daemon FSM diagram: DaemonState, transition + caller mapping.
 
-Run: python scripts/fsm_daemon_diagram.py  (or python fsm_daemon_diagram.py from scripts/)
+Run: python scripts/fsm/fsm_daemon_diagram.py
 Output: Mermaid diagram (paste into https://mermaid.live) or markdown table.
 """
 import sys
 from pathlib import Path
 
-# Add project root so "from src..." works when run from scripts/ or project root
-_project_root = Path(__file__).resolve().parent.parent
+# Add project root so "from src..." works when run from scripts/fsm/ or project root
+_project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_project_root))
 
 from src.fsm.daemon_fsm import DaemonState
@@ -136,7 +136,7 @@ def main() -> None:
         out = emit_html()
         print(f"Wrote {out} - open in browser")
     else:
-        print("Usage: python scripts/fsm_daemon_diagram.py [mode]")
+        print("Usage: python scripts/fsm/fsm_daemon_diagram.py [mode]")
         print("  mermaid - state diagram (paste into https://mermaid.live)")
         print("  table   - markdown table")
         print("  md      - generate docs/fsm/daemon.md for MkDocs")
