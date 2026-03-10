@@ -55,6 +55,15 @@ function fmtExpiry(expiry: string | null | undefined): string {
   return s
 }
 
+/** Format trade_date (YYYY-MM-DD string from API) for display. */
+function fmtTradeDate(tradeDate: string | null | undefined): string {
+  if (tradeDate == null || String(tradeDate).trim() === '') return '—'
+  const s = String(tradeDate).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  if (/^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+  return s
+}
+
 function unixToDatetimeLocal(ts: number | string | null | undefined): string {
   if (ts == null) return ''
   const n = typeof ts === 'number' ? ts : Number(ts)
@@ -270,6 +279,10 @@ export function PositionsPage({
   const [ledgerStockGroupByPosition, setLedgerStockGroupByPosition] = useState<boolean>(false)
   /** Trade History Stocks: filter by position category tab (All | category name | Uncategorized) */
   const [ledgerStockCategoryTab, setLedgerStockCategoryTab] = useState<string>('All')
+  /** Trade History Options: sort column and direction for closed groups table (Expiry / Trade date) */
+  const [ledgerOptSort, setLedgerOptSort] = useState<{ column: 'expiry' | 'trade_date'; dir: 'asc' | 'desc' }>({ column: 'expiry', dir: 'desc' })
+  /** Trade History Stocks: sort column and direction (Trade date) */
+  const [ledgerStockSort, setLedgerStockSort] = useState<{ column: 'trade_date'; dir: 'asc' | 'desc' }>({ column: 'trade_date', dir: 'desc' })
   const toggleDetailExpand = (key: string) => {
     setExpandedDetailKeys(prev => {
       const isOpen = prev.includes(key)
@@ -667,6 +680,25 @@ export function PositionsPage({
     () => optExecutionGroups.filter(group => group.status === 'realized'),
     [optExecutionGroups],
   )
+  /** Sorted closed option groups for Trade History table (by Expiry or Trade date). */
+  const sortedClosedOptionGroups = useMemo(() => {
+    const list = [...closedOptionGroups]
+    const { column, dir } = ledgerOptSort
+    const mult = dir === 'asc' ? 1 : -1
+    list.sort((a, b) => {
+      if (column === 'expiry') {
+        const sa = (a.expiry ?? '').trim().replace(/-/g, '')
+        const sb = (b.expiry ?? '').trim().replace(/-/g, '')
+        return mult * (sa.localeCompare(sb, undefined, { numeric: true }))
+      }
+      const datesA = [...(a.trades ?? []).map(t => t.trade_date).filter((d): d is string => d != null && String(d).trim() !== '')].sort()
+      const datesB = [...(b.trades ?? []).map(t => t.trade_date).filter((d): d is string => d != null && String(d).trim() !== '')].sort()
+      const va = datesA.length > 0 ? datesA[0] : ''
+      const vb = datesB.length > 0 ? datesB[0] : ''
+      return mult * va.localeCompare(vb)
+    })
+    return list
+  }, [closedOptionGroups, ledgerOptSort])
   const expiredUnrealizedOptionGroups = useMemo(
     () => optExecutionGroups.filter(group => group.status === 'unrealized' && isOptionExpired(group.expiry)),
     [optExecutionGroups],
@@ -732,6 +764,24 @@ export function PositionsPage({
     () => filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT'),
     [filteredExecutions],
   )
+  /** Trade History Stocks: filtered by category tab then sorted by Trade date. */
+  const sortedStockExecutions = useMemo(() => {
+    let list = filteredExecutions.filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
+    if (ledgerStockCategoryTab !== 'All') {
+      list =
+        ledgerStockCategoryTab === 'Uncategorized'
+          ? list.filter(ex => getStockExecCategory(ex) === '—')
+          : list.filter(ex => getStockExecCategory(ex) === ledgerStockCategoryTab)
+    }
+    const { dir } = ledgerStockSort
+    const mult = dir === 'asc' ? 1 : -1
+    list = [...list].sort((a, b) => {
+      const va = (a.trade_date ?? '').trim()
+      const vb = (b.trade_date ?? '').trim()
+      return mult * va.localeCompare(vb)
+    })
+    return list
+  }, [filteredExecutions, ledgerStockCategoryTab, ledgerStockSort, getStockExecCategory])
 
   useEffect(() => {
     if (ledgerTab === 'options' && !hasOptionExecutions && hasStockExecutions) {
@@ -1496,12 +1546,67 @@ export function PositionsPage({
                                 <tr>
                                   <th rowSpan={2} className="replay-opt-expand-col"></th>
                                   <th rowSpan={2}>Contract</th>
-                                  <th rowSpan={2}>Expiry</th>
+                                  <th
+                                    rowSpan={2}
+                                    className="replay-th-sortable"
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      setLedgerOptSort(prev =>
+                                        prev.column === 'expiry'
+                                          ? { column: 'expiry', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                          : { column: 'expiry', dir: 'desc' },
+                                      )
+                                    }}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        setLedgerOptSort(prev =>
+                                          prev.column === 'expiry'
+                                            ? { column: 'expiry', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                            : { column: 'expiry', dir: 'desc' },
+                                        )
+                                      }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                    title="Sort by Expiry"
+                                  >
+                                    Expiry {ledgerOptSort.column === 'expiry' ? (ledgerOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                                  </th>
                                   <th rowSpan={2}>STRIKE</th>
                                   <th colSpan={3}>BUY</th>
                                   <th colSpan={3}>SELL</th>
                                   <th rowSpan={2}>Realized PnL</th>
                                   <th rowSpan={2}>Account</th>
+                                  <th
+                                    rowSpan={2}
+                                    className="replay-th-sortable"
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      setLedgerOptSort(prev =>
+                                        prev.column === 'trade_date'
+                                          ? { column: 'trade_date', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                          : { column: 'trade_date', dir: 'desc' },
+                                      )
+                                    }}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        setLedgerOptSort(prev =>
+                                          prev.column === 'trade_date'
+                                            ? { column: 'trade_date', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                            : { column: 'trade_date', dir: 'desc' },
+                                        )
+                                      }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                    title="Sort by Trade date"
+                                  >
+                                    Trade date {ledgerOptSort.column === 'trade_date' ? (ledgerOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                                  </th>
                                 </tr>
                                 <tr>
                                   <th className="replay-th-sub">Size</th>
@@ -1513,7 +1618,7 @@ export function PositionsPage({
                                 </tr>
                               </thead>
                               <tbody>
-                                {closedOptionGroups.map((g) => {
+                                {sortedClosedOptionGroups.map((g) => {
                                   const uniqueAccounts = Array.from(
                                     new Set(
                                       (g.trades ?? []).map(t => (t.account_id ?? '').trim()).filter(Boolean),
@@ -1565,6 +1670,14 @@ export function PositionsPage({
                                         </span>
                                       </td>
                                       <td>{accountLabel}</td>
+                                      <td>
+                                        {(() => {
+                                          const dates = (g.trades ?? []).map(t => t.trade_date).filter((d): d is string => d != null && String(d).trim() !== '')
+                                          if (dates.length === 0) return '—'
+                                          dates.sort()
+                                          return fmtTradeDate(dates[0])
+                                        })()}
+                                      </td>
                                     </tr>
                                   )
                                 })}
@@ -1577,6 +1690,7 @@ export function PositionsPage({
                                       {fmtUsd0(closedOptGroupsPnlSum)}
                                     </strong>
                                   </td>
+                                  <td colSpan={2} />
                                 </tr>
                               </tfoot>
                             </table>
@@ -1692,6 +1806,7 @@ export function PositionsPage({
                                 <th>Expiry</th>
                                 <th>STRIKE</th>
                                 <th>Time</th>
+                                <th>Trade date</th>
                                 <th>Side</th>
                                 <th>Qty</th>
                                 <th>Price</th>
@@ -1704,10 +1819,10 @@ export function PositionsPage({
                             <tbody>
                               {expandedDetailKeys.length === 0 ? (
                                 <tr>
-                                  <td colSpan={11} className="replay-detail-placeholder">Click a closed trade row above to load details</td>
+                                  <td colSpan={12} className="replay-detail-placeholder">Click a closed trade row above to load details</td>
                                 </tr>
                               ) : (
-                                closedOptionGroups
+                                sortedClosedOptionGroups
                                   .filter(g => expandedDetailKeys.includes(getOptGroupKey(g)))
                                   .flatMap((g) =>
                                     g.trades.map((ex, ti) => {
@@ -1744,6 +1859,7 @@ export function PositionsPage({
                                           <td>{fmtExpiry(ex.expiry ?? g.expiry)}</td>
                                           <td><strong>{fmtUsd(g.strike)}</strong></td>
                                           <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                          <td>{fmtTradeDate(ex.trade_date)}</td>
                                           <td>{sideLabel}</td>
                                           <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
                                           <td>{fmtUsd(ex.price)}</td>
@@ -1801,6 +1917,24 @@ export function PositionsPage({
                             <thead>
                               <tr>
                                 <th>Time</th>
+                                <th
+                                  className="replay-th-sortable"
+                                  onClick={e => {
+                                    e.stopPropagation()
+                                    setLedgerStockSort(prev => ({ column: 'trade_date', dir: prev.dir === 'desc' ? 'asc' : 'desc' }))
+                                  }}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault()
+                                      setLedgerStockSort(prev => ({ column: 'trade_date', dir: prev.dir === 'desc' ? 'asc' : 'desc' }))
+                                    }
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                  title="Sort by Trade date"
+                                >
+                                  Trade date {ledgerStockSort.dir === 'asc' ? ' ▲' : ' ▼'}
+                                </th>
                                 <th>Symbol</th>
                                 <th>Account</th>
                                 <th>Category</th>
@@ -1814,12 +1948,7 @@ export function PositionsPage({
                             </thead>
                             <tbody>
                               {(() => {
-                                let stockExecs = filteredExecutions.filter(ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT')
-                                if (ledgerStockCategoryTab !== 'All') {
-                                  stockExecs = ledgerStockCategoryTab === 'Uncategorized'
-                                    ? stockExecs.filter(ex => getStockExecCategory(ex) === '—')
-                                    : stockExecs.filter(ex => getStockExecCategory(ex) === ledgerStockCategoryTab)
-                                }
+                                const stockExecs = sortedStockExecutions
                                 if (!ledgerStockGroupByPosition) {
                                   return stockExecs.map((ex, i) => {
                                     const s = (ex.side ?? '').toUpperCase()
@@ -1832,6 +1961,7 @@ export function PositionsPage({
                                     return (
                                       <tr key={i}>
                                         <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                        <td>{fmtTradeDate(ex.trade_date)}</td>
                                         <td>{ex.symbol ?? '—'}</td>
                                         <td>{ex.account_id ?? '—'}</td>
                                         <td>{getStockExecCategory(ex)}</td>
@@ -1869,7 +1999,7 @@ export function PositionsPage({
                                   })
                                 }
                                 const groups = new Map<string, Execution[]>()
-                                for (const ex of stockExecs) {
+                                for (const ex of sortedStockExecutions) {
                                   const acc = (ex.account_id ?? '').trim()
                                   const sym = (ex.symbol ?? '').toString().trim().toUpperCase()
                                   const key = `${acc}|${sym}`
@@ -1889,7 +2019,7 @@ export function PositionsPage({
                                   const category = positionCategoryByAccountContract.get(stkContractKey(sym, accId)) ?? '—'
                                   rows.push(
                                     <tr key={`h-${groupKey}`} className="replay-stock-group-header">
-                                      <td colSpan={10}>
+                                      <td colSpan={11}>
                                         <span className="replay-stock-group-symbol">{sym || '—'}</span>
                                         <span className="replay-stock-group-account">{accId || '—'}</span>
                                         <span className="replay-stock-group-category">{category}</span>
@@ -1907,6 +2037,7 @@ export function PositionsPage({
                                     rows.push(
                                       <tr key={rowIdx}>
                                         <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                        <td>{fmtTradeDate(ex.trade_date)}</td>
                                         <td>{ex.symbol ?? '—'}</td>
                                         <td>{ex.account_id ?? '—'}</td>
                                         <td>{getStockExecCategory(ex)}</td>

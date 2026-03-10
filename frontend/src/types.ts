@@ -230,6 +230,8 @@ export interface Execution {
   raw_extra?: Record<string, unknown>
   /** Set when GET /executions?include_opt_pairs=true: ids of the other leg(s) in C↔P pairs. */
   paired_execution_ids?: number[]
+  /** Trade date (Flex tradeDate / execution date), YYYY-MM-DD. */
+  trade_date?: string | null
 }
 
 /** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */

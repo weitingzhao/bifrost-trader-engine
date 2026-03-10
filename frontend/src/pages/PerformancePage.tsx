@@ -68,24 +68,37 @@ function normalizeStrike(s: string | number | null | undefined): string {
   return Number.isFinite(n) ? String(n) : String(s).trim()
 }
 
-/** PnL = Qty * price * 100 - commission; nulls treated as 0. For Execution: sign by side (SELL +, BUY -). */
+/** Sort executions by trade_date (asc) then time (asc) for Performance page. Uses trade_date as primary. */
+function sortExecByTradeDateThenTime(a: Execution, b: Execution): number {
+  const da = (a.trade_date ?? '').trim()
+  const db = (b.trade_date ?? '').trim()
+  if (da !== db) return da.localeCompare(db)
+  return (a.time ?? 0) - (b.time ?? 0)
+}
+
+/** Unrealized Execution PnL: -QTY * PRICE * 100 - COMMISSION (quantity is signed; commission already has sign, subtract as-is). */
 function execPnl(e: Execution): number {
   const qty = Number(e.quantity) || 0
   const price = Number(e.price) || 0
   const commission = Number(e.commission) || 0
-  const side = (e.side ?? '').toString().trim().toUpperCase()
-  const sign = side === 'SELL' ? 1 : -1
-  const pnl = sign * qty * price * 100 - commission
+  const pnl = -qty * price * 100 - commission
   return Number.isFinite(pnl) ? pnl : 0
 }
 
-/** PnL for Match (pair): Qty * (p_price - c_price) * 100 - commission; nulls as 0. */
-function matchPnl(p: { quantity: number; c_price: number; p_price: number; commission: number }): number {
+/** PnL for Match (pair): per leg PNL = (QTY*PRICE*100 + COMMISSION); if SIDE=BUY keep it, if SIDE=SELL negate. Commission has sign in DB. */
+function matchPnl(p: { quantity: number; c_side: string; p_side: string; c_price: number; p_price: number; commission: number }): number {
   const qty = Number(p.quantity) || 0
   const cPrice = Number(p.c_price) || 0
   const pPrice = Number(p.p_price) || 0
   const commission = Number(p.commission) || 0
-  const pnl = qty * (pPrice - cPrice) * 100 - commission
+  const sideC = (p.c_side ?? '').toString().trim().toUpperCase()
+  const sideP = (p.p_side ?? '').toString().trim().toUpperCase()
+  const halfComm = commission / 2
+  const legC = qty * cPrice * 100 + halfComm
+  const legP = qty * pPrice * 100 + halfComm
+  const pnlC = sideC === 'BUY' ? legC : -legC
+  const pnlP = sideP === 'BUY' ? legP : -legP
+  const pnl = pnlC + pnlP
   return Number.isFinite(pnl) ? pnl : 0
 }
 
@@ -111,7 +124,18 @@ function getChicagoDayRange(dateStr: string): { since_ts: number; until_ts: numb
   }
 }
 
-/** Unix timestamp to YYYY-MM-DD in America/Chicago (for grouping executions by calendar day). */
+/** Date YYYY-MM-DD minus N days, returns YYYY-MM-DD. Used so backend can pair opens from before the month. */
+function dateStrMinusDays(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const t = new Date(y, m - 1, d)
+  t.setDate(t.getDate() - days)
+  const yy = t.getFullYear()
+  const mm = String(t.getMonth() + 1).padStart(2, '0')
+  const dd = String(t.getDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+/** Unix timestamp to YYYY-MM-DD in America/Chicago (fallback when trade_date is missing). */
 function unixTimeToChicagoDateStr(ts: number): string {
   if (!Number.isFinite(ts)) return ''
   const sec = ts > 1e12 ? ts / 1000 : ts
@@ -121,6 +145,14 @@ function unixTimeToChicagoDateStr(ts: number): string {
   const m = parts.find((p) => p.type === 'month')?.value ?? ''
   const day = parts.find((p) => p.type === 'day')?.value ?? ''
   return `${y}-${m}-${day}`
+}
+
+/** Calendar day for an execution: prefer trade_date (YYYY-MM-DD), else Chicago date from time. Used for calendar grouping. */
+function executionDateStr(e: Execution): string {
+  const td = (e.trade_date ?? '').trim()
+  if (td && /^\d{4}-\d{2}-\d{2}$/.test(td)) return td
+  if (e.time != null && Number.isFinite(Number(e.time))) return unixTimeToChicagoDateStr(Number(e.time))
+  return ''
 }
 
 /** Time range to date range (Chicago calendar). calendarMonth = "YYYY-MM". Quarter = current month + 2 months back (3 months). */
@@ -195,10 +227,10 @@ function computeOptPairsFromExecutions(
   }
   const pairs: { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] = []
   for (const list of Object.values(byKey)) {
-    const sorted = [...list].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
-    const buyQueue: { q: number; p: number; c: number; side: string }[] = []
-    const sellQueue: { q: number; p: number; c: number; side: string }[] = []
-    const sym = sorted[0]?.symbol ?? ''
+const sorted = [...list].sort(sortExecByTradeDateThenTime)
+  const buyQueue: { q: number; p: number; c: number; side: string }[] = []
+  const sellQueue: { q: number; p: number; c: number; side: string }[] = []
+  const sym = sorted[0]?.symbol ?? ''
     const exp = sorted[0]?.expiry ?? ''
     const str = String(sorted[0]?.strike ?? '')
     const acc = sorted[0]?.account_id ?? ''
@@ -381,7 +413,7 @@ function computeDayRealizedUnrealized(
     const first = execs[0]
     const firstPair = pairs[0]
     const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
-    const sortedExecs = [...execs].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+    const sortedExecs = [...execs].sort(sortExecByTradeDateThenTime)
     const pairedExecIds = new Set<number>()
     for (const p of pairs) {
       if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
@@ -423,7 +455,7 @@ function computeDayRealizedUnrealizedStock(
   let totalRealized = 0
   let totalUnrealized = 0
   for (const list of Object.values(byKey)) {
-    const sorted = [...list].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+    const sorted = [...list].sort(sortExecByTradeDateThenTime)
     const buyQueue: { q: number; p: number; c: number }[] = []
     const sellQueue: { q: number; p: number; c: number }[] = []
 
@@ -566,13 +598,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           const stockMap: Record<string, { realized: number; unrealized: number }> = {}
           for (let day = 1; day <= lastDay; day++) {
             const dateStr = `${monthKey}-${String(day).padStart(2, '0')}`
-            const dayExecs = execs.filter((e) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === dateStr)
+            const dayExecs = execs.filter((e) => executionDateStr(e) === dateStr)
             const sameDayPairs =
               optPairs == null
                 ? null
                 : optPairs.filter((p) => {
                   const legP = execById.get(p.leg_p_execution_id)
-                  const pDate = legP?.time != null ? unixTimeToChicagoDateStr(Number(legP.time)) : ''
+                  const pDate = legP != null ? executionDateStr(legP) : ''
                   return pDate === dateStr
                 })
             const useBackendPairs = sameDayPairs != null && sameDayPairs.length > 0
@@ -650,13 +682,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         const map: Record<string, { realized: number; unrealized: number }> = {}
         for (let day = 1; day <= lastDay; day++) {
           const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-          const dayExecs = execs.filter((e) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === dateStr)
+          const dayExecs = execs.filter((e) => executionDateStr(e) === dateStr)
           const sameDayPairs =
             optPairs == null
               ? null
               : optPairs.filter((p) => {
                 const legP = execById.get(p.leg_p_execution_id)
-                const pDate = legP?.time != null ? unixTimeToChicagoDateStr(Number(legP.time)) : ''
+                const pDate = legP != null ? executionDateStr(legP) : ''
                 return pDate === dateStr
               })
           const useBackendPairs = sameDayPairs != null && sameDayPairs.length > 0
@@ -697,8 +729,9 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       .finally(() => setCalendarMonthPerformanceLoading(false))
   }, [calendarMonth])
 
-  // When a day is selected, fetch executions from start of that month through end of selected day
-  // so we can match 3/6's execution with 3/4's (look back); then filter display to selected day only.
+  // When a day is selected, fetch executions from (selectedDay - LOOK_BACK_DAYS) through end of selected day
+  // so backend can pair opens from before the month with closes on the selected day; then filter display to selected day only.
+  const OPT_PAIR_LOOK_BACK_DAYS = 60
   useEffect(() => {
     if (!selectedDay) {
       setSelectedDayExecutions(null)
@@ -706,8 +739,8 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       setSelectedDayComputedPnL(null)
       return
     }
-    const firstOfMonth = selectedDay.slice(0, 7) + '-01'
-    const { since_ts: monthStartTs } = getChicagoDayRange(firstOfMonth)
+    const lookBackStart = dateStrMinusDays(selectedDay, OPT_PAIR_LOOK_BACK_DAYS)
+    const { since_ts: monthStartTs } = getChicagoDayRange(lookBackStart)
     const { until_ts: dayEndTs } = getChicagoDayRange(selectedDay)
     setSelectedDayExecutionsLoading(true)
     fetchExecutions(monthStartTs, dayEndTs, 5000, true)
@@ -717,8 +750,11 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         const execs = res.executions ?? []
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
         const execByIdForDate = new Map(execs.map((e: Execution) => [e.id!, e]))
-        const legDate = (eid: number) => (execByIdForDate.get(eid)?.time != null ? unixTimeToChicagoDateStr(Number(execByIdForDate.get(eid)!.time)) : '')
-        const dayExecs = execs.filter((e: Execution) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === selectedDay)
+        const legDate = (eid: number) => {
+          const ex = execByIdForDate.get(eid)
+          return ex != null ? executionDateStr(ex) : ''
+        }
+        const dayExecs = execs.filter((e: Execution) => executionDateStr(e) === selectedDay)
         const relevantPairs =
           optPairs != null && optPairs.length > 0
             ? optPairs.filter(
@@ -1122,14 +1158,17 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                           <>
                             {(() => {
                               const allExecs = selectedDayExecutions ?? []
-                              const dayExecs = allExecs.filter((e) => e.time != null && unixTimeToChicagoDateStr(Number(e.time)) === selectedDay)
+                              const dayExecs = allExecs.filter((e) => executionDateStr(e) === selectedDay)
                               const optExecs = dayExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
                               const backendPairs = selectedDayOptPairs ?? []
                               const execById = new Map<number, Execution>()
                               for (const e of allExecs) {
                                 if (e.id != null) execById.set(e.id, e)
                               }
-                              const legDateStr = (eid: number) => (execById.get(eid)?.time != null ? unixTimeToChicagoDateStr(Number(execById.get(eid)!.time)) : '')
+                              const legDateStr = (eid: number) => {
+                                const ex = execById.get(eid)
+                                return ex != null ? executionDateStr(ex) : ''
+                              }
                               // Pairs that have at least one leg on the selected day (can look back to earlier days).
                               const relevantPairs = backendPairs.filter(
                                 (p) =>
@@ -1265,7 +1304,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                 const first = execs[0]
                                 const firstPair = pairs[0]
                                 const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
-                                const sortedExecs = [...execs].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+                                const sortedExecs = [...execs].sort(sortExecByTradeDateThenTime)
                                 const pairedExecIds = new Set<number>()
                                 for (const p of pairs) {
                                   if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
@@ -1388,7 +1427,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                               ? execById.get(firstPair.leg_p_execution_id)?.option_right
                                               : undefined)
                                       )
-                                      const sortedExecs = [...execs].sort((a, b) => (a.time ?? 0) - (b.time ?? 0))
+                                      const sortedExecs = [...execs].sort(sortExecByTradeDateThenTime)
                                       type Row = { type: 'Execution'; e: Execution } | { type: 'Match'; p: (typeof dayPairs)[0] }
                                       const pairedExecIds = new Set<number>()
                                       for (const p of pairs) {
@@ -1449,7 +1488,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                       <td>{row.p.account_id || '—'}</td>
                                                       <td>{execTimeStr}</td>
                                                       <td>{row.p.c_side}</td>
-                                                      <td>{row.p.quantity}</td>
+                                                      <td>{legC?.quantity != null && legP?.quantity != null ? `${legC.quantity} / ${legP.quantity}` : String(row.p.quantity)}</td>
                                                       <td>{fmtUsd(row.p.c_price)}</td>
                                                       <td>{fmtUsd(row.p.commission)}</td>
                                                       <td className={(() => { const mp = row.p.net_pnl ?? matchPnl(row.p); return Math.abs(mp) < 0.005 ? '' : (mp >= 0 ? 'tone-positive' : 'tone-negative'); })()}>{fmtPnl(row.p.net_pnl ?? matchPnl(row.p))}</td>

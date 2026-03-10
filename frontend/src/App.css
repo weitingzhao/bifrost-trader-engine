@@ -3779,6 +3779,15 @@ th {
   font-size: var(--text-small, 0.875rem);
 }
 
+.replay-th-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.replay-th-sortable:hover {
+  color: var(--color-accent, #06c);
+}
+
 .replay-opt-contract {
   font-family: var(--font-mono, monospace);
   font-size: var(--text-small);

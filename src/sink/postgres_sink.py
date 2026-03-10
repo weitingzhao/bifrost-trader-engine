@@ -1556,6 +1556,12 @@ class PostgreSQLSink(StatusSink):
                             exec_dt = None
                     else:
                         exec_dt = None
+                    # When source is not flex_trades, trade_date is not provided by the source; set it from exec_time.
+                    if (source or "").strip() != "flex_trades" and trade_date is None and exec_dt is not None:
+                        try:
+                            trade_date = exec_dt.date() if hasattr(exec_dt, "date") else None
+                        except Exception:
+                            trade_date = None
                     cols = (
                         "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, "
                         "expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, "

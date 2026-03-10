@@ -47,6 +47,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **[US 指数数据源（参考指数）](INDEX_DATA_SOURCES.md)** | TradingView 指数日线、配置、定时拉取、gap-fill、GET /status 与 benchmark |
 | **[IB 数据获取服务边界](IB_MARKET_DATA_BOUNDARIES.md)** | IB 历史数据 Pacing、Step Size（duration/bar 合法组合）、不可用数据、行情订阅；Market 页 Fetch 逻辑需遵守 |
 | **[Performance 页面设计](PERFORMANCE_PAGE_DESIGN.md)** | 基于执行记录的绩效分析、Calendar PnL、评估指标与 API（R-M7 / R-H2）；**执行计划**见 [plans/performance-execution-plan.md](plans/performance-execution-plan.md) |
+| **[Performance Match / Realized 逻辑](PERFORMANCE_MATCH_LOGIC.md)** | Match（R）与 Realized 的判定流程、后端 opt_pairs 与 filtered_pairs、前端 relevantPairs；全为 Unrealized 时的排查步骤 |
 | **[IB Pacing 实现方案](plans/ib-pacing-implementation-plan.md)** | 边界配置化、Worker/API 用量计量、Redis 限流、监控暴露的详细设计与分步实现 |
 
 **Reference（部署初始化数据）**：**reference/init/** 目录可放置一次性 SQL 脚本；执行顺序见 [reference/init/README.md](../reference/init/README.md)。当前无必跑脚本，仅需执行 `refresh_db_schema.py`；Flex 默认范围由 settings.flex_default_range_days 控制。

@@ -14,6 +14,12 @@ from src.sink.postgres_sink import _get_conn_params, _sync_accounts_snapshot_to_
 
 logger = logging.getLogger(__name__)
 
+# Exec_time to UTC epoch for comparison with API since_ts/until_ts (Unix seconds = UTC).
+# Use when exec_time is stored as Chicago local time so comparison is session-independent.
+# Table alias "e" vs no alias: use _EXEC_EPOCH_E for "e.exec_time", _EXEC_EPOCH for "exec_time".
+_EXEC_EPOCH_E = "extract(epoch from (e.exec_time AT TIME ZONE 'America/Chicago'))"
+_EXEC_EPOCH = "extract(epoch from (exec_time AT TIME ZONE 'America/Chicago'))"
+
 
 def _fill_contract_key_for_opt(d: Dict[str, Any]) -> None:
     """In-place: for OPT rows with missing contract_key, set contract_key from symbol|OPT|expiry|strike|option_right."""
@@ -282,21 +288,21 @@ class StatusReader:
         account_id: Optional[str] = None,
         limit: Optional[int] = 200,
     ) -> List[Dict[str, Any]]:
-        """Return rows from account_executions (R-A2). Newest first. Converts exec_time to Unix time for API.
+        """Return rows from account_executions (R-A2). Newest first. Filters by trade_date (since_ts/until_ts converted to Chicago dates). Converts exec_time to Unix time for API.
         When limit is None or 0, no LIMIT is applied (return all matching rows).
-        用于「取当天交易记录」的第一条 Query。配对（C↔P 另一条）由 get_executions_with_opt_pairs
-        通过第二条 Query（get_executions_by_contract_keys）按合约键拉取所有腿（可跨日）后再做。
+        用于「取当天交易记录」的第一条 Query；按 trade_date 过滤以与日历日一致。配对（C↔P）由 get_executions_with_opt_pairs 第二条 Query 拉取 OPT 腿。
         """
         if not self._connect():
             return []
         try:
             conditions = []
             values: List[Any] = []
+            # Filter by trade_date so calendar/day grouping matches; convert since_ts/until_ts (Chicago day bounds) to dates.
             if since_ts is not None:
-                conditions.append("extract(epoch from exec_time) >= %s")
+                conditions.append("e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
                 values.append(since_ts)
             if until_ts is not None:
-                conditions.append("extract(epoch from exec_time) <= %s")
+                conditions.append("e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
                 values.append(until_ts)
             if account_id is not None and account_id.strip():
                 conditions.append("account_id = %s")
@@ -311,15 +317,16 @@ class StatusReader:
                 try:
                     cur.execute(
                         f"""
-                        SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                        SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                                e.symbol, e.sec_type, e.side, e.quantity, e.price,
                                c.commission, e.source,
                                e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                               c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra
+                               c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                               e.trade_date, e.raw_extra
                         FROM account_executions e
                         LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
                         {where}
-                        ORDER BY e.exec_time DESC NULLS LAST{limit_clause}
+                        ORDER BY e.trade_date DESC NULLS LAST, e.exec_time DESC NULLS LAST{limit_clause}
                         """,
                         values,
                     )
@@ -328,29 +335,32 @@ class StatusReader:
                         try:
                             cur.execute(
                                 f"""
-                                SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                                SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                                        e.symbol, e.sec_type, e.side, e.quantity, e.price,
                                        c.commission, e.source,
                                        e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                                       c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra
+                                       c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                                       e.trade_date, e.raw_extra
                                 FROM account_executions e
                                 LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id
                                 {where}
-                                ORDER BY e.exec_time DESC NULLS LAST{limit_clause}
+                                ORDER BY e.trade_date DESC NULLS LAST, e.exec_time DESC NULLS LAST{limit_clause}
                                 """,
                                 values,
                             )
                         except Exception:
                             cur.execute(
                                 f"""
-                                        SELECT id, account_id, exec_id, extract(epoch from exec_time) AS time,
-                                               symbol, sec_type, side, quantity, price,
-                                               NULL::double precision AS commission, source,
-                                               expiry, strike, option_right, exchange, order_id, cum_qty,
-                                               NULL::double precision AS realized_pnl, contract_key,
-                                               NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date, raw_extra
-                                        FROM account_executions {where}
-                                ORDER BY exec_time DESC NULLS LAST{limit_clause}
+                                        SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+                                               e.symbol, e.sec_type, e.side, e.quantity, e.price,
+                                               NULL::double precision AS commission, e.source,
+                                               e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
+                                               NULL::double precision AS realized_pnl, e.contract_key,
+                                               NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date,
+                                               e.trade_date, e.raw_extra
+                                        FROM account_executions e
+                                        {where}
+                                ORDER BY e.trade_date DESC NULLS LAST, e.exec_time DESC NULLS LAST{limit_clause}
                                 """,
                                 values,
                             )
@@ -396,8 +406,8 @@ class StatusReader:
                     SELECT
                         account_id,
                         source,
-                        extract(epoch from max(exec_time)) AS latest_exec_ts,
-                        extract(epoch from (now() - max(exec_time))) / 86400.0 AS days_since_latest
+                        extract(epoch from (max(exec_time) AT TIME ZONE 'America/Chicago')) AS latest_exec_ts,
+                        extract(epoch from (now() - (max(exec_time) AT TIME ZONE 'America/Chicago'))) / 86400.0 AS days_since_latest
                     FROM account_executions
                     WHERE exec_time IS NOT NULL
                     GROUP BY account_id, source
@@ -456,15 +466,16 @@ class StatusReader:
         values.append(limit)
         # 调试：打出第二条 Query 的 SQL 与参数，便于核对「如何执行」
         sql = f"""
-                        SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                        SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                                e.symbol, e.sec_type, e.side, e.quantity, e.price,
                                c.commission, e.source,
                                e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                               c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra
+                               c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                               e.trade_date, e.raw_extra
                         FROM account_executions e
                         LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
                         WHERE {where}
-                        ORDER BY e.exec_time ASC NULLS LAST
+                        ORDER BY e.trade_date ASC NULLS LAST, e.exec_time ASC NULLS LAST
                         LIMIT %s
                         """
         logger.info(
@@ -483,15 +494,16 @@ class StatusReader:
                         try:
                             cur.execute(
                                 f"""
-                                SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+                                SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                                        e.symbol, e.sec_type, e.side, e.quantity, e.price,
                                        c.commission, e.source,
                                        e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
-                                       c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra
+                                       c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
+                                       e.trade_date, e.raw_extra
                                 FROM account_executions e
                                 LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id
                                 WHERE {where}
-                                ORDER BY e.exec_time ASC NULLS LAST
+                                ORDER BY e.trade_date ASC NULLS LAST, e.exec_time ASC NULLS LAST
                                 LIMIT %s
                                 """,
                                 values,
@@ -506,16 +518,17 @@ class StatusReader:
                             acc_filter = " AND account_id = %s" if (account_id and account_id.strip()) else ""
                             cur.execute(
                                 f"""
-                                SELECT id, account_id, exec_id, extract(epoch from exec_time) AS time,
+                                SELECT id, account_id, exec_id, {_EXEC_EPOCH} AS time,
                                        symbol, sec_type, side, quantity, price,
                                        NULL::double precision AS commission, source,
                                        expiry, strike, option_right, exchange, order_id, cum_qty,
                                        NULL::double precision AS realized_pnl, contract_key,
-                                       NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date, raw_extra
+                                       NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date,
+                                       trade_date, raw_extra
                                 FROM account_executions
                                 WHERE (symbol, expiry, COALESCE(strike::text,''), account_id) IN ({placeholders})
                                   AND upper(trim(COALESCE(sec_type,''))) = 'OPT'{acc_filter}
-                                ORDER BY exec_time ASC NULLS LAST
+                                ORDER BY trade_date ASC NULLS LAST, exec_time ASC NULLS LAST
                                 LIMIT %s
                                 """,
                                 vals_no_acc,
@@ -589,16 +602,43 @@ class StatusReader:
             if aid not in pair_map[bid]:
                 pair_map[bid].append(aid)
 
-        # Group by (symbol, expiry, strike, account_id)
+        def _norm_strike(s: Any) -> str:
+            if s is None:
+                return ""
+            try:
+                f = float(s)
+                return str(int(f)) if math.isfinite(f) and f == int(f) else str(f)
+            except (TypeError, ValueError):
+                return str(s).strip()
+
+        def _norm_side(s: Any) -> str:
+            """Map IB BOT/SLD and variants to BUY/SELL so pairing works."""
+            if s is None:
+                return "BUY"
+            raw = (str(s) or "").strip().upper()
+            if raw in ("BOT", "BUY", "B"):
+                return "BUY"
+            if raw in ("SLD", "SELL", "S"):
+                return "SELL"
+            return raw or "BUY"
+
+        def _norm_expiry(s: Any) -> str:
+            """Canonical expiry for grouping: digits only (YYYYMMDD) so 20260306 and 2026-03-06 match."""
+            if s is None:
+                return ""
+            raw = str(s).strip().replace("-", "").replace(" ", "")
+            return "".join(c for c in raw if c.isdigit()) if raw else ""
+
+        # Group by (symbol, expiry, strike, account_id); normalize strike and expiry so keys match
         groups: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
         for e in opt_only:
-            side = (e.get("side") or "").strip().upper() or "BUY"
+            side = _norm_side(e.get("side"))
             if side not in ("BUY", "SELL"):
                 continue
             key = (
                 (e.get("symbol") or "").strip(),
-                str(e.get("expiry") or "").strip(),
-                str(e.get("strike") if e.get("strike") is not None else ""),
+                _norm_expiry(e.get("expiry")),
+                _norm_strike(e.get("strike")),
                 (e.get("account_id") or "").strip(),
             )
             if key not in groups:
@@ -616,10 +656,11 @@ class StatusReader:
             sell_queue: List[Tuple[float, float, float, str, int]] = []
 
             for x in group_sorted:
-                side = (x.get("side") or "").strip().upper() or "BUY"
+                side = _norm_side(x.get("side"))
                 if side not in ("BUY", "SELL"):
                     continue
-                q = float(x.get("quantity") or 0)
+                # IB/Flex: SELL often has negative quantity; use abs for sizing so pairing works
+                q = abs(float(x.get("quantity") or 0))
                 p = float(x.get("price") or 0)
                 c = (
                     float(x.get("commission") or 0)
@@ -756,25 +797,48 @@ class StatusReader:
             limit=5000,
         )
         pair_map, opt_pairs = self._compute_opt_pair_map_and_pairs(all_legs)
-        # Only return pairs whose both legs have exec_time in [since_ts, until_ts] (no matching with future).
-        id_to_time_filter: Dict[int, float] = {}
+        # Only return pairs whose both legs have trade_date in the Chicago date range (same as Query 1/2).
+        try:
+            from zoneinfo import ZoneInfo
+            chicago = ZoneInfo("America/Chicago")
+            since_date = datetime.fromtimestamp(since_ts, tz=timezone.utc).astimezone(chicago).date()
+            until_date = datetime.fromtimestamp(until_ts, tz=timezone.utc).astimezone(chicago).date()
+        except Exception:
+            since_date = until_date = None
+        id_to_trade_date: Dict[int, date] = {}
         for leg in all_legs:
             eid = leg.get("id")
-            t = leg.get("time")
-            if eid is not None and t is not None:
-                try:
-                    id_to_time_filter[int(eid)] = float(t)
-                except (TypeError, ValueError):
-                    pass
+            if eid is None:
+                continue
+            td = leg.get("trade_date")
+            if td is not None:
+                if isinstance(td, date):
+                    id_to_trade_date[int(eid)] = td
+                elif isinstance(td, str) and len(td) >= 10:
+                    try:
+                        id_to_trade_date[int(eid)] = datetime.strptime(td[:10], "%Y-%m-%d").date()
+                    except (TypeError, ValueError):
+                        pass
+            # Fallback: when trade_date is NULL (e.g. legacy rows), derive date from time (exec_time) in Chicago
+            if int(eid) not in id_to_trade_date:
+                t = leg.get("time")
+                if t is not None:
+                    try:
+                        from zoneinfo import ZoneInfo
+                        ts = float(t)
+                        dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(ZoneInfo("America/Chicago"))
+                        id_to_trade_date[int(eid)] = dt.date()
+                    except Exception:
+                        pass
         filtered_pairs = []
         for p in opt_pairs:
             cid = p.get("leg_c_execution_id")
             pid = p.get("leg_p_execution_id")
-            tc = id_to_time_filter.get(int(cid)) if cid is not None else None
-            tp = id_to_time_filter.get(int(pid)) if pid is not None else None
-            if tc is None or tp is None:
+            dc = id_to_trade_date.get(int(cid)) if cid is not None else None
+            dp = id_to_trade_date.get(int(pid)) if pid is not None else None
+            if dc is None or dp is None:
                 continue
-            if tc < since_ts or tc > until_ts or tp < since_ts or tp > until_ts:
+            if since_date is not None and until_date is not None and (dc < since_date or dc > until_date or dp < since_date or dp > until_date):
                 continue
             filtered_pairs.append(p)
         pair_map_filtered: Dict[int, List[int]] = {}
@@ -805,19 +869,20 @@ class StatusReader:
         account_id: Optional[str] = None,
         limit: int = 5000,
     ) -> List[Dict[str, Any]]:
-        """一条 SQL（CTE + 窗口函数）取出「当天有 OPT 的合约」的、且 exec_time 在 [since_ts, until_ts] 内的全部 OPT 腿。
-        这样从 SQL 层就保证 Match 的两条腿的 exec time 都在请求的时间范围内（时间不会倒流、配对只在本范围内）。
+        """一条 SQL（CTE + 窗口函数）取出「trade_date 在 since_ts/until_ts 对应芝加哥日期内」的 OPT 合约的全部 OPT 腿。
+        过滤按 trade_date 与 Query 1 / 日历日一致。time 仍为 exec_time 的 epoch，用于 FIFO 配对排序。
         配对按 side：PARTITION BY symbol, expiry, strike, account_id, side_norm（BUY/SELL），同组内 FIFO 配对 BUY↔SELL。"""
         if since_ts is None or until_ts is None:
             return []
         if not self._connect():
             return []
+        # Filter by trade_date (same as get_executions): convert since_ts/until_ts to Chicago dates
         values: List[Any] = [since_ts, until_ts]
         acc_cond = ""
         if account_id and account_id.strip():
             acc_cond = " AND e.account_id = %s"
             values.append(account_id.strip())
-        # values2: in_selected_day (2), all_legs time filter (2), optional account_id, limit
+        # values2: in_selected_day (2), all_legs trade_date filter (2), optional account_id, limit
         values2: List[Any] = [since_ts, until_ts, since_ts, until_ts]
         if account_id and account_id.strip():
             values2.append(account_id.strip())
@@ -826,24 +891,27 @@ class StatusReader:
 WITH day_keys AS (
   SELECT DISTINCT e.symbol, e.expiry, COALESCE(e.strike::text,'') AS strike_s, e.account_id
   FROM account_executions e
-  WHERE extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s
+  WHERE e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
     {acc_cond}
 ),
 all_legs AS (
-  SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+  SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+         e.trade_date,
          e.symbol, e.sec_type, e.side, e.quantity, e.price,
          c.commission, e.source,
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
          c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra,
-         (extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s) AS in_selected_day,
+         (e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date) AS in_selected_day,
          upper(trim(COALESCE(e.side,''))) AS side_norm
   FROM account_executions e
   INNER JOIN day_keys k ON e.symbol = k.symbol AND e.expiry = k.expiry
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
   LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
-    AND extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s
+    AND e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     {acc_cond}
 ),
 numbered AS (
@@ -864,24 +932,27 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
 WITH day_keys AS (
   SELECT DISTINCT e.symbol, e.expiry, COALESCE(e.strike::text,'') AS strike_s, e.account_id
   FROM account_executions e
-  WHERE extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s
+  WHERE e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
     {acc_cond}
 ),
 all_legs AS (
-  SELECT e.id, e.account_id, e.exec_id, extract(epoch from e.exec_time) AS time,
+  SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+         e.trade_date,
          e.symbol, e.sec_type, e.side, e.quantity, e.price,
          NULL::double precision AS commission, e.source,
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
          NULL::double precision AS realized_pnl, e.contract_key, NULL::text AS currency,
          NULL::double precision AS yield_, NULL::integer AS yield_redemption_date, e.raw_extra,
-         (extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s) AS in_selected_day,
+         (e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date) AS in_selected_day,
          upper(trim(COALESCE(e.side,''))) AS side_norm
   FROM account_executions e
   INNER JOIN day_keys k ON e.symbol = k.symbol AND e.expiry = k.expiry
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
-    AND extract(epoch from e.exec_time) >= %s AND extract(epoch from e.exec_time) <= %s
+    AND e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     {acc_cond}
 ),
 numbered AS (
@@ -2815,6 +2886,12 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                             exec_dt = None
                     else:
                         exec_dt = None
+                    # When source is not flex_trades, trade_date is not provided by the source; set it from exec_time.
+                    if (source or "").strip() != "flex_trades" and trade_date is None and exec_dt is not None:
+                        try:
+                            trade_date = exec_dt.date() if hasattr(exec_dt, "date") else None
+                        except Exception:
+                            trade_date = None
                     cols = (
                         "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, "
                         "expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, "
