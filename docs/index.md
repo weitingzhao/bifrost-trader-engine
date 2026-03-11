@@ -60,4 +60,4 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 | **Frontend** | 监控 UI，调用 Server API。 | **[scripts/run_frontend.sh](../scripts/run_frontend.sh)**：`./scripts/run_frontend.sh dev`（开发，端口见 `config/config.yaml` 的 `frontend.port`，默认 5173）、`./scripts/run_frontend.sh build`（构建到 `frontend/dist`）、`./scripts/run_frontend.sh install`（仅安装依赖） |
 | **Docs** | 文档站点（MkDocs）。 | 生成 FSM：`python scripts/fsm_build_docs.py` → `mkdocs build`；本地预览：`mkdocs serve` 或 `python scripts/run_docs.py`（默认 http://127.0.0.1:8000） |
 
-其他常用脚本（均在 `scripts/` 下）：`db_refresh_schema.py`、`db_release_dblock.py`、`scripts/check/ib/check_ib_connect.py` 等；详见 [README.md](../README.md) 与各阶段执行计划。
+其他常用脚本（均在 `scripts/` 下）：`db_refresh_schema.py`、`db_release_dblock.py`、`scripts/check/ib/check_ib_connect.py` 等；详见 [README.md](../README.md) 与各阶段执行计划。上述 scripts/check 下脚本为可选运维/检查用，阶段验收不依赖。

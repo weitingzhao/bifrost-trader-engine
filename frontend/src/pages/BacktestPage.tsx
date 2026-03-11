@@ -1,4 +1,5 @@
 import type { StatusResponse } from '../types'
+import { InfoTooltip } from '../components/InfoTooltip'
 
 interface BacktestPageProps {
   status: StatusResponse | null
@@ -6,12 +7,12 @@ interface BacktestPageProps {
   breadcrumbLabel?: string
 }
 
-export function BacktestPage({ status: _status, onGoToScreener, breadcrumbLabel = 'Back test' }: BacktestPageProps) {
+export function BacktestPage({ status: _status, onGoToScreener, breadcrumbLabel = 'Backtest' }: BacktestPageProps) {
   return (
-    <div className="replay-main">
-      <section className="replay-section" aria-labelledby="backtest-head">
+    <div className="card process-section">
+      <h2 id="backtest-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
         {onGoToScreener ? (
-          <h2 id="backtest-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
+          <>
             <button
               type="button"
               className="page-title-breadcrumb-link"
@@ -22,12 +23,15 @@ export function BacktestPage({ status: _status, onGoToScreener, breadcrumbLabel 
             </button>
             {' / '}
             {breadcrumbLabel}
-          </h2>
+          </>
         ) : (
-          <h2 id="backtest-head">Back test</h2>
+          breadcrumbLabel
         )}
-        <p className="section-hint">Backtest tools. (Placeholder)</p>
-      </section>
+        <InfoTooltip text="Backtest and strategy validation — planned for a later release." />
+      </h2>
+      <p className="section-hint">
+        Backtest and strategy validation will be available in a later release.
+      </p>
     </div>
   )
 }

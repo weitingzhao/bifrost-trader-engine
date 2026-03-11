@@ -114,7 +114,7 @@
 | TC-1-R-C1a-1 | R-C1a | **人工** | 起 daemon、发 SIGTERM、断言数秒内退出 |
 | TC-1-R-C1a-2 | R-C1a | 不适用 | 控制文件按计划留阶段 2；当前为 DB 控制，无 1.3 |
 
-**阶段 1 小结**：**scripts/check/ 已移除**，阶段 1 验收改为按上述清单**人工执行**；约 6 个 TC 为人工核对 schema/配置/信号，3 个为人工操作验证，1 个为设计验证，1 个不适用。
+**阶段 1 小结**：阶段 1 验收**不依赖** scripts/check/，按上述清单**人工执行**；scripts/check/ **保留**，供 IB 连接检查、Flex 拉取等日常使用；约 6 个 TC 为人工核对 schema/配置/信号，3 个为人工操作验证，1 个为设计验证，1 个不适用。
 
 ---
 
@@ -185,7 +185,7 @@
 | 项目 | 阶段 1 | 阶段 2 | 阶段 3（数据获取） |
 |------|--------|--------|------------------|
 | **执行计划文档** | ✅ [phase1-execution-plan.md](phase1-execution-plan.md) | ✅ [phase2-execution-plan.md](phase2-execution-plan.md) | ✅ [phase3-execution-plan.md](phase3-execution-plan.md)（Todo、验收清单、代码锚点） |
-| **自检/验收脚本** | 已移除 scripts/check/；阶段 1 人工验收 | ⏳ 无 phase2 脚本（可选） | ❌ 无 phase3_0 或等价脚本 |
+| **自检/验收脚本** | 阶段 1 不依赖 scripts/check/，人工验收；scripts/check/ 保留（IB/Flex 等） | ⏳ 无 phase2 脚本（可选） | ❌ 无 phase3_0 或等价脚本 |
 | **验收依据** | 执行计划 + PLAN_NEXT_STEPS TC-1-* | phase2 验收清单 + PLAN_NEXT_STEPS TC-2-* | phase3-execution-plan + PLAN_NEXT_STEPS 阶段 3 验证标准与 TC-3-* |
 
 **影响**：阶段 3 的**正式验收**可依据 [phase3-execution-plan.md](phase3-execution-plan.md) 的 Todo/验收清单与 [PLAN_NEXT_STEPS 阶段 3](../PLAN_NEXT_STEPS.md#阶段-3数据获取账户持仓市值交易历史与统计) 的「检查方式」「验证标准」逐条执行并记录；目前**无** phase3_0.py，需人工执行 TC-3-* 或后续补充自检脚本。

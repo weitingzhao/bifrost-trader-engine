@@ -1,5 +1,5 @@
 ---
-description: Language and locale — use Chinese for communication, English for UI and code; docs may stay Chinese
+description: Language and locale — Chinese for communication; English for UI and identifiers; code comments optional; docs may stay Chinese
 alwaysApply: true
 ---
 
@@ -8,7 +8,7 @@ alwaysApply: true
 **与本项目用户对话一律使用中文。** 此规则适用于本仓库内所有 Agent 与用户的聊天、解释与总结。
 
 - **Communication with the user**: Use **Chinese** for all dialogue with the user (chat, explanations, summaries). Apply this in this project even if the user has a global preference for another language.
-- **UI and code**: Use **English** for all user-facing strings (labels, buttons, tooltips, placeholders, error messages), code identifiers, and comments. No Chinese in the frontend UI or in source code that ships.
+- **UI and code**: Use **English** for all user-facing strings (labels, buttons, tooltips, placeholders, error messages) and code identifiers. No Chinese in the frontend UI. Code comments have no language requirement (Chinese or English is fine).
 - **Documentation** (e.g. docs/, README, .md in the repo): May remain **Chinese** where it already is; new or updated docs can be in Chinese or English as the project owner prefers.
 
-When adding or changing UI text, error messages, or code comments, write them in English.
+When adding or changing UI text or error messages, use English.

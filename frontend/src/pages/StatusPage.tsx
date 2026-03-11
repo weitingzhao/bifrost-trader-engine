@@ -4,86 +4,16 @@ import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMoni
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { fmtSince, fmtTs, fmtUsd } from '../utils/format'
-
-const HEDGE_REASON_LABELS: Record<string, string> = {
-  trading_suspended: 'Hedge suspended',
-  no_status: 'No status data',
-  daemon_not_running: 'Daemon not running',
-  data_stale: 'Data stale',
-  trading_state_pause_cost: 'Trading state: Pause cost',
-  trading_state_risk_halt: 'Trading state: Risk halt',
-  trading_state_stale: 'Trading state: Stale',
-  trading_state_force_hedge: 'Trading state: Force hedge',
-  status_read_error: 'Server read error (lock timeout or connection issue; please refresh later)',
-}
-
-const DAEMON_REASON_LABELS: Record<string, string> = {
-  no_heartbeat: 'No heartbeat data',
-  daemon_not_running: 'Daemon not running',
-  heartbeat_stale: 'Heartbeat not updating (no DB write for >35s; daemon may be busy or stuck)',
-  ib_not_connected: 'IB not connected',
-  status_read_error: 'Server read error (lock timeout or connection issue; please refresh later)',
-}
-
-const DAEMON_SELF_CHECK_LABELS: Record<string, string> = {
-  ok: 'OK',
-  degraded: 'Degraded',
-  blocked: 'Blocked',
-}
-
-const MONITOR_SELF_CHECK_LABELS: Record<string, string> = {
-  ok: 'OK',
-  degraded: 'Degraded',
-  blocked: 'Blocked',
-}
-
-const MONITOR_REASON_LABELS: Record<string, string> = {
-  monitor_stopped: 'Monitor service stopped',
-  monitor_ib_error: 'Monitor IB connection error (account or market)',
-}
-
-const DAEMON_STATE_LABELS: Record<string, string> = {
-  running: 'Running',
-  running_suspended: 'Running (hedge suspended)',
-  connecting: 'Connecting',
-  waiting_ib: 'Waiting for IB (auto-retry)',
-  connected: 'Connected',
-  stopping: 'Stopping',
-  stopped: 'Stopped',
-  idle: 'Idle',
-}
-
-const STATUS_FIELDS: [string, string][] = [
-  ['daemon_state', 'Daemon state'],
-  ['trading_state', 'Trading state'],
-  ['symbol', 'Symbol'],
-  ['spot', 'Spot price'],
-  ['stock_position', 'Stock position'],
-  ['daily_hedge_count', 'Daily hedge count'],
-  ['ts', 'Updated at'],
-]
-
-function setMsg(
-  setter: (v: { text: string; isErr: boolean }) => void,
-  text: string,
-  isErr: boolean
-) {
-  setter({ text, isErr })
-}
-
-const MSG_AUTO_CLEAR_MS = 5000
-
-function scheduleMsgClear(
-  setter: (v: { text: string; isErr: boolean }) => void,
-  timeoutRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
-  delayMs: number = MSG_AUTO_CLEAR_MS
-) {
-  if (timeoutRef.current != null) clearTimeout(timeoutRef.current)
-  timeoutRef.current = setTimeout(() => {
-    setter({ text: '', isErr: false })
-    timeoutRef.current = null
-  }, delayMs)
-}
+import {
+  DAEMON_REASON_LABELS,
+  DAEMON_SELF_CHECK_LABELS,
+  DAEMON_STATE_LABELS,
+  HEDGE_REASON_LABELS,
+  MONITOR_REASON_LABELS,
+  MONITOR_SELF_CHECK_LABELS,
+  STATUS_FIELDS,
+} from './status/statusLabels'
+import { scheduleMsgClear, setMsg } from './status/messageUtils'
 
 export interface StatusPageProps {
   status: StatusResponse | null

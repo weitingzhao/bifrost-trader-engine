@@ -1,6 +1,10 @@
-"""Status, operations, daemon_heartbeat, daemon_run_status, control commands."""
+"""Status, operations, daemon_heartbeat, daemon_run_status, control commands, risk summary.
+
+Daemon heartbeat read and row-to-dict conversion live only in this module; do not duplicate
+in other modules. All callers (e.g. StatusReader in common.py) must use get_daemon_heartbeat(conn)."""
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 import psycopg2
@@ -62,7 +66,9 @@ def get_run_status(conn: Any) -> Optional[bool]:
 
 
 def get_daemon_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
-    """Return daemon_heartbeat row id=1. None if table missing."""
+    """Return daemon_heartbeat row id=1. None if table missing.
+    Single source of truth for heartbeat read logic; fallbacks for older DB schemas (missing
+    listener_*, event_subscribe_*, etc.) are handled here only."""
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -253,3 +259,27 @@ def write_heartbeat_interval(status_config: dict, heartbeat_interval_sec: int) -
     except Exception as e:
         logger.warning("write_heartbeat_interval failed: %s", e)
         return False
+
+
+def get_risk_summary(conn: Any) -> Dict[str, Any]:
+    """Return risk/post-mortem summary: status_current (daily_hedge_count, daily_pnl) + operations count in last 24h + block_reasons."""
+    out: Dict[str, Any] = {
+        "daily_hedge_count": None,
+        "daily_pnl": None,
+        "spot": None,
+        "symbol": None,
+        "operations_count_24h": 0,
+        "block_reasons": [],
+        "ts": None,
+    }
+    row = get_status_current(conn)
+    if row is not None:
+        out["daily_hedge_count"] = row.get("daily_hedge_count")
+        out["daily_pnl"] = row.get("daily_pnl")
+        out["spot"] = row.get("spot")
+        out["symbol"] = row.get("symbol")
+        out["ts"] = row.get("ts")
+    now = time.time()
+    ops = get_operations(conn, since_ts=now - 86400, limit=500)
+    out["operations_count_24h"] = len(ops)
+    return out
