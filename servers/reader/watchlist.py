@@ -10,14 +10,18 @@ logger = logging.getLogger(__name__)
 
 
 def get_watchlist(conn: Any) -> List[Dict[str, Any]]:
-    """Return all watchlist rows (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, created_at)."""
+    """Return all watchlist rows (contract_key, symbol, sec_type, ..., category_id, category, created_at)."""
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT id, contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source,
-                       extract(epoch from created_at) AS created_at
-                FROM watchlist ORDER BY created_at DESC
+                SELECT w.id, w.contract_key, w.symbol, w.sec_type, w.expiry, w.strike, w.option_right,
+                       w.display_label, w.source, w.category_id,
+                       pc.name AS category,
+                       extract(epoch from w.created_at) AS created_at
+                FROM watchlist w
+                LEFT JOIN position_categories pc ON w.category_id = pc.id
+                ORDER BY w.created_at DESC
                 """
             )
             return [dict(r) for r in cur.fetchall()]
@@ -36,6 +40,7 @@ def add_watchlist(
     option_right: Optional[str] = None,
     display_label: Optional[str] = None,
     source: str = "manual",
+    category_id: Optional[int] = None,
 ) -> bool:
     """Insert or replace watchlist row by contract_key. Returns True on success.
     If contract_key contains no '|', treat as stock symbol and normalize to SYMBOL|STK|||."""
@@ -54,14 +59,15 @@ def add_watchlist(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO watchlist (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO watchlist (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, category_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (contract_key) DO UPDATE SET
                     symbol = EXCLUDED.symbol, sec_type = EXCLUDED.sec_type, expiry = EXCLUDED.expiry,
                     strike = EXCLUDED.strike, option_right = EXCLUDED.option_right,
-                    display_label = EXCLUDED.display_label, source = EXCLUDED.source
+                    display_label = EXCLUDED.display_label, source = EXCLUDED.source,
+                    category_id = EXCLUDED.category_id
                 """,
-                (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source),
+                (contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, category_id),
             )
         conn.commit()
         return True

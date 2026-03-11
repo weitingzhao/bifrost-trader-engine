@@ -116,6 +116,7 @@ export async function postWatchlist(item: {
   option_right?: string
   display_label?: string
   source?: string
+  category_id?: number | null
 }): Promise<{ ok: boolean; error?: string }> {
   const r = await fetch(`${API}/watchlist`, {
     method: 'POST',

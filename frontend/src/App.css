@@ -1287,6 +1287,43 @@ body::before {
   width: 4.5rem;
 }
 
+/* Watchlist Actions column: compact, small but clearly clickable buttons */
+.watchlist-action-btns {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.watchlist-action-btn {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.25;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  white-space: nowrap;
+}
+.watchlist-action-btn:hover:not(:disabled) {
+  background: var(--color-border);
+  border-color: var(--color-border-strong);
+}
+.watchlist-action-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.watchlist-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.watchlist-action-btn--remove:hover:not(:disabled) {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
 /* ---------- 守护程序区块 ---------- */
 .daemon-header {
   display: flex;
@@ -2343,12 +2380,13 @@ th {
 
 .ib-position-category-select,
 .ib-category-modal-select {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-md, 6px);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
-  color: var(--color-text);
-  font-size: var(--text-body);
+  color: var(--color-text-main);
   cursor: pointer;
   min-height: 2rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;

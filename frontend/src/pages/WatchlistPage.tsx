@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { IbAccountSnapshot, IbPositionRow, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
+import type { IbAccountSnapshot, IbPositionRow, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
 import type { BarStatsResponse } from '../types'
-import { fetchWatchlist, fetchBarStats, fetchQuotes, postBarsFetch, postWatchlist, deleteWatchlist } from '../api'
+import { fetchWatchlist, fetchBarStats, fetchQuotes, postBarsFetch, postWatchlist, deleteWatchlist, fetchPositionCategories } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
 
@@ -74,6 +75,27 @@ function formatStrike(strike: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(n)
 }
 
+/** Same as Live page: Last + Bid/Ask spread vs Last (green if above Last, red if below). */
+function renderLastBidAsk(q: RealtimeQuote | undefined): ReactNode {
+  if (!q) return '—'
+  const last = q.last != null && Number.isFinite(q.last) ? q.last : null
+  const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
+  const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
+  const bidDiff = last != null && bid != null ? bid - last : null
+  const askDiff = last != null && ask != null ? ask - last : null
+  return (
+    <>
+      {last != null ? fmtUsd(last) : '—'}
+      {bidDiff != null && (
+        <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+      )}
+      {askDiff != null && (
+        <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+      )}
+    </>
+  )
+}
+
 export function WatchlistPage({ status }: WatchlistPageProps) {
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([])
   const [watchlistLoading, setWatchlistLoading] = useState(false)
@@ -89,10 +111,17 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   const [fetchMarketDataStep, setFetchMarketDataStep] = useState<string | null>(null)
   const [fetchMarketDataError, setFetchMarketDataError] = useState<string | null>(null)
   const [realtimeQuotes, setRealtimeQuotes] = useState<RealtimeQuote[]>([])
+  const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
 
   const positions = useMemo(() => {
     return (status?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
   }, [status?.accounts])
+
+  /** Contract keys that have a position in any account (for Holding column). */
+  const contractKeysWithPosition = useMemo(
+    () => new Set(positions.map(p => positionToContractKey(p))),
+    [positions],
+  )
 
   const loadWatchlist = useCallback(async () => {
     setWatchlistLoading(true)
@@ -111,6 +140,14 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   useEffect(() => {
     loadWatchlist()
   }, [loadWatchlist])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPositionCategories()
+      .then((res) => { if (!cancelled) setPositionCategories(res.items ?? []) })
+      .catch(() => { if (!cancelled) setPositionCategories([]) })
+    return () => { cancelled = true }
+  }, [])
 
   /** R-RM*: 轮询实时行情（用于当前价列）；4 秒 */
   useEffect(() => {
@@ -175,6 +212,26 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     [loadWatchlist],
   )
 
+  const handleWatchlistCategoryChange = useCallback(
+    async (item: WatchlistItem, category_id: number | null) => {
+      setWatchlistError(null)
+      const res = await postWatchlist({
+        contract_key: item.contract_key,
+        symbol: item.symbol ?? undefined,
+        sec_type: item.sec_type ?? undefined,
+        expiry: item.expiry ?? undefined,
+        strike: item.strike ?? undefined,
+        option_right: item.option_right ?? undefined,
+        display_label: item.display_label ?? undefined,
+        source: item.source ?? undefined,
+        category_id,
+      })
+      if (res.ok) await loadWatchlist()
+      else setWatchlistError(res.error || 'Failed to update category')
+    },
+    [loadWatchlist],
+  )
+
   const watchlistContractKeys = useMemo(() => new Set(watchlistItems.map(w => w.contract_key)), [watchlistItems])
 
   /** 仅展示尚未在自选中的持仓，用于「从持仓添加」按钮列表；只列 STK（股票） */
@@ -188,6 +245,36 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
 
   const watchlistStocks = useMemo(() => watchlistItems.filter(w => (w.sec_type || 'STK').toUpperCase() !== 'OPT'), [watchlistItems])
   const watchlistOptions = useMemo(() => watchlistItems.filter(w => (w.sec_type || '').toUpperCase() === 'OPT'), [watchlistItems])
+
+  /** Group stocks/options by category label (same order as Accounts: Uncategorized first, then alphabetical). */
+  const stockByCategory = useMemo(() => {
+    const map: Record<string, WatchlistItem[]> = {}
+    for (const item of watchlistStocks) {
+      const k = (item.category && String(item.category).trim()) || 'Uncategorized'
+      if (!map[k]) map[k] = []
+      map[k].push(item)
+    }
+    return map
+  }, [watchlistStocks])
+  const optionByCategory = useMemo(() => {
+    const map: Record<string, WatchlistItem[]> = {}
+    for (const item of watchlistOptions) {
+      const k = (item.category && String(item.category).trim()) || 'Uncategorized'
+      if (!map[k]) map[k] = []
+      map[k].push(item)
+    }
+    return map
+  }, [watchlistOptions])
+  const watchlistCategoryOrder = useMemo(() => {
+    const keys = new Set<string>([...Object.keys(stockByCategory), ...Object.keys(optionByCategory)])
+    const arr = Array.from(keys)
+    arr.sort((a, b) => {
+      if (a === 'Uncategorized') return -1
+      if (b === 'Uncategorized') return 1
+      return a.localeCompare(b)
+    })
+    return arr
+  }, [stockByCategory, optionByCategory])
 
   function openAddOptionModal(item: WatchlistItem) {
     const symbol = (item.symbol || (item.contract_key || '').split('|')[0] || '').trim()
@@ -297,101 +384,163 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
   }
 
-  function renderStockTable(items: WatchlistItem[], emptyText: string) {
-    if (items.length === 0) return <p className="replay-placeholder">{emptyText}</p>
+  function renderStockTableGrouped(emptyText: string) {
+    if (watchlistStocks.length === 0) return <p className="replay-placeholder">{emptyText}</p>
     return (
-      <table className="table-operations">
+      <table className="table-operations ib-positions-table realtime-quotes-table">
         <thead>
           <tr>
             <th>Symbol</th>
-            <th>Price</th>
+            <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below)">Last (Bid / Ask)</th>
+            <th>Category</th>
+            <th>Holding</th>
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>
-          {items.map(item => {
-            const sym = symbolFromItem(item)
-            const q = quoteBySymbol[sym]
-            return (
-              <tr key={item.contract_key}>
-                <td title={item.contract_key}>{watchlistItemLabel(item)}</td>
-                <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsd(q.last) : '—'}</td>
-                <td>
-                <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => handleAnalyze(item)}
-                    disabled={analysisLoadingSymbol !== null}
-                    aria-label={`Analyze ${symbolFromItem(item) || watchlistItemLabel(item)} in Stock_xx`}
-                  >
-                    {analysisLoadingSymbol === symbolFromItem(item) ? 'Analyzing…' : 'Analyze'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => openAddOptionModal(item)}
-                    aria-label="Add option"
-                  >
-                    Options
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => handleRemoveWatchlist(item)}
-                    aria-label="Remove from watchlist"
-                  >
-                    X
-                  </button>
-                </span>
-              </td>
-            </tr>
+        {watchlistCategoryOrder.map((catLabel) => {
+          const items = stockByCategory[catLabel] ?? []
+          if (items.length === 0) return null
+          return (
+            <tbody key={catLabel}>
+              <tr className="ib-stock-group-header">
+                <td colSpan={5}>{catLabel}</td>
+              </tr>
+              {items.map((item) => {
+                const sym = symbolFromItem(item)
+                const q = quoteBySymbol[sym]
+                const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
+                return (
+                  <tr key={item.contract_key}>
+                    <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistItemLabel(item)}</td>
+                    <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAsk(q)}</td>
+                    <td>
+                      <select
+                        className="ib-position-category-select"
+                        value={item.category_id ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          handleWatchlistCategoryChange(item, v ? Number(v) : null)
+                        }}
+                        aria-label={`Category for ${watchlistItemLabel(item)}`}
+                        style={{ minWidth: '8rem' }}
+                      >
+                        <option value="">Uncategorized</option>
+                        {positionCategories.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>{hasHolding ? 'Yes' : '—'}</td>
+                    <td>
+                      <span className="watchlist-action-btns">
+                        <button
+                          type="button"
+                          className="watchlist-action-btn"
+                          onClick={() => handleAnalyze(item)}
+                          disabled={analysisLoadingSymbol !== null}
+                          aria-label={`Analyze ${symbolFromItem(item) || watchlistItemLabel(item)} in Stock_xx`}
+                        >
+                          {analysisLoadingSymbol === symbolFromItem(item) ? 'Analyzing…' : 'Analyze'}
+                        </button>
+                        <button
+                          type="button"
+                          className="watchlist-action-btn"
+                          onClick={() => openAddOptionModal(item)}
+                          aria-label="Add option"
+                        >
+                          Options
+                        </button>
+                        <button
+                          type="button"
+                          className="watchlist-action-btn watchlist-action-btn--remove"
+                          onClick={() => handleRemoveWatchlist(item)}
+                          aria-label="Remove from watchlist"
+                        >
+                          X
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
           )
-          })}
-        </tbody>
+        })}
       </table>
     )
   }
 
-  function renderOptionsTable(items: WatchlistItem[], emptyText: string) {
-    if (items.length === 0) return <p className="replay-placeholder">{emptyText}</p>
+  function renderOptionsTableGrouped(emptyText: string) {
+    if (watchlistOptions.length === 0) return <p className="replay-placeholder">{emptyText}</p>
     return (
-      <table className="table-operations">
+      <table className="table-operations ib-positions-table realtime-quotes-table">
         <thead>
           <tr>
             <th>Symbol</th>
-            <th>Price (underlying)</th>
+            <th title="Underlying Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below)">Last (Bid / Ask)</th>
             <th>Expiry</th>
             <th>Right</th>
             <th>Strike</th>
+            <th>Category</th>
+            <th>Holding</th>
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>
-          {items.map(item => {
-            const sym = symbolFromItem(item)
-            const q = quoteBySymbol[sym]
-            return (
-              <tr key={item.contract_key}>
-                <td title={item.contract_key}>{item.symbol || watchlistItemLabel(item)}</td>
-                <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsd(q.last) : '—'}</td>
-                <td>{formatExpiry(item.expiry)}</td>
-                <td>{formatOptionRight(item.option_right)}</td>
-                <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
-                <td>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => handleRemoveWatchlist(item)}
-                  aria-label="Remove from watchlist"
-                >
-                  X
-                </button>
-              </td>
-            </tr>
+        {watchlistCategoryOrder.map((catLabel) => {
+          const items = optionByCategory[catLabel] ?? []
+          if (items.length === 0) return null
+          return (
+            <tbody key={`opt-${catLabel}`}>
+              <tr className="ib-stock-group-header">
+                <td colSpan={8}>{catLabel}</td>
+              </tr>
+              {items.map((item) => {
+                const sym = symbolFromItem(item)
+                const q = quoteBySymbol[sym]
+                const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
+                return (
+                  <tr key={item.contract_key}>
+                    <td title={item.contract_key}>{item.symbol || watchlistItemLabel(item)}</td>
+                    <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAsk(q)}</td>
+                    <td>{formatExpiry(item.expiry)}</td>
+                    <td>{formatOptionRight(item.option_right)}</td>
+                    <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+                    <td>
+                      <select
+                        className="ib-position-category-select"
+                        value={item.category_id ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          handleWatchlistCategoryChange(item, v ? Number(v) : null)
+                        }}
+                        aria-label={`Category for ${item.symbol || watchlistItemLabel(item)}`}
+                        style={{ minWidth: '8rem' }}
+                      >
+                        <option value="">Uncategorized</option>
+                        {positionCategories.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>{hasHolding ? 'Yes' : '—'}</td>
+                    <td>
+                      <span className="watchlist-action-btns">
+                        <button
+                          type="button"
+                          className="watchlist-action-btn watchlist-action-btn--remove"
+                          onClick={() => handleRemoveWatchlist(item)}
+                          aria-label="Remove from watchlist"
+                        >
+                          X
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
           )
-          })}
-        </tbody>
+        })}
       </table>
     )
   }
@@ -406,11 +555,8 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
       <section className="replay-section" aria-labelledby="watchlist-head">
         <h3 id="watchlist-head" className="page-title-with-tooltip">
           Stocks & options
-          <InfoTooltip text="Stocks: enter Symbol to add. Options: use 'Options' on a stock row and fill expiry, right, strike." />
+          <InfoTooltip text="Stocks in this list are subscribed by the daemon as Real-time ticker (see System → Event Subscribe). Add a symbol below to include it in monitoring. The daemon syncs this list on every heartbeat; no restart is needed when you add or remove symbols." />
         </h3>
-        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: '0.75rem' }}>
-          Stocks in this list are subscribed by the daemon as <strong>Real-time ticker</strong> (see System → Event Subscribe). Add a symbol below to include it in monitoring. The daemon syncs this list on every heartbeat; no restart is needed when you add or remove symbols.
-        </p>
         {watchlistError && (
           <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
             {watchlistError}
@@ -473,9 +619,9 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
         ) : (
           <>
             <h4 className="watchlist-subhead">Stocks</h4>
-            {renderStockTable(watchlistStocks, 'No stocks in watchlist.')}
+            {renderStockTableGrouped('No stocks in watchlist.')}
             <h4 className="watchlist-subhead" style={{ marginTop: '1rem' }}>Options</h4>
-            {renderOptionsTable(watchlistOptions, 'No options in watchlist.')}
+            {renderOptionsTableGrouped('No options in watchlist.')}
           </>
         )}
       </section>

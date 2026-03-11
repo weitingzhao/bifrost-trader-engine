@@ -455,6 +455,10 @@ export interface WatchlistItem {
   option_right?: string | null
   display_label?: string | null
   source?: string | null
+  /** Position category (same as Accounts); id from position_categories */
+  category_id?: number | null
+  /** Category name (e.g. Dividend, Short-term) */
+  category?: string | null
   created_at?: number | null
 }
 

@@ -509,6 +509,9 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS position_category_tags_category_id ON position_category_tags (category_id)"
         )
+        cur.execute(
+            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS category_id integer REFERENCES position_categories(id) ON DELETE SET NULL"
+        )
         conn.commit()
         _log("us_market_holidays")
         cur.execute(

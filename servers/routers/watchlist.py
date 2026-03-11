@@ -20,6 +20,7 @@ class WatchlistBody(BaseModel):
     option_right: Optional[str] = None
     display_label: Optional[str] = None
     source: Optional[str] = None
+    category_id: Optional[int] = None
 
     class Config:
         extra = "ignore"
@@ -50,6 +51,7 @@ def post_watchlist(request: Request, body: WatchlistBody = Body(...)) -> Dict[st
         option_right=body.option_right,
         display_label=body.display_label,
         source=body.source or "manual",
+        category_id=body.category_id,
     )
     if ok:
         return {"ok": True, "message": "Watchlist item added or updated."}

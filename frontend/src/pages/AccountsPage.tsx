@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ExecutionFreshnessItem, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBarsBenchmark, fetchQuotes, fetchExecutionsFreshness, postExecutionsFetch, postExecutionsFetchFlex, postExecutionsFetchFlexUpload, subscribeQuotes } from '../api'
-import { fetchPositionCategories, postPositionCategory, deletePositionCategory, putPositionCategoryTag } from '../api'
+import { fetchPositionCategories, postPositionCategory, patchPositionCategory, deletePositionCategory, putPositionCategoryTag } from '../api'
 import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtExpiry, fmtUsd, fmtUsdRound0 } from '../utils/format'
@@ -54,6 +54,8 @@ export function AccountsPage({
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
   const [categoryModalOpen, setCategoryModalOpen] = useState(false)
   const [categoryError, setCategoryError] = useState<string | null>(null)
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null)
+  const [editingCategoryName, setEditingCategoryName] = useState('')
 
   useEffect(() => {
     if (!hasAccounts) return
@@ -313,7 +315,12 @@ export function AccountsPage({
             role="dialog"
             aria-modal="true"
             aria-labelledby="category-modal-title"
-            onClick={(e) => e.target === e.currentTarget && setCategoryModalOpen(false)}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setCategoryModalOpen(false)
+                setEditingCategoryId(null)
+              }
+            }}
           >
             <div className="modal-content card" style={{ maxWidth: '28rem' }} onClick={(e) => e.stopPropagation()}>
               <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
@@ -327,23 +334,71 @@ export function AccountsPage({
               </p>
               <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1rem 0' }}>
                 {positionCategories.map((c) => (
-                  <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                    <span style={{ flex: 1 }}>{c.name}</span>
-                    {c.description && (
-                      <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                  <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                    {editingCategoryId === c.id ? (
+                      <>
+                        <input
+                          type="text"
+                          value={editingCategoryName}
+                          onChange={(e) => setEditingCategoryName(e.target.value)}
+                          placeholder="Category name"
+                          style={{ flex: 1, minWidth: '8rem' }}
+                          aria-label="Edit category name"
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          onClick={async () => {
+                            const name = editingCategoryName.trim()
+                            if (!name) return
+                            setCategoryError(null)
+                            const res = await patchPositionCategory(c.id, { name })
+                            if (res.ok) {
+                              const r = await fetchPositionCategories()
+                              setPositionCategories(r.items ?? [])
+                              setEditingCategoryId(null)
+                            } else {
+                              setCategoryError(res.error ?? 'Failed to update name.')
+                            }
+                          }}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          onClick={() => { setEditingCategoryId(null); setCategoryError(null) }}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ flex: 1 }}>{c.name}</span>
+                        {c.description && (
+                          <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          onClick={() => { setEditingCategoryId(c.id); setEditingCategoryName(c.name); setCategoryError(null) }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          onClick={async () => {
+                            if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
+                            await deletePositionCategory(c.id)
+                            const r = await fetchPositionCategories()
+                            setPositionCategories(r.items ?? [])
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={async () => {
-                        if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
-                        await deletePositionCategory(c.id)
-                        const r = await fetchPositionCategories()
-                        setPositionCategories(r.items ?? [])
-                      }}
-                    >
-                      Delete
-                    </button>
                   </li>
                 ))}
               </ul>
@@ -1322,7 +1377,12 @@ export function AccountsPage({
           role="dialog"
           aria-modal="true"
           aria-labelledby="category-modal-title"
-          onClick={(e) => e.target === e.currentTarget && setCategoryModalOpen(false)}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setCategoryModalOpen(false)
+              setEditingCategoryId(null)
+            }
+          }}
         >
           <div className="modal-content card" style={{ maxWidth: '30rem' }} onClick={(e) => e.stopPropagation()}>
             <h3 id="category-modal-title" style={{ marginTop: 0 }}>Position categories</h3>
@@ -1336,23 +1396,71 @@ export function AccountsPage({
             </p>
             <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1rem 0' }}>
               {positionCategories.map((c) => (
-                <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <span style={{ flex: 1 }}>{c.name}</span>
-                  {c.description && (
-                    <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                  {editingCategoryId === c.id ? (
+                    <>
+                      <input
+                        type="text"
+                        value={editingCategoryName}
+                        onChange={(e) => setEditingCategoryName(e.target.value)}
+                        placeholder="Category name"
+                        style={{ flex: 1, minWidth: '8rem' }}
+                        aria-label="Edit category name"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={async () => {
+                          const name = editingCategoryName.trim()
+                          if (!name) return
+                          setCategoryError(null)
+                          const res = await patchPositionCategory(c.id, { name })
+                          if (res.ok) {
+                            const r = await fetchPositionCategories()
+                            setPositionCategories(r.items ?? [])
+                            setEditingCategoryId(null)
+                          } else {
+                            setCategoryError(res.error ?? 'Failed to update name.')
+                          }
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={() => { setEditingCategoryId(null); setCategoryError(null) }}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ flex: 1 }}>{c.name}</span>
+                      {c.description && (
+                        <span className="section-hint" style={{ fontSize: '0.85rem' }}>{c.description}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={() => { setEditingCategoryId(c.id); setEditingCategoryName(c.name); setCategoryError(null) }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={async () => {
+                          if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
+                          await deletePositionCategory(c.id)
+                          const r = await fetchPositionCategories()
+                          setPositionCategories(r.items ?? [])
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-small"
-                    onClick={async () => {
-                      if (!confirm(`Delete category "${c.name}"? Positions tagged with it will be untagged.`)) return
-                      await deletePositionCategory(c.id)
-                      const r = await fetchPositionCategories()
-                      setPositionCategories(r.items ?? [])
-                    }}
-                  >
-                    Delete
-                  </button>
                 </li>
               ))}
             </ul>
