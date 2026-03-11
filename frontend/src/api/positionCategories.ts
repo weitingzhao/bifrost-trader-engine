@@ -43,3 +43,22 @@ export async function putPositionCategoryTag(account_id: string, contract_key: s
   const j = await res.json().catch(() => ({}))
   return { ok: j.ok === true, error: j.error }
 }
+
+/** Market Streams: symbol order per category (saved to DB). */
+export async function fetchMarketStreamsSymbolOrder(): Promise<{ ok: boolean; order?: Record<string, string[]> }> {
+  const r = await fetch(`${API}/position-categories/symbol-order`)
+  if (!r.ok) return { ok: false }
+  const j = await r.json().catch(() => ({}))
+  return { ok: j.ok === true, order: j.order ?? {} }
+}
+
+/** Market Streams: save symbol order for one category. */
+export async function putMarketStreamsSymbolOrder(category_name: string, symbols: string[]): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${API}/position-categories/symbol-order`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category_name, symbols }),
+  })
+  const j = await res.json().catch(() => ({}))
+  return { ok: j.ok === true, error: j.error }
+}

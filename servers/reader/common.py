@@ -380,3 +380,13 @@ class StatusReader:
         if not self._connect():
             return False
         return position_categories_module.set_position_category_tag(self._conn, account_id=account_id, contract_key=contract_key, category_id=category_id)
+
+    def get_market_streams_symbol_order(self) -> Dict[str, Any]:
+        if not self._connect():
+            return {}
+        return position_categories_module.get_market_streams_symbol_order(self._conn)
+
+    def set_market_streams_symbol_order(self, category_name: str, symbols: List[str]) -> bool:
+        if not self._connect():
+            return False
+        return position_categories_module.set_market_streams_symbol_order(self._conn, category_name=category_name, symbols=symbols)

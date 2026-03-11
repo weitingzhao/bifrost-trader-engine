@@ -68,6 +68,8 @@ export {
   patchPositionCategory,
   deletePositionCategory,
   putPositionCategoryTag,
+  fetchMarketStreamsSymbolOrder,
+  putMarketStreamsSymbolOrder,
 } from './positionCategories'
 export {
   fetchCeleryLogs,

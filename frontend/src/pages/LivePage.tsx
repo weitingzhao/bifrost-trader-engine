@@ -1,9 +1,31 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { RealtimeQuote, StatusResponse } from '../types'
-import { fetchBarsBenchmark, fetchQuotes, fetchWatchlist, subscribeQuotes } from '../api'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import type { PositionCategory, RealtimeQuote, StatusResponse } from '../types'
+import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, postRefreshTickerSubscriptions, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { fmtUsd } from '../utils/format'
+import { fmtUsd, fmtUsdRound0 } from '../utils/format'
 import { computeDailyChange, type DailyBenchmark } from './accounts/accountsUtils'
+
+const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
+
+function loadSymbolOrderFromStorage(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(SYMBOL_ORDER_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, string[]>
+  } catch {
+    /* ignore */
+  }
+  return {}
+}
+
+function saveSymbolOrderToStorage(order: Record<string, string[]>): void {
+  try {
+    localStorage.setItem(SYMBOL_ORDER_STORAGE_KEY, JSON.stringify(order))
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Quote age → Symbol cell freshness: under 3s normal, 3–10s gray, over 10s darker (replaces Since column). */
 function getQuoteFreshness(ts: number | null | undefined): 'fresh' | 'stale' | 'very-stale' | null {
@@ -39,6 +61,13 @@ export function LivePage({ status }: LivePageProps) {
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const [watchlistSymbolSet, setWatchlistSymbolSet] = useState<Set<string>>(new Set())
   const [, setFreshnessTick] = useState(0)
+  const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
+  /** Custom category order (names). Empty = use default from API + data. */
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([])
+  /** Symbol order per category (from DB; fallback localStorage). */
+  const [symbolOrderByCategory, setSymbolOrderByCategory] = useState<Record<string, string[]>>(loadSymbolOrderFromStorage)
+  const [categoryOrderSaving, setCategoryOrderSaving] = useState(false)
+  const [streamSyncFeedback, setStreamSyncFeedback] = useState<string | null>(null)
   useEffect(() => {
     const id = setInterval(() => setFreshnessTick((t) => t + 1), 1000)
     return () => clearInterval(id)
@@ -62,6 +91,30 @@ export function LivePage({ status }: LivePageProps) {
     return () => {
       cancelled = true
     }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPositionCategories()
+      .then((r) => {
+        if (!cancelled) setPositionCategories(r.items ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setPositionCategories([])
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchMarketStreamsSymbolOrder()
+      .then((res) => {
+        if (!cancelled && res.ok && res.order && Object.keys(res.order).length > 0) {
+          setSymbolOrderByCategory(res.order)
+        }
+      })
+      .catch(() => { /* keep localStorage fallback */ })
+    return () => { cancelled = true }
   }, [])
 
   const accountsList = j?.accounts ?? []
@@ -182,6 +235,7 @@ export function LivePage({ status }: LivePageProps) {
     let secondaryQty = 0
     let secondaryTotalCost = 0
     let secondaryHasCost = false
+    let positionCategory = 'Uncategorized'
     const accountIdsWithSymbol: string[] = []
     for (const acc of accountsList) {
       const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
@@ -194,6 +248,9 @@ export function LivePage({ status }: LivePageProps) {
         const secType = (p.secType ?? '').toString().toUpperCase()
         const posQty = typeof p.position === 'number' ? p.position : 0
         if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
+        if (positionCategory === 'Uncategorized' && p.category && String(p.category).trim()) {
+          positionCategory = String(p.category).trim()
+        }
         if (accId && !accountIdsWithSymbol.includes(accId)) accountIdsWithSymbol.push(accId)
         qty += posQty
         const avg = p.avgCost != null && Number.isFinite(p.avgCost as number) ? (p.avgCost as number) : null
@@ -258,6 +315,7 @@ export function LivePage({ status }: LivePageProps) {
       pnlCost,
       streamCategory,
       isInWatchlist,
+      category: positionCategory,
       primaryQty: primaryQty || null,
       primaryAvgCost,
       primaryPnlCost,
@@ -268,7 +326,8 @@ export function LivePage({ status }: LivePageProps) {
   })
 
   const [streamCategoryFilter, setStreamCategoryFilter] = useState<'all' | 'primary' | 'secondary' | 'wishlist'>('all')
-  const filteredRows = useMemo(() => {
+  const [positionCategoryFilter, setPositionCategoryFilter] = useState<string>('all')
+  const filteredByAccount = useMemo(() => {
     if (!hasStreamAccounts) return watchlistRows
     if (streamCategoryFilter === 'all') return watchlistRows
     if (streamCategoryFilter === 'wishlist') return watchlistRows.filter((row) => row.isInWatchlist === true)
@@ -278,6 +337,162 @@ export function LivePage({ status }: LivePageProps) {
       return watchlistRows.filter((row) => row.streamCategory === 'secondary' || row.streamCategory === 'both')
     return watchlistRows.filter((row) => row.streamCategory === streamCategoryFilter)
   }, [watchlistRows, hasStreamAccounts, streamCategoryFilter])
+  const filteredRows = useMemo(() => {
+    if (positionCategoryFilter === 'all') return filteredByAccount
+    return filteredByAccount.filter((row) => row.category === positionCategoryFilter)
+  }, [filteredByAccount, positionCategoryFilter])
+
+  /** Category names that appear in data. */
+  const categoryNamesFromData = useMemo(() => {
+    const set = new Set<string>()
+    watchlistRows.forEach((row) => set.add(row.category))
+    return Array.from(set)
+  }, [watchlistRows])
+
+  /** Default category order: Uncategorized first, then API categories by sort_order, then data-only names alphabetical. */
+  const defaultCategoryOrder = useMemo(() => {
+    const apiNames = new Set(positionCategories.map((c) => c.name))
+    const apiOrdered = [...positionCategories]
+      .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999))
+      .map((c) => c.name)
+    const dataOnly = categoryNamesFromData.filter((n) => n !== 'Uncategorized' && !apiNames.has(n)).sort((a, b) => a.localeCompare(b))
+    const uncategorizedFirst = categoryNamesFromData.includes('Uncategorized') ? ['Uncategorized'] : []
+    return [...uncategorizedFirst, ...apiOrdered.filter((n) => categoryNamesFromData.includes(n)), ...dataOnly]
+  }, [positionCategories, categoryNamesFromData])
+
+  /** Display order: user's categoryOrder if set, else default; append any new data categories. */
+  const streamCategoryOrder = useMemo(() => {
+    const base = categoryOrder.length > 0 ? [...categoryOrder] : [...defaultCategoryOrder]
+    const set = new Set(base)
+    for (const c of categoryNamesFromData) {
+      if (!set.has(c)) {
+        base.push(c)
+        set.add(c)
+      }
+    }
+    return base
+  }, [categoryOrder, defaultCategoryOrder, categoryNamesFromData])
+
+  /** Initialize categoryOrder from default once we have data (do not overwrite user order). */
+  useEffect(() => {
+    if (defaultCategoryOrder.length > 0 && categoryOrder.length === 0) {
+      setCategoryOrder(defaultCategoryOrder)
+    }
+  }, [defaultCategoryOrder, categoryOrder.length])
+
+  const persistCategoryOrder = useCallback(async (ordered: string[]) => {
+    const orderWithoutUncat = ordered.filter((c) => c !== 'Uncategorized')
+    const nameToOrder = new Map(orderWithoutUncat.map((name, i) => [name, i]))
+    setCategoryOrderSaving(true)
+    try {
+      for (const cat of positionCategories) {
+        const idx = nameToOrder.get(cat.name)
+        const desired = idx ?? 999
+        const current = cat.sort_order ?? 999
+        if (desired !== current) {
+          await patchPositionCategory(cat.id, { sort_order: desired })
+        }
+      }
+      setCategoryOrder(ordered)
+    } finally {
+      setCategoryOrderSaving(false)
+    }
+  }, [positionCategories])
+
+  const handleCategoryDragStart = useCallback((e: React.DragEvent, cat: string) => {
+    e.dataTransfer.setData('text/plain', cat)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('application/x-market-streams-category', cat)
+  }, [])
+
+  const handleCategoryDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const handleCategoryDrop = useCallback(
+    (e: React.DragEvent, dropTargetCat: string) => {
+      e.preventDefault()
+      const dragged = e.dataTransfer.getData('application/x-market-streams-category')
+      if (!dragged || dragged === dropTargetCat) return
+      const current = categoryOrder.length > 0 ? categoryOrder : defaultCategoryOrder
+      const fromIdx = current.indexOf(dragged)
+      const toIdx = current.indexOf(dropTargetCat)
+      if (fromIdx === -1 || toIdx === -1) return
+      const next = [...current]
+      next.splice(fromIdx, 1)
+      next.splice(next.indexOf(dropTargetCat), 0, dragged)
+      persistCategoryOrder(next)
+    },
+    [categoryOrder, defaultCategoryOrder, persistCategoryOrder],
+  )
+
+  /** Group filtered rows by category for table sections. */
+  const rowsByCategory = useMemo(() => {
+    const map: Record<string, typeof filteredRows> = {}
+    for (const row of filteredRows) {
+      const cat = row.category
+      if (!map[cat]) map[cat] = []
+      map[cat].push(row)
+    }
+    return map
+  }, [filteredRows])
+
+  /** Rows per category sorted by symbol order (localStorage). Symbols not in order list appended at end. */
+  const sortedRowsByCategory = useMemo(() => {
+    const out: Record<string, typeof filteredRows> = {}
+    for (const cat of Object.keys(rowsByCategory)) {
+      const rows = rowsByCategory[cat]
+      const order = symbolOrderByCategory[cat]
+      if (!order || order.length === 0) {
+        out[cat] = [...rows]
+        continue
+      }
+      const orderSet = new Set(order)
+      const inOrder: typeof rows = []
+      const rest: typeof rows = []
+      for (const sym of order) {
+        const row = rows.find((r) => r.symbol === sym)
+        if (row) inOrder.push(row)
+      }
+      for (const row of rows) {
+        if (!orderSet.has(row.symbol)) rest.push(row)
+      }
+      out[cat] = [...inOrder, ...rest]
+    }
+    return out
+  }, [rowsByCategory, symbolOrderByCategory])
+
+  const categoryOrderFiltered = useMemo(() => {
+    const keys = Object.keys(rowsByCategory)
+    keys.sort((a, b) => {
+      const orderA = streamCategoryOrder.indexOf(a)
+      const orderB = streamCategoryOrder.indexOf(b)
+      if (orderA !== -1 && orderB !== -1) return orderA - orderB
+      if (a === 'Uncategorized') return -1
+      if (b === 'Uncategorized') return 1
+      return a.localeCompare(b)
+    })
+    return keys
+  }, [rowsByCategory, streamCategoryOrder])
+
+  const applySymbolReorder = useCallback((cat: string, fromSymbol: string, toSymbol: string) => {
+    const rows = rowsByCategory[cat]
+    if (!rows || rows.length < 2 || fromSymbol === toSymbol) return
+    const order = symbolOrderByCategory[cat] ?? rows.map((r) => r.symbol)
+    const fromIdx = order.indexOf(fromSymbol)
+    const toIdx = order.indexOf(toSymbol)
+    if (fromIdx === -1 || toIdx === -1) return
+    const next = [...order]
+    next.splice(fromIdx, 1)
+    const newToIdx = next.indexOf(toSymbol)
+    if (newToIdx === -1) return
+    next.splice(newToIdx, 0, fromSymbol)
+    const nextByCat = { ...symbolOrderByCategory, [cat]: next }
+    setSymbolOrderByCategory(nextByCat)
+    saveSymbolOrderToStorage(nextByCat)
+    putMarketStreamsSymbolOrder(cat, next).catch(() => { /* DB failed; localStorage already updated */ })
+  }, [rowsByCategory, symbolOrderByCategory])
 
   return (
     <div className="app-page-stack">
@@ -298,6 +513,28 @@ export function LivePage({ status }: LivePageProps) {
               />
             </h2>
           </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              type="button"
+              className="btn btn-small btn-size-default"
+              onClick={async () => {
+                setStreamSyncFeedback('Syncing…')
+                try {
+                  const res = await postRefreshTickerSubscriptions()
+                  setStreamSyncFeedback(res.ok ? 'Sync requested' : res.error || 'Failed')
+                } catch {
+                  setStreamSyncFeedback('Failed')
+                }
+                setTimeout(() => setStreamSyncFeedback(null), 4000)
+              }}
+              title="Sync Event subscription with current Wishlist and Position symbols: unsubscribe symbols no longer in either."
+            >
+              Refresh
+            </button>
+            {streamSyncFeedback != null && (
+              <span className="section-hint" aria-live="polite">{streamSyncFeedback}</span>
+            )}
+          </div>
         </div>
         {hasStreamAccounts && (
           <div className="realtime-stream-filter">
@@ -317,10 +554,41 @@ export function LivePage({ status }: LivePageProps) {
             </div>
           </div>
         )}
+        <div className="realtime-stream-filter">
+          <span className="section-hint">Category:</span>
+          <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category">
+            <button
+              type="button"
+              className={`replay-filter-pill ${positionCategoryFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setPositionCategoryFilter('all')}
+              aria-pressed={positionCategoryFilter === 'all'}
+            >
+              All
+            </button>
+            {streamCategoryOrder.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilter === cat ? 'active' : ''}`}
+                onClick={() => setPositionCategoryFilter(cat)}
+                aria-pressed={positionCategoryFilter === cat}
+                draggable
+                onDragStart={(e) => handleCategoryDragStart(e, cat)}
+                onDragOver={handleCategoryDragOver}
+                onDrop={(e) => handleCategoryDrop(e, cat)}
+                title="Drag to reorder category"
+              >
+                <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
+                {cat}
+              </button>
+            ))}
+          </div>
+          {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
+        </div>
         <div className="realtime-quotes-table-wrap">
           <table className="table-operations realtime-quotes-table">
             <colgroup>
-              <col style={{ width: '4.25rem' }} />
+              <col style={{ width: '5rem' }} />
               {hasStreamAccounts && <col style={{ width: '4rem' }} />}
               {hasStreamAccounts && <col style={{ width: '5rem' }} />}
               {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
@@ -375,29 +643,48 @@ export function LivePage({ status }: LivePageProps) {
                   <td colSpan={hasStreamAccounts ? 14 : 8}>
                     {watchlistRows.length === 0
                       ? 'No symbols (add symbols in Watchlist, or ensure Stream Accounts Primary/Secondary have positions, or daemon is running)'
-                      : 'No rows match the selected account filter.'}
+                      : 'No rows match the selected filters.'}
                   </td>
                 </tr>
               ) : (
-                filteredRows.map((row) => {
-                  const {
-                    symbol,
-                    quote: q,
-                    qty,
-                    avgCost,
-                    changePct,
-                    pnlVsBench,
-                    pnlCost,
-                    primaryQty,
-                    primaryAvgCost,
-                    primaryPnlCost,
-                    secondaryQty,
-                    secondaryAvgCost,
-                    secondaryPnlCost,
-                  } = row
-                  const symbolFreshness = getQuoteFreshness(q?.ts)
-                  return (
-                    <tr key={symbol}>
+                categoryOrderFiltered.map((cat) => (
+                  <Fragment key={cat}>
+                    <tr className="ib-stock-group-header">
+                      <td colSpan={hasStreamAccounts ? 14 : 8}>{cat}</td>
+                    </tr>
+                    {(sortedRowsByCategory[cat] ?? rowsByCategory[cat]).map((row) => {
+                      const {
+                        symbol,
+                        quote: q,
+                        qty,
+                        avgCost,
+                        changePct,
+                        pnlVsBench,
+                        pnlCost,
+                        primaryQty,
+                        primaryAvgCost,
+                        primaryPnlCost,
+                        secondaryQty,
+                        secondaryAvgCost,
+                        secondaryPnlCost,
+                      } = row
+                      const symbolFreshness = getQuoteFreshness(q?.ts)
+                      return (
+                        <tr
+                          key={row.symbol}
+                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            try {
+                              const raw = e.dataTransfer.getData('application/x-market-streams-symbol')
+                              if (!raw) return
+                              const { category: fromCat, symbol: fromSymbol } = JSON.parse(raw) as { category: string; symbol: string }
+                              if (fromCat === cat && fromSymbol !== row.symbol) applySymbolReorder(cat, fromSymbol, row.symbol)
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
+                        >
                       <td
                         className={symbolFreshness ? `realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : 'realtime-quote-symbol'}
                         title={[
@@ -407,6 +694,18 @@ export function LivePage({ status }: LivePageProps) {
                           .filter(Boolean)
                           .join('\n') || undefined}
                       >
+                        <span
+                          className="realtime-quote-drag-handle"
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('application/x-market-streams-symbol', JSON.stringify({ category: cat, symbol: row.symbol }))
+                            e.dataTransfer.effectAllowed = 'move'
+                          }}
+                          title="Drag to reorder symbol"
+                          aria-hidden
+                        >
+                          ⋮⋮
+                        </span>
                         <strong>{symbol}</strong>
                       </td>
                       {hasStreamAccounts && (
@@ -416,7 +715,7 @@ export function LivePage({ status }: LivePageProps) {
                           <td className="realtime-quote-num">
                             {primaryPnlCost != null && Number.isFinite(primaryPnlCost) ? (
                               <span className={primaryPnlCost > 0 ? 'pnl-positive' : primaryPnlCost < 0 ? 'pnl-negative' : ''}>
-                                {fmtUsd(Math.abs(primaryPnlCost))}
+                                {fmtUsdRound0(primaryPnlCost)}
                               </span>
                             ) : (
                               '—'
@@ -427,7 +726,7 @@ export function LivePage({ status }: LivePageProps) {
                           <td className="realtime-quote-num">
                             {secondaryPnlCost != null && Number.isFinite(secondaryPnlCost) ? (
                               <span className={secondaryPnlCost > 0 ? 'pnl-positive' : secondaryPnlCost < 0 ? 'pnl-negative' : ''}>
-                                {fmtUsd(Math.abs(secondaryPnlCost))}
+                                {fmtUsdRound0(secondaryPnlCost)}
                               </span>
                             ) : (
                               '—'
@@ -469,7 +768,7 @@ export function LivePage({ status }: LivePageProps) {
                       <td className="realtime-quote-num">
                         {pnlCost != null && Number.isFinite(pnlCost) ? (
                           <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsd(Math.abs(pnlCost))}
+                            {fmtUsdRound0(pnlCost)}
                           </span>
                         ) : (
                           '—'
@@ -496,8 +795,10 @@ export function LivePage({ status }: LivePageProps) {
                         })() : '—'}
                       </td>
                     </tr>
-                  )
-                })
+                      )
+                    })}
+                  </Fragment>
+                ))
               )}
               {filteredRows.length > 0 && (() => {
                 const primaryCostSum = filteredRows.reduce((a, r) => {
@@ -537,14 +838,14 @@ export function LivePage({ status }: LivePageProps) {
                         <td className="realtime-quote-num">{primaryCostSum !== 0 ? fmtUsd(primaryCostSum) : '—'}</td>
                         <td className="realtime-quote-num">
                           <span className={primaryPnlSum > 0 ? 'pnl-positive' : primaryPnlSum < 0 ? 'pnl-negative' : ''}>
-                            {primaryPnlSum !== 0 ? fmtUsd(Math.abs(primaryPnlSum)) : '—'}
+                            {primaryPnlSum !== 0 ? fmtUsdRound0(primaryPnlSum) : '—'}
                           </span>
                         </td>
                         <td className="realtime-quote-num">—</td>
                         <td className="realtime-quote-num">{secondaryCostSum !== 0 ? fmtUsd(secondaryCostSum) : '—'}</td>
                         <td className="realtime-quote-num">
                           <span className={secondaryPnlSum > 0 ? 'pnl-positive' : secondaryPnlSum < 0 ? 'pnl-negative' : ''}>
-                            {secondaryPnlSum !== 0 ? fmtUsd(Math.abs(secondaryPnlSum)) : '—'}
+                            {secondaryPnlSum !== 0 ? fmtUsdRound0(secondaryPnlSum) : '—'}
                           </span>
                         </td>
                       </>
@@ -560,7 +861,7 @@ export function LivePage({ status }: LivePageProps) {
                     </td>
                     <td className="realtime-quote-num">
                       <span className={totalDailyDollar > 0 ? 'pnl-positive' : totalDailyDollar < 0 ? 'pnl-negative' : ''}>
-                        {totalDailyDollar !== 0 ? fmtUsd(Math.abs(totalDailyDollar)) : '—'}
+                        {totalDailyDollar !== 0 ? fmtUsdRound0(totalDailyDollar) : '—'}
                       </span>
                     </td>
                     <td className="realtime-quote-num">
@@ -572,7 +873,7 @@ export function LivePage({ status }: LivePageProps) {
                     </td>
                     <td className="realtime-quote-num">
                       <span className={totalCostPnl > 0 ? 'pnl-positive' : totalCostPnl < 0 ? 'pnl-negative' : ''}>
-                        {totalCostPnl !== 0 ? fmtUsd(Math.abs(totalCostPnl)) : '—'}
+                        {totalCostPnl !== 0 ? fmtUsdRound0(totalCostPnl) : '—'}
                       </span>
                     </td>
                     <td className="realtime-quote-num">—</td>
@@ -616,7 +917,7 @@ export function LivePage({ status }: LivePageProps) {
                     className="watchlist-summary-value"
                     style={{ color: totalCostPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}
                   >
-                    {fmtUsd(totalCostPnl)}
+                    {fmtUsdRound0(totalCostPnl)}
                   </span>
                 </span>
                 {totalPct != null && Number.isFinite(totalPct) && (
@@ -640,7 +941,7 @@ export function LivePage({ status }: LivePageProps) {
                           color: totalDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)',
                         }}
                       >
-                        {fmtUsd(totalDailyDollar)}
+                        {fmtUsdRound0(totalDailyDollar)}
                       </span>
                     </span>
                     {totalDailyPct != null && Number.isFinite(totalDailyPct) && (

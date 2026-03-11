@@ -94,7 +94,8 @@ def main() -> int:
             "daemon_run_status, daemon_heartbeat, settings, accounts, account_positions, "
             "instrument_prices, account_executions, account_execution_commissions, "
             "stock_day, stock_min, option_day, option_min, watchlist, bars_backfill_jobs, "
-            "position_categories, position_category_tags, us_market_holidays, flex_accounts, key_value_group, key_value_config"
+            "position_categories, position_category_tags, market_streams_symbol_order, "
+            "us_market_holidays, flex_accounts, key_value_group, key_value_config"
         )
         print(f"Schema refreshed in database {dbname!r}.")
         print(f"  Tables: {tables_list}")

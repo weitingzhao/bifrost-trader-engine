@@ -149,3 +149,69 @@ def set_position_category_tag(
         except Exception:
             pass
         return False
+
+
+def get_market_streams_symbol_order(conn: Any) -> Dict[str, List[str]]:
+    """Return category_name -> ordered list of symbols from market_streams_symbol_order."""
+    if conn is None:
+        return {}
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT category_name, symbol, sort_order
+                FROM market_streams_symbol_order
+                ORDER BY category_name, sort_order
+                """
+            )
+            rows = cur.fetchall()
+        out: Dict[str, List[str]] = {}
+        for r in (rows or []):
+            cat = (r.get("category_name") or "").strip()
+            sym = (r.get("symbol") or "").strip()
+            if not cat or not sym:
+                continue
+            if cat not in out:
+                out[cat] = []
+            out[cat].append(sym)
+        return out
+    except Exception as e:
+        logger.debug("get_market_streams_symbol_order failed: %s", e)
+        return {}
+
+
+def set_market_streams_symbol_order(
+    conn: Any,
+    category_name: str,
+    symbols: List[str],
+) -> bool:
+    """Replace symbol order for one category. symbols = ordered list of symbol strings."""
+    if conn is None:
+        return False
+    cat = (category_name or "").strip()
+    if not cat:
+        return False
+    symbols_clean = [str(s).strip() for s in (symbols or []) if str(s).strip()]
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM market_streams_symbol_order WHERE category_name = %s",
+                (cat,),
+            )
+            for i, sym in enumerate(symbols_clean):
+                cur.execute(
+                    """
+                    INSERT INTO market_streams_symbol_order (category_name, symbol, sort_order, updated_at)
+                    VALUES (%s, %s, %s, now())
+                    """,
+                    (cat, sym, i),
+                )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.debug("set_market_streams_symbol_order failed: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False

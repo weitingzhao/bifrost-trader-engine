@@ -1202,6 +1202,34 @@ body::before {
   filter: brightness(1.08);
 }
 
+.replay-filter-pill-draggable {
+  cursor: grab;
+}
+.replay-filter-pill-draggable:active {
+  cursor: grabbing;
+}
+.replay-filter-pill-grip {
+  opacity: 0.6;
+  margin-right: 0.35em;
+  user-select: none;
+  pointer-events: none;
+}
+
+.realtime-quote-drag-handle {
+  cursor: grab;
+  user-select: none;
+  margin-right: 0.35em;
+  opacity: 0.5;
+  display: inline-block;
+  vertical-align: middle;
+}
+.realtime-quote-drag-handle:hover {
+  opacity: 0.9;
+}
+.realtime-quote-drag-handle:active {
+  cursor: grabbing;
+}
+
 /* 实时行情表格 */
 .realtime-quotes-table-wrap {
   overflow-x: auto;
@@ -1236,6 +1264,16 @@ body::before {
   color: var(--color-text-muted);
   opacity: 0.55;
 }
+/* Market Streams: category group header row */
+.realtime-quotes-table tr.ib-stock-group-header td {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-caption);
+}
+
 .realtime-quotes-table .realtime-quote-last-bid-ask {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

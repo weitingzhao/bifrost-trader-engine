@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 async def refresh_ticker_subscriptions(app: Any) -> None:
-    """每次心跳同步 Real-time ticker：应与 Watchlist STK + 当前活跃标的 一致；多退少补，无需重启守护进程。"""
+    """每次心跳同步 Real-time ticker：应与 Watchlist STK + 当前活跃标的 + Stream 主/副账户持仓 STK 一致；多退少补，无需重启守护进程。"""
     if not app.connector.is_connected:
         return
     desired: set = set()
@@ -16,6 +16,10 @@ async def refresh_ticker_subscriptions(app: Any) -> None:
         desired.add(app.symbol.strip())
     if app._status_sink and hasattr(app._status_sink, "get_watchlist_stk_symbols"):
         for s in getattr(app._status_sink, "get_watchlist_stk_symbols")() or []:
+            if s and str(s).strip():
+                desired.add(str(s).strip())
+    if app._status_sink and hasattr(app._status_sink, "get_stream_position_stk_symbols"):
+        for s in getattr(app._status_sink, "get_stream_position_stk_symbols")() or []:
             if s and str(s).strip():
                 desired.add(str(s).strip())
     current = set(app.connector.get_subscribed_ticker_symbols())

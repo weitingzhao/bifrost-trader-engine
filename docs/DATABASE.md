@@ -524,6 +524,22 @@
 - **外键**：category_id → position_categories(id)；account_id + contract_key 对应 account_positions 中存在的行（应用层保证，或可选 FK）。
 - **读取**：servers/reader.get_accounts_from_tables() 在读取 account_positions 时 LEFT JOIN 本表与 position_categories，将 category_id、category（名称）写入 positions[*]。
 
+### 2.21 表 `market_streams_symbol_order`（Market Streams 页 Symbol 自定义排序）
+
+- **用途**：存储 Live 页 Market Streams 表格中，**按 Category 分组的 Symbol 显示顺序**。category_name 与 position_categories.name 或前端展示的 "Uncategorized" 一致；同一 category 下按 sort_order 升序显示。
+- **写入**：监控端在用户拖拽调整 Symbol 顺序后，PUT /position-categories/symbol-order 写入（按 category_name 整表替换该 category 的排序）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| category_name | text NOT NULL | 分类名（与 position 的 category 或 "Uncategorized" 一致） |
+| symbol | text NOT NULL | 标的代码 |
+| sort_order | integer NOT NULL | 显示顺序（0-based） |
+| updated_at | timestamptz | 更新时间（默认 now()） |
+
+- **主键**：(category_name, symbol)。
+- **读取**：GET /position-categories/symbol-order 返回 `{ order: { [category_name]: string[] } }`，供前端 Market Streams 表格排序。
+
 ### 2.5 表 `daemon_run_status`（阶段 2：挂起/恢复状态，监控机写入、交易机轮询）
 
 - **用途**：供监控机设置「挂起/恢复」交易流程（不下新对冲），交易机在每次 heartbeat 及 tick 时**只读**该表并据此决定是否执行 maybe_hedge；与 daemon_control 配合实现 RE-5（监控与交易分离）。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
@@ -655,7 +671,7 @@
 python scripts/db_refresh_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags**、**market_streams_symbol_order** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, ...` 等清理（不执行也可，代码已不再读写这些列）。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
 
@@ -728,6 +744,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）；§2.12 弃用 ohlc_bars，新增 §2.13–§2.17 表 stock_day、stock_min、option_day、option_min、watchlist（股票/期权 K 线与自选标的）；供复盘与风控页及 GET /executions、GET /bars、Watchlist CRUD、报价落库使用。 | 阶段 3 |
 | 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、watchlist；K 线读写改为分表；Watchlist CRUD 与智能拉取 duration。 | 阶段 3 |
 | 2026-03-08 持仓分类 | 新增 §2.19 表 position_categories（STK 持仓分类定义）、§2.20 表 position_category_tags（持仓→分类 Tag）；GET /position-categories、PUT /position-categories/tag；GET /status 的 positions 带出 category_id/category。 | 阶段 3 扩展 |
+| 2026-03-11 Market Streams 排序落库 | 新增 §2.21 表 market_streams_symbol_order（按 category 的 Symbol 自定义排序）；GET/PUT /position-categories/symbol-order；需执行 db_refresh_schema.py 创建新表。 | 阶段 3 扩展 |
 | 2026-03-08 Flex Transaction | 新增 §2.21 表 account_transactions（IB Flex 资金流水）；POST /transactions/fetch 拉取 Flex Cash Transactions 写入；get_net_cash_flow/get_transactions 供 GET /performance 使用。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 US market holidays | 新增 §2.22 表 us_market_holidays（NYSE 休市日）；GET /market/trading-day 判断是否交易日；Settings 页 US market holidays 管理添加/删除；Data 页「(end)」标黄仅交易日。 | 阶段 3 扩展 |
 | 2026-03-08 Flex 一行双 Query ID | §2.23 flex_accounts 去掉 account_is_host、query_id，改为 query_host_id（必填）+ query_secondary_id（可选）；同一行同一 Label/Purpose，Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |

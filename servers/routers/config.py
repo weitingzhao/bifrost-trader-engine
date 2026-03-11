@@ -378,3 +378,30 @@ def put_position_category_tag(request: Request, body: Dict[str, Any] = Body(...)
     if reader.set_position_category_tag(account_id, contract_key, category_id):
         return {"ok": True}
     return {"ok": False, "error": "Failed to set tag."}
+
+
+@router.get("/position-categories/symbol-order")
+def get_market_streams_symbol_order(request: Request) -> Dict[str, Any]:
+    """Return category_name -> ordered list of symbols (Market Streams custom symbol order)."""
+    reader = request.app.state.reader
+    order = reader.get_market_streams_symbol_order()
+    return {"ok": True, "order": order}
+
+
+@router.put("/position-categories/symbol-order")
+def put_market_streams_symbol_order(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Save symbol order for one category. body: category_name (required), symbols (array of symbol strings)."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "Postgres required."}
+    reader = request.app.state.reader
+    b = body or {}
+    category_name = (b.get("category_name") or "").strip()
+    symbols = b.get("symbols")
+    if not category_name:
+        return {"ok": False, "error": "category_name is required."}
+    if not isinstance(symbols, list):
+        return {"ok": False, "error": "symbols must be an array."}
+    if reader.set_market_streams_symbol_order(category_name, symbols):
+        return {"ok": True}
+    return {"ok": False, "error": "Failed to save symbol order."}

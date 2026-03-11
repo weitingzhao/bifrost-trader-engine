@@ -885,6 +885,46 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             return []
 
+    def get_stream_position_stk_symbols(self) -> List[str]:
+        """Return distinct STK symbols from account_positions for stream primary/secondary accounts (settings.stream_primary_account_id, stream_secondary_account_id). Used by daemon to include Market Streams position symbols in ticker subscription."""
+        if not self._ensure_conn():
+            return []
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT stream_primary_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
+                )
+                row = cur.fetchone()
+            if not row:
+                return []
+            account_ids: List[str] = []
+            for i in (0, 1):
+                v = row[i] if i < len(row) and row[i] is not None else None
+                if v is not None and str(v).strip():
+                    account_ids.append(str(v).strip())
+            if not account_ids:
+                return []
+            placeholders = ", ".join("%s" for _ in account_ids)
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT TRIM(ap.symbol) AS sym
+                    FROM account_positions ap
+                    WHERE ap.account_id IN (""" + placeholders + """)
+                    AND ap.symbol IS NOT NULL AND TRIM(ap.symbol) != ''
+                    AND (ap.sec_type IS NULL OR UPPER(TRIM(ap.sec_type)) = 'STK')
+                    AND COALESCE(ap.position, 0) != 0
+                    ORDER BY sym
+                    """,
+                    tuple(account_ids),
+                )
+                rows = cur.fetchall()
+            return [str(r[0]) for r in rows if r and r[0]]
+        except Exception as e:
+            logger.debug("get_stream_position_stk_symbols failed: %s", e)
+            self._conn.rollback()
+            return []
+
     def write_daemon_graceful_shutdown(self) -> None:
         """Set daemon_heartbeat.graceful_shutdown_at = now() and ib_client_id = NULL so next start uses client_id=1.
         Call on SIGTERM/SIGINT or after consuming stop (not on SIGKILL - cannot be caught).
