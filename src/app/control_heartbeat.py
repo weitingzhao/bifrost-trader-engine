@@ -1,0 +1,335 @@
+"""Control poll, run_status, and heartbeat loop. Used by GsTrading."""
+
+import asyncio
+import logging
+import time
+from typing import Any, Optional
+
+from src.fsm.daemon_fsm import DaemonState
+
+logger = logging.getLogger(__name__)
+
+
+def poll_control(app: Any) -> Optional[str]:
+    """Poll control command from sink (PostgreSQL daemon_control table when sink is postgres). Return stop/flatten or None."""
+    if app._status_sink is None:
+        return None
+    if hasattr(app._status_sink, "poll_and_consume_control"):
+        return app._status_sink.poll_and_consume_control()
+    return None
+
+
+def poll_run_status(app: Any) -> tuple[bool, Optional[float]]:
+    """Poll daemon_run_status from sink (suspended, heartbeat_interval_sec). interval None => use config default."""
+    if app._status_sink is None:
+        return False, None
+    if hasattr(app._status_sink, "poll_run_status"):
+        return app._status_sink.poll_run_status()
+    return False, None
+
+
+def effective_heartbeat_interval(app: Any) -> float:
+    """Heartbeat interval in seconds (from DB if set via monitoring, else config); clamped to [5, 120]."""
+    raw = (
+        app._heartbeat_interval_from_db
+        if app._heartbeat_interval_from_db is not None
+        else app._heartbeat_interval
+    )
+    return max(5.0, min(120.0, float(raw)))
+
+
+def redis_quotes_connected(app: Any) -> bool:
+    """Whether daemon is connected to Redis and writing real-time quotes (for status/monitoring)."""
+    return bool(
+        getattr(app, "_redis_quotes", None)
+        and getattr(app._redis_quotes, "available", False)
+    )
+
+
+def event_subscribe_flags(app: Any) -> dict:
+    """IB event subscription status for System page: ticker, positions, fills, commission."""
+    connected = app.connector.is_connected
+    running = app._fsm_daemon.is_running()
+    return {
+        "event_subscribe_ticker": running and connected,
+        "event_subscribe_positions": running and connected,
+        "event_subscribe_fills": False,
+        "event_subscribe_commission": connected,
+    }
+
+
+def listener_heartbeat_kwargs(app: Any) -> dict:
+    """Listener connection status for daemon_heartbeat (second IB client_id so TWS shows it)."""
+    listener = getattr(app, "listener_connector", None)
+    return {
+        "listener_connected": bool(listener and listener.is_connected),
+        "listener_client_id": getattr(listener, "client_id", None) if listener else None,
+    }
+
+
+def apply_run_status_transition(app: Any) -> bool:
+    """Sync Daemon FSM with daemon_run_status: RUNNING <-> RUNNING_SUSPENDED. Returns True if suspended (skip hedge)."""
+    suspended, interval = poll_run_status(app)
+    app._heartbeat_interval_from_db = interval
+    cur = app._fsm_daemon.current
+    if suspended and cur == DaemonState.RUNNING:
+        app._fsm_daemon.transition(DaemonState.RUNNING_SUSPENDED)
+        logger.info(
+            "[Daemon] state=RUNNING → RUNNING_SUSPENDED (daemon_run_status.suspended=true)"
+        )
+    elif not suspended and cur == DaemonState.RUNNING_SUSPENDED:
+        app._fsm_daemon.transition(DaemonState.RUNNING)
+        logger.info(
+            "[Daemon] state=RUNNING_SUSPENDED → RUNNING (daemon_run_status.suspended=false)"
+        )
+    return suspended
+
+
+async def heartbeat(app: Any) -> None:
+    """Periodic heartbeat to run maybe_hedge even without tick updates; write status snapshot if sink configured. FSM RUNNING <-> RUNNING_SUSPENDED per daemon_run_status."""
+    while app._fsm_daemon.is_running():
+        cmd = poll_control(app)
+        if cmd == "stop":
+            logger.info("[Daemon] control (db): stop → requesting stop")
+            app._fsm_daemon.request_stop()
+            return
+        if cmd == "flatten":
+            logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+        if cmd == "release_ib" and app.connector.is_connected:
+            now_t = time.time()
+            interval = effective_heartbeat_interval(app)
+            next_retry_ts = now_t + interval
+            sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
+            if app._status_sink and hasattr(
+                app._status_sink, "write_daemon_heartbeat"
+            ):
+                app._status_sink.write_daemon_heartbeat(
+                    hedge_running=True,
+                    ib_connected=False,
+                    ib_client_id=None,
+                    next_retry_ts=next_retry_ts,
+                    seconds_until_retry=sec_until,
+                    redis_quotes_connected=redis_quotes_connected(app),
+                    **event_subscribe_flags(app),
+                    **listener_heartbeat_kwargs(app),
+                )
+            logger.info(
+                "[Daemon] state=%s | control release_ib → releasing IB on next heartbeat",
+                app._fsm_daemon.current.value,
+            )
+            app._ib_disconnected_during_run = True
+        if (
+            cmd == "refresh_accounts"
+            and app.connector.is_connected
+            and app._status_sink
+        ):
+            logger.info(
+                "[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB"
+            )
+            await app._refresh_accounts_data()
+            app._last_accounts_refresh_ts = time.time()
+            minimal = app._build_heartbeat_minimal_dict()
+            app._status_sink.write_snapshot(minimal, append_history=False)
+            await app._refresh_position_prices()
+            app._instrument_prices_initialized = True
+        if (
+            cmd == "refresh_replay"
+            and app.connector.is_connected
+            and app._status_sink
+        ):
+            logger.info(
+                "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
+            )
+            await app._refresh_executions_only()
+        if (
+            cmd == "refresh_ticker_subscriptions"
+            and app.connector.is_connected
+        ):
+            logger.info(
+                "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Watchlist"
+            )
+            await app._refresh_ticker_subscriptions()
+        suspended = apply_run_status_transition(app)
+        interval_sec = effective_heartbeat_interval(app)
+        state_label = app._fsm_daemon.current.value
+        if suspended:
+            logger.info(
+                "[Daemon] state=%s | heartbeat: sleep %.0fs, skip maybe_hedge (suspended)",
+                state_label,
+                interval_sec,
+            )
+        else:
+            logger.info(
+                "[Daemon] state=%s | heartbeat: sleep %.0fs, then maybe_hedge",
+                state_label,
+                interval_sec,
+            )
+        await asyncio.sleep(interval_sec)
+        if not app._fsm_daemon.is_running():
+            return
+        cmd = poll_control(app)
+        if cmd == "stop":
+            logger.info("[Daemon] control (db): stop → requesting stop")
+            app._fsm_daemon.request_stop()
+            return
+        if cmd == "flatten":
+            logger.warning("[Daemon] control (db): flatten (not implemented yet)")
+        if cmd == "release_ib" and app.connector.is_connected:
+            now_t = time.time()
+            interval = effective_heartbeat_interval(app)
+            next_retry_ts = now_t + interval
+            sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
+            if app._status_sink and hasattr(
+                app._status_sink, "write_daemon_heartbeat"
+            ):
+                app._status_sink.write_daemon_heartbeat(
+                    hedge_running=True,
+                    ib_connected=False,
+                    ib_client_id=None,
+                    next_retry_ts=next_retry_ts,
+                    seconds_until_retry=sec_until,
+                    redis_quotes_connected=redis_quotes_connected(app),
+                    **event_subscribe_flags(app),
+                    **listener_heartbeat_kwargs(app),
+                )
+            logger.info(
+                "[Daemon] state=%s | control release_ib → releasing IB on next heartbeat",
+                app._fsm_daemon.current.value,
+            )
+            app._ib_disconnected_during_run = True
+        if (
+            cmd == "refresh_accounts"
+            and app.connector.is_connected
+            and app._status_sink
+        ):
+            logger.info(
+                "[Daemon] control (db): refresh_accounts → fetching from IB and syncing to DB"
+            )
+            await app._refresh_accounts_data()
+            app._last_accounts_refresh_ts = time.time()
+            minimal = app._build_heartbeat_minimal_dict()
+            app._status_sink.write_snapshot(minimal, append_history=False)
+            await app._refresh_position_prices()
+            app._instrument_prices_initialized = True
+        if (
+            cmd == "refresh_replay"
+            and app.connector.is_connected
+            and app._status_sink
+        ):
+            logger.info(
+                "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
+            )
+            await app._refresh_executions_only()
+        if (
+            cmd == "refresh_ticker_subscriptions"
+            and app.connector.is_connected
+        ):
+            logger.info(
+                "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Watchlist"
+            )
+            await app._refresh_ticker_subscriptions()
+        suspended = apply_run_status_transition(app)
+        if not app.connector.is_connected:
+            now_t = time.time()
+            interval = effective_heartbeat_interval(app)
+            next_retry_ts = now_t + interval
+            sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
+            if app._status_sink and hasattr(
+                app._status_sink, "write_daemon_heartbeat"
+            ):
+                app._status_sink.write_daemon_heartbeat(
+                    hedge_running=True,
+                    ib_connected=False,
+                    ib_client_id=None,
+                    next_retry_ts=next_retry_ts,
+                    seconds_until_retry=sec_until,
+                    redis_quotes_connected=redis_quotes_connected(app),
+                    **event_subscribe_flags(app),
+                    **listener_heartbeat_kwargs(app),
+                )
+            logger.warning(
+                "[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)",
+                app._fsm_daemon.current.value,
+            )
+            app._ib_disconnected_during_run = True
+            return
+        now_ts = time.time()
+        if (
+            now_ts - app._last_accounts_refresh_ts
+            >= app._accounts_refresh_interval_sec
+        ):
+            await app._refresh_accounts_data()
+            app._last_accounts_refresh_ts = now_ts
+        if app.symbol:
+            spot_fresh = await app.connector.get_underlying_price(app.symbol)
+            if spot_fresh is not None and spot_fresh > 0:
+                app.store.set_underlying_price(spot_fresh)
+        if app._status_sink:
+            result = await app._refresh_and_build_snapshot()
+            if result is not None:
+                snapshot, spot, cs, data_lag_ms = result
+                snap_dict = app._build_snapshot_dict(
+                    snapshot, spot, cs, data_lag_ms
+                )
+                app._status_sink.write_snapshot(snap_dict, append_history=False)
+                if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
+                    try:
+                        payload = app._quote_payload()
+                        if payload:
+                            app._redis_quotes.set_quote(app.symbol, payload)
+                            app._redis_quotes.publish_update(
+                                app.symbol,
+                                {"symbol": app.symbol, "ts": payload.get("ts")},
+                            )
+                    except Exception as e:
+                        logger.warning("Redis quote write in heartbeat: %s", e)
+            else:
+                logger.debug(
+                    "Heartbeat: no full snapshot (spot unavailable), writing minimal status"
+                )
+                minimal = app._build_heartbeat_minimal_dict()
+                app._status_sink.write_snapshot(minimal, append_history=False)
+                if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
+                    try:
+                        payload = app._quote_payload()
+                        if payload:
+                            app._redis_quotes.set_quote(app.symbol, payload)
+                            app._redis_quotes.publish_update(
+                                app.symbol,
+                                {"symbol": app.symbol, "ts": payload.get("ts")},
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Redis quote write in heartbeat (minimal): %s", e
+                        )
+            if not getattr(app, "_instrument_prices_initialized", False):
+                try:
+                    await app._refresh_position_prices()
+                    app._instrument_prices_initialized = True
+                except Exception as e:
+                    logger.debug(
+                        "R-M6 initial refresh_position_prices: %s", e
+                    )
+            try:
+                if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
+                    app._sync_instrument_prices_from_redis()
+                else:
+                    await app._refresh_position_prices()
+            except Exception as e:
+                logger.debug("R-M6 instrument_prices sync failed: %s", e)
+            if hasattr(app._status_sink, "write_daemon_heartbeat"):
+                app._status_sink.write_daemon_heartbeat(
+                    hedge_running=True,
+                    ib_connected=app.connector.is_connected,
+                    ib_client_id=getattr(app.connector, "client_id", None),
+                    heartbeat_interval_sec=effective_heartbeat_interval(app),
+                    redis_quotes_connected=redis_quotes_connected(app),
+                    **event_subscribe_flags(app),
+                    **listener_heartbeat_kwargs(app),
+                )
+        await app._refresh_ticker_subscriptions()
+        if not suspended:
+            logger.info(
+                "[Daemon] state=RUNNING | heartbeat: tick, running maybe_hedge"
+            )
+            await app._eval_hedge_sync()

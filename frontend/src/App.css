@@ -3999,9 +3999,9 @@ th {
 
 .ib-portfolio-netliq-chart .ib-portfolio-line-svg {
   width: 100%;
-  max-width: 640px;
+  max-width: 480px;
   height: auto;
-  min-height: 220px;
+  min-height: 120px;
 }
 
 .ib-portfolio-chart-empty {
@@ -4051,8 +4051,8 @@ th {
 }
 
 .ib-portfolio-pie-svg {
-  width: 180px;
-  height: 180px;
+  width: 130px;
+  height: 130px;
   flex-shrink: 0;
 }
 

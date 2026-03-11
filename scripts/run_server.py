@@ -88,7 +88,7 @@ class RedisStreamLogHandler(logging.Handler):
 def _console_log_redis_url() -> str:
     """Build Redis URL from config/env. Falls back to local Redis."""
     try:
-        from src.app.gs_trading import read_config
+        from src.app.config import read_config
 
         config, _ = read_config()
         r = config.get("redis") or {}
@@ -185,7 +185,7 @@ def _free_port(port: int, wait_sec: float = 0.6) -> bool:
 
 
 def main() -> None:
-    from src.app.gs_trading import read_config
+    from src.app.config import read_config
 
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     config_path = args[0] if args else None

@@ -108,7 +108,7 @@ def build_backfill_preview(
     period_key = period_map.get(per) or "1D"
     try:
         try:
-            from src.app.gs_trading import read_config
+            from src.app.config import read_config
 
             config, _ = read_config()
         except Exception:
@@ -187,7 +187,7 @@ async def run_one_backfill(
     period_key = period_map.get(per) or "1D"
     try:
         try:
-            from src.app.gs_trading import read_config
+            from src.app.config import read_config
             config, _ = read_config()
         except Exception:
             config = {}

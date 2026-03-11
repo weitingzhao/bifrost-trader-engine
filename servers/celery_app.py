@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 def _redis_url_from_config() -> str:
     """Build Redis URL from config (same redis as realtime quotes; use db 1 for Celery to avoid clash)."""
     try:
-        from src.app.gs_trading import read_config
+        from src.app.config import read_config
         config, _ = read_config()
     except Exception as e:
         logger.warning("read_config for Celery failed: %s; using default Redis URL", e)

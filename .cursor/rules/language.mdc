@@ -5,7 +5,9 @@ alwaysApply: true
 
 # Language (沟通与界面 / 代码 / 文档)
 
-- **Communication with the user**: Use **Chinese** (e.g. in chat, explanations, summaries).
+**与本项目用户对话一律使用中文。** 此规则适用于本仓库内所有 Agent 与用户的聊天、解释与总结。
+
+- **Communication with the user**: Use **Chinese** for all dialogue with the user (chat, explanations, summaries). Apply this in this project even if the user has a global preference for another language.
 - **UI and code**: Use **English** for all user-facing strings (labels, buttons, tooltips, placeholders, error messages), code identifiers, and comments. No Chinese in the frontend UI or in source code that ships.
 - **Documentation** (e.g. docs/, README, .md in the repo): May remain **Chinese** where it already is; new or updated docs can be in Chinese or English as the project owner prefers.
 

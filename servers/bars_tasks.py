@@ -35,7 +35,7 @@ def _is_bars_skip_ib(status_cfg: Optional[Dict[str, Any]] = None) -> bool:
     if status_cfg is not None:
         return bool(status_cfg.get("bars_skip_ib"))
     try:
-        from src.app.gs_trading import read_config
+        from src.app.config import read_config
         config, _ = read_config()
         return bool((config.get("status") or {}).get("bars_skip_ib"))
     except Exception:
@@ -59,7 +59,7 @@ def _connect_ib_at_startup() -> None:
 
     async def _connect() -> None:
         try:
-            from src.app.gs_trading import read_config
+            from src.app.config import read_config
             from servers.reader import StatusReader
             config, _ = read_config()
             reader = StatusReader(config)
@@ -115,7 +115,7 @@ async def _worker_connect_poll_loop() -> None:
                 if now - last_auto_retry >= 30:
                     last_auto_retry = now
                     try:
-                        from src.app.gs_trading import read_config
+                        from src.app.config import read_config
                         from servers.reader import StatusReader
                         config, _ = read_config()
                         reader = StatusReader(config)
@@ -437,7 +437,7 @@ def backfill_bars(
         return {"ok": False, "error": "invalid job_id"}
 
     try:
-        from src.app.gs_trading import read_config
+        from src.app.config import read_config
         from servers.reader import update_bars_backfill_job_result
     except ImportError as e:
         logger.exception("backfill_bars: import failed: %s", e)
@@ -509,7 +509,7 @@ def _update_result(
 ) -> None:
     """Update bars_backfill_jobs row when status_cfg or config is available."""
     try:
-        from src.app.gs_trading import read_config
+        from src.app.config import read_config
         from servers.reader import update_bars_backfill_job_result
         if status_cfg:
             cfg = status_cfg

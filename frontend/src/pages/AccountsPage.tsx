@@ -955,9 +955,9 @@ export function AccountsPage({
           const allY = series.flatMap((s) => s.points.map((p) => p.y))
           const minY = allY.length ? Math.min(...allY, 0) : 0
           const maxY = allY.length ? Math.max(...allY) * 1.05 : 1
-          const w = 600
-          const h = 220
-          const pad = { left: 48, right: 16, top: 8, bottom: 28 }
+          const w = 480
+          const h = 120
+          const pad = { left: 40, right: 12, top: 6, bottom: 20 }
           const x = (t: number) => pad.left + ((t - minT) / (maxT - minT || 1)) * (w - pad.left - pad.right)
           const y = (v: number) => pad.top + (1 - (v - minY) / (maxY - minY || 1)) * (h - pad.top - pad.bottom)
           const lineColors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6']

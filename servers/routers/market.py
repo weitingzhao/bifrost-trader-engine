@@ -1,0 +1,638 @@
+"""Market and bars: OHLC, backfill jobs, trading-day, holidays, indices."""
+
+import logging
+import time
+from datetime import date, datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+from fastapi import APIRouter, Body, Query, Request
+from fastapi.exceptions import HTTPException
+from pydantic import BaseModel
+
+from servers.reader import (
+    write_ohlc_bars_to_db,
+    delete_stock_bars_for_symbol,
+    insert_bars_backfill_job,
+    get_bars_backfill_jobs,
+    get_bars_backfill_job,
+    delete_bars_backfill_job,
+    delete_all_bars_backfill_jobs,
+    trim_bars_backfill_jobs,
+    update_bars_backfill_job_result,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["market"])
+
+_TOLERANCE_END_SEC = 2 * 86400
+_WATCHLIST_EOD_PERIODS = ["1 D", "1 hour", "5 mins", "1 min"]
+
+
+def _coverage_status(
+    min_ts: Optional[float],
+    max_ts: Optional[float],
+    count: int,
+    target_start_ts: float,
+    target_end_ts: float,
+) -> str:
+    """Return ok | gap_end | missing. Only end gap is checked."""
+    if count == 0:
+        return "missing"
+    gap_end = max_ts is None or max_ts < target_end_ts - _TOLERANCE_END_SEC
+    if gap_end:
+        return "gap_end"
+    return "ok"
+
+
+def _job_row_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
+    """Map DB row to API shape (job_id, created_ts, updated_ts, ...)."""
+    created_ts = j.get("created_at")
+    if hasattr(created_ts, "timestamp"):
+        created_ts = created_ts.timestamp()
+    updated_ts = j.get("updated_at")
+    if hasattr(updated_ts, "timestamp"):
+        updated_ts = updated_ts.timestamp()
+    return {
+        "job_id": str(j.get("id", "")),
+        "type": "backfill",
+        "symbol": j.get("symbol"),
+        "period": j.get("period"),
+        "years": j.get("years"),
+        "days": j.get("days"),
+        "override_days": j.get("override_days"),
+        "status": j.get("status"),
+        "result": j.get("result"),
+        "created_ts": created_ts,
+        "updated_ts": updated_ts,
+    }
+
+
+def _get_watchlist_stock_symbols(reader) -> List[str]:
+    """Return unique stock symbols from Watchlist in insertion order."""
+    watchlist = reader.get_watchlist()
+    sym_list: List[str] = []
+    for w in watchlist:
+        sec = (w.get("sec_type") or "STK").strip().upper()
+        if sec == "OPT":
+            continue
+        sym = (w.get("symbol") or "").strip()
+        if not sym and w.get("contract_key"):
+            parts = (w["contract_key"] or "").split("|")
+            sym = (parts[0] or "").strip() if parts else ""
+        if sym:
+            sym_list.append(sym.upper())
+    return list(dict.fromkeys(sym_list))
+
+
+def _enqueue_bars_backfill_job(
+    control_via_db,
+    symbol: str,
+    period: str,
+    *,
+    years: Optional[float] = None,
+    days: Optional[int] = None,
+    override_days: Optional[float] = None,
+    span_hours: Optional[float] = None,
+    is_test: bool = False,
+    api_interval_sec: int = 10,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Insert one bars backfill job and enqueue the matching Celery task."""
+    jid = insert_bars_backfill_job(
+        control_via_db,
+        symbol,
+        period,
+        years,
+        days,
+        override_days,
+        span_hours=span_hours,
+        skip_ib=is_test,
+        api_interval_sec=api_interval_sec,
+    )
+    if jid is None:
+        return False, None, "入队失败。"
+    logger.info(
+        "bars/backfill enqueue job_id=%s symbol=%s period=%s years=%s days=%s override_days=%s span_hours=%s",
+        jid, symbol, period, years, days, override_days, span_hours,
+    )
+    try:
+        from servers.bars_tasks import backfill_bars
+        backfill_bars.apply_async(
+            args=[symbol, period],
+            kwargs={"years": years, "days": days, "override_days": override_days, "span_hours": span_hours},
+            task_id=str(jid),
+        )
+    except Exception as e:
+        logger.exception("Celery enqueue failed: %s", e)
+        update_bars_backfill_job_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
+        return False, None, f"Celery 入队失败: {e}"
+    return True, str(jid), None
+
+
+# --- Bars read ---
+
+@router.get("/bars")
+def get_bars(
+    request: Request,
+    symbol: Optional[str] = Query(None, description="Symbol, e.g. NVDA"),
+    period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 min, 1 D)"),
+    limit: int = Query(100, ge=1, le=500),
+) -> Dict[str, Any]:
+    """K-line/OHLC bars for replay (R-A3). Reads from stock_day (1 D) or stock_min."""
+    reader = request.app.state.reader
+    sym = (symbol or "").strip()
+    if not sym:
+        return {"bars": [], "message": "请提供 symbol 参数。"}
+    per = (period or "1 D").strip()
+    items = reader.get_bars(symbol=sym, period=per, limit=limit)
+    bars = [
+        {
+            "time": float(r["time"]) if r.get("time") is not None else 0,
+            "open": float(r["open"]) if r.get("open") is not None else 0,
+            "high": float(r["high"]) if r.get("high") is not None else 0,
+            "low": float(r["low"]) if r.get("low") is not None else 0,
+            "close": float(r["close"]) if r.get("close") is not None else 0,
+            "volume": float(r["volume"]) if r.get("volume") is not None else 0,
+        }
+        for r in items
+    ]
+    return {"bars": bars}
+
+
+@router.get("/bars/latest")
+def get_bars_latest(
+    request: Request,
+    symbol: Optional[str] = Query(None),
+    period: Optional[str] = Query("1 D"),
+) -> Dict[str, Any]:
+    """Return latest bar time (Unix) for symbol+period."""
+    reader = request.app.state.reader
+    sym = (symbol or "").strip()
+    if not sym:
+        return {"latest": None, "message": "请提供 symbol 参数。"}
+    per = (period or "1 D").strip()
+    t = reader.get_bars_latest(symbol=sym, period=per)
+    return {"latest": t}
+
+
+@router.get("/bars/benchmark")
+def get_bars_benchmark(
+    request: Request,
+    symbols: Optional[str] = Query(None, description="Comma-separated symbols"),
+    date_str: Optional[str] = Query(None, alias="date", description="YYYY-MM-DD; default today"),
+) -> Dict[str, Any]:
+    """Return latest daily bar on or before date per symbol (for Daily % / Daily $)."""
+    reader = request.app.state.reader
+    if not symbols or not str(symbols).strip():
+        return {"benchmarks": {}}
+    sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
+    ref = date.today()
+    if date_str and str(date_str).strip():
+        try:
+            ref = datetime.strptime(str(date_str).strip()[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    result = reader.get_bars_benchmark(symbols=sym_list, on_or_before=ref)
+    out = {}
+    for sym, ent in result.items():
+        bar_time = ent.get("bar_time") or 0
+        try:
+            bar_date = datetime.fromtimestamp(bar_time).date()
+        except (TypeError, ValueError, OSError):
+            bar_date = ref
+        is_today = (ref - bar_date).days == 0
+        is_stale = (ref - bar_date).days > 1
+        out[sym] = {**ent, "is_today": is_today, "is_stale": is_stale}
+    return {"benchmarks": out}
+
+
+@router.get("/bars/stats")
+def get_bars_stats(
+    request: Request,
+    symbol: Optional[str] = Query(None, description="Symbol, e.g. NVDA"),
+) -> Dict[str, Any]:
+    """Return row counts for symbol in stock_day / stock_min."""
+    reader = request.app.state.reader
+    sym = (symbol or "").strip()
+    if not sym:
+        return {"stock_day": 0, "stock_min": {}, "message": "请提供 symbol 参数。"}
+    stats = reader.get_bars_stats(symbol=sym)
+    return stats
+
+
+# --- Market calendar ---
+
+@router.get("/market/trading-day")
+def get_market_trading_day(
+    request: Request,
+    date_param: Optional[str] = Query(None, alias="date", description="Date YYYY-MM-DD; default today America/New_York"),
+) -> Dict[str, Any]:
+    """Return whether the given date is a US (NYSE) trading day."""
+    reader = request.app.state.reader
+    if date_param and date_param.strip():
+        date_str = date_param.strip()
+    else:
+        from zoneinfo import ZoneInfo
+        date_str = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    is_trading = reader.get_is_us_trading_day(date_str)
+    return {"date": date_str, "is_trading_day": is_trading}
+
+
+@router.get("/market/holidays")
+def get_market_holidays(
+    request: Request,
+    year: Optional[int] = Query(None, description="Filter by year"),
+    exchange: str = Query("NYSE", description="Exchange (e.g. NYSE)"),
+) -> List[Dict[str, Any]]:
+    """Return US market holidays from us_market_holidays."""
+    reader = request.app.state.reader
+    return reader.get_market_holidays(exchange=exchange, year=year)
+
+
+@router.post("/market/holidays")
+def post_market_holiday(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Add or update one holiday. Body: date (YYYY-MM-DD), label (optional), exchange (optional, default NYSE)."""
+    reader = request.app.state.reader
+    date_str = (body.get("date") or "").strip()
+    if not date_str:
+        raise HTTPException(status_code=400, detail="date is required")
+    label = (body.get("label") or "").strip() or None
+    exchange = (body.get("exchange") or "NYSE").strip() or "NYSE"
+    ok = reader.add_market_holiday(date_str, label=label, exchange=exchange)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Invalid date or failed to add holiday")
+    return {"date": date_str, "exchange": exchange, "label": label}
+
+
+@router.delete("/market/holidays")
+def delete_market_holiday(
+    request: Request,
+    date_param: str = Query(..., alias="date", description="Date YYYY-MM-DD"),
+    exchange: str = Query("NYSE", description="Exchange"),
+) -> Dict[str, Any]:
+    """Delete one holiday."""
+    reader = request.app.state.reader
+    date_str = date_param.strip()
+    if not date_str:
+        raise HTTPException(status_code=400, detail="date is required")
+    ok = reader.delete_market_holiday(date_str, exchange=exchange)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Invalid date or failed to delete")
+    return {"date": date_str, "exchange": exchange, "deleted": True}
+
+
+# --- Bars coverage and indices ---
+
+@router.get("/bars/coverage")
+def get_bars_coverage(
+    request: Request,
+    symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use Watchlist stocks + reference indices"),
+) -> Dict[str, Any]:
+    """Return coverage (count, min/max ts) plus target range from config and status: ok | gap_end | missing."""
+    app = request.app
+    reader = app.state.reader
+    control_via_db = app.state.control_via_db
+    if symbols is not None and str(symbols).strip():
+        sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
+    else:
+        sym_list = list(_get_watchlist_stock_symbols(reader))
+        for ref in (control_via_db or {}).get("reference_indices") or []:
+            s = (ref.get("symbol") or "").strip()
+            if s and s not in sym_list:
+                sym_list.append(s)
+    coverage = reader.get_bars_coverage(symbols=sym_list)
+    try:
+        from src.app.config import read_config
+        config, _ = read_config()
+    except Exception:
+        config = {}
+    hb = (config.get("history_backfill") or {}).get("stock") or {}
+    daily_years = float(hb.get("daily_years", 10.0))
+    min_weeks = float(hb.get("min_weeks", 1.0))
+    five_min_months = float(hb.get("5min_months", 1.0))
+    one_hour_months = float(hb.get("1hour_months", 3.0))
+    policy = {"daily_years": daily_years, "min_weeks": min_weeks, "5min_months": five_min_months, "1hour_months": one_hour_months}
+    now_ts = time.time()
+    one_day = 86400.0
+    target_end_ts = now_ts
+    target_daily_start = now_ts - (365 * daily_years * one_day)
+    target_min_start = now_ts - (7 * min_weeks * one_day)
+    target_5min_start = now_ts - (30 * five_min_months * one_day)
+    target_1hour_start = now_ts - (30 * one_hour_months * one_day)
+    enriched = []
+    for item in coverage:
+        day = item.get("stock_day") or {}
+        day_ts_s = day.get("min_ts")
+        day_ts_e = day.get("max_ts")
+        day_cnt = day.get("count") or 0
+        day_status = _coverage_status(day_ts_s, day_ts_e, day_cnt, target_daily_start, target_end_ts)
+        stock_day_enriched = {**day, "target_start_ts": target_daily_start, "target_end_ts": target_end_ts, "status": day_status}
+        mins = item.get("stock_min") or {}
+        min_1 = mins.get("1 min") or {}
+        min_5 = mins.get("5 mins") or {}
+        min_1h = mins.get("1 hour") or {}
+        stock_min_enriched = {
+            "1 min": {**min_1, "target_start_ts": target_min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1.get("min_ts"), min_1.get("max_ts"), min_1.get("count") or 0, target_min_start, target_end_ts)},
+            "5 mins": {**min_5, "target_start_ts": target_5min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_5.get("min_ts"), min_5.get("max_ts"), min_5.get("count") or 0, target_5min_start, target_end_ts)},
+            "1 hour": {**min_1h, "target_start_ts": target_1hour_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1h.get("min_ts"), min_1h.get("max_ts"), min_1h.get("count") or 0, target_1hour_start, target_end_ts)},
+        }
+        enriched.append({"symbol": item.get("symbol"), "stock_day": stock_day_enriched, "stock_min": stock_min_enriched})
+    return {"coverage": enriched, "policy": policy}
+
+
+@router.post("/indices/refresh")
+def post_indices_refresh(
+    request: Request,
+    symbol: Optional[str] = Query(None, description="Refresh only this index (e.g. ^GSPC); omit to refresh all"),
+    days: Optional[int] = Query(None, description="For single-symbol refresh: number of days to fetch"),
+) -> Dict[str, Any]:
+    """Refresh reference index daily bars from TradingView."""
+    control_via_db = request.app.state.control_via_db
+    reader = request.app.state.reader
+    if not control_via_db:
+        return {"ok": False, "updated": [], "errors": ["Postgres config required."]}
+    try:
+        from servers.index_data_client import refresh_reference_indices, refresh_one_index
+        if symbol and (symbol := symbol.strip()):
+            result = refresh_one_index(control_via_db, symbol, days=days, reader=reader)
+        else:
+            result = refresh_reference_indices(control_via_db, reader=reader)
+        return {"ok": result.get("ok", True), "updated": result.get("updated", []), "errors": result.get("errors", [])}
+    except Exception as e:
+        logger.warning("POST /indices/refresh failed: %s", e, exc_info=True)
+        return {"ok": False, "updated": [], "errors": [str(e)]}
+
+
+class DeleteBarsBody(BaseModel):
+    periods: Optional[List[str]] = None
+
+    class Config:
+        extra = "ignore"
+
+
+@router.delete("/bars/symbol")
+def delete_bars_for_symbol(
+    request: Request,
+    symbol: Optional[str] = Query(..., description="Symbol to delete bars for"),
+    body: Optional[DeleteBarsBody] = Body(None, description="Optional: periods to delete (1 D, 1 min, 5 mins, 1 hour). Omit to delete all."),
+) -> Dict[str, Any]:
+    """Delete stock_day and/or stock_min rows for the given symbol."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "需要 postgres 配置以删除 K 线数据。"}
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "请提供 symbol 参数。"}
+    period_list = None
+    if body and body.periods and len(body.periods) > 0:
+        period_list = [p.strip() for p in body.periods if (p or "").strip()]
+    result = delete_stock_bars_for_symbol(control_via_db, sym, periods=period_list)
+    if result.get("ok"):
+        return {"ok": True, "deleted_day": result.get("deleted_day", 0), "deleted_min": result.get("deleted_min", 0), "message": f"已删除 {sym} 的选定周期记录，可重新 Pull。"}
+    return {"ok": False, "error": result.get("error", "删除失败")}
+
+
+# --- Bars fetch and backfill ---
+
+@router.post("/bars/fetch")
+async def post_bars_fetch(
+    request: Request,
+    symbol: Optional[str] = Query(..., description="Symbol, e.g. NVDA"),
+    period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 D, 1 min)"),
+    duration: Optional[str] = Query("30 D", description="IB durationStr (e.g. 30 D, 5 D)"),
+    smart_duration: bool = Query(False, description="Compute duration from latest bar gap"),
+) -> Dict[str, Any]:
+    """Fetch bars via monitor MarketIbClient and write to stock_day/stock_min."""
+    app = request.app
+    reader = app.state.reader
+    control_via_db = app.state.control_via_db
+    sym = (symbol or "").strip()
+    if not sym:
+        return {"ok": False, "error": "请提供 symbol 参数。", "bars": [], "count": 0}
+    if not control_via_db:
+        return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "bars": [], "count": 0}
+    if not getattr(app.state, "monitor_enabled", True):
+        return {"ok": False, "error": "监控已停止，无法拉取 K 线。", "bars": [], "count": 0}
+    from servers.ib_clients import MarketIbClient
+    client = getattr(app.state, "market_ib_client", None)
+    if client is None:
+        return {"ok": False, "error": "监控端 MarketIbClient 未初始化。", "bars": [], "count": 0}
+    per = (period or "1 D").strip()
+    dur = (duration or "30 D").strip()
+    if per.lower() in ("1 min", "1min"):
+        dur = "1 D"
+    if smart_duration:
+        latest_ts = reader.get_bars_latest(symbol=sym, period=per)
+        if latest_ts is not None:
+            now = datetime.now(tz=timezone.utc).timestamp()
+            gap_sec = max(0, now - latest_ts)
+            if per.upper() == "1 D":
+                gap_days = min(max(1, int(gap_sec / 86400) + 1), 720)
+                dur = f"{gap_days} D"
+            elif per.lower() in ("1 min", "1min"):
+                dur = "1 D"
+            else:
+                gap_days = min(max(1, int(gap_sec / 86400) + 1), 7)
+                dur = f"{gap_days} D"
+    try:
+        await client.ensure_connected()
+    except Exception as e:
+        return {"ok": False, "error": f"连接 IB 失败：{e}", "bars": [], "count": 0}
+    raw = await client.fetch_bars(sym, per, dur)
+    if not raw:
+        return {"ok": True, "message": "IB 未返回 K 线数据。", "bars": [], "count": 0}
+    rows = [dict(b, symbol=sym, period=per) for b in raw]
+    if not write_ohlc_bars_to_db(control_via_db, rows):
+        return {"ok": False, "error": "写入 K 线表失败。", "bars": [], "count": 0}
+    bars = [
+        {"time": float(b.get("bar_time") or 0), "open": float(b.get("open") or 0), "high": float(b.get("high") or 0), "low": float(b.get("low") or 0), "close": float(b.get("close") or 0), "volume": float(b.get("volume") or 0)}
+        for b in raw
+    ]
+    return {"ok": True, "count": len(bars), "bars": bars}
+
+
+@router.post("/bars/watchlist/eod-refresh/preview")
+async def post_watchlist_eod_refresh_preview(
+    request: Request,
+    override_days: float = Query(1.0, ge=0, le=7),
+    api_interval_sec: int = Query(10, ge=0, le=300),
+) -> Dict[str, Any]:
+    """Preview EOD refresh without enqueuing jobs."""
+    app = request.app
+    reader = app.state.reader
+    control_via_db = app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "需要 postgres 配置以读取 K 线表与 Watchlist。"}
+    from servers.bars_backfill import build_backfill_preview
+    symbols = _get_watchlist_stock_symbols(reader)
+    periods = _WATCHLIST_EOD_PERIODS
+    items = []
+    failures = []
+    total_override_records = 0
+    total_request_chunks = 0
+    for sym in symbols:
+        for per in periods:
+            item = build_backfill_preview(reader, sym, per, override_days=override_days)
+            if item.get("ok") is False:
+                failures.append({"symbol": sym, "period": per, "error": item.get("error", "Preview failed")})
+                continue
+            item["api_interval_sec"] = api_interval_sec
+            items.append(item)
+            total_override_records += int(((item.get("override_records") or {}).get("count")) or 0)
+            total_request_chunks += len(item.get("ib_request_plan") or [])
+    return {
+        "ok": True,
+        "preview_only": True,
+        "ready_to_enqueue": bool(getattr(app.state, "monitor_enabled", True)),
+        "symbols_count": len(symbols),
+        "queued_jobs_if_confirmed": len(symbols) * len(periods),
+        "override_days": override_days,
+        "api_interval_sec": api_interval_sec,
+        "periods": periods,
+        "symbols": symbols,
+        "items": items,
+        "total_override_records": total_override_records,
+        "total_request_chunks": total_request_chunks,
+        "failed_count": len(failures),
+        "failures": failures,
+        "message": f"Dry run ready: {len(items)} preview item(s), {total_override_records} existing record(s) may be overwritten, {total_request_chunks} IB request chunk(s).",
+    }
+
+
+@router.post("/bars/backfill")
+async def post_bars_backfill(
+    request: Request,
+    symbol: Optional[str] = Query(..., description="Symbol, e.g. NVDA"),
+    period: Optional[str] = Query("1 D", description="Bar period: 1 D | 1 min | 5 mins | 1 hour"),
+    years: Optional[float] = Query(None),
+    days: Optional[int] = Query(None),
+    override_days: Optional[float] = Query(None),
+    span_hours: Optional[float] = Query(None),
+    queue: bool = Query(True, description="Must be true; backfill runs via Celery Worker."),
+    is_test: bool = Query(False),
+    api_interval_sec: int = Query(10, ge=0, le=300),
+) -> Dict[str, Any]:
+    """Backfill: enqueue job to Celery Worker only."""
+    app = request.app
+    reader = app.state.reader
+    control_via_db = app.state.control_via_db
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "error": "请提供 symbol 参数。", "count": 0}
+    if not control_via_db:
+        return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "count": 0}
+    if not getattr(app.state, "monitor_enabled", True):
+        return {"ok": False, "error": "监控已停止，无法补全 K 线。", "count": 0}
+    per = (period or "1 D").strip()
+    if not queue:
+        return {"ok": False, "error": "Backfill 仅支持 queue=true，由 Celery Worker 在后台拉取（IB 速率限制）。", "count": 0}
+    ok, job_id, error = _enqueue_bars_backfill_job(
+        control_via_db, sym, per, years=years, days=days, override_days=override_days, span_hours=span_hours, is_test=is_test, api_interval_sec=api_interval_sec
+    )
+    if not ok or not job_id:
+        return {"ok": False, "error": error or "入队失败。", "count": 0}
+    trim_bars_backfill_jobs(control_via_db, keep=200)
+    return {"ok": True, "job_id": job_id, "message": "Queued (Celery). Poll GET /bars/jobs/{job_id} for status."}
+
+
+@router.post("/bars/watchlist/eod-refresh")
+async def post_watchlist_eod_refresh(
+    request: Request,
+    override_days: float = Query(1.0, ge=0, le=7),
+    is_test: bool = Query(False),
+    api_interval_sec: int = Query(10, ge=0, le=300),
+) -> Dict[str, Any]:
+    """Queue end-of-day refresh for every Watchlist stock and all coverage periods."""
+    app = request.app
+    reader = app.state.reader
+    control_via_db = app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "queued_count": 0}
+    if not getattr(app.state, "monitor_enabled", True):
+        return {"ok": False, "error": "监控已停止，无法补全 K 线。", "queued_count": 0}
+    symbols = _get_watchlist_stock_symbols(reader)
+    periods = _WATCHLIST_EOD_PERIODS
+    if not symbols:
+        return {"ok": True, "queued_count": 0, "failed_count": 0, "symbols_count": 0, "symbols": [], "periods": periods, "override_days": override_days, "message": "Watchlist 中没有股票 symbol，无需执行收盘刷新。"}
+    queued_jobs = []
+    failures = []
+    for sym in symbols:
+        for per in periods:
+            ok, job_id, error = _enqueue_bars_backfill_job(control_via_db, sym, per, override_days=override_days, is_test=is_test, api_interval_sec=api_interval_sec)
+            if ok and job_id:
+                queued_jobs.append({"job_id": job_id, "symbol": sym, "period": per})
+            else:
+                failures.append({"symbol": sym, "period": per, "error": error or "入队失败。"})
+    trim_bars_backfill_jobs(control_via_db, keep=200)
+    queued_count = len(queued_jobs)
+    failed_count = len(failures)
+    if queued_count == 0:
+        return {"ok": False, "error": "收盘刷新任务入队失败。", "queued_count": 0, "failed_count": failed_count, "symbols_count": len(symbols), "symbols": symbols, "periods": periods, "override_days": override_days, "failures": failures}
+    message = f"Queued {queued_count} EOD refresh job(s) for {len(symbols)} watchlist symbol(s). override_days={override_days:g}."
+    if failed_count > 0:
+        message += f" Failed: {failed_count}."
+    return {"ok": True, "message": message, "queued_count": queued_count, "failed_count": failed_count, "symbols_count": len(symbols), "symbols": symbols, "periods": periods, "override_days": override_days, "queued_jobs": queued_jobs, "failures": failures}
+
+
+# --- Bars jobs ---
+
+@router.get("/bars/jobs")
+def get_bars_jobs(
+    request: Request,
+    limit: int = Query(20, ge=0, le=500),
+    offset: int = Query(0, ge=0),
+    status: Optional[str] = Query(None, description="Filter: pending, running, done, failed"),
+) -> Dict[str, Any]:
+    """List backfill jobs with pagination and optional status filter."""
+    control_via_db = request.app.state.control_via_db
+    status_cfg_for_read = request.app.state.status_cfg_for_read
+    db_config = control_via_db or status_cfg_for_read
+    if not db_config:
+        logger.info("GET /bars/jobs: no Postgres config, returning empty list")
+        return {"jobs": [], "total": 0, "error": "No Postgres config. Set postgres in config or PGHOST."}
+    effective_limit = limit if limit and limit > 0 else 500
+    try:
+        rows, total = get_bars_backfill_jobs(db_config, limit=effective_limit, offset=offset, status=status)
+    except Exception as e:
+        logger.warning("GET /bars/jobs: get_bars_backfill_jobs failed: %s", e)
+        return {"jobs": [], "total": 0, "error": str(e)}
+    list_jobs = [_job_row_to_api(r) for r in rows]
+    return {"jobs": list_jobs, "total": total}
+
+
+@router.get("/bars/jobs/{job_id}")
+def get_bars_job(request: Request, job_id: str) -> Dict[str, Any]:
+    """Get one backfill job status and result."""
+    control_via_db = request.app.state.control_via_db
+    status_cfg_for_read = request.app.state.status_cfg_for_read
+    db_config = control_via_db or status_cfg_for_read
+    if not db_config:
+        return {"ok": False, "error": "No DB"}
+    job = get_bars_backfill_job(db_config, job_id)
+    if job is None:
+        return {"ok": False, "error": "Job not found"}
+    return {"ok": True, "job": _job_row_to_api(job)}
+
+
+@router.delete("/bars/jobs/{job_id}")
+def delete_bars_job(request: Request, job_id: str) -> Dict[str, Any]:
+    """Delete one backfill job by id."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "No DB"}
+    if delete_bars_backfill_job(control_via_db, job_id):
+        return {"ok": True}
+    return {"ok": False, "error": "Delete failed"}
+
+
+@router.delete("/bars/jobs")
+def delete_all_bars_jobs(
+    request: Request,
+    status: Optional[str] = Query(None, description="If set, only delete jobs with this status"),
+) -> Dict[str, Any]:
+    """Delete all backfill jobs, or only those matching status filter."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "No DB", "deleted": 0}
+    deleted = delete_all_bars_backfill_jobs(control_via_db, status_filter=status)
+    return {"ok": True, "deleted": deleted}

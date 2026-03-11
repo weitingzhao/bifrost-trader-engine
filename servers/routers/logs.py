@@ -1,0 +1,429 @@
+"""Log endpoints: daemon, server, and Celery console logs (fetch, clear, trim, stream)."""
+
+import asyncio
+import json
+import logging
+import threading
+import time
+from typing import Any, Dict
+
+from fastapi import APIRouter, Body, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from servers.routers.deps import DAEMON_LOG_STREAM_KEY, SERVER_LOG_STREAM_KEY, daemon_log_redis_url
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["logs"])
+
+
+def _daemon_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD Redis stream bifrost:daemon_console, push each line to all SSE queues."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        last_id = "$"
+        while True:
+            try:
+                result = r.xread(block=5000, streams={DAEMON_LOG_STREAM_KEY: last_id}, count=100)
+                if not result:
+                    continue
+                for _stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_id = eid
+                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        with app_ref.state.daemon_log_lock:
+                            queues = list(app_ref.state.daemon_log_queues)
+                        loop = getattr(app_ref.state, "_daemon_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(q.put_nowait, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("daemon_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("daemon_log_reader_loop exited: %s", e)
+
+
+def _server_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD Redis stream bifrost:server_console, push each line to all SSE queues."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        last_id = "$"
+        while True:
+            try:
+                result = r.xread(block=5000, streams={SERVER_LOG_STREAM_KEY: last_id}, count=100)
+                if not result:
+                    continue
+                for _stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_id = eid
+                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        with app_ref.state.server_log_lock:
+                            queues = list(app_ref.state.server_log_queues)
+                        loop = getattr(app_ref.state, "_server_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(q.put_nowait, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("server_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("server_log_reader_loop exited: %s", e)
+
+
+def _celery_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD Redis stream Celery console, push each line to all SSE queues."""
+    try:
+        import redis
+        from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+        r = redis.from_url(broker_url)
+        last_id = "$"
+        while True:
+            try:
+                result = r.xread(block=5000, streams={CELERY_LOG_STREAM_KEY: last_id}, count=100)
+                if not result:
+                    continue
+                for stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_id = eid
+                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        with app_ref.state.celery_log_lock:
+                            queues = list(app_ref.state.celery_log_queues)
+                        loop = getattr(app_ref.state, "_celery_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(q.put_nowait, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("celery_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("celery_log_reader_loop exited: %s", e)
+
+
+# --- Daemon logs ---
+
+@router.get("/api/daemon/logs")
+def get_daemon_logs(
+    request: Request,
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from daemon console Redis stream (for initial display in System → Daemon Console)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        raw = r.xrevrange(DAEMON_LOG_STREAM_KEY, count=tail)
+        lines = []
+        for _eid, fields in reversed(raw):
+            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            lines.append(line)
+        return {"lines": lines}
+    except Exception as e:
+        logger.warning("get_daemon_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/daemon/logs")
+def clear_daemon_logs(request: Request) -> Dict[str, Any]:
+    """Delete the daemon console Redis stream so next fetch is empty. UI Clear button uses this."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.delete(DAEMON_LOG_STREAM_KEY)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_daemon_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/daemon/logs/trim")
+def trim_daemon_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Trim daemon console Redis stream to at most max_lines (keep newest)."""
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.xtrim(DAEMON_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_daemon_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/daemon/logs/stream")
+async def get_daemon_logs_stream(request: Request):
+    """SSE: stream new daemon console lines in real time (Redis XREAD)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("daemon_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.daemon_log_lock:
+        app.state.daemon_log_queues.append(queue)
+        if app.state._daemon_log_loop is None:
+            app.state._daemon_log_loop = asyncio.get_running_loop()
+        if app.state._daemon_log_thread is None or not app.state._daemon_log_thread.is_alive():
+            app.state._daemon_log_thread = threading.Thread(
+                target=_daemon_log_reader_loop,
+                args=(app,),
+                name="daemon-log-reader",
+                daemon=True,
+            )
+            app.state._daemon_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.daemon_log_lock:
+                if queue in app.state.daemon_log_queues:
+                    app.state.daemon_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Server logs ---
+
+@router.get("/api/server/logs")
+def get_server_logs(
+    request: Request,
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from server console Redis stream (for initial display in System → Server Console)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        raw = r.xrevrange(SERVER_LOG_STREAM_KEY, count=tail)
+        lines = []
+        for _eid, fields in reversed(raw):
+            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            lines.append(line)
+        return {"lines": lines}
+    except Exception as e:
+        logger.warning("get_server_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/server/logs")
+def clear_server_logs(request: Request) -> Dict[str, Any]:
+    """Delete the server console Redis stream so next fetch is empty. UI Clear button uses this."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.delete(SERVER_LOG_STREAM_KEY)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_server_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/server/logs/trim")
+def trim_server_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Trim server console Redis stream to at most max_lines (keep newest)."""
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.xtrim(SERVER_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_server_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/server/logs/stream")
+async def get_server_logs_stream(request: Request):
+    """SSE: stream new server console lines in real time (Redis XREAD)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("server_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.server_log_lock:
+        app.state.server_log_queues.append(queue)
+        if app.state._server_log_loop is None:
+            app.state._server_log_loop = asyncio.get_running_loop()
+        if app.state._server_log_thread is None or not app.state._server_log_thread.is_alive():
+            app.state._server_log_thread = threading.Thread(
+                target=_server_log_reader_loop,
+                args=(app,),
+                name="server-log-reader",
+                daemon=True,
+            )
+            app.state._server_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.server_log_lock:
+                if queue in app.state.server_log_queues:
+                    app.state.server_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Celery logs ---
+
+@router.get("/api/celery/logs")
+def get_celery_logs(
+    request: Request,
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from Celery console Redis stream (for initial display in System → Celery Console)."""
+    try:
+        import redis
+        from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+        r = redis.from_url(broker_url)
+        raw = r.xrevrange(CELERY_LOG_STREAM_KEY, count=tail)
+        lines = []
+        for _eid, fields in reversed(raw):
+            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            lines.append(line)
+        return {"lines": lines}
+    except Exception as e:
+        logger.warning("get_celery_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/celery/logs")
+def clear_celery_logs(request: Request) -> Dict[str, Any]:
+    """Delete the Celery console Redis stream so next fetch is empty. UI Clear button uses this."""
+    try:
+        import redis
+        from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+        r = redis.from_url(broker_url)
+        r.delete(CELERY_LOG_STREAM_KEY)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_celery_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/celery/logs/trim")
+def trim_celery_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Trim Celery console Redis stream to at most max_lines (keep newest)."""
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        from servers.celery_app import broker_url, CELERY_LOG_STREAM_KEY
+        r = redis.from_url(broker_url)
+        r.xtrim(CELERY_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_celery_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/celery/logs/stream")
+async def get_celery_logs_stream(request: Request):
+    """SSE: stream new Celery console lines in real time (Redis XREAD)."""
+    try:
+        from servers.celery_app import get_celery_broker_connected
+        if not get_celery_broker_connected():
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Celery broker (Redis) not available"},
+            )
+    except Exception as e:
+        logger.warning("celery_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.celery_log_lock:
+        app.state.celery_log_queues.append(queue)
+        if app.state._celery_log_loop is None:
+            app.state._celery_log_loop = asyncio.get_running_loop()
+        if app.state._celery_log_thread is None or not app.state._celery_log_thread.is_alive():
+            app.state._celery_log_thread = threading.Thread(
+                target=_celery_log_reader_loop,
+                args=(app,),
+                name="celery-log-reader",
+                daemon=True,
+            )
+            app.state._celery_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.celery_log_lock:
+                if queue in app.state.celery_log_queues:
+                    app.state.celery_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -80,7 +80,7 @@ class RedisStreamLogHandler(logging.Handler):
 def _daemon_log_redis_url() -> str:
     """Build Redis URL for daemon console stream from config/env. Falls back to local Redis."""
     try:
-        from src.app.gs_trading import read_config
+        from src.app.config import read_config
 
         config, _ = read_config()
         r = config.get("redis") or {}
@@ -137,6 +137,6 @@ if __name__ == "__main__":
     else:
         setup_logging(debug=False)
 
-    from src.app.gs_trading import run_daemon
+    from src.app.entry import run_daemon
 
     run_daemon(config_path)
