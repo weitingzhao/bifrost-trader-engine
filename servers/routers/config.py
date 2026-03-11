@@ -23,7 +23,7 @@ router = APIRouter(tags=["config"])
 
 
 class IbConfigBody(BaseModel):
-    """POST /config/ib body. Client IDs: Daemon (Trading, Listener), Monitor (Account, Market data), Celery (Market Data). Second IB: Listener + Account only."""
+    """POST /config/ib body. Client IDs: Daemon (Trading, Listener), Monitor (Account, Market data), Celery (Market Data). Second IB: Listener + Account only. Stream accounts: for Live page categorization."""
     ib_host: Optional[str] = None
     ib_port_type: Optional[str] = None
     ib_client_id_daemon: Optional[int] = None
@@ -36,6 +36,8 @@ class IbConfigBody(BaseModel):
     ib2_port_type: Optional[str] = None
     ib2_client_id_listener: Optional[int] = None
     ib2_client_id_account: Optional[int] = None
+    stream_primary_account_id: Optional[str] = None
+    stream_secondary_account_id: Optional[str] = None
 
     class Config:
         extra = "ignore"
@@ -84,6 +86,8 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
         "ib2_port_type": None,
         "ib2_client_id_listener": 3,
         "ib2_client_id_account": 102,
+        "stream_primary_account_id": None,
+        "stream_secondary_account_id": None,
     }
     host = (str(body.ib_host or current.get("ib_host", "127.0.0.1"))).strip() or "127.0.0.1"
     port_type = (str(body.ib_port_type or current.get("ib_port_type", "tws_paper"))).strip().lower() or "tws_paper"
@@ -108,11 +112,17 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
     cid2_a = body.ib2_client_id_account if body.ib2_client_id_account is not None else current.get("ib2_client_id_account", 102)
     cid2_l = int(cid2_l) if cid2_l is not None else 3
     cid2_a = int(cid2_a) if cid2_a is not None else 102
+    stream_primary_id = body.stream_primary_account_id if body.stream_primary_account_id is not None else current.get("stream_primary_account_id")
+    stream_secondary_id = body.stream_secondary_account_id if body.stream_secondary_account_id is not None else current.get("stream_secondary_account_id")
+    if stream_primary_id is not None:
+        stream_primary_id = (str(stream_primary_id)).strip() or None
+    if stream_secondary_id is not None:
+        stream_secondary_id = (str(stream_secondary_id)).strip() or None
     logger.info(
         "[config/ib] writing settings: host=%r port_type=%r ... ib2_host=%r ib2_port_type=%r",
         host, port_type, ib2_h, ib2_pt,
     )
-    if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_id, ib2_h, ib2_pt, cid2_l, cid2_a):
+    if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_id, ib2_h, ib2_pt, cid2_l, cid2_a, stream_primary_id, stream_secondary_id):
         return JSONResponse(
             status_code=200,
             content={
@@ -129,6 +139,8 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
                 "ib2_port_type": ib2_pt,
                 "ib2_client_id_listener": cid2_l,
                 "ib2_client_id_account": cid2_a,
+                "stream_primary_account_id": stream_primary_id,
+                "stream_secondary_account_id": stream_secondary_id,
             },
         )
     return JSONResponse(status_code=500, content={"error": "failed to write settings"})

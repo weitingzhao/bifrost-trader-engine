@@ -26,6 +26,10 @@ export interface IbConnectionSectionProps {
   setFlexSecondaryToken: (v: string) => void
   primaryAccountId: string
   setPrimaryAccountId: (v: string) => void
+  streamPrimaryAccountId: string
+  setStreamPrimaryAccountId: (v: string) => void
+  streamSecondaryAccountId: string
+  setStreamSecondaryAccountId: (v: string) => void
   clientIdDaemon: number
   setClientIdDaemon: (v: number) => void
   clientIdListener: number
@@ -64,6 +68,10 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     setFlexSecondaryToken,
     primaryAccountId,
     setPrimaryAccountId,
+    streamPrimaryAccountId,
+    setStreamPrimaryAccountId,
+    streamSecondaryAccountId,
+    setStreamSecondaryAccountId,
     clientIdDaemon,
     setClientIdDaemon,
     clientIdListener,
@@ -194,6 +202,38 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                 onChange={(e) => setPrimaryAccountId(e.target.value)}
                 placeholder="e.g. U17113214 (empty = first from Host User)"
                 style={{ width: '12rem', marginLeft: '0.25rem' }}
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+      <div className="daemon-group" id="ib-stream-accounts">
+        <div className="daemon-group-header">
+          <span className="daemon-group-title">Stream accounts (Live page)</span>
+          <InfoTooltip text="Account IDs used to categorize Market Streams on the Live page: Primary and Secondary. Positions from the primary account show as Primary; from the secondary as Secondary; from both as Both. Leave empty to hide the Account column and category filter." />
+        </div>
+        <div className="daemon-group-body">
+          <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+            <label>
+              Primary:
+              <input
+                type="text"
+                value={streamPrimaryAccountId}
+                onChange={(e) => setStreamPrimaryAccountId(e.target.value)}
+                placeholder="e.g. U17113214 (empty = no label)"
+                style={{ width: '12rem', marginLeft: '0.25rem' }}
+                aria-label="Stream primary account ID"
+              />
+            </label>
+            <label>
+              Secondary:
+              <input
+                type="text"
+                value={streamSecondaryAccountId}
+                onChange={(e) => setStreamSecondaryAccountId(e.target.value)}
+                placeholder="e.g. U98765432 (empty = no label)"
+                style={{ width: '12rem', marginLeft: '0.25rem' }}
+                aria-label="Stream secondary account ID"
               />
             </label>
           </div>

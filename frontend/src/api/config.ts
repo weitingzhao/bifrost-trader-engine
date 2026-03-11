@@ -22,6 +22,8 @@ export async function postIbConfig(
     ib_client_id_markets?: number
     ib_client_id_worker_market?: number
     ib_primary_account_id?: string | null
+    stream_primary_account_id?: string | null
+    stream_secondary_account_id?: string | null
     ib2_host?: string | null
     ib2_port_type?: string | null
     ib2_client_id_listener?: number
@@ -36,6 +38,8 @@ export async function postIbConfig(
     if (clientIds.ib_client_id_markets != null) body.ib_client_id_markets = clientIds.ib_client_id_markets
     if (clientIds.ib_client_id_worker_market != null) body.ib_client_id_worker_market = clientIds.ib_client_id_worker_market
     if (clientIds.ib_primary_account_id !== undefined) body.ib_primary_account_id = clientIds.ib_primary_account_id
+    if (clientIds.stream_primary_account_id !== undefined) body.stream_primary_account_id = clientIds.stream_primary_account_id
+    if (clientIds.stream_secondary_account_id !== undefined) body.stream_secondary_account_id = clientIds.stream_secondary_account_id
     if (clientIds.ib2_host !== undefined) body.ib2_host = clientIds.ib2_host
     if (clientIds.ib2_port_type !== undefined) body.ib2_port_type = clientIds.ib2_port_type
     if (clientIds.ib2_client_id_listener != null) body.ib2_client_id_listener = clientIds.ib2_client_id_listener

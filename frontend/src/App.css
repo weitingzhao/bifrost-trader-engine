@@ -1184,6 +1184,16 @@ body::before {
 .realtime-quotes-table {
   width: 100%;
   min-width: 320px;
+  table-layout: fixed;
+}
+.realtime-quotes-table th,
+.realtime-quotes-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.realtime-quotes-table .realtime-quote-num,
+.realtime-quotes-table .realtime-quote-since {
+  white-space: nowrap;
 }
 .realtime-quotes-table .realtime-quote-num {
   font-variant-numeric: tabular-nums;

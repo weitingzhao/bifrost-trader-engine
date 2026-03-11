@@ -20,6 +20,7 @@ export const IB_CONNECTION_SUBSECTIONS = [
   { id: 'ib-primary', label: 'Host User', icon: 'user-host' },
   { id: 'ib-second', label: 'Second User', icon: 'user-second' },
   { id: 'ib-trading-account', label: 'Trading account', icon: 'user-host' },
+  { id: 'ib-stream-accounts', label: 'Stream accounts (Live)', icon: 'stream' },
   { id: 'ib-client-ids', label: 'Client IDs', icon: 'id' },
   { id: 'ib-flex', label: 'Flex Settings', icon: 'flex' },
 ] as const

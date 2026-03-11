@@ -61,6 +61,23 @@ def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
         else:
             out["ib_primary_account_id"] = None
         try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur_s:
+                cur_s.execute(
+                    "SELECT stream_primary_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
+                )
+                r_s = cur_s.fetchone()
+            if r_s and (r_s.get("stream_primary_account_id") or "").strip():
+                out["stream_primary_account_id"] = str(r_s["stream_primary_account_id"]).strip()
+            else:
+                out["stream_primary_account_id"] = None
+            if r_s and (r_s.get("stream_secondary_account_id") or "").strip():
+                out["stream_secondary_account_id"] = str(r_s["stream_secondary_account_id"]).strip()
+            else:
+                out["stream_secondary_account_id"] = None
+        except Exception:
+            out["stream_primary_account_id"] = None
+            out["stream_secondary_account_id"] = None
+        try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur2:
                 cur2.execute(
                     "SELECT ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account FROM settings WHERE id = 1"
@@ -104,6 +121,8 @@ def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
                 "ib2_port_type": None,
                 "ib2_client_id_listener": 3,
                 "ib2_client_id_account": 102,
+                "stream_primary_account_id": None,
+                "stream_secondary_account_id": None,
             }
         except Exception as e2:
             logger.debug("get_ib_config failed: %s", e2)
@@ -317,8 +336,10 @@ def write_ib_config(
     ib2_port_type: Optional[str] = None,
     ib2_client_id_listener: Optional[int] = None,
     ib2_client_id_account: Optional[int] = None,
+    stream_primary_account_id: Optional[str] = None,
+    stream_secondary_account_id: Optional[str] = None,
 ) -> bool:
-    """Update settings (id=1): ib_host, port_type, client_ids, ib_primary_account_id, ib2_*. Returns True on success."""
+    """Update settings (id=1): ib_host, port_type, client_ids, ib_primary_account_id, ib2_*, stream_*_account_id. Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     host = (ib_host or "").strip() or "127.0.0.1"
@@ -344,7 +365,11 @@ def write_ib_config(
                 ):
                     cur.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}")
                 cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_primary_account_id text")
+                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_primary_account_id text")
+                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_secondary_account_id text")
                 primary_val = (ib_primary_account_id or "").strip() or None
+                stream_primary_val = (stream_primary_account_id or "").strip() or None
+                stream_secondary_val = (stream_secondary_account_id or "").strip() or None
                 for col, default in (
                     ("ib2_host", "text"),
                     ("ib2_port_type", "text DEFAULT 'tws_paper'"),
@@ -361,8 +386,8 @@ def write_ib_config(
                 cid2_a = int(ib2_client_id_account) if ib2_client_id_account is not None else 102
                 cur.execute(
                     """
-                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market, ib_primary_account_id, ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account)
-                    VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market, ib_primary_account_id, ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account, stream_primary_account_id, stream_secondary_account_id)
+                    VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         ib_host = EXCLUDED.ib_host,
                         ib_port_type = EXCLUDED.ib_port_type,
@@ -375,9 +400,11 @@ def write_ib_config(
                         ib2_host = EXCLUDED.ib2_host,
                         ib2_port_type = EXCLUDED.ib2_port_type,
                         ib2_client_id_listener = EXCLUDED.ib2_client_id_listener,
-                        ib2_client_id_account = EXCLUDED.ib2_client_id_account
+                        ib2_client_id_account = EXCLUDED.ib2_client_id_account,
+                        stream_primary_account_id = EXCLUDED.stream_primary_account_id,
+                        stream_secondary_account_id = EXCLUDED.stream_secondary_account_id
                     """,
-                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_val, ib2_h, ib2_pt, cid2_l, cid2_a),
+                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_val, ib2_h, ib2_pt, cid2_l, cid2_a, stream_primary_val, stream_secondary_val),
                 )
             conn.commit()
             logger.info(

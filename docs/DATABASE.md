@@ -573,6 +573,8 @@
 | ib_client_id_markets | integer | 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 101） |
 | ib_client_id_worker_market | integer | Celery worker（如 Bars 补全，worker_market）连接 IB 使用的 Client ID（默认 500），与 Daemon/Monitor 隔离，避免冲突 |
 | ib_primary_account_id | text | 主账户 account_id（如 U17113214），用于对冲与行情；空则使用 TWS managed accounts 首个（R-A4） |
+| stream_primary_account_id | text | Live 页 Market Streams 主账户 ID，用于按账户分类/筛选；空则不显示 Account 列与筛选器 |
+| stream_secondary_account_id | text | Live 页 Market Streams 次账户 ID，用于按账户分类/筛选；空则同上 |
 | ib2_host | text | 第二 IB 主机（不同 TWS 机器，手动交易账户）；空则未配置 |
 | ib2_port_type | text | 第二 IB 端口类型（tws_live/tws_paper/gateway），默认 tws_paper |
 | ib2_client_id_listener | integer | 第二 IB 监听 Client ID（默认 3），用于获取更新 |
