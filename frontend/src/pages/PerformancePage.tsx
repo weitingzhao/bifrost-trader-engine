@@ -320,39 +320,42 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           <div className="performance-filter-group">
             <fieldset className="performance-filter performance-filter-time-range" aria-label="Time range">
               <span className="performance-filter-legend-inline">Time range</span>
-              <div className="performance-time-range-radios">
-                <label className="performance-radio">
+              <div className="performance-time-range-pills" role="group">
+                <label className={`performance-time-range-pill ${timeRange === 'quarter' ? 'active' : ''}`}>
                   <input
                     type="radio"
                     name="timeRange"
                     value="quarter"
                     checked={timeRange === 'quarter'}
                     onChange={() => setTimeRange('quarter')}
+                    className="performance-time-range-pill-input"
                     aria-label="Quarter"
                   />
-                  <span>Quarter</span>
+                  <span className="performance-time-range-pill-label">Quarter</span>
                 </label>
-                <label className="performance-radio">
+                <label className={`performance-time-range-pill ${timeRange === 'year' ? 'active' : ''}`}>
                   <input
                     type="radio"
                     name="timeRange"
                     value="year"
                     checked={timeRange === 'year'}
                     onChange={() => setTimeRange('year')}
+                    className="performance-time-range-pill-input"
                     aria-label="Year"
                   />
-                  <span>Year</span>
+                  <span className="performance-time-range-pill-label">Year</span>
                 </label>
-                <label className="performance-radio">
+                <label className={`performance-time-range-pill ${timeRange === '3year' ? 'active' : ''}`}>
                   <input
                     type="radio"
                     name="timeRange"
                     value="3year"
                     checked={timeRange === '3year'}
                     onChange={() => setTimeRange('3year')}
+                    className="performance-time-range-pill-input"
                     aria-label="3 Years"
                   />
-                  <span>3 Years</span>
+                  <span className="performance-time-range-pill-label">3 Years</span>
                 </label>
               </div>
             </fieldset>
@@ -612,19 +615,52 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                     <div className="performance-summary-rows performance-summary-inside-calendar">
                       <div className="performance-summary-row performance-summary-row-summary">
                         <span className="performance-summary-type">Summary</span>
-                        <span className="performance-summary-inline">
-                          <span className="performance-summary-kv">Total PnL <span className={(summary.total_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(summary.total_pnl)}</span></span>
-                          <span className="performance-summary-kv">Realized {fmtUsd(summary.total_realized_pnl ?? summary.total_pnl)}</span>
-                          <span className="performance-summary-kv">Net <span className={(summary.net_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}>{fmtUsd(summary.net_pnl)}</span></span>
-                          <span className="performance-summary-kv">Unrealized {fmtUsd(summary.total_unrealized_pnl)}</span>
-                          <span className="performance-summary-kv">Comm {fmtUsd(summary.total_commission)}</span>
-                          <span className="performance-summary-kv">Trades {summary.trade_count ?? 0}</span>
-                          <span className="performance-summary-kv">Win rate {summary.win_rate != null ? `${(summary.win_rate * 100).toFixed(1)}%` : '—'}</span>
-                          <span className="performance-summary-kv">Return% {summary.return_pct != null ? `${summary.return_pct.toFixed(2)}%` : '—'}</span>
-                          <span className="performance-summary-kv">PF {summary.profit_factor != null ? (Number.isFinite(summary.profit_factor) ? summary.profit_factor.toFixed(2) : '∞') : '—'}</span>
-                          <span className="performance-summary-kv">Max DD {summary.max_drawdown != null ? fmtUsd(-summary.max_drawdown) : '—'}</span>
-                          <span className="performance-summary-kv">Avg W/L {fmtUsd(summary.avg_win)} / {fmtUsd(summary.avg_loss)}</span>
-                        </span>
+                        <div className="performance-summary-metrics">
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Total PnL</span>
+                            <span className={`performance-summary-metric-value ${(summary.total_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}`}>{fmtUsd(summary.total_pnl)}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Realized</span>
+                            <span className="performance-summary-metric-value">{fmtUsd(summary.total_realized_pnl ?? summary.total_pnl)}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Net</span>
+                            <span className={`performance-summary-metric-value ${(summary.net_pnl ?? 0) >= 0 ? 'tone-positive' : 'tone-negative'}`}>{fmtUsd(summary.net_pnl)}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Unrealized</span>
+                            <span className="performance-summary-metric-value">{fmtUsd(summary.total_unrealized_pnl)}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Comm</span>
+                            <span className="performance-summary-metric-value">{fmtUsd(summary.total_commission)}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Trades</span>
+                            <span className="performance-summary-metric-value">{summary.trade_count ?? 0}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Win rate</span>
+                            <span className="performance-summary-metric-value">{summary.win_rate != null ? `${(summary.win_rate * 100).toFixed(1)}%` : '—'}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Return%</span>
+                            <span className="performance-summary-metric-value">{summary.return_pct != null ? `${summary.return_pct.toFixed(2)}%` : '—'}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">PF</span>
+                            <span className="performance-summary-metric-value">{summary.profit_factor != null ? (Number.isFinite(summary.profit_factor) ? summary.profit_factor.toFixed(2) : '∞') : '—'}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Max DD</span>
+                            <span className="performance-summary-metric-value">{summary.max_drawdown != null ? fmtUsd(-summary.max_drawdown) : '—'}</span>
+                          </div>
+                          <div className="performance-summary-metric">
+                            <span className="performance-summary-metric-label">Avg W/L</span>
+                            <span className="performance-summary-metric-value">{fmtUsd(summary.avg_win)} / {fmtUsd(summary.avg_loss)}</span>
+                          </div>
+                        </div>
                       </div>
                       {(() => {
                         const realized = data.realized_by_sec_type ?? []
@@ -644,13 +680,28 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                         const InlineRow = ({ type, realized: rVal, commission, net, trades, unrealized: uVal, toneR, toneN, toneU }: { type: string; realized: string; commission: string; net: string; trades: string; unrealized: string; toneR: 'positive' | 'negative'; toneN: 'positive' | 'negative'; toneU: 'positive' | 'negative' }) => (
                           <div className="performance-summary-row">
                             <span className="performance-summary-type">{type}</span>
-                            <span className="performance-summary-inline">
-                              <span className="performance-summary-kv">Realized <span className={toneR === 'positive' ? 'tone-positive' : 'tone-negative'}>{rVal}</span></span>
-                              <span className="performance-summary-kv">Comm {commission}</span>
-                              <span className="performance-summary-kv">Net <span className={toneN === 'positive' ? 'tone-positive' : 'tone-negative'}>{net}</span></span>
-                              <span className="performance-summary-kv">Trades {trades}</span>
-                              <span className="performance-summary-kv">Unrealized <span className={toneU === 'positive' ? 'tone-positive' : 'tone-negative'}>{uVal}</span></span>
-                            </span>
+                            <div className="performance-summary-metrics">
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Realized</span>
+                                <span className={`performance-summary-metric-value ${toneR === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{rVal}</span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Comm</span>
+                                <span className="performance-summary-metric-value">{commission}</span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Net</span>
+                                <span className={`performance-summary-metric-value ${toneN === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{net}</span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Trades</span>
+                                <span className="performance-summary-metric-value">{trades}</span>
+                              </div>
+                              <div className="performance-summary-metric">
+                                <span className="performance-summary-metric-label">Unrealized</span>
+                                <span className={`performance-summary-metric-value ${toneU === 'positive' ? 'tone-positive' : 'tone-negative'}`}>{uVal}</span>
+                              </div>
+                            </div>
                           </div>
                         )
                         return (

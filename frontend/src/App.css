@@ -1176,6 +1176,32 @@ body::before {
   cursor: pointer;
 }
 
+/* Market Streams: Account filter pills (一字排开) */
+.realtime-stream-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  flex-wrap: wrap;
+}
+.realtime-stream-filter-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.realtime-stream-filter .replay-filter-pill.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-bg);
+}
+.realtime-stream-filter .replay-filter-pill.active:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-bg);
+  filter: brightness(1.08);
+}
+
 /* 实时行情表格 */
 .realtime-quotes-table-wrap {
   overflow-x: auto;
@@ -1198,15 +1224,44 @@ body::before {
 .realtime-quotes-table .realtime-quote-num {
   font-variant-numeric: tabular-nums;
 }
-.realtime-quotes-table .realtime-quote-since {
-  font-variant-numeric: tabular-nums;
+/* Symbol cell: color = quote freshness (replaces Since column). <3s normal, 3–10s gray, >10s darker */
+.realtime-quotes-table .realtime-quote-symbol {
+  font-weight: 700;
+}
+.realtime-quotes-table .realtime-quote-symbol.realtime-quote-symbol-stale {
   color: var(--color-text-muted);
+  opacity: 0.85;
+}
+.realtime-quotes-table .realtime-quote-symbol.realtime-quote-symbol-very-stale {
+  color: var(--color-text-muted);
+  opacity: 0.55;
+}
+.realtime-quotes-table .realtime-quote-last-bid-ask {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.realtime-quotes-table .realtime-quote-spread {
+  font-size: 0.875em;
+  margin-left: 0.2em;
+}
+.realtime-quotes-table .realtime-quotes-sum-row td {
+  border-top: 3px solid var(--color-border, #888);
+  padding-top: 0.5rem;
+  font-weight: 600;
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.07));
+}
+.realtime-quotes-table .realtime-quotes-sum-row td:first-child {
+  font-weight: 700;
 }
 .realtime-quotes-table .pnl-positive {
   color: var(--color-success);
 }
 .realtime-quotes-table .pnl-negative {
   color: var(--color-danger);
+}
+.realtime-quotes-table .realtime-quote-colgroup {
+  font-weight: 600;
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.04));
 }
 
 /* Watchlist summary row: fixed width per segment to avoid layout jump when numbers change */
@@ -2956,7 +3011,8 @@ th {
   gap: var(--space-2);
 }
 
-.performance-page .performance-filters-inline .performance-filter-time-range .performance-time-range-radios {
+.performance-page .performance-filters-inline .performance-filter-time-range .performance-time-range-radios,
+.performance-page .performance-filters-inline .performance-filter-time-range .performance-time-range-pills {
   display: inline-flex;
 }
 
@@ -2990,6 +3046,69 @@ th {
   flex-wrap: wrap;
   gap: var(--space-4);
   align-items: center;
+}
+
+/* Time range pills: same look as Transfer & Pay Types (accent, standalone pills) */
+.performance-page .performance-time-range-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.performance-page .performance-time-range-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.75rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  user-select: none;
+}
+
+.performance-page .performance-time-range-pill:hover {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong, rgba(255, 255, 255, 0.2));
+}
+
+.performance-page .performance-time-range-pill.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-bg);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.performance-page .performance-time-range-pill.active:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.performance-page .performance-time-range-pill:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.performance-page .performance-time-range-pill-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.performance-page .performance-time-range-pill-label {
+  pointer-events: none;
 }
 
 .performance-page .performance-radio {
@@ -3185,22 +3304,43 @@ th {
   min-width: 280px;
 }
 .performance-calendar-summary {
-  flex: 0 1 280px;
+  flex: 1 1 320px;
   min-width: 0;
+  max-width: 100%;
 }
+/* Calendar summary: three columns (Summary | Option | Stock) */
 .performance-summary-inside-calendar.performance-summary-rows {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0 var(--space-4);
+  align-items: start;
+}
+.performance-summary-inside-calendar .performance-summary-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  border-bottom: none;
+  border-right: 1px solid var(--color-border);
+  font-size: 0.8125rem;
+  min-width: 0;
+}
+.performance-summary-inside-calendar .performance-summary-row:last-child {
+  border-right: none;
+  padding-right: 0;
 }
 .performance-summary-row-summary .performance-summary-type {
   font-weight: 700;
 }
 .performance-summary-row {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--space-3);
-  padding: var(--space-1) 0;
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--color-border);
   font-size: 0.8125rem;
 }
@@ -3209,8 +3349,52 @@ th {
 }
 .performance-summary-type {
   font-weight: 600;
-  min-width: 4rem;
+  flex-shrink: 0;
+  width: 4.5rem;
   color: var(--color-text-main);
+  padding-top: 2px;
+}
+.performance-summary-inside-calendar .performance-summary-type {
+  width: auto;
+  padding-top: 0;
+  margin-bottom: 0;
+}
+.performance-summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: var(--space-2) var(--space-3);
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+/* Inside calendar columns: metrics in one column for compact vertical fit */
+.performance-summary-inside-calendar .performance-summary-metrics {
+  grid-template-columns: 1fr;
+  gap: var(--space-1) 0;
+}
+.performance-summary-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.performance-summary-metric-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  line-height: 1.2;
+}
+.performance-summary-metric-value {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+  line-height: 1.3;
+}
+.performance-summary-metric-value.tone-positive {
+  color: var(--color-success);
+}
+.performance-summary-metric-value.tone-negative {
+  color: var(--color-danger);
 }
 .performance-summary-inline {
   display: flex;
@@ -3892,6 +4076,87 @@ th {
 /* Transfer & Pay uses card process-section + title row + replay-section (see TransferPayPage) */
 .transfer-pay-page .replay-section {
   margin-top: var(--space-2);
+}
+
+/* Transfer & Pay: Types multi-select as pills */
+.transfer-pay-page .transferpay-types-filter {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.transfer-pay-page .transferpay-types-legend {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+.transfer-pay-page .transferpay-types-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.transfer-pay-page .transferpay-type-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.75rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  user-select: none;
+}
+
+.transfer-pay-page .transferpay-type-pill:hover {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong, rgba(255, 255, 255, 0.2));
+}
+
+.transfer-pay-page .transferpay-type-pill.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-bg);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.transfer-pay-page .transferpay-type-pill.active:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.transfer-pay-page .transferpay-type-pill:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.transfer-pay-page .transferpay-type-pill-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.transfer-pay-page .transferpay-type-pill-label {
+  pointer-events: none;
 }
 
 .replay-cost {

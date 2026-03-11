@@ -1,11 +1,14 @@
 """Daemon control: POST /control/* (stop, flatten, suspend, resume, retry_ib, release_ib, refresh_*, set_heartbeat_interval, monitor_stop, monitor_release_ib, celery_stop, monitor_connect)."""
 
+import asyncio
 import json
 import logging
 import os
 import threading
 import time
 from typing import Any, Dict, Optional
+
+MONITOR_STOP_DISCONNECT_TIMEOUT = 2.5  # seconds; avoid hang if IB disconnect blocks
 
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
@@ -31,21 +34,39 @@ def _exit_after_send() -> None:
 
 @router.post("/control/monitor_stop")
 async def post_monitor_stop(request: Request) -> JSONResponse:
-    """Stop monitor-side IB activity AND terminate the monitor process itself."""
+    """Stop monitor-side IB activity AND terminate the monitor process itself.
+    Disconnects are wrapped in a short timeout so a stuck IB API cannot block the response;
+    the exit thread always runs and the process exits shortly after returning 200."""
     app = request.app
     app.state.monitor_enabled = False
+
+    async def _disconnect_with_timeout(client: Any, name: str) -> None:
+        try:
+            await asyncio.wait_for(client.disconnect(), timeout=MONITOR_STOP_DISCONNECT_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("monitor_stop: %s disconnect timed out after %.1fs; process will exit anyway.", name, MONITOR_STOP_DISCONNECT_TIMEOUT)
+        except Exception as e:
+            logger.debug("monitor_stop: %s disconnect error (ignored): %s", name, e)
+
     try:
         client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
         if client is not None:
-            await client.disconnect()
+            await _disconnect_with_timeout(client, "account_ib_client")
     except Exception:
         pass
     try:
         mclient: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
         if mclient is not None:
-            await mclient.disconnect()
+            await _disconnect_with_timeout(mclient, "market_ib_client")
     except Exception:
         pass
+    try:
+        acc2 = getattr(app.state, "account_ib_client_2", None)
+        if acc2 is not None:
+            await _disconnect_with_timeout(acc2, "account_ib_client_2")
+    except Exception:
+        pass
+
     threading.Thread(target=_exit_after_send, daemon=True).start()
     return JSONResponse(status_code=200, content={"ok": True, "monitor_enabled": False})
 
@@ -75,9 +96,12 @@ async def post_monitor_release_ib(request: Request) -> JSONResponse:
     return JSONResponse(status_code=200, content={"ok": True, "message": "Monitor IB connections released."})
 
 
+CELERY_STOP_REDIS_TIMEOUT = 5  # seconds; avoid hang if Redis is unreachable
+
 @router.post("/control/celery_stop")
 def post_celery_stop() -> JSONResponse:
-    """Set Redis key so Celery worker exits. Worker polls every 2s; process will terminate shortly after."""
+    """Set Redis key so Celery worker exits. Worker polls every 2s; process will terminate shortly after.
+    Uses a short Redis timeout so the request does not hang if the broker is unreachable."""
     try:
         import redis
         from servers.celery_app import (
@@ -86,7 +110,11 @@ def post_celery_stop() -> JSONResponse:
             WORKER_STOP_REQUESTED_KEY,
             broker_url,
         )
-        r = redis.from_url(broker_url)
+        r = redis.from_url(
+            broker_url,
+            socket_connect_timeout=CELERY_STOP_REDIS_TIMEOUT,
+            socket_timeout=CELERY_STOP_REDIS_TIMEOUT,
+        )
         r.set(WORKER_STOP_REQUESTED_KEY, "1")
         r.setex(
             WORKER_IB_STATUS_KEY,

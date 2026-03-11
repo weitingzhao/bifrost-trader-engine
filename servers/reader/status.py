@@ -199,6 +199,7 @@ def write_control_command(status_config: dict, command: str) -> bool:
         return False
     try:
         params = _get_conn_params(status_config)
+        params.setdefault("connect_timeout", 5)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:

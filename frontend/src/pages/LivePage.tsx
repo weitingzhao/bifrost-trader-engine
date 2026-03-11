@@ -2,7 +2,32 @@ import { useEffect, useMemo, useState } from 'react'
 import type { RealtimeQuote, StatusResponse } from '../types'
 import { fetchBarsBenchmark, fetchQuotes, fetchWatchlist, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { fmtSince, fmtUsd } from '../utils/format'
+import { fmtUsd } from '../utils/format'
+import { computeDailyChange, type DailyBenchmark } from './accounts/accountsUtils'
+
+/** Quote age → Symbol cell freshness: under 3s normal, 3–10s gray, over 10s darker (replaces Since column). */
+function getQuoteFreshness(ts: number | null | undefined): 'fresh' | 'stale' | 'very-stale' | null {
+  if (ts == null || !Number.isFinite(ts)) return null
+  const ageSec = Date.now() / 1000 - ts
+  if (ageSec < 3) return 'fresh'
+  if (ageSec <= 10) return 'stale'
+  return 'very-stale'
+}
+
+/** Tooltip text for Symbol: raw data used for Daily % / Daily $ (ref price, bar date). */
+function getDailyRefTooltip(bench: DailyBenchmark | undefined, last: number | null | undefined): string {
+  if (!bench || !Number.isFinite(bench.close) || bench.close <= 0) return ''
+  const prevOk = bench.prev_close != null && Number.isFinite(bench.prev_close) && bench.prev_close > 0
+  const ref = bench.is_today && prevOk ? bench.prev_close! : bench.close
+  const refLabel = bench.is_today && prevOk ? 'prev close' : 'latest close'
+  const barDate =
+    Number.isFinite(bench.bar_time) && bench.bar_time > 0
+      ? new Date(bench.bar_time * 1000).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' })
+      : '—'
+  const lines: string[] = [`Daily % / Daily $ ref: ${fmtUsd(ref)} (${refLabel}), bar date: ${barDate}`]
+  if (last != null && Number.isFinite(last)) lines.push(`Current last: ${fmtUsd(last)}`)
+  return lines.join('\n')
+}
 
 export interface LivePageProps {
   status: StatusResponse | null
@@ -11,8 +36,13 @@ export interface LivePageProps {
 export function LivePage({ status }: LivePageProps) {
   const j = status
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
-  const [benchmarks, setBenchmarks] = useState<Record<string, { bar_time: number; close: number }>>({})
+  const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const [watchlistSymbolSet, setWatchlistSymbolSet] = useState<Set<string>>(new Set())
+  const [, setFreshnessTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setFreshnessTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
   useEffect(() => {
     let cancelled = false
     fetchWatchlist()
@@ -138,14 +168,26 @@ export function LivePage({ status }: LivePageProps) {
       ),
     [j?.subscribed_tickers]
   )
+  const norm = (id: string | null) => (id ?? '').trim().toLowerCase() || ''
+  const wantPrimary = norm(streamPrimaryId)
+  const wantSecondary = norm(streamSecondaryId)
   const wishlistSet = watchlistSymbolSet.size > 0 ? watchlistSymbolSet : subscribedSet
   const watchlistRows = watchlistSymbols.map((symbol) => {
     let qty = 0
     let totalCost = 0
     let hasCost = false
+    let primaryQty = 0
+    let primaryTotalCost = 0
+    let primaryHasCost = false
+    let secondaryQty = 0
+    let secondaryTotalCost = 0
+    let secondaryHasCost = false
     const accountIdsWithSymbol: string[] = []
     for (const acc of accountsList) {
       const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
+      const accIdNorm = norm(accId)
+      const isAccPrimary = wantPrimary && accIdNorm === wantPrimary
+      const isAccSecondary = wantSecondary && accIdNorm === wantSecondary
       const positions = acc?.positions ?? []
       for (const p of positions) {
         const sym = (p.symbol ?? '').trim()
@@ -154,17 +196,29 @@ export function LivePage({ status }: LivePageProps) {
         if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
         if (accId && !accountIdsWithSymbol.includes(accId)) accountIdsWithSymbol.push(accId)
         qty += posQty
-        if (p.avgCost != null && Number.isFinite(p.avgCost as number)) {
-          totalCost += (p.avgCost as number) * posQty
+        const avg = p.avgCost != null && Number.isFinite(p.avgCost as number) ? (p.avgCost as number) : null
+        if (avg != null) {
+          totalCost += avg * posQty
           hasCost = true
+        }
+        if (isAccPrimary) {
+          primaryQty += posQty
+          if (avg != null) {
+            primaryTotalCost += avg * posQty
+            primaryHasCost = true
+          }
+        }
+        if (isAccSecondary) {
+          secondaryQty += posQty
+          if (avg != null) {
+            secondaryTotalCost += avg * posQty
+            secondaryHasCost = true
+          }
         }
       }
     }
     let streamCategory: 'primary' | 'secondary' | 'both' | null = null
     if (hasStreamAccounts && accountIdsWithSymbol.length > 0) {
-      const norm = (id: string | null) => (id ?? '').trim().toLowerCase() || ''
-      const wantPrimary = norm(streamPrimaryId)
-      const wantSecondary = norm(streamSecondaryId)
       const isPrimary = wantPrimary ? accountIdsWithSymbol.some((id) => norm(id) === wantPrimary) : false
       const isSecondary = wantSecondary ? accountIdsWithSymbol.some((id) => norm(id) === wantSecondary) : false
       if (isPrimary && isSecondary) streamCategory = 'both'
@@ -172,20 +226,45 @@ export function LivePage({ status }: LivePageProps) {
       else if (isSecondary) streamCategory = 'secondary'
     }
     const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
+    const primaryAvgCost = primaryHasCost && primaryQty !== 0 ? primaryTotalCost / primaryQty : null
+    const secondaryAvgCost = secondaryHasCost && secondaryQty !== 0 ? secondaryTotalCost / secondaryQty : null
     const quote = quotesMap[symbol]
     const bench = benchmarks[symbol]
-    let changePct: number | null = null
-    let pnlVsBench: number | null = null
-    if (bench && quote && Number.isFinite(quote.last) && Number.isFinite(bench.close) && bench.close > 0) {
-      changePct = ((quote.last - bench.close) / bench.close) * 100
-      if (qty != null && Number.isFinite(qty)) pnlVsBench = (quote.last - bench.close) * qty
-    }
+    const { changePct, pnlVsBench } = computeDailyChange(
+      bench,
+      quote?.last ?? null,
+      qty ?? 0,
+    )
     const pnlCost =
       quote && avgCost != null && Number.isFinite(quote.last) && qty != null && Number.isFinite(qty) && qty !== 0
         ? (quote.last - avgCost) * qty
         : null
+    const primaryPnlCost =
+      quote && primaryAvgCost != null && Number.isFinite(quote.last) && primaryQty !== 0
+        ? (quote.last - primaryAvgCost) * primaryQty
+        : null
+    const secondaryPnlCost =
+      quote && secondaryAvgCost != null && Number.isFinite(quote.last) && secondaryQty !== 0
+        ? (quote.last - secondaryAvgCost) * secondaryQty
+        : null
     const isInWatchlist = wishlistSet.has((symbol || '').trim().toUpperCase())
-    return { symbol, quote, qty: qty || null, avgCost, changePct, pnlVsBench, pnlCost, streamCategory, isInWatchlist }
+    return {
+      symbol,
+      quote,
+      qty: qty || null,
+      avgCost,
+      changePct,
+      pnlVsBench,
+      pnlCost,
+      streamCategory,
+      isInWatchlist,
+      primaryQty: primaryQty || null,
+      primaryAvgCost,
+      primaryPnlCost,
+      secondaryQty: secondaryQty || null,
+      secondaryAvgCost,
+      secondaryPnlCost,
+    }
   })
 
   const [streamCategoryFilter, setStreamCategoryFilter] = useState<'all' | 'primary' | 'secondary' | 'wishlist'>('all')
@@ -221,60 +300,79 @@ export function LivePage({ status }: LivePageProps) {
           </div>
         </div>
         {hasStreamAccounts && (
-          <div className="realtime-stream-filter" style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="realtime-stream-filter">
             <span className="section-hint">Account:</span>
-            <select
-              value={streamCategoryFilter}
-              onChange={(e) =>
-                setStreamCategoryFilter(e.target.value as 'all' | 'primary' | 'secondary' | 'wishlist')
-              }
-              aria-label="Filter by stream account"
-              style={{ minWidth: '8rem' }}
-            >
-              <option value="all">All</option>
-              <option value="primary">Primary</option>
-              <option value="secondary">Secondary</option>
-              <option value="wishlist">Wishlist</option>
-            </select>
+            <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account">
+              {(['all', 'primary', 'secondary', 'wishlist'] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`replay-filter-pill ${streamCategoryFilter === value ? 'active' : ''}`}
+                  onClick={() => setStreamCategoryFilter(value)}
+                  aria-pressed={streamCategoryFilter === value}
+                >
+                  {value === 'all' ? 'All' : value === 'primary' ? 'Primary' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         <div className="realtime-quotes-table-wrap">
           <table className="table-operations realtime-quotes-table">
             <colgroup>
-              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '4.25rem' }} />
+              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
               {hasStreamAccounts && <col style={{ width: '5rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '4rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5rem' }} />}
+              {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
               <col style={{ width: '4rem' }} />
               <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '4.75rem' }} />
               <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '5rem' }} />
-              <col style={{ width: '5rem' }} />
-              <col style={{ width: '5rem' }} />
+              <col style={{ width: '4.75rem' }} />
               <col style={{ width: '6rem' }} />
+              <col style={{ width: '8rem' }} />
             </colgroup>
             <thead>
               <tr>
                 <th>Symbol</th>
-                {hasStreamAccounts && <th>Account</th>}
+                {hasStreamAccounts && (
+                  <>
+                    <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
+                      Primary
+                    </th>
+                    <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
+                      Secondary
+                    </th>
+                  </>
+                )}
                 <th>Qty</th>
                 <th>Cost</th>
                 <th>Daily %</th>
                 <th>Daily $</th>
                 <th>SINCE %</th>
                 <th>SINCE $</th>
-                <th>Last</th>
-                <th>Bid</th>
-                <th>Ask</th>
-                <th>Since</th>
+                <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below)">Last (Bid / Ask)</th>
               </tr>
+              {hasStreamAccounts && (
+                <tr>
+                  <th aria-hidden />
+                  <th>Qty</th>
+                  <th>Cost</th>
+                  <th>SINCE $</th>
+                  <th>Qty</th>
+                  <th>Cost</th>
+                  <th>SINCE $</th>
+                  <th aria-hidden colSpan={7} />
+                </tr>
+              )}
             </thead>
             <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={hasStreamAccounts ? 12 : 11}>
+                  <td colSpan={hasStreamAccounts ? 14 : 8}>
                     {watchlistRows.length === 0
                       ? 'No symbols (add symbols in Watchlist, or ensure Stream Accounts Primary/Secondary have positions, or daemon is running)'
                       : 'No rows match the selected account filter.'}
@@ -282,27 +380,67 @@ export function LivePage({ status }: LivePageProps) {
                 </tr>
               ) : (
                 filteredRows.map((row) => {
-                  const { symbol, quote: q, qty, avgCost, changePct, pnlVsBench, pnlCost, streamCategory } = row
+                  const {
+                    symbol,
+                    quote: q,
+                    qty,
+                    avgCost,
+                    changePct,
+                    pnlVsBench,
+                    pnlCost,
+                    primaryQty,
+                    primaryAvgCost,
+                    primaryPnlCost,
+                    secondaryQty,
+                    secondaryAvgCost,
+                    secondaryPnlCost,
+                  } = row
+                  const symbolFreshness = getQuoteFreshness(q?.ts)
                   return (
                     <tr key={symbol}>
-                      <td><strong>{symbol}</strong></td>
+                      <td
+                        className={symbolFreshness ? `realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : 'realtime-quote-symbol'}
+                        title={[
+                          q?.ts != null ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}` : null,
+                          getDailyRefTooltip(benchmarks[symbol], q?.last),
+                        ]
+                          .filter(Boolean)
+                          .join('\n') || undefined}
+                      >
+                        <strong>{symbol}</strong>
+                      </td>
                       {hasStreamAccounts && (
-                        <td className="realtime-quote-account">
-                          {streamCategory === 'primary'
-                            ? 'Primary'
-                            : streamCategory === 'secondary'
-                              ? 'Secondary'
-                              : streamCategory === 'both'
-                                ? 'Both'
-                                : 'Wishlist'}
-                        </td>
+                        <>
+                          <td className="realtime-quote-num">{primaryQty != null && Number.isFinite(primaryQty) ? primaryQty : '—'}</td>
+                          <td className="realtime-quote-num">{primaryAvgCost != null && Number.isFinite(primaryAvgCost) ? fmtUsd(primaryAvgCost) : '—'}</td>
+                          <td className="realtime-quote-num">
+                            {primaryPnlCost != null && Number.isFinite(primaryPnlCost) ? (
+                              <span className={primaryPnlCost > 0 ? 'pnl-positive' : primaryPnlCost < 0 ? 'pnl-negative' : ''}>
+                                {fmtUsd(Math.abs(primaryPnlCost))}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="realtime-quote-num">{secondaryQty != null && Number.isFinite(secondaryQty) ? secondaryQty : '—'}</td>
+                          <td className="realtime-quote-num">{secondaryAvgCost != null && Number.isFinite(secondaryAvgCost) ? fmtUsd(secondaryAvgCost) : '—'}</td>
+                          <td className="realtime-quote-num">
+                            {secondaryPnlCost != null && Number.isFinite(secondaryPnlCost) ? (
+                              <span className={secondaryPnlCost > 0 ? 'pnl-positive' : secondaryPnlCost < 0 ? 'pnl-negative' : ''}>
+                                {fmtUsd(Math.abs(secondaryPnlCost))}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        </>
                       )}
                       <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
                       <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
                       <td className="realtime-quote-num">
                         {changePct != null && Number.isFinite(changePct) ? (
                           <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
-                            {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+                            {Math.abs(changePct).toFixed(2)}%
                           </span>
                         ) : (
                           '—'
@@ -311,7 +449,7 @@ export function LivePage({ status }: LivePageProps) {
                       <td className="realtime-quote-num">
                         {pnlVsBench != null && Number.isFinite(pnlVsBench) ? (
                           <span className={pnlVsBench > 0 ? 'pnl-positive' : pnlVsBench < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsd(pnlVsBench)}
+                            {fmtUsd(Math.abs(pnlVsBench))}
                           </span>
                         ) : (
                           '—'
@@ -323,7 +461,7 @@ export function LivePage({ status }: LivePageProps) {
                           const sincePct = ((q.last - avgCost) / avgCost) * 100
                           return (
                             <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
-                              {sincePct >= 0 ? '+' : ''}{sincePct.toFixed(2)}%
+                              {Math.abs(sincePct).toFixed(2)}%
                             </span>
                           )
                         })()}
@@ -331,20 +469,116 @@ export function LivePage({ status }: LivePageProps) {
                       <td className="realtime-quote-num">
                         {pnlCost != null && Number.isFinite(pnlCost) ? (
                           <span className={pnlCost > 0 ? 'pnl-positive' : pnlCost < 0 ? 'pnl-negative' : ''}>
-                            {fmtUsd(pnlCost)}
+                            {fmtUsd(Math.abs(pnlCost))}
                           </span>
                         ) : (
                           '—'
                         )}
                       </td>
-                      <td className="realtime-quote-num">{q ? fmtUsd(q.last) : '—'}</td>
-                      <td className="realtime-quote-num">{q ? fmtUsd(q.bid ?? null) : '—'}</td>
-                      <td className="realtime-quote-num">{q ? fmtUsd(q.ask ?? null) : '—'}</td>
-                      <td className="realtime-quote-since">{q ? fmtSince(q.ts) : '—'}</td>
+                      <td className="realtime-quote-num realtime-quote-last-bid-ask">
+                        {q ? (() => {
+                          const last = q.last != null && Number.isFinite(q.last) ? q.last : null
+                          const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
+                          const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
+                          const bidDiff = last != null && bid != null ? bid - last : null
+                          const askDiff = last != null && ask != null ? ask - last : null
+                          return (
+                            <>
+                              {last != null ? fmtUsd(last) : '—'}
+                              {bidDiff != null && (
+                                <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+                              )}
+                              {askDiff != null && (
+                                <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+                              )}
+                            </>
+                          )
+                        })() : '—'}
+                      </td>
                     </tr>
                   )
                 })
               )}
+              {filteredRows.length > 0 && (() => {
+                const primaryCostSum = filteredRows.reduce((a, r) => {
+                  const q = r.primaryQty != null && Number.isFinite(r.primaryQty) ? r.primaryQty : 0
+                  const c = r.primaryAvgCost != null && Number.isFinite(r.primaryAvgCost) ? r.primaryAvgCost : 0
+                  return a + q * c
+                }, 0)
+                const primaryPnlSum = filteredRows.reduce((a, r) => a + (r.primaryPnlCost != null && Number.isFinite(r.primaryPnlCost) ? r.primaryPnlCost : 0), 0)
+                const secondaryCostSum = filteredRows.reduce((a, r) => {
+                  const q = r.secondaryQty != null && Number.isFinite(r.secondaryQty) ? r.secondaryQty : 0
+                  const c = r.secondaryAvgCost != null && Number.isFinite(r.secondaryAvgCost) ? r.secondaryAvgCost : 0
+                  return a + q * c
+                }, 0)
+                const secondaryPnlSum = filteredRows.reduce((a, r) => a + (r.secondaryPnlCost != null && Number.isFinite(r.secondaryPnlCost) ? r.secondaryPnlCost : 0), 0)
+                const totalQty = filteredRows.reduce((a, r) => a + (r.qty != null && Number.isFinite(r.qty) ? r.qty : 0), 0)
+                const totalCost = filteredRows.reduce((a, r) => {
+                  const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
+                  const c = r.avgCost != null && Number.isFinite(r.avgCost) ? r.avgCost : 0
+                  return a + q * c
+                }, 0)
+                const totalCostPnl = filteredRows.reduce((a, r) => a + (r.pnlCost != null && Number.isFinite(r.pnlCost) ? r.pnlCost : 0), 0)
+                const totalDailyDollar = filteredRows.reduce((a, r) => a + (r.pnlVsBench != null && Number.isFinite(r.pnlVsBench) ? r.pnlVsBench : 0), 0)
+                const sumLastQty = filteredRows.reduce((a, r) => {
+                  const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
+                  const last = r.quote?.last != null && Number.isFinite(r.quote.last) ? r.quote.last : 0
+                  return a + last * q
+                }, 0)
+                const totalDailyDenom = sumLastQty - totalDailyDollar
+                const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar) ? (totalDailyDollar / totalDailyDenom) * 100 : null
+                const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
+                return (
+                  <tr className="realtime-quotes-sum-row">
+                    <td><strong>Total</strong></td>
+                    {hasStreamAccounts && (
+                      <>
+                        <td className="realtime-quote-num">—</td>
+                        <td className="realtime-quote-num">{primaryCostSum !== 0 ? fmtUsd(primaryCostSum) : '—'}</td>
+                        <td className="realtime-quote-num">
+                          <span className={primaryPnlSum > 0 ? 'pnl-positive' : primaryPnlSum < 0 ? 'pnl-negative' : ''}>
+                            {primaryPnlSum !== 0 ? fmtUsd(Math.abs(primaryPnlSum)) : '—'}
+                          </span>
+                        </td>
+                        <td className="realtime-quote-num">—</td>
+                        <td className="realtime-quote-num">{secondaryCostSum !== 0 ? fmtUsd(secondaryCostSum) : '—'}</td>
+                        <td className="realtime-quote-num">
+                          <span className={secondaryPnlSum > 0 ? 'pnl-positive' : secondaryPnlSum < 0 ? 'pnl-negative' : ''}>
+                            {secondaryPnlSum !== 0 ? fmtUsd(Math.abs(secondaryPnlSum)) : '—'}
+                          </span>
+                        </td>
+                      </>
+                    )}
+                    <td className="realtime-quote-num">{totalQty !== 0 ? totalQty : '—'}</td>
+                    <td className="realtime-quote-num">{totalCost !== 0 ? fmtUsd(totalCost) : '—'}</td>
+                    <td className="realtime-quote-num">
+                      {totalDailyPct != null && Number.isFinite(totalDailyPct) ? (
+                        <span className={totalDailyPct > 0 ? 'pnl-positive' : totalDailyPct < 0 ? 'pnl-negative' : ''}>
+                          {Math.abs(totalDailyPct).toFixed(2)}%
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="realtime-quote-num">
+                      <span className={totalDailyDollar > 0 ? 'pnl-positive' : totalDailyDollar < 0 ? 'pnl-negative' : ''}>
+                        {totalDailyDollar !== 0 ? fmtUsd(Math.abs(totalDailyDollar)) : '—'}
+                      </span>
+                    </td>
+                    <td className="realtime-quote-num">
+                      {totalPct != null && Number.isFinite(totalPct) ? (
+                        <span className={totalPct > 0 ? 'pnl-positive' : totalPct < 0 ? 'pnl-negative' : ''}>
+                          {Math.abs(totalPct).toFixed(2)}%
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="realtime-quote-num">
+                      <span className={totalCostPnl > 0 ? 'pnl-positive' : totalCostPnl < 0 ? 'pnl-negative' : ''}>
+                        {totalCostPnl !== 0 ? fmtUsd(Math.abs(totalCostPnl)) : '—'}
+                      </span>
+                    </td>
+                    <td className="realtime-quote-num">—</td>
+                  </tr>
+                )
+              })()}
             </tbody>
           </table>
         </div>

@@ -418,12 +418,13 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                   </button>
                 ))}
               </div>
-              <fieldset className="performance-filter" style={{ border: 'none', padding: 0, margin: 0 }} aria-label="Transaction types">
-                <span className="performance-filter-legend-inline">Types</span>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                  <label className="performance-radio" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
+              <fieldset className="transferpay-types-filter" aria-label="Transaction types">
+                <span className="transferpay-types-legend">Types</span>
+                <div className="transferpay-types-pills">
+                  <label className={`transferpay-type-pill ${typeFilter.size === 4 ? 'active' : ''}`}>
                     <input
                       type="checkbox"
+                      className="transferpay-type-pill-input"
                       checked={typeFilter.size === 4}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -434,16 +435,16 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                       }}
                       aria-label="All transaction types"
                     />
-                    <span>All</span>
+                    <span className="transferpay-type-pill-label">All</span>
                   </label>
                   {(['deposit', 'withdrawal', 'dividend', 'other'] as SummaryTypeKey[]).map((t) => (
                     <label
                       key={t}
-                      className="performance-radio"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}
+                      className={`transferpay-type-pill ${typeFilter.has(t) ? 'active' : ''}`}
                     >
                       <input
                         type="checkbox"
+                        className="transferpay-type-pill-input"
                         checked={typeFilter.has(t)}
                         onChange={() => {
                           setTypeFilter((prev) => {
@@ -458,7 +459,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                         }}
                         aria-label={t === 'other' ? 'Other' : t.charAt(0).toUpperCase() + t.slice(1)}
                       />
-                      <span>
+                      <span className="transferpay-type-pill-label">
                         {t === 'deposit'
                           ? 'Deposit'
                           : t === 'withdrawal'
