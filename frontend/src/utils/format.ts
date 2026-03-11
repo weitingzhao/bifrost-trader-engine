@@ -176,6 +176,35 @@ export function fmtExpiry(expiry: string | null | undefined): string {
   return String(expiry).trim()
 }
 
+/**
+ * Days from today to expiry (negative if past). Expiry: YYYYMMDD or YYYYMM (last day of month).
+ * Returns null if expiry is empty or invalid.
+ */
+export function daysUntilExpiry(expiry: string | null | undefined): number | null {
+  if (!expiry || !String(expiry).trim()) return null
+  const s = String(expiry).trim().replace(/\D/g, '')
+  let expiryDate: Date
+  if (s.length === 8) {
+    const y = parseInt(s.slice(0, 4), 10)
+    const m = parseInt(s.slice(4, 6), 10) - 1
+    const d = parseInt(s.slice(6, 8), 10)
+    if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return null
+    expiryDate = new Date(y, m, d)
+  } else if (s.length === 6) {
+    const y = parseInt(s.slice(0, 4), 10)
+    const m = parseInt(s.slice(4, 6), 10) // 1-12
+    if (Number.isNaN(y) || Number.isNaN(m)) return null
+    expiryDate = new Date(y, m, 0) // day 0 of month m = last day of month (m-1)
+  } else {
+    return null
+  }
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  expiryDate.setHours(0, 0, 0, 0)
+  const diffMs = expiryDate.getTime() - today.getTime()
+  return Math.round(diffMs / (24 * 60 * 60 * 1000))
+}
+
 /** Format trade_date (YYYY-MM-DD string from API) for display. */
 export function fmtTradeDate(tradeDate: string | null | undefined): string {
   if (tradeDate == null || String(tradeDate).trim() === '') return '—'

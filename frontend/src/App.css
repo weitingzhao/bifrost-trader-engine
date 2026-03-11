@@ -4149,6 +4149,18 @@ th {
   font-weight: 600;
 }
 
+/** Days remaining until option expiry (Positions page) */
+.expiry-days-remaining {
+  color: var(--color-warning, #eab308);
+  font-weight: 500;
+}
+
+/** (Last − Strike) / Last % in Positions Options table */
+.replay-last-strike-pct {
+  font-size: 0.9em;
+  color: var(--color-warning, #eab308);
+}
+
 /* Transfer & Pay uses card process-section + title row + replay-section (see TransferPayPage) */
 .transfer-pay-page .replay-section {
   margin-top: var(--space-2);

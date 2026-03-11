@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Execution, StatusResponse } from '../types'
-import { deleteExecution } from '../api'
+import type { Execution, RealtimeQuote, StatusResponse } from '../types'
+import { deleteExecution, fetchQuotes, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
+  daysUntilExpiry,
   fmtExpiry,
   fmtTs,
   fmtUsd,
@@ -44,6 +45,21 @@ export function PositionsPage({
   const [expandedOpenDetailKeys, setExpandedOpenDetailKeys] = useState<string[]>([])
 
   const [openAccordionMode, setOpenAccordionMode] = useState<boolean>(false)
+  const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+
+  useEffect(() => {
+    let cancelled = false
+    fetchQuotes()
+      .then(res => { if (!cancelled) setQuotesMap(() => Object.fromEntries((res.quotes || []).map(q => [q.symbol, q]))) })
+      .catch(() => { if (!cancelled) setQuotesMap({}) })
+    const unsub = subscribeQuotes(q => {
+      setQuotesMap(prev => ({ ...prev, [q.symbol]: q }))
+    })
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [])
 
   const toggleOpenDetailExpand = (key: string) => {
     setExpandedOpenDetailKeys(prev => {
@@ -446,6 +462,7 @@ export function PositionsPage({
                           <th rowSpan={2}>Contract</th>
                           <th rowSpan={2}>Expiry</th>
                           <th rowSpan={2}>STRIKE</th>
+                          <th rowSpan={2} title="Underlying last price (same as Watchlist Last); (Last − Strike) / Last %">Last</th>
                           <th colSpan={3}>BUY</th>
                           <th colSpan={3}>SELL</th>
                           <th rowSpan={2}>Unrealized PnL</th>
@@ -493,8 +510,37 @@ export function PositionsPage({
                                   )
                                 })()}
                               </td>
-                              <td>{fmtExpiry(group.expiry)}</td>
+                              <td>
+                                {fmtExpiry(group.expiry)}
+                                {(() => {
+                                  const days = daysUntilExpiry(group.expiry)
+                                  if (days == null) return null
+                                  const label = days >= 0 ? (days === 0 ? ' (today)' : ` (${days}d)`) : ` (${-days}d ago)`
+                                  return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                })()}
+                              </td>
                               <td><strong>{fmtUsd(group.strike)}</strong></td>
+                              <td>
+                                {(() => {
+                                  const underlying = getContractLabelParts(group.contract_key).symbol
+                                  const q = underlying ? quotesMap[underlying] : undefined
+                                  const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
+                                  const strike = group.strike != null && Number.isFinite(group.strike) ? group.strike : null
+                                  const pct = last != null && strike != null && last !== 0
+                                    ? ((last - strike) / last) * 100
+                                    : null
+                                  return (
+                                    <>
+                                      {last != null ? fmtUsd(last) : '—'}
+                                      {pct != null && (
+                                        <span className="replay-last-strike-pct" title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
+                                          {' '}({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)
+                                        </span>
+                                      )}
+                                    </>
+                                  )
+                                })()}
+                              </td>
                               <td>{group.buy_volume}</td>
                               <td>{fmtUsd(group.buy_avg_price)}</td>
                               <td><span className="replay-cost">{fmtUsd(group.buy_cost)}</span></td>
@@ -537,7 +583,7 @@ export function PositionsPage({
                       </tbody>
                       <tfoot>
                         <tr className="replay-opt-tfoot-total">
-                          <td colSpan={10} className="replay-opt-tfoot-label">Total</td>
+                          <td colSpan={11} className="replay-opt-tfoot-label">Total</td>
                           <td>
                             <span className="replay-pnl-unrealized">
                               {fmtUsd(openOptionGroups.reduce((acc, g) => acc + (g.unrealized_pnl ?? 0), 0))}
@@ -560,6 +606,7 @@ export function PositionsPage({
                             <th>Contract</th>
                             <th>Expiry</th>
                             <th>STRIKE</th>
+                            <th title="Underlying last; (Last − Strike) / Last %">Last</th>
                             <th>Time</th>
                             <th>Side</th>
                             <th>Qty</th>
@@ -601,8 +648,39 @@ export function PositionsPage({
                                           )
                                         })()}
                                       </td>
-                                      <td>{fmtExpiry(position.lastTradeDateOrContractMonth ?? position.expiry ?? group.expiry)}</td>
+                                      <td>
+                                        {(() => {
+                                          const exp = position.lastTradeDateOrContractMonth ?? position.expiry ?? group.expiry
+                                          const days = daysUntilExpiry(exp)
+                                          return (
+                                            <>
+                                              {fmtExpiry(exp)}
+                                              {days != null && (
+                                                <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>
+                                                  {' '}({days >= 0 ? `${days}d` : `-${-days}d`})
+                                                </span>
+                                              )}
+                                            </>
+                                          )
+                                        })()}
+                                      </td>
                                       <td><strong>{position.strike != null ? fmtUsd(position.strike) : fmtUsd(group.strike)}</strong></td>
+                                      <td>
+                                        {(() => {
+                                          const underlying = getContractLabelParts(group.contract_key).symbol
+                                          const q = underlying ? quotesMap[underlying] : undefined
+                                          const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
+                                          const strike = position.strike ?? group.strike
+                                          const strikeNum = strike != null && Number.isFinite(strike) ? strike : null
+                                          const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
+                                          return (
+                                            <>
+                                              {last != null ? fmtUsd(last) : '—'}
+                                              {pct != null && <span className="replay-last-strike-pct"> ({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)</span>}
+                                            </>
+                                          )
+                                        })()}
+                                      </td>
                                       <td>{(() => {
                                         const ts = position.exec_time != null ? Number(position.exec_time) : (position.updated_at != null ? Number(position.updated_at) : null)
                                         return ts != null && Number.isFinite(ts) ? fmtTs(ts) : '—'
@@ -670,8 +748,39 @@ export function PositionsPage({
                                           )
                                         })()}
                                       </td>
-                                      <td>{fmtExpiry(ex.expiry ?? group.expiry)}</td>
+                                      <td>
+                                        {(() => {
+                                          const exp = ex.expiry ?? group.expiry
+                                          const days = daysUntilExpiry(exp)
+                                          return (
+                                            <>
+                                              {fmtExpiry(exp)}
+                                              {days != null && (
+                                                <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>
+                                                  {' '}({days >= 0 ? `${days}d` : `-${-days}d`})
+                                                </span>
+                                              )}
+                                            </>
+                                          )
+                                        })()}
+                                      </td>
                                       <td><strong>{fmtUsd(ex.strike ?? group.strike)}</strong></td>
+                                      <td>
+                                        {(() => {
+                                          const underlying = getContractLabelParts(group.contract_key).symbol
+                                          const q = underlying ? quotesMap[underlying] : undefined
+                                          const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
+                                          const strike = ex.strike ?? group.strike
+                                          const strikeNum = strike != null && Number.isFinite(strike) ? strike : null
+                                          const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
+                                          return (
+                                            <>
+                                              {last != null ? fmtUsd(last) : '—'}
+                                              {pct != null && <span className="replay-last-strike-pct"> ({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)</span>}
+                                            </>
+                                          )
+                                        })()}
+                                      </td>
                                       <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
                                       <td>{sideLabel}</td>
                                       <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
