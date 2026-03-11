@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { RealtimeQuote, StatusResponse } from '../types'
-import { fetchBarsBenchmark, fetchQuotes, subscribeQuotes } from '../api'
+import { fetchBarsBenchmark, fetchQuotes, fetchWatchlist, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtSince, fmtUsd } from '../utils/format'
 
@@ -12,10 +12,70 @@ export function LivePage({ status }: LivePageProps) {
   const j = status
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [benchmarks, setBenchmarks] = useState<Record<string, { bar_time: number; close: number }>>({})
+  const [watchlistSymbolSet, setWatchlistSymbolSet] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    fetchWatchlist()
+      .then((res) => {
+        if (cancelled) return
+        const set = new Set<string>()
+        for (const w of res.items ?? []) {
+          const sym = (w.symbol ?? '').trim()
+          const st = (w.sec_type ?? '').toString().toUpperCase()
+          if (sym && (st === 'STK' || !st)) set.add(sym.toUpperCase())
+        }
+        setWatchlistSymbolSet(set)
+      })
+      .catch(() => {
+        if (!cancelled) setWatchlistSymbolSet(new Set())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
+  const accountsList = j?.accounts ?? []
+  // Primary/Secondary account IDs from Settings → Stream Accounts (stream_primary_account_id, stream_secondary_account_id).
+  // No hardcoded account IDs: read from status.ib_config (backend reads from DB settings), then match against accountsList[].account_id.
+  const ibConfig = j?.ib_config as { stream_primary_account_id?: string; stream_secondary_account_id?: string } | undefined
+  const streamPrimaryId = (ibConfig?.stream_primary_account_id ?? '').trim() || null
+  const streamSecondaryId = (ibConfig?.stream_secondary_account_id ?? '').trim() || null
+  const hasStreamAccounts = streamPrimaryId != null || streamSecondaryId != null
+
+  const streamPositionSymbols = useMemo(() => {
+    const primary: string[] = []
+    const secondary: string[] = []
+    const norm = (id: string | null) => (id ?? '').trim().toLowerCase() || ''
+    const wantPrimary = norm(streamPrimaryId)
+    const wantSecondary = norm(streamSecondaryId)
+    for (const acc of accountsList) {
+      const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
+      const accIdNorm = norm(accId)
+      const positions = acc?.positions ?? []
+      for (const p of positions) {
+        const sym = (p.symbol ?? '').trim()
+        const secType = (p.secType ?? '').toString().toUpperCase()
+        const posQty = typeof p.position === 'number' ? p.position : 0
+        if (!sym || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
+        if (wantPrimary && accIdNorm === wantPrimary && !primary.includes(sym)) primary.push(sym)
+        if (wantSecondary && accIdNorm === wantSecondary && !secondary.includes(sym)) secondary.push(sym)
+      }
+    }
+    return { primary, secondary }
+  }, [accountsList, streamPrimaryId, streamSecondaryId])
+
+  // Market Streams symbol list: show symbol if it appears in ANY of Wishlist, Primary, or Secondary.
   const watchlistSymbols = useMemo(
-    () => [...new Set([...(j?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
-    [j?.subscribed_tickers, quotesMap],
+    () =>
+      [
+        ...new Set([
+          ...(j?.subscribed_tickers ?? []),
+          ...streamPositionSymbols.primary,
+          ...streamPositionSymbols.secondary,
+          ...Object.keys(quotesMap),
+        ]),
+      ].sort(),
+    [j?.subscribed_tickers, streamPositionSymbols.primary, streamPositionSymbols.secondary, quotesMap],
   )
   const benchmarkSymbols = useMemo(
     () =>
@@ -68,24 +128,48 @@ export function LivePage({ status }: LivePageProps) {
   const hb = j?.daemon_heartbeat
   const marketStreamsOk =
     j?.redis_quotes_connected === true && hb?.daemon_alive === true && hb?.event_subscribe_ticker === true
-  const accountsList = j?.accounts ?? []
+
+  const subscribedSet = useMemo(
+    () =>
+      new Set(
+        (j?.subscribed_tickers ?? [])
+          .map((s: string) => (s && typeof s === 'string' ? s.trim().toUpperCase() : ''))
+          .filter(Boolean)
+      ),
+    [j?.subscribed_tickers]
+  )
+  const wishlistSet = watchlistSymbolSet.size > 0 ? watchlistSymbolSet : subscribedSet
   const watchlistRows = watchlistSymbols.map((symbol) => {
     let qty = 0
     let totalCost = 0
     let hasCost = false
+    const accountIdsWithSymbol: string[] = []
     for (const acc of accountsList) {
+      const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
       const positions = acc?.positions ?? []
       for (const p of positions) {
         const sym = (p.symbol ?? '').trim()
         const secType = (p.secType ?? '').toString().toUpperCase()
         const posQty = typeof p.position === 'number' ? p.position : 0
         if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
+        if (accId && !accountIdsWithSymbol.includes(accId)) accountIdsWithSymbol.push(accId)
         qty += posQty
         if (p.avgCost != null && Number.isFinite(p.avgCost as number)) {
           totalCost += (p.avgCost as number) * posQty
           hasCost = true
         }
       }
+    }
+    let streamCategory: 'primary' | 'secondary' | 'both' | null = null
+    if (hasStreamAccounts && accountIdsWithSymbol.length > 0) {
+      const norm = (id: string | null) => (id ?? '').trim().toLowerCase() || ''
+      const wantPrimary = norm(streamPrimaryId)
+      const wantSecondary = norm(streamSecondaryId)
+      const isPrimary = wantPrimary ? accountIdsWithSymbol.some((id) => norm(id) === wantPrimary) : false
+      const isSecondary = wantSecondary ? accountIdsWithSymbol.some((id) => norm(id) === wantSecondary) : false
+      if (isPrimary && isSecondary) streamCategory = 'both'
+      else if (isPrimary) streamCategory = 'primary'
+      else if (isSecondary) streamCategory = 'secondary'
     }
     const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
     const quote = quotesMap[symbol]
@@ -100,8 +184,21 @@ export function LivePage({ status }: LivePageProps) {
       quote && avgCost != null && Number.isFinite(quote.last) && qty != null && Number.isFinite(qty) && qty !== 0
         ? (quote.last - avgCost) * qty
         : null
-    return { symbol, quote, qty: qty || null, avgCost, changePct, pnlVsBench, pnlCost }
+    const isInWatchlist = wishlistSet.has((symbol || '').trim().toUpperCase())
+    return { symbol, quote, qty: qty || null, avgCost, changePct, pnlVsBench, pnlCost, streamCategory, isInWatchlist }
   })
+
+  const [streamCategoryFilter, setStreamCategoryFilter] = useState<'all' | 'primary' | 'secondary' | 'wishlist'>('all')
+  const filteredRows = useMemo(() => {
+    if (!hasStreamAccounts) return watchlistRows
+    if (streamCategoryFilter === 'all') return watchlistRows
+    if (streamCategoryFilter === 'wishlist') return watchlistRows.filter((row) => row.isInWatchlist === true)
+    if (streamCategoryFilter === 'primary')
+      return watchlistRows.filter((row) => row.streamCategory === 'primary' || row.streamCategory === 'both')
+    if (streamCategoryFilter === 'secondary')
+      return watchlistRows.filter((row) => row.streamCategory === 'secondary' || row.streamCategory === 'both')
+    return watchlistRows.filter((row) => row.streamCategory === streamCategoryFilter)
+  }, [watchlistRows, hasStreamAccounts, streamCategoryFilter])
 
   return (
     <div className="app-page-stack">
@@ -116,18 +213,52 @@ export function LivePage({ status }: LivePageProps) {
               <InfoTooltip
                 text={
                   marketStreamsOk
-                    ? `Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Daemon alive and Event subscription active. SSE connected, ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
-                    : 'Ticker data from daemon subscription, pushed via Redis to monitor. Symbols: Watchlist STK + strategy symbol. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
+                    ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Primary & Secondary account positions (Settings → Stream Accounts). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
+                    : 'Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Primary & Secondary account positions. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
                 }
               />
             </h2>
           </div>
         </div>
+        {hasStreamAccounts && (
+          <div className="realtime-stream-filter" style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span className="section-hint">Account:</span>
+            <select
+              value={streamCategoryFilter}
+              onChange={(e) =>
+                setStreamCategoryFilter(e.target.value as 'all' | 'primary' | 'secondary' | 'wishlist')
+              }
+              aria-label="Filter by stream account"
+              style={{ minWidth: '8rem' }}
+            >
+              <option value="all">All</option>
+              <option value="primary">Primary</option>
+              <option value="secondary">Secondary</option>
+              <option value="wishlist">Wishlist</option>
+            </select>
+          </div>
+        )}
         <div className="realtime-quotes-table-wrap">
           <table className="table-operations realtime-quotes-table">
+            <colgroup>
+              <col style={{ width: '5.5rem' }} />
+              {hasStreamAccounts && <col style={{ width: '5rem' }} />}
+              <col style={{ width: '4rem' }} />
+              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '5.5rem' }} />
+              <col style={{ width: '5rem' }} />
+              <col style={{ width: '5rem' }} />
+              <col style={{ width: '5rem' }} />
+              <col style={{ width: '6rem' }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>Symbol</th>
+                {hasStreamAccounts && <th>Account</th>}
                 <th>Qty</th>
                 <th>Cost</th>
                 <th>Daily %</th>
@@ -141,16 +272,31 @@ export function LivePage({ status }: LivePageProps) {
               </tr>
             </thead>
             <tbody>
-              {watchlistRows.length === 0 ? (
+              {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>No symbols in watchlist (add symbols in Watchlist or ensure daemon is running)</td>
+                  <td colSpan={hasStreamAccounts ? 12 : 11}>
+                    {watchlistRows.length === 0
+                      ? 'No symbols (add symbols in Watchlist, or ensure Stream Accounts Primary/Secondary have positions, or daemon is running)'
+                      : 'No rows match the selected account filter.'}
+                  </td>
                 </tr>
               ) : (
-                watchlistRows.map((row) => {
-                  const { symbol, quote: q, qty, avgCost, changePct, pnlVsBench, pnlCost } = row
+                filteredRows.map((row) => {
+                  const { symbol, quote: q, qty, avgCost, changePct, pnlVsBench, pnlCost, streamCategory } = row
                   return (
                     <tr key={symbol}>
                       <td><strong>{symbol}</strong></td>
+                      {hasStreamAccounts && (
+                        <td className="realtime-quote-account">
+                          {streamCategory === 'primary'
+                            ? 'Primary'
+                            : streamCategory === 'secondary'
+                              ? 'Secondary'
+                              : streamCategory === 'both'
+                                ? 'Both'
+                                : 'Wishlist'}
+                        </td>
+                      )}
                       <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
                       <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
                       <td className="realtime-quote-num">
@@ -202,23 +348,23 @@ export function LivePage({ status }: LivePageProps) {
             </tbody>
           </table>
         </div>
-        {watchlistRows.length > 0 &&
+        {filteredRows.length > 0 &&
           (() => {
-            const totalCostPnl = watchlistRows.reduce((acc, row) => {
+            const totalCostPnl = filteredRows.reduce((acc, row) => {
               const v = row.pnlCost
               return acc + (v != null && Number.isFinite(v) ? v : 0)
             }, 0)
-            const totalCost = watchlistRows.reduce((acc, row) => {
+            const totalCost = filteredRows.reduce((acc, row) => {
               const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
               const cost = row.avgCost != null && Number.isFinite(row.avgCost) ? row.avgCost : 0
               return acc + qty * cost
             }, 0)
             const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
-            const totalDailyDollar = watchlistRows.reduce((acc, row) => {
+            const totalDailyDollar = filteredRows.reduce((acc, row) => {
               const v = row.pnlVsBench
               return acc + (v != null && Number.isFinite(v) ? v : 0)
             }, 0)
-            const sumLastQty = watchlistRows.reduce((acc, row) => {
+            const sumLastQty = filteredRows.reduce((acc, row) => {
               const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
               const last = row.quote?.last != null && Number.isFinite(row.quote.last) ? row.quote.last : 0
               return acc + last * qty
