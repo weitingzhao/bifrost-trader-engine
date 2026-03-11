@@ -1,0 +1,177 @@
+import type { StatusResponse } from '../../../types'
+import { InfoTooltip } from '../../../components/InfoTooltip'
+
+type Lamp = 'green' | 'yellow' | 'red' | 'none'
+
+interface MonitorClient {
+  connected?: boolean
+  client_id?: number
+  last_error?: string
+}
+
+export interface StatusMonitorPanelProps {
+  status: StatusResponse | null
+  monitorLamp: Lamp
+  monitorEnabled: boolean
+  monitorSelfCheckText: string
+  monitorBlockReasons: string
+  apiHealthLamp: Lamp
+  healthCountdownSec: number | null
+  monitorIbGroupLamp: Lamp
+  monitorAccount: MonitorClient | undefined
+  monitorMarket: MonitorClient | undefined
+  onMonitorStop: () => void
+  onMonitorConnect: () => void
+  onMonitorReleaseIb: () => void
+  monitorCtrlMsg: { text: string; isErr: boolean }
+  className?: string
+}
+
+export function StatusMonitorPanel({
+  status: j,
+  monitorLamp,
+  monitorEnabled,
+  monitorSelfCheckText,
+  monitorBlockReasons,
+  apiHealthLamp,
+  healthCountdownSec,
+  monitorIbGroupLamp,
+  monitorAccount,
+  monitorMarket,
+  onMonitorStop,
+  onMonitorConnect,
+  onMonitorReleaseIb,
+  monitorCtrlMsg,
+  className,
+}: StatusMonitorPanelProps) {
+  return (
+    <div id="system-panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
+      <div className="daemon-header">
+        <div className="daemon-header-main daemon-header-with-lamp">
+          <div className="lamp-wrap-span">
+            <div className={`lamp lamp-sm ${monitorLamp}`} title="Monitor status lamp" />
+          </div>
+          <div>
+            <h2 className="daemon-card-title">Management</h2>
+            <div>
+              <strong>Status: {j ? `${monitorEnabled ? 'Running' : 'Stopped'} (${monitorSelfCheckText})` : 'Fetch failed'}</strong>
+              {j && monitorBlockReasons && monitorBlockReasons !== 'None' ? ` Block reasons: ${monitorBlockReasons}` : ''}
+            </div>
+          </div>
+        </div>
+        <div className="monitor-header-actions">
+          <button
+            type="button"
+            className="btn-stop"
+            disabled={!monitorEnabled}
+            title={monitorEnabled ? 'Stop monitor IB interaction and disconnect' : 'Already stopped'}
+            onClick={onMonitorStop}
+          >
+            Stop
+          </button>
+        </div>
+      </div>
+
+      <div className="daemon-groups">
+        <div className="daemon-group">
+          <div className="daemon-group-header">
+            <div className={`lamp lamp-sm ${apiHealthLamp}`} title="API service (green if /health reachable, else red)" />
+            <span className="daemon-group-title">API service</span>
+          </div>
+          <div className="daemon-group-body">
+            <p className="section-hint">
+              <strong>
+                Status:{' '}
+                {j ? (
+                  <>
+                    {monitorEnabled ? <span className="countdown-num">Running</span> : 'Stopped'}{' '}
+                    <span>({monitorSelfCheckText})</span>
+                  </>
+                ) : (
+                  'Fetch failed'
+                )}
+              </strong>
+              {j && monitorBlockReasons && monitorBlockReasons !== 'None' ? ` Block reasons: ${monitorBlockReasons}` : ''}
+            </p>
+            {healthCountdownSec != null ? (
+              <p className="section-hint countdown-line">
+                Next health check: <span className="countdown-num">{healthCountdownSec}</span> s
+              </p>
+            ) : (
+              <p className="section-hint">Health check: —</p>
+            )}
+          </div>
+        </div>
+        <div className="daemon-group">
+          <div className="daemon-group-header">
+            <div className={`lamp lamp-sm ${monitorIbGroupLamp}`} title="Monitor IB connection status" />
+            <span className="daemon-group-title">IB connection</span>
+          </div>
+          <div className="daemon-group-body">
+            <p className="section-hint countdown-line">
+              Account Client:{' '}
+              {monitorAccount?.connected ? (
+                <span className="countdown-num">Connected @ {monitorAccount?.client_id ?? '—'}</span>
+              ) : (
+                `Not connected${monitorAccount?.last_error ? ` (${monitorAccount.last_error})` : ''}`
+              )}
+            </p>
+            <p className="section-hint countdown-line">
+              Market Client:{' '}
+              {monitorMarket?.connected ? (
+                <span className="countdown-num">Connected @ {monitorMarket?.client_id ?? '—'}</span>
+              ) : (
+                `Not connected${monitorMarket?.last_error ? ` (${monitorMarket.last_error})` : ''}`
+              )}
+            </p>
+            <div className="controls" style={{ marginTop: '0.25rem' }}>
+              {(monitorAccount?.connected || monitorMarket?.connected) ? (
+                <button
+                  type="button"
+                  className="btn-retry-ib"
+                  title="Release Monitor IB connections (Account + Market client_id). Monitor keeps running; use Connect to reconnect."
+                  onClick={onMonitorReleaseIb}
+                >
+                  Release
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-resume"
+                  disabled={!monitorEnabled}
+                  title={monitorEnabled ? 'Establish monitor IB connection (AccountIbClient + MarketIbClient)' : 'Monitor stopped; cannot connect'}
+                  onClick={onMonitorConnect}
+                >
+                  Connect
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="daemon-group">
+          <div className="daemon-group-header">
+            <div className={`lamp lamp-sm ${j?.redis_quotes_connected ? 'green' : monitorEnabled ? 'red' : 'none'}`} title="Monitor Redis status" />
+            <span className="daemon-group-title">Database</span>
+          </div>
+          <div className="daemon-group-body">
+            {!monitorEnabled ? (
+              <p className="section-hint">Redis: —</p>
+            ) : j?.redis_quotes_connected ? (
+              <p className="section-hint countdown-line">
+                Redis: <span className="countdown-num">Connected</span>{' '}
+                <InfoTooltip text="GET /quotes available" />
+              </p>
+            ) : (
+              <p className="section-hint">Redis: Not connected or not configured</p>
+            )}
+          </div>
+        </div>
+      </div>
+      {monitorCtrlMsg.text ? (
+        <div className={`msg ${monitorCtrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
+          {monitorCtrlMsg.text}
+        </div>
+      ) : null}
+    </div>
+  )
+}

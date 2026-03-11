@@ -3,7 +3,7 @@ import type { Operation, StatusResponse } from '../types'
 import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
-import { fmtSince, fmtTs, fmtUsd } from '../utils/format'
+import { fmtTs, fmtUsd } from '../utils/format'
 import {
   DAEMON_REASON_LABELS,
   DAEMON_SELF_CHECK_LABELS,
@@ -14,6 +14,8 @@ import {
   STATUS_FIELDS,
 } from './status/statusLabels'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
+import { useControlAction } from './status/useControlAction'
+import { StatusDaemonPanel, StatusMonitorPanel, StatusCeleryPanel, StatusStrategyPanel } from './status/panels'
 
 export interface StatusPageProps {
   status: StatusResponse | null
@@ -92,6 +94,11 @@ export function StatusPage({
     subscribeLogs: subscribeCeleryLogs,
     clearLogs: clearCeleryLogs,
   })
+
+  const runCtrlAction = useControlAction(setCtrlMsg, ctrlMsgClearRef, { onSuccess: loadStatus })
+  const runHedgeAction = useControlAction(setHedgeCtrlMsg, hedgeCtrlMsgClearRef)
+  const runMonitorAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, { onSuccess: loadStatus })
+  const runCeleryAction = useControlAction(setCeleryCtrlMsg, celeryCtrlMsgClearRef, { onSuccess: loadStatus })
 
   const j = status
   const hb = j?.daemon_heartbeat
@@ -245,115 +252,6 @@ export function StatusPage({
     return { label, value: out }
   })
 
-  const onSuspend = async () => {
-    setMsg(setCtrlMsg, 'Setting suspend…', false)
-    const res = await postSuspend()
-    setMsg(
-      setCtrlMsg,
-      res.ok ? 'Suspend set; daemon will pause new hedges on next heartbeat.' : (res.error ?? ''),
-      !res.ok
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
-  }
-
-  const onResume = async () => {
-    setMsg(setCtrlMsg, 'Setting resume…', false)
-    const res = await postResume()
-    setMsg(
-      setCtrlMsg,
-      res.ok ? 'Resume set; daemon will resume hedging on next heartbeat.' : (res.error ?? ''),
-      !res.ok
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
-  }
-
-  const onReleaseIb = async () => {
-    setMsg(setCtrlMsg, 'Requesting release IB…', false)
-    const res = await postReleaseIb()
-    setMsg(
-      setCtrlMsg,
-      res.ok
-        ? 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB (daemon keeps running). Use «Retry IB connection» below to reconnect when ready.'
-        : (res.error ?? ''),
-      !res.ok
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
-  }
-
-  const onFlatten = async () => {
-    setMsg(setHedgeCtrlMsg, 'Requesting flatten…', false)
-    const res = await postFlatten()
-    setMsg(
-      setHedgeCtrlMsg,
-      res.ok ? 'Flatten sent; hedge process will consume and execute.' : (res.error ?? ''),
-      !res.ok
-    )
-    scheduleMsgClear(setHedgeCtrlMsg, hedgeCtrlMsgClearRef)
-  }
-
-  const onStop = async () => {
-    setMsg(setCtrlMsg, 'Requesting daemon stop…', false)
-    const res = await postStop()
-    setMsg(
-      setCtrlMsg,
-      res.ok ? 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' : (res.error ?? ''),
-      !res.ok
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setCtrlMsg, ctrlMsgClearRef)
-  }
-
-  const onMonitorStop = async () => {
-    setMsg(setMonitorCtrlMsg, 'Stopping monitor service…', false)
-    const res = await postMonitorStop()
-    setMsg(
-      setMonitorCtrlMsg,
-      res.ok ? 'Monitor service stopped (no new IB requests).' : (res.error ?? ''),
-      !res.ok
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setMonitorCtrlMsg, monitorCtrlMsgClearRef)
-  }
-
-  const onMonitorConnect = async () => {
-    setMsg(setMonitorCtrlMsg, 'Establishing monitor IB connection…', false)
-    const res = await postMonitorConnect()
-    setMsg(
-      setMonitorCtrlMsg,
-      res.ok ? 'Monitor IB connect requested (account + market); check status bar for result.' : (res.error ?? ''),
-      !res.ok,
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setMonitorCtrlMsg, monitorCtrlMsgClearRef)
-  }
-
-  const onMonitorReleaseIb = async () => {
-    setMsg(setMonitorCtrlMsg, 'Releasing monitor IB connections…', false)
-    const res = await postMonitorReleaseIb()
-    setMsg(
-      setMonitorCtrlMsg,
-      res.ok ? 'Monitor IB connections released (Account + Market client_id). Use Connect to reconnect.' : (res.error ?? ''),
-      !res.ok,
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setMonitorCtrlMsg, monitorCtrlMsgClearRef)
-  }
-
-  const onCeleryStop = async () => {
-    setMsg(setCeleryCtrlMsg, 'Requesting Celery worker stop…', false)
-    const res = await postCeleryStop()
-    setMsg(
-      setCeleryCtrlMsg,
-      res.ok ? 'Celery worker stop requested; process will exit within a few seconds.' : (res.error ?? ''),
-      !res.ok,
-    )
-    if (res.ok) loadStatus()
-    scheduleMsgClear(setCeleryCtrlMsg, celeryCtrlMsgClearRef)
-  }
-
   /** Shut down entire system: Celery first, then Daemon, then Management last (so others still receive messages). */
   const doShutdownAll = async () => {
     setShutdownConfirmOpen(false)
@@ -487,432 +385,80 @@ export function StatusPage({
 
         <div className={showAllSystemSections ? 'system-stack' : undefined}>
         {(showAllSystemSections || systemTab === 'daemon') && (
-      <div id="system-panel-daemon" role="tabpanel" aria-labelledby="tab-daemon" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
-      <div className="daemon-header">
-          <div className="daemon-header-main daemon-header-with-lamp">
-            <div className="lamp-wrap-span">
-              <div className={`lamp lamp-sm ${daemonLamp}`} title="Daemon status lamp" />
-            </div>
-            <div>
-              <h2 className="daemon-card-title">Daemon</h2>
-              <div>
-                <strong>Status: {j ? `${daemonLabel} (${daemonSelfCheckText})` : 'Fetch failed'}</strong>
-                {j && daemonBlockReasons && daemonBlockReasons !== 'None' ? ` Block reasons: ${daemonBlockReasons}` : ''}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn-stop"
-            title="Send stop to daemon; daemon exits and clears ib_client_id in DB; next start uses client_id=1"
-            onClick={onStop}
-          >
-            Stop
-          </button>
-        </div>
-
-        <div className="daemon-groups">
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${heartbeatGroupLamp}`} title="Heartbeat status" />
-              <span className="daemon-group-title">Heartbeat</span>
-            </div>
-            <div className="daemon-group-body">
-              {hb?.daemon_alive && hb.last_ts != null ? (
-                <p className="section-hint">Last heartbeat: <strong>{fmtTs(hb.last_ts)}</strong></p>
-              ) : hb?.graceful_shutdown_at != null ? (
-                <p className="section-hint">Gracefully stopped at <strong>{fmtTs(hb.graceful_shutdown_at)}</strong> (SIGTERM/Stop)</p>
-              ) : hb?.last_ts != null ? (
-                <p className="section-hint">Last heartbeat: <strong>{fmtTs(hb.last_ts)}</strong> (timed out; may have been kill -9 or crash)</p>
-              ) : (
-                <p className="section-hint">{daemonHint || '—'}</p>
-              )}
-              {hb?.daemon_alive && secondsUntilNextHeartbeat != null && (
-                <p className="section-hint countdown-line">
-                  Next heartbeat: <span className="countdown-num">{secondsUntilNextHeartbeat}</span> s
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${ibGroupLamp}`} title="IB connection status" />
-              <span className="daemon-group-title">IB connection</span>
-            </div>
-            <div className="daemon-group-body">
-              {ibConnected ? (
-                <p className="section-hint countdown-line">
-                  Trading Client: <span className="countdown-num">Connected @ {hb?.ib_client_id ?? '?'}</span>
-                </p>
-              ) : (
-                <p className="section-hint">{daemonIbLine || '—'}</p>
-              )}
-              {j?.ib_config?.ib_client_id_listener != null && (
-                <p className="section-hint countdown-line">
-                  Listener Client: {hb?.listener_connected ? (
-                    <span className="countdown-num">Connected @ {hb?.listener_client_id ?? j.ib_config.ib_client_id_listener}</span>
-                  ) : (
-                    <span>Not connected</span>
-                  )}
-                </p>
-              )}
-              {ibConnected && (
-                <div className="controls">
-                  <button
-                    type="button"
-                    className="btn-retry-ib"
-                    title="Release IB connection on next daemon heartbeat (daemon will go to WAITING_IB and can retry later)"
-                    onClick={onReleaseIb}
-                  >
-                    Reset
-                  </button>
-                </div>
-              )}
-              {hb?.daemon_alive && !ibConnected && (
-                <p className="section-hint section-hint--retry">Will retry connection on next heartbeat.</p>
-              )}
-            </div>
-          </div>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.redis_quotes_connected ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Daemon Redis status" />
-              <span className="daemon-group-title">Database</span>
-            </div>
-            <div className="daemon-group-body">
-              {!hb?.daemon_alive ? (
-                <p className="section-hint">Redis: —</p>
-              ) : hb.redis_quotes_connected ? (
-                <p className="section-hint countdown-line">
-                  Redis: <span className="countdown-num">Connected</span> <span>(writes quotes and publishes)</span>
-                </p>
-              ) : (
-                <p className="section-hint">Redis: Not connected or not configured</p>
-              )}
-            </div>
-          </div>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <span className="daemon-group-title">Event Subscribe</span>
-              <InfoTooltip text="Daemon IB event subscription status: ticker (Watchlist STK), positions, fills, commission. Green = subscribed; red = not subscribed when daemon is running." />
-            </div>
-            <div className="daemon-group-body">
-              <ul className="event-subscribe-list">
-                <li className="event-subscribe-row">
-                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
-                  <span>Real-time ticker</span>
-                </li>
-                <li className="event-subscribe-row">
-                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
-                  <span>Position updates</span>
-                </li>
-                <li className="event-subscribe-row">
-                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
-                  <span>Fill / execution report</span>
-                </li>
-                <li className="event-subscribe-row">
-                  <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
-                  <span>Commission report</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${strategyGroupLamp}`} title="Trading strategy status" />
-              <span className="daemon-group-title">Trading strategy</span>
-            </div>
-            <div className="daemon-group-body">
-              <p className="section-hint">
-                Current: <span>{runStatusLabel}</span>
-                (set by monitor; daemon syncs via PostgreSQL)
-              </p>
-              <div className="controls">
-                <button
-                  type="button"
-                  className="btn-suspend"
-                  disabled={suspended}
-                  title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
-                  onClick={onSuspend}
-                >
-                  Suspend
-                </button>
-                <button
-                  type="button"
-                  className="btn-resume"
-                  disabled={!suspended}
-                  title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
-                  onClick={onResume}
-                >
-                  Resume
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {ctrlMsg.text ? (
-          <div className={`msg ${ctrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
-            {ctrlMsg.text}
-          </div>
-        ) : null}
-      </div>
+          <StatusDaemonPanel
+            status={j}
+            hb={hb}
+            daemonLabel={daemonLabel}
+            daemonHint={daemonHint}
+            daemonSelfCheckText={daemonSelfCheckText}
+            daemonBlockReasons={daemonBlockReasons}
+            daemonLamp={daemonLamp}
+            heartbeatGroupLamp={heartbeatGroupLamp}
+            ibGroupLamp={ibGroupLamp}
+            strategyGroupLamp={strategyGroupLamp}
+            secondsUntilNextHeartbeat={secondsUntilNextHeartbeat}
+            runStatusLabel={runStatusLabel}
+            suspended={suspended}
+            ibConnected={ibConnected}
+            daemonIbLine={daemonIbLine}
+            ibConfig={j?.ib_config}
+            onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
+            onSuspend={() => runCtrlAction(postSuspend, { loading: 'Setting suspend…', success: 'Suspend set; daemon will pause new hedges on next heartbeat.' })}
+            onResume={() => runCtrlAction(postResume, { loading: 'Setting resume…', success: 'Resume set; daemon will resume hedging on next heartbeat.' })}
+            onReleaseIb={() => runCtrlAction(postReleaseIb, { loading: 'Requesting release IB…', success: 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB (daemon keeps running). Use «Retry IB connection» below to reconnect when ready.' })}
+            ctrlMsg={ctrlMsg}
+            className={showAllSystemSections ? 'system-stack-section' : undefined}
+          />
         )}
 
         {(showAllSystemSections || systemTab === 'monitor') && (
-      <div id="system-panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
-        <div className="daemon-header">
-          <div className="daemon-header-main daemon-header-with-lamp">
-            <div className="lamp-wrap-span">
-              <div className={`lamp lamp-sm ${monitorLamp}`} title="Monitor status lamp" />
-            </div>
-            <div>
-              <h2 className="daemon-card-title">Management</h2>
-              <div>
-                <strong>Status: {j ? `${monitorEnabled ? 'Running' : 'Stopped'} (${monitorSelfCheckText})` : 'Fetch failed'}</strong>
-                {j && monitorBlockReasons && monitorBlockReasons !== 'None' ? ` Block reasons: ${monitorBlockReasons}` : ''}
-              </div>
-            </div>
-          </div>
-          <div className="monitor-header-actions">
-            <button
-              type="button"
-              className="btn-stop"
-              disabled={!monitorEnabled}
-              title={monitorEnabled ? 'Stop monitor IB interaction and disconnect' : 'Already stopped'}
-              onClick={onMonitorStop}
-            >
-              Stop
-            </button>
-          </div>
-        </div>
-
-        <div className="daemon-groups">
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${apiHealthLamp}`} title="API service (green if /health reachable, else red)" />
-              <span className="daemon-group-title">API service</span>
-            </div>
-            <div className="daemon-group-body">
-              <p className="section-hint">
-                <strong>
-                  Status:{' '}
-                  {j ? (
-                    <>
-                      {monitorEnabled ? <span className="countdown-num">Running</span> : 'Stopped'}{' '}
-                      <span>({monitorSelfCheckText})</span>
-                    </>
-                  ) : (
-                    'Fetch failed'
-                  )}
-                </strong>
-                {j && monitorBlockReasons && monitorBlockReasons !== 'None' ? ` Block reasons: ${monitorBlockReasons}` : ''}
-              </p>
-              {healthCountdownSec != null ? (
-                <p className="section-hint countdown-line">
-                  Next health check: <span className="countdown-num">{healthCountdownSec}</span> s
-                </p>
-              ) : (
-                <p className="section-hint">Health check: —</p>
-              )}
-            </div>
-          </div>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${monitorIbGroupLamp}`} title="Monitor IB connection status" />
-              <span className="daemon-group-title">IB connection</span>
-            </div>
-            <div className="daemon-group-body">
-              <p className="section-hint countdown-line">
-                Account Client:{' '}
-                {monitorAccount?.connected ? (
-                  <span className="countdown-num">Connected @ {monitorAccount?.client_id ?? '—'}</span>
-                ) : (
-                  `Not connected${monitorAccount?.last_error ? ` (${monitorAccount.last_error})` : ''}`
-                )}
-              </p>
-              <p className="section-hint countdown-line">
-                Market Client:{' '}
-                {monitorMarket?.connected ? (
-                  <span className="countdown-num">Connected @ {monitorMarket?.client_id ?? '—'}</span>
-                ) : (
-                  `Not connected${monitorMarket?.last_error ? ` (${monitorMarket.last_error})` : ''}`
-                )}
-              </p>
-              <div className="controls" style={{ marginTop: '0.25rem' }}>
-                {(monitorAccount?.connected || monitorMarket?.connected) ? (
-                  <button
-                    type="button"
-                    className="btn-retry-ib"
-                    title="Release Monitor IB connections (Account + Market client_id). Monitor keeps running; use Connect to reconnect."
-                    onClick={onMonitorReleaseIb}
-                  >
-                    Release
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-resume"
-                    disabled={!monitorEnabled}
-                    title={monitorEnabled ? 'Establish monitor IB connection (AccountIbClient + MarketIbClient)' : 'Monitor stopped; cannot connect'}
-                    onClick={onMonitorConnect}
-                  >
-                    Connect
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${j?.redis_quotes_connected ? 'green' : monitorEnabled ? 'red' : 'none'}`} title="Monitor Redis status" />
-              <span className="daemon-group-title">Database</span>
-            </div>
-            <div className="daemon-group-body">
-              {!monitorEnabled ? (
-                <p className="section-hint">Redis: —</p>
-              ) : j?.redis_quotes_connected ? (
-                <p className="section-hint countdown-line">
-                  Redis: <span className="countdown-num">Connected</span>{' '}
-                  <InfoTooltip text="GET /quotes available" />
-                </p>
-              ) : (
-                <p className="section-hint">Redis: Not connected or not configured</p>
-              )}
-            </div>
-          </div>
-        </div>
-        {monitorCtrlMsg.text ? (
-          <div className={`msg ${monitorCtrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
-            {monitorCtrlMsg.text}
-          </div>
-        ) : null}
-      </div>
+          <StatusMonitorPanel
+            status={j}
+            monitorLamp={monitorLamp}
+            monitorEnabled={monitorEnabled}
+            monitorSelfCheckText={monitorSelfCheckText}
+            monitorBlockReasons={monitorBlockReasons}
+            apiHealthLamp={apiHealthLamp}
+            healthCountdownSec={healthCountdownSec}
+            monitorIbGroupLamp={monitorIbGroupLamp}
+            monitorAccount={monitorAccount}
+            monitorMarket={monitorMarket}
+            onMonitorStop={() => runMonitorAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped (no new IB requests).' })}
+            onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested (account + market); check status bar for result.' })}
+            onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released (Account + Market client_id). Use Connect to reconnect.' })}
+            monitorCtrlMsg={monitorCtrlMsg}
+            className={showAllSystemSections ? 'system-stack-section' : undefined}
+          />
         )}
 
         {(showAllSystemSections || systemTab === 'celery') && (
-      <div id="system-panel-celery" role="tabpanel" aria-labelledby="tab-celery" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
-        <div className="daemon-header">
-          <div className="daemon-header-main daemon-header-with-lamp">
-            <div className="lamp-wrap-span">
-              <div className={`lamp lamp-sm ${celeryLamp}`} title="Celery status lamp" />
-            </div>
-            <div>
-              <h2 className="daemon-card-title">Celery</h2>
-              <div>
-                <strong>Status: {j ? (celeryBrokerConnected ? (celeryWorkersAlive ? 'Broker connected, worker(s) running (ping ok)' : 'Broker connected, no workers (start: python scripts/run_celery.py)') : 'Broker not connected') : 'Fetch failed'}</strong>
-              </div>
-            </div>
-          </div>
-          <div className="monitor-header-actions">
-            <button
-              type="button"
-              className="btn-stop"
-              title="Stop Celery worker process (same as Monitor/Daemon Stop); restart with: python scripts/run_celery.py"
-              onClick={onCeleryStop}
-            >
-              Stop
-            </button>
-          </div>
-        </div>
-        <div className="daemon-groups">
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${celeryBrokerConnected ? 'green' : 'red'}`} title="Celery broker (Redis) status" />
-              <span className="daemon-group-title">Broker (Redis)</span>
-              <InfoTooltip text="Celery broker and result backend. Same Redis as config.redis (db 1 for Celery). Required for queued bars backfill." />
-            </div>
-            <div className="daemon-group-body">
-              {celeryBrokerConnected ? (
-                <p className="section-hint countdown-line">
-                  <span className="countdown-num">Connected</span> <span>(bars queue available)</span>
-                </p>
-              ) : (
-                <p className="section-hint">Not connected or Redis not configured</p>
-              )}
-            </div>
-          </div>
-          <div className="daemon-group">
-            <div className="daemon-group-header">
-              <div className={`lamp lamp-sm ${(j?.celery_workers?.length ?? 0) > 0 ? 'green' : celeryBrokerConnected ? 'yellow' : 'none'}`} title="Celery workers responding to ping" />
-              <span className="daemon-group-title">Celery Workers</span>
-              <InfoTooltip text="Workers that responded to inspect ping. Worker connects to IB using Settings → Celery worker_market; connection is kept so backfill can use it. Use Stop above to terminate the worker." />
-            </div>
-            <div className="daemon-group-body">
-              <p className="section-hint">
-                {(j?.celery_workers?.length ?? 0) > 0
-                  ? (j?.celery_workers ?? []).join(', ')
-                  : 'None (start worker: python scripts/run_celery.py)'}
-              </p>
-              <p className="section-hint countdown-line">
-                Last job activity:{' '}
-                {celeryLastTs != null && Number.isFinite(celeryLastTs)
-                  ? `${fmtTs(celeryLastTs)} (${fmtSince(celeryLastTs)} ago)`
-                  : 'No job activity yet'}
-              </p>
-              <p className="section-hint countdown-line">
-                IB Client ID:{' '}
-                {celeryWorkerIbConnected ? (
-                  <span className="countdown-num">Connected @ {celeryWorkerIbClientId ?? '—'}</span>
-                ) : (
-                  <>
-                    Not connected{' '}
-                    <InfoTooltip text="IB connection is inside the Worker process. Start worker first: python scripts/run_celery.py (uses Settings → Celery worker_market)." />
-                  </>
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
-        {celeryCtrlMsg.text ? (
-          <div className={`msg ${celeryCtrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
-            {celeryCtrlMsg.text}
-          </div>
-        ) : null}
-      </div>
+          <StatusCeleryPanel
+            status={j}
+            celeryLamp={celeryLamp}
+            celeryBrokerConnected={celeryBrokerConnected}
+            celeryWorkersAlive={celeryWorkersAlive}
+            celeryLastTs={celeryLastTs}
+            celeryWorkerIbConnected={celeryWorkerIbConnected}
+            celeryWorkerIbClientId={celeryWorkerIbClientId}
+            onCeleryStop={() => runCeleryAction(postCeleryStop, { loading: 'Requesting Celery worker stop…', success: 'Celery worker stop requested; process will exit within a few seconds.' })}
+            celeryCtrlMsg={celeryCtrlMsg}
+            className={showAllSystemSections ? 'system-stack-section' : undefined}
+          />
         )}
 
         {(showAllSystemSections || systemTab === 'strategy') && (
-      <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={`system-tab-panel ${showAllSystemSections ? 'system-stack-section' : ''}`}>
-        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-          <div className="lamp-wrap-span">
-            <div className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status lamp" />
-          </div>
-          <div>
-            <h2 className="daemon-card-title page-title-with-tooltip">
-              Trading Strategy
-              <InfoTooltip text="Depends on daemon; business logic; may support multiple strategies later." />
-            </h2>
-            <div>
-              <strong>Status: {j ? `${hedgeLabel} (${hedgeSelfCheckText})` : 'Fetch failed'}</strong>
-              {j && hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` Block reasons: ${hedgeBlockReasons}` : ''}
-            </div>
-          </div>
-        </div>
-        <p className="section-hint">{hedgeHint}</p>
-        <div className="statusSummary" style={{ marginTop: '0.5rem' }}>
-          {statusSummaryItems.map(({ label, value }) => (
-            <div key={label}>
-              <span>{label}</span>{' '}
-              <span className="status-summary-value">{value}</span>
-            </div>
-          ))}
-        </div>
-        <div className="controls" style={{ marginTop: '0.5rem' }}>
-          <button
-            type="button"
-            className="btn-flatten"
-            title="Hedge process consumes and executes; flattens strategy hedge exposure"
-            onClick={onFlatten}
-          >
-            Flatten exposure
-          </button>
-        </div>
-        {hedgeCtrlMsg.text ? (
-          <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'}`}>
-            {hedgeCtrlMsg.text}
-          </div>
-        ) : null}
-      </div>
+          <StatusStrategyPanel
+            status={j}
+            hedgeLamp={hedgeLamp}
+            hedgeLabel={hedgeLabel}
+            hedgeSelfCheckText={hedgeSelfCheckText}
+            hedgeBlockReasons={hedgeBlockReasons}
+            hedgeHint={hedgeHint}
+            statusSummaryItems={statusSummaryItems}
+            onFlatten={() => runHedgeAction(postFlatten, { loading: 'Requesting flatten…', success: 'Flatten sent; hedge process will consume and execute.' })}
+            hedgeCtrlMsg={hedgeCtrlMsg}
+            className={showAllSystemSections ? 'system-stack-section' : undefined}
+          />
         )}
         </div>
       </div>

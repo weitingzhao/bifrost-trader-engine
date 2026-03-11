@@ -1,4 +1,4 @@
-"""Connection and StatusReader facade. Delegates to domain modules (status, watchlist, market, settings, accounts)."""
+"""Connection and StatusReader facade. Delegates to domain modules (status, watchlist, market, settings, accounts, executions, position_categories)."""
 
 import logging
 from datetime import date
@@ -9,7 +9,9 @@ import psycopg2
 from src.sink.postgres_sink import _get_conn_params
 
 from servers.reader import accounts as accounts_module
+from servers.reader import executions as executions_module
 from servers.reader import market as market_module
+from servers.reader import position_categories as position_categories_module
 from servers.reader import settings as settings_module
 from servers.reader import status as status_module
 from servers.reader import watchlist as watchlist_module
@@ -245,86 +247,6 @@ class StatusReader:
         return status_module.get_risk_summary(self._conn)
 
     # --- Accounts domain (delegate to accounts module) ---
-    def get_executions(
-        self,
-        since_ts: Optional[float] = None,
-        until_ts: Optional[float] = None,
-        account_id: Optional[str] = None,
-        limit: Optional[int] = 200,
-    ) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return accounts_module.get_executions(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
-
-    def get_executions_freshness(self) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return accounts_module.get_executions_freshness(self._conn)
-
-    def get_executions_by_contract_keys(
-        self,
-        contract_keys: List[Tuple[str, str, str, str]],
-        account_id: Optional[str] = None,
-        limit: int = 5000,
-    ) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return accounts_module.get_executions_by_contract_keys(self._conn, contract_keys=contract_keys, account_id=account_id, limit=limit)
-
-    def get_executions_with_opt_pairs(
-        self,
-        since_ts: Optional[float] = None,
-        until_ts: Optional[float] = None,
-        account_id: Optional[str] = None,
-        limit: int = 200,
-    ) -> Dict[str, Any]:
-        if not self._connect():
-            return {"executions": [], "opt_pairs": []}
-        return accounts_module.get_executions_with_opt_pairs(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
-
-    def get_executions_with_opt_pairs_single_query(
-        self,
-        since_ts: Optional[float] = None,
-        until_ts: Optional[float] = None,
-        account_id: Optional[str] = None,
-        limit: int = 5000,
-    ) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return accounts_module.get_executions_with_opt_pairs_single_query(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
-
-    def get_net_cash_flow(
-        self,
-        since_ts: Optional[float] = None,
-        until_ts: Optional[float] = None,
-        account_id: Optional[str] = None,
-    ) -> float:
-        if not self._connect():
-            return 0.0
-        return accounts_module.get_net_cash_flow(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id)
-
-    def get_transactions(
-        self,
-        since_ts: Optional[float] = None,
-        until_ts: Optional[float] = None,
-        account_id: Optional[str] = None,
-        limit: int = 500,
-    ) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return accounts_module.get_transactions(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
-
-    def get_performance_stats(
-        self,
-        since_ts: Optional[float] = None,
-        until_ts: Optional[float] = None,
-        account_id: Optional[str] = None,
-        granularity: str = "day",
-    ) -> Dict[str, Any]:
-        if not self._connect():
-            return {}
-        return accounts_module.get_performance_stats(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, granularity=granularity)
-
     def get_accounts_from_tables(self) -> Optional[List[Dict[str, Any]]]:
         if not self._connect():
             return None
@@ -335,10 +257,92 @@ class StatusReader:
             return None
         return accounts_module.get_accounts_fetched_at(self._conn)
 
+    # --- Executions / transactions / performance (delegate to executions module) ---
+    def get_executions(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        limit: Optional[int] = 200,
+    ) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        return executions_module.get_executions(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+
+    def get_executions_freshness(self) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        return executions_module.get_executions_freshness(self._conn)
+
+    def get_executions_by_contract_keys(
+        self,
+        contract_keys: List[Tuple[str, str, str, str]],
+        account_id: Optional[str] = None,
+        limit: int = 5000,
+    ) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        return executions_module.get_executions_by_contract_keys(self._conn, contract_keys=contract_keys, account_id=account_id, limit=limit)
+
+    def get_executions_with_opt_pairs(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        if not self._connect():
+            return {"executions": [], "opt_pairs": []}
+        return executions_module.get_executions_with_opt_pairs(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+
+    def get_executions_with_opt_pairs_single_query(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        limit: int = 5000,
+    ) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        return executions_module.get_executions_with_opt_pairs_single_query(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+
+    def get_net_cash_flow(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+    ) -> float:
+        if not self._connect():
+            return 0.0
+        return executions_module.get_net_cash_flow(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id)
+
+    def get_transactions(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        return executions_module.get_transactions(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+
+    def get_performance_stats(
+        self,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+        account_id: Optional[str] = None,
+        granularity: str = "day",
+    ) -> Dict[str, Any]:
+        if not self._connect():
+            return {}
+        return executions_module.get_performance_stats(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, granularity=granularity)
+
+    # --- Position categories (delegate to position_categories module) ---
     def get_position_categories(self) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return accounts_module.get_position_categories(self._conn)
+        return position_categories_module.get_position_categories(self._conn)
 
     def create_position_category(
         self,
@@ -348,7 +352,7 @@ class StatusReader:
     ) -> Optional[int]:
         if not self._connect():
             return None
-        return accounts_module.create_position_category(self._conn, name=name, description=description, sort_order=sort_order)
+        return position_categories_module.create_position_category(self._conn, name=name, description=description, sort_order=sort_order)
 
     def update_position_category(
         self,
@@ -359,12 +363,12 @@ class StatusReader:
     ) -> bool:
         if not self._connect():
             return False
-        return accounts_module.update_position_category(self._conn, category_id=category_id, name=name, description=description, sort_order=sort_order)
+        return position_categories_module.update_position_category(self._conn, category_id=category_id, name=name, description=description, sort_order=sort_order)
 
     def delete_position_category(self, category_id: int) -> bool:
         if not self._connect():
             return False
-        return accounts_module.delete_position_category(self._conn, category_id)
+        return position_categories_module.delete_position_category(self._conn, category_id)
 
     def set_position_category_tag(
         self,
@@ -374,4 +378,4 @@ class StatusReader:
     ) -> bool:
         if not self._connect():
             return False
-        return accounts_module.set_position_category_tag(self._conn, account_id=account_id, contract_key=contract_key, category_id=category_id)
+        return position_categories_module.set_position_category_tag(self._conn, account_id=account_id, contract_key=contract_key, category_id=category_id)

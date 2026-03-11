@@ -1,4 +1,5 @@
-"""Reader package: DB read/write facade. StatusReader and module-level functions re-exported for drop-in use."""
+"""Reader package: DB read/write facade. StatusReader and module-level functions re-exported for drop-in use.
+Domain split: accounts = snapshot read/write + execution/transaction write; executions = execution/transaction read + performance; position_categories = position category CRUD."""
 
 from servers.reader.common import StatusReader
 from servers.reader.status import (

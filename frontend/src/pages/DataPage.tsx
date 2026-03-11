@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, Fragment } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar, BarCoverageItem, BarsCoverageResponse, StatusResponse } from '../types'
 import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, postWatchlistEodRefresh, fetchWatchlistEodRefreshPreview, postIndicesRefresh, deleteBarsForSymbol, deleteBarsJob, deleteAllBarsJobs } from '../api'
 import type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from '../api'
-import { InfoTooltip } from '../components/InfoTooltip'
 import { fetchMarketTradingDay } from '../api'
-import { fmtDurationSeconds, fmtTs, fmtUsd } from '../utils/format'
-import { BAR_PERIODS } from './data/constants'
-import { coverageCell, coverageCompact, coverageRange, coverageStatusDisplay, inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
-import { BarsCandlestickChart } from './data/BarsCandlestickChart'
+import { fmtDurationSeconds, fmtTs } from '../utils/format'
+import { ALL_BAR_PERIOD_VALUES, BAR_PERIODS } from './data/constants'
+import { inspectBarsLimitForPeriod } from './data/dataCoverageUtils'
 import { useBarCandidateSymbols } from './data/useBarCandidateSymbols'
+import { DataCoveragePanel, DataBarsPreviewPanel, DataJobsPanel } from './data/panels'
 
 interface DataPageProps {
   status: StatusResponse | null
@@ -36,7 +35,7 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
   /** True when Reset was opened from an Index row (daily only); false for Watchlist (multi-period). */
   const [resetConfirmIsIndex, setResetConfirmIsIndex] = useState(false)
   /** Periods to clear when Reset (1 D, 1 min, 5 mins, 1 hour); multi-select checkboxes; ignored when resetConfirmIsIndex */
-  const [resetPeriods, setResetPeriods] = useState<string[]>(['1 D', '1 min', '5 mins', '1 hour'])
+  const [resetPeriods, setResetPeriods] = useState<string[]>(() => [...ALL_BAR_PERIOD_VALUES])
   /** Backfill options: fake IB call (skip IB fetch), default off; API interval between requests (sec), default 10 */
   const [backfillIsTest, setBackfillIsTest] = useState(false)
   const [backfillApiIntervalSec, setBackfillApiIntervalSec] = useState(10)
@@ -54,7 +53,7 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
   /** True when Pull modal was opened from an Index row (TradingView daily only); false for Watchlist (IB, all periods). */
   const [pullModalIsIndex, setPullModalIsIndex] = useState(false)
   /** Selected periods to pull in the modal (multi-select; init from periods needing backfill when opening) */
-  const [pullSelectedPeriods, setPullSelectedPeriods] = useState<string[]>(['1 D', '1 min', '5 mins', '1 hour'])
+  const [pullSelectedPeriods, setPullSelectedPeriods] = useState<string[]>(() => [...ALL_BAR_PERIOD_VALUES])
   const [pullRangeMode, setPullRangeMode] = useState<'max' | 'min' | 'custom' | null>('max')
   const [watchlistRefreshPreview, setWatchlistRefreshPreview] = useState<WatchlistEodRefreshPreviewResponse | null>(null)
   /** Custom span per period: Daily/5min/1h use days; 1 min uses hours */
@@ -311,6 +310,45 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
     }
   }, [])
 
+  const handleOpenReset = useCallback((symbol: string, isIndex: boolean) => {
+    setResetConfirmSymbol(symbol)
+    setResetConfirmIsIndex(isIndex)
+    setResetPeriods(isIndex ? ['1 D'] : [...ALL_BAR_PERIOD_VALUES])
+  }, [])
+
+  const handleOpenPull = useCallback((symbol: string, isIndex: boolean) => {
+    setPullModalSymbol(symbol)
+    setPullModalIsIndex(isIndex)
+    setPullSelectedPeriods(isIndex ? ['1 D'] : [...ALL_BAR_PERIOD_VALUES])
+    setPullRangeMode('max')
+    setPullCustomDailyDays(30)
+    setPullCustom1minHours(24)
+    setPullCustom5minDays(7)
+    setPullCustom1hourDays(7)
+  }, [])
+
+  const handleBarsJobsSort = useCallback((key: 'job_id' | 'status' | 'created_ts' | 'updated_ts') => {
+    if (barsJobsSortKey === key) {
+      setBarsJobsSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setBarsJobsSortKey(key)
+      setBarsJobsSortDir(key === 'status' ? 'asc' : 'desc')
+    }
+  }, [barsJobsSortKey])
+
+  const handleDeleteBarsJob = useCallback(
+    async (jobId: string) => {
+      setDeletingJobId(jobId)
+      try {
+        const res = await deleteBarsJob(jobId)
+        if (res.ok) await loadBarsJobs()
+      } finally {
+        setDeletingJobId(null)
+      }
+    },
+    [loadBarsJobs],
+  )
+
   return (
     <div className="card process-section market-data-page">
       {onGoToScreener && (
@@ -327,283 +365,36 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
           {breadcrumbLabel}
         </h2>
       )}
-      <section className="replay-section" aria-labelledby="data-coverage-head">
-        <h3 id="data-coverage-head" className="page-title-with-tooltip">
-          Coverage
-          <InfoTooltip text={coveragePolicy
-            ? `Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Target range (current config): Daily ${coveragePolicy.daily_years}y, 1 min ${coveragePolicy.min_weeks}w, 5min ${coveragePolicy['5min_months']}mo, 1h ${coveragePolicy['1hour_months']}mo. Need backfill if status is not OK. Empty when no Watchlist stocks.`
-            : 'Coverage of Watchlist stocks in stock_day / stock_min by period (count and date range). Target range from config: Daily 10y, 1 min 1w, 5min 1mo, 1h 3mo. Need backfill if status is not OK. Empty when no Watchlist stocks.'} />
-        </h3>
-        <div className="replay-toolbar data-backfill-options" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-          <label className="data-toggle-switch-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-            <span className="toggle-switch" role="switch" aria-checked={backfillIsTest} tabIndex={0} onClick={() => setBackfillIsTest(!backfillIsTest)} onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setBackfillIsTest(!backfillIsTest) } }}>
-              <span className="toggle-switch-track" />
-              <span className={backfillIsTest ? 'toggle-switch-thumb on' : 'toggle-switch-thumb'} />
-            </span>
-            <span>fake IB call</span>
-            <InfoTooltip text="When on, pull will not call IB (test mode: only log planned requests). Default off." />
-          </label>
-          <label className="data-toggle-switch-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-            <span className="toggle-switch" role="switch" aria-checked={needWatchlistDryRun} tabIndex={0} onClick={() => setNeedWatchlistDryRun(!needWatchlistDryRun)} onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setNeedWatchlistDryRun(!needWatchlistDryRun) } }}>
-              <span className="toggle-switch-track" />
-              <span className={needWatchlistDryRun ? 'toggle-switch-thumb on' : 'toggle-switch-thumb'} />
-            </span>
-            <span>Dry run</span>
-            <InfoTooltip text="Default off. When off, clicking EOD Pull queues worker jobs immediately. When on, click first opens the dry-run preview; only the modal confirmation will queue jobs." />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span>API interval (sec):</span>
-            <input
-              type="number"
-              min={0}
-              max={300}
-              value={backfillApiIntervalSec}
-              onChange={e => setBackfillApiIntervalSec(Math.max(0, Math.min(300, parseInt(e.target.value, 10) || 0)))}
-              style={{ width: '4rem' }}
-              aria-label="Seconds between each IB API request"
-            />
-            <InfoTooltip text="Wait this many seconds between each IB history request (chunk). Default 10." />
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={coverageLoading}
-              onClick={() => loadCoverage()}
-              aria-label="Refresh coverage"
-            >
-              {coverageLoading ? '…' : 'Refresh'}
-            </button>
-          </label>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            disabled={watchlistPreviewLoading || watchlistRefreshRunning}
-            onClick={() => { void handleWatchlistEodRefreshClick() }}
-            aria-label={needWatchlistDryRun ? 'Dry run end-of-day pull for all Watchlist symbols' : 'Queue end-of-day pull for all Watchlist symbols'}
-            title={needWatchlistDryRun
-              ? 'Dry run first: preview overwritten records, gap range, and IB request parameters before queueing worker jobs'
-              : 'Queue worker jobs immediately for all Watchlist stocks without opening dry-run preview'}
-          >
-            {watchlistPreviewLoading ? 'Dry run…' : watchlistRefreshRunning ? 'Queuing…' : 'EOD Pull'}
-          </button>
-          <InfoTooltip text={needWatchlistDryRun
-            ? 'Dry run is enabled. Clicking the button opens the preview first; only modal confirmation will queue jobs. EOD Pull runs once after market close: fills end gap and overrides latest bars with final close (override_days=1). Dry run is off by default.'
-            : 'Dry run is disabled. Clicking the button queues jobs immediately. EOD Pull runs once after market close: fills end gap and overrides latest bars with final close (override_days=1). A message like “Queued 48 EOD refresh job(s) for 12 watchlist symbol(s). override_days=1” means 48 worker jobs were enqueued (e.g. 4 periods × 12 symbols); only the latest bar per symbol/period is overwritten with end-of-day data.'} />
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={indicesRefreshLoading || (status?.reference_indices?.length ?? 0) === 0}
-            onClick={() => { void handleRefreshIndices() }}
-            aria-label="Refresh reference indices"
-            title="Pull daily bars for reference indices from TradingView into stock_day."
-          >
-            {indicesRefreshLoading ? 'Refreshing…' : 'Refresh indices'}
-          </button>
-          <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC) from TradingView. Daily only." />
-        </div>
-        {indicesRefreshMessage && (
-          <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
-            {indicesRefreshMessage}
-          </div>
-        )}
-        {watchlistRefreshMessage && (
-          <div className="replay-placeholder" role="status" style={{ marginBottom: '0.5rem' }}>
-            {watchlistRefreshMessage}
-          </div>
-        )}
-        {coverageError && (
-          <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
-            {coverageError}
-          </div>
-        )}
-        {deleteSymbolError && (
-          <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
-            {deleteSymbolError}
-          </div>
-        )}
-        {coverage && coverage.length === 0 && !coverageLoading && (
-          <div className="replay-placeholder">No stocks in Watchlist and no reference indices configured. Add stocks on the Watchlist tab or configure reference_indices, then refresh.</div>
-        )}
-        {coverage && coverage.length > 0 && (
-          <>
-            <div className="data-coverage-table-wrap">
-          <table className="table-operations data-coverage-table">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th colSpan={2}>Daily</th>
-                <th colSpan={2}>1 min</th>
-                <th colSpan={2}>5 mins</th>
-                <th colSpan={2}>1 hour</th>
-                <th className="data-coverage-actions">Actions</th>
-              </tr>
-              <tr>
-                <th></th>
-                <th className="data-coverage-bars">Bars</th>
-                <th className="data-coverage-range">Range</th>
-                <th className="data-coverage-bars">Bars</th>
-                <th className="data-coverage-range">Range</th>
-                <th className="data-coverage-bars">Bars</th>
-                <th className="data-coverage-range">Range</th>
-                <th className="data-coverage-bars">Bars</th>
-                <th className="data-coverage-range">Range</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {coverageGroups.map((group) => (
-                <Fragment key={group.label || 'all'}>
-                  {group.label ? (
-                    <tr className="data-coverage-group-header-row">
-                      <th colSpan={10} className="data-coverage-group-header">
-                        {group.label}
-                      </th>
-                    </tr>
-                  ) : null}
-                  {group.rows.map((row) => {
-                const isIndex = status?.reference_indices?.some((r) => r.symbol === row.symbol)
-                const dayStatus = coverageStatusDisplay(row.stock_day.status)
-                const min1Status = coverageStatusDisplay(row.stock_min['1 min']?.status)
-                const min5Status = coverageStatusDisplay(row.stock_min['5 mins']?.status)
-                const min1hStatus = coverageStatusDisplay(row.stock_min['1 hour']?.status)
-                const isDeleting = deletingSymbol === row.symbol
-                const periodsNeedingBackfill: string[] = []
-                if (dayStatus.needBackfill) periodsNeedingBackfill.push('1 D')
-                if (min1Status.needBackfill) periodsNeedingBackfill.push('1 min')
-                if (min5Status.needBackfill) periodsNeedingBackfill.push('5 mins')
-                if (min1hStatus.needBackfill) periodsNeedingBackfill.push('1 hour')
-                const isBackfilling = backfillSymbol === row.symbol
-                const canBackfill = periodsNeedingBackfill.length > 0 && !isBackfilling && !isDeleting && !isIndex
-                const renderBarsCell = (p: { count: number; min_ts: number | null; max_ts: number | null }, needPull: boolean, period: string, titleStr: string) => (
-                  <button
-                    type="button"
-                    className="data-coverage-bars-btn"
-                    onClick={() => openBarsForSymbol(row.symbol, period)}
-                    title={titleStr}
-                    aria-label={`Show bars ${row.symbol} ${period}`}
-                  >
-                    {coverageCompact(p, needPull, isTradingDay)}
-                  </button>
-                )
-                return (
-                  <tr key={row.symbol}>
-                    <td>
-                      {isIndex ? (() => {
-                        const ref = status?.reference_indices?.find((r) => r.symbol === row.symbol)
-                        const label = ref?.label || row.symbol
-                        return (
-                          <>
-                            <strong>{label}</strong>
-                            <span className="data-coverage-status" style={{ marginLeft: '0.35rem', color: 'var(--color-text-muted)', fontWeight: 'normal', fontSize: '0.9em' }} title="Reference index symbol">{row.symbol}</span>
-                          </>
-                        )
-                      })() : (
-                        <strong>{row.symbol}</strong>
-                      )}
-                    </td>
-                    <td className="data-coverage-bars" title={coverageCell(row.stock_day)}>
-                      {renderBarsCell(row.stock_day, dayStatus.needBackfill, '1 D', coverageCell(row.stock_day))}
-                    </td>
-                    <td className="data-coverage-range">{coverageRange(row.stock_day)}</td>
-                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null })}>
-                      {renderBarsCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null }, min1Status.needBackfill, '1 min', coverageCell(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null }))}
-                    </td>
-                    <td className="data-coverage-range">{coverageRange(row.stock_min['1 min'] || { count: 0, min_ts: null, max_ts: null })}</td>
-                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null })}>
-                      {renderBarsCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null }, min5Status.needBackfill, '5 mins', coverageCell(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null }))}
-                    </td>
-                    <td className="data-coverage-range">{coverageRange(row.stock_min['5 mins'] || { count: 0, min_ts: null, max_ts: null })}</td>
-                    <td className="data-coverage-bars" title={coverageCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null })}>
-                      {renderBarsCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null }, min1hStatus.needBackfill, '1 hour', coverageCell(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null }))}
-                    </td>
-                    <td className="data-coverage-range">{coverageRange(row.stock_min['1 hour'] || { count: 0, min_ts: null, max_ts: null })}</td>
-                    <td className="data-coverage-actions data-coverage-actions-nowrap">
-                      {isIndex ? (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-reset btn-sm"
-                            disabled={isDeleting}
-                            onClick={() => {
-                              setResetConfirmSymbol(row.symbol)
-                              setResetConfirmIsIndex(true)
-                              setResetPeriods(['1 D'])
-                            }}
-                            title="Reset daily bars for this index"
-                            aria-label={`Reset ${row.symbol}`}
-                          >
-                            {isDeleting ? '…' : 'Reset'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            disabled={indicesRefreshLoading || (backfillSymbol === row.symbol)}
-                            title="Pull daily bars for this index from TradingView (same range modal as Watchlist)"
-                            aria-label={`Pull ${row.symbol}`}
-                            onClick={() => {
-                              setPullModalSymbol(row.symbol)
-                              setPullModalIsIndex(true)
-                              setPullSelectedPeriods(['1 D'])
-                              setPullRangeMode('max')
-                              setPullCustomDailyDays(30)
-                              setPullCustom1minHours(24)
-                              setPullCustom5minDays(7)
-                              setPullCustom1hourDays(7)
-                            }}
-                          >
-                            {backfillSymbol === row.symbol ? (backfillMessage || 'Pulling…') : 'Pull'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                      <button
-                        type="button"
-                        className="btn btn-reset btn-sm"
-                        disabled={isDeleting}
-                        onClick={() => {
-                          setResetConfirmSymbol(row.symbol)
-                          setResetConfirmIsIndex(false)
-                          setResetPeriods(['1 D', '1 min', '5 mins', '1 hour'])
-                        }}
-                        title="Reset all bars for this symbol (stock_day + stock_min); then you can Pull from scratch"
-                        aria-label={`Reset data for ${row.symbol}`}
-                      >
-                        {isDeleting ? '…' : 'Reset'}
-                      </button>
-                      {periodsNeedingBackfill.length > 0 && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          disabled={!canBackfill}
-                          title={`Queue pull for ${periodsNeedingBackfill.join(', ')}`}
-                          aria-label={`Pull ${row.symbol}`}
-                          onClick={() => {
-                            setPullModalSymbol(row.symbol)
-                            setPullModalIsIndex(false)
-                            setPullSelectedPeriods(['1 D', '1 min', '5 mins', '1 hour'])
-                            setPullRangeMode('max')
-                            setPullCustomDailyDays(30)
-                            setPullCustom1minHours(24)
-                            setPullCustom5minDays(7)
-                            setPullCustom1hourDays(7)
-                          }}
-                        >
-                          {isBackfilling ? (backfillMessage || 'Queuing…') : 'Pull'}
-                        </button>
-                      )}
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                )
-                  })}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-            </div>
-          </>
-        )}
-      </section>
+      <DataCoveragePanel
+        coverage={coverage}
+        coveragePolicy={coveragePolicy}
+        coverageLoading={coverageLoading}
+        coverageError={coverageError}
+        deleteSymbolError={deleteSymbolError}
+        deletingSymbol={deletingSymbol}
+        backfillSymbol={backfillSymbol}
+        backfillMessage={backfillMessage}
+        isTradingDay={isTradingDay}
+        status={status}
+        coverageGroups={coverageGroups}
+        indicesRefreshLoading={indicesRefreshLoading}
+        indicesRefreshMessage={indicesRefreshMessage}
+        watchlistRefreshMessage={watchlistRefreshMessage}
+        watchlistPreviewLoading={watchlistPreviewLoading}
+        watchlistRefreshRunning={watchlistRefreshRunning}
+        backfillIsTest={backfillIsTest}
+        needWatchlistDryRun={needWatchlistDryRun}
+        backfillApiIntervalSec={backfillApiIntervalSec}
+        onLoadCoverage={loadCoverage}
+        onRefreshIndices={handleRefreshIndices}
+        onWatchlistEodRefresh={handleWatchlistEodRefreshClick}
+        onOpenReset={handleOpenReset}
+        onOpenPull={handleOpenPull}
+        onOpenBarsForSymbol={openBarsForSymbol}
+        onBackfillIsTestChange={setBackfillIsTest}
+        onNeedWatchlistDryRunChange={setNeedWatchlistDryRun}
+        onBackfillApiIntervalSecChange={setBackfillApiIntervalSec}
+      />
 
       {watchlistRefreshPreview && (
         <div className="data-reset-modal-overlay" onClick={() => { if (!watchlistRefreshRunning) setWatchlistRefreshPreview(null) }} role="dialog" aria-modal="true" aria-labelledby="eod-dry-run-title">
@@ -723,12 +514,7 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
               <>
                 <p>Select periods to clear (cannot be undone):</p>
                 <div className="data-reset-periods">
-                  {[
-                    { value: '1 D', label: 'Daily' },
-                    { value: '1 min', label: '1 Min' },
-                    { value: '5 mins', label: '5 Mins' },
-                    { value: '1 hour', label: '1 Hour' },
-                  ].map(({ value, label }) => (
+                  {BAR_PERIODS.map(({ value, label }) => (
                     <label key={value} className="data-reset-period-check">
                       <input
                         type="checkbox"
@@ -874,11 +660,11 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
                 <input
                   type="checkbox"
                   checked={pullSelectedPeriods.length === 4}
-                  onChange={e => setPullSelectedPeriods(e.target.checked ? ['1 D', '1 min', '5 mins', '1 hour'] : [])}
+                  onChange={e => setPullSelectedPeriods(e.target.checked ? [...ALL_BAR_PERIOD_VALUES] : [])}
                 />
                 <span>All</span>
               </label>
-              {(['1 D', '1 min', '5 mins', '1 hour'] as const).map(period => (
+              {ALL_BAR_PERIOD_VALUES.map(period => (
                 <label key={period} className="data-pull-range-period-check">
                   <input
                     type="checkbox"
@@ -888,7 +674,7 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
                       else setPullSelectedPeriods(p => p.filter(x => x !== period))
                     }}
                   />
-                  <span>{period === '1 D' ? 'Daily' : period === '1 min' ? '1 Min' : period === '5 mins' ? '5 mins' : '1 hour'}</span>
+                  <span>{BAR_PERIODS.find(p => p.value === period)?.label ?? period}</span>
                 </label>
               ))}
             </div>
@@ -980,276 +766,37 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
         </div>
       )}
 
-      <section className="replay-section" aria-labelledby="data-bars-head">
-        <h3 id="data-bars-head" className="page-title-with-tooltip">
-          Preview
-          <InfoTooltip text="Load bars from DB for a symbol and period. Backfill is triggered per symbol in the coverage table above (uses config default ranges)." />
-        </h3>
-        <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-          <label htmlFor="data-bar-symbol" className="replay-bar-symbol-label">Symbol</label>
-          <input
-            id="data-bar-symbol"
-            type="text"
-            className="replay-bar-symbol-input"
-            placeholder="Symbol, e.g. NVDA"
-            value={barSymbol}
-            onChange={e => setBarSymbol((e.target.value || '').trim().toUpperCase())}
-            aria-label="Symbol for bars"
-          />
-          <span className="replay-bar-symbol-label">Period</span>
-          <div className="replay-bar-period-radios" role="group" aria-label="Bar period">
-            {BAR_PERIODS.map(p => (
-              <label key={p.value} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', marginRight: '1rem' }}>
-                <input
-                  type="radio"
-                  name="bar-period"
-                  value={p.value}
-                  checked={barPeriod === p.value}
-                  onChange={() => setBarPeriod(p.value)}
-                  aria-label={p.label}
-                />
-                <span>{p.label}</span>
-              </label>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={barsLoading || !barSymbol.trim()}
-            onClick={() => loadBarsFromApi(barSymbol.trim())}
-            aria-label="Load bars"
-          >
-            {barsLoading ? 'Loading…' : 'Load'}
-          </button>
-        </div>
-        <p className="replay-sync-hint" style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
-          Backfill runs in Celery Worker (config default ranges per period). See System → Recent operations for job status.
-        </p>
-        {bars.length > 0 && (
-          <div className="data-bars-chart-container">
-            <div className="data-bars-chart-header">
-              <span className="data-bars-chart-title">
-                {barSymbol || '—'} {barPeriod} · {chartBars.length} bars
-              </span>
-            </div>
-            <BarsCandlestickChart bars={chartBars} period={barPeriod} />
-          </div>
-        )}
-        {bars.length === 0 ? (
-          <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
-        ) : (
-          <table className="table-operations">
-            <thead>
-              <tr>
-                <th>
-                  <button
-                    type="button"
-                    className="table-sort-header"
-                    onClick={() => setBarsTimeSort(s => s === 'desc' ? 'asc' : 'desc')}
-                    aria-sort={barsTimeSort === 'desc' ? 'descending' : 'ascending'}
-                    aria-label={`Sort by time ${barsTimeSort === 'desc' ? '(newest first), click for oldest first' : '(oldest first), click for newest first'}`}
-                  >
-                    Time {barsTimeSort === 'desc' ? '↓' : '↑'}
-                  </button>
-                </th>
-                <th>Open</th>
-                <th>High</th>
-                <th>Low</th>
-                <th>Close</th>
-                <th>Vol</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableBars.map((b, i) => (
-                <tr key={i}>
-                  <td>{b.time != null ? fmtTs(b.time) : '—'}</td>
-                  <td>{fmtUsd(b.open)}</td>
-                  <td>{fmtUsd(b.high)}</td>
-                  <td>{fmtUsd(b.low)}</td>
-                  <td>{fmtUsd(b.close)}</td>
-                  <td>{b.volume != null ? Number(b.volume).toLocaleString() : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <DataBarsPreviewPanel
+        barSymbol={barSymbol}
+        barPeriod={barPeriod}
+        bars={bars}
+        barsLoading={barsLoading}
+        barsTimeSort={barsTimeSort}
+        chartBars={chartBars}
+        tableBars={tableBars}
+        onSymbolChange={setBarSymbol}
+        onPeriodChange={setBarPeriod}
+        onLoadBars={() => loadBarsFromApi(barSymbol.trim())}
+        onBarsTimeSortToggle={() => setBarsTimeSort((s) => (s === 'desc' ? 'asc' : 'desc'))}
+      />
 
-      <section className="replay-section" aria-labelledby="data-jobs-head">
-        <h3 id="data-jobs-head" className="page-title-with-tooltip">
-          Celery jobs
-          <InfoTooltip text="Recent bars backfill tasks sent to Celery. Each row = one period (1 D, 1 min, 5 mins, 1 hour). Check here to see if 1 hour or other periods were queued and their status." />
-        </h3>
-        <div className="replay-toolbar data-jobs-toolbar" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-          <div className="data-jobs-status-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <span className="data-jobs-status-label">Status:</span>
-            {(['pending', 'running', 'done', 'failed'] as const).map(s => (
-              <label key={s} className="data-jobs-status-checkbox" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={barsJobsStatusSelected.has(s)}
-                  onChange={() => toggleBarsJobsStatus(s)}
-                  aria-label={`Filter and delete ${s} jobs`}
-                />
-                <span>{s === 'done' ? 'Done' : s === 'failed' ? 'Failed' : s === 'pending' ? 'Pending' : 'Running'}</span>
-              </label>
-            ))}
-            <button
-              type="button"
-              className="btn btn-reset btn-sm"
-              disabled={barsJobsTotal === 0 || barsJobsLoading || barsJobsStatusSelected.size === 0}
-              onClick={() => setConfirmDeleteAll(true)}
-              aria-label="Delete jobs with selected status(es)"
-            >
-              Delete all
-            </button>
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <span>Least:</span>
-            <select
-              value={barsJobsLimit}
-              onChange={e => setBarsJobsLimit(Number(e.target.value))}
-              aria-label="Number of jobs to show"
-              style={{ minWidth: '5rem' }}
-            >
-              <option value={5}>5</option>
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={200}>200</option>
-              <option value={500}>500</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            disabled={barsJobsLoading}
-            onClick={() => loadBarsJobs()}
-            aria-label="Refresh backfill jobs"
-          >
-            {barsJobsLoading ? '…' : 'Refresh'}
-          </button>
-          <span className="replay-sync-hint" style={{ marginLeft: 'auto' }}>
-            {barsJobsTotal > 0 ? `${barsJobs.length} shown (${barsJobsTotal} total)` : '0 jobs'}
-          </span>
-        </div>
-        {barsJobsError && (
-          <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>
-            {barsJobsError}
-          </div>
-        )}
-        <p className="replay-sync-hint" style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
-          Jobs are created when you click Pull above (one per period: 1 D, 1 min, 5 mins, 1 hour). Pending → Worker picks up → running → done/failed.
-        </p>
-        {barsJobs.length === 0 && !barsJobsLoading ? (
-          <div className="replay-placeholder">No pull jobs yet. Run Pull for a symbol above.</div>
-        ) : (
-          <table className="table-operations">
-            <thead>
-              <tr>
-                <th>
-                  <button
-                    type="button"
-                    className="table-sort-header"
-                    onClick={() => {
-                      if (barsJobsSortKey === 'job_id') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
-                      else { setBarsJobsSortKey('job_id'); setBarsJobsSortDir('desc') }
-                    }}
-                    aria-sort={barsJobsSortKey === 'job_id' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
-                  >
-                    Job ID {barsJobsSortKey === 'job_id' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
-                  </button>
-                </th>
-                <th>Symbol</th>
-                <th>Period</th>
-                <th>
-                  <button
-                    type="button"
-                    className="table-sort-header"
-                    onClick={() => {
-                      if (barsJobsSortKey === 'status') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
-                      else { setBarsJobsSortKey('status'); setBarsJobsSortDir('asc') }
-                    }}
-                    aria-sort={barsJobsSortKey === 'status' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
-                  >
-                    Status {barsJobsSortKey === 'status' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
-                  </button>
-                </th>
-                <th>Result</th>
-                <th>
-                  <button
-                    type="button"
-                    className="table-sort-header"
-                    onClick={() => {
-                      if (barsJobsSortKey === 'created_ts') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
-                      else { setBarsJobsSortKey('created_ts'); setBarsJobsSortDir('desc') }
-                    }}
-                    aria-sort={barsJobsSortKey === 'created_ts' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
-                  >
-                    Created {barsJobsSortKey === 'created_ts' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
-                  </button>
-                </th>
-                <th>
-                  <button
-                    type="button"
-                    className="table-sort-header"
-                    onClick={() => {
-                      if (barsJobsSortKey === 'updated_ts') setBarsJobsSortDir(d => d === 'asc' ? 'desc' : 'asc')
-                      else { setBarsJobsSortKey('updated_ts'); setBarsJobsSortDir('desc') }
-                    }}
-                    aria-sort={barsJobsSortKey === 'updated_ts' ? (barsJobsSortDir === 'asc' ? 'ascending' : 'descending') : undefined}
-                  >
-                    Updated {barsJobsSortKey === 'updated_ts' ? (barsJobsSortDir === 'asc' ? '↑' : '↓') : ''}
-                  </button>
-                </th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedBarsJobs.map((j) => (
-                <tr key={j.job_id}>
-                  <td><code style={{ fontSize: '0.85em' }}>{j.job_id}</code></td>
-                  <td><strong>{j.symbol}</strong></td>
-                  <td>{j.period}</td>
-                  <td>
-                    <span className={`status-badge status-${j.status}`}>
-                      {j.status}
-                    </span>
-                  </td>
-                  <td title={j.result?.error || j.result?.message}>
-                    {j.status === 'done' && j.result?.count != null ? `${j.result.count} bars` : null}
-                    {j.status === 'failed' && j.result?.error ? j.result.error.slice(0, 40) + (j.result.error.length > 40 ? '…' : '') : null}
-                    {j.status === 'done' && j.result?.message && j.result?.count == null ? j.result.message.slice(0, 30) + '…' : null}
-                    {!j.result && j.status !== 'pending' && j.status !== 'running' ? '—' : null}
-                  </td>
-                  <td>{j.created_ts != null ? fmtTs(j.created_ts) : '—'}</td>
-                  <td>{j.updated_ts != null ? fmtTs(j.updated_ts) : '—'}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn btn-reset btn-sm"
-                      disabled={deletingJobId !== null}
-                      aria-label={`Delete job ${j.job_id}`}
-                      onClick={async () => {
-                        setDeletingJobId(j.job_id)
-                        try {
-                          const res = await deleteBarsJob(j.job_id)
-                          if (res.ok) await loadBarsJobs()
-                        } finally {
-                          setDeletingJobId(null)
-                        }
-                      }}
-                    >
-                      {deletingJobId === j.job_id ? '…' : 'Delete'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <DataJobsPanel
+        sortedBarsJobs={sortedBarsJobs}
+        barsJobsLoading={barsJobsLoading}
+        barsJobsError={barsJobsError}
+        barsJobsTotal={barsJobsTotal}
+        barsJobsLimit={barsJobsLimit}
+        barsJobsStatusSelected={barsJobsStatusSelected}
+        barsJobsSortKey={barsJobsSortKey}
+        barsJobsSortDir={barsJobsSortDir}
+        deletingJobId={deletingJobId}
+        onToggleStatus={toggleBarsJobsStatus}
+        onDeleteAllClick={() => setConfirmDeleteAll(true)}
+        onLimitChange={setBarsJobsLimit}
+        onRefreshJobs={loadBarsJobs}
+        onSort={handleBarsJobsSort}
+        onDeleteJob={handleDeleteBarsJob}
+      />
 
       {/* Delete all backfill jobs confirmation */}
       {confirmDeleteAll && (
