@@ -30,7 +30,7 @@
 | | **R-B1** | 策略 PnL 优化：在历史数据上对比不同参数的理论 P&L、收益曲线、回撤等，优化策略回报。 | 待实现 | 阶段 4 | §4.2 | 阶段 4 |
 | | **R-B2** | 安全边界验证：Guard/边界参数可验证；不同参数下对冲与拦截次数及原因可复盘。 | 待实现 | 阶段 4 | §4.2 | 阶段 4 |
 | **e. 策略应用（自动交易）** | **R-C3** | 一键平敞口：异常或红时可一键平掉本策略管理的对冲敞口；仅针对本守护程序负责的对冲仓位。依赖 R-A1 及策略边界等。 | 待实现 | 阶段 5 | §5 | 阶段 5（Test Case 待补全） |
-| **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | 待实现 | 见分步计划「实时行情」 | §7 | REALTIME_MARKET_DATA_DESIGN.md |
+| **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | 待实现 | 见分步计划「实时行情」 | §7 | PLAN_NEXT_STEPS「实时行情与联动」 |
 | | **R-RM2** | 事件订阅所得行情写入 Redis 缓存；唯一写入方为守护进程，监控不写 Redis 行情。 | 待实现 | 同上 | §7 | 同上 |
 | | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | 待实现 | 同上 | §7 | 同上 |
 
@@ -88,7 +88,7 @@
 
 - **目标**：提供**独立于实时交易监控**的**复盘与风控分析**页面，用于事后查看账户执行交易、辅助行情（如 K 线）及风险模型评估，与当前“红绿灯 + 状态 + 操作列表”的监控页**分离**，避免实时监控与复盘分析混在同一视图。
 - **范围**：监控应用内新增页面或路由（如「复盘」/「风控」）；可查看账户执行交易记录（R-A2）、辅助行情（R-A3）、以及基于历史数据的风险/统计视图；不要求与 R-M5 同屏，通过导航切换。数据由阶段 3 的 R-A2、R-A3 及 R-H2 提供。
-- **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + instrument_prices；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径见 [PERFORMANCE_PAGE_DESIGN.md](PERFORMANCE_PAGE_DESIGN.md)。分步实现顺序与验收见 [performance-execution-plan.md](plans/performance-execution-plan.md)。
+- **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + instrument_prices；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径以实现与 PLAN_NEXT_STEPS 阶段 3 验收为准；分步实现顺序与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8。
 - **与分步计划**：阶段 3（与 R-A2、R-A3 数据能力一并交付）。
 
 ---
@@ -141,7 +141,7 @@
 
 - **目标**：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。
 - **形态**：存在**独立脚本或模块**（如 `scripts/stats_from_history.py` 或 `src/stats/`），**只读**阶段 1 sink 写入的历史表；**不跑** FSM/Guard/StateClassifier。输出至少包含按日/周对冲次数、盈亏分布或汇总；可离线运行，不依赖守护进程在线。
-- **Performance 计算逻辑**：按日/周/月汇总、胜率、盈亏分布及 Performance 页的**计算逻辑**与 R-M7 的 Performance 子页一致，按 [performance-execution-plan.md](plans/performance-execution-plan.md) 分阶段实现并验收。
+- **Performance 计算逻辑**：按日/周/月汇总、胜率、盈亏分布及 Performance 页的**计算逻辑**与 R-M7 的 Performance 子页一致，按 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8 与阶段 3 验收清单分阶段实现并验收。
 - **与分步计划**：阶段 3。
 
 ### 4.2 回测（R-B1、R-B2）
@@ -165,7 +165,7 @@
 
 ## 6. 实时行情与联动（f，R-RM*）
 
-本节需求与架构细节见 **[REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)**（需求 §1、架构 §2、注意要点 §3）。此处仅作索引与简述。
+此处仅作索引与简述；详细步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」。
 
 | 编号 | 需求简述 | 说明 |
 |------|----------|------|

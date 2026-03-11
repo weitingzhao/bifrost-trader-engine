@@ -32,6 +32,7 @@ nav:
     - Hedge FSM: fsm/hedge.md
     - Trading FSM: fsm/trading.md
     - Daemon FSM: fsm/daemon.md
-  - Config:
-    - State Space: STATE_SPACE_MAPPING.md
-    - Config Safety: CONFIG_SAFETY_TAXONOMY.md
+  - Research:
+    - State Space: research/STATE_SPACE_MAPPING.md
+    - Config Safety: research/CONFIG_SAFETY_TAXONOMY.md
+    - Guard Tuning: research/GUARD_TUNING_AND_IMPACT.md

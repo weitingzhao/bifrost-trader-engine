@@ -99,7 +99,7 @@ The system has **three parts**: (1) **auto-trading** daemon, (2) **monitoring & 
 
 ## State space (O,D,M,L,E,S)
 
-The engine uses a six-dimensional state space for hedge gating. See [docs/STATE_SPACE_MAPPING.md](docs/STATE_SPACE_MAPPING.md) for the state space table → code mapping, threshold config and defaults, and when TargetPosition is output vs SAFE_MODE.
+The engine uses a six-dimensional state space for hedge gating. See [docs/research/STATE_SPACE_MAPPING.md](docs/research/STATE_SPACE_MAPPING.md) for the state space table → code mapping, threshold config and defaults, and when TargetPosition is output vs SAFE_MODE.
 
 ## License
 

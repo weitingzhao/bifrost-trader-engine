@@ -178,8 +178,13 @@ export function AccountsPage({
   const hasAccounts = Array.isArray(rawAccounts) && rawAccounts.length > 0
   const fetchedAt = j?.accounts_fetched_at
   const accounts = hasAccounts ? [...rawAccounts!].sort((a, b) => getNetLiq(b) - getNetLiq(a)) : []
-  const selectedIndex = accounts.length > 0 ? Math.min(ibAccountIndex, accounts.length - 1) : 0
-  const acc = accounts[selectedIndex]
+  /** Only show accounts with Net Liquidation ≥ $10. */
+  const accountsVisible = useMemo(
+    () => accounts.filter((a) => getNetLiq(a) >= 10),
+    [accounts],
+  )
+  const selectedIndex = accountsVisible.length > 0 ? Math.min(ibAccountIndex, accountsVisible.length - 1) : 0
+  const acc = accountsVisible[selectedIndex] ?? null
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
   const [replaySyncing, setReplaySyncing] = useState(false)
@@ -228,6 +233,56 @@ export function AccountsPage({
     }
     return { optionContracts: optKeys.size, stockLines, unrealizedPnl }
   }, [rawAccounts])
+
+  /** Aggregated totals across visible accounts (Net Liq ≥ $10). */
+  const aggregatedTotals = useMemo(() => {
+    let totalNetLiq = 0
+    let totalCash = 0
+    let totalBuyingPower = 0
+    for (const a of accountsVisible) {
+      totalNetLiq += getNetLiq(a)
+      const cash = a.summary?.TotalCashValue
+      if (cash != null) {
+        const n = parseFloat(String(cash))
+        if (Number.isFinite(n)) totalCash += n
+      }
+      const bp = a.summary?.BuyingPower
+      if (bp != null) {
+        const n = parseFloat(String(bp))
+        if (Number.isFinite(n)) totalBuyingPower += n
+      }
+    }
+    return { totalNetLiq, totalCash, totalBuyingPower }
+  }, [accountsVisible])
+
+  /** Pie chart: composition by Cash + stock categories + Options (market value). */
+  const portfolioPieData = useMemo(() => {
+    const slices: { name: string; value: number }[] = []
+    const cash = aggregatedTotals.totalCash
+    if (cash > 0) slices.push({ name: 'Cash', value: cash })
+
+    const categoryValue: Record<string, number> = {}
+    let optionsValue = 0
+    for (const account of accountsVisible) {
+      for (const pos of account.positions ?? []) {
+        const qty = Number(pos.position)
+        if (!Number.isFinite(qty) || qty === 0) continue
+        const price = pos.price != null && Number.isFinite(pos.price) ? pos.price : (pos.avgCost ?? 0)
+        const mv = Math.abs(qty) * (Number.isFinite(price) ? price : 0)
+        if ((pos.secType ?? '').toUpperCase() === 'OPT') {
+          optionsValue += mv
+        } else {
+          const cat = (pos.category && String(pos.category).trim()) || 'Uncategorized'
+          categoryValue[cat] = (categoryValue[cat] ?? 0) + mv
+        }
+      }
+    }
+    Object.entries(categoryValue).sort((a, b) => b[1] - a[1]).forEach(([name, value]) => {
+      if (value > 0) slices.push({ name, value })
+    })
+    if (optionsValue > 0) slices.push({ name: 'Options', value: optionsValue })
+    return slices
+  }, [accountsVisible, aggregatedTotals.totalCash])
 
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const stockSymbols = useMemo(() => {
@@ -342,22 +397,6 @@ export function AccountsPage({
             </button>
           </div>
         </div>
-        {refreshFeedback != null && refreshFeedback !== '' && (
-          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
-            {refreshFeedback}
-          </p>
-        )}
-
-        <div className="ib-portfolio-overview-compact" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
-          <span><span className="ib-portfolio-overview-label">Accounts</span> {status?.accounts?.length ?? 0}</span>
-          <span className="ib-portfolio-overview-sep">·</span>
-          <span><span className="ib-portfolio-overview-label">Options</span> {overviewTotals.optionContracts}</span>
-          <span className="ib-portfolio-overview-sep">·</span>
-          <span><span className="ib-portfolio-overview-label">Stock lines</span> {overviewTotals.stockLines}</span>
-          <span className="ib-portfolio-overview-sep">·</span>
-          <span><span className="ib-portfolio-overview-label">Unrealized PnL</span> {fmtUsd(overviewTotals.unrealizedPnl)}</span>
-        </div>
-
         <section className="replay-section" aria-label="Execution fetch range">
           <div className="replay-toolbar">
             <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
@@ -391,6 +430,21 @@ export function AccountsPage({
             {replaySyncing && <span className="replay-sync-hint">Fetching executions from IB…</span>}
           </div>
         </section>
+        {refreshFeedback != null && refreshFeedback !== '' && (
+          <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
+            {refreshFeedback}
+          </p>
+        )}
+
+        <div className="ib-portfolio-overview-compact" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
+          <span><span className="ib-portfolio-overview-label">Accounts</span> {status?.accounts?.length ?? 0}</span>
+          <span className="ib-portfolio-overview-sep">·</span>
+          <span><span className="ib-portfolio-overview-label">Options</span> {overviewTotals.optionContracts}</span>
+          <span className="ib-portfolio-overview-sep">·</span>
+          <span><span className="ib-portfolio-overview-label">Stock lines</span> {overviewTotals.stockLines}</span>
+          <span className="ib-portfolio-overview-sep">·</span>
+          <span><span className="ib-portfolio-overview-label">Unrealized PnL</span> {fmtUsd(overviewTotals.unrealizedPnl)}</span>
+        </div>
 
         <p className="section-hint">
           No account data (IB not connected or daemon has not written yet; after connection, data is pulled on heartbeat and written to accounts / account_positions)
@@ -501,6 +555,31 @@ export function AccountsPage({
     })
     return keys
   }, [stockByCategory])
+
+  /** Execution freshness for this account: IB Flex (flex_trades) and IB Stream (all other sources, latest row). */
+  const execFreshnessForAccount = useMemo(() => {
+    const forAcc = execFreshness.filter((r) => (r.account_id || '') === (aid || ''))
+    const flexRow = forAcc.find((r) => (r.source || '').toLowerCase() === 'flex_trades') ?? null
+    const streamRows = forAcc.filter((r) => (r.source || '').toLowerCase() !== 'flex_trades')
+    const streamBest =
+      streamRows.length > 0
+        ? streamRows.reduce((best, r) =>
+            (r.latest_exec_ts ?? 0) > (best.latest_exec_ts ?? 0) ? r : best,
+          )
+        : null
+    return { ibFlex: flexRow, ibStream: streamBest }
+  }, [execFreshness, aid])
+
+  /** Returns "Today", "1 day ago", or "N days ago" for display; null item → caller shows "Never". */
+  function formatExecDaysAgo(item: ExecutionFreshnessItem | null): string {
+    if (!item) return '—'
+    const days = item.days_since_latest
+    if (days == null || !Number.isFinite(days)) return '—'
+    if (days < 0.5) return 'Today'
+    if (days < 1.5) return '1 day ago'
+    return `${Math.round(days)} days ago`
+  }
+
   const spot =
     status?.status?.spot != null && Number.isFinite(Number(status.status.spot))
       ? Number(status.status.spot)
@@ -544,40 +623,6 @@ export function AccountsPage({
           </button>
         </div>
       </div>
-
-      {refreshFeedback != null && refreshFeedback !== '' && (
-        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
-          {refreshFeedback}
-        </p>
-      )}
-
-      {fetchedAt != null && Number.isFinite(fetchedAt) && (
-        <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
-          Data from {new Date(fetchedAt * 1000).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium' })}
-          , {(() => {
-            const sec = Math.floor(Date.now() / 1000 - fetchedAt)
-            if (sec < 60) return `${sec}s ago`
-            if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-            return `${(sec / 3600).toFixed(1)}h ago`
-          })()}
-        </p>
-      )}
-      {hasAccounts && (fetchedAt == null || !Number.isFinite(fetchedAt)) && (
-        <p className="section-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
-          Data time unknown (click "Refresh" to have monitor fetch from IB and write to DB; fetch time will appear here)
-        </p>
-      )}
-
-      <div className="ib-portfolio-overview-compact" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
-        <span><span className="ib-portfolio-overview-label">Accounts</span> {accounts.length}</span>
-        <span className="ib-portfolio-overview-sep">·</span>
-        <span><span className="ib-portfolio-overview-label">Options</span> {overviewTotals.optionContracts}</span>
-        <span className="ib-portfolio-overview-sep">·</span>
-        <span><span className="ib-portfolio-overview-label">Stock lines</span> {overviewTotals.stockLines}</span>
-        <span className="ib-portfolio-overview-sep">·</span>
-        <span><span className="ib-portfolio-overview-label">Unrealized PnL</span> {fmtUsd(overviewTotals.unrealizedPnl)}</span>
-      </div>
-
       <section className="replay-section" aria-label="Execution fetch range">
         <div className="replay-toolbar">
           <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
@@ -623,7 +668,7 @@ export function AccountsPage({
                 disabled={replaySyncing || flexSyncing}
               />
               <label htmlFor="flex-use-upload" className="section-hint">
-                Use local Flex Trades XML (upload instead of Web Service)
+                Use Local Flex Xml
               </label>
             </div>
             <button
@@ -632,7 +677,6 @@ export function AccountsPage({
               disabled={replaySyncing || flexSyncing}
               onClick={async () => {
                 if (flexUseUpload) {
-                  // 上传本地 Flex XML：打开文件选择框，读取内容后 POST /executions/fetch-flex-upload
                   const input = document.createElement('input')
                   input.type = 'file'
                   input.accept = '.xml,text/xml,application/xml'
@@ -785,64 +829,30 @@ export function AccountsPage({
               }}
               aria-label="Fetch executions from IB Flex Trades and write to DB"
             >
-              {flexSyncing ? 'Fetching…' : 'Fetch from IB (Flex)'}
+              {flexSyncing ? 'Fetching…' : 'Flex Refresh'}
             </button>
             {(replaySyncing || flexSyncing) && (
               <span className="replay-sync-hint">
                 {replaySyncing ? 'Fetching executions from IB (TWS)…' : 'Fetching executions from IB Flex…'}
               </span>
             )}
+            {fetchedAt != null && Number.isFinite(fetchedAt) && (
+              <span className="section-hint replay-data-from-inline">
+                Data from {new Date(fetchedAt * 1000).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium' })}
+                , {(() => {
+                  const sec = Math.floor(Date.now() / 1000 - fetchedAt)
+                  if (sec < 60) return `${sec}s ago`
+                  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
+                  return `${(sec / 3600).toFixed(1)}h ago`
+                })()}
+              </span>
+            )}
+            {hasAccounts && (fetchedAt == null || !Number.isFinite(fetchedAt)) && (
+              <span className="section-hint replay-data-from-inline">
+                Data time unknown (click "Refresh" to have monitor fetch from IB and write to DB)
+              </span>
+            )}
           </div>
-          {execFreshness.length > 0 && (
-            <div className="replay-exec-freshness">
-              <div className="section-hint" style={{ marginTop: '0.25rem', marginBottom: '0.25rem' }}>
-                Execution data status by source &amp; account (latest row per group).
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table className="ib-positions-table">
-                  <thead>
-                    <tr>
-                      <th>Account</th>
-                      <th>Source</th>
-                      <th>Latest execution time</th>
-                      <th>Gap (days)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {execFreshness.map((row, idx) => {
-                      const days = row.days_since_latest
-                      let gapLabel = '—'
-                      if (days != null && Number.isFinite(days)) {
-                        if (days < 0.5) {
-                          gapLabel = 'Today'
-                        } else if (days < 1.5) {
-                          gapLabel = '1 day'
-                        } else {
-                          gapLabel = `${Math.round(days)} days`
-                        }
-                      }
-                      const tsSec = row.latest_exec_ts
-                      const tsLabel =
-                        tsSec != null && Number.isFinite(tsSec)
-                          ? new Date(tsSec * 1000).toLocaleString('en-US', {
-                              dateStyle: 'short',
-                              timeStyle: 'short',
-                            })
-                          : '—'
-                      return (
-                        <tr key={`${row.account_id || 'unknown'}-${row.source || 'unknown'}-${idx}`}>
-                          <td>{row.account_id || '—'}</td>
-                          <td>{row.source || '—'}</td>
-                          <td>{tsLabel}</td>
-                          <td>{gapLabel}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
         {flexMessage && (
           <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
@@ -851,33 +861,185 @@ export function AccountsPage({
         )}
       </section>
 
+      {refreshFeedback != null && refreshFeedback !== '' && (
+        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0, color: refreshFeedback.startsWith('Refreshed') ? 'var(--color-success, green)' : undefined }}>
+          {refreshFeedback}
+        </p>
+      )}
+
+      <div className="ib-portfolio-overview-dashboard">
+        <div className="ib-portfolio-overview-tile ib-portfolio-overview-tile-pnl">
+          <span className="ib-portfolio-overview-label">Unrealized PnL</span>
+          <span
+            className="ib-portfolio-overview-value"
+            style={{
+              color:
+                overviewTotals.unrealizedPnl > 0
+                  ? 'var(--color-success, #16a34a)'
+                  : overviewTotals.unrealizedPnl < 0
+                    ? 'var(--color-danger, #dc2626)'
+                    : undefined,
+            }}
+          >
+            {fmtUsd(overviewTotals.unrealizedPnl)}
+          </span>
+        </div>
+        <div className="ib-portfolio-overview-tile">
+          <span className="ib-portfolio-overview-label">Net Liquidation</span>
+          <span className="ib-portfolio-overview-value">{fmtUsd(aggregatedTotals.totalNetLiq)}</span>
+        </div>
+        <div className="ib-portfolio-overview-tile">
+          <span className="ib-portfolio-overview-label">Cash</span>
+          <span className="ib-portfolio-overview-value">{fmtUsd(aggregatedTotals.totalCash)}</span>
+        </div>
+        <div className="ib-portfolio-overview-tile">
+          <span className="ib-portfolio-overview-label">Buying Power</span>
+          <span className="ib-portfolio-overview-value">{fmtUsd(aggregatedTotals.totalBuyingPower)}</span>
+        </div>
+      </div>
+      <div className="ib-portfolio-charts-row">
+        {portfolioPieData.length > 0 && (
+        <div className="ib-portfolio-overview-row-pie">
+          <span className="ib-portfolio-pie-title">Portfolio by category</span>
+          <div className="ib-portfolio-pie-inner">
+            <svg className="ib-portfolio-pie-svg" viewBox="0 0 100 100" aria-label="Portfolio composition by category">
+              {(() => {
+                const total = portfolioPieData.reduce((s, d) => s + d.value, 0)
+                if (total <= 0) return null
+                const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b']
+                let start = -0.25
+                return portfolioPieData.map((d, i) => {
+                  const ratio = d.value / total
+                  const angle = ratio * 2 * Math.PI
+                  const end = start + angle
+                  const x1 = 50 + 45 * Math.cos(start)
+                  const y1 = 50 + 45 * Math.sin(start)
+                  const x2 = 50 + 45 * Math.cos(end)
+                  const y2 = 50 + 45 * Math.sin(end)
+                  const large = ratio > 0.5 ? 1 : 0
+                  const path = `M 50 50 L ${x1} ${y1} A 45 45 0 ${large} 1 ${x2} ${y2} Z`
+                  start = end
+                  return <path key={d.name} d={path} fill={colors[i % colors.length]} aria-label={`${d.name}: ${fmtUsd(d.value)}`} />
+                })
+              })()}
+            </svg>
+            <ul className="ib-portfolio-pie-legend">
+              {portfolioPieData.map((d, i) => {
+                const total = portfolioPieData.reduce((s, x) => s + x.value, 0)
+                const pct = total > 0 ? (d.value / total) * 100 : 0
+                const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#64748b']
+                return (
+                  <li key={d.name} className="ib-portfolio-pie-legend-item">
+                    <span className="ib-portfolio-pie-legend-dot" style={{ backgroundColor: colors[i % colors.length] }} />
+                    <span className="ib-portfolio-pie-legend-label">{d.name}</span>
+                    <span className="ib-portfolio-pie-legend-value">{fmtUsd(d.value)}</span>
+                    <span className="ib-portfolio-pie-legend-pct">({pct.toFixed(1)}%)</span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        </div>
+        )}
+        <div className="ib-portfolio-netliq-chart-wrap">
+        <span className="ib-portfolio-pie-title">Net Liquidation over time</span>
+        {(() => {
+          const series = accountsVisible.map((a) => ({
+            accountId: a.account_id ?? '',
+            label: a.account_id ?? '—',
+            points: [{ t: Date.now() / 1000, y: getNetLiq(a) }],
+          })).filter((s) => s.points[0].y > 0)
+          const allTs = series.flatMap((s) => s.points.map((p) => p.t))
+          const minT = allTs.length ? Math.min(...allTs) : 0
+          const maxT = allTs.length ? Math.max(...allTs) : 1
+          const allY = series.flatMap((s) => s.points.map((p) => p.y))
+          const minY = allY.length ? Math.min(...allY, 0) : 0
+          const maxY = allY.length ? Math.max(...allY) * 1.05 : 1
+          const w = 600
+          const h = 220
+          const pad = { left: 48, right: 16, top: 8, bottom: 28 }
+          const x = (t: number) => pad.left + ((t - minT) / (maxT - minT || 1)) * (w - pad.left - pad.right)
+          const y = (v: number) => pad.top + (1 - (v - minY) / (maxY - minY || 1)) * (h - pad.top - pad.bottom)
+          const lineColors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6']
+          return (
+            <div className="ib-portfolio-netliq-chart">
+              {series.length === 0 ? (
+                <p className="ib-portfolio-chart-empty">No account data (Net Liquidation ≥ $10).</p>
+              ) : (
+                <svg className="ib-portfolio-line-svg" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet">
+                  <defs>
+                    <linearGradient id="netliq-fill" x1="0" y1="1" x2="0" y2="0">
+                      <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.15" />
+                      <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  {series.map((s, idx) => {
+                    const pts = s.points.sort((a, b) => a.t - b.t)
+                    const pathD = pts.length ? `M ${pts.map((p) => `${x(p.t)} ${y(p.y)}`).join(' L ')}` : ''
+                    const pathFill = pts.length >= 2
+                      ? `${pathD} L ${x(pts[pts.length - 1].t)} ${y(minY)} L ${x(pts[0].t)} ${y(minY)} Z`
+                      : ''
+                    return (
+                      <g key={s.accountId}>
+                        {pathFill && <path d={pathFill} fill="url(#netliq-fill)" />}
+                        <path d={pathD} fill="none" stroke={lineColors[idx % lineColors.length]} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        {pts.map((p, i) => (
+                          <circle key={i} cx={x(p.t)} cy={y(p.y)} r="4" fill={lineColors[idx % lineColors.length]} />
+                        ))}
+                      </g>
+                    )
+                  })}
+                  <line x1={pad.left} y1={h - pad.bottom} x2={w - pad.right} y2={h - pad.bottom} stroke="var(--color-border)" strokeWidth="1" />
+                  <line x1={pad.left} y1={pad.top} x2={pad.left} y2={h - pad.bottom} stroke="var(--color-border)" strokeWidth="1" />
+                </svg>
+              )}
+              <ul className="ib-portfolio-line-legend">
+                {series.map((s, idx) => (
+                  <li key={s.accountId}>
+                    <span className="ib-portfolio-pie-legend-dot" style={{ backgroundColor: lineColors[idx % lineColors.length] }} />
+                    <span>{s.label}</span>
+                    <span className="ib-portfolio-line-legend-value">{fmtUsd(s.points[s.points.length - 1]?.y ?? 0)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })()}
+        </div>
+      </div>
+
       <div className="ib-accounts-wrap">
-        {accounts.length > 1 && (
-          <div className="ib-accounts-tabs">
-            {accounts.map((a, idx) => (
+        {accountsVisible.length > 1 && (
+          <div className="system-tabs ib-accounts-tab-row" role="tablist" aria-label="Account">
+            {accountsVisible.map((a, idx) => (
               <button
                 key={a.account_id ?? idx}
                 type="button"
-                className={`ib-accounts-tab ${idx === selectedIndex ? 'active' : ''}`}
+                role="tab"
+                aria-selected={idx === selectedIndex}
+                className={`system-tab ${idx === selectedIndex ? 'active' : ''}`}
                 onClick={() => setIbAccountIndex(idx)}
               >
                 {a.account_id ?? `Account-${idx + 1}`}
                 {(a.positions?.length ?? 0) > 0 && (
-                  <span className="section-hint" style={{ marginLeft: '0.35rem', fontWeight: 'normal' }}>
-                    ({a.positions!.length})
-                  </span>
+                  <span className="ib-accounts-tab-count">({a.positions!.length})</span>
                 )}
               </button>
             ))}
           </div>
         )}
-        <div className="ib-accounts-content">
-          <div className="ib-summary-row">
+        <div className="ib-accounts-content system-tab-panel">
+          {!acc ? (
+            <p className="section-hint" style={{ marginTop: '0.5rem' }}>No accounts with Net Liquidation ≥ $10</p>
+          ) : (
+          <>
+          <div className="ib-summary-card">
+            <div className="ib-summary-row">
             <div className="ib-summary-item">
               <span className="label">Account</span>
               <span className="value">{aid}</span>
             </div>
-            {netLiq != null && Number.isFinite(netLiq) && (
+            {netLiq != null && Number.isFinite(netLiq) && netLiq >= 10 && (
               <div className="ib-summary-item">
                 <span className="label">Net liquidation</span>
                 <span className="value">{fmtUsd(netLiq)}</span>
@@ -895,6 +1057,25 @@ export function AccountsPage({
                 <span className="value">{fmtUsd(buyingPower)}</span>
               </div>
             )}
+            <section className="ib-summary-ib-section" aria-label="IB execution data">
+              <div className="ib-summary-item">
+                <span className="label">IB Flex</span>
+                <span className="value">
+                  {execFreshnessForAccount.ibFlex
+                    ? formatExecDaysAgo(execFreshnessForAccount.ibFlex)
+                    : '—'}
+                </span>
+              </div>
+              <div className="ib-summary-item">
+                <span className="label">IB Stream</span>
+                <span className="value">
+                  {execFreshnessForAccount.ibStream
+                    ? formatExecDaysAgo(execFreshnessForAccount.ibStream)
+                    : '—'}
+                </span>
+              </div>
+            </section>
+            </div>
           </div>
 
           <div className="ib-positions-title">Stock positions</div>
@@ -1272,6 +1453,8 @@ export function AccountsPage({
                 )
               })()}
             </>
+          )}
+          </>
           )}
         </div>
       </div>

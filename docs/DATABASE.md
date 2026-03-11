@@ -279,7 +279,7 @@
 
 ### 2.22 表 `us_market_holidays`（美股交易日历：NYSE 休市日）
 
-- **用途**：存**美股（NYSE）休市日**，供 GET /market/trading-day 判断某日是否为交易日；Data 页据此仅在交易日将「(end)」标黄（需 Pull 时）。数据来源见 [INDEX_DATA_SOURCES.md](INDEX_DATA_SOURCES.md) § US market holidays。
+- **用途**：存**美股（NYSE）休市日**，供 GET /market/trading-day 判断某日是否为交易日；Data 页据此仅在交易日将「(end)」标黄（需 Pull 时）。数据来源为美股休市日历（配置或外部数据源）。
 - **写入**：通过 **Settings 页「US market holidays (NYSE)」** 或 API POST /market/holidays 添加/删除；亦可手动 INSERT。每年 NYSE 公布日历时在 Settings 中追加新年度。
 - **列**：
 

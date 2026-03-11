@@ -799,6 +799,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           </button>
           {' / Performance'}
         </h2>
+        <section className="performance-time-range-block" aria-label="Time range and daily statistics">
         <div className="performance-filters performance-filters-inline">
           {loading && <p className="section-hint performance-filters-loading">Loading…</p>}
           <div className="performance-filter-group">
@@ -957,6 +958,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           </>
           )
         })()}
+        </section>
       </section>
 
       {error && (
@@ -965,13 +967,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         </div>
       )}
 
-      {data && summary && (
-        <>
-          <section className="card" aria-label="Calendar Option / Stock">
-            <h3 className="card-subtitle page-title-with-tooltip">
-              Calendar — Option / Stock
-              <InfoTooltip text="Daily Option Realized and Unrealized in calendar form." />
-            </h3>
+      <section className="card performance-calendar-section" aria-label="Calendar">
+        <h3 className="card-subtitle page-title-with-tooltip">
+          Calendar
+          <InfoTooltip text="Daily Option Realized and Unrealized in calendar form." />
+        </h3>
+        {data && summary ? (
+          <>
               {calendarMonthPerformanceLoading && (
                 <p className="section-hint performance-calendar-loading">Loading calendar…</p>
               )}
@@ -1532,9 +1534,11 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                   </>
                 )
               })()}
-            </section>
-        </>
-      )}
+          </>
+        ) : (
+          <p className="section-hint">Select time range above and load data to see calendar.</p>
+        )}
+      </section>
     </div>
   )
 }

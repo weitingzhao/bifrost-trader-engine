@@ -48,6 +48,10 @@
   --color-success: #22c55e;
   --color-success-soft: rgba(34, 197, 94, 0.15);
 
+  /* 仪表盘 / 卡片 tile 背景（与 surface-elevated 区分） */
+  --color-dashboard-tile: rgba(255, 255, 255, 0.05);
+  --color-dashboard-shadow: rgba(0, 0, 0, 0.25);
+
   /* 字体 */
   --font-sans: 'DM Sans', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -93,6 +97,9 @@
   --color-danger-soft: rgba(220, 38, 38, 0.1);
   --color-warning: #ca8a04;
   --color-warning-soft: rgba(202, 138, 4, 0.12);
+
+  --color-dashboard-tile: rgba(0, 0, 0, 0.04);
+  --color-dashboard-shadow: rgba(0, 0, 0, 0.08);
   --color-success: #16a34a;
   --color-success-soft: rgba(22, 163, 74, 0.12);
 }
@@ -2120,6 +2127,24 @@ th {
   color: var(--color-accent);
 }
 
+/* Account switcher on Accounts page: same underline-tab look as Positions page */
+.ib-accounts-tab-row.system-tabs {
+  margin-top: 0;
+}
+.ib-accounts-tab-row .system-tab {
+  min-width: 8rem;
+  justify-content: center;
+}
+.ib-accounts-tab-count {
+  margin-left: var(--space-1);
+  font-weight: 400;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+.ib-accounts-tab-row .system-tab.active .ib-accounts-tab-count {
+  color: var(--color-text-muted);
+}
+
 .ib-accounts-content {
   background: var(--color-surface-elevated);
   border: 1px solid var(--color-border);
@@ -2127,11 +2152,19 @@ th {
   padding: var(--space-4);
 }
 
+.ib-summary-card {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  box-shadow: 0 1px 3px var(--color-dashboard-shadow);
+}
+
 .ib-summary-row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
   font-size: var(--text-body);
 }
 
@@ -2152,6 +2185,19 @@ th {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-main);
+}
+
+.ib-summary-ib-section {
+  grid-column: span 2;
+  min-width: 200px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.ib-summary-ib-section .ib-summary-item {
+  flex: 1 1 140px;
 }
 
 .ib-positions-title {
@@ -2595,6 +2641,11 @@ th {
   color: var(--color-text-muted);
 }
 
+.replay-data-from-inline {
+  margin-left: var(--space-1);
+  white-space: nowrap;
+}
+
 .replay-bar-symbol-row {
   display: flex;
   align-items: center;
@@ -2997,6 +3048,14 @@ th {
 
 .by-day-total-summary-kv {
   margin-right: var(--space-2);
+}
+
+.performance-time-range-block {
+  margin-top: var(--space-3);
+}
+
+.performance-calendar-section {
+  margin-top: var(--space-4);
 }
 
 .performance-summary-section .tone-positive {
@@ -3884,6 +3943,198 @@ th {
   color: var(--color-text-muted);
   font-weight: 300;
   user-select: none;
+}
+
+/* Dashboard-style overview strip on Accounts page */
+.ib-portfolio-overview-dashboard {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  margin-bottom: 0;
+  padding: var(--space-4);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 2px 8px var(--color-dashboard-shadow), 0 1px 2px var(--color-dashboard-shadow);
+}
+
+.ib-portfolio-charts-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 0;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 2px 8px var(--color-dashboard-shadow), 0 1px 2px var(--color-dashboard-shadow);
+}
+
+.ib-portfolio-overview-row-pie {
+  flex: 1 1 280px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.ib-portfolio-netliq-chart-wrap {
+  flex: 1 1 400px;
+  min-width: 280px;
+  padding: var(--space-4);
+}
+
+.ib-portfolio-charts-row .ib-portfolio-overview-row-pie + .ib-portfolio-netliq-chart-wrap {
+  border-left: 1px solid var(--color-border);
+}
+
+.ib-portfolio-netliq-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ib-portfolio-netliq-chart .ib-portfolio-line-svg {
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  min-height: 220px;
+}
+
+.ib-portfolio-chart-empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+.ib-portfolio-line-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.ib-portfolio-line-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ib-portfolio-line-legend-value {
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.ib-portfolio-pie-title {
+  display: block;
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+}
+
+.ib-portfolio-pie-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.ib-portfolio-pie-svg {
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+}
+
+.ib-portfolio-pie-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.ib-portfolio-pie-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ib-portfolio-pie-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ib-portfolio-pie-legend-label {
+  min-width: 5rem;
+  color: var(--color-text-main);
+}
+
+.ib-portfolio-pie-legend-value {
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.ib-portfolio-pie-legend-pct {
+  color: var(--color-text-muted);
+  margin-left: 0.25rem;
+}
+
+@media (max-width: 640px) {
+  .ib-portfolio-overview-dashboard {
+    grid-template-columns: 1fr;
+  }
+  .ib-portfolio-charts-row {
+    flex-direction: column;
+  }
+  .ib-portfolio-charts-row .ib-portfolio-overview-row-pie + .ib-portfolio-netliq-chart-wrap {
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+.ib-portfolio-overview-dashboard .ib-portfolio-overview-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-dashboard-tile);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.ib-portfolio-overview-dashboard .ib-portfolio-overview-label {
+  display: block;
+  margin-right: 0;
+  font-size: var(--text-tiny);
+  letter-spacing: 0.05em;
+}
+
+.ib-portfolio-overview-dashboard .ib-portfolio-overview-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+  letter-spacing: -0.02em;
+}
+
+.ib-portfolio-overview-dashboard .ib-portfolio-overview-tile-pnl .ib-portfolio-overview-value {
+  font-size: 1.35rem;
 }
 
 .risk-card {

@@ -28,9 +28,9 @@ alwaysApply: true
 
 - **数据库设计（PostgreSQL）** → docs/DATABASE.md  
 - **FSM 状态流转** → docs/fsm/linkage.md  
-- **状态空间** (O,D,M,L,E,S) → docs/STATE_SPACE_MAPPING.md  
-- **配置安全分类 / 风险模型** → docs/CONFIG_SAFETY_TAXONOMY.md  
-- **Guard 边界与微调** → docs/GUARD_TUNING_AND_IMPACT.md  
+- **状态空间** (O,D,M,L,E,S) → docs/research/STATE_SPACE_MAPPING.md  
+- **配置安全分类 / 风险模型** → docs/research/CONFIG_SAFETY_TAXONOMY.md  
+- **Guard 边界与微调** → docs/research/GUARD_TUNING_AND_IMPACT.md  
 
 **何时用**：实现或修改**数据表、写入策略、sink** 时查 DATABASE.md；实现或修改**状态机、状态空间、风控边界、Guard 参数、block reason** 与回测验证时，查 FSM/状态空间/风险/Guard 文档。
 

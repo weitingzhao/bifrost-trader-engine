@@ -47,7 +47,7 @@ order:
   order_type: "market"   # or "limit"
 
 # Safety gates — pipeline-aligned (strategy → state → intent → guard)
-# See docs/CONFIG_SAFETY_TAXONOMY.md
+# See docs/research/CONFIG_SAFETY_TAXONOMY.md
 gates:
   strategy:
     structure:

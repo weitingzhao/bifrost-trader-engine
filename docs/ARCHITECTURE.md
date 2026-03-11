@@ -11,7 +11,7 @@
 | **REQUIREMENTS.md** | 产品功能需求唯一定义：监控、控制、历史、回测、交易基础等（R-M*/R-C*/R-H*/R-B*/R-A*）。 |
 | **本文档 (ARCHITECTURE.md)** | 系统级架构：**运行环境与部署约束**（§2）、三大组成部分、组件划分、数据流、部署视图、需求→组件→阶段映射。 |
 | **PLAN_NEXT_STEPS.md** | 分阶段实现计划、每阶段里程碑与验收标准；验收通过方可进入下一阶段。 |
-| **STATE_SPACE_MAPPING.md / FSM_LINKAGE.md / CONFIG_SAFETY_TAXONOMY.md** | 状态空间、FSM、配置安全边界等专项，此处不重复。 |
+| **research/STATE_SPACE_MAPPING.md**、**FSM_LINKAGE.md**、**research/CONFIG_SAFETY_TAXONOMY.md** | 状态空间、FSM、配置安全边界等专项，此处不重复。 |
 
 ---
 
@@ -82,7 +82,7 @@
 - **队列**：拉取任务（如 backfill 请求）写入**队列**；当前实现采用 **Celery + Redis**（broker 与 result backend 使用同一 Redis，与实时行情可选共用实例、不同 db）；任务行仍写入 **bars_backfill_jobs** 表（job_id 即 Celery task_id），便于 GET /bars/jobs 与前端轮询。
 - **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A servers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
 - **API 行为**：监控/数据 API 收到 backfill 等请求时**仅入队并返回 job_id**；客户端通过 **GET /bars/jobs/{job_id}**（或等效）轮询任务状态与结果；任务完成后可刷新 coverage/列表。
-- **限速与串行**：Worker 串行处理任务并在任务间留间隔（如 2s），以符合 IB 历史数据 Pacing 限制；见 [IB_MARKET_DATA_BOUNDARIES.md](IB_MARKET_DATA_BOUNDARIES.md)。
+- **限速与串行**：Worker 串行处理任务并在任务间留间隔（如 2s），以符合 IB 官方历史数据 Pacing 限制。
 
 ---
 
@@ -219,7 +219,7 @@
 
 ### 5.1 实时行情缓存与联动（R-RM*，可选）
 
-在保留上述数据流的前提下，可增加**实时行情缓存与守护→监控联动**（详见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)）：
+在保留上述数据流的前提下，可增加**实时行情缓存与守护→监控联动**：
 
 - **守护进程**：除心跳写 PG 外，在 **IB 事件回调**中把行情写入 **Redis**（缓存），并通过 **Redis Pub/Sub 或 Streams** 发布「有更新」通知。
 - **Redis**：仅作行情**缓存**与**联动通道**；**唯一写入方为守护进程**；监控 Server **不**向 Redis 写行情。
@@ -309,7 +309,7 @@
 - **阶段 3**：数据获取（账户、持仓、市值、交易历史与统计）；架构上完成策略与监控所需数据的获取；**非实时 K 线拉取（backfill）经队列 + 独立 Worker 进程执行**（§2.7、§4.4）。
 - **阶段 4**：策略框架与回测（R-B1、R-B2）；架构上完成“可回测优化策略 PnL 并验证 Guard”。
 - **阶段 5**：自动交易对冲与监控（R-C2、R-C3）；架构上完成暂停/恢复、一键平敞口等。
-- **实时行情与联动（R-RM*，可选）**：守护双线（心跳+事件）、Redis 行情缓存、Redis Pub/Sub 或 Streams 联动、监控订阅并推前端；详见 [REALTIME_MARKET_DATA_DESIGN.md](REALTIME_MARKET_DATA_DESIGN.md)，步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」。
+- **实时行情与联动（R-RM*，可选）**：守护双线（心跳+事件）、Redis 行情缓存、Redis Pub/Sub 或 Streams 联动、监控订阅并推前端；步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」。
 
 各阶段 **里程碑、检查方式、验证标准** 以 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 为准；**本阶段验收通过后，方可启动下一阶段开发**。
 
@@ -373,7 +373,7 @@
 - **[运行环境与部署约束](ARCHITECTURE.md#2-运行环境与部署约束)** — 本文档 §2
 - **[分步推进计划](PLAN_NEXT_STEPS.md)** — 阶段划分与验收
 - **[FSM 串联](fsm/FSM_LINKAGE.md)** — Daemon/Trading/Hedge 三 FSM 联动
-- **[状态空间](STATE_SPACE_MAPPING.md)** — O,D,M,L,E,S 与代码/配置
-- **[配置安全分类](CONFIG_SAFETY_TAXONOMY.md)** — gates 与安全边界
-- **[Guard 微调与影响](GUARD_TUNING_AND_IMPACT.md)** — 参数调整与后果
+- **[状态空间](research/STATE_SPACE_MAPPING.md)** — O,D,M,L,E,S 与代码/配置
+- **[配置安全分类](research/CONFIG_SAFETY_TAXONOMY.md)** — gates 与安全边界
+- **[Guard 微调与影响](research/GUARD_TUNING_AND_IMPACT.md)** — 参数调整与后果
 - **§9 本文** — 安全边界配置的存储与版本管理（文件 vs 配置注册表、可追溯性、与回测结果匹配）
