@@ -17,6 +17,7 @@ export async function postPositionCategory(item: { name: string; description?: s
   return { ok: j.ok === true, id: j.id, error: j.error }
 }
 
+/** PATCH category (name/description/sort_order). Not exported from api/index; use when adding edit-category UI. */
 export async function patchPositionCategory(id: number, item: { name?: string; description?: string; sort_order?: number }): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch(`${API}/position-categories/${id}`, {
     method: 'PATCH',

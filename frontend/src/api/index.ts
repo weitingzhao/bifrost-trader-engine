@@ -65,7 +65,6 @@ export { fetchQuotes, subscribeQuotes } from './quotes'
 export {
   fetchPositionCategories,
   postPositionCategory,
-  patchPositionCategory,
   deletePositionCategory,
   putPositionCategoryTag,
 } from './positionCategories'
