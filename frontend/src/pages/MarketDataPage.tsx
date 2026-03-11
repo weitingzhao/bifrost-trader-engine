@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Bar, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
 import { fetchBars, fetchQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { fmtTs, fmtUsd } from '../utils/format'
 
 const BAR_PERIODS = [
   { value: '1 D', label: 'Daily' },
@@ -9,21 +10,6 @@ const BAR_PERIODS = [
   { value: '5 mins', label: '5 min' },
   { value: '1 hour', label: '1 hour' },
 ] as const
-
-function fmtTs(ts: number | null | undefined): string {
-  if (ts == null) return '--'
-  return new Date(ts * 1000).toLocaleString()
-}
-
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
 
 interface MarketDataPageProps {
   status: StatusResponse | null

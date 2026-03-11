@@ -2,42 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse, AccountTransaction } from '../types'
 import { getTransactions, postTransactionsFetch } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { fmtDate, fmtUsd, fmtUsd0 } from '../utils/format'
 
 interface TransferPayPageProps {
   status: StatusResponse | null
   onViewChange?: (view: 'accounts') => void
-}
-
-function fmtDate(ts: number | string | null | undefined): string {
-  if (ts == null) return '—'
-  const sec = Number(ts)
-  if (!Number.isFinite(sec)) return '—'
-  const d = new Date(sec > 1e12 ? sec : sec * 1000)
-  return d.toLocaleDateString('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-}
-
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
-function fmtUsd0(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(n)
 }
 
 type SummaryMode = 'year' | 'quarter' | 'month'
@@ -571,7 +540,7 @@ export function TransferPayPage({ status: _status, onViewChange }: TransferPayPa
                   ) : (
                     pagedTransactions.map((tx) => (
                       <tr key={`${tx.account_id}-${tx.ts}-${tx.amount}-${tx.type}`}>
-                        <td>{fmtDate(tx.ts)}</td>
+                        <td>{fmtDate(tx.ts, { locale: 'en-CA' })}</td>
                         <td>{tx.account_id ?? '—'}</td>
                         <td>{tx.type ?? '—'}</td>
                         <td className={tx.amount >= 0 ? 'replay-pnl-detail-positive' : 'replay-pnl-detail-negative'}>

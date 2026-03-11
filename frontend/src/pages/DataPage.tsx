@@ -4,6 +4,7 @@ import { fetchBars, fetchBarsCoverage, fetchBarsJobs, postBarsBackfill, postWatc
 import type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fetchMarketTradingDay } from '../api'
+import { fmtDate, fmtDurationSeconds, fmtTs, fmtTsForPeriod, fmtUsd } from '../utils/format'
 
 const BAR_PERIODS = [
   { value: '1 D', label: 'Daily' },
@@ -21,54 +22,6 @@ const INSPECT_BARS_LIMIT_BY_PERIOD: Record<string, number> = {
 
 function inspectBarsLimitForPeriod(period: string): number {
   return INSPECT_BARS_LIMIT_BY_PERIOD[period] ?? 100
-}
-
-function fmtTs(ts: number | null | undefined): string {
-  if (ts == null) return '--'
-  return new Date(ts * 1000).toLocaleString()
-}
-
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
-function fmtDate(ts: number | null | undefined): string {
-  if (ts == null || !Number.isFinite(ts)) return '—'
-  return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' })
-}
-
-function fmtDurationSeconds(seconds: number | null | undefined): string {
-  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '—'
-  const total = Math.round(seconds)
-  const days = Math.floor(total / 86400)
-  const hours = Math.floor((total % 86400) / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutes}m`
-}
-
-/** X-axis label by period: Daily → date only, intraday → time or short datetime. */
-function fmtTsForPeriod(ts: number | null | undefined, period: string): string {
-  if (ts == null || !Number.isFinite(ts)) return '—'
-  const d = new Date(ts * 1000)
-  if (period === '1 D') {
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  }
-  if (period === '1 min' || period === '5 mins') {
-    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-  }
-  if (period === '1 hour') {
-    return d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' }) + ' ' +
-      d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-  }
-  return d.toLocaleString()
 }
 
 function coverageCell(p: { count: number; min_ts: number | null; max_ts: number | null }): string {
@@ -113,12 +66,6 @@ function coverageStatusDisplay(status: string | undefined): { label: string; nee
     default:
       return { label: '', needBackfill: false, severity: 'ok' }
   }
-}
-
-function statusColor(severity: 'ok' | 'gap' | 'missing'): string {
-  if (severity === 'missing') return 'var(--danger, #c00)'
-  if (severity === 'gap') return 'var(--color-warning, #b8860b)'
-  return 'var(--success, green)'
 }
 
 interface DataPageProps {

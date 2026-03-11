@@ -1,0 +1,299 @@
+import { useEffect, useState } from 'react'
+import type { Execution } from '../../types'
+import { createExecution, updateExecution } from '../../api'
+import { unixToDatetimeLocal } from '../../utils/format'
+
+export interface ExecutionFormState {
+  account_id: string
+  time: string
+  symbol: string
+  sec_type: string
+  side: string
+  quantity: string
+  price: string
+  expiry: string
+  strike: string
+  option_right: string
+  commission: string
+  realized_pnl: string
+  currency: string
+}
+
+const defaultForm: ExecutionFormState = {
+  account_id: '',
+  time: '',
+  symbol: '',
+  sec_type: 'STK',
+  side: 'BUY',
+  quantity: '',
+  price: '',
+  expiry: '',
+  strike: '',
+  option_right: 'C',
+  commission: '',
+  realized_pnl: '',
+  currency: 'USD',
+}
+
+function datetimeLocalToUnix(value: string): number {
+  if (!value || !value.trim()) return Math.floor(Date.now() / 1000)
+  return Math.floor(new Date(value).getTime() / 1000)
+}
+
+interface ExecutionFormModalProps {
+  open: boolean
+  editExec: Execution | null
+  accountOptions: string[]
+  onClose: () => void
+  onSuccess: () => void | Promise<void>
+}
+
+export function ExecutionFormModal({
+  open,
+  editExec,
+  accountOptions,
+  onClose,
+  onSuccess,
+}: ExecutionFormModalProps) {
+  const [execForm, setExecForm] = useState<ExecutionFormState>(defaultForm)
+  const [execFormError, setExecFormError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (open && accountOptions.length > 0 && !editExec) {
+      setExecForm({
+        ...defaultForm,
+        account_id: accountOptions[0] ?? '',
+        time: unixToDatetimeLocal(Date.now() / 1000),
+      })
+    }
+  }, [open, accountOptions, editExec])
+
+  useEffect(() => {
+    if (editExec) {
+      setExecForm({
+        account_id: editExec.account_id ?? '',
+        time: unixToDatetimeLocal(editExec.time),
+        symbol: editExec.symbol ?? '',
+        sec_type: (editExec.sec_type ?? 'STK').toUpperCase(),
+        side: (editExec.side ?? 'BUY').toUpperCase(),
+        quantity: editExec.quantity != null ? String(Math.abs(Number(editExec.quantity))) : '',
+        price: String(editExec.price ?? ''),
+        expiry: editExec.expiry ?? '',
+        strike: String(editExec.strike ?? ''),
+        option_right: (editExec.option_right ?? 'C').toUpperCase().slice(0, 1),
+        commission: String(editExec.commission ?? ''),
+        realized_pnl: String(editExec.realized_pnl ?? ''),
+        currency: editExec.currency ?? 'USD',
+      })
+    }
+  }, [editExec])
+
+  if (!open && !editExec) return null
+
+  return (
+    <div
+      className="modal-overlay"
+      onClick={() => {
+        onClose()
+        setExecFormError(null)
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="exec-modal-title"
+    >
+      <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
+        <h3 id="exec-modal-title">{editExec ? 'Edit execution' : 'Add history'}</h3>
+        {execFormError && <p className="section-hint replay-form-error">{execFormError}</p>}
+        <form
+          className="replay-exec-form"
+          onSubmit={async e => {
+            e.preventDefault()
+            setExecFormError(null)
+            const sym = execForm.symbol.trim()
+            const qRaw = Number(execForm.quantity)
+            const q = Math.abs(qRaw)
+            const p = Number(execForm.price)
+            if (!sym || !Number.isFinite(q) || q <= 0 || !Number.isFinite(p)) {
+              setExecFormError('Fill symbol, quantity (> 0), and price.')
+              return
+            }
+            const timeUnix = datetimeLocalToUnix(execForm.time)
+            const isOpt = (execForm.sec_type || 'STK').toUpperCase() === 'OPT'
+            if (isOpt) {
+              const strikeNum = execForm.strike != null && execForm.strike !== '' ? Number(execForm.strike) : NaN
+              if (!Number.isFinite(strikeNum) || strikeNum <= 0) {
+                setExecFormError('Option strike is required and must be > 0.')
+                return
+              }
+            }
+            let contract_key: string | undefined
+            if (isOpt && sym) {
+              const rawStrike = execForm.strike ? Number(execForm.strike) : 0
+              const strikeStr = Number.isFinite(rawStrike) ? rawStrike.toFixed(1) : '0.0'
+              contract_key = `${sym}|OPT|${execForm.expiry || ''}|${strikeStr}|${(execForm.option_right || 'C').toUpperCase().slice(0, 1)}`
+            } else {
+              contract_key = undefined
+            }
+            const sideUpper = (execForm.side || 'BUY').toUpperCase()
+            const quantityForDb = sideUpper === 'SELL' ? -q : q
+            if (editExec?.id != null) {
+              const body: Record<string, unknown> = {
+                exec_time: timeUnix,
+                symbol: sym,
+                sec_type: execForm.sec_type || 'STK',
+                side: sideUpper,
+                quantity: quantityForDb,
+                price: p,
+                account_id: execForm.account_id.trim(),
+                strike: execForm.strike ? Number(execForm.strike) : undefined,
+                option_right: execForm.option_right || undefined,
+                contract_key: contract_key || undefined,
+                commission: execForm.commission ? Number(execForm.commission) : undefined,
+                realized_pnl: execForm.realized_pnl ? Number(execForm.realized_pnl) : undefined,
+                currency: execForm.currency.trim() || undefined,
+              }
+              const expiryTrimmed = execForm.expiry.trim()
+              if (isOpt && expiryTrimmed && /^\d{6,8}$/.test(expiryTrimmed)) {
+                body.expiry = expiryTrimmed
+              }
+              const res = await updateExecution(editExec.id, body)
+              if (res.ok) {
+                onClose()
+                await onSuccess()
+              } else {
+                setExecFormError(res.error ?? 'Update failed')
+              }
+            } else {
+              const body: Record<string, unknown> = {
+                account_id: execForm.account_id.trim(),
+                time: timeUnix,
+                symbol: sym,
+                sec_type: execForm.sec_type || 'STK',
+                side: sideUpper,
+                quantity: quantityForDb,
+                price: p,
+                source: 'manual',
+                expiry: execForm.expiry.trim() || undefined,
+                strike: execForm.strike ? Number(execForm.strike) : undefined,
+                option_right: execForm.option_right || undefined,
+                contract_key: contract_key || undefined,
+                commission: execForm.commission ? Number(execForm.commission) : undefined,
+                realized_pnl: execForm.realized_pnl ? Number(execForm.realized_pnl) : undefined,
+                currency: execForm.currency.trim() || undefined,
+              }
+              const res = await createExecution(body)
+              if (res.ok) {
+                onClose()
+                await onSuccess()
+              } else {
+                setExecFormError(res.error ?? 'Add failed')
+              }
+            }
+          }}
+        >
+          <div className="replay-exec-form-row">
+            <label>Account</label>
+            <select
+              value={execForm.account_id}
+              onChange={e => setExecForm(f => ({ ...f, account_id: e.target.value }))}
+              required
+            >
+              {accountOptions.map(accId => (
+                <option key={accId} value={accId}>
+                  {accId}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Time</label>
+            <input type="datetime-local" value={execForm.time} onChange={e => setExecForm(f => ({ ...f, time: e.target.value }))} required />
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Symbol</label>
+            <input type="text" value={execForm.symbol} onChange={e => setExecForm(f => ({ ...f, symbol: e.target.value.trim().toUpperCase() }))} placeholder="e.g. NVDA" required />
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Type</label>
+            <div className="replay-exec-type-radios">
+              <label>
+                <input type="radio" name="exec-sec-type" value="STK" checked={(execForm.sec_type || 'STK').toUpperCase() === 'STK'} onChange={e => setExecForm(f => ({ ...f, sec_type: e.target.value }))} />
+                STK
+              </label>
+              <label>
+                <input type="radio" name="exec-sec-type" value="OPT" checked={(execForm.sec_type || 'STK').toUpperCase() === 'OPT'} onChange={e => setExecForm(f => ({ ...f, sec_type: e.target.value }))} />
+                OPT
+              </label>
+            </div>
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Side</label>
+            <div className="replay-exec-type-radios">
+              <label>
+                <input type="radio" name="exec-side" value="BUY" checked={(execForm.side || 'BUY').toUpperCase() === 'BUY'} onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))} />
+                Buy
+              </label>
+              <label>
+                <input type="radio" name="exec-side" value="SELL" checked={(execForm.side || 'BUY').toUpperCase() === 'SELL'} onChange={e => setExecForm(f => ({ ...f, side: e.target.value }))} />
+                Sell
+              </label>
+            </div>
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Quantity</label>
+            <input type="number" step="any" min="0" value={execForm.quantity} onChange={e => setExecForm(f => ({ ...f, quantity: e.target.value }))} required />
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Price</label>
+            <input type="number" step="any" value={execForm.price} onChange={e => setExecForm(f => ({ ...f, price: e.target.value }))} required />
+          </div>
+          {(execForm.sec_type || 'STK').toUpperCase() === 'OPT' && (
+            <>
+              <div className="replay-exec-form-row">
+                <label>Expiry (YYYYMMDD)</label>
+                <input type="text" value={execForm.expiry} onChange={e => setExecForm(f => ({ ...f, expiry: e.target.value }))} placeholder="20251219" />
+              </div>
+              <div className="replay-exec-form-row">
+                <label>STRIKE</label>
+                <input type="number" step="0.1" min="0.1" value={execForm.strike} onChange={e => setExecForm(f => ({ ...f, strike: e.target.value }))} required placeholder="Required, > 0" />
+              </div>
+              <div className="replay-exec-form-row">
+                <label>Right</label>
+                <div className="replay-exec-type-radios">
+                  <label>
+                    <input type="radio" name="exec-option-right" value="C" checked={(execForm.option_right || 'C').toUpperCase() === 'C'} onChange={e => setExecForm(f => ({ ...f, option_right: e.target.value }))} />
+                    Call
+                  </label>
+                  <label>
+                    <input type="radio" name="exec-option-right" value="P" checked={(execForm.option_right || 'C').toUpperCase() === 'P'} onChange={e => setExecForm(f => ({ ...f, option_right: e.target.value }))} />
+                    Put
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
+          <div className="replay-exec-form-row">
+            <label>Commission</label>
+            <input type="number" step="any" value={execForm.commission} onChange={e => setExecForm(f => ({ ...f, commission: e.target.value }))} placeholder="Optional" />
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Realized PnL</label>
+            <input type="number" step="any" value={execForm.realized_pnl} onChange={e => setExecForm(f => ({ ...f, realized_pnl: e.target.value }))} placeholder="Optional" />
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Currency</label>
+            <input type="text" value={execForm.currency} onChange={e => setExecForm(f => ({ ...f, currency: e.target.value }))} placeholder="USD" />
+          </div>
+          <div className="replay-exec-form-actions">
+            <button type="button" className="btn btn-secondary" onClick={() => { onClose(); setExecFormError(null) }}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary">
+              {editExec ? 'Save' : 'Add'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}

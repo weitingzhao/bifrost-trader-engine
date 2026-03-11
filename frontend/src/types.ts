@@ -192,6 +192,7 @@ export interface ControlResponse {
   ok?: boolean
   error?: string
   message?: string
+  statusText?: string
 }
 
 /** Risk/post-mortem summary for 复盘与风控 page (GET /risk_summary) */

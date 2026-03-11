@@ -1,35 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
 import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
-
-function fmtTs(ts: number | null | undefined): string {
-  if (ts == null) return '--'
-  return new Date(ts * 1000).toLocaleString()
-}
-
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
-/** Console log line parsing: extract level and optional timestamp prefix for console coloring */
-/** Format elapsed since ts (Unix sec): seconds → minutes → hours → days */
-function fmtSince(ts: number | null | undefined): string {
-  if (ts == null || !Number.isFinite(ts)) return '—'
-  const nowSec = Date.now() / 1000
-  const elapsed = Math.max(0, Math.floor(nowSec - ts))
-  if (elapsed < 60) return `${elapsed}s`
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`
-  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h`
-  return `${Math.floor(elapsed / 86400)}d`
-}
+import { fmtSince, fmtTs, fmtUsd } from '../utils/format'
 
 const HEDGE_REASON_LABELS: Record<string, string> = {
   trading_suspended: 'Hedge suspended',

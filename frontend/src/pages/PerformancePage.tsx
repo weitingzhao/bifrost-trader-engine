@@ -3,54 +3,7 @@ import type { Execution, PerformanceResponse, StatusResponse } from '../types'
 import type { BackendOptPair } from '../types'
 import { fetchExecutions, fetchPerformance } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-
-function fmtChicagoTime(unixSec: number | string | null | undefined): string {
-  let sec: number
-  if (typeof unixSec === 'string') sec = parseFloat(unixSec)
-  else if (typeof unixSec === 'number') sec = unixSec
-  else return '—'
-  if (!Number.isFinite(sec)) return '—'
-  if (sec > 1e12) sec /= 1000
-  const d = new Date(sec * 1000)
-  const f = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Chicago',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-  const parts = f.formatToParts(d)
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
-  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`
-}
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
-/** Format PnL: treat 0 (or rounding to 0) as $0.00 so we never show -$0.00. */
-function fmtPnl(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  const val = Number(n)
-  if (Math.abs(val) < 0.005) return fmtUsd(0)
-  return fmtUsd(val)
-}
-
-/** Format PnL for calendar cells: round to integer, no decimals. */
-function fmtPnlCalendar(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  const val = Number(n)
-  if (Math.abs(val) < 0.5) return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(0)
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Math.round(val))
-}
+import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
 
 /** Option right to full name: C/CALL -> CALL, P/PUT -> PUT. */
 function optionRightToFull(r: string | null | undefined): string {

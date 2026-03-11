@@ -2,26 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { RealtimeQuote, StatusResponse } from '../types'
 import { fetchBarsBenchmark, fetchQuotes, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
-function fmtSince(ts: number | null | undefined): string {
-  if (ts == null || !Number.isFinite(ts)) return '—'
-  const nowSec = Date.now() / 1000
-  const elapsed = Math.max(0, Math.floor(nowSec - ts))
-  if (elapsed < 60) return `${elapsed}s`
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`
-  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h`
-  return `${Math.floor(elapsed / 86400)}d`
-}
+import { fmtSince, fmtUsd } from '../utils/format'
 
 export interface LivePageProps {
   status: StatusResponse | null

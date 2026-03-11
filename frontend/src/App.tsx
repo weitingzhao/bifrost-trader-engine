@@ -14,8 +14,9 @@ import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
 import { DataPage } from './pages/DataPage'
-import { PositionsPage, type PortfolioView } from './pages/PositionsPage'
+import { PositionsPage } from './pages/PositionsPage'
 import { TradeHistoryPage } from './pages/TradeHistoryPage'
+import type { PortfolioView } from './pages/portfolio/types'
 import { PerformancePage } from './pages/PerformancePage'
 import { ResearchRiskAnalysisPage } from './pages/ResearchRiskAnalysisPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -23,6 +24,7 @@ import { TransferPayPage } from './pages/TransferPayPage'
 import { BacktestPage } from './pages/BacktestPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import logoImg from '../img/logo.png'
+import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import './App.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
@@ -55,21 +57,6 @@ interface StreamSummaryItem {
   label: string
   value: string
   tone: StreamTone
-}
-
-function fmtUsdCompact(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '--'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(n)
-}
-
-function fmtPctCompact(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '--'
-  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
 }
 
 /** Small outline icon for submenu items (Portfolio & Research). */

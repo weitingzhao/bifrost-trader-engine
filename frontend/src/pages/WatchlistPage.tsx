@@ -3,6 +3,7 @@ import type { IbAccountSnapshot, IbPositionRow, RealtimeQuote, StatusResponse, W
 import type { BarStatsResponse } from '../types'
 import { fetchWatchlist, fetchBarStats, fetchQuotes, postBarsFetch, postWatchlist, deleteWatchlist } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { fmtUsd } from '../utils/format'
 
 interface WatchlistPageProps {
   status: StatusResponse | null
@@ -134,11 +135,6 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     () => Object.fromEntries(realtimeQuotes.map(q => [q.symbol, q])),
     [realtimeQuotes],
   )
-
-  function fmtUsdShort(n: number | null | undefined): string {
-    if (n == null || !Number.isFinite(n)) return '—'
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
-  }
 
   const handleAddWatchlist = useCallback(
     async (contract_key: string, source: string, symbol?: string, sec_type?: string, expiry?: string, strike?: number, option_right?: string) => {
@@ -319,7 +315,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
             return (
               <tr key={item.contract_key}>
                 <td title={item.contract_key}>{watchlistItemLabel(item)}</td>
-                <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsdShort(q.last) : '—'}</td>
+                <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsd(q.last) : '—'}</td>
                 <td>
                 <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
                   <button
@@ -378,7 +374,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
             return (
               <tr key={item.contract_key}>
                 <td title={item.contract_key}>{item.symbol || watchlistItemLabel(item)}</td>
-                <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsdShort(q.last) : '—'}</td>
+                <td>{q?.last != null && Number.isFinite(q.last) ? fmtUsd(q.last) : '—'}</td>
                 <td>{formatExpiry(item.expiry)}</td>
                 <td>{formatOptionRight(item.option_right)}</td>
                 <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>

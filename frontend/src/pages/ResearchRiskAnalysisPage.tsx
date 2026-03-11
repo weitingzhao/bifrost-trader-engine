@@ -2,16 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { RiskSummaryResponse } from '../types'
 import { fetchRiskSummary } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
+import { fmtUsd } from '../utils/format'
 
 interface ResearchBreadcrumbProps {
   onGoToScreener?: () => void

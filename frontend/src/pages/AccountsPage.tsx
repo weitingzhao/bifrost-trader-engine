@@ -4,6 +4,7 @@ import { fetchBarsBenchmark, fetchQuotes, fetchExecutionsFreshness, postExecutio
 import { fetchPositionCategories, postPositionCategory, deletePositionCategory, putPositionCategoryTag } from '../api'
 import type { PositionCategory } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { fmtExpiry, fmtUsd, fmtUsdRound0 } from '../utils/format'
 
 type DailyBenchmark = {
   bar_time: number
@@ -14,34 +15,6 @@ type DailyBenchmark = {
 }
 
 type PriceSource = 'live' | 'db' | 'daemon' | null
-
-function fmtUsd(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n)
-}
-
-function fmtUsdRound0(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Math.round(n))
-}
-
-function fmtExpiry(raw: string | undefined): string {
-  if (!raw || typeof raw !== 'string') return '—'
-  const s = String(raw).trim().replace(/\D/g, '')
-  if (s.length === 8) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
-  if (s.length === 6) return `${s.slice(0, 4)}-${s.slice(4, 6)}`
-  return raw
-}
 
 function getNetLiq(a: IbAccountSnapshot): number {
   const v = a.summary?.NetLiquidation
