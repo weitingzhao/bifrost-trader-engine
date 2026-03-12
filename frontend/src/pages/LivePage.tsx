@@ -1,8 +1,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { OpenOrder, PositionCategory, RealtimeQuote, StatusResponse } from '../types'
-import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, postRefreshTickerSubscriptions, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
+import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, postReleaseTickerSubscriptions, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { fmtTs, fmtUsd, fmtUsdRound0 } from '../utils/format'
+import { fmtSince, fmtTs, fmtUsd, fmtUsdRound0, parseOptionContractKey } from '../utils/format'
 import { computeDailyChange, type DailyBenchmark } from './accounts/accountsUtils'
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
@@ -49,6 +50,19 @@ function getDailyRefTooltip(bench: DailyBenchmark | undefined, last: number | nu
   const lines: string[] = [`Daily % / Daily $ ref: ${fmtUsd(ref)} (${refLabel}), bar date: ${barDate}`]
   if (last != null && Number.isFinite(last)) lines.push(`Current last: ${fmtUsd(last)}`)
   return lines.join('\n')
+}
+
+/** Format qty for Qty / Filled/Rem: integer part bold+yellow, whole numbers add muted ".0". */
+function fmtQtyWithMutedDecimal(v: number | string | null | undefined): ReactNode {
+  if (v == null || (typeof v === 'string' && v.trim() === '')) return '—'
+  const num = Number(v)
+  if (!Number.isFinite(num)) return '—'
+  const intPart = Math.floor(num)
+  const isWhole = Number.isInteger(num) || num === intPart
+  if (isWhole) {
+    return <><span className="open-order-qty-intrinsic">{intPart}</span><span className="decimal-muted">.0</span></>
+  }
+  return <><span className="open-order-qty-intrinsic">{intPart}</span><span className="decimal-muted">.{String(num).split('.')[1] ?? '0'}</span></>
 }
 
 export interface LivePageProps {
@@ -540,16 +554,16 @@ export function LivePage({ status }: LivePageProps) {
               type="button"
               className="btn btn-small btn-size-default"
               onClick={async () => {
-                setStreamSyncFeedback('Syncing…')
+                setStreamSyncFeedback('Releasing…')
                 try {
-                  const res = await postRefreshTickerSubscriptions()
-                  setStreamSyncFeedback(res.ok ? 'Sync requested' : res.error || 'Failed')
+                  const res = await postReleaseTickerSubscriptions()
+                  setStreamSyncFeedback(res.ok ? 'Released; daemon will restore on next heartbeat' : res.error || 'Failed')
                 } catch {
                   setStreamSyncFeedback('Failed')
                 }
                 setTimeout(() => setStreamSyncFeedback(null), 4000)
               }}
-              title="Sync Event subscription with current Wishlist and Position symbols: unsubscribe symbols no longer in either."
+              title="Release all Real-time ticker subscriptions (same as Status → Event Subscribe → Release). Daemon will restore subscriptions on next heartbeat."
             >
               Refresh
             </button>
@@ -1001,41 +1015,126 @@ export function LivePage({ status }: LivePageProps) {
           <div>
             <h2 className="daemon-card-title page-title-with-tooltip">
               Open Orders
-              <InfoTooltip text="Unfilled orders from daemon (event-driven). Daemon writes to DB on orderStatus/openOrder events; this page polls GET /open-orders and also receives open_orders via GET /status. Updates every few seconds." />
+              <InfoTooltip text="Unfilled orders from daemon (event-driven). Daemon writes to DB on orderStatus/openOrder events; this page polls GET /open-orders and also receives open_orders via GET /status. Data source: PostgreSQL table daemon_open_orders. Account ID is the IB account that placed each order. Updates every few seconds." />
             </h2>
           </div>
           {openOrdersUpdatedAt != null && (
             <span className="section-hint" style={{ marginLeft: 'auto' }}>Last updated: {fmtTs(openOrdersUpdatedAt)}</span>
           )}
+          <span className="section-hint" style={{ marginLeft: 8 }}>Source: DB table daemon_open_orders</span>
         </div>
         <div className="open-orders-table-wrap">
           {openOrders.length === 0 ? (
             <p className="section-hint">No open orders</p>
           ) : (
-            <table className="open-orders-table table-operations" role="grid" aria-label="Open orders">
-              <thead>
-                <tr>
-                  <th scope="col">Symbol</th>
-                  <th scope="col">Side</th>
-                  <th scope="col">Qty</th>
-                  <th scope="col">Limit</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Filled / Remaining</th>
-                </tr>
-              </thead>
-              <tbody>
-                {openOrders.map((o, i) => (
-                  <tr key={o.order_id ?? o.perm_id ?? i}>
-                    <td>{o.symbol ?? '—'}</td>
-                    <td>{o.action ?? '—'}</td>
-                    <td>{o.total_quantity != null ? Number(o.total_quantity) : '—'}</td>
-                    <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
-                    <td>{o.status ?? '—'}</td>
-                    <td>{o.filled != null && o.remaining != null ? `${o.filled} / ${o.remaining}` : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              {(() => {
+                const optionOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'OPT')
+                const stockOrders = openOrders.filter((o) => ((o.sec_type ?? '').toString().toUpperCase()) === 'STK')
+                return (
+                  <>
+                    {optionOrders.length > 0 && (
+                      <div className="open-orders-section" style={{ marginBottom: 'var(--space-3)' }}>
+                        <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Option (OPT)</h3>
+                        <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Option">
+                          <thead>
+                            <tr>
+                              <th scope="col">Account ID</th>
+                              <th scope="col">Symbol</th>
+                              <th scope="col">Expiry</th>
+                              <th scope="col">Strike</th>
+                              <th scope="col">Opt side</th>
+                              <th scope="col">Side</th>
+                              <th scope="col">Qty</th>
+                              <th scope="col">Limit</th>
+                              <th scope="col">Status</th>
+                              <th scope="col">Filled / Rem</th>
+                              <th scope="col">Submit</th>
+                              <th scope="col">Since</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {optionOrders.map((o, i) => {
+                              const optParts = parseOptionContractKey(o.contract_key)
+                              const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
+                              return (
+                                <tr key={o.order_id ?? o.perm_id ?? i}>
+                                  <td>{o.account_id ?? '—'}</td>
+                                  <td>{o.symbol ?? '—'}</td>
+                                  <td>{optParts.expiry}</td>
+                                  <td>{optParts.strike === '—' ? '—' : fmtUsd(Number(optParts.strike))}</td>
+                                  <td>{optParts.rightLabel}</td>
+                                  <td>{o.action ?? '—'}</td>
+                                  <td>{o.total_quantity != null ? Math.round(Number(o.total_quantity)) : '—'}</td>
+                                  <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                                  <td>{o.status ?? '—'}</td>
+                                  <td>
+                                    {o.filled != null && o.remaining != null ? (
+                                      <>{Math.round(Number(o.filled))} / {Math.round(Number(o.remaining))}</>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </td>
+                                  <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
+                                  <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {stockOrders.length > 0 && (
+                      <div className="open-orders-section">
+                        <h3 className="open-orders-subtitle" style={{ fontSize: 'var(--text-caption)', fontWeight: 600, marginBottom: 'var(--space-1)' }}>Stock (STK)</h3>
+                        <table className="open-orders-table table-operations" role="grid" aria-label="Open orders Stock">
+                          <thead>
+                            <tr>
+                              <th scope="col">Account ID</th>
+                              <th scope="col">Symbol</th>
+                              <th scope="col">Side</th>
+                              <th scope="col">Qty</th>
+                              <th scope="col">Limit</th>
+                              <th scope="col">Status</th>
+                              <th scope="col">Filled / Rem</th>
+                              <th scope="col">Submit</th>
+                              <th scope="col">Since</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {stockOrders.map((o, i) => {
+                              const submitTs = o.updated_ts != null && Number.isFinite(Number(o.updated_ts)) ? Number(o.updated_ts) : null
+                              return (
+                                <tr key={o.order_id ?? o.perm_id ?? i}>
+                                  <td>{o.account_id ?? '—'}</td>
+                                  <td>{o.symbol ?? '—'}</td>
+                                  <td>{o.action ?? '—'}</td>
+                                  <td>{o.total_quantity != null ? fmtQtyWithMutedDecimal(o.total_quantity) : '—'}</td>
+                                  <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                                  <td>{o.status ?? '—'}</td>
+                                  <td>
+                                    {o.filled != null && o.remaining != null ? (
+                                      <>{fmtQtyWithMutedDecimal(o.filled)} / {fmtQtyWithMutedDecimal(o.remaining)}</>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </td>
+                                  <td>{submitTs != null ? fmtTs(submitTs) : '—'}</td>
+                                  <td>{submitTs != null ? `${fmtSince(submitTs)} ago` : '—'}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {optionOrders.length === 0 && stockOrders.length === 0 && (
+                      <p className="section-hint">No OPT or STK open orders (other sec types filtered)</p>
+                    )}
+                  </>
+                )
+              })()}
+            </>
           )}
         </div>
       </div>

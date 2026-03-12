@@ -239,3 +239,14 @@ export function getContractLabelParts(contract_key: string): { symbol: string; r
   const rightLabel = right === 'C' ? 'CALL' : right === 'P' ? 'PUT' : right || ''
   return { symbol, rightLabel }
 }
+
+/** Parse OPT contract_key (symbol|OPT|expiry|strike|right) into Expiry, Strike, Side. rightLabel: C→CALL, P→PUT. */
+export function parseOptionContractKey(contract_key: string | null | undefined): { expiry: string; strike: string; right: string; rightLabel: string } {
+  if (!contract_key || !contract_key.trim()) return { expiry: '—', strike: '—', right: '—', rightLabel: '—' }
+  const parts = contract_key.split('|')
+  const expiry = (parts[2] ?? '').trim() || '—'
+  const strike = (parts[3] ?? '').trim() || '—'
+  const right = ((parts[4] ?? '').toString().toUpperCase().slice(0, 1)) || '—'
+  const rightLabel = right === 'C' ? 'CALL' : right === 'P' ? 'PUT' : right
+  return { expiry, strike, right, rightLabel }
+}

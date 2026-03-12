@@ -1,6 +1,6 @@
-import type { DaemonHeartbeat, IbConfig, OpenOrder, StatusResponse } from '../../../types'
+import type { DaemonHeartbeat, IbConfig, StatusResponse } from '../../../types'
 import { InfoTooltip } from '../../../components/InfoTooltip'
-import { fmtTs, fmtUsd } from '../../../utils/format'
+import { fmtTs } from '../../../utils/format'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
 
@@ -223,40 +223,9 @@ export function StatusDaemonPanel({
             <InfoTooltip text="Current unfilled orders from daemon (event-driven). Refreshed with status poll." />
           </div>
           <div className="daemon-group-body">
-            {(() => {
-              const orders: OpenOrder[] = j?.open_orders ?? []
-              if (orders.length === 0) {
-                return <p className="section-hint">No open orders</p>
-              }
-              return (
-                <div className="open-orders-table-wrap">
-                  <table className="open-orders-table" role="grid" aria-label="Open orders">
-                    <thead>
-                      <tr>
-                        <th scope="col">Symbol</th>
-                        <th scope="col">Side</th>
-                        <th scope="col">Qty</th>
-                        <th scope="col">Limit</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Filled / Remaining</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {orders.map((o, i) => (
-                        <tr key={o.order_id ?? o.perm_id ?? i}>
-                          <td>{o.symbol ?? '—'}</td>
-                          <td>{o.action ?? '—'}</td>
-                          <td>{o.total_quantity != null ? Number(o.total_quantity) : '—'}</td>
-                          <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
-                          <td>{o.status ?? '—'}</td>
-                          <td>{o.filled != null && o.remaining != null ? `${o.filled} / ${o.remaining}` : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            })()}
+            <p className="section-hint countdown-line">
+              Open orders: <span className="countdown-num">{j?.open_orders?.length ?? 0}</span>
+            </p>
           </div>
         </div>
       </div>

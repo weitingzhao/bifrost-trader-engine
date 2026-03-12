@@ -2111,6 +2111,16 @@ body::before {
 .open-orders-live-card .open-orders-table tbody tr:nth-child(even) {
   background: var(--color-bg-subtle);
 }
+/* Qty / Filled/Rem: integer part bold + yellow for visibility */
+.open-orders-live-card .open-order-qty-intrinsic {
+  font-weight: 700;
+  color: #e6b800;
+}
+/* Filled/Rem: mute ".0" for whole numbers */
+.open-orders-live-card .decimal-muted {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
 
 .daemon-group-body .controls {
   margin-top: var(--space-2);
