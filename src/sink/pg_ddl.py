@@ -886,6 +886,14 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 "ALTER TABLE daemon_heartbeat ADD COLUMN listener_2_client_id integer",
             ),
             (
+                "last_control_message",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN last_control_message text",
+            ),
+            (
+                "subscribed_tickers",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN subscribed_tickers text[]",
+            ),
+            (
                 "run_status_heartbeat_interval",
                 "ALTER TABLE daemon_run_status ADD COLUMN heartbeat_interval_sec smallint",
             ),

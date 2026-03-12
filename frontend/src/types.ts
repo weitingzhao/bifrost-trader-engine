@@ -184,6 +184,8 @@ export interface DaemonHeartbeat {
   /** Listener on Secondary host (settings.ib2_host, ib2_client_id_listener) */
   listener_2_connected?: boolean
   listener_2_client_id?: number | null
+  /** Last control message (e.g. init_ticker error: 请清空订阅). Cleared on success. */
+  last_control_message?: string | null
 }
 
 export interface StatusRow {

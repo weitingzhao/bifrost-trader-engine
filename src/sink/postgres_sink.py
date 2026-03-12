@@ -712,7 +712,7 @@ class PostgreSQLSink(StatusSink):
                     return None
                 row_id, command, created_at = row
                 cmd = (command or "").strip().lower()
-                if cmd not in ("stop", "flatten", "retry_ib", "release_ib", "refresh_accounts", "refresh_replay", "refresh_ticker_subscriptions"):
+                if cmd not in ("stop", "flatten", "retry_ib", "release_ib", "refresh_accounts", "refresh_replay", "refresh_ticker_subscriptions", "release_ticker_subscriptions", "init_ticker_subscriptions"):
                     cmd = "stop"  # treat unknown as stop for safety
                 if consume_only is not None and cmd not in consume_only:
                     return None  # do not consume this command (caller may leave flatten for same process to consume)
@@ -847,6 +847,36 @@ class PostgreSQLSink(StatusSink):
                         continue
                 logger.debug("write_daemon_heartbeat failed: %s", e)
                 return
+
+    def write_daemon_control_message(self, message: Optional[str]) -> None:
+        """Set or clear daemon_heartbeat.last_control_message (e.g. init_ticker error). None clears."""
+        if not self._ensure_conn():
+            return
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE daemon_heartbeat SET last_control_message = %s WHERE id = 1",
+                    (message,),
+                )
+            self._conn.commit()
+        except Exception as e:
+            self._conn.rollback()
+            logger.debug("write_daemon_control_message failed: %s", e)
+
+    def write_daemon_subscribed_tickers(self, symbols: List[str]) -> None:
+        """Write daemon_heartbeat.subscribed_tickers (actual list from daemon) so status API can return it; keeps UI in sync after Release."""
+        if not self._ensure_conn():
+            return
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE daemon_heartbeat SET subscribed_tickers = %s WHERE id = 1",
+                    (symbols or [],),
+                )
+            self._conn.commit()
+        except Exception as e:
+            self._conn.rollback()
+            logger.debug("write_daemon_subscribed_tickers failed: %s", e)
 
     def get_last_ib_client_id(self) -> Optional[int]:
         """Read daemon_heartbeat.ib_client_id for id=1. Used at startup to pick next client_id (last+1) when last is not null, so restart after crash can avoid 'client id in use'."""

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
-import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postRefreshTickerSubscriptions, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
+import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postReleaseTickerSubscriptions, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { fmtTs, fmtUsd } from '../utils/format'
@@ -59,7 +59,7 @@ export function StatusPage({
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
   const [celeryCtrlMsg, setCeleryCtrlMsg] = useState({ text: '', isErr: false })
-  const [syncTickerLoading, setSyncTickerLoading] = useState(false)
+  const [releaseTickerLoading, setReleaseTickerLoading] = useState(false)
   const [syncTickerMsg, setSyncTickerMsg] = useState({ text: '', isErr: false })
   const [tick, setTick] = useState(0)
   const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
@@ -328,7 +328,7 @@ export function StatusPage({
       {showSystemSection && (
       <div className="card process-section system-tabs-wrapper">
         <div className="status-section-heading-row">
-          <h2 className="status-section-heading">System status</h2>
+          <h2 className="status-section-heading">Status</h2>
           <div className="status-section-actions">
             <button
               type="button"
@@ -452,7 +452,7 @@ export function StatusPage({
       {showConsoleSection && (
       <div className="card process-section system-tabs-wrapper stream-event-card">
         <div className="status-section-heading-row">
-          <h2 className="status-section-heading">Stream Event</h2>
+          <h2 className="status-section-heading">Event</h2>
         </div>
         <div className="status-management-celery-row stream-event-row">
           <div className="status-panel-section status-management-celery-half stream-event-strategy-quarter">
@@ -488,31 +488,36 @@ export function StatusPage({
                   Event Subscribe
                   <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Watchlist STK + strategy symbol)." />
                 </h2>
+                {hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.subscribed_tickers?.length ?? 0) >= 0 && (
+                  <span className="event-subscribe-ticker-count" aria-label="Subscribed ticker count">
+                    {j?.subscribed_tickers?.length ?? 0} ticker{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'}
+                  </span>
+                )}
               </div>
-              {hb?.daemon_alive != null && hb?.daemon_alive && (
+              <div className="event-subscribe-buttons">
                 <button
                   type="button"
                   className="btn-resume"
-                  title="Sync Real-time ticker with Watchlist (subscribe/add, unsubscribe/remove); list updates on next heartbeat"
-                  disabled={syncTickerLoading}
+                  title="Release all Real-time ticker subscriptions; daemon will restore on next heartbeat"
+                  disabled={releaseTickerLoading || !hb?.daemon_alive}
                   onClick={async () => {
-                    setSyncTickerLoading(true)
+                    setReleaseTickerLoading(true)
                     try {
-                      const res = await postRefreshTickerSubscriptions()
+                      const res = await postReleaseTickerSubscriptions()
                       if (res.ok && typeof loadStatus === 'function') {
-                        setMsg(setSyncTickerMsg, 'Synced', false)
+                        setMsg(setSyncTickerMsg, 'Released; restoring on next heartbeat', false)
                         scheduleMsgClear(setSyncTickerMsg, syncTickerMsgClearRef)
                         setTimeout(() => loadStatus(), 1500)
                       }
                       if (!res.ok && res.error) setMsg(setSyncTickerMsg, res.error, true)
                     } finally {
-                      setSyncTickerLoading(false)
+                      setReleaseTickerLoading(false)
                     }
                   }}
                 >
-                  {syncTickerLoading ? 'Syncing…' : 'Sync'}
+                  {releaseTickerLoading ? 'Releasing…' : 'Release'}
                 </button>
-              )}
+              </div>
             </div>
             <div className="event-subscribe-body">
             <table className="table-operations table-event-subscribe">
@@ -583,6 +588,11 @@ export function StatusPage({
             {syncTickerMsg.text ? (
               <div className={`msg ${syncTickerMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
                 {syncTickerMsg.text}
+              </div>
+            ) : null}
+            {hb?.last_control_message ? (
+              <div className="msg err" style={{ marginTop: '0.5rem' }} role="alert">
+                {hb.last_control_message}
               </div>
             ) : null}
             </div>

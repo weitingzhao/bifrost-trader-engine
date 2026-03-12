@@ -390,8 +390,16 @@ class GsTrading:
         await _control_heartbeat.heartbeat(self)
 
     async def _refresh_ticker_subscriptions(self) -> None:
-        """Sync Real-time ticker subscriptions with Watchlist STK + active symbol."""
+        """Sync = Release then Init: unsubscribe all, then subscribe to ideal set."""
         await _instrument_prices.refresh_ticker_subscriptions(self)
+
+    async def _release_ticker_subscriptions(self) -> None:
+        """Unsubscribe all Real-time ticker subscriptions."""
+        await _instrument_prices.release_ticker_subscriptions(self)
+
+    async def _init_ticker_subscriptions(self) -> None:
+        """If no subscriptions: subscribe to watchlist + all positions. Else write error to last_control_message."""
+        await _instrument_prices.init_ticker_subscriptions(self)
 
     def _get_position_stk_instruments(self) -> dict:
         """From accounts_data aggregate STK instruments; return contract_key -> meta."""

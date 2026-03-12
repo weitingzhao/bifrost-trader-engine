@@ -297,12 +297,34 @@ def post_control_refresh_replay(request: Request) -> JSONResponse:
 
 @router.post("/control/refresh_ticker_subscriptions")
 def post_control_refresh_ticker_subscriptions(request: Request) -> JSONResponse:
-    """Insert 'refresh_ticker_subscriptions' into daemon_control; daemon will sync real-time ticker with Watchlist on next poll."""
+    """Insert 'refresh_ticker_subscriptions' into daemon_control; daemon will Release then Init on next poll."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
     if write_control_command(control_via_db, "refresh_ticker_subscriptions"):
         return JSONResponse(status_code=200, content={"ok": True, "message": "refresh_ticker_subscriptions written to daemon_control"})
+    return JSONResponse(status_code=500, content={"error": "failed to write control command"})
+
+
+@router.post("/control/release_ticker_subscriptions")
+def post_control_release_ticker_subscriptions(request: Request) -> JSONResponse:
+    """Insert 'release_ticker_subscriptions' into daemon_control; daemon will unsubscribe all tickers on next poll."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
+    if write_control_command(control_via_db, "release_ticker_subscriptions"):
+        return JSONResponse(status_code=200, content={"ok": True, "message": "release_ticker_subscriptions written to daemon_control"})
+    return JSONResponse(status_code=500, content={"error": "failed to write control command"})
+
+
+@router.post("/control/init_ticker_subscriptions")
+def post_control_init_ticker_subscriptions(request: Request) -> JSONResponse:
+    """Insert 'init_ticker_subscriptions' into daemon_control; daemon will subscribe to watchlist+positions if none subscribed, else set last_control_message."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
+    if write_control_command(control_via_db, "init_ticker_subscriptions"):
+        return JSONResponse(status_code=200, content={"ok": True, "message": "init_ticker_subscriptions written to daemon_control"})
     return JSONResponse(status_code=500, content={"error": "failed to write control command"})
 
 

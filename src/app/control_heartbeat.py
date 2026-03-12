@@ -155,9 +155,27 @@ async def heartbeat(app: Any) -> None:
             and app.connector.is_connected
         ):
             logger.info(
-                "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Watchlist"
+                "[Daemon] control (db): refresh_ticker_subscriptions → Release then Init"
             )
             await app._refresh_ticker_subscriptions()
+        if (
+            cmd == "release_ticker_subscriptions"
+            and app.connector.is_connected
+        ):
+            logger.info(
+                "[Daemon] control (db): release_ticker_subscriptions → unsubscribe all"
+            )
+            await app._release_ticker_subscriptions()
+            if app._status_sink and hasattr(app._status_sink, "write_daemon_subscribed_tickers"):
+                app._status_sink.write_daemon_subscribed_tickers([])
+        if (
+            cmd == "init_ticker_subscriptions"
+            and app.connector.is_connected
+        ):
+            logger.info(
+                "[Daemon] control (db): init_ticker_subscriptions → subscribe if empty"
+            )
+            await app._init_ticker_subscriptions()
         suspended = apply_run_status_transition(app)
         interval_sec = effective_heartbeat_interval(app)
         state_label = app._fsm_daemon.current.value
@@ -234,9 +252,27 @@ async def heartbeat(app: Any) -> None:
             and app.connector.is_connected
         ):
             logger.info(
-                "[Daemon] control (db): refresh_ticker_subscriptions → syncing Real-time ticker with Watchlist"
+                "[Daemon] control (db): refresh_ticker_subscriptions → Release then Init"
             )
             await app._refresh_ticker_subscriptions()
+        if (
+            cmd == "release_ticker_subscriptions"
+            and app.connector.is_connected
+        ):
+            logger.info(
+                "[Daemon] control (db): release_ticker_subscriptions → unsubscribe all"
+            )
+            await app._release_ticker_subscriptions()
+            if app._status_sink and hasattr(app._status_sink, "write_daemon_subscribed_tickers"):
+                app._status_sink.write_daemon_subscribed_tickers([])
+        if (
+            cmd == "init_ticker_subscriptions"
+            and app.connector.is_connected
+        ):
+            logger.info(
+                "[Daemon] control (db): init_ticker_subscriptions → subscribe if empty"
+            )
+            await app._init_ticker_subscriptions()
         suspended = apply_run_status_transition(app)
         if not app.connector.is_connected:
             now_t = time.time()
@@ -336,7 +372,16 @@ async def heartbeat(app: Any) -> None:
                     **event_subscribe_flags(app),
                     **listener_heartbeat_kwargs(app),
                 )
-        await app._refresh_ticker_subscriptions()
+        # Ticker subscriptions: every heartbeat run Redis-based sync (a/b/c); after Release, next heartbeat restores subscriptions.
+        if app.connector.is_connected:
+            await app._refresh_ticker_subscriptions()
+            # Write actual subscribed list to DB so status API / UI show current state (e.g. 0 tickers right after Release).
+            if app._status_sink and hasattr(app._status_sink, "write_daemon_subscribed_tickers"):
+                if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
+                    current = sorted(app._redis_quotes.get_subscribed_symbols())
+                else:
+                    current = sorted(app.connector.get_subscribed_ticker_symbols())
+                app._status_sink.write_daemon_subscribed_tickers(current)
         if not suspended:
             logger.info(
                 "[Daemon] state=RUNNING | heartbeat: tick, running maybe_hedge"

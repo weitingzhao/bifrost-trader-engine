@@ -2,17 +2,19 @@
 
 Daemon is the only writer; monitor subscribes and reads. Key naming: quote:{symbol}.
 TTL on quote keys to avoid stale data. Channel: daemon:quotes (minimal payload: symbol + ts).
+Subscribed ticker set: ticker:subscribed (Redis SET), updated on subscribe/unsubscribe.
 """
 
 import json
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 QUOTE_KEY_PREFIX = "quote:"
+TICKER_SUBSCRIBED_KEY = "ticker:subscribed"
 QUOTE_TTL_SEC = 300
 PUB_CHANNEL = "daemon:quotes"
 
@@ -149,6 +151,82 @@ class RedisQuotesClient:
             if q is not None:
                 out.append(q)
         return out
+
+    def add_symbol_subscribed(self, symbol: str) -> bool:
+        """Add symbol to Redis SET ticker:subscribed. Returns True on success."""
+        if not self._client:
+            return False
+        s = (symbol or "").strip()
+        if not s:
+            return False
+        try:
+            self._client.sadd(TICKER_SUBSCRIBED_KEY, s)
+            return True
+        except Exception as e:
+            logger.warning("Redis add_symbol_subscribed failed symbol=%s: %s", symbol, e)
+            return False
+
+    def remove_symbol_subscribed(self, symbol: str) -> bool:
+        """Remove symbol from Redis SET ticker:subscribed. Returns True on success."""
+        if not self._client:
+            return False
+        s = (symbol or "").strip()
+        if not s:
+            return False
+        try:
+            self._client.srem(TICKER_SUBSCRIBED_KEY, s)
+            return True
+        except Exception as e:
+            logger.warning("Redis remove_symbol_subscribed failed symbol=%s: %s", symbol, e)
+            return False
+
+    def get_subscribed_symbols(self) -> Set[str]:
+        """Return set of symbols in Redis SET ticker:subscribed (daemon subscription list)."""
+        if not self._client:
+            return set()
+        try:
+            members = self._client.smembers(TICKER_SUBSCRIBED_KEY)
+            return {str(m).strip() for m in (members or []) if m and str(m).strip()}
+        except Exception as e:
+            logger.debug("Redis get_subscribed_symbols failed: %s", e)
+            return set()
+
+    def get_subscribed_symbols_with_ages_sec(self) -> Tuple[Set[str], Dict[str, Optional[float]]]:
+        """Return (subscribed_symbols, symbol -> seconds_since_last_update).
+        For each symbol in ticker:subscribed, read quote and compute age from payload 'ts'.
+        If no quote or no 'ts', age is None (treated as stale)."""
+        subscribed = self.get_subscribed_symbols()
+        now = time.time()
+        ages: Dict[str, Optional[float]] = {}
+        for sym in subscribed:
+            q = self.get_quote(sym)
+            if q is None:
+                ages[sym] = None
+                continue
+            ts = q.get("ts")
+            if ts is None:
+                ages[sym] = None
+                continue
+            try:
+                t = float(ts)
+                if t > 0:
+                    ages[sym] = now - t
+                else:
+                    ages[sym] = None
+            except (TypeError, ValueError):
+                ages[sym] = None
+        return subscribed, ages
+
+    def clear_subscribed_set(self) -> bool:
+        """Remove all members from ticker:subscribed (e.g. on Release). Returns True on success."""
+        if not self._client:
+            return False
+        try:
+            self._client.delete(TICKER_SUBSCRIBED_KEY)
+            return True
+        except Exception as e:
+            logger.warning("Redis clear_subscribed_set failed: %s", e)
+            return False
 
     def close(self) -> None:
         if self._client:

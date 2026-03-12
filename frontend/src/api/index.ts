@@ -8,6 +8,8 @@ export {
   postRefreshAccounts,
   postRefreshReplay,
   postRefreshTickerSubscriptions,
+  postReleaseTickerSubscriptions,
+  postInitTickerSubscriptions,
   postStop,
 } from './control'
 export {

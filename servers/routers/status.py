@@ -54,6 +54,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "event_subscribe_positions": hb.get("event_subscribe_positions", False),
                 "event_subscribe_fills": hb.get("event_subscribe_fills", False),
                 "event_subscribe_commission": hb.get("event_subscribe_commission", False),
+                "last_control_message": hb.get("last_control_message"),
             }
             dsc = derive_daemon_self_check(payload["daemon_heartbeat"])
             payload["daemon_self_check"] = dsc["daemon_self_check"]
@@ -77,7 +78,11 @@ def get_status(request: Request) -> Dict[str, Any]:
             sym = (w.get("symbol") or "").strip()
             if sym and (st == "STK" or not st):
                 symbols_set.add(sym)
-        payload["subscribed_tickers"] = sorted(s for s in symbols_set if s)
+        # Prefer actual daemon subscription list (written each heartbeat) so UI reflects Release / restore in time
+        if hb is not None and hb.get("subscribed_tickers") is not None and isinstance(hb["subscribed_tickers"], list):
+            payload["subscribed_tickers"] = sorted(s for s in hb["subscribed_tickers"] if s and str(s).strip())
+        else:
+            payload["subscribed_tickers"] = sorted(s for s in symbols_set if s)
         payload["reference_indices"] = (control_via_db or {}).get("reference_indices") or []
         payload["accounts"] = reader.get_accounts_from_tables()
         if payload["accounts"] is None:

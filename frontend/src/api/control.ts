@@ -44,9 +44,23 @@ export async function postRefreshReplay(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** Sync daemon real-time ticker subscriptions to Watchlist (add/remove, clear stale). */
+/** Sync = Release then Init: daemon unsubscribes all tickers then subscribes to watchlist + positions. */
 export async function postRefreshTickerSubscriptions(): Promise<ControlResponse> {
   const r = await fetch(`${API}/control/refresh_ticker_subscriptions`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** Release: daemon unsubscribes all Real-time ticker subscriptions. */
+export async function postReleaseTickerSubscriptions(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/release_ticker_subscriptions`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
+}
+
+/** Init: daemon subscribes to watchlist + all positions if none subscribed; else sets last_control_message error. */
+export async function postInitTickerSubscriptions(): Promise<ControlResponse> {
+  const r = await fetch(`${API}/control/init_ticker_subscriptions`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
