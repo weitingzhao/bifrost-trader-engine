@@ -12,8 +12,12 @@ export interface IbConfig {
   ib_client_id_markets?: number
   /** Celery: Market Data / worker_market (default 500) */
   ib_client_id_worker_market?: number
-  /** 主账户 account_id（多账户时用于对冲与行情），R-A4 */
-  ib_primary_account_id?: string | null
+  /** Host 账户 account_id（多账户时用于对冲与行情），R-A4 */
+  ib_host_account_id?: string | null
+  /** Live 页 Market Streams Host 账户 ID（Event Account），用于按账户分类/筛选 */
+  stream_host_account_id?: string | null
+  /** Live 页 Market Streams Secondary 账户 ID */
+  stream_secondary_account_id?: string | null
   /** 第二 IB 主机（不同 TWS 机器，手动交易账户），空则未配置 */
   ib2_host?: string | null
   /** Default Flex Query range in days (e.g. 30). Stored in settings.flex_default_range_days. */

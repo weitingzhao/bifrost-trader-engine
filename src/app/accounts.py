@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 async def refresh_accounts_data(app: Any) -> None:
-    """R-A1: fetch all managed accounts' summary + positions from IB; store for monitoring and set primary account for trading.
+    """R-A1: fetch all managed accounts' summary + positions from IB; store for monitoring and set host account for trading.
     IB managedAccounts is comma-separated; we get each account's summary and filter positions by account from one reqPositions.
     """
     if not app.connector.is_connected:
@@ -25,11 +25,11 @@ async def refresh_accounts_data(app: Any) -> None:
         # Request all positions once, then filter by account (avoids N reqPositionsAsync and ensures same snapshot)
         all_positions = await app.connector.get_positions(account=None)
         accounts_list: list = []
-        primary_id = None
-        primary_summary = None
-        # R-A4: use configured primary_account_id if it is in the managed list; otherwise first account
-        if app._primary_account_id and app._primary_account_id in account_ids:
-            primary_id = app._primary_account_id
+        host_id = None
+        host_summary = None
+        # R-A4: use configured host_account_id if it is in the managed list; otherwise first account
+        if app._host_account_id and app._host_account_id in account_ids:
+            host_id = app._host_account_id
         for account_id in account_ids:
             values = await app.connector.get_account_summary(account=account_id)
             summary = {}
@@ -55,17 +55,17 @@ async def refresh_accounts_data(app: Any) -> None:
                     "positions": pos_dicts,
                 }
             )
-            if primary_id is None and account_id:
-                primary_id = account_id
-                primary_summary = summary if summary else None
-            elif primary_id == account_id:
-                primary_summary = summary if summary else None
+            if host_id is None and account_id:
+                host_id = account_id
+                host_summary = summary if summary else None
+            elif host_id == account_id:
+                host_summary = summary if summary else None
         app.store.set_accounts_data(accounts_list)
-        app.store.set_account_summary(primary_id, primary_summary)
+        app.store.set_account_summary(host_id, host_summary)
         logger.info(
-            "[R-A1] accounts_data count=%s (primary=%s)",
+            "[R-A1] accounts_data count=%s (host=%s)",
             len(accounts_list),
-            primary_id,
+            host_id,
         )
         # R-A2: 拉取账户执行/成交并写入 account_executions，供复盘与 GET /executions
         if app._status_sink and hasattr(app._status_sink, "write_account_executions"):

@@ -893,11 +893,11 @@ class PostgreSQLSink(StatusSink):
             try:
                 with self._conn.cursor() as cur2:
                     cur2.execute(
-                        "SELECT ib_primary_account_id, ib2_host, ib2_port_type, ib2_client_id_listener FROM settings WHERE id = 1"
+                        "SELECT ib_host_account_id, ib2_host, ib2_port_type, ib2_client_id_listener FROM settings WHERE id = 1"
                     )
                     r2 = cur2.fetchone()
                     if r2 and r2[0] is not None and str(r2[0]).strip():
-                        out["primary_account_id"] = str(r2[0]).strip()
+                        out["host_account_id"] = str(r2[0]).strip()
                     if r2 and len(r2) > 1 and r2[1] is not None and str(r2[1]).strip():
                         ib2_host = str(r2[1]).strip()
                         ib2_port_type = (r2[2] or "").strip().lower() if len(r2) > 2 else "tws_paper"
@@ -937,13 +937,13 @@ class PostgreSQLSink(StatusSink):
             return []
 
     def get_stream_position_stk_symbols(self) -> List[str]:
-        """Return distinct STK symbols from account_positions for stream primary/secondary accounts (settings.stream_primary_account_id, stream_secondary_account_id). Used by daemon to include Market Streams position symbols in ticker subscription."""
+        """Return distinct STK symbols from account_positions for stream host/secondary accounts (settings.stream_host_account_id, stream_secondary_account_id). Used by daemon to include Market Streams position symbols in ticker subscription."""
         if not self._ensure_conn():
             return []
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    "SELECT stream_primary_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
+                    "SELECT stream_host_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
                 )
                 row = cur.fetchone()
             if not row:

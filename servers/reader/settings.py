@@ -17,7 +17,7 @@ _VALID_IB_PORT_TYPES = frozenset(("tws_live", "tws_paper", "gateway"))
 # ----- Conn-based (for common.StatusReader delegation) -----
 
 def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
-    """Return settings row id=1: ib_host, port_type, client_ids, ib_primary_account_id, ib2_*, flex_default_range_days, flex_init_range_days. None if table missing."""
+    """Return settings row id=1: ib_host, port_type, client_ids, ib_host_account_id, ib2_*, flex_default_range_days, flex_init_range_days. None if table missing."""
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -27,7 +27,7 @@ def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
                 "COALESCE(ib_client_id_account, 100) AS ib_client_id_account, "
                 "COALESCE(ib_client_id_markets, 101) AS ib_client_id_markets, "
                 "COALESCE(ib_client_id_worker_market, 500) AS ib_client_id_worker_market, "
-                "ib_primary_account_id, flex_default_range_days, flex_init_range_days "
+                "ib_host_account_id, flex_default_range_days, flex_init_range_days "
                 "FROM settings WHERE id = 1"
             )
             row = cur.fetchone()
@@ -56,26 +56,26 @@ def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
                 out["flex_init_range_days"] = 360
         else:
             out["flex_init_range_days"] = 360
-        if row.get("ib_primary_account_id") is not None and str(row.get("ib_primary_account_id")).strip():
-            out["ib_primary_account_id"] = str(row["ib_primary_account_id"]).strip()
+        if row.get("ib_host_account_id") is not None and str(row.get("ib_host_account_id")).strip():
+            out["ib_host_account_id"] = str(row["ib_host_account_id"]).strip()
         else:
-            out["ib_primary_account_id"] = None
+            out["ib_host_account_id"] = None
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur_s:
                 cur_s.execute(
-                    "SELECT stream_primary_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
+                    "SELECT stream_host_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
                 )
                 r_s = cur_s.fetchone()
-            if r_s and (r_s.get("stream_primary_account_id") or "").strip():
-                out["stream_primary_account_id"] = str(r_s["stream_primary_account_id"]).strip()
+            if r_s and (r_s.get("stream_host_account_id") or "").strip():
+                out["stream_host_account_id"] = str(r_s["stream_host_account_id"]).strip()
             else:
-                out["stream_primary_account_id"] = None
+                out["stream_host_account_id"] = None
             if r_s and (r_s.get("stream_secondary_account_id") or "").strip():
                 out["stream_secondary_account_id"] = str(r_s["stream_secondary_account_id"]).strip()
             else:
                 out["stream_secondary_account_id"] = None
         except Exception:
-            out["stream_primary_account_id"] = None
+            out["stream_host_account_id"] = None
             out["stream_secondary_account_id"] = None
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur2:
@@ -119,14 +119,14 @@ def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
                 "ib_client_id_account": 100,
                 "ib_client_id_markets": 101,
                 "ib_client_id_worker_market": 500,
-                "ib_primary_account_id": None,
+                "ib_host_account_id": None,
                 "flex_default_range_days": 30,
                 "flex_init_range_days": 360,
                 "ib2_host": None,
                 "ib2_port_type": None,
                 "ib2_client_id_listener": 3,
                 "ib2_client_id_account": 102,
-                "stream_primary_account_id": None,
+                "stream_host_account_id": None,
                 "stream_secondary_account_id": None,
             }
         except Exception as e2:
@@ -166,7 +166,7 @@ def get_flex_config(conn: Any, purpose: Optional[str] = None) -> Any:
                 qs_ids = [x.strip() for x in qs_raw.split(",") if x.strip()]
                 if host_tok:
                     for qid in qh_ids:
-                        out.append({"token": host_tok, "query_id": qid, "role": "primary", "query_label": label or None, "purpose": purp or None})
+                        out.append({"token": host_tok, "query_id": qid, "role": "host", "query_label": label or None, "purpose": purp or None})
                 if sec_tok:
                     for qid in qs_ids:
                         out.append({"token": sec_tok, "query_id": qid, "role": "secondary", "query_label": label or None, "purpose": purp or None})
@@ -255,15 +255,15 @@ def write_ib_config(
     ib_client_id_account: int = 100,
     ib_client_id_markets: int = 101,
     ib_client_id_worker_market: int = 500,
-    ib_primary_account_id: Optional[str] = None,
+    ib_host_account_id: Optional[str] = None,
     ib2_host: Optional[str] = None,
     ib2_port_type: Optional[str] = None,
     ib2_client_id_listener: Optional[int] = None,
     ib2_client_id_account: Optional[int] = None,
-    stream_primary_account_id: Optional[str] = None,
+    stream_host_account_id: Optional[str] = None,
     stream_secondary_account_id: Optional[str] = None,
 ) -> bool:
-    """Update settings (id=1): ib_host, port_type, client_ids, ib_primary_account_id, ib2_*, stream_*_account_id. Returns True on success."""
+    """Update settings (id=1): ib_host, port_type, client_ids, ib_host_account_id, ib2_*, stream_*_account_id. Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     host = (ib_host or "").strip() or "127.0.0.1"
@@ -288,11 +288,11 @@ def write_ib_config(
                     ("ib_client_id_worker_market", 500),
                 ):
                     cur.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}")
-                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_primary_account_id text")
-                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_primary_account_id text")
+                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_host_account_id text")
+                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_host_account_id text")
                 cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_secondary_account_id text")
-                primary_val = (ib_primary_account_id or "").strip() or None
-                stream_primary_val = (stream_primary_account_id or "").strip() or None
+                host_val = (ib_host_account_id or "").strip() or None
+                stream_host_val = (stream_host_account_id or "").strip() or None
                 stream_secondary_val = (stream_secondary_account_id or "").strip() or None
                 for col, default in (
                     ("ib2_host", "text"),
@@ -310,7 +310,7 @@ def write_ib_config(
                 cid2_a = int(ib2_client_id_account) if ib2_client_id_account is not None else 102
                 cur.execute(
                     """
-                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market, ib_primary_account_id, ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account, stream_primary_account_id, stream_secondary_account_id)
+                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market, ib_host_account_id, ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account, stream_host_account_id, stream_secondary_account_id)
                     VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         ib_host = EXCLUDED.ib_host,
@@ -320,15 +320,15 @@ def write_ib_config(
                         ib_client_id_account = EXCLUDED.ib_client_id_account,
                         ib_client_id_markets = EXCLUDED.ib_client_id_markets,
                         ib_client_id_worker_market = EXCLUDED.ib_client_id_worker_market,
-                        ib_primary_account_id = EXCLUDED.ib_primary_account_id,
+                        ib_host_account_id = EXCLUDED.ib_host_account_id,
                         ib2_host = EXCLUDED.ib2_host,
                         ib2_port_type = EXCLUDED.ib2_port_type,
                         ib2_client_id_listener = EXCLUDED.ib2_client_id_listener,
                         ib2_client_id_account = EXCLUDED.ib2_client_id_account,
-                        stream_primary_account_id = EXCLUDED.stream_primary_account_id,
+                        stream_host_account_id = EXCLUDED.stream_host_account_id,
                         stream_secondary_account_id = EXCLUDED.stream_secondary_account_id
                     """,
-                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_val, ib2_h, ib2_pt, cid2_l, cid2_a, stream_primary_val, stream_secondary_val),
+                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, host_val, ib2_h, ib2_pt, cid2_l, cid2_a, stream_host_val, stream_secondary_val),
                 )
             conn.commit()
             logger.info(

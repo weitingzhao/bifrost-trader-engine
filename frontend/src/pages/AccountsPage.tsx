@@ -680,7 +680,7 @@ export function AccountsPage({
                     if (Array.isArray(per_query) && per_query.length > 0) {
                       const perParts = per_query.map((q) => {
                         const roleLabel =
-                          (q.role === 'primary' && 'Primary') ||
+                          (q.role === 'host' || q.role === 'primary') ? 'Host' :
                           (q.role === 'secondary' && 'Secondary') ||
                           'Flex'
                         const label = q.label ? ` ${q.label}` : ''
@@ -718,7 +718,7 @@ export function AccountsPage({
                           per_query
                             .map((q) => {
                               const roleLabel =
-                                (q.role === 'primary' && 'Primary') ||
+                                (q.role === 'host' || q.role === 'primary') ? 'Host' :
                                 (q.role === 'secondary' && 'Secondary') ||
                                 'Flex'
                               const label = q.label ? ` ${q.label}` : ''

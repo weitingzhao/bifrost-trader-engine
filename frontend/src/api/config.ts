@@ -11,7 +11,7 @@ export async function postSetHeartbeatInterval(heartbeat_interval_sec: number): 
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** Save IB and client_id (POST /config/ib). Omitted fields unchanged. R-A4: ib_primary_account_id, ib2_* optional. */
+/** Save IB and client_id (POST /config/ib). Omitted fields unchanged. R-A4: ib_host_account_id, ib2_* optional. */
 export async function postIbConfig(
   ib_host: string,
   ib_port_type: 'tws_live' | 'tws_paper' | 'gateway',
@@ -21,8 +21,8 @@ export async function postIbConfig(
     ib_client_id_account?: number
     ib_client_id_markets?: number
     ib_client_id_worker_market?: number
-    ib_primary_account_id?: string | null
-    stream_primary_account_id?: string | null
+    ib_host_account_id?: string | null
+    stream_host_account_id?: string | null
     stream_secondary_account_id?: string | null
     ib2_host?: string | null
     ib2_port_type?: string | null
@@ -37,8 +37,8 @@ export async function postIbConfig(
     if (clientIds.ib_client_id_account != null) body.ib_client_id_account = clientIds.ib_client_id_account
     if (clientIds.ib_client_id_markets != null) body.ib_client_id_markets = clientIds.ib_client_id_markets
     if (clientIds.ib_client_id_worker_market != null) body.ib_client_id_worker_market = clientIds.ib_client_id_worker_market
-    if (clientIds.ib_primary_account_id !== undefined) body.ib_primary_account_id = clientIds.ib_primary_account_id
-    if (clientIds.stream_primary_account_id !== undefined) body.stream_primary_account_id = clientIds.stream_primary_account_id
+    if (clientIds.ib_host_account_id !== undefined) body.ib_host_account_id = clientIds.ib_host_account_id
+    if (clientIds.stream_host_account_id !== undefined) body.stream_host_account_id = clientIds.stream_host_account_id
     if (clientIds.stream_secondary_account_id !== undefined) body.stream_secondary_account_id = clientIds.stream_secondary_account_id
     if (clientIds.ib2_host !== undefined) body.ib2_host = clientIds.ib2_host
     if (clientIds.ib2_port_type !== undefined) body.ib2_port_type = clientIds.ib2_port_type

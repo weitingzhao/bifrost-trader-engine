@@ -120,11 +120,11 @@ class GsTrading:
         else:
             self.listener_connector_2 = None
 
-        # Primary account for hedging/market data when multiple IB accounts exist (R-A4). From DB only.
-        self._primary_account_id: Optional[str] = None
-        if db_ib and db_ib.get("primary_account_id"):
-            self._primary_account_id = str(db_ib["primary_account_id"]).strip()
-            logger.info("[R-A4] primary_account_id=%s (for hedging and market data)", self._primary_account_id)
+        # Host account for hedging/market data when multiple IB accounts exist (R-A4). From DB only.
+        self._host_account_id: Optional[str] = None
+        if db_ib and db_ib.get("host_account_id"):
+            self._host_account_id = str(db_ib["host_account_id"]).strip()
+            logger.info("[R-A4] host_account_id=%s (for hedging and market data)", self._host_account_id)
 
         # 1.b Config sections (unified _*_cfg naming)
         self._structure_cfg = get_structure_config(config)

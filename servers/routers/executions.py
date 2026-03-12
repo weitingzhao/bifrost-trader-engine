@@ -322,7 +322,7 @@ def post_executions_fetch_flex(request: Request, body: Dict[str, Any] = Body(def
         if data_from and data_to:
             msg += f" Flex data time span: {data_from} .. {data_to}."
         if rows_per_fetch and len(rows_per_fetch) > 0 and rows_per_fetch[0] == 0 and (len(rows_per_fetch) == 1 or any(c > 0 for c in rows_per_fetch[1:])):
-            msg += " Primary (Query ID " + str(entries[0]["query_id"]) + ") returned 0 trades; in Settings > IB Connection > Flex ensure the purpose=trades row uses a Query that includes Activity > Trades and the date range covers your trades."
+            msg += " Host (Query ID " + str(entries[0]["query_id"]) + ") returned 0 trades; in Settings > IB Connection > Flex ensure the purpose=trades row uses a Query that includes Activity > Trades and the date range covers your trades."
         if errors:
             msg += " Partial errors: " + "; ".join(errors)
         return {

@@ -95,7 +95,7 @@
 
 ### 2.7 表 `accounts`（阶段 3.0 R-A1：多账户摘要，由 accounts_snapshot 规范化）
 
-- **用途**：存 IB 多账户摘要，便于按账户查询、更新与后续账户操作；由守护进程在写入 snapshot 时从内存中的 accounts_snapshot 同步写入（每账户一行）。**多账户时**：主账户用于守护进程对冲与行情（由 config 或 settings 的 `primary_account_id` 指定）；**所有账户**均写入本表，供统一 Portfolio 展示。
+- **用途**：存 IB 多账户摘要，便于按账户查询、更新与后续账户操作；由守护进程在写入 snapshot 时从内存中的 accounts_snapshot 同步写入（每账户一行）。**多账户时**：Host 账户用于守护进程对冲与行情（由 config 或 settings 的 `host_account_id` 指定）；**所有账户**均写入本表，供统一 Portfolio 展示。
 - **写入**：按 **account_id** 唯一键 upsert（`ON CONFLICT (account_id) DO UPDATE`），不删整表、不整表重插；仅更新该账户行。
 - **列**：
 
@@ -110,7 +110,7 @@
 
 ### 2.8 表 `account_positions`（阶段 3 R-A1：多账户持仓，由 accounts_snapshot 规范化）
 
-- **用途**：存每个账户的持仓明细，便于按账户/标的查询与后续风控、对冲逻辑。**多账户时**：主账户用于守护进程对冲与行情；**所有账户**的持仓均写入本表，供统一 Portfolio 展示。
+- **用途**：存每个账户的持仓明细，便于按账户/标的查询与后续风控、对冲逻辑。**多账户时**：Host 账户用于守护进程对冲与行情；**所有账户**的持仓均写入本表，供统一 Portfolio 展示。
 - **主键**：**(account_id, contract_key)**，无自增 id；据此判断插入新行或更新现有行。
 - **contract_key** 格式为 `symbol|sec_type|expiry|strike|right`，期权（OPT）用到期/行权价/权利区分合约，股票（STK）为 `symbol|STK|||`。
 - **写入**：与 `accounts` 同步；对 snapshot 中每条持仓计算 contract_key 后 `INSERT ... ON CONFLICT (account_id, contract_key) DO UPDATE`；仅删除该账户下**不在当前 snapshot** 的行（平仓或移除的持仓），不整表清空。
@@ -565,7 +565,7 @@
 
 ### 2.9 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
 
-- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。**IB 配置**（host、port_type、client_id、primary_account_id、第二 IB）**全部在 DB**，config.yaml 不再定义 client_id 或 primary_account_id；host/port 仅作 DB 无数据时的 fallback。**主账户**由 `ib_primary_account_id` 指定；**第二 IB**（不同 TWS 机器，手动交易账户）由 `ib2_*` 指定，用于统一 Portfolio（R-A4）。
+- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。**IB 配置**（host、port_type、client_id、host_account_id、第二 IB）**全部在 DB**，config.yaml 不再定义 client_id 或 host_account_id；host/port 仅作 DB 无数据时的 fallback。**Host 账户**由 `ib_host_account_id` 指定；**第二 IB**（不同 TWS 机器，手动交易账户）由 `ib2_*` 指定，用于统一 Portfolio（R-A4）。
 - **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入；StatusReader 的 `write_ib_config(...)` 执行 UPDATE。
 - **列**：
 
@@ -579,8 +579,8 @@
 | ib_client_id_account | integer | 监控端拉取账户信息/执行记录（POST /executions/fetch）使用的 Client ID（默认 100） |
 | ib_client_id_markets | integer | 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 101） |
 | ib_client_id_worker_market | integer | Celery worker（如 Bars 补全，worker_market）连接 IB 使用的 Client ID（默认 500），与 Daemon/Monitor 隔离，避免冲突 |
-| ib_primary_account_id | text | 主账户 account_id（如 U17113214），用于对冲与行情；空则使用 TWS managed accounts 首个（R-A4） |
-| stream_primary_account_id | text | Live 页 Market Streams 主账户 ID，用于按账户分类/筛选；空则不显示 Account 列与筛选器 |
+| ib_host_account_id | text | Host 账户 account_id（如 U17113214），用于对冲与行情；空则使用 TWS managed accounts 首个（R-A4） |
+| stream_host_account_id | text | Live 页 Market Streams Host 账户 ID，用于按账户分类/筛选；空则不显示 Account 列与筛选器 |
 | stream_secondary_account_id | text | Live 页 Market Streams 次账户 ID，用于按账户分类/筛选；空则同上 |
 | ib2_host | text | 第二 IB 主机（不同 TWS 机器，手动交易账户）；空则未配置 |
 | ib2_port_type | text | 第二 IB 端口类型（tws_live/tws_paper/gateway），默认 tws_paper |
@@ -601,7 +601,7 @@
 | Monitor | Market data | ib_client_id_markets | — | 监控端拉取市场数据/K 线（POST /bars/fetch）；仅主账户有数据订阅，第二 IB 无此列 |
 | Celery | Market Data | ib_client_id_worker_market | — | Celery worker（如 Bars 补全）连接 IB，与 Daemon/Monitor 隔离 |
 
-- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。**config.yaml 不再定义 client_id 或 primary_account_id**，均由本表提供。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`；否则使用 config 的 `ib.host`、`ib.port`（client_id 默认 1）。**主账户**：若本表 `ib_primary_account_id` 非空，守护进程使用该 account_id 作为对冲与行情账户；否则使用 TWS managed accounts 首个（R-A4）。**第二 IB**：若 `ib2_host` 非空，监控端创建 AccountIbClient2 连接第二 TWS，用于拉取该账户的持仓/执行，供统一 Portfolio；第二 IB 无 daemon、无 market data（无 `ib2_client_id_markets` 列）。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`（仅 Host）；**Celery** 使用 `ib_client_id_worker_market`。**Flex**：`ib_flex_host_token` 与 `ib_flex_secondary_token` 由 Settings 页 Flex 区块或 POST /config/flex 写入。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
+- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。**config.yaml 不再定义 client_id 或 host_account_id**，均由本表提供。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`；否则使用 config 的 `ib.host`、`ib.port`（client_id 默认 1）。**Host 账户**：若本表 `ib_host_account_id` 非空，守护进程使用该 account_id 作为对冲与行情账户；否则使用 TWS managed accounts 首个（R-A4）。**第二 IB**：若 `ib2_host` 非空，监控端创建 AccountIbClient2 连接第二 TWS，用于拉取该账户的持仓/执行，供统一 Portfolio；第二 IB 无 daemon、无 market data（无 `ib2_client_id_markets` 列）。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`（仅 Host）；**Celery** 使用 `ib_client_id_worker_market`。**Flex**：`ib_flex_host_token` 与 `ib_flex_secondary_token` 由 Settings 页 Flex 区块或 POST /config/flex 写入。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
 
 ---
 

@@ -26,12 +26,12 @@ class IbConfigBody(BaseModel):
     ib_client_id_account: Optional[int] = None
     ib_client_id_markets: Optional[int] = None
     ib_client_id_worker_market: Optional[int] = None
-    ib_primary_account_id: Optional[str] = None
+    ib_host_account_id: Optional[str] = None
     ib2_host: Optional[str] = None
     ib2_port_type: Optional[str] = None
     ib2_client_id_listener: Optional[int] = None
     ib2_client_id_account: Optional[int] = None
-    stream_primary_account_id: Optional[str] = None
+    stream_host_account_id: Optional[str] = None
     stream_secondary_account_id: Optional[str] = None
 
     class Config:
@@ -76,12 +76,12 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
         "ib_client_id_account": 100,
         "ib_client_id_markets": 101,
         "ib_client_id_worker_market": 500,
-        "ib_primary_account_id": None,
+        "ib_host_account_id": None,
         "ib2_host": None,
         "ib2_port_type": None,
         "ib2_client_id_listener": 3,
         "ib2_client_id_account": 102,
-        "stream_primary_account_id": None,
+        "stream_host_account_id": None,
         "stream_secondary_account_id": None,
     }
     host = (str(body.ib_host or current.get("ib_host", "127.0.0.1"))).strip() or "127.0.0.1"
@@ -94,9 +94,9 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
     cid_m = body.ib_client_id_markets if body.ib_client_id_markets is not None else current.get("ib_client_id_markets", 101)
     cid_w = body.ib_client_id_worker_market if body.ib_client_id_worker_market is not None else current.get("ib_client_id_worker_market", 500)
     cid_d, cid_l, cid_a, cid_m, cid_w = int(cid_d), int(cid_l), int(cid_a), int(cid_m), int(cid_w)
-    primary_id = body.ib_primary_account_id if body.ib_primary_account_id is not None else current.get("ib_primary_account_id")
-    if primary_id is not None:
-        primary_id = (str(primary_id)).strip() or None
+    host_id = body.ib_host_account_id if body.ib_host_account_id is not None else current.get("ib_host_account_id")
+    if host_id is not None:
+        host_id = (str(host_id)).strip() or None
     ib2_h = body.ib2_host if body.ib2_host is not None else current.get("ib2_host")
     if ib2_h is not None:
         ib2_h = (str(ib2_h)).strip() or None
@@ -107,17 +107,17 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
     cid2_a = body.ib2_client_id_account if body.ib2_client_id_account is not None else current.get("ib2_client_id_account", 102)
     cid2_l = int(cid2_l) if cid2_l is not None else 3
     cid2_a = int(cid2_a) if cid2_a is not None else 102
-    stream_primary_id = body.stream_primary_account_id if body.stream_primary_account_id is not None else current.get("stream_primary_account_id")
+    stream_host_id = body.stream_host_account_id if body.stream_host_account_id is not None else current.get("stream_host_account_id")
     stream_secondary_id = body.stream_secondary_account_id if body.stream_secondary_account_id is not None else current.get("stream_secondary_account_id")
-    if stream_primary_id is not None:
-        stream_primary_id = (str(stream_primary_id)).strip() or None
+    if stream_host_id is not None:
+        stream_host_id = (str(stream_host_id)).strip() or None
     if stream_secondary_id is not None:
         stream_secondary_id = (str(stream_secondary_id)).strip() or None
     logger.info(
         "[config/ib] writing settings: host=%r port_type=%r ... ib2_host=%r ib2_port_type=%r",
         host, port_type, ib2_h, ib2_pt,
     )
-    if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, primary_id, ib2_h, ib2_pt, cid2_l, cid2_a, stream_primary_id, stream_secondary_id):
+    if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, host_id, ib2_h, ib2_pt, cid2_l, cid2_a, stream_host_id, stream_secondary_id):
         return JSONResponse(
             status_code=200,
             content={
@@ -129,12 +129,12 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
                 "ib_client_id_account": cid_a,
                 "ib_client_id_markets": cid_m,
                 "ib_client_id_worker_market": cid_w,
-                "ib_primary_account_id": primary_id,
+                "ib_host_account_id": host_id,
                 "ib2_host": ib2_h,
                 "ib2_port_type": ib2_pt,
                 "ib2_client_id_listener": cid2_l,
                 "ib2_client_id_account": cid2_a,
-                "stream_primary_account_id": stream_primary_id,
+                "stream_host_account_id": stream_host_id,
                 "stream_secondary_account_id": stream_secondary_id,
             },
         )

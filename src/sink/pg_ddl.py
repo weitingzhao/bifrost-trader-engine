@@ -183,9 +183,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
             )
         cur.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_primary_account_id text"
+            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_host_account_id text"
         )
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_primary_account_id text")
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_host_account_id text")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_secondary_account_id text")
         cur.execute(
             "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib2_host text"

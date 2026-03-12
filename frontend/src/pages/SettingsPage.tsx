@@ -44,8 +44,8 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
   const [clientIdAccount, setClientIdAccount] = useState(DEFAULT_REFRESH_EXECUTIONS)
   const [clientIdMarkets, setClientIdMarkets] = useState(DEFAULT_BARS_FETCH)
   const [clientIdWorker, setClientIdWorker] = useState(DEFAULT_WORKER)
-  const [primaryAccountId, setPrimaryAccountId] = useState<string>('')
-  const [streamPrimaryAccountId, setStreamPrimaryAccountId] = useState<string>('')
+  const [hostAccountId, setHostAccountId] = useState<string>('')
+  const [streamHostAccountId, setStreamHostAccountId] = useState<string>('')
   const [streamSecondaryAccountId, setStreamSecondaryAccountId] = useState<string>('')
   const [ib2Host, setIb2Host] = useState<string>('')
   const [ib2PortType, setIb2PortType] = useState<'tws_live' | 'tws_paper' | 'gateway'>(DEFAULT_PORT_TYPE)
@@ -82,8 +82,8 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     if (c.ib_client_id_account != null) setClientIdAccount(c.ib_client_id_account)
     if (c.ib_client_id_markets != null) setClientIdMarkets(c.ib_client_id_markets)
     if (c.ib_client_id_worker_market != null) setClientIdWorker(c.ib_client_id_worker_market)
-    if (c.ib_primary_account_id != null) setPrimaryAccountId(String(c.ib_primary_account_id))
-    if ((c as { stream_primary_account_id?: string }).stream_primary_account_id != null) setStreamPrimaryAccountId(String((c as { stream_primary_account_id?: string }).stream_primary_account_id))
+    if (c.ib_host_account_id != null) setHostAccountId(String(c.ib_host_account_id))
+    if (c.stream_host_account_id != null) setStreamHostAccountId(String(c.stream_host_account_id))
     if ((c as { stream_secondary_account_id?: string }).stream_secondary_account_id != null) setStreamSecondaryAccountId(String((c as { stream_secondary_account_id?: string }).stream_secondary_account_id))
     if (c.ib2_host != null) setIb2Host(String(c.ib2_host))
     if (c.ib2_port_type != null) setIb2PortType(c.ib2_port_type as 'tws_live' | 'tws_paper' | 'gateway')
@@ -214,8 +214,8 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
         ib_client_id_account: clientIdAccount,
         ib_client_id_markets: clientIdMarkets,
         ib_client_id_worker_market: clientIdWorker,
-        ib_primary_account_id: primaryAccountId.trim() || null,
-        stream_primary_account_id: streamPrimaryAccountId.trim() || null,
+        ib_host_account_id: hostAccountId.trim() || null,
+        stream_host_account_id: streamHostAccountId.trim() || null,
         stream_secondary_account_id: streamSecondaryAccountId.trim() || null,
         ib2_host: ib2Host.trim() || null,
         ib2_port_type: ib2Host.trim() ? ib2PortType : null,
@@ -325,10 +325,10 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
               setIb2PortType={setIb2PortType}
               flexSecondaryToken={flexSecondaryToken}
               setFlexSecondaryToken={setFlexSecondaryToken}
-              primaryAccountId={primaryAccountId}
-              setPrimaryAccountId={setPrimaryAccountId}
-              streamPrimaryAccountId={streamPrimaryAccountId}
-              setStreamPrimaryAccountId={setStreamPrimaryAccountId}
+              hostAccountId={hostAccountId}
+              setHostAccountId={setHostAccountId}
+              streamHostAccountId={streamHostAccountId}
+              setStreamHostAccountId={setStreamHostAccountId}
               streamSecondaryAccountId={streamSecondaryAccountId}
               setStreamSecondaryAccountId={setStreamSecondaryAccountId}
               clientIdDaemon={clientIdDaemon}

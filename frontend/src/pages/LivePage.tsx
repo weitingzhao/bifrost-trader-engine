@@ -140,18 +140,18 @@ export function LivePage({ status }: LivePageProps) {
   }, [])
 
   const accountsList = j?.accounts ?? []
-  // Primary/Secondary account IDs from Settings → Account → Event Account (stream_primary_account_id, stream_secondary_account_id).
+  // Host/Secondary account IDs from Settings → Account → Event Account (stream_host_account_id, stream_secondary_account_id).
   // No hardcoded account IDs: read from status.ib_config (backend reads from DB settings), then match against accountsList[].account_id.
-  const ibConfig = j?.ib_config as { stream_primary_account_id?: string; stream_secondary_account_id?: string } | undefined
-  const streamPrimaryId = (ibConfig?.stream_primary_account_id ?? '').trim() || null
+  const ibConfig = j?.ib_config as { stream_host_account_id?: string; stream_secondary_account_id?: string } | undefined
+  const streamHostId = (ibConfig?.stream_host_account_id ?? '').trim() || null
   const streamSecondaryId = (ibConfig?.stream_secondary_account_id ?? '').trim() || null
-  const hasStreamAccounts = streamPrimaryId != null || streamSecondaryId != null
+  const hasStreamAccounts = streamHostId != null || streamSecondaryId != null
 
   const streamPositionSymbols = useMemo(() => {
-    const primary: string[] = []
+    const host: string[] = []
     const secondary: string[] = []
     const norm = (id: string | null) => (id ?? '').trim().toLowerCase() || ''
-    const wantPrimary = norm(streamPrimaryId)
+    const wantHost = norm(streamHostId)
     const wantSecondary = norm(streamSecondaryId)
     for (const acc of accountsList) {
       const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
@@ -162,25 +162,25 @@ export function LivePage({ status }: LivePageProps) {
         const secType = (p.secType ?? '').toString().toUpperCase()
         const posQty = typeof p.position === 'number' ? p.position : 0
         if (!sym || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
-        if (wantPrimary && accIdNorm === wantPrimary && !primary.includes(sym)) primary.push(sym)
+        if (wantHost && accIdNorm === wantHost && !host.includes(sym)) host.push(sym)
         if (wantSecondary && accIdNorm === wantSecondary && !secondary.includes(sym)) secondary.push(sym)
       }
     }
-    return { primary, secondary }
-  }, [accountsList, streamPrimaryId, streamSecondaryId])
+    return { host, secondary }
+  }, [accountsList, streamHostId, streamSecondaryId])
 
-  // Market Streams symbol list: show symbol if it appears in ANY of Wishlist, Primary, or Secondary.
+  // Market Streams symbol list: show symbol if it appears in ANY of Wishlist, Host, or Secondary.
   const watchlistSymbols = useMemo(
     () =>
       [
         ...new Set([
           ...(j?.subscribed_tickers ?? []),
-          ...streamPositionSymbols.primary,
+          ...streamPositionSymbols.host,
           ...streamPositionSymbols.secondary,
           ...Object.keys(quotesMap),
         ]),
       ].sort(),
-    [j?.subscribed_tickers, streamPositionSymbols.primary, streamPositionSymbols.secondary, quotesMap],
+    [j?.subscribed_tickers, streamPositionSymbols.host, streamPositionSymbols.secondary, quotesMap],
   )
   const benchmarkSymbols = useMemo(
     () =>
@@ -244,16 +244,16 @@ export function LivePage({ status }: LivePageProps) {
     [j?.subscribed_tickers]
   )
   const norm = (id: string | null) => (id ?? '').trim().toLowerCase() || ''
-  const wantPrimary = norm(streamPrimaryId)
+  const wantHost = norm(streamHostId)
   const wantSecondary = norm(streamSecondaryId)
   const wishlistSet = watchlistSymbolSet.size > 0 ? watchlistSymbolSet : subscribedSet
   const watchlistRows = watchlistSymbols.map((symbol) => {
     let qty = 0
     let totalCost = 0
     let hasCost = false
-    let primaryQty = 0
-    let primaryTotalCost = 0
-    let primaryHasCost = false
+    let hostQty = 0
+    let hostTotalCost = 0
+    let hostHasCost = false
     let secondaryQty = 0
     let secondaryTotalCost = 0
     let secondaryHasCost = false
@@ -262,7 +262,7 @@ export function LivePage({ status }: LivePageProps) {
     for (const acc of accountsList) {
       const accId = (acc?.account_id ?? (acc as { account?: string }).account ?? '').toString().trim()
       const accIdNorm = norm(accId)
-      const isAccPrimary = wantPrimary && accIdNorm === wantPrimary
+      const isAccHost = wantHost && accIdNorm === wantHost
       const isAccSecondary = wantSecondary && accIdNorm === wantSecondary
       const positions = acc?.positions ?? []
       for (const p of positions) {
@@ -280,11 +280,11 @@ export function LivePage({ status }: LivePageProps) {
           totalCost += avg * posQty
           hasCost = true
         }
-        if (isAccPrimary) {
-          primaryQty += posQty
+        if (isAccHost) {
+          hostQty += posQty
           if (avg != null) {
-            primaryTotalCost += avg * posQty
-            primaryHasCost = true
+            hostTotalCost += avg * posQty
+            hostHasCost = true
           }
         }
         if (isAccSecondary) {
@@ -296,16 +296,16 @@ export function LivePage({ status }: LivePageProps) {
         }
       }
     }
-    let streamCategory: 'primary' | 'secondary' | 'both' | null = null
+    let streamCategory: 'host' | 'secondary' | 'both' | null = null
     if (hasStreamAccounts && accountIdsWithSymbol.length > 0) {
-      const isPrimary = wantPrimary ? accountIdsWithSymbol.some((id) => norm(id) === wantPrimary) : false
+      const isHost = wantHost ? accountIdsWithSymbol.some((id) => norm(id) === wantHost) : false
       const isSecondary = wantSecondary ? accountIdsWithSymbol.some((id) => norm(id) === wantSecondary) : false
-      if (isPrimary && isSecondary) streamCategory = 'both'
-      else if (isPrimary) streamCategory = 'primary'
+      if (isHost && isSecondary) streamCategory = 'both'
+      else if (isHost) streamCategory = 'host'
       else if (isSecondary) streamCategory = 'secondary'
     }
     const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
-    const primaryAvgCost = primaryHasCost && primaryQty !== 0 ? primaryTotalCost / primaryQty : null
+    const hostAvgCost = hostHasCost && hostQty !== 0 ? hostTotalCost / hostQty : null
     const secondaryAvgCost = secondaryHasCost && secondaryQty !== 0 ? secondaryTotalCost / secondaryQty : null
     const quote = quotesMap[symbol]
     const bench = benchmarks[symbol]
@@ -318,9 +318,9 @@ export function LivePage({ status }: LivePageProps) {
       quote && avgCost != null && Number.isFinite(quote.last) && qty != null && Number.isFinite(qty) && qty !== 0
         ? (quote.last - avgCost) * qty
         : null
-    const primaryPnlCost =
-      quote && primaryAvgCost != null && Number.isFinite(quote.last) && primaryQty !== 0
-        ? (quote.last - primaryAvgCost) * primaryQty
+    const hostPnlCost =
+      quote && hostAvgCost != null && Number.isFinite(quote.last) && hostQty !== 0
+        ? (quote.last - hostAvgCost) * hostQty
         : null
     const secondaryPnlCost =
       quote && secondaryAvgCost != null && Number.isFinite(quote.last) && secondaryQty !== 0
@@ -338,23 +338,23 @@ export function LivePage({ status }: LivePageProps) {
       streamCategory,
       isInWatchlist,
       category: positionCategory,
-      primaryQty: primaryQty || null,
-      primaryAvgCost,
-      primaryPnlCost,
+      hostQty: hostQty || null,
+      hostAvgCost,
+      hostPnlCost,
       secondaryQty: secondaryQty || null,
       secondaryAvgCost,
       secondaryPnlCost,
     }
   })
 
-  const [streamCategoryFilter, setStreamCategoryFilter] = useState<'all' | 'primary' | 'secondary' | 'wishlist'>('all')
+  const [streamCategoryFilter, setStreamCategoryFilter] = useState<'all' | 'host' | 'secondary' | 'wishlist'>('all')
   const [positionCategoryFilter, setPositionCategoryFilter] = useState<string>('all')
   const filteredByAccount = useMemo(() => {
     if (!hasStreamAccounts) return watchlistRows
     if (streamCategoryFilter === 'all') return watchlistRows
     if (streamCategoryFilter === 'wishlist') return watchlistRows.filter((row) => row.isInWatchlist === true)
-    if (streamCategoryFilter === 'primary')
-      return watchlistRows.filter((row) => row.streamCategory === 'primary' || row.streamCategory === 'both')
+    if (streamCategoryFilter === 'host')
+      return watchlistRows.filter((row) => row.streamCategory === 'host' || row.streamCategory === 'both')
     if (streamCategoryFilter === 'secondary')
       return watchlistRows.filter((row) => row.streamCategory === 'secondary' || row.streamCategory === 'both')
     return watchlistRows.filter((row) => row.streamCategory === streamCategoryFilter)
@@ -529,8 +529,8 @@ export function LivePage({ status }: LivePageProps) {
               <InfoTooltip
                 text={
                   marketStreamsOk
-                    ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Primary & Secondary account positions (Settings → Account). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
-                    : 'Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Primary & Secondary account positions. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
+                    ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions (Settings → Account). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
+                    : 'Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
                 }
               />
             </h2>
@@ -563,7 +563,7 @@ export function LivePage({ status }: LivePageProps) {
             <div className="realtime-stream-filter">
               <span className="section-hint">Account:</span>
               <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account">
-                {(['all', 'primary', 'secondary', 'wishlist'] as const).map((value) => (
+                {(['all', 'host', 'secondary', 'wishlist'] as const).map((value) => (
                   <button
                     key={value}
                     type="button"
@@ -571,7 +571,7 @@ export function LivePage({ status }: LivePageProps) {
                     onClick={() => setStreamCategoryFilter(value)}
                     aria-pressed={streamCategoryFilter === value}
                   >
-                    {value === 'all' ? 'All' : value === 'primary' ? 'Primary' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
+                    {value === 'all' ? 'All' : value === 'host' ? 'Host' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
                   </button>
                 ))}
               </div>
@@ -633,7 +633,7 @@ export function LivePage({ status }: LivePageProps) {
                 {hasStreamAccounts && (
                   <>
                     <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
-                      Primary
+                      Host
                     </th>
                     <th colSpan={3} scope="colgroup" className="realtime-quote-colgroup">
                       Secondary
@@ -666,7 +666,7 @@ export function LivePage({ status }: LivePageProps) {
                 <tr>
                   <td colSpan={hasStreamAccounts ? 14 : 8}>
                     {watchlistRows.length === 0
-                      ? 'No symbols (add symbols in Watchlist, or ensure Event Account (Primary/Secondary) have positions, or daemon is running)'
+                      ? 'No symbols (add symbols in Watchlist, or ensure Event Account (Host/Secondary) have positions, or daemon is running)'
                       : 'No rows match the selected filters.'}
                   </td>
                 </tr>
@@ -685,9 +685,9 @@ export function LivePage({ status }: LivePageProps) {
                         changePct,
                         pnlVsBench,
                         pnlCost,
-                        primaryQty,
-                        primaryAvgCost,
-                        primaryPnlCost,
+                        hostQty,
+                        hostAvgCost,
+                        hostPnlCost,
                         secondaryQty,
                         secondaryAvgCost,
                         secondaryPnlCost,
@@ -734,12 +734,12 @@ export function LivePage({ status }: LivePageProps) {
                       </td>
                       {hasStreamAccounts && (
                         <>
-                          <td className="realtime-quote-num">{primaryQty != null && Number.isFinite(primaryQty) ? primaryQty : '—'}</td>
-                          <td className="realtime-quote-num">{primaryAvgCost != null && Number.isFinite(primaryAvgCost) ? fmtUsd(primaryAvgCost) : '—'}</td>
+                          <td className="realtime-quote-num">{hostQty != null && Number.isFinite(hostQty) ? hostQty : '—'}</td>
+                          <td className="realtime-quote-num">{hostAvgCost != null && Number.isFinite(hostAvgCost) ? fmtUsd(hostAvgCost) : '—'}</td>
                           <td className="realtime-quote-num">
-                            {primaryPnlCost != null && Number.isFinite(primaryPnlCost) ? (
-                              <span className={primaryPnlCost > 0 ? 'pnl-positive' : primaryPnlCost < 0 ? 'pnl-negative' : ''}>
-                                {fmtUsdRound0(primaryPnlCost)}
+                            {hostPnlCost != null && Number.isFinite(hostPnlCost) ? (
+                              <span className={hostPnlCost > 0 ? 'pnl-positive' : hostPnlCost < 0 ? 'pnl-negative' : ''}>
+                                {fmtUsdRound0(hostPnlCost)}
                               </span>
                             ) : (
                               '—'
@@ -825,12 +825,12 @@ export function LivePage({ status }: LivePageProps) {
                 ))
               )}
               {filteredRows.length > 0 && (() => {
-                const primaryCostSum = filteredRows.reduce((a, r) => {
-                  const q = r.primaryQty != null && Number.isFinite(r.primaryQty) ? r.primaryQty : 0
-                  const c = r.primaryAvgCost != null && Number.isFinite(r.primaryAvgCost) ? r.primaryAvgCost : 0
+                const hostCostSum = filteredRows.reduce((a, r) => {
+                  const q = r.hostQty != null && Number.isFinite(r.hostQty) ? r.hostQty : 0
+                  const c = r.hostAvgCost != null && Number.isFinite(r.hostAvgCost) ? r.hostAvgCost : 0
                   return a + q * c
                 }, 0)
-                const primaryPnlSum = filteredRows.reduce((a, r) => a + (r.primaryPnlCost != null && Number.isFinite(r.primaryPnlCost) ? r.primaryPnlCost : 0), 0)
+                const hostPnlSum = filteredRows.reduce((a, r) => a + (r.hostPnlCost != null && Number.isFinite(r.hostPnlCost) ? r.hostPnlCost : 0), 0)
                 const secondaryCostSum = filteredRows.reduce((a, r) => {
                   const q = r.secondaryQty != null && Number.isFinite(r.secondaryQty) ? r.secondaryQty : 0
                   const c = r.secondaryAvgCost != null && Number.isFinite(r.secondaryAvgCost) ? r.secondaryAvgCost : 0
@@ -859,10 +859,10 @@ export function LivePage({ status }: LivePageProps) {
                     {hasStreamAccounts && (
                       <>
                         <td className="realtime-quote-num">—</td>
-                        <td className="realtime-quote-num">{primaryCostSum !== 0 ? fmtUsd(primaryCostSum) : '—'}</td>
+                        <td className="realtime-quote-num">{hostCostSum !== 0 ? fmtUsd(hostCostSum) : '—'}</td>
                         <td className="realtime-quote-num">
-                          <span className={primaryPnlSum > 0 ? 'pnl-positive' : primaryPnlSum < 0 ? 'pnl-negative' : ''}>
-                            {primaryPnlSum !== 0 ? fmtUsdRound0(primaryPnlSum) : '—'}
+                          <span className={hostPnlSum > 0 ? 'pnl-positive' : hostPnlSum < 0 ? 'pnl-negative' : ''}>
+                            {hostPnlSum !== 0 ? fmtUsdRound0(hostPnlSum) : '—'}
                           </span>
                         </td>
                         <td className="realtime-quote-num">—</td>

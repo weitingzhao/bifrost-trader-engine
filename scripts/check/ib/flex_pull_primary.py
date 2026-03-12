@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch a single IB Flex Trades report using Primary (Host) token and a given Query ID.
+"""Fetch a single IB Flex Trades report using Host token and a given Query ID.
 
 Use this to verify that the Flex API returns data for Query ID 1428383 (or another ID)
 with the token stored in Settings (or passed via env). Run from project root.
@@ -37,7 +37,7 @@ os.chdir(_PROJECT_ROOT)
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Pull Primary IB Flex Trades report by Query ID using Host token."
+        description="Pull Host IB Flex Trades report by Query ID using Host token."
     )
     parser.add_argument(
         "query_id",

@@ -23,7 +23,7 @@
 
 - **数据与下单**：均通过 IB API 来自 **TWS**（Trader Workstation）。
 - **账户**：**两个 IB 账户**（见需求 R-A4）。
-  - **主账户**：数据与下单经当前 IB API 连接 TWS；承担**自动交易**（本项目 Gamma scalping）、**手动交易**及**行情/持仓数据源**。由 settings 表 `primary_account_id` 指定，未配置时取 TWS 返回的 managed accounts 中第一个。**Client ID 与 primary_account_id 均在 PostgreSQL settings 表**，config.yaml 不再定义。
+  - **Host 账户**：数据与下单经当前 IB API 连接 TWS；承担**自动交易**（本项目 Gamma scalping）、**手动交易**及**行情/持仓数据源**。由 settings 表 `host_account_id`（列名 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。**Client ID 与 host_account_id 均在 PostgreSQL settings 表**，config.yaml 不再定义。
   - **第二账户**：**仅手动交易**；守护进程不对其下单或订阅行情。若与主账户在同一 TWS 同一登录下，由现有守护进程/监控端拉取并写入 `accounts` / `account_positions` 等表；若在**另一 TWS 或另一登录**下，则通过监控端或独立服务的**第二 IB 连接**拉取后写入同一库（当前计划仅文档预留，不实现第二连接）。
 - **实现方式**：TWS 允许多个 API 连接，用不同的 **client_id** 区分。守护程序使用一个 `client_id`（如 1）；手动交易使用 TWS 界面或另一 `client_id`（如 2）的客户端；监控端 Account/Market、Celery 各用不同 client_id。**不需要**开两个 TWS 实例（同一登录下两 account_id 即可）。
 
@@ -291,7 +291,7 @@
 | 产品需求（REQUIREMENTS.md） | 对应组件 | 交付阶段 |
 |--------------------------------|----------|----------|
 |--------------------------------|----------|----------|
-| 两个 IB 账户；主账户：自动+行情+手动；第二账户：仅手动，统一 Portfolio（R-A4） | 配置 primary_account_id、IB Connector、守护进程按主账户对冲、监控/Performance 按 account_id 展示 | 阶段 3 |
+| 两个 IB 账户；Host 账户：自动+行情+手动；第二账户：仅手动，统一 Portfolio（R-A4） | 配置 host_account_id（ib_host_account_id）、IB Connector、守护进程按 Host 账户对冲、监控/Performance 按 account_id 展示 | 阶段 3 |
 | 单一 TWS、多 account_id；自动/手动不同 client_id | IB Connector、配置 | 已实现 |
 | TWS 独占 Mac Mini；守护程序可选同机或 Linux 单进程 | DaemonFSM、run_engine、部署文档（§2.3） | 已实现 |
 | 监控：不依赖控制台查看状态 | StatusSink + SQLite/文件；独立应用 GET /status | 阶段 1.1 + 阶段 2.1 |

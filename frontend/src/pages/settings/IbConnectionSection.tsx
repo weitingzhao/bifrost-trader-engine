@@ -25,10 +25,10 @@ export interface IbConnectionSectionProps {
   setIb2PortType: (v: PortType) => void
   flexSecondaryToken: string
   setFlexSecondaryToken: (v: string) => void
-  primaryAccountId: string
-  setPrimaryAccountId: (v: string) => void
-  streamPrimaryAccountId: string
-  setStreamPrimaryAccountId: (v: string) => void
+  hostAccountId: string
+  setHostAccountId: (v: string) => void
+  streamHostAccountId: string
+  setStreamHostAccountId: (v: string) => void
   streamSecondaryAccountId: string
   setStreamSecondaryAccountId: (v: string) => void
   clientIdDaemon: number
@@ -69,10 +69,10 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     setIb2PortType,
     flexSecondaryToken,
     setFlexSecondaryToken,
-    primaryAccountId,
-    setPrimaryAccountId,
-    streamPrimaryAccountId,
-    setStreamPrimaryAccountId,
+    hostAccountId,
+    setHostAccountId,
+    streamHostAccountId,
+    setStreamHostAccountId,
     streamSecondaryAccountId,
     setStreamSecondaryAccountId,
     clientIdDaemon,
@@ -117,9 +117,9 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
       <div className="daemon-group settings-ib-config-sheet" id="ib-config-sheet">
         <div className="daemon-group-header">
           <span className="daemon-group-title">IB Configure</span>
-          <InfoTooltip text="Configure two IB connections: Host (primary TWS for daemon, auto-trading, market data) and Secondary (optional second TWS). Expand each group below to edit. Flex range preferences are at the bottom." />
+          <InfoTooltip text="Configure two IB connections: Host (TWS for daemon, auto-trading, market data) and Secondary (optional second TWS). Expand each group below to edit. Flex range preferences are at the bottom." />
         </div>
-        <p className="settings-ib-config-subtitle">Host (primary) and Secondary (optional second TWS). Same fields for each.</p>
+        <p className="settings-ib-config-subtitle">Host and Secondary (optional second TWS). Same fields for each.</p>
         <div className="daemon-group-body">
           <section className="settings-ib-section">
             <h3 className="settings-ib-config-sheet-title">User client related settings</h3>
@@ -360,12 +360,12 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                     <td className="flex-query-cell-input">
                       <input
                         type="text"
-                        value={streamPrimaryAccountId}
-                        onChange={(e) => setStreamPrimaryAccountId(e.target.value)}
-                        placeholder="Primary (e.g. U17113214)"
+                        value={streamHostAccountId}
+                        onChange={(e) => setStreamHostAccountId(e.target.value)}
+                        placeholder="Host (e.g. U17113214)"
                         className="flex-query-input"
                         style={{ maxWidth: '100%' }}
-                        aria-label="Stream primary account ID — Host"
+                        aria-label="Stream host account ID — Host"
                       />
                     </td>
                     <td className="flex-query-cell-input">
@@ -385,8 +385,8 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                     <td className="flex-query-cell-input">
                       <input
                         type="text"
-                        value={primaryAccountId}
-                        onChange={(e) => setPrimaryAccountId(e.target.value)}
+                        value={hostAccountId}
+                        onChange={(e) => setHostAccountId(e.target.value)}
                         placeholder="e.g. U17113214 (empty = first from Host User)"
                         className="flex-query-input"
                         style={{ maxWidth: '100%' }}
