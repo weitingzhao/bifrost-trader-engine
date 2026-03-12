@@ -132,19 +132,22 @@ def post_celery_stop() -> JSONResponse:
 
 @router.post("/control/monitor_connect")
 async def post_monitor_connect(request: Request) -> JSONResponse:
-    """Establish monitor IB connections (account + market). On success, /status monitor_ib_status.*.connected becomes true."""
+    """Establish monitor IB connections (account + account2 + market). On success, /status monitor_ib_status.*.connected becomes true."""
     app = request.app
     if not getattr(app.state, "monitor_enabled", True):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Monitor stopped; cannot connect IB."})
     acc_client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+    acc_client_2: Optional[AccountIbClient] = getattr(app.state, "account_ib_client_2", None)
     mkt_client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
-    if acc_client is None and mkt_client is None:
+    if acc_client is None and acc_client_2 is None and mkt_client is None:
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": "Monitor IB clients not initialized (check startup logs or DB IB settings)."},
         )
     acc_ok: Optional[bool] = None
     acc_err: Optional[str] = None
+    acc2_ok: Optional[bool] = None
+    acc2_err: Optional[str] = None
     mkt_ok: Optional[bool] = None
     mkt_err: Optional[str] = None
     if acc_client is not None:
@@ -154,6 +157,13 @@ async def post_monitor_connect(request: Request) -> JSONResponse:
         except Exception as e:
             acc_ok = False
             acc_err = str(e)
+    if acc_client_2 is not None:
+        try:
+            await acc_client_2.ensure_connected()
+            acc2_ok = True
+        except Exception as e:
+            acc2_ok = False
+            acc2_err = str(e)
     if mkt_client is not None:
         try:
             await mkt_client.ensure_connected()
@@ -161,13 +171,14 @@ async def post_monitor_connect(request: Request) -> JSONResponse:
         except Exception as e:
             mkt_ok = False
             mkt_err = str(e)
-    ok = (acc_ok is not False) and (mkt_ok is not False)
+    ok = (acc_ok is not False) and (acc2_ok is not False) and (mkt_ok is not False)
     status_code = 200 if ok else 500
     return JSONResponse(
         status_code=status_code,
         content={
             "ok": ok,
             "account": {"requested": acc_client is not None, "success": acc_ok, "error": acc_err},
+            "account2": {"requested": acc_client_2 is not None, "success": acc2_ok, "error": acc2_err},
             "market": {"requested": mkt_client is not None, "success": mkt_ok, "error": mkt_err},
         },
     )

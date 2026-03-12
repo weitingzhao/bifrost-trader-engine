@@ -65,6 +65,7 @@ function SystemDashboard({
   onOpenSectionWithConsole,
   streamLamp,
   streamItems,
+  onStreamClick,
   workerPending,
   workerRunning,
 }: {
@@ -73,6 +74,7 @@ function SystemDashboard({
   onOpenSectionWithConsole?: (section: OperationsSection, consoleSection: ConsoleSection) => void
   streamLamp: LampId
   streamItems: StreamSummaryItem[]
+  onStreamClick?: () => void
   workerPending?: number | null
   workerRunning?: number | null
 }) {
@@ -128,7 +130,13 @@ function SystemDashboard({
         </div>
 
         <div className="dashboard-streams-cluster" aria-label="Market streams summary">
-          <div className="dashboard-streams-inline">
+          <button
+            type="button"
+            className="dashboard-streams-inline dashboard-streams-btn"
+            onClick={onStreamClick}
+            aria-label="Go to Live page"
+            title="Go to Live page"
+          >
             <span className={`lamp lamp-sm ${streamLamp}`} aria-hidden />
             <div className="dashboard-streams-marquee">
               <div className="dashboard-streams-track">
@@ -140,7 +148,7 @@ function SystemDashboard({
                 ))}
               </div>
             </div>
-          </div>
+          </button>
         </div>
       </div>
     </section>
@@ -409,13 +417,6 @@ export default function App() {
       return { qty, avgCost, pnlCost, pnlVsBench, changePct }
     })
 
-    const totalCostPnl = rows.reduce((acc, row) => acc + (row.pnlCost != null && Number.isFinite(row.pnlCost) ? row.pnlCost : 0), 0)
-    const totalCost = rows.reduce((acc, row) => {
-      const qty = Number.isFinite(row.qty) ? row.qty : 0
-      const cost = row.avgCost != null && Number.isFinite(row.avgCost) ? row.avgCost : 0
-      return acc + qty * cost
-    }, 0)
-    const totalPct = totalCost > 0 && Number.isFinite(totalCostPnl) ? (totalCostPnl / totalCost) * 100 : null
     const totalDailyDollar = rows.reduce((acc, row) => acc + (row.pnlVsBench != null && Number.isFinite(row.pnlVsBench) ? row.pnlVsBench : 0), 0)
     const sumLastQty = watchlistSymbols.reduce((acc, symbol, index) => {
       const qty = Number.isFinite(rows[index]?.qty) ? rows[index].qty : 0
@@ -434,33 +435,42 @@ export default function App() {
       return 'neutral'
     }
 
-    return [
+    const items: StreamSummaryItem[] = [
       {
         label: 'Market Streams',
         value: liveLamp === 'green' ? 'Online' : 'Offline',
         tone: liveLamp === 'green' ? 'positive' : 'negative',
       },
+      ...watchlistSymbols.map((symbol, i) => {
+        const row = rows[i]
+        const pct = row?.changePct ?? null
+        const dollar = row?.pnlVsBench ?? null
+        const valueStr =
+          pct != null && dollar != null
+            ? `${fmtPctCompact(pct)} / ${fmtUsdCompact(dollar)}`
+            : pct != null
+              ? fmtPctCompact(pct)
+              : dollar != null
+                ? fmtUsdCompact(dollar)
+                : '—'
+        return {
+          label: symbol,
+          value: valueStr,
+          tone: toneForNumber(pct ?? dollar),
+        }
+      }),
       {
-        label: 'Total $',
-        value: fmtUsdCompact(totalCostPnl),
-        tone: toneForNumber(totalCostPnl),
+        label: 'Daily %',
+        value: fmtPctCompact(totalDailyPct),
+        tone: toneForNumber(totalDailyPct),
       },
       {
         label: 'Daily $',
         value: fmtUsdCompact(totalDailyDollar),
         tone: toneForNumber(totalDailyDollar),
       },
-      {
-        label: 'Total %',
-        value: fmtPctCompact(totalPct),
-        tone: toneForNumber(totalPct),
-      },
-      {
-        label: 'Daily %',
-        value: fmtPctCompact(totalDailyPct),
-        tone: toneForNumber(totalDailyPct),
-      },
     ]
+    return items
   }, [status?.accounts, watchlistSymbols, quotesMap, benchmarks, liveLamp])
 
   useEffect(() => {
@@ -685,6 +695,7 @@ export default function App() {
           onOpenSectionWithConsole={openSystemSectionWithConsole}
           streamLamp={liveLamp}
           streamItems={streamSummaryItems}
+          onStreamClick={() => setActiveTab('live')}
           workerPending={workerJobPending}
           workerRunning={workerJobRunning}
         />

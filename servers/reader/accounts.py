@@ -68,6 +68,11 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                          WHERE e.account_id = ap.account_id AND e.contract_key = ap.contract_key
                          ORDER BY e.exec_time DESC NULLS LAST
                          LIMIT 1) AS position_exec_time,
+                        (SELECT e.trade_date
+                         FROM account_executions e
+                         WHERE e.account_id = ap.account_id AND e.contract_key = ap.contract_key
+                         ORDER BY e.exec_time DESC NULLS LAST
+                         LIMIT 1) AS position_trade_date,
                         ap.expiry,
                         ap.strike,
                         ap.option_right,
@@ -139,6 +144,15 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                             t = None
                         if t is not None and math.isfinite(t):
                             pos_dict["exec_time"] = t
+                    except (TypeError, ValueError):
+                        pass
+                raw_trade_date = p.get("position_trade_date")
+                if raw_trade_date is not None:
+                    try:
+                        if hasattr(raw_trade_date, "isoformat"):
+                            pos_dict["trade_date"] = raw_trade_date.isoformat()
+                        elif isinstance(raw_trade_date, str) and raw_trade_date.strip():
+                            pos_dict["trade_date"] = raw_trade_date.strip()[:10]
                     except (TypeError, ValueError):
                         pass
 

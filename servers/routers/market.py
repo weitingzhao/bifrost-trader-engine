@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["market"])
 
-_TOLERANCE_END_SEC = 2 * 86400
+# End-gap tolerance: when "today" is a US trading day (excl. weekends & holidays), allow at most 1 day;
+# when not (weekend/holiday), allow 2 days so we don't falsely flag gap.
+_TOLERANCE_END_SEC_TRADING_DAY = 1 * 86400
+_TOLERANCE_END_SEC_NON_TRADING = 2 * 86400
 _WATCHLIST_EOD_PERIODS = ["1 D", "1 hour", "5 mins", "1 min"]
 
 
@@ -35,11 +38,12 @@ def _coverage_status(
     count: int,
     target_start_ts: float,
     target_end_ts: float,
+    tolerance_end_sec: float,
 ) -> str:
     """Return ok | gap_end | missing. Only end gap is checked."""
     if count == 0:
         return "missing"
-    gap_end = max_ts is None or max_ts < target_end_ts - _TOLERANCE_END_SEC
+    gap_end = max_ts is None or max_ts < target_end_ts - tolerance_end_sec
     if gap_end:
         return "gap_end"
     return "ok"
@@ -319,22 +323,30 @@ def get_bars_coverage(
     target_min_start = now_ts - (7 * min_weeks * one_day)
     target_5min_start = now_ts - (30 * five_min_months * one_day)
     target_1hour_start = now_ts - (30 * one_hour_months * one_day)
+    # Today (America/New_York): if trading day, end-gap tolerance = 1 day; else (weekend/holiday) = 2 days.
+    try:
+        from zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        is_trading_today = reader.get_is_us_trading_day(today_str)
+    except Exception:
+        is_trading_today = True
+    tolerance_end_sec = _TOLERANCE_END_SEC_TRADING_DAY if is_trading_today else _TOLERANCE_END_SEC_NON_TRADING
     enriched = []
     for item in coverage:
         day = item.get("stock_day") or {}
         day_ts_s = day.get("min_ts")
         day_ts_e = day.get("max_ts")
         day_cnt = day.get("count") or 0
-        day_status = _coverage_status(day_ts_s, day_ts_e, day_cnt, target_daily_start, target_end_ts)
+        day_status = _coverage_status(day_ts_s, day_ts_e, day_cnt, target_daily_start, target_end_ts, tolerance_end_sec)
         stock_day_enriched = {**day, "target_start_ts": target_daily_start, "target_end_ts": target_end_ts, "status": day_status}
         mins = item.get("stock_min") or {}
         min_1 = mins.get("1 min") or {}
         min_5 = mins.get("5 mins") or {}
         min_1h = mins.get("1 hour") or {}
         stock_min_enriched = {
-            "1 min": {**min_1, "target_start_ts": target_min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1.get("min_ts"), min_1.get("max_ts"), min_1.get("count") or 0, target_min_start, target_end_ts)},
-            "5 mins": {**min_5, "target_start_ts": target_5min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_5.get("min_ts"), min_5.get("max_ts"), min_5.get("count") or 0, target_5min_start, target_end_ts)},
-            "1 hour": {**min_1h, "target_start_ts": target_1hour_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1h.get("min_ts"), min_1h.get("max_ts"), min_1h.get("count") or 0, target_1hour_start, target_end_ts)},
+            "1 min": {**min_1, "target_start_ts": target_min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1.get("min_ts"), min_1.get("max_ts"), min_1.get("count") or 0, target_min_start, target_end_ts, tolerance_end_sec)},
+            "5 mins": {**min_5, "target_start_ts": target_5min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_5.get("min_ts"), min_5.get("max_ts"), min_5.get("count") or 0, target_5min_start, target_end_ts, tolerance_end_sec)},
+            "1 hour": {**min_1h, "target_start_ts": target_1hour_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1h.get("min_ts"), min_1h.get("max_ts"), min_1h.get("count") or 0, target_1hour_start, target_end_ts, tolerance_end_sec)},
         }
         enriched.append({"symbol": item.get("symbol"), "stock_day": stock_day_enriched, "stock_min": stock_min_enriched})
     return {"coverage": enriched, "policy": policy}

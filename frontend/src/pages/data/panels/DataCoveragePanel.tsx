@@ -130,7 +130,7 @@ export function DataCoveragePanel({
           />
           <InfoTooltip text="Wait this many seconds between each IB history request (chunk). Default 10." />
           <button type="button" className="btn btn-secondary btn-sm" disabled={coverageLoading} onClick={() => onLoadCoverage()} aria-label="Refresh coverage">
-            {coverageLoading ? '…' : 'Refresh'}
+            {coverageLoading ? '…' : 'Refresh coverage'}
           </button>
         </label>
         <button
@@ -147,7 +147,7 @@ export function DataCoveragePanel({
               : 'Queue worker jobs immediately for all Watchlist stocks without opening dry-run preview'
           }
         >
-          {watchlistPreviewLoading ? 'Dry run…' : watchlistRefreshRunning ? 'Queuing…' : 'EOD Pull'}
+          {watchlistPreviewLoading ? 'Dry run…' : watchlistRefreshRunning ? 'Queuing…' : 'Pull EOD'}
         </button>
         <InfoTooltip
           text={
@@ -163,10 +163,10 @@ export function DataCoveragePanel({
           onClick={() => {
             void onRefreshIndices()
           }}
-          aria-label="Refresh reference indices"
+          aria-label="Refresh Index"
           title="Pull daily bars for reference indices from TradingView into stock_day."
         >
-          {indicesRefreshLoading ? 'Refreshing…' : 'Refresh indices'}
+          {indicesRefreshLoading ? 'Refreshing…' : 'Refresh Index'}
         </button>
         <InfoTooltip text="Refresh reference indices (^GSPC, ^DJI, ^IXIC) from TradingView. Daily only." />
       </div>

@@ -906,6 +906,17 @@ body::before {
   overflow: hidden;
 }
 
+.dashboard-streams-btn {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.dashboard-streams-btn:hover {
+  background: var(--color-surface-hover, rgba(128, 128, 128, 0.08));
+}
+
 .dashboard-streams-inline .lamp-sm {
   margin-right: 0;
   flex-shrink: 0;
@@ -1177,12 +1188,23 @@ body::before {
 }
 
 /* Market Streams: Account filter pills (一字排开) */
+.realtime-stream-filters-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
 .realtime-stream-filter {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-2);
   flex-wrap: wrap;
+}
+
+.realtime-stream-filters-row .realtime-stream-filter {
+  margin-bottom: 0;
 }
 .realtime-stream-filter-pills {
   display: inline-flex;
@@ -1587,6 +1609,38 @@ body::before {
   margin: var(--space-1) 0 0 0;
   font-size: var(--text-caption);
   color: var(--color-text-muted);
+}
+
+/* IB connection: table with Host/Secondary as rows, Account/Market as columns (Status → Management) */
+.daemon-group-body .ib-connection-table {
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+.daemon-group-body .ib-connection-table th,
+.daemon-group-body .ib-connection-table td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  text-align: left;
+  vertical-align: middle;
+}
+.daemon-group-body .ib-connection-table th.ib-connection-th-corner {
+  width: 0;
+  padding: 0;
+}
+.daemon-group-body .ib-connection-table .ib-connection-th {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-bottom: var(--space-1);
+}
+.daemon-group-body .ib-connection-table .ib-connection-row-label {
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding-right: var(--space-3);
+}
+.daemon-group-body .ib-connection-table .ib-connection-cell .countdown-num {
+  white-space: nowrap;
 }
 
 .daemon-group-body .controls {

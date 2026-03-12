@@ -2,19 +2,24 @@
 
 import psycopg2
 
-def _ensure_tables(conn, log=None) -> None:
+def _ensure_tables(conn, log=None, log_table=None) -> None:
     """Create status_current, status_history, operations if not exist (per DATABASE.md §2).
     If log is callable, it is called with a short step name before each DDL section (for progress/debug).
+    If log_table is callable, it is called as log_table(table_name, purpose) before each table is created/updated.
     """
     def _log(msg: str) -> None:
         if callable(log):
             log(msg)
+    def _log_table(name: str, purpose: str) -> None:
+        if callable(log_table):
+            log_table(name, purpose)
     try:
         conn.rollback()
     except Exception:
         pass
     with conn.cursor() as cur:
         _log("status_current, status_history, operations")
+        _log_table("status_current", "Current run status snapshot (single row)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS status_current (
@@ -36,6 +41,7 @@ def _ensure_tables(conn, log=None) -> None:
             )
         """
         )
+        _log_table("status_history", "Status snapshot history")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS status_history (
@@ -57,6 +63,7 @@ def _ensure_tables(conn, log=None) -> None:
             )
         """
         )
+        _log_table("operations", "Operations log")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS operations (
@@ -71,6 +78,7 @@ def _ensure_tables(conn, log=None) -> None:
         """
         )
         _log("daemon_control, daemon_run_status, daemon_heartbeat")
+        _log_table("daemon_control", "Daemon control commands (stop, refresh, etc.)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_control (
@@ -81,6 +89,7 @@ def _ensure_tables(conn, log=None) -> None:
             )
         """
         )
+        _log_table("daemon_run_status", "Run suspended flag (single row)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_run_status (
@@ -96,6 +105,7 @@ def _ensure_tables(conn, log=None) -> None:
             ON CONFLICT (id) DO NOTHING
         """
         )
+        _log_table("daemon_heartbeat", "Daemon heartbeat and IB/subscription status")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_heartbeat (
@@ -112,6 +122,7 @@ def _ensure_tables(conn, log=None) -> None:
         """
         )
         _log("settings + ib_client_id columns")
+        _log_table("settings", "App settings (IB config, stream accounts, etc.)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS settings (
@@ -176,6 +187,7 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_default_range_days integer DEFAULT 30")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_init_range_days integer DEFAULT 360")
         _log("accounts, account_positions, instrument_prices")
+        _log_table("accounts", "Account summaries")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS accounts (
@@ -188,6 +200,7 @@ def _ensure_tables(conn, log=None) -> None:
             )
         """
         )
+        _log_table("account_positions", "Positions per account")
         # account_positions: (account_id, contract_key) 为主键，无 id；天然按主键 INSERT/UPDATE，仅删除已平仓行
         cur.execute(
             """
@@ -235,6 +248,7 @@ def _ensure_tables(conn, log=None) -> None:
             ON account_positions (account_id, contract_key)
         """
         )
+        _log_table("instrument_prices", "Last prices for positions/watchlist")
         # R-M6: 每个持仓标的当前价（按 contract_key 聚合），供监控页逐行展示与计算盈亏
         cur.execute(
             """
@@ -254,6 +268,7 @@ def _ensure_tables(conn, log=None) -> None:
         """
         )
         _log("account_executions, account_execution_commissions")
+        _log_table("account_executions", "Execution/transaction records")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS account_executions (
@@ -278,6 +293,7 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS account_executions_account_time ON account_executions (account_id, exec_time DESC)"
         )
+        _log_table("account_execution_commissions", "Commission records")
         # R-A2 §2.11.1: CommissionReport 表，与 account_executions 通过 exec_id 关联
         cur.execute(
             """
@@ -294,6 +310,7 @@ def _ensure_tables(conn, log=None) -> None:
         )
         # §2.21: account_transactions (Flex cash transactions for Performance Phase 0)
         _log("account_transactions")
+        _log_table("account_transactions", "Cash/transaction records")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS account_transactions (
@@ -348,6 +365,7 @@ def _ensure_tables(conn, log=None) -> None:
             "CREATE INDEX IF NOT EXISTS account_transactions_account_ts ON account_transactions (account_id, ts DESC)"
         )
         _log("stock_day table + index (may block if API/worker use stock_day)")
+        _log_table("stock_day", "Stock daily OHLC bars")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_day (
@@ -368,6 +386,7 @@ def _ensure_tables(conn, log=None) -> None:
             "CREATE INDEX IF NOT EXISTS stock_day_symbol_time ON stock_day (symbol, bar_time DESC)"
         )
         _log("stock_min table + index")
+        _log_table("stock_min", "Stock minute OHLC bars")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS stock_min (
@@ -389,6 +408,7 @@ def _ensure_tables(conn, log=None) -> None:
             "CREATE INDEX IF NOT EXISTS stock_min_symbol_period_time ON stock_min (symbol, period, bar_time DESC)"
         )
         _log("option_day, option_min tables + indexes")
+        _log_table("option_day", "Option daily OHLC bars")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS option_day (
@@ -411,6 +431,7 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_day_symbol_expiry_strike_right_time ON option_day (symbol, expiry, strike, option_right, bar_time DESC)"
         )
+        _log_table("option_min", "Option minute OHLC bars")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS option_min (
@@ -437,6 +458,7 @@ def _ensure_tables(conn, log=None) -> None:
         # Release earlier DDL locks before the final watchlist/backfill DDL step.
         conn.commit()
         _log("watchlist, bars_backfill_jobs")
+        _log_table("watchlist", "Watchlist items (STK/OPT)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS watchlist (
@@ -456,6 +478,7 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS watchlist_contract_key ON watchlist (contract_key)"
         )
+        _log_table("bars_backfill_jobs", "Backfill job queue")
         # 阶段 3 非实时拉取 Worker：backfill 任务队列表（见 docs/DATABASE.md §2.x bars_backfill_jobs）
         cur.execute(
             """
@@ -483,6 +506,7 @@ def _ensure_tables(conn, log=None) -> None:
         cur.execute("ALTER TABLE bars_backfill_jobs ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
         conn.commit()
         _log("position_categories, position_category_tags")
+        _log_table("position_categories", "Position category definitions")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS position_categories (
@@ -493,8 +517,9 @@ def _ensure_tables(conn, log=None) -> None:
                 created_at timestamptz DEFAULT now(),
                 updated_at timestamptz DEFAULT now()
             )
-            """
+        """
         )
+        _log_table("position_category_tags", "Position-to-category mapping")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS position_category_tags (
@@ -513,6 +538,7 @@ def _ensure_tables(conn, log=None) -> None:
             "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS category_id integer REFERENCES position_categories(id) ON DELETE SET NULL"
         )
         _log("market_streams_symbol_order")
+        _log_table("market_streams_symbol_order", "Market Streams symbol order per category")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS market_streams_symbol_order (
@@ -526,6 +552,7 @@ def _ensure_tables(conn, log=None) -> None:
         )
         conn.commit()
         _log("us_market_holidays")
+        _log_table("us_market_holidays", "US market holidays")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS us_market_holidays (
@@ -538,6 +565,7 @@ def _ensure_tables(conn, log=None) -> None:
             """
         )
         _log("flex_accounts")
+        _log_table("flex_accounts", "Flex query config")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS flex_accounts (
@@ -674,6 +702,7 @@ def _ensure_tables(conn, log=None) -> None:
             except Exception:
                 conn.rollback()
         _log("key_value_config")
+        _log_table("key_value_group", "Key-value config groups")
         # 1) Group table first
         cur.execute(
             """
@@ -715,6 +744,7 @@ def _ensure_tables(conn, log=None) -> None:
             "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'key_value_config'"
         )
         table_exists = cur.fetchone() is not None
+        _log_table("key_value_config", "Key-value config entries")
         if not table_exists:
             cur.execute(
                 """

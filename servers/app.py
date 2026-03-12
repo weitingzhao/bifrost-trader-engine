@@ -164,6 +164,7 @@ def create_app(
             # 后台尝试建立 IB 连接，不阻塞 startup，避免 GET /status、GET /health 等不到响应导致前端显示 Fetch failed
             async def _connect_ib_in_background() -> None:
                 acc_client = getattr(app.state, "account_ib_client", None)
+                acc_client_2 = getattr(app.state, "account_ib_client_2", None)
                 mkt_client = getattr(app.state, "market_ib_client", None)
                 if acc_client is not None:
                     try:
@@ -172,6 +173,15 @@ def create_app(
                     except Exception as e:
                         logger.warning(
                             "AccountIbClient auto-connect on startup failed: %s (will retry on first use)",
+                            e,
+                        )
+                if acc_client_2 is not None:
+                    try:
+                        await acc_client_2.ensure_connected()
+                        logger.info("Monitor AccountIbClient2 (Secondary) connected on startup")
+                    except Exception as e:
+                        logger.warning(
+                            "AccountIbClient2 auto-connect on startup failed: %s (will retry on Connect or first use)",
                             e,
                         )
                 if mkt_client is not None:

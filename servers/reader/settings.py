@@ -83,11 +83,16 @@ def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
                     "SELECT ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account FROM settings WHERE id = 1"
                 )
                 r2 = cur2.fetchone()
-            if r2 and (r2.get("ib2_host") or "").strip():
-                out["ib2_host"] = (r2.get("ib2_host") or "").strip()
-                out["ib2_port_type"] = (r2.get("ib2_port_type") or "tws_paper").strip().lower()
+            if r2:
+                # Always return DB values for client IDs (Settings display and status).
                 out["ib2_client_id_listener"] = int(r2.get("ib2_client_id_listener") or 3)
                 out["ib2_client_id_account"] = int(r2.get("ib2_client_id_account") or 102)
+                if (r2.get("ib2_host") or "").strip():
+                    out["ib2_host"] = (r2.get("ib2_host") or "").strip()
+                    out["ib2_port_type"] = (r2.get("ib2_port_type") or "tws_paper").strip().lower()
+                else:
+                    out["ib2_host"] = None
+                    out["ib2_port_type"] = None
             else:
                 out["ib2_host"] = None
                 out["ib2_port_type"] = None

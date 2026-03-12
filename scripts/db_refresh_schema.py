@@ -25,8 +25,18 @@ os.chdir(_PROJECT_ROOT)
 
 
 def _progress(msg: str) -> None:
-    """Print progress to stderr and flush so it appears immediately (e.g. when blocking on lock)."""
-    print(f"[schema] {msg}", file=sys.stderr, flush=True)
+    """Script-level progress (connect, run, close)."""
+    print(f"[refresh] {msg}", file=sys.stderr, flush=True)
+
+
+def _step(msg: str) -> None:
+    """DDL section / step (e.g. which group of tables is being processed)."""
+    print(f"[step] {msg}", file=sys.stderr, flush=True)
+
+
+def _log_table(table_name: str, purpose: str) -> None:
+    """One line per table: name and short purpose."""
+    print(f"[table]   {table_name}  -- {purpose}", file=sys.stderr, flush=True)
 
 
 def main() -> int:
@@ -87,7 +97,7 @@ def main() -> int:
 
     try:
         _progress("Running _ensure_tables (see step logs below; if it hangs, last step is where lock is held).")
-        _ensure_tables(conn, log=_progress)
+        _ensure_tables(conn, log=_step, log_table=_log_table)
         conn.commit()
         tables_list = (
             "status_current, status_history, operations, daemon_control, "

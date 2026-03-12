@@ -19,6 +19,7 @@ export interface StatusMonitorPanelProps {
   healthCountdownSec: number | null
   monitorIbGroupLamp: Lamp
   monitorAccount: MonitorClient | undefined
+  monitorAccount2: MonitorClient | undefined
   monitorMarket: MonitorClient | undefined
   onMonitorStop: () => void
   onMonitorConnect: () => void
@@ -37,6 +38,7 @@ export function StatusMonitorPanel({
   healthCountdownSec,
   monitorIbGroupLamp,
   monitorAccount,
+  monitorAccount2,
   monitorMarket,
   onMonitorStop,
   onMonitorConnect,
@@ -108,28 +110,56 @@ export function StatusMonitorPanel({
             <span className="daemon-group-title">IB connection</span>
           </div>
           <div className="daemon-group-body">
-            <p className="section-hint countdown-line">
-              Account Client:{' '}
-              {monitorAccount?.connected ? (
-                <span className="countdown-num">Connected @ {monitorAccount?.client_id ?? '—'}</span>
-              ) : (
-                `Not connected${monitorAccount?.last_error ? ` (${monitorAccount.last_error})` : ''}`
-              )}
-            </p>
-            <p className="section-hint countdown-line">
-              Market Client:{' '}
-              {monitorMarket?.connected ? (
-                <span className="countdown-num">Connected @ {monitorMarket?.client_id ?? '—'}</span>
-              ) : (
-                `Not connected${monitorMarket?.last_error ? ` (${monitorMarket.last_error})` : ''}`
-              )}
-            </p>
+            <table className="ib-connection-table" aria-label="IB connection status by Host and type">
+              <thead>
+                <tr>
+                  <th scope="col" className="ib-connection-th-corner" />
+                  <th scope="col" className="ib-connection-th">Account</th>
+                  <th scope="col" className="ib-connection-th">Market</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row" className="ib-connection-row-label">Host</th>
+                  <td className="ib-connection-cell">
+                    {monitorAccount?.connected ? (
+                      <span className="countdown-num">Connected @ {monitorAccount?.client_id ?? '—'}</span>
+                    ) : (
+                      `Not connected${monitorAccount?.last_error ? ` (${monitorAccount.last_error})` : ''}`
+                    )}
+                  </td>
+                  <td className="ib-connection-cell">
+                    {monitorMarket?.connected ? (
+                      <span className="countdown-num">Connected @ {monitorMarket?.client_id ?? '—'}</span>
+                    ) : (
+                      `Not connected${monitorMarket?.last_error ? ` (${monitorMarket.last_error})` : ''}`
+                    )}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row" className="ib-connection-row-label" title="Secondary (Second User)">
+                    Sec
+                    <InfoTooltip text="Uses Settings → IB Connection → Second User (IP/Host). Restart Management after changing." />
+                  </th>
+                  <td className="ib-connection-cell">
+                    {monitorAccount2 === undefined ? (
+                      'Not configured'
+                    ) : monitorAccount2?.connected ? (
+                      <span className="countdown-num">Connected @ {monitorAccount2?.client_id ?? '—'}</span>
+                    ) : (
+                      `Not connected${monitorAccount2?.last_error ? ` (${monitorAccount2.last_error})` : ''}`
+                    )}
+                  </td>
+                  <td className="ib-connection-cell">—</td>
+                </tr>
+              </tbody>
+            </table>
             <div className="controls" style={{ marginTop: '0.25rem' }}>
-              {(monitorAccount?.connected || monitorMarket?.connected) ? (
+              {(monitorAccount?.connected || monitorAccount2?.connected || monitorMarket?.connected) ? (
                 <button
                   type="button"
                   className="btn-retry-ib"
-                  title="Release Monitor IB connections (Account + Market client_id). Monitor keeps running; use Connect to reconnect."
+                  title="Release Monitor IB connections (Account + Account2 + Market). Monitor keeps running; use Connect to reconnect."
                   onClick={onMonitorReleaseIb}
                 >
                   Release
@@ -139,7 +169,7 @@ export function StatusMonitorPanel({
                   type="button"
                   className="btn-resume"
                   disabled={!monitorEnabled}
-                  title={monitorEnabled ? 'Establish monitor IB connection (AccountIbClient + MarketIbClient)' : 'Monitor stopped; cannot connect'}
+                  title={monitorEnabled ? 'Establish monitor IB connection (Account + Account2 + Market)' : 'Monitor stopped; cannot connect'}
                   onClick={onMonitorConnect}
                 >
                   Connect

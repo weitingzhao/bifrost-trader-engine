@@ -536,54 +536,56 @@ export function LivePage({ status }: LivePageProps) {
             )}
           </div>
         </div>
-        {hasStreamAccounts && (
+        <div className="realtime-stream-filters-row">
+          {hasStreamAccounts && (
+            <div className="realtime-stream-filter">
+              <span className="section-hint">Account:</span>
+              <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account">
+                {(['all', 'primary', 'secondary', 'wishlist'] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`replay-filter-pill ${streamCategoryFilter === value ? 'active' : ''}`}
+                    onClick={() => setStreamCategoryFilter(value)}
+                    aria-pressed={streamCategoryFilter === value}
+                  >
+                    {value === 'all' ? 'All' : value === 'primary' ? 'Primary' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="realtime-stream-filter">
-            <span className="section-hint">Account:</span>
-            <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by stream account">
-              {(['all', 'primary', 'secondary', 'wishlist'] as const).map((value) => (
+            <span className="section-hint">Category:</span>
+            <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category">
+              <button
+                type="button"
+                className={`replay-filter-pill ${positionCategoryFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setPositionCategoryFilter('all')}
+                aria-pressed={positionCategoryFilter === 'all'}
+              >
+                All
+              </button>
+              {streamCategoryOrder.map((cat) => (
                 <button
-                  key={value}
+                  key={cat}
                   type="button"
-                  className={`replay-filter-pill ${streamCategoryFilter === value ? 'active' : ''}`}
-                  onClick={() => setStreamCategoryFilter(value)}
-                  aria-pressed={streamCategoryFilter === value}
+                  className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilter === cat ? 'active' : ''}`}
+                  onClick={() => setPositionCategoryFilter(cat)}
+                  aria-pressed={positionCategoryFilter === cat}
+                  draggable
+                  onDragStart={(e) => handleCategoryDragStart(e, cat)}
+                  onDragOver={handleCategoryDragOver}
+                  onDrop={(e) => handleCategoryDrop(e, cat)}
+                  title="Drag to reorder category"
                 >
-                  {value === 'all' ? 'All' : value === 'primary' ? 'Primary' : value === 'secondary' ? 'Secondary' : 'Wishlist'}
+                  <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
+                  {cat}
                 </button>
               ))}
             </div>
+            {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
           </div>
-        )}
-        <div className="realtime-stream-filter">
-          <span className="section-hint">Category:</span>
-          <div className="realtime-stream-filter-pills" role="group" aria-label="Filter by position category">
-            <button
-              type="button"
-              className={`replay-filter-pill ${positionCategoryFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setPositionCategoryFilter('all')}
-              aria-pressed={positionCategoryFilter === 'all'}
-            >
-              All
-            </button>
-            {streamCategoryOrder.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className={`replay-filter-pill replay-filter-pill-draggable ${positionCategoryFilter === cat ? 'active' : ''}`}
-                onClick={() => setPositionCategoryFilter(cat)}
-                aria-pressed={positionCategoryFilter === cat}
-                draggable
-                onDragStart={(e) => handleCategoryDragStart(e, cat)}
-                onDragOver={handleCategoryDragOver}
-                onDrop={(e) => handleCategoryDrop(e, cat)}
-                title="Drag to reorder category"
-              >
-                <span className="replay-filter-pill-grip" aria-hidden>⋮⋮</span>
-                {cat}
-              </button>
-            ))}
-          </div>
-          {categoryOrderSaving && <span className="section-hint" style={{ marginLeft: '0.5rem' }}>Saving order…</span>}
         </div>
         <div className="realtime-quotes-table-wrap">
           <table className="table-operations realtime-quotes-table">

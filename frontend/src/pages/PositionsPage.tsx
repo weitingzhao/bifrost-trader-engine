@@ -682,6 +682,11 @@ export function PositionsPage({
                                         })()}
                                       </td>
                                       <td>{(() => {
+                                        // Prefer trade_date (from latest execution), then exec_time, then updated_at
+                                        const tradeDate = position.trade_date ?? null
+                                        if (tradeDate && tradeDate.trim()) {
+                                          return tradeDate.trim().slice(0, 10)
+                                        }
                                         const ts = position.exec_time != null ? Number(position.exec_time) : (position.updated_at != null ? Number(position.updated_at) : null)
                                         return ts != null && Number.isFinite(ts) ? fmtTs(ts) : '—'
                                       })()}</td>

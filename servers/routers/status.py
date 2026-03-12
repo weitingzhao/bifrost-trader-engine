@@ -97,6 +97,7 @@ def get_status(request: Request) -> Dict[str, Any]:
 
             monitor_ib_status: Dict[str, Any] = {}
             acc_client = getattr(app.state, "account_ib_client", None)
+            acc_client_2 = getattr(app.state, "account_ib_client_2", None)
             mkt_client = getattr(app.state, "market_ib_client", None)
             if acc_client is not None:
                 monitor_ib_status["account"] = {
@@ -104,6 +105,23 @@ def get_status(request: Request) -> Dict[str, Any]:
                     "client_id": acc_client.client_id,
                     "last_error": acc_client.last_error,
                 }
+            if acc_client_2 is not None:
+                monitor_ib_status["account2"] = {
+                    "connected": bool(acc_client_2.connected),
+                    "client_id": acc_client_2.client_id,
+                    "last_error": acc_client_2.last_error,
+                }
+            else:
+                # Expose account2 when Second IB is configured in Settings (host set and/or client_id changed from default).
+                ib2_host = (ib_cfg or {}).get("ib2_host") or ""
+                ib2_host = (ib2_host or "").strip() if isinstance(ib2_host, str) else ""
+                cid2 = int((ib_cfg or {}).get("ib2_client_id_account", 102))
+                if ib2_host or cid2 != 102:
+                    monitor_ib_status["account2"] = {
+                        "connected": False,
+                        "client_id": cid2,
+                        "last_error": "Restart Management to apply" if ib2_host else "Set Second IB host in Settings to enable",
+                    }
             if mkt_client is not None:
                 monitor_ib_status["market"] = {
                     "connected": bool(mkt_client.connected),
@@ -119,10 +137,11 @@ def get_status(request: Request) -> Dict[str, Any]:
         monitor_block_reasons: list = []
         monitor_status_obj = payload.get("monitor_ib_status") or {}
         acc_status = monitor_status_obj.get("account") or {}
+        acc2_status = monitor_status_obj.get("account2") or {}
         mkt_status = monitor_status_obj.get("market") or {}
         if not monitor_enabled:
             monitor_block_reasons.append("monitor_stopped")
-        if acc_status.get("last_error") or mkt_status.get("last_error"):
+        if acc_status.get("last_error") or acc2_status.get("last_error") or mkt_status.get("last_error"):
             monitor_block_reasons.append("monitor_ib_error")
         if not monitor_enabled:
             monitor_self_check = "blocked"
@@ -133,8 +152,13 @@ def get_status(request: Request) -> Dict[str, Any]:
         else:
             monitor_self_check = "ok"
             acc_conn = bool(acc_status.get("connected"))
+            acc2_conn = bool(acc2_status.get("connected"))
             mkt_conn = bool(mkt_status.get("connected"))
-            if not acc_conn and not mkt_conn:
+            # Green when all configured clients are connected (account2 only exists when second IB is configured)
+            need_acc2 = "account2" in monitor_status_obj
+            if need_acc2 and not (acc_conn and acc2_conn and mkt_conn):
+                monitor_lamp = "yellow" if (acc_conn or acc2_conn or mkt_conn) else "red"
+            elif not acc_conn and not mkt_conn:
                 monitor_lamp = "yellow"
             else:
                 monitor_lamp = "green"

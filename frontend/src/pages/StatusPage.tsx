@@ -185,15 +185,21 @@ export function StatusPage({
   const monitorEnabled = j?.monitor_enabled !== false
   const monitorStatus = (j?.monitor_ib_status as any) || {}
   const monitorAccount = monitorStatus.account as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorAccount2 = monitorStatus.account2 as { connected?: boolean; client_id?: number; last_error?: string } | undefined
   const monitorMarket = monitorStatus.market as { connected?: boolean; client_id?: number; last_error?: string } | undefined
-  const monitorHasError = Boolean(monitorAccount?.last_error || monitorMarket?.last_error)
+  const monitorHasError = Boolean(monitorAccount?.last_error || monitorAccount2?.last_error || monitorMarket?.last_error)
+  const hasAccount2 = monitorAccount2 !== undefined
+  const allMonitorClientsConnected = hasAccount2
+    ? Boolean(monitorAccount?.connected && monitorAccount2?.connected && monitorMarket?.connected)
+    : Boolean(monitorAccount?.connected && monitorMarket?.connected)
+  const anyMonitorClientConnected = Boolean(monitorAccount?.connected || monitorAccount2?.connected || monitorMarket?.connected)
   const monitorLamp =
     !monitorEnabled
       ? 'red'
       : monitorHasError
         ? 'yellow'
-        : monitorAccount && !monitorAccount.connected
-          ? 'yellow'
+        : hasAccount2 && !allMonitorClientsConnected
+          ? anyMonitorClientConnected ? 'yellow' : 'yellow'
           : (monitorAccount?.connected || monitorMarket?.connected)
             ? 'green'
             : 'yellow'
@@ -216,7 +222,13 @@ export function StatusPage({
     .join('; ') || 'None'
 
   const monitorIbGroupLamp =
-    !monitorEnabled ? 'none' : (monitorAccount?.connected && monitorMarket?.connected) ? 'green' : (monitorAccount?.connected || monitorMarket?.connected) ? 'yellow' : 'red'
+    !monitorEnabled
+      ? 'none'
+      : allMonitorClientsConnected
+        ? 'green'
+        : anyMonitorClientConnected
+          ? 'yellow'
+          : 'red'
 
   const celeryBrokerConnected = j?.celery_broker_connected === true
   const celeryLastTs = j?.celery_worker_last_updated_ts
@@ -422,10 +434,11 @@ export function StatusPage({
             healthCountdownSec={healthCountdownSec}
             monitorIbGroupLamp={monitorIbGroupLamp}
             monitorAccount={monitorAccount}
+            monitorAccount2={monitorAccount2}
             monitorMarket={monitorMarket}
             onMonitorStop={() => runMonitorAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped (no new IB requests).' })}
-            onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested (account + market); check status bar for result.' })}
-            onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released (Account + Market client_id). Use Connect to reconnect.' })}
+            onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested (Account + Account2 + Market); check status bar for result.' })}
+            onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released (Account + Account2 + Market). Use Connect to reconnect.' })}
             monitorCtrlMsg={monitorCtrlMsg}
             className={showAllSystemSections ? 'system-stack-section' : undefined}
           />

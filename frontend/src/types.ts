@@ -68,8 +68,10 @@ export interface IbPositionRow {
   contract_key?: string | null
   /** 持仓行最后更新时间（account_positions.updated_at，Unix 秒），供 Details TIME 列显示 */
   updated_at?: number | null
-  /** 该持仓对应的 account_executions 最新一条的 exec_time（LEFT JOIN 按 account_id+contract_key，Unix 秒），供 Pool=On Details TIME 列优先使用 */
+  /** 该持仓对应的 account_executions 最新一条的 exec_time（LEFT JOIN 按 account_id+contract_key，Unix 秒），供 Details TIME 列：无 trade_date 时使用 */
   exec_time?: number | null
+  /** 该持仓对应的 account_executions 最新一条的 trade_date（YYYY-MM-DD），Details TIME 列优先使用 */
+  trade_date?: string | null
   /** 持仓分类（STK）：position_categories 的 id，用于按分类跟踪回报 */
   category_id?: number | null
   /** 持仓分类名称（STK），如 Dividend、Short-term */
@@ -103,9 +105,10 @@ export interface StatusResponse {
   ib_config?: IbConfig | null
   /** Flex config: tokens in settings (ib_flex_host_token, ib_flex_secondary_token), rows in flex_accounts. Configure in Settings → IB Connection → Flex. */
   flex_config?: FlexConfig | null
-  /** 监控端 IB 状态：AccountIbClient/MarketIbClient 的连接情况与错误信息 */
+  /** 监控端 IB 状态：Account (Host), Account (Secondary), Market (Host) 连接情况与错误信息 */
   monitor_ib_status?: {
     account?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
+    account2?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
     market?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
   } | null
   /** 监控端是否启用（停止监控后需重新启动监控服务进程） */
