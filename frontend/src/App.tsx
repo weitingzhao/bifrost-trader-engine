@@ -86,7 +86,7 @@ function SystemDashboard({
       ]
 
   return (
-    <section className="card dashboard-strip" aria-label="Status dashboard">
+    <section className="card dashboard-strip" aria-label="System dashboard">
       <div className="dashboard-strip-grid">
         <div className="dashboard-system-cluster">
           <span className="dashboard-group-label">Sys</span>
@@ -97,7 +97,7 @@ function SystemDashboard({
                 type="button"
                 className="dashboard-chip"
                 onClick={() => onOpenSection(item.id)}
-                aria-label={`Open Status detail for ${item.label}`}
+                aria-label={`Open System detail for ${item.label}`}
               >
                 <span className={`lamp lamp-sm ${item.lamp}`} aria-hidden />
                 <span className="dashboard-chip-label" aria-hidden>{item.label}</span>
@@ -112,7 +112,7 @@ function SystemDashboard({
               type="button"
               className="dashboard-worker-item dashboard-worker-item-btn"
               onClick={() => (onOpenSectionWithConsole ? onOpenSectionWithConsole('celery', 'console') : onOpenSection('celery'))}
-              aria-label="Open Status and Celery Console"
+              aria-label="Open System and Celery Console"
             >
               <span className="dashboard-worker-label">Pending</span>
               <span className="dashboard-worker-value">{workerPending != null ? String(workerPending) : '—'}</span>
@@ -492,7 +492,7 @@ export default function App() {
   }, [benchmarkSymbols.join(',')])
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'system', label: 'Status', lamp: systemLamp },
+    { id: 'system', label: 'System', lamp: systemLamp },
     { id: 'live', label: 'Live', lamp: liveLamp },
     { id: 'watchlist', label: 'Watchlist' },
     { id: 'replay', label: 'Portfolio' },
@@ -546,7 +546,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
-          <nav className="app-tabs" aria-label="Status, Live, Watchlist, Portfolio, Research">
+          <nav className="app-tabs" aria-label="System, Live, Watchlist, Portfolio, Research">
             {tabList.map(({ id, label, lamp }) => {
               if (id === 'replay') {
                 return (
@@ -717,7 +717,6 @@ export default function App() {
           onConsoleSectionChange={setConsoleSection}
           showConsoleTabs={true}
           consoleCardTitle="Console"
-          consoleCardDescription="Consoles for each subsystem, Recent Operations, and Event Subscribe."
         />
       )}
 

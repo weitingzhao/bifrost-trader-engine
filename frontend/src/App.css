@@ -561,13 +561,73 @@ body::before {
 }
 
 .card-operations {
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-2);
 }
 
+.card-event-subscribe {
+  overflow-x: hidden;
+}
 .card-event-subscribe .table-operations tbody td:last-child {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+.event-subscribe-status-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  flex: 1;
+}
+
+.event-subscribe-ticker-marquee {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Shorter marquee in Event Subscribe: smaller gap and font so it doesn’t overflow */
+.event-subscribe-ticker-marquee .event-subscribe-track {
+  gap: var(--space-2);
+  animation-duration: 16s;
+}
+.event-subscribe-ticker-marquee .dashboard-streams-item {
+  font-size: var(--text-caption);
+}
+
+/* Event Subscribe table: Subscription column wider, no wrap */
+.table-event-subscribe .event-subscribe-col-subscription {
+  min-width: 8.5rem;
+  white-space: nowrap;
+}
+
+/* Event Subscribe section: constrain height so it doesn’t overflow the page */
+.event-subscribe-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 50vh;
+  overflow: hidden;
+  overflow-x: hidden;
+}
+.event-subscribe-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  margin-bottom: var(--space-2);
+}
+.event-subscribe-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .card h2 {
@@ -618,7 +678,7 @@ body::before {
 .status-page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-2);
 }
 .status-page-header {
   display: flex;
@@ -670,15 +730,120 @@ body::before {
 .status-page-msg.ok { color: var(--color-text-muted); }
 .status-page-msg.err { color: var(--color-danger, #c53030); }
 
-/* ---------- System 页 Tabs（Daemon / Monitor / Trading Strategy）---------- */
+/* ---------- System 页 Tabs（Daemon / Management / Celery）---------- */
+.status-section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.status-section-heading {
+  font-size: var(--text-title);
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text-main);
+}
+.status-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
 .system-tabs-wrapper {
-  padding-top: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-3);
+}
+.system-tabs-wrapper .system-tabs {
+  margin-bottom: 0;
+}
+.system-tab-content {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
 }
 .system-tabs {
   display: flex;
   gap: 0;
   margin-bottom: var(--space-4);
   border-bottom: 1px solid var(--color-border);
+}
+.system-tabs-one-row {
+  flex-wrap: nowrap;
+}
+.status-tab-sep {
+  margin: 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+/* Unified section box for Daemon and Management/Celery (left-aligned) */
+.status-panel-section {
+  padding: var(--space-3);
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.15));
+  border-radius: 12px;
+  border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
+}
+.status-panel-section-daemon {
+  width: 100%;
+  box-sizing: border-box;
+}
+.status-management-celery-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: stretch;
+  margin-top: var(--space-3);
+}
+.status-management-celery-half {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.status-management-celery-half > .system-tab-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Stream Event: Trading Strategy 1/4, Event Subscribe 3/4 */
+.stream-event-row .stream-event-strategy-quarter {
+  flex: 0 0 25%;
+  min-width: 0;
+}
+.stream-event-row .stream-event-subscribe-rest {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 768px) {
+  .stream-event-row .stream-event-strategy-quarter,
+  .stream-event-row .stream-event-subscribe-rest {
+    flex: 1 1 100%;
+  }
+}
+
+.status-management-celery-half .system-tab-panel,
+.status-panel-section .system-tab-panel {
+  min-height: auto;
+}
+.status-management-celery-row .status-management-celery-half > .system-tab-panel {
+  min-height: 0;
+}
+@media (max-width: 768px) {
+  .status-management-celery-row {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .status-panel-section {
+    padding: var(--space-2);
+  }
+}
+/* Smaller control buttons in System Status sections (Stop is system-level, keep normal size) */
+.status-panel-section .btn-resume,
+.status-panel-section .btn-suspend,
+.status-panel-section .btn-retry-ib,
+.status-panel-section .btn-flatten {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
 }
 .system-tab {
   display: inline-flex;
@@ -1477,6 +1642,16 @@ body::before {
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+
+.daemon-group-header-with-action {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.daemon-group-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .daemon-group-header-main {
@@ -2495,6 +2670,55 @@ select:focus {
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: var(--space-2);
   font-size: var(--text-body);
+}
+
+/* Trading Strategy compact (Stream Event 1/4 column) — slightly smaller font */
+.strategy-panel-compact {
+  padding: 0;
+  font-size: 0.875rem;
+}
+.strategy-compact-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.strategy-compact-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.strategy-compact-status {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+  line-height: 1.3;
+}
+.strategy-compact-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: 0.75rem;
+  margin-bottom: var(--space-2);
+}
+.strategy-compact-summary-item {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+.strategy-compact-label {
+  color: var(--color-text-muted);
+}
+.strategy-compact-summary .status-summary-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+}
+.strategy-compact-controls {
+  margin-top: 0;
+}
+.strategy-compact-msg {
+  font-size: 0.75rem;
+  margin-top: var(--space-1);
 }
 
 .statusSummary span {

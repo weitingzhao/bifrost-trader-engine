@@ -54,7 +54,6 @@ export function StatusPage({
   showSystemSection = true,
   showConsoleSection = true,
   consoleCardTitle,
-  consoleCardDescription,
 }: StatusPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
@@ -259,9 +258,11 @@ export function StatusPage({
       out =
         k === 'ts'
           ? fmtTs(v as number)
-          : k === 'daemon_state'
-            ? DAEMON_STATE_LABELS[String(v)] ?? v
-            : String(v)
+          : k === 'spot' && typeof v === 'number'
+            ? fmtUsd(v)
+            : k === 'daemon_state'
+              ? DAEMON_STATE_LABELS[String(v)] ?? v
+              : String(v)
     else out = '--'
     return { label, value: out }
   })
@@ -297,24 +298,6 @@ export function StatusPage({
 
   return (
     <div className="status-page">
-      <header className="status-page-header" aria-label="Status page header">
-        <h1 className="status-page-title">System Status</h1>
-        <div className="status-page-actions">
-          <button
-            type="button"
-            className="btn-shutdown-all"
-            title="Stop Celery, then Daemon, then Management (in order)"
-            disabled={shutdownAllLoading}
-            onClick={onShutdownAllClick}
-          >
-            {shutdownAllLoading ? 'Shutting down…' : 'Shutdown'}
-          </button>
-          {shutdownAllMsg.text ? (
-            <span className={`status-page-msg ${shutdownAllMsg.isErr ? 'err' : 'ok'}`}>{shutdownAllMsg.text}</span>
-          ) : null}
-        </div>
-      </header>
-
       {/* Shutdown confirmation modal — same style as Data page reset modal */}
       {shutdownConfirmOpen && (
         <div
@@ -344,8 +327,25 @@ export function StatusPage({
       <>
       {showSystemSection && (
       <div className="card process-section system-tabs-wrapper">
+        <div className="status-section-heading-row">
+          <h2 className="status-section-heading">System status</h2>
+          <div className="status-section-actions">
+            <button
+              type="button"
+              className="btn-shutdown-all"
+              title="Stop Celery, then Daemon, then Management (in order)"
+              disabled={shutdownAllLoading}
+              onClick={onShutdownAllClick}
+            >
+              {shutdownAllLoading ? 'Shutting down…' : 'Shutdown'}
+            </button>
+            {shutdownAllMsg.text ? (
+              <span className={`status-page-msg ${shutdownAllMsg.isErr ? 'err' : 'ok'}`}>{shutdownAllMsg.text}</span>
+            ) : null}
+          </div>
+        </div>
         {showSectionTabs && (
-        <div className="system-tabs" role="tablist" aria-label="System sections">
+        <div className="system-tabs system-tabs-one-row" role="tablist" aria-label="System sections">
           <button
             type="button"
             role="tab"
@@ -361,120 +361,232 @@ export function StatusPage({
           <button
             type="button"
             role="tab"
-            aria-selected={systemTab === 'monitor'}
-            aria-controls="system-panel-monitor"
-            id="tab-monitor"
-            className={`system-tab ${systemTab === 'monitor' ? 'active' : ''}`}
+            aria-selected={systemTab === 'monitor' || systemTab === 'celery'}
+            aria-controls="system-panel-monitor-celery"
+            id="tab-monitor-celery"
+            className={`system-tab ${systemTab === 'monitor' || systemTab === 'celery' ? 'active' : ''}`}
             onClick={() => setSystemTabSelected('monitor')}
           >
             <span className={`lamp lamp-sm ${monitorLamp}`} title="Management status" aria-hidden />
             <span>Management</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={systemTab === 'celery'}
-            aria-controls="system-panel-celery"
-            id="tab-celery"
-            className={`system-tab ${systemTab === 'celery' ? 'active' : ''}`}
-            onClick={() => setSystemTabSelected('celery')}
-          >
+            <span className="status-tab-sep" aria-hidden>/</span>
             <span className={`lamp lamp-sm ${celeryLamp}`} title="Celery (bars worker) status" aria-hidden />
             <span>Celery</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={systemTab === 'strategy'}
-            aria-controls="system-panel-strategy"
-            id="tab-strategy"
-            className={`system-tab ${systemTab === 'strategy' ? 'active' : ''}`}
-            onClick={() => setSystemTabSelected('strategy')}
-          >
-            <span className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status" aria-hidden />
-            <span>Trading Strategy</span>
           </button>
         </div>
         )}
 
-        <div className={showAllSystemSections ? 'system-stack' : undefined}>
+        <div className={`system-tab-content ${showAllSystemSections ? 'system-stack' : ''}`}>
         {(showAllSystemSections || systemTab === 'daemon') && (
-          <StatusDaemonPanel
-            status={j}
-            hb={hb}
-            daemonLabel={daemonLabel}
-            daemonHint={daemonHint}
-            daemonSelfCheckText={daemonSelfCheckText}
-            daemonBlockReasons={daemonBlockReasons}
-            daemonLamp={daemonLamp}
-            heartbeatGroupLamp={heartbeatGroupLamp}
-            ibGroupLamp={ibGroupLamp}
-            strategyGroupLamp={strategyGroupLamp}
-            secondsUntilNextHeartbeat={secondsUntilNextHeartbeat}
-            runStatusLabel={runStatusLabel}
-            suspended={suspended}
-            ibConnected={ibConnected}
-            daemonIbLine={daemonIbLine}
-            ibConfig={j?.ib_config}
-            onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
-            onSuspend={() => runCtrlAction(postSuspend, { loading: 'Setting suspend…', success: 'Suspend set; daemon will pause new hedges on next heartbeat.' })}
-            onResume={() => runCtrlAction(postResume, { loading: 'Setting resume…', success: 'Resume set; daemon will resume hedging on next heartbeat.' })}
-            onReleaseIb={() => runCtrlAction(postReleaseIb, { loading: 'Requesting release IB…', success: 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB (daemon keeps running). Use «Retry IB connection» below to reconnect when ready.' })}
-            ctrlMsg={ctrlMsg}
-            className={showAllSystemSections ? 'system-stack-section' : undefined}
-          />
+          <div className="status-panel-section status-panel-section-daemon">
+            <StatusDaemonPanel
+              status={j}
+              hb={hb}
+              daemonLabel={daemonLabel}
+              daemonHint={daemonHint}
+              daemonSelfCheckText={daemonSelfCheckText}
+              daemonBlockReasons={daemonBlockReasons}
+              daemonLamp={daemonLamp}
+              heartbeatGroupLamp={heartbeatGroupLamp}
+              ibGroupLamp={ibGroupLamp}
+              strategyGroupLamp={strategyGroupLamp}
+              secondsUntilNextHeartbeat={secondsUntilNextHeartbeat}
+              runStatusLabel={runStatusLabel}
+              suspended={suspended}
+              ibConnected={ibConnected}
+              daemonIbLine={daemonIbLine}
+              ibConfig={j?.ib_config}
+              onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
+              onSuspend={() => runCtrlAction(postSuspend, { loading: 'Setting suspend…', success: 'Suspend set; daemon will pause new hedges on next heartbeat.' })}
+              onResume={() => runCtrlAction(postResume, { loading: 'Setting resume…', success: 'Resume set; daemon will resume hedging on next heartbeat.' })}
+              onReleaseIb={() => runCtrlAction(postReleaseIb, { loading: 'Requesting release IB…', success: 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB (daemon keeps running). Use «Retry IB connection» below to reconnect when ready.' })}
+              ctrlMsg={ctrlMsg}
+              className={showAllSystemSections ? 'system-stack-section' : undefined}
+            />
+          </div>
         )}
 
-        {(showAllSystemSections || systemTab === 'monitor') && (
-          <StatusMonitorPanel
-            status={j}
-            monitorLamp={monitorLamp}
-            monitorEnabled={monitorEnabled}
-            monitorSelfCheckText={monitorSelfCheckText}
-            monitorBlockReasons={monitorBlockReasons}
-            apiHealthLamp={apiHealthLamp}
-            healthCountdownSec={healthCountdownSec}
-            monitorIbGroupLamp={monitorIbGroupLamp}
-            monitorAccount={monitorAccount}
-            monitorAccount2={monitorAccount2}
-            monitorMarket={monitorMarket}
-            onMonitorStop={() => runMonitorStopAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped (no new IB requests). Server has exited; refresh the page after restarting it.' })}
-            onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested (Account + Account2 + Market); check status bar for result.' })}
-            onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released (Account + Account2 + Market). Use Connect to reconnect.' })}
-            monitorCtrlMsg={monitorCtrlMsg}
-            className={showAllSystemSections ? 'system-stack-section' : undefined}
-          />
+        {(showAllSystemSections || systemTab === 'monitor' || systemTab === 'celery') && (
+          <div className="status-management-celery-row" id="system-panel-monitor-celery" role="tabpanel" aria-labelledby="tab-monitor-celery">
+            <div className="status-panel-section status-management-celery-half">
+              <StatusMonitorPanel
+                status={j}
+                monitorLamp={monitorLamp}
+                monitorEnabled={monitorEnabled}
+                monitorSelfCheckText={monitorSelfCheckText}
+                monitorBlockReasons={monitorBlockReasons}
+                apiHealthLamp={apiHealthLamp}
+                healthCountdownSec={healthCountdownSec}
+                monitorIbGroupLamp={monitorIbGroupLamp}
+                monitorAccount={monitorAccount}
+                monitorAccount2={monitorAccount2}
+                monitorMarket={monitorMarket}
+                onMonitorStop={() => runMonitorStopAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped (no new IB requests). Server has exited; refresh the page after restarting it.' })}
+                onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested (Account + Account2 + Market); check status bar for result.' })}
+                onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released (Account + Account2 + Market). Use Connect to reconnect.' })}
+                monitorCtrlMsg={monitorCtrlMsg}
+                className={showAllSystemSections ? 'system-stack-section' : undefined}
+              />
+            </div>
+            <div className="status-panel-section status-management-celery-half">
+              <StatusCeleryPanel
+                status={j}
+                celeryLamp={celeryLamp}
+                celeryBrokerConnected={celeryBrokerConnected}
+                celeryWorkersAlive={celeryWorkersAlive}
+                celeryLastTs={celeryLastTs}
+                celeryWorkerIbConnected={celeryWorkerIbConnected}
+                celeryWorkerIbClientId={celeryWorkerIbClientId}
+                onCeleryStop={() => runCeleryAction(postCeleryStop, { loading: 'Requesting Celery worker stop…', success: 'Celery worker stop requested; process will exit within a few seconds.' })}
+                celeryCtrlMsg={celeryCtrlMsg}
+                className={showAllSystemSections ? 'system-stack-section' : undefined}
+              />
+            </div>
+          </div>
         )}
+        </div>
+      </div>
+      )}
 
-        {(showAllSystemSections || systemTab === 'celery') && (
-          <StatusCeleryPanel
-            status={j}
-            celeryLamp={celeryLamp}
-            celeryBrokerConnected={celeryBrokerConnected}
-            celeryWorkersAlive={celeryWorkersAlive}
-            celeryLastTs={celeryLastTs}
-            celeryWorkerIbConnected={celeryWorkerIbConnected}
-            celeryWorkerIbClientId={celeryWorkerIbClientId}
-            onCeleryStop={() => runCeleryAction(postCeleryStop, { loading: 'Requesting Celery worker stop…', success: 'Celery worker stop requested; process will exit within a few seconds.' })}
-            celeryCtrlMsg={celeryCtrlMsg}
-            className={showAllSystemSections ? 'system-stack-section' : undefined}
-          />
-        )}
-
-        {(showAllSystemSections || systemTab === 'strategy') && (
-          <StatusStrategyPanel
-            status={j}
-            hedgeLamp={hedgeLamp}
-            hedgeLabel={hedgeLabel}
-            hedgeSelfCheckText={hedgeSelfCheckText}
-            hedgeBlockReasons={hedgeBlockReasons}
-            hedgeHint={hedgeHint}
-            statusSummaryItems={statusSummaryItems}
-            onFlatten={() => runHedgeAction(postFlatten, { loading: 'Requesting flatten…', success: 'Flatten sent; hedge process will consume and execute.' })}
-            hedgeCtrlMsg={hedgeCtrlMsg}
-            className={showAllSystemSections ? 'system-stack-section' : undefined}
-          />
-        )}
+      {/* Stream Event — Trading Strategy + Event Subscribe, same row style as Management/Celery (above Console) */}
+      {showConsoleSection && (
+      <div className="card process-section system-tabs-wrapper stream-event-card">
+        <div className="status-section-heading-row">
+          <h2 className="status-section-heading">Stream Event</h2>
+        </div>
+        <div className="status-management-celery-row stream-event-row">
+          <div className="status-panel-section status-management-celery-half stream-event-strategy-quarter">
+            <StatusStrategyPanel
+              compact
+              status={j}
+              hedgeLamp={hedgeLamp}
+              hedgeLabel={hedgeLabel}
+              hedgeSelfCheckText={hedgeSelfCheckText}
+              hedgeBlockReasons={hedgeBlockReasons}
+              hedgeHint={hedgeHint}
+              statusSummaryItems={statusSummaryItems}
+              onFlatten={() => runHedgeAction(postFlatten, { loading: 'Requesting flatten…', success: 'Flatten sent; hedge process will consume and execute.' })}
+              hedgeCtrlMsg={hedgeCtrlMsg}
+            />
+          </div>
+          <div className="status-panel-section status-management-celery-half stream-event-subscribe-rest card-event-subscribe event-subscribe-section">
+            <div className="event-subscribe-header-row">
+              <div className="daemon-header-with-lamp" style={{ marginBottom: 0 }}>
+                <div className="lamp-wrap-span">
+                  <div className={`lamp lamp-sm ${(() => {
+                    if (!hb?.daemon_alive) return 'red'
+                    const tickerOk = hb.event_subscribe_ticker
+                    const positionsOk = hb.event_subscribe_positions
+                    const fillsOk = hb.event_subscribe_fills
+                    const commissionOk = hb.event_subscribe_commission
+                    const allOk = tickerOk && positionsOk && fillsOk && commissionOk
+                    const anyOk = tickerOk || positionsOk || fillsOk || commissionOk
+                    return allOk ? 'green' : anyOk ? 'yellow' : 'red'
+                  })()}`} title="Event Subscribe: green = all subscribed, yellow = some not, red = none or daemon down" aria-hidden />
+                </div>
+                <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
+                  Event Subscribe
+                  <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Watchlist STK + strategy symbol)." />
+                </h2>
+              </div>
+              {hb?.daemon_alive != null && hb?.daemon_alive && (
+                <button
+                  type="button"
+                  className="btn-resume"
+                  title="Sync Real-time ticker with Watchlist (subscribe/add, unsubscribe/remove); list updates on next heartbeat"
+                  disabled={syncTickerLoading}
+                  onClick={async () => {
+                    setSyncTickerLoading(true)
+                    try {
+                      const res = await postRefreshTickerSubscriptions()
+                      if (res.ok && typeof loadStatus === 'function') {
+                        setMsg(setSyncTickerMsg, 'Synced', false)
+                        scheduleMsgClear(setSyncTickerMsg, syncTickerMsgClearRef)
+                        setTimeout(() => loadStatus(), 1500)
+                      }
+                      if (!res.ok && res.error) setMsg(setSyncTickerMsg, res.error, true)
+                    } finally {
+                      setSyncTickerLoading(false)
+                    }
+                  }}
+                >
+                  {syncTickerLoading ? 'Syncing…' : 'Sync'}
+                </button>
+              )}
+            </div>
+            <div className="event-subscribe-body">
+            <table className="table-operations table-event-subscribe">
+              <thead>
+                <tr>
+                  <th className="event-subscribe-col-subscription">Subscription</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="event-subscribe-col-subscription">Real-time ticker</td>
+                  <td>
+                    <div className="event-subscribe-status-cell">
+                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
+                      <span className="event-subscribe-status-text">
+                        {hb?.daemon_alive && hb?.event_subscribe_ticker
+                          ? `${j?.subscribed_tickers?.length ?? 0} ticker${(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'}`
+                          : hb?.daemon_alive
+                            ? 'Not subscribed'
+                            : '—'}
+                      </span>
+                      {hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.subscribed_tickers?.length ?? 0) > 0 && (
+                        <div className="dashboard-streams-marquee event-subscribe-ticker-marquee">
+                          <div className="dashboard-streams-track event-subscribe-track">
+                            {(() => {
+                              const tickers = j?.subscribed_tickers ?? []
+                              const short = tickers.length > 8 ? tickers.slice(0, 8) : tickers
+                              return [...short, ...short].map((sym, idx) => (
+                                <span key={`${sym}-${idx}`} className="dashboard-streams-item">{sym}</span>
+                              ))
+                            })()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="event-subscribe-col-subscription">Position updates</td>
+                  <td>
+                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
+                    <span className="event-subscribe-status-text">
+                      {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="event-subscribe-col-subscription">Fill / execution report</td>
+                  <td>
+                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
+                    <span className="event-subscribe-status-text">
+                      {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="event-subscribe-col-subscription">Commission report</td>
+                  <td>
+                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
+                    <span className="event-subscribe-status-text">
+                      {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            {syncTickerMsg.text ? (
+              <div className={`msg ${syncTickerMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
+                {syncTickerMsg.text}
+              </div>
+            ) : null}
+            </div>
+          </div>
         </div>
       </div>
       )}
@@ -485,9 +597,6 @@ export function StatusPage({
           <div className="console-card-header">
             <div>
               <h2 className="daemon-card-title">{consoleCardTitle}</h2>
-              {consoleCardDescription ? (
-                <p className="section-hint section-hint-tight">{consoleCardDescription}</p>
-              ) : null}
             </div>
           </div>
         ) : null}
@@ -537,20 +646,9 @@ export function StatusPage({
           >
             Recent operations
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={consoleTab === 'events'}
-            aria-controls="celery-section-panel-events"
-            id="celery-tab-events"
-            className={`system-tab ${consoleTab === 'events' ? 'active' : ''}`}
-            onClick={() => setConsoleTabSelected('events')}
-          >
-            Event Subscribe
-          </button>
         </div>
         )}
-        {consoleTab === 'daemon-console' && (
+        {(consoleTab === 'daemon-console' || consoleTab === 'events') && (
           <div id="celery-section-panel-daemon-console" role="tabpanel" aria-labelledby="celery-tab-daemon-console"
             style={{ marginTop: 'var(--space-3)' }}
           >
@@ -631,110 +729,10 @@ export function StatusPage({
             </table>
           </div>
         )}
-        {consoleTab === 'events' && (
-          <div id="celery-section-panel-events" role="tabpanel" aria-labelledby="celery-tab-events"
-            style={{ marginTop: 'var(--space-3)' }}
-          >
-            <div className="daemon-card-title page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
-              Event Subscribe
-              <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Watchlist STK + strategy symbol)." />
-              {hb?.daemon_alive != null && hb?.daemon_alive && (
-                <button
-                  type="button"
-                  className="btn-resume"
-                  style={{ marginLeft: '0.5rem', verticalAlign: 'middle' }}
-                  title="Sync Real-time ticker with Watchlist (subscribe/add, unsubscribe/remove); list updates on next heartbeat"
-                  disabled={syncTickerLoading}
-                  onClick={async () => {
-                    setSyncTickerLoading(true)
-                    try {
-                      const res = await postRefreshTickerSubscriptions()
-                      if (res.ok && typeof loadStatus === 'function') {
-                        setMsg(setSyncTickerMsg, 'Synced', false)
-                        scheduleMsgClear(setSyncTickerMsg, syncTickerMsgClearRef)
-                        setTimeout(() => loadStatus(), 1500)
-                      }
-                      if (!res.ok && res.error) setMsg(setSyncTickerMsg, res.error, true)
-                    } finally {
-                      setSyncTickerLoading(false)
-                    }
-                  }}
-                >
-                  {syncTickerLoading ? 'Syncing…' : 'Sync'}
-                </button>
-              )}
-            </div>
-            <table className="table-operations">
-              <thead>
-                <tr>
-                  <th>Subscription</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Real-time ticker</td>
-                  <td>
-                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
-                    <span className="event-subscribe-status-text">
-                      {hb?.daemon_alive && hb?.event_subscribe_ticker
-                        ? `Subscribed (${j?.subscribed_tickers?.length ?? 0} ticker${(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring)`
-                        : hb?.daemon_alive
-                          ? 'Not subscribed'
-                          : '—'}
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td>Position updates</td>
-                  <td>
-                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
-                    <span className="event-subscribe-status-text">
-                      {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td>Fill / execution report</td>
-                  <td>
-                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
-                    <span className="event-subscribe-status-text">
-                      {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <td>Commission report</td>
-                  <td>
-                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
-                    <span className="event-subscribe-status-text">
-                      {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            {syncTickerMsg.text ? (
-              <div className={`msg ${syncTickerMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
-                {syncTickerMsg.text}
-              </div>
-            ) : null}
-            {hb?.daemon_alive && hb?.event_subscribe_ticker && (
-              <div className="event-subscribe-tickers-block" style={{ marginTop: '1rem' }}>
-                <h3 className="daemon-group-title" style={{ marginBottom: '0.5rem' }}>Real-time ticker — subscribed symbols</h3>
-                <p className="section-hint" style={{ margin: 0, fontWeight: 600 }}>
-                  {(j?.subscribed_tickers?.length ?? 0)} ticker{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'} in monitoring
-                </p>
-                <p className="section-hint" style={{ margin: '0.25rem 0 0 0' }}>
-                  {j?.subscribed_tickers?.length ? j.subscribed_tickers.join(', ') : '—'}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
       </div>
       )}
     </>
     </div>
   )
 }
+

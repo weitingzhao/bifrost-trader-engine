@@ -14,6 +14,8 @@ export interface StatusStrategyPanelProps {
   onFlatten: () => void
   hedgeCtrlMsg: { text: string; isErr: boolean }
   className?: string
+  /** Compact layout for Stream Event (1/4 width) */
+  compact?: boolean
 }
 
 export function StatusStrategyPanel({
@@ -27,9 +29,52 @@ export function StatusStrategyPanel({
   onFlatten,
   hedgeCtrlMsg,
   className,
+  compact = false,
 }: StatusStrategyPanelProps) {
+  const panelClass = `system-tab-panel ${className ?? ''} ${compact ? 'strategy-panel-compact' : ''}`.trim()
+
+  if (compact) {
+    return (
+      <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
+        <div className="strategy-compact-header">
+          <div className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status" aria-hidden />
+          <span className="strategy-compact-title">Trading Strategy</span>
+        </div>
+        <div className="strategy-compact-status">
+          {j ? `${hedgeLabel}` : 'Fetch failed'}
+          {j && hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` · ${hedgeBlockReasons}` : ''}
+        </div>
+        <div className="strategy-compact-summary">
+          {statusSummaryItems
+            .filter(({ label }) => label !== 'Updated at' && label !== 'Daemon state')
+            .map(({ label, value }) => (
+              <span key={label} className="strategy-compact-summary-item">
+                <span className="strategy-compact-label">{label}</span>
+                <span className="status-summary-value">{value}</span>
+              </span>
+            ))}
+        </div>
+        <div className="controls strategy-compact-controls">
+          <button
+            type="button"
+            className="btn-flatten"
+            title="Flattens strategy hedge exposure"
+            onClick={onFlatten}
+          >
+            Flatten
+          </button>
+        </div>
+        {hedgeCtrlMsg.text ? (
+          <div className={`msg ${hedgeCtrlMsg.isErr ? 'err' : 'ok'} strategy-compact-msg`}>
+            {hedgeCtrlMsg.text}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
-    <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
+    <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
       <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
         <div className="lamp-wrap-span">
           <div className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status lamp" />

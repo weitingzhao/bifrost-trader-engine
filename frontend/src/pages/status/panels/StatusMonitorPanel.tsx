@@ -102,12 +102,45 @@ export function StatusMonitorPanel({
             ) : (
               <p className="section-hint">Health check: —</p>
             )}
+            {/* Database/Redis status under API service */}
+            {!monitorEnabled ? (
+              <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: —</p>
+            ) : j?.redis_quotes_connected ? (
+              <p className="section-hint countdown-line" style={{ marginTop: 'var(--space-2)' }}>
+                Redis: <span className="countdown-num">Connected</span>{' '}
+                <InfoTooltip text="GET /quotes available" />
+              </p>
+            ) : (
+              <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: Not connected or not configured</p>
+            )}
           </div>
         </div>
         <div className="daemon-group">
-          <div className="daemon-group-header">
-            <div className={`lamp lamp-sm ${monitorIbGroupLamp}`} title="Monitor IB connection status" />
-            <span className="daemon-group-title">IB connection</span>
+          <div className="daemon-group-header daemon-group-header-with-action">
+            <div className="daemon-group-header-left">
+              <div className={`lamp lamp-sm ${monitorIbGroupLamp}`} title="Monitor IB connection status" />
+              <span className="daemon-group-title">IB connection</span>
+            </div>
+            {(monitorAccount?.connected || monitorAccount2?.connected || monitorMarket?.connected) ? (
+              <button
+                type="button"
+                className="btn-retry-ib"
+                title="Release Monitor IB connections (Account + Account2 + Market). Monitor keeps running; use Connect to reconnect."
+                onClick={onMonitorReleaseIb}
+              >
+                Release
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn-resume"
+                disabled={!monitorEnabled}
+                title={monitorEnabled ? 'Establish monitor IB connection (Account + Account2 + Market)' : 'Monitor stopped; cannot connect'}
+                onClick={onMonitorConnect}
+              >
+                Connect
+              </button>
+            )}
           </div>
           <div className="daemon-group-body">
             <table className="ib-connection-table" aria-label="IB connection status by Host and type">
@@ -153,46 +186,6 @@ export function StatusMonitorPanel({
                 </tr>
               </tbody>
             </table>
-            <div className="controls" style={{ marginTop: '0.25rem' }}>
-              {(monitorAccount?.connected || monitorAccount2?.connected || monitorMarket?.connected) ? (
-                <button
-                  type="button"
-                  className="btn-retry-ib"
-                  title="Release Monitor IB connections (Account + Account2 + Market). Monitor keeps running; use Connect to reconnect."
-                  onClick={onMonitorReleaseIb}
-                >
-                  Release
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn-resume"
-                  disabled={!monitorEnabled}
-                  title={monitorEnabled ? 'Establish monitor IB connection (Account + Account2 + Market)' : 'Monitor stopped; cannot connect'}
-                  onClick={onMonitorConnect}
-                >
-                  Connect
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="daemon-group">
-          <div className="daemon-group-header">
-            <div className={`lamp lamp-sm ${j?.redis_quotes_connected ? 'green' : monitorEnabled ? 'red' : 'none'}`} title="Monitor Redis status" />
-            <span className="daemon-group-title">Database</span>
-          </div>
-          <div className="daemon-group-body">
-            {!monitorEnabled ? (
-              <p className="section-hint">Redis: —</p>
-            ) : j?.redis_quotes_connected ? (
-              <p className="section-hint countdown-line">
-                Redis: <span className="countdown-num">Connected</span>{' '}
-                <InfoTooltip text="GET /quotes available" />
-              </p>
-            ) : (
-              <p className="section-hint">Redis: Not connected or not configured</p>
-            )}
           </div>
         </div>
       </div>

@@ -99,24 +99,46 @@ export function StatusDaemonPanel({
                 Next heartbeat: <span className="countdown-num">{secondsUntilNextHeartbeat}</span> s
               </p>
             )}
+            {/* Database/Redis under Heartbeat to save space */}
+            {!hb?.daemon_alive ? (
+              <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: —</p>
+            ) : hb.redis_quotes_connected ? (
+              <p className="section-hint countdown-line" style={{ marginTop: 'var(--space-2)' }}>
+                Redis: <span className="countdown-num">Connected</span>
+              </p>
+            ) : (
+              <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: Not connected or not configured</p>
+            )}
           </div>
         </div>
         <div className="daemon-group">
-          <div className="daemon-group-header">
-            <div className={`lamp lamp-sm ${ibGroupLamp}`} title="IB connection status" />
-            <span className="daemon-group-title">IB connection</span>
+          <div className="daemon-group-header daemon-group-header-with-action">
+            <div className="daemon-group-header-left">
+              <div className={`lamp lamp-sm ${ibGroupLamp}`} title="IB connection status" />
+              <span className="daemon-group-title">IB connection</span>
+            </div>
+            {ibConnected && (
+              <button
+                type="button"
+                className="btn-retry-ib"
+                title="Release IB connection on next daemon heartbeat (daemon will go to WAITING_IB and can retry later)"
+                onClick={onReleaseIb}
+              >
+                Reset
+              </button>
+            )}
           </div>
           <div className="daemon-group-body">
             {ibConnected ? (
               <p className="section-hint countdown-line">
-                Trading Client: <span className="countdown-num">Connected @ {hb?.ib_client_id ?? '?'}</span>
+                Trading: <span className="countdown-num">Connected @ {hb?.ib_client_id ?? '?'}</span>
               </p>
             ) : (
               <p className="section-hint">{daemonIbLine || '—'}</p>
             )}
             {ibConfig?.ib_client_id_listener != null && (
               <p className="section-hint countdown-line">
-                Listener (Host): {hb?.listener_connected ? (
+                Listener: {hb?.listener_connected ? (
                   <span className="countdown-num">Connected @ {hb?.listener_client_id ?? ibConfig.ib_client_id_listener}</span>
                 ) : (
                   <span>Not connected</span>
@@ -125,44 +147,15 @@ export function StatusDaemonPanel({
             )}
             {(ibConfig?.ib2_host ?? ibConfig?.ib2_client_id_listener != null) && (
               <p className="section-hint countdown-line">
-                Listener (Secondary): {hb?.listener_2_connected ? (
+                Listener: {hb?.listener_2_connected ? (
                   <span className="countdown-num">Connected @ {hb?.listener_2_client_id ?? ibConfig?.ib2_client_id_listener ?? '?'}</span>
                 ) : (
                   <span>Not connected</span>
                 )}
               </p>
             )}
-            {ibConnected && (
-              <div className="controls">
-                <button
-                  type="button"
-                  className="btn-retry-ib"
-                  title="Release IB connection on next daemon heartbeat (daemon will go to WAITING_IB and can retry later)"
-                  onClick={onReleaseIb}
-                >
-                  Reset
-                </button>
-              </div>
-            )}
             {hb?.daemon_alive && !ibConnected && (
               <p className="section-hint section-hint--retry">Will retry connection on next heartbeat.</p>
-            )}
-          </div>
-        </div>
-        <div className="daemon-group">
-          <div className="daemon-group-header">
-            <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.redis_quotes_connected ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Daemon Redis status" />
-            <span className="daemon-group-title">Database</span>
-          </div>
-          <div className="daemon-group-body">
-            {!hb?.daemon_alive ? (
-              <p className="section-hint">Redis: —</p>
-            ) : hb.redis_quotes_connected ? (
-              <p className="section-hint countdown-line">
-                Redis: <span className="countdown-num">Connected</span> <span>(writes quotes and publishes)</span>
-              </p>
-            ) : (
-              <p className="section-hint">Redis: Not connected or not configured</p>
             )}
           </div>
         </div>
