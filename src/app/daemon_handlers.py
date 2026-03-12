@@ -176,35 +176,73 @@ async def handle_running(app: Any) -> DaemonState:
             "[Daemon] no watchlist or active symbol available; skip ticker subscribe"
         )
     app.connector.subscribe_positions(app._eval_hedge_threadsafe)
+
+    # R-A5: open orders — sync callback from IB thread: refresh list and write sink
+    def _on_open_orders_update() -> None:
+        try:
+            orders = app.connector.get_open_orders_snapshot()
+            if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
+                app._status_sink.write_open_orders(orders)
+        except Exception as e:
+            logger.warning("[Daemon] open orders callback error: %s", e)
+
+    app.connector.subscribe_order_status(lambda _: _on_open_orders_update())
+    app.connector.subscribe_open_order(lambda _: _on_open_orders_update())
+    # Optional R-A5: subscribe to fills so Event Subscribe "Fill / execution report" lamp turns green
+    try:
+        app.connector.subscribe_fills(lambda _: None)
+        app._event_subscribe_fills_registered = True
+    except Exception as e:
+        logger.warning("[Daemon] subscribe_fills failed: %s", e)
+    # Optional: include TWS manual orders in initial snapshot
+    try:
+        initial_orders = await app.connector.get_open_orders_async(
+            include_all_from_tws=True
+        )
+        if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
+            app._status_sink.write_open_orders(initial_orders)
+    except Exception as e:
+        logger.warning("[Daemon] initial open orders snapshot failed: %s", e)
+
     listener_just_connected = False
     try:
         ok = await app.listener_connector.connect(max_attempts=3)
         if ok:
             listener_just_connected = True
             logger.info(
-                "[Daemon] Listener IB connected (client_id=%s)",
+                "[Daemon] Listener (Host) IB connected (client_id=%s)",
                 app.listener_connector.client_id,
             )
         else:
             logger.warning(
-                "[Daemon] Listener IB connect failed (TWS may not show listener client_id)"
+                "[Daemon] Listener (Host) IB connect failed (TWS may not show listener client_id)"
             )
     except Exception as e:
-        logger.warning("[Daemon] Listener IB connect error: %s", e)
+        logger.warning("[Daemon] Listener (Host) IB connect error: %s", e)
+    listener_2_just_connected = False
+    listener_2 = getattr(app, "listener_connector_2", None)
+    if listener_2 is not None:
+        try:
+            ok2 = await listener_2.connect(max_attempts=3)
+            if ok2:
+                listener_2_just_connected = True
+                logger.info(
+                    "[Daemon] Listener (Secondary) IB connected (client_id=%s)",
+                    listener_2.client_id,
+                )
+            else:
+                logger.warning(
+                    "[Daemon] Listener (Secondary) IB connect failed"
+                )
+        except Exception as e:
+            logger.warning("[Daemon] Listener (Secondary) IB connect error: %s", e)
     app._apply_run_status_transition()
     if app._status_sink:
         app._status_sink.write_snapshot(
             app._build_heartbeat_minimal_dict(), append_history=False
         )
         if hasattr(app._status_sink, "write_daemon_heartbeat"):
-            listener_kw = (
-                {
-                    "listener_connected": True,
-                    "listener_client_id": app.listener_connector.client_id,
-                }
-                if listener_just_connected
-                else app._listener_heartbeat_kwargs()
-            )
+            listener_kw = app._listener_heartbeat_kwargs()
             app._status_sink.write_daemon_heartbeat(
                 hedge_running=True,
                 ib_connected=app.connector.is_connected,
@@ -248,6 +286,14 @@ async def handle_running(app: Any) -> DaemonState:
                     except Exception as e:
                         logger.warning(
                             "[Daemon] release_ib: listener disconnect failed: %s", e
+                        )
+                listener_2 = getattr(app, "listener_connector_2", None)
+                if listener_2 and listener_2.is_connected:
+                    try:
+                        await listener_2.disconnect()
+                    except Exception as e:
+                        logger.warning(
+                            "[Daemon] release_ib: listener_2 disconnect failed: %s", e
                         )
                 return DaemonState.WAITING_IB
     except asyncio.CancelledError:
@@ -309,6 +355,12 @@ async def handle_stopping(app: Any) -> DaemonState:
             await listener.disconnect()
         except Exception as e:
             logger.debug("Listener disconnect on stop: %s", e)
+    listener_2 = getattr(app, "listener_connector_2", None)
+    if listener_2:
+        try:
+            await listener_2.disconnect()
+        except Exception as e:
+            logger.debug("Listener (Secondary) disconnect on stop: %s", e)
     logger.info("[Daemon] state=STOPPING → STOPPED (exit)")
     return DaemonState.STOPPED
 

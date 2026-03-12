@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
@@ -43,6 +43,8 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "ib_client_id": hb.get("ib_client_id"),
                 "listener_connected": hb.get("listener_connected", False),
                 "listener_client_id": hb.get("listener_client_id"),
+                "listener_2_connected": hb.get("listener_2_connected", False),
+                "listener_2_client_id": hb.get("listener_2_client_id"),
                 "next_retry_ts": hb.get("next_retry_ts"),
                 "seconds_until_retry": hb.get("seconds_until_retry"),
                 "graceful_shutdown_at": hb.get("graceful_shutdown_at"),
@@ -92,6 +94,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             "ib_client_id_worker_market": 500,
         }
         payload["flex_config"] = reader.get_flex_config()
+        payload["open_orders"] = reader.get_open_orders()
         try:
             from servers.ib_clients import AccountIbClient, MarketIbClient
 
@@ -218,6 +221,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "ib_client_id_worker_market": 500,
             },
             "flex_config": {"host_token": None, "secondary_token": None, "rows": []},
+            "open_orders": [],
             "monitor_ib_status": None,
             "monitor_enabled": False,
             "monitor_health": "ok",
@@ -232,6 +236,14 @@ def get_status(request: Request) -> Dict[str, Any]:
             "celery_worker_last_updated_ts": None,
             "system_lamp": "red",
         }
+
+
+@router.get("/open-orders")
+def get_open_orders(request: Request) -> Dict[str, Any]:
+    """R-A5: Return current open/unfilled orders (symbol, side, qty, limit price, status, filled/remaining)."""
+    reader = request.app.state.reader
+    items: List[Any] = reader.get_open_orders()
+    return {"open_orders": items}
 
 
 @router.get("/operations")

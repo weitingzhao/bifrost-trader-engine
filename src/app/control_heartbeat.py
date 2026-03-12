@@ -50,21 +50,30 @@ def event_subscribe_flags(app: Any) -> dict:
     """IB event subscription status for System page: ticker, positions, fills, commission."""
     connected = app.connector.is_connected
     running = app._fsm_daemon.is_running()
+    fills_subscribed = getattr(app, "_event_subscribe_fills_registered", False)
     return {
         "event_subscribe_ticker": running and connected,
         "event_subscribe_positions": running and connected,
-        "event_subscribe_fills": False,
+        "event_subscribe_fills": running and connected and fills_subscribed,
         "event_subscribe_commission": connected,
     }
 
 
 def listener_heartbeat_kwargs(app: Any) -> dict:
-    """Listener connection status for daemon_heartbeat (second IB client_id so TWS shows it)."""
+    """Listener connection status for daemon_heartbeat: Host + optional Secondary (ib2_host)."""
     listener = getattr(app, "listener_connector", None)
-    return {
+    listener_2 = getattr(app, "listener_connector_2", None)
+    out = {
         "listener_connected": bool(listener and listener.is_connected),
         "listener_client_id": getattr(listener, "client_id", None) if listener else None,
     }
+    if listener_2 is not None:
+        out["listener_2_connected"] = bool(listener_2.is_connected)
+        out["listener_2_client_id"] = getattr(listener_2, "client_id", None)
+    else:
+        out["listener_2_connected"] = False
+        out["listener_2_client_id"] = None
+    return out
 
 
 def apply_run_status_transition(app: Any) -> bool:

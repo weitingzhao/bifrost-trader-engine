@@ -100,6 +100,25 @@ class GsTrading:
             client_id=listener_client_id,
             connect_timeout=ib_cfg.get("connect_timeout", 60.0),
         )
+        # Secondary IB (Second TWS): Listener on Secondary host with its own client_id
+        ib2_host = (db_ib.get("ib2_host") or "").strip() if isinstance(db_ib.get("ib2_host"), str) else ""
+        if ib2_host:
+            ib2_port = int(db_ib.get("ib2_port", 7497))
+            ib2_client_id_listener = int(db_ib.get("ib2_client_id_listener", 3))
+            self.listener_connector_2 = IBConnector(
+                host=ib2_host,
+                port=ib2_port,
+                client_id=ib2_client_id_listener,
+                connect_timeout=ib_cfg.get("connect_timeout", 60.0),
+            )
+            logger.info(
+                "IB Listener (Secondary): host=%s port=%s client_id=%s",
+                ib2_host,
+                ib2_port,
+                ib2_client_id_listener,
+            )
+        else:
+            self.listener_connector_2 = None
 
         # Primary account for hedging/market data when multiple IB accounts exist (R-A4). From DB only.
         self._primary_account_id: Optional[str] = None

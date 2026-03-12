@@ -4,7 +4,7 @@ See docs/DATABASE.md for table schemas and write strategy.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 # Snapshot dict keys (R-M1a). Must match docs/DATABASE.md §2.1.
@@ -82,4 +82,9 @@ class StatusSink(ABC):
 
     # 可选：写入 K 线/OHLC（R-A3）。默认实现为空。
     def write_ohlc_bars(self, rows: Any) -> None:  # rows: Iterable[Dict[str, Any]]
+        return
+
+    # 可选：写入当前未成交订单快照（R-A5）。默认实现为空。
+    def write_open_orders(self, orders: List[Dict[str, Any]]) -> None:
+        """Write current open/unfilled orders snapshot. Replaces previous snapshot (e.g. TRUNCATE + INSERT)."""
         return

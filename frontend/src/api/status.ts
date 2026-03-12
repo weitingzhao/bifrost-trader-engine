@@ -1,8 +1,15 @@
-import type { StatusResponse, OperationsResponse } from '../types'
+import type { OpenOrder, OperationsResponse, StatusResponse } from '../types'
 import { API } from './constants'
 
 export async function fetchStatus(): Promise<StatusResponse | null> {
   const r = await fetch(`${API}/status`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** R-A5: GET /open-orders — current unfilled orders from DB (daemon event-driven write). */
+export async function fetchOpenOrders(): Promise<{ open_orders: OpenOrder[] }> {
+  const r = await fetch(`${API}/open-orders`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }

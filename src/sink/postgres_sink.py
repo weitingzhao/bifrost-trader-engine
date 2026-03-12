@@ -599,6 +599,42 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.warning("update_execution_commission failed: exec_id=%r %s", exec_id, e)
 
+    def write_open_orders(self, orders: List[Dict[str, Any]]) -> None:
+        """R-A5: 写入当前未成交订单快照；全量替换（TRUNCATE + INSERT）。"""
+        if not self._ensure_conn():
+            return
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute("TRUNCATE TABLE daemon_open_orders")
+                if orders:
+                    for o in orders:
+                        cur.execute(
+                            """
+                            INSERT INTO daemon_open_orders
+                            (order_id, perm_id, account_id, symbol, sec_type, action, total_quantity,
+                             filled, remaining, limit_price, status, contract_key, updated_ts)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                            """,
+                            (
+                                o.get("order_id"),
+                                o.get("perm_id"),
+                                o.get("account_id"),
+                                o.get("symbol"),
+                                o.get("sec_type"),
+                                o.get("action"),
+                                o.get("total_quantity"),
+                                o.get("filled"),
+                                o.get("remaining"),
+                                o.get("limit_price"),
+                                o.get("status"),
+                                o.get("contract_key"),
+                            ),
+                        )
+            self._conn.commit()
+        except Exception as e:
+            self._conn.rollback()
+            logger.warning("write_open_orders failed: %s", e, exc_info=True)
+
     def write_ohlc_bars(self, rows: Any) -> None:
         """R-A3 扩展：写入股票 K 线到 stock_day（1 D）或 stock_min（1 min, 5 mins, 1 hour）。按 (symbol, bar_time) 或 (symbol, period, bar_time) UPSERT。"""
         if not rows:
@@ -732,13 +768,16 @@ class PostgreSQLSink(StatusSink):
         event_subscribe_commission: bool = False,
         listener_connected: bool = False,
         listener_client_id: Optional[int] = None,
+        listener_2_connected: bool = False,
+        listener_2_client_id: Optional[int] = None,
     ) -> None:
         """Update daemon_heartbeat row (id=1). RE-6: daemon vs hedge; RE-7: ib_connected, ib_client_id, next_retry_ts.
         seconds_until_retry: relative countdown from daemon clock, avoids clock skew on UI (optional).
         heartbeat_interval_sec: interval in use by daemon, for monitor countdown.
         redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*).
         event_subscribe_*: daemon IB event subscription status for System page (ticker, positions, fills, commission).
-        listener_connected/listener_client_id: second daemon IB connection (TWS client_id from settings.ib_client_id_listener)."""
+        listener_connected/listener_client_id: daemon Listener on Host (settings.ib_client_id_listener).
+        listener_2_connected/listener_2_client_id: daemon Listener on Secondary host (settings.ib2_host, ib2_client_id_listener)."""
         if not self._ensure_conn():
             return
         for attempt in (1, 2):
@@ -758,7 +797,8 @@ class PostgreSQLSink(StatusSink):
                                 graceful_shutdown_at = NULL, heartbeat_interval_sec = %s, redis_quotes_connected = %s,
                                 event_subscribe_ticker = %s, event_subscribe_positions = %s,
                                 event_subscribe_fills = %s, event_subscribe_commission = %s,
-                                listener_connected = %s, listener_client_id = %s
+                                listener_connected = %s, listener_client_id = %s,
+                                listener_2_connected = %s, listener_2_client_id = %s
                             WHERE id = 1
                             """,
                             (
@@ -775,6 +815,8 @@ class PostgreSQLSink(StatusSink):
                                 event_subscribe_commission,
                                 listener_connected,
                                 listener_client_id,
+                                listener_2_connected,
+                                listener_2_client_id,
                             ),
                         )
                     else:
@@ -786,12 +828,13 @@ class PostgreSQLSink(StatusSink):
                                 heartbeat_interval_sec = %s, redis_quotes_connected = %s,
                                 event_subscribe_ticker = %s, event_subscribe_positions = %s,
                                 event_subscribe_fills = %s, event_subscribe_commission = %s,
-                                listener_connected = %s, listener_client_id = %s
+                                listener_connected = %s, listener_client_id = %s,
+                                listener_2_connected = %s, listener_2_client_id = %s
                             WHERE id = 1
                             """,
                             (hedge_running, ib_connected, ib_client_id, iv, redis_quotes_connected,
                              event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission,
-                             listener_connected, listener_client_id),
+                             listener_connected, listener_client_id, listener_2_connected, listener_2_client_id),
                         )
                 self._conn.commit()
                 return
@@ -850,11 +893,19 @@ class PostgreSQLSink(StatusSink):
             try:
                 with self._conn.cursor() as cur2:
                     cur2.execute(
-                        "SELECT ib_primary_account_id FROM settings WHERE id = 1"
+                        "SELECT ib_primary_account_id, ib2_host, ib2_port_type, ib2_client_id_listener FROM settings WHERE id = 1"
                     )
                     r2 = cur2.fetchone()
                     if r2 and r2[0] is not None and str(r2[0]).strip():
                         out["primary_account_id"] = str(r2[0]).strip()
+                    if r2 and len(r2) > 1 and r2[1] is not None and str(r2[1]).strip():
+                        ib2_host = str(r2[1]).strip()
+                        ib2_port_type = (r2[2] or "").strip().lower() if len(r2) > 2 else "tws_paper"
+                        ib2_port = IB_PORT_TYPE_TO_PORT.get(ib2_port_type, 7497)
+                        out["ib2_host"] = ib2_host
+                        out["ib2_port"] = ib2_port
+                        out["ib2_port_type"] = ib2_port_type or "tws_paper"
+                        out["ib2_client_id_listener"] = int(r2[3]) if len(r2) > 3 and r2[3] is not None else 3
             except Exception:
                 pass
             return out

@@ -34,6 +34,8 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
     out["event_subscribe_commission"] = bool(row[12]) if len(row) > 12 and row[12] is not None else False
     out["listener_connected"] = bool(row[13]) if len(row) > 13 and row[13] is not None else False
     out["listener_client_id"] = int(row[14]) if len(row) > 14 and row[14] is not None else None
+    out["listener_2_connected"] = bool(row[15]) if len(row) > 15 and row[15] is not None else False
+    out["listener_2_client_id"] = int(row[16]) if len(row) > 16 and row[16] is not None else None
     return out
 
 
@@ -82,7 +84,8 @@ def get_daemon_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
                        redis_quotes_connected,
                        event_subscribe_ticker, event_subscribe_positions,
                        event_subscribe_fills, event_subscribe_commission,
-                       listener_connected, listener_client_id
+                       listener_connected, listener_client_id,
+                       listener_2_connected, listener_2_client_id
                 FROM daemon_heartbeat WHERE id = 1
                 """
             )
@@ -92,6 +95,30 @@ def get_daemon_heartbeat(conn: Any) -> Optional[Dict[str, Any]]:
         return _row_to_heartbeat(row)
     except Exception as e:
         err = str(e).lower()
+        if "listener_2_connected" in err or "listener_2_client_id" in err:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT extract(epoch from last_ts) AS last_ts, hedge_running,
+                               ib_connected, ib_client_id,
+                               extract(epoch from next_retry_ts) AS next_retry_ts,
+                               seconds_until_retry,
+                               extract(epoch from graceful_shutdown_at) AS graceful_shutdown_at,
+                               heartbeat_interval_sec,
+                               redis_quotes_connected,
+                               event_subscribe_ticker, event_subscribe_positions,
+                               event_subscribe_fills, event_subscribe_commission,
+                               listener_connected, listener_client_id
+                        FROM daemon_heartbeat WHERE id = 1
+                        """
+                    )
+                    row = cur.fetchone()
+                if row is None:
+                    return None
+                return _row_to_heartbeat(row + (False, None))
+            except Exception as e2:
+                logger.debug("get_daemon_heartbeat (fallback no listener_2_*) failed: %s", e2)
         if "listener_connected" in err or "listener_client_id" in err:
             try:
                 with conn.cursor() as cur:
@@ -190,6 +217,26 @@ def get_operations(
         return [dict(r) for r in rows]
     except Exception as e:
         logger.warning("get_operations failed: %s", e)
+        return []
+
+
+def get_open_orders(conn: Any) -> List[Dict[str, Any]]:
+    """R-A5: Return current open orders from daemon_open_orders (symbol, action, status, filled, remaining, limit_price, etc.)."""
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT order_id, perm_id, account_id, symbol, sec_type, action,
+                       total_quantity, filled, remaining, limit_price, status, contract_key,
+                       extract(epoch from updated_ts) AS updated_ts
+                FROM daemon_open_orders
+                ORDER BY updated_ts DESC NULLS LAST
+                """
+            )
+            rows = cur.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("get_open_orders failed: %s", e)
         return []
 
 

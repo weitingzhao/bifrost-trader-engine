@@ -533,6 +533,79 @@ class IBConnector:
             return
         self.ib.execDetailsEvent += lambda trade, fill: on_fill(trade)
 
+    def subscribe_order_status(self, on_status: Callable[[Trade], None]) -> None:
+        """Subscribe to order status changes (e.g. Submitted, Filled, Cancelled). R-A5."""
+        if not self.is_connected:
+            return
+        self.ib.orderStatusEvent += lambda trade: on_status(trade)
+
+    def subscribe_open_order(self, on_open: Callable[[Trade], None]) -> None:
+        """Subscribe to new open orders. R-A5."""
+        if not self.is_connected:
+            return
+        self.ib.openOrderEvent += lambda trade: on_open(trade)
+
+    def _trade_to_open_order_dict(self, trade: Trade) -> Dict[str, Any]:
+        """Convert a Trade to a dict for daemon_open_orders / R-A5."""
+        contract = getattr(trade, "contract", None)
+        order = getattr(trade, "order", None)
+        status = getattr(trade, "orderStatus", None)
+        order_id = getattr(order, "orderId", None) if order else None
+        perm_id = getattr(order, "permId", None) if order else None
+        account_id = getattr(order, "account", None) or getattr(trade, "account", None)
+        if account_id is None and order is not None:
+            account_id = getattr(order, "account", None)
+        symbol = getattr(contract, "symbol", "") or "" if contract else ""
+        sec_type = getattr(contract, "secType", "") or "" if contract else ""
+        action = getattr(order, "action", "") or "" if order else ""
+        total_quantity = getattr(order, "totalQuantity", 0) or 0
+        if status is not None:
+            filled = getattr(status, "filled", 0) or 0
+            remaining = getattr(status, "remaining", 0) or 0
+            order_status = getattr(status, "status", "") or ""
+        else:
+            filled = 0
+            remaining = total_quantity
+            order_status = ""
+        limit_price = getattr(order, "lmtPrice", None) if order else None
+        if limit_price is not None and (limit_price == 0 or (isinstance(limit_price, float) and limit_price != limit_price)):
+            limit_price = None
+        contract_key = self._contract_key(contract) if contract else ""
+        return {
+            "order_id": order_id,
+            "perm_id": perm_id,
+            "account_id": str(account_id) if account_id is not None else None,
+            "symbol": symbol,
+            "sec_type": sec_type,
+            "action": action,
+            "total_quantity": total_quantity,
+            "filled": filled,
+            "remaining": remaining,
+            "limit_price": limit_price,
+            "status": order_status,
+            "contract_key": contract_key,
+        }
+
+    def get_open_orders_snapshot(self) -> List[Dict[str, Any]]:
+        """Sync snapshot of current open orders from ib.openTrades(). R-A5 (for use from IB event callbacks)."""
+        out: List[Dict[str, Any]] = []
+        for trade in self.ib.openTrades() or []:
+            if not isinstance(trade, Trade):
+                continue
+            out.append(self._trade_to_open_order_dict(trade))
+        return out
+
+    async def get_open_orders_async(
+        self, include_all_from_tws: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Return current open orders from ib.openTrades(). R-A5.
+        If include_all_from_tws is True, call reqAllOpenOrdersAsync() first so TWS manual orders are included."""
+        if not self.is_connected:
+            await self.connect()
+        if include_all_from_tws:
+            await self.ib.reqAllOpenOrdersAsync()
+        return self.get_open_orders_snapshot()
+
     def _exec_side_to_buy_sell(self, side: Optional[str]) -> str:
         """Map IB Execution.side (BOT/SLD) to BUY/SELL. Handles variants."""
         if not side:

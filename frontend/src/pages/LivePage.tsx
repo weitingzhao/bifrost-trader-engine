@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import type { PositionCategory, RealtimeQuote, StatusResponse } from '../types'
-import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, postRefreshTickerSubscriptions, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
+import type { OpenOrder, PositionCategory, RealtimeQuote, StatusResponse } from '../types'
+import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, postRefreshTickerSubscriptions, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { fmtUsd, fmtUsdRound0 } from '../utils/format'
+import { fmtTs, fmtUsd, fmtUsdRound0 } from '../utils/format'
 import { computeDailyChange, type DailyBenchmark } from './accounts/accountsUtils'
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
@@ -68,6 +68,9 @@ export function LivePage({ status }: LivePageProps) {
   const [symbolOrderByCategory, setSymbolOrderByCategory] = useState<Record<string, string[]>>(loadSymbolOrderFromStorage)
   const [categoryOrderSaving, setCategoryOrderSaving] = useState(false)
   const [streamSyncFeedback, setStreamSyncFeedback] = useState<string | null>(null)
+  /** Open orders: from status (DB) + dedicated poll for live updates. */
+  const [openOrders, setOpenOrders] = useState<OpenOrder[]>([])
+  const [openOrdersUpdatedAt, setOpenOrdersUpdatedAt] = useState<number | null>(null)
   useEffect(() => {
     const id = setInterval(() => setFreshnessTick((t) => t + 1), 1000)
     return () => clearInterval(id)
@@ -117,8 +120,27 @@ export function LivePage({ status }: LivePageProps) {
     return () => { cancelled = true }
   }, [])
 
+  // Open orders: sync from status (parent poll) and dedicated poll from DB
+  useEffect(() => {
+    const list = j?.open_orders ?? []
+    setOpenOrders(list)
+  }, [j?.open_orders])
+  useEffect(() => {
+    const poll = () => {
+      fetchOpenOrders()
+        .then((res) => {
+          setOpenOrders(res.open_orders ?? [])
+          setOpenOrdersUpdatedAt(Date.now() / 1000)
+        })
+        .catch(() => { /* keep previous */ })
+    }
+    poll()
+    const id = setInterval(poll, 6000)
+    return () => clearInterval(id)
+  }, [])
+
   const accountsList = j?.accounts ?? []
-  // Primary/Secondary account IDs from Settings → Stream Accounts (stream_primary_account_id, stream_secondary_account_id).
+  // Primary/Secondary account IDs from Settings → Account → Event Account (stream_primary_account_id, stream_secondary_account_id).
   // No hardcoded account IDs: read from status.ib_config (backend reads from DB settings), then match against accountsList[].account_id.
   const ibConfig = j?.ib_config as { stream_primary_account_id?: string; stream_secondary_account_id?: string } | undefined
   const streamPrimaryId = (ibConfig?.stream_primary_account_id ?? '').trim() || null
@@ -507,7 +529,7 @@ export function LivePage({ status }: LivePageProps) {
               <InfoTooltip
                 text={
                   marketStreamsOk
-                    ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Primary & Secondary account positions (Settings → Stream Accounts). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
+                    ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Primary & Secondary account positions (Settings → Account). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
                     : 'Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Primary & Secondary account positions. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
                 }
               />
@@ -644,7 +666,7 @@ export function LivePage({ status }: LivePageProps) {
                 <tr>
                   <td colSpan={hasStreamAccounts ? 14 : 8}>
                     {watchlistRows.length === 0
-                      ? 'No symbols (add symbols in Watchlist, or ensure Stream Accounts Primary/Secondary have positions, or daemon is running)'
+                      ? 'No symbols (add symbols in Watchlist, or ensure Event Account (Primary/Secondary) have positions, or daemon is running)'
                       : 'No rows match the selected filters.'}
                   </td>
                 </tr>
@@ -965,6 +987,57 @@ export function LivePage({ status }: LivePageProps) {
               </p>
             )
           })()}
+      </div>
+
+      <div className="card card-operations open-orders-live-card">
+        <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
+          <div className="lamp-wrap-span">
+            <div
+              className={`lamp lamp-sm ${(j?.daemon_heartbeat?.daemon_alive && j?.daemon_heartbeat?.ib_connected) ? 'green' : 'red'}`}
+              title="Open orders: green when daemon is connected to IB (event-driven write to DB); data polled from DB."
+              aria-hidden
+            />
+          </div>
+          <div>
+            <h2 className="daemon-card-title page-title-with-tooltip">
+              Open Orders
+              <InfoTooltip text="Unfilled orders from daemon (event-driven). Daemon writes to DB on orderStatus/openOrder events; this page polls GET /open-orders and also receives open_orders via GET /status. Updates every few seconds." />
+            </h2>
+          </div>
+          {openOrdersUpdatedAt != null && (
+            <span className="section-hint" style={{ marginLeft: 'auto' }}>Last updated: {fmtTs(openOrdersUpdatedAt)}</span>
+          )}
+        </div>
+        <div className="open-orders-table-wrap">
+          {openOrders.length === 0 ? (
+            <p className="section-hint">No open orders</p>
+          ) : (
+            <table className="open-orders-table table-operations" role="grid" aria-label="Open orders">
+              <thead>
+                <tr>
+                  <th scope="col">Symbol</th>
+                  <th scope="col">Side</th>
+                  <th scope="col">Qty</th>
+                  <th scope="col">Limit</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Filled / Remaining</th>
+                </tr>
+              </thead>
+              <tbody>
+                {openOrders.map((o, i) => (
+                  <tr key={o.order_id ?? o.perm_id ?? i}>
+                    <td>{o.symbol ?? '—'}</td>
+                    <td>{o.action ?? '—'}</td>
+                    <td>{o.total_quantity != null ? Number(o.total_quantity) : '—'}</td>
+                    <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                    <td>{o.status ?? '—'}</td>
+                    <td>{o.filled != null && o.remaining != null ? `${o.filled} / ${o.remaining}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -136,6 +136,7 @@
 | **StatusSink（接口）** | write_snapshot(snapshot_dict)；由配置选择实现（SQLite/File/可选 Redis-PG）；snapshot 可含 **自检结果**（见需求 §4.1）。 | 阶段 1.1 引入 |
 | **状态自检** | 基于当前 CompositeState、guards、config 做只读评估；输出 ok/degraded/blocked 与 block_reasons；供监控控制台展示或告警。 | 与阶段 2 监控一并考虑 |
 | **控制通道** | 轮询控制文件（或后续 API）：**stop**（R-C1）、**flatten**（R-C3 一键平敞口）、可选 trading_paused（R-C2）；可选“触发自检”并写回 sink。 | 阶段 1.2/1.3（stop）；阶段 2 或 3.2（flatten、pause） |
+| **Open Orders 事件订阅** | 订阅 IB orderStatusEvent、openOrderEvent（及可选 execDetailsEvent）；维护内存 open orders 列表；写入 sink 或经联动通道推送；可选 reqAllOpenOrders 包含 TWS 手动挂单。 | connector + 事件回调 + sink/联动 |
 
 ### 4.2 状态 Sink（守护进程调用，存储由配置决定）
 
@@ -224,8 +225,16 @@
 - **守护进程**：除心跳写 PG 外，在 **IB 事件回调**中把行情写入 **Redis**（缓存），并通过 **Redis Pub/Sub 或 Streams** 发布「有更新」通知。
 - **Redis**：仅作行情**缓存**与**联动通道**；**唯一写入方为守护进程**；监控 Server **不**向 Redis 写行情。
 - **监控 Server**：订阅 Redis 联动通道；收到通知后**读 Redis**（或解析消息体），向前端推送（WebSocket/SSE 或 GET /quotes）；与守护仍**物理解耦**，仅需与守护同连 Redis。
+- **未成交订单（R-A5）**：可与行情联动共用“守护事件 → 写 Redis/发布”模式；初期亦可仅写 PG/sink + GET /open-orders。
 
 部署时 Redis 可与 PG 同机或独立；未配置或不可用时系统退化为仅 PG + 现有 GET /status 轮询，不破坏现有行为。
+
+### 5.2 未成交订单数据流（R-A5，事件驱动）
+
+- TWS → IB API 推送 **orderStatusEvent** / **openOrderEvent** / **execDetailsEvent** → 守护进程内 **IB Connector** 回调。
+- 回调内更新内存 open orders 列表（或等价结构），并写入 **sink**（如 PG 表 `daemon_open_orders` 或现有状态表）或经 **Redis Pub/Sub/Streams** 发布（与 R-RM* 联动一致）。
+- 监控 Server 读 sink 或订阅联动通道，提供 **GET /open-orders**（或 GET /status 内嵌 open_orders）；前端展示挂单列表及状态变更。
+- 初期实现可仅采用「sink + GET /open-orders」；Redis 推送可在 R-RM* 落地后复用同一通道。
 
 ---
 
@@ -299,6 +308,7 @@
 | 多消费者/远程存储可选 | RedisSink/PostgreSQLSink | 按需 |
 | **非实时市场数据拉取（R-A3 扩展）** | 队列（PG 表或 Redis+RQ）+ **独立 Worker 进程**；API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id}；串行+间隔满足 IB Pacing | 阶段 3 |
 | **实时行情与联动（R-RM*）** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端 | 见 PLAN_NEXT_STEPS「实时行情与联动」 |
+| **未成交订单可观测（R-A5）** | Open Orders 事件订阅（orderStatusEvent、openOrderEvent、可选 execDetailsEvent）；维护 open orders 并写 sink 或推送；GET /open-orders；可选 reqAllOpenOrders | 阶段 3 或「实时行情与联动」步骤 |
 
 ---
 

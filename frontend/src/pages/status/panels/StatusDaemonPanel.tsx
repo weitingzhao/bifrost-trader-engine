@@ -1,6 +1,6 @@
-import type { DaemonHeartbeat, IbConfig, StatusResponse } from '../../../types'
+import type { DaemonHeartbeat, IbConfig, OpenOrder, StatusResponse } from '../../../types'
 import { InfoTooltip } from '../../../components/InfoTooltip'
-import { fmtTs } from '../../../utils/format'
+import { fmtTs, fmtUsd } from '../../../utils/format'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
 
@@ -116,8 +116,17 @@ export function StatusDaemonPanel({
             )}
             {ibConfig?.ib_client_id_listener != null && (
               <p className="section-hint countdown-line">
-                Listener Client: {hb?.listener_connected ? (
+                Listener (Host): {hb?.listener_connected ? (
                   <span className="countdown-num">Connected @ {hb?.listener_client_id ?? ibConfig.ib_client_id_listener}</span>
+                ) : (
+                  <span>Not connected</span>
+                )}
+              </p>
+            )}
+            {(ibConfig?.ib2_host ?? ibConfig?.ib2_client_id_listener != null) && (
+              <p className="section-hint countdown-line">
+                Listener (Secondary): {hb?.listener_2_connected ? (
+                  <span className="countdown-num">Connected @ {hb?.listener_2_client_id ?? ibConfig?.ib2_client_id_listener ?? '?'}</span>
                 ) : (
                   <span>Not connected</span>
                 )}
@@ -213,6 +222,48 @@ export function StatusDaemonPanel({
                 Resume
               </button>
             </div>
+          </div>
+        </div>
+        <div className="daemon-group">
+          <div className="daemon-group-header">
+            <span className="daemon-group-title">Open Orders</span>
+            <InfoTooltip text="Current unfilled orders from daemon (event-driven). Refreshed with status poll." />
+          </div>
+          <div className="daemon-group-body">
+            {(() => {
+              const orders: OpenOrder[] = j?.open_orders ?? []
+              if (orders.length === 0) {
+                return <p className="section-hint">No open orders</p>
+              }
+              return (
+                <div className="open-orders-table-wrap">
+                  <table className="open-orders-table" role="grid" aria-label="Open orders">
+                    <thead>
+                      <tr>
+                        <th scope="col">Symbol</th>
+                        <th scope="col">Side</th>
+                        <th scope="col">Qty</th>
+                        <th scope="col">Limit</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Filled / Remaining</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orders.map((o, i) => (
+                        <tr key={o.order_id ?? o.perm_id ?? i}>
+                          <td>{o.symbol ?? '—'}</td>
+                          <td>{o.action ?? '—'}</td>
+                          <td>{o.total_quantity != null ? Number(o.total_quantity) : '—'}</td>
+                          <td>{o.limit_price != null ? fmtUsd(Number(o.limit_price)) : '—'}</td>
+                          <td>{o.status ?? '—'}</td>
+                          <td>{o.filled != null && o.remaining != null ? `${o.filled} / ${o.remaining}` : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
           </div>
         </div>
       </div>

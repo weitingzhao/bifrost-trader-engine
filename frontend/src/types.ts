@@ -135,6 +135,25 @@ export interface StatusResponse {
   subscribed_tickers?: string[]
   /** US market indices for watchlist comparison (e.g. S&P 500, Dow, Nasdaq). Used for benchmark row and /bars/benchmark. */
   reference_indices?: { symbol: string; label?: string }[]
+  /** R-A5: current open/unfilled orders from daemon (symbol, action, status, filled, remaining, limit_price). */
+  open_orders?: OpenOrder[]
+}
+
+/** R-A5: one row from daemon_open_orders (GET /status or GET /open-orders). */
+export interface OpenOrder {
+  order_id?: number | null
+  perm_id?: number | null
+  account_id?: string | null
+  symbol?: string | null
+  sec_type?: string | null
+  action?: string | null
+  total_quantity?: number | null
+  filled?: number | null
+  remaining?: number | null
+  limit_price?: number | null
+  status?: string | null
+  contract_key?: string | null
+  updated_ts?: number | null
 }
 
 export interface DaemonHeartbeat {
@@ -158,6 +177,9 @@ export interface DaemonHeartbeat {
   /** 守护进程第二条 IB 连接（settings.ib_client_id_listener），TWS 中会显示该 Client ID */
   listener_connected?: boolean
   listener_client_id?: number | null
+  /** Listener on Secondary host (settings.ib2_host, ib2_client_id_listener) */
+  listener_2_connected?: boolean
+  listener_2_client_id?: number | null
 }
 
 export interface StatusRow {

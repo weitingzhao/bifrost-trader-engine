@@ -7,8 +7,8 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
 | 来源 | 说明 |
 |------|------|
 | **Watchlist** | 后台 `GET /status` 返回的 `subscribed_tickers`（来自 Watchlist 的 STK + 策略标的） |
-| **Primary 持仓** | 在 **Settings → IB Connection → Stream Accounts → Primary** 中配置的 account_id 下，当前 **持仓表里 STK、数量非 0** 的 symbol |
-| **Secondary 持仓** | 在 **Settings → IB Connection → Stream Accounts → Secondary** 中配置的 account_id 下，当前 **持仓表里 STK、数量非 0** 的 symbol |
+| **Primary 持仓** | 在 **Settings → IB Connection → Event Listener → Primary** 中配置的 account_id 下，当前 **持仓表里 STK、数量非 0** 的 symbol |
+| **Secondary 持仓** | 在 **Settings → IB Connection → Event Listener → Secondary** 中配置的 account_id 下，当前 **持仓表里 STK、数量非 0** 的 symbol |
 
 即：**Stream 列表 = Watchlist ∪ Primary 账户持仓 symbol ∪ Secondary 账户持仓 symbol**。
 
@@ -24,7 +24,7 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
 - **Secondary 要出现在 Live 上，必须**：  
   1. Settings 里配置了 **第二 IB**（`ib2_host` 等），这样监控会创建 `account_ib_client_2`；  
   2. 至少执行过一次 **Refresh accounts**，把第二 IB 的账户/持仓拉下来并写入 DB；  
-  3. **Stream Accounts → Secondary** 里填的 account_id，与第二 IB 返回并写入 DB 的 **account_id 一致**（比较时已做 trim + 忽略大小写）。
+  3. **Event Listener → Secondary** 里填的 account_id，与第二 IB 返回并写入 DB 的 **account_id 一致**（比较时已做 trim + 忽略大小写）。
 
 ## 3. Account 列（每行属于哪个 Stream 账户）
 
@@ -51,7 +51,7 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
    配置了第二 IB 后，需要至少执行一次 **Refresh accounts**（例如在 Status 页或 Accounts 页），才会把第二 TWS 的账户/持仓写入 DB；否则 `status.accounts` 里没有 Secondary 账户。
 
 3. **Stream Secondary account_id 与 DB 不一致**  
-   Settings → Stream Accounts → Secondary 填的必须和第二 IB 实际返回的 account_id 一致（例如 TWS 显示 `DU12345`，就填 `DU12345`）。前端已用 **trim + 忽略大小写** 比较，空格或大小写不会导致不匹配；但 ID 本身必须一致。
+   Settings → Event Listener → Secondary 填的必须和第二 IB 实际返回的 account_id 一致（例如 TWS 显示 `DU12345`，就填 `DU12345`）。前端已用 **trim + 忽略大小写** 比较，空格或大小写不会导致不匹配；但 ID 本身必须一致。
 
 4. **第二 IB 连接失败**  
    Refresh accounts 时若 AccountIbClient2 连接失败，只会写入 Host 的账户，Secondary 仍不会进 DB；可查看监控/后台日志确认是否有 `AccountIbClient2` 报错。
@@ -79,6 +79,6 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
   因此：**Secondary 账户和其持仓只有在执行过 Refresh accounts 且第二 IB 连接成功时才会出现在 `accounts` / `account_positions`。**
 
 **排查「选 Secondary 没有一条记录」建议**：  
-1. 在 **Accounts 页** 或直接看 **GET /status** 的 `accounts` 数组里，是否有一个元素的 `account_id` 与你 Settings 里 **Stream Accounts → Secondary** 填的完全一致（忽略大小写和首尾空格）。  
+1. 在 **Accounts 页** 或直接看 **GET /status** 的 `accounts` 数组里，是否有一个元素的 `account_id` 与你 Settings 里 **Event Listener → Secondary** 填的完全一致（忽略大小写和首尾空格）。  
 2. 若没有，说明 DB 里没有该 Secondary 账户 → 检查 Second IB 是否配置、是否执行过 Refresh accounts、第二 IB 是否连接成功（看监控/后台日志）。  
 3. 若有该 account 但 `positions` 为空或没有 STK，则 Stream 里选 Secondary 也会是 0 条（前端只统计 STK、数量非 0 的持仓）。
