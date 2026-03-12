@@ -637,7 +637,7 @@ export function LivePage({ status }: LivePageProps) {
               <col style={{ width: '5.5rem' }} />
               <col style={{ width: '8rem' }} />
               <col style={{ width: '4.25rem' }} />
-              <col style={{ width: '4.25rem' }} />
+              <col style={{ width: '5.25rem' }} />
               <col style={{ width: '4.25rem' }} />
               <col style={{ width: '5.5rem' }} />
             </colgroup>
