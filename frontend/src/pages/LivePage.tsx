@@ -635,11 +635,11 @@ export function LivePage({ status }: LivePageProps) {
               {hasStreamAccounts && <col style={{ width: '5.5rem' }} />}
               <col style={{ width: '4rem' }} />
               <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '4.75rem' }} />
-              <col style={{ width: '5.5rem' }} />
-              <col style={{ width: '4.75rem' }} />
-              <col style={{ width: '6rem' }} />
               <col style={{ width: '8rem' }} />
+              <col style={{ width: '4.25rem' }} />
+              <col style={{ width: '4.25rem' }} />
+              <col style={{ width: '4.25rem' }} />
+              <col style={{ width: '5.5rem' }} />
             </colgroup>
             <thead>
               <tr>
@@ -656,11 +656,11 @@ export function LivePage({ status }: LivePageProps) {
                 )}
                 <th>Qty</th>
                 <th>Cost</th>
+                <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below). Last is colored green/red vs previous close.">Last (Bid / Ask)</th>
                 <th>Daily %</th>
                 <th>Daily $</th>
                 <th>SINCE %</th>
                 <th>SINCE $</th>
-                <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below)">Last (Bid / Ask)</th>
               </tr>
               {hasStreamAccounts && (
                 <tr>
@@ -774,6 +774,35 @@ export function LivePage({ status }: LivePageProps) {
                       )}
                       <td className="realtime-quote-num">{qty != null && Number.isFinite(qty) ? qty : '—'}</td>
                       <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
+                      <td className="realtime-quote-num realtime-quote-last-bid-ask">
+                        {q ? (() => {
+                          const last = q.last != null && Number.isFinite(q.last) ? q.last : null
+                          const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
+                          const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
+                          const bidDiff = last != null && bid != null ? bid - last : null
+                          const askDiff = last != null && ask != null ? ask - last : null
+                          const bench = benchmarks[symbol]
+                          const prevClose = bench && (bench.prev_close != null && Number.isFinite(bench.prev_close))
+                            ? bench.prev_close
+                            : (bench && Number.isFinite(bench.close) ? bench.close : null)
+                          const lastVsPrev = last != null && prevClose != null && prevClose > 0
+                            ? (last > prevClose ? 'pnl-positive' : last < prevClose ? 'pnl-negative' : '')
+                            : ''
+                          return (
+                            <>
+                              {last != null ? (
+                                <span className={lastVsPrev}>{fmtUsd(last)}</span>
+                              ) : '—'}
+                              {bidDiff != null && (
+                                <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+                              )}
+                              {askDiff != null && (
+                                <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+                              )}
+                            </>
+                          )
+                        })() : '—'}
+                      </td>
                       <td className="realtime-quote-num">
                         {changePct != null && Number.isFinite(changePct) ? (
                           <span className={changePct > 0 ? 'pnl-positive' : changePct < 0 ? 'pnl-negative' : ''}>
@@ -812,26 +841,6 @@ export function LivePage({ status }: LivePageProps) {
                           '—'
                         )}
                       </td>
-                      <td className="realtime-quote-num realtime-quote-last-bid-ask">
-                        {q ? (() => {
-                          const last = q.last != null && Number.isFinite(q.last) ? q.last : null
-                          const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
-                          const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
-                          const bidDiff = last != null && bid != null ? bid - last : null
-                          const askDiff = last != null && ask != null ? ask - last : null
-                          return (
-                            <>
-                              {last != null ? fmtUsd(last) : '—'}
-                              {bidDiff != null && (
-                                <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
-                              )}
-                              {askDiff != null && (
-                                <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
-                              )}
-                            </>
-                          )
-                        })() : '—'}
-                      </td>
                     </tr>
                       )
                     })}
@@ -851,7 +860,6 @@ export function LivePage({ status }: LivePageProps) {
                   return a + q * c
                 }, 0)
                 const secondaryPnlSum = filteredRows.reduce((a, r) => a + (r.secondaryPnlCost != null && Number.isFinite(r.secondaryPnlCost) ? r.secondaryPnlCost : 0), 0)
-                const totalQty = filteredRows.reduce((a, r) => a + (r.qty != null && Number.isFinite(r.qty) ? r.qty : 0), 0)
                 const totalCost = filteredRows.reduce((a, r) => {
                   const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
                   const c = r.avgCost != null && Number.isFinite(r.avgCost) ? r.avgCost : 0
@@ -873,14 +881,14 @@ export function LivePage({ status }: LivePageProps) {
                     {hasStreamAccounts && (
                       <>
                         <td className="realtime-quote-num">—</td>
-                        <td className="realtime-quote-num">{hostCostSum !== 0 ? fmtUsd(hostCostSum) : '—'}</td>
+                        <td className="realtime-quote-num">{hostCostSum !== 0 ? fmtUsdRound0(hostCostSum) : '—'}</td>
                         <td className="realtime-quote-num">
                           <span className={hostPnlSum > 0 ? 'pnl-positive' : hostPnlSum < 0 ? 'pnl-negative' : ''}>
                             {hostPnlSum !== 0 ? fmtUsdRound0(hostPnlSum) : '—'}
                           </span>
                         </td>
                         <td className="realtime-quote-num">—</td>
-                        <td className="realtime-quote-num">{secondaryCostSum !== 0 ? fmtUsd(secondaryCostSum) : '—'}</td>
+                        <td className="realtime-quote-num">{secondaryCostSum !== 0 ? fmtUsdRound0(secondaryCostSum) : '—'}</td>
                         <td className="realtime-quote-num">
                           <span className={secondaryPnlSum > 0 ? 'pnl-positive' : secondaryPnlSum < 0 ? 'pnl-negative' : ''}>
                             {secondaryPnlSum !== 0 ? fmtUsdRound0(secondaryPnlSum) : '—'}
@@ -888,8 +896,9 @@ export function LivePage({ status }: LivePageProps) {
                         </td>
                       </>
                     )}
-                    <td className="realtime-quote-num">{totalQty !== 0 ? totalQty : '—'}</td>
-                    <td className="realtime-quote-num">{totalCost !== 0 ? fmtUsd(totalCost) : '—'}</td>
+                    <td className="realtime-quote-num">—</td>
+                    <td className="realtime-quote-num">{totalCost !== 0 ? fmtUsdRound0(totalCost) : '—'}</td>
+                    <td className="realtime-quote-num">—</td>
                     <td className="realtime-quote-num">
                       {totalDailyPct != null && Number.isFinite(totalDailyPct) ? (
                         <span className={totalDailyPct > 0 ? 'pnl-positive' : totalDailyPct < 0 ? 'pnl-negative' : ''}>
@@ -914,7 +923,6 @@ export function LivePage({ status }: LivePageProps) {
                         {totalCostPnl !== 0 ? fmtUsdRound0(totalCostPnl) : '—'}
                       </span>
                     </td>
-                    <td className="realtime-quote-num">—</td>
                   </tr>
                 )
               })()}
