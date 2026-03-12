@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { FlexAccountItem } from '../../types'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
@@ -50,6 +51,8 @@ export interface IbConnectionSectionProps {
   setInitFlexRangeDays: (v: number) => void
   flexAccounts: FlexAccountItem[]
   setFlexAccounts: (v: FlexAccountItem[] | ((prev: FlexAccountItem[]) => FlexAccountItem[])) => void
+  /** Current hash-based sub-anchor (e.g. ib-users); when set, the corresponding group is expanded. */
+  activeSubId?: string
 }
 
 export function IbConnectionSection(props: IbConnectionSectionProps) {
@@ -92,169 +95,136 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     setInitFlexRangeDays,
     flexAccounts,
     setFlexAccounts,
+    activeSubId,
   } = props
+
+  const [userGroupOpen, setUserGroupOpen] = useState(false)
+  const [clientIdGroupOpen, setClientIdGroupOpen] = useState(false)
+  const [streamAccountsGroupOpen, setStreamAccountsGroupOpen] = useState(false)
+  const [flexQueryGroupOpen, setFlexQueryGroupOpen] = useState(false)
+
+  // When user clicks a sidebar link: expand the target group, collapse the others, and scroll to it.
+  useEffect(() => {
+    if (!activeSubId) return
+    setUserGroupOpen(activeSubId === 'ib-users')
+    setClientIdGroupOpen(activeSubId === 'ib-client-ids')
+    setStreamAccountsGroupOpen(activeSubId === 'ib-account')
+    setFlexQueryGroupOpen(activeSubId === 'ib-flex-query')
+  }, [activeSubId])
 
   return (
     <div id="settings-ib-connection" className="settings-ib-connection-group">
-      <h3 className="settings-ib-group-title">IB Settings</h3>
-      <div className="daemon-group" id="ib-primary">
+      <div className="daemon-group settings-ib-config-sheet" id="ib-config-sheet">
         <div className="daemon-group-header">
-          <span className="daemon-group-title">Host User</span>
-          <InfoTooltip text="Primary TWS: daemon + auto-trading + market data. One TWS per machine. Flex token used for this account's Flex Queries (e.g. Cash Transactions)." />
+          <span className="daemon-group-title">IB Configure</span>
+          <InfoTooltip text="Configure two IB connections: Host (primary TWS for daemon, auto-trading, market data) and Secondary (optional second TWS). Expand each group below to edit. Flex range preferences are at the bottom." />
         </div>
+        <p className="settings-ib-config-subtitle">Host (primary) and Secondary (optional second TWS). Same fields for each.</p>
         <div className="daemon-group-body">
-          <div className="settings-ib-user-controls">
-            <label className="settings-ib-user-label">
-              IP/Host:
-              <input
-                type="text"
-                value={ibHost}
-                onChange={(e) => setIbHost(e.target.value)}
-                placeholder="127.0.0.1"
-                className="settings-ib-user-input"
-              />
-            </label>
-            <label className="settings-ib-user-label">
-              Port type:
-              <select
-                value={ibPortType}
-                onChange={(e) => setIbPortType(e.target.value as PortType)}
-                className="settings-ib-user-select"
-              >
-                <option value="tws_paper">TWS Paper (7497)</option>
-                <option value="tws_live">TWS Live (7496)</option>
-                <option value="gateway">Gateway (4002)</option>
-              </select>
-            </label>
-          </div>
-          <div className="settings-ib-user-controls settings-ib-user-token-row">
-            <label className="settings-ib-user-label settings-ib-user-token-label">
-              Flex token:
-              <input
-                type="text"
-                placeholder="IB Flex token (for this account)"
-                value={flexHostToken}
-                onChange={(e) => setFlexHostToken(e.target.value)}
-                className="settings-ib-user-token-input"
-              />
-            </label>
-          </div>
-        </div>
-      </div>
-      <div className="daemon-group" id="ib-second">
-        <div className="daemon-group-header">
-          <span className="daemon-group-title">Second User</span>
-          <InfoTooltip text="Second TWS (different machine): manual-only account. Leave empty if not used. Flex token for this account's Flex Queries." />
-        </div>
-        <div className="daemon-group-body">
-          <div className="settings-ib-user-controls">
-            <label className="settings-ib-user-label">
-              IP/Host:
-              <input
-                type="text"
-                value={ib2Host}
-                onChange={(e) => setIb2Host(e.target.value)}
-                placeholder="e.g. 192.168.10.31 (empty = disabled)"
-                className="settings-ib-user-input"
-              />
-            </label>
-            <label className="settings-ib-user-label">
-              Port type:
-              <select
-                value={ib2PortType}
-                onChange={(e) => setIb2PortType(e.target.value as PortType)}
-                className="settings-ib-user-select"
-                disabled={!ib2Host.trim()}
-              >
-                <option value="tws_paper">TWS Paper (7497)</option>
-                <option value="tws_live">TWS Live (7496)</option>
-                <option value="gateway">Gateway (4002)</option>
-              </select>
-            </label>
-          </div>
-          <div className="settings-ib-user-controls settings-ib-user-token-row">
-            <label className="settings-ib-user-label settings-ib-user-token-label">
-              Flex token:
-              <input
-                type="text"
-                placeholder="IB Flex token (second IB, empty if not used)"
-                value={flexSecondaryToken}
-                onChange={(e) => setFlexSecondaryToken(e.target.value)}
-                className="settings-ib-user-token-input"
-                disabled={!ib2Host.trim()}
-              />
-            </label>
-          </div>
-        </div>
-      </div>
-      <div className="daemon-group" id="ib-trading-account">
-        <div className="daemon-group-header">
-          <span className="daemon-group-title">Trading account (hedging & status)</span>
-          <InfoTooltip text="The single IB account used by the daemon for auto-hedging and for writing status (positions, account summary). Must be one of Host User's managed accounts. Empty = use first account from Host User's TWS." />
-        </div>
-        <div className="daemon-group-body">
-          <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-            <label>
-              Account ID:
-              <input
-                type="text"
-                value={primaryAccountId}
-                onChange={(e) => setPrimaryAccountId(e.target.value)}
-                placeholder="e.g. U17113214 (empty = first from Host User)"
-                style={{ width: '12rem', marginLeft: '0.25rem' }}
-              />
-            </label>
-          </div>
-        </div>
-      </div>
-      <div className="daemon-group" id="ib-stream-accounts">
-        <div className="daemon-group-header">
-          <span className="daemon-group-title">Stream accounts (Live page)</span>
-          <InfoTooltip text="Account IDs used to categorize Market Streams on the Live page: Primary and Secondary. Positions from the primary account show as Primary; from the secondary as Secondary; from both as Both. Leave empty to hide the Account column and category filter." />
-        </div>
-        <div className="daemon-group-body">
-          <div className="controls" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-            <label>
-              Primary:
-              <input
-                type="text"
-                value={streamPrimaryAccountId}
-                onChange={(e) => setStreamPrimaryAccountId(e.target.value)}
-                placeholder="e.g. U17113214 (empty = no label)"
-                style={{ width: '12rem', marginLeft: '0.25rem' }}
-                aria-label="Stream primary account ID"
-              />
-            </label>
-            <label>
-              Secondary:
-              <input
-                type="text"
-                value={streamSecondaryAccountId}
-                onChange={(e) => setStreamSecondaryAccountId(e.target.value)}
-                placeholder="e.g. U98765432 (empty = no label)"
-                style={{ width: '12rem', marginLeft: '0.25rem' }}
-                aria-label="Stream secondary account ID"
-              />
-            </label>
-          </div>
-        </div>
-      </div>
-      <div className="daemon-group" id="ib-client-ids">
-        <div className="daemon-group-header">
-          <span className="daemon-group-title">Client IDs</span>
-          <InfoTooltip text="Per-role client IDs. Host = Host User; Secondary = Second IB (when configured). Market data is Host only—only the primary account has a data subscription; Secondary has no market data." />
-        </div>
-        <div className="daemon-group-body">
-          <div className="flex-query-table-wrap">
-            <table className="flex-query-table" aria-label="Client IDs by role and connection">
+          <section className="settings-ib-section">
+            <h3 className="settings-ib-config-sheet-title">User client related settings</h3>
+            <div className="flex-query-table-wrap settings-ib-config-table-wrap">
+            <table className="flex-query-table settings-ib-config-table" aria-label="User client related settings: Host and Secondary">
+              <colgroup>
+                <col className="settings-ib-config-col-label" />
+                <col className="settings-ib-config-col-host" />
+                <col className="settings-ib-config-col-secondary" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th scope="col">Role</th>
-                  <th scope="col">Host</th>
-                  <th scope="col">Secondary</th>
+                  <th scope="col" className="settings-ib-config-th-label" aria-label="Field" />
+                  <th scope="col" className="settings-ib-config-th-host">Host</th>
+                  <th scope="col" className="settings-ib-config-th-secondary">Secondary</th>
                 </tr>
               </thead>
               <tbody>
+                <tr
+                  id="ib-users"
+                  className="settings-ib-collapsible-group-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setUserGroupOpen((o) => !o)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setUserGroupOpen((o) => !o) } }}
+                  aria-expanded={userGroupOpen}
+                  aria-label="User group"
+                >
+                  <td colSpan={3} className="settings-ib-collapsible-group-header">
+                    <span className={`settings-ib-collapsible-chevron ${userGroupOpen ? 'open' : ''}`} aria-hidden>▼</span>
+                    <span className="settings-ib-collapsible-group-title">User</span>
+                  </td>
+                </tr>
+                {userGroupOpen && (
+                  <>
+                <tr>
+                  <td className="flex-query-cell-type">IP/Host</td>
+                  <td className="flex-query-cell-input">
+                    <input
+                      type="text"
+                      value={ibHost}
+                      onChange={(e) => setIbHost(e.target.value)}
+                      placeholder="127.0.0.1"
+                      className="flex-query-input"
+                      aria-label="IP/Host — Host"
+                    />
+                  </td>
+                  <td className="flex-query-cell-input">
+                    <input
+                      type="text"
+                      value={ib2Host}
+                      onChange={(e) => setIb2Host(e.target.value)}
+                      placeholder="e.g. 192.168.10.31 (empty = disabled)"
+                      className="flex-query-input"
+                      aria-label="IP/Host — Secondary"
+                    />
+                  </td>
+                </tr>
+                <tr>
+                  <td className="flex-query-cell-type">Port type</td>
+                  <td className="flex-query-cell-input">
+                    <select
+                      value={ibPortType}
+                      onChange={(e) => setIbPortType(e.target.value as PortType)}
+                      className="flex-query-input"
+                      aria-label="Port type — Host"
+                    >
+                      <option value="tws_paper">TWS Paper (7497)</option>
+                      <option value="tws_live">TWS Live (7496)</option>
+                      <option value="gateway">Gateway (4002)</option>
+                    </select>
+                  </td>
+                  <td className="flex-query-cell-input">
+                    <select
+                      value={ib2PortType}
+                      onChange={(e) => setIb2PortType(e.target.value as PortType)}
+                      className="flex-query-input"
+                      disabled={!ib2Host.trim()}
+                      aria-label="Port type — Secondary"
+                    >
+                      <option value="tws_paper">TWS Paper (7497)</option>
+                      <option value="tws_live">TWS Live (7496)</option>
+                      <option value="gateway">Gateway (4002)</option>
+                    </select>
+                  </td>
+                </tr>
+                  </>
+                )}
+                <tr
+                  className="settings-ib-collapsible-group-row"
+                  id="ib-client-ids"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setClientIdGroupOpen((o) => !o)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setClientIdGroupOpen((o) => !o) } }}
+                  aria-expanded={clientIdGroupOpen}
+                  aria-label="Client ID group"
+                >
+                  <td colSpan={3} className="settings-ib-collapsible-group-header">
+                    <span className={`settings-ib-collapsible-chevron ${clientIdGroupOpen ? 'open' : ''}`} aria-hidden>▼</span>
+                    <span className="settings-ib-collapsible-group-title">Client ID</span>
+                  </td>
+                </tr>
+                {clientIdGroupOpen && (
+                  <>
                 <tr className="client-ids-group-row">
                   <td colSpan={3} className="client-ids-group-header">Daemon</td>
                 </tr>
@@ -366,94 +336,189 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   </td>
                   <td className="flex-query-cell-input">—</td>
                 </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div className="daemon-group" id="ib-flex">
-        <div className="daemon-group-header">
-          <span className="daemon-group-title">Flex Settings</span>
-          <InfoTooltip text="One row per query type. Fill in Query IDs for Host and (optional) Second IB. Default Flex Query range is used when Fetch from IB (Flex) is called without a date range (e.g. from script or API). Tokens set above. See docs/FLEX_TRANSACTIONS.md." />
-        </div>
-        <div className="daemon-group-body">
-          <div className="controls" style={{ flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <label>
-              Default Flex Query range (days):
-              <input
-                type="number"
-                min={1}
-                max={9999}
-                value={defaultFlexRangeDays}
-                onChange={(e) => setDefaultFlexRangeDays(Math.max(1, Math.min(9999, Math.round(Number(e.target.value) || 30))))}
-                className="settings-flex-range-select"
-                style={{ width: '5rem', marginLeft: '0.35rem' }}
-                aria-label="Default Flex Query range in days"
-              />
-            </label>
-            <label>
-              Init Flex Query range (days):
-              <input
-                type="number"
-                min={1}
-                max={9999}
-                value={initFlexRangeDays}
-                onChange={(e) => setInitFlexRangeDays(Math.max(1, Math.min(9999, Math.round(Number(e.target.value) || 360))))}
-                className="settings-flex-range-select"
-                style={{ width: '5rem', marginLeft: '0.35rem' }}
-                aria-label="Init Flex Query range in days"
-              />
-            </label>
-            <span className="section-hint" style={{ margin: 0 }}>Default: used when no from_date/to_date is sent (from_date = yesterday − N days, to_date = yesterday). Init: for initial/full pull (e.g. 360 days).</span>
-          </div>
-          <div className="flex-query-table-wrap">
-            <table className="flex-query-table" aria-label="Flex Query IDs by type">
-              <thead>
-                <tr>
-                  <th scope="col">Query type</th>
-                  <th scope="col">Host</th>
-                  <th scope="col">Secondary</th>
+                  </>
+                )}
+                <tr
+                  id="ib-account"
+                  className="settings-ib-collapsible-group-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setStreamAccountsGroupOpen((o) => !o)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStreamAccountsGroupOpen((o) => !o) } }}
+                  aria-expanded={streamAccountsGroupOpen}
+                  aria-label="Account group"
+                >
+                  <td colSpan={3} className="settings-ib-collapsible-group-header">
+                    <span className={`settings-ib-collapsible-chevron ${streamAccountsGroupOpen ? 'open' : ''}`} aria-hidden>▼</span>
+                    <span className="settings-ib-collapsible-group-title">Account</span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {FLEX_QUERY_TYPES.map(({ purpose, label }, i) => (
-                  <tr key={purpose}>
-                    <td className="flex-query-cell-type">{label}</td>
+                {streamAccountsGroupOpen && (
+                  <>
+                  <tr>
+                    <td className="flex-query-cell-type">Event Account</td>
                     <td className="flex-query-cell-input">
                       <input
                         type="text"
-                        placeholder="Query ID"
-                        value={flexAccounts[i]?.query_host_id ?? ''}
-                        onChange={(e) => {
-                          const next = [...flexAccounts]
-                          if (!next[i]) next[i] = { purpose, query_label: label, query_host_id: '', query_secondary_id: '' }
-                          next[i] = { ...next[i], query_host_id: e.target.value }
-                          setFlexAccounts(next)
-                        }}
+                        value={streamPrimaryAccountId}
+                        onChange={(e) => setStreamPrimaryAccountId(e.target.value)}
+                        placeholder="Primary (e.g. U17113214)"
                         className="flex-query-input"
-                        aria-label={`${label} — Host Query ID`}
+                        style={{ maxWidth: '100%' }}
+                        aria-label="Stream primary account ID — Host"
                       />
                     </td>
                     <td className="flex-query-cell-input">
                       <input
                         type="text"
-                        placeholder="Query ID"
-                        value={flexAccounts[i]?.query_secondary_id ?? ''}
-                        onChange={(e) => {
-                          const next = [...flexAccounts]
-                          if (!next[i]) next[i] = { purpose, query_label: label, query_host_id: '', query_secondary_id: '' }
-                          next[i] = { ...next[i], query_secondary_id: e.target.value }
-                          setFlexAccounts(next)
-                        }}
+                        value={streamSecondaryAccountId}
+                        onChange={(e) => setStreamSecondaryAccountId(e.target.value)}
+                        placeholder="Secondary (e.g. U98765432)"
                         className="flex-query-input"
-                        aria-label={`${label} — Secondary Query ID`}
+                        style={{ maxWidth: '100%' }}
+                        aria-label="Stream secondary account ID — Secondary"
                       />
                     </td>
                   </tr>
-                ))}
+                  <tr id="ib-trading-account">
+                    <td className="flex-query-cell-type">Trading Account</td>
+                    <td className="flex-query-cell-input">
+                      <input
+                        type="text"
+                        value={primaryAccountId}
+                        onChange={(e) => setPrimaryAccountId(e.target.value)}
+                        placeholder="e.g. U17113214 (empty = first from Host User)"
+                        className="flex-query-input"
+                        style={{ maxWidth: '100%' }}
+                        aria-label="Trading Account — Host"
+                        title="The single IB account used by the daemon for auto-hedging and for writing status (positions, account summary). Must be one of Host User's managed accounts. Empty = use first account from Host User's TWS."
+                      />
+                    </td>
+                    <td className="flex-query-cell-input">—</td>
+                  </tr>
+                  </>
+                )}
+                <tr
+                  id="ib-flex-query"
+                  className="settings-ib-collapsible-group-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setFlexQueryGroupOpen((o) => !o)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFlexQueryGroupOpen((o) => !o) } }}
+                  aria-expanded={flexQueryGroupOpen}
+                  aria-label="Flex Query group"
+                >
+                  <td colSpan={3} className="settings-ib-collapsible-group-header">
+                    <span className={`settings-ib-collapsible-chevron ${flexQueryGroupOpen ? 'open' : ''}`} aria-hidden>▼</span>
+                    <span className="settings-ib-collapsible-group-title">Flex Query</span>
+                  </td>
+                </tr>
+                {flexQueryGroupOpen && (
+                  <>
+                    <tr>
+                      <td className="flex-query-cell-type">Flex token</td>
+                      <td className="flex-query-cell-input">
+                        <input
+                          type="text"
+                          placeholder="IB Flex token (Host account)"
+                          value={flexHostToken}
+                          onChange={(e) => setFlexHostToken(e.target.value)}
+                          className="flex-query-input"
+                          style={{ maxWidth: '100%' }}
+                          aria-label="Flex token — Host"
+                        />
+                      </td>
+                      <td className="flex-query-cell-input">
+                        <input
+                          type="text"
+                          placeholder="IB Flex token (empty if not used)"
+                          value={flexSecondaryToken}
+                          onChange={(e) => setFlexSecondaryToken(e.target.value)}
+                          className="flex-query-input"
+                          style={{ maxWidth: '100%' }}
+                          disabled={!ib2Host.trim()}
+                          aria-label="Flex token — Secondary"
+                        />
+                      </td>
+                    </tr>
+                    {FLEX_QUERY_TYPES.map(({ purpose, label }, i) => (
+                      <tr key={purpose}>
+                        <td className="flex-query-cell-type">{label}</td>
+                        <td className="flex-query-cell-input">
+                          <input
+                            type="text"
+                            placeholder="Query ID"
+                            value={flexAccounts[i]?.query_host_id ?? ''}
+                            onChange={(e) => {
+                              const next = [...flexAccounts]
+                              if (!next[i]) next[i] = { purpose, query_label: label, query_host_id: '', query_secondary_id: '' }
+                              next[i] = { ...next[i], query_host_id: e.target.value }
+                              setFlexAccounts(next)
+                            }}
+                            className="flex-query-input"
+                            style={{ maxWidth: '100%' }}
+                            aria-label={`${label} — Host Query ID`}
+                          />
+                        </td>
+                        <td className="flex-query-cell-input">
+                          <input
+                            type="text"
+                            placeholder="Query ID"
+                            value={flexAccounts[i]?.query_secondary_id ?? ''}
+                            onChange={(e) => {
+                              const next = [...flexAccounts]
+                              if (!next[i]) next[i] = { purpose, query_label: label, query_host_id: '', query_secondary_id: '' }
+                              next[i] = { ...next[i], query_secondary_id: e.target.value }
+                              setFlexAccounts(next)
+                            }}
+                            className="flex-query-input"
+                            style={{ maxWidth: '100%' }}
+                            aria-label={`${label} — Secondary Query ID`}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </>
+                )}
               </tbody>
             </table>
           </div>
+          </section>
+          <section className="settings-ib-section settings-ib-preference-section">
+            <h3 className="settings-ib-config-sheet-title">IB Preference</h3>
+            <div id="flex-preference" className="settings-flex-preference">
+              <h4 className="settings-flex-preference-title">Flex Preference</h4>
+              <p className="settings-ib-config-subtitle">Default ranges for Flex Query when no date range is sent. Init: for initial/full pull.</p>
+              <div className="controls settings-ib-preference-controls">
+                <label className="settings-ib-preference-range-row">
+                  Default range
+                  <input
+                    type="number"
+                    min={1}
+                    max={9999}
+                    value={defaultFlexRangeDays}
+                    onChange={(e) => setDefaultFlexRangeDays(Math.max(1, Math.min(9999, Math.round(Number(e.target.value) || 30))))}
+                    className="settings-flex-range-select"
+                    aria-label="Default Flex Query range in days"
+                  />
+                  <span className="settings-ib-range-suffix">days</span>
+                </label>
+                <label className="settings-ib-preference-range-row">
+                  Init range
+                  <input
+                    type="number"
+                    min={1}
+                    max={9999}
+                    value={initFlexRangeDays}
+                    onChange={(e) => setInitFlexRangeDays(Math.max(1, Math.min(9999, Math.round(Number(e.target.value) || 360))))}
+                    className="settings-flex-range-select"
+                    aria-label="Init Flex Query range in days"
+                  />
+                  <span className="settings-ib-range-suffix">days</span>
+                </label>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-"""Config: IB, Flex, key-value groups/key-value, position-categories."""
+"""Config: IB, Flex, position-categories."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -8,11 +8,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from servers.reader import (
-    create_key_value_group,
-    delete_key_value,
-    delete_key_value_group,
-    set_key_value,
-    update_key_value_group,
     write_flex_config,
     write_ib_config,
 )
@@ -176,122 +171,6 @@ def post_config_flex(request: Request, body: FlexConfigBody = Body(...)) -> JSON
             },
         )
     return JSONResponse(status_code=500, content={"error": "failed to write flex config"})
-
-
-@router.get("/config/key-value/groups")
-def get_config_key_value_groups(request: Request) -> Dict[str, Any]:
-    """List all key-value groups (for Settings Key-Value Config)."""
-    reader = request.app.state.reader
-    groups = reader.get_key_value_groups()
-    return {"ok": True, "items": groups}
-
-
-@router.post("/config/key-value/groups")
-def post_config_key_value_group(request: Request, body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
-    """Create one key-value group. body: name (required), description, sort_order."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "Postgres required.", "id": None}
-    b = body or {}
-    name = (b.get("name") or "").strip()
-    if not name:
-        return {"ok": False, "error": "name is required.", "id": None}
-    gid = create_key_value_group(control_via_db, name, b.get("description"), b.get("sort_order", 0))
-    if gid is not None:
-        return {"ok": True, "id": gid, "name": name}
-    return {"ok": False, "error": "Failed to create group (name may already exist).", "id": None}
-
-
-@router.patch("/config/key-value/groups/{group_name:path}")
-def patch_config_key_value_group(request: Request, group_name: str, body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
-    """Update one key-value group. Match by group_name only (not id). body: name, description, sort_order (optional)."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "Postgres required."}
-    b = body or {}
-    if update_key_value_group(
-        control_via_db,
-        group_name.strip(),
-        b.get("name"),
-        b.get("description"),
-        b.get("sort_order"),
-    ):
-        return {"ok": True, "group_name": group_name.strip()}
-    return {"ok": False, "error": "Failed to update group."}
-
-
-@router.delete("/config/key-value/groups/{group_name:path}")
-def delete_config_key_value_group(request: Request, group_name: str) -> Dict[str, Any]:
-    """Delete one group and all its key-values (CASCADE). Match by group_name only (not id)."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "Postgres required."}
-    name = group_name.strip()
-    if delete_key_value_group(control_via_db, name):
-        return {"ok": True, "group_name": name}
-    return {"ok": False, "error": "Failed to delete group."}
-
-
-@router.get("/config/key-value")
-def get_config_key_value(
-    request: Request,
-    key: Optional[str] = None,
-    group_name: Optional[str] = None,
-) -> Dict[str, Any]:
-    """List key-value rows: by key (single), or by group_name. When both given, match by group name only."""
-    reader = request.app.state.reader
-    if key and (group_name or "").strip():
-        val = reader.get_key_value_in_group(key.strip(), group_name.strip())
-        return {"ok": True, "items": [{"key": key.strip(), "value": val or ""}]}
-    if key:
-        val = reader.get_key_value(key.strip())
-        return {"ok": True, "items": [{"key": key.strip(), "value": val or ""}] if key.strip() else [], "key": key.strip()}
-    if (group_name or "").strip():
-        items = reader.get_key_values_by_group(group_name.strip())
-        return {"ok": True, "items": items}
-    items = reader.get_all_key_values()
-    return {"ok": True, "items": items}
-
-
-@router.post("/config/key-value")
-def post_config_key_value(request: Request, body: Dict[str, Any] = Body(default=None)) -> Dict[str, Any]:
-    """Upsert one key-value row. body: group_name (required), key (required), value, description. Default group_name=flex_range_options."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "Postgres required to write key_value_config."}
-    b = body or {}
-    k = (b.get("key") or "").strip()
-    if not k:
-        return {"ok": False, "error": "key is required."}
-    gname = (b.get("group_name") or "").strip() or "flex_range_options"
-    v = b.get("value")
-    v = (v.strip() if isinstance(v, str) else str(v)) if v is not None else ""
-    desc = (b.get("description") or "").strip() or None
-    if set_key_value(control_via_db, k, v, desc, group_name=gname):
-        return {"ok": True, "key": k, "value": v, "group_name": gname}
-    return {"ok": False, "error": "Failed to write key_value_config."}
-
-
-@router.delete("/config/key-value")
-def delete_config_key_value(
-    request: Request,
-    key: Optional[str] = None,
-    group_name: Optional[str] = None,
-    body: Optional[Dict[str, Any]] = Body(default=None),
-) -> Dict[str, Any]:
-    """Delete one key-value row. key + group_name required (match by name only). Default group_name=flex_range_options."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "Postgres required to delete from key_value_config."}
-    bod = body or {}
-    k = (key or "").strip() or (bod.get("key") or "").strip()
-    k = (k.strip() if isinstance(k, str) else str(k)).strip() if k else ""
-    gname = (group_name or "").strip() or (bod.get("group_name") or "").strip() or "flex_range_options"
-    if not k:
-        return {"ok": False, "error": "key is required."}
-    if delete_key_value(control_via_db, k, group_name=gname):
-        return {"ok": True, "key": k}
-    return {"ok": False, "error": "Failed to delete key."}
 
 
 # --- position-categories ---

@@ -77,68 +77,6 @@ export async function postFlexConfig(
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), accounts: j.accounts, host_token: j.host_token, secondary_token: j.secondary_token, flex_default_range_days: j.flex_default_range_days, flex_init_range_days: j.flex_init_range_days }
 }
 
-/** GET /config/key-value: list by key or group_name. Match by group name only. */
-export async function fetchKeyValueConfig(params?: { key?: string; group_name?: string }): Promise<{ ok: boolean; items: Array<{ key: string; value: string; description?: string | null; updated_at?: string; group_id?: number }>; error?: string }> {
-  const p = params || {}
-  const q = new URLSearchParams()
-  if (p.key) q.set('key', p.key)
-  if (p.group_name) q.set('group_name', p.group_name)
-  const url = q.toString() ? `${API}/config/key-value?${q}` : `${API}/config/key-value`
-  const r = await fetch(url)
-  const j = await r.json().catch(() => ({ ok: false, items: [] }))
-  return { ...j, ok: r.ok && j.ok !== false, items: j.items ?? [] }
-}
-
-export async function fetchKeyValueGroups(): Promise<{ ok: boolean; items: Array<{ id: number; name: string; description?: string | null; sort_order?: number; created_at?: string; updated_at?: string }>; error?: string }> {
-  const r = await fetch(`${API}/config/key-value/groups`)
-  const j = await r.json().catch(() => ({ ok: false, items: [] }))
-  return { ...j, ok: r.ok && j.ok !== false, items: j.items ?? [] }
-}
-
-export async function postKeyValueGroup(body: { name: string; description?: string; sort_order?: number }): Promise<{ ok: boolean; id?: number; name?: string; error?: string }> {
-  const r = await fetch(`${API}/config/key-value/groups`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
-}
-
-export async function patchKeyValueGroup(groupName: string, body: { name?: string; description?: string; sort_order?: number }): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/config/key-value/groups/${encodeURIComponent(groupName)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
-}
-
-export async function deleteKeyValueGroup(groupName: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/config/key-value/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' })
-  const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
-}
-
-export async function postKeyValueConfig(body: { group_name?: string; key: string; value?: string; description?: string }): Promise<{ ok: boolean; key?: string; value?: string; error?: string }> {
-  const r = await fetch(`${API}/config/key-value`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
-}
-
-export async function deleteKeyValueConfig(key: string, groupName?: string): Promise<{ ok: boolean; key?: string; error?: string }> {
-  const q = new URLSearchParams({ key })
-  if (groupName) q.set('group_name', groupName)
-  const r = await fetch(`${API}/config/key-value?${q}`, { method: 'DELETE' })
-  const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok && j.ok !== false, error: j.error }
-}
-
 export interface MarketHolidayRow {
   exchange: string
   holiday_date: string

@@ -121,6 +121,27 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             ON CONFLICT (id) DO NOTHING
         """
         )
+        _log_table("daemon_open_orders", "R-A5: open/unfilled orders snapshot")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daemon_open_orders (
+                id bigserial PRIMARY KEY,
+                order_id integer NOT NULL,
+                perm_id integer,
+                account_id text,
+                symbol text,
+                sec_type text,
+                action text,
+                total_quantity numeric,
+                filled numeric,
+                remaining numeric,
+                limit_price numeric,
+                status text,
+                contract_key text,
+                updated_ts timestamptz DEFAULT now()
+            )
+        """
+        )
         _log("settings + ib_client_id columns")
         _log_table("settings", "App settings (IB config, stream accounts, etc.)")
         cur.execute(
@@ -701,94 +722,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 conn.commit()
             except Exception:
                 conn.rollback()
-        _log("key_value_config")
-        _log_table("key_value_group", "Key-value config groups")
-        # 1) Group table first
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS key_value_group (
-                id serial PRIMARY KEY,
-                name text UNIQUE NOT NULL,
-                description text,
-                sort_order integer NOT NULL DEFAULT 0,
-                created_at timestamptz DEFAULT now(),
-                updated_at timestamptz DEFAULT now()
-            )
-            """
-        )
-        conn.commit()
-        # Ensure at least one key_value_group exists for migration (no Flex-specific seed)
-        cur.execute(
-            """
-            INSERT INTO key_value_group (name, description, sort_order)
-            VALUES ('default', 'Default group for key-value config', 0)
-            ON CONFLICT (name) DO NOTHING
-            """
-        )
-        conn.commit()
-        # Ensure sequence is at least 2 for future groups
-        try:
-            cur.execute("SELECT setval(pg_get_serial_sequence('key_value_group', 'id'), GREATEST(1, (SELECT COALESCE(MAX(id), 1) FROM key_value_group)))")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # 2) key_value_config: create with group_id or migrate existing
-        cur.execute(
-            """
-            SELECT column_name FROM information_schema.columns
-            WHERE table_schema = current_schema() AND table_name = 'key_value_config' AND column_name = 'group_id'
-            """
-        )
-        has_group_id = cur.fetchone() is not None
-        cur.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'key_value_config'"
-        )
-        table_exists = cur.fetchone() is not None
-        _log_table("key_value_config", "Key-value config entries")
-        if not table_exists:
-            cur.execute(
-                """
-                CREATE TABLE key_value_config (
-                    group_id integer NOT NULL REFERENCES key_value_group(id) ON DELETE CASCADE,
-                    key text NOT NULL,
-                    value text NOT NULL DEFAULT '',
-                    description text,
-                    updated_at timestamptz DEFAULT now(),
-                    PRIMARY KEY (group_id, key)
-                )
-                """
-            )
-            conn.commit()
-        elif not has_group_id:
-            # Existing table without group_id: add column, backfill, change PK
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS key_value_config (
-                    key text PRIMARY KEY,
-                    value text NOT NULL DEFAULT '',
-                    description text,
-                    updated_at timestamptz DEFAULT now()
-                )
-                """
-            )
-            conn.commit()
-            cur.execute("ALTER TABLE key_value_config ADD COLUMN IF NOT EXISTS group_id integer")
-            conn.commit()
-            cur.execute(
-                "UPDATE key_value_config SET group_id = (SELECT id FROM key_value_group WHERE name = 'default' LIMIT 1) WHERE group_id IS NULL"
-            )
-            conn.commit()
-            cur.execute("ALTER TABLE key_value_config ALTER COLUMN group_id SET NOT NULL")
-            conn.commit()
-            cur.execute("ALTER TABLE key_value_config DROP CONSTRAINT IF EXISTS key_value_config_pkey")
-            conn.commit()
-            cur.execute(
-                "ALTER TABLE key_value_config ADD CONSTRAINT key_value_config_group_id_fkey "
-                "FOREIGN KEY (group_id) REFERENCES key_value_group(id) ON DELETE CASCADE"
-            )
-            conn.commit()
-            cur.execute("ALTER TABLE key_value_config ADD PRIMARY KEY (group_id, key)")
-            conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
             with conn.cursor() as cur2:
@@ -943,6 +876,14 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             (
                 "listener_client_id",
                 "ALTER TABLE daemon_heartbeat ADD COLUMN listener_client_id integer",
+            ),
+            (
+                "listener_2_connected",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_2_connected boolean DEFAULT false",
+            ),
+            (
+                "listener_2_client_id",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_2_client_id integer",
             ),
             (
                 "run_status_heartbeat_interval",

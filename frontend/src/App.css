@@ -1549,6 +1549,17 @@ body::before {
 }
 
 /* Client IDs table: group headers (Daemon, Monitor, Celery) */
+.settings-ib-client-ids-subtitle {
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: var(--space-4) 0 var(--space-2) 0;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .client-ids-group-row .client-ids-group-header {
   font-weight: 600;
   color: var(--color-text-muted);
@@ -1562,6 +1573,230 @@ body::before {
 }
 .client-ids-group-row:first-child .client-ids-group-header {
   padding-top: var(--space-2);
+}
+
+/* Interactive Brokers Settings: collapsible User / Client ID group headers */
+.settings-ib-collapsible-group-row {
+  cursor: pointer;
+  outline: none;
+}
+.settings-ib-collapsible-group-row:hover .settings-ib-collapsible-group-header {
+  background: var(--color-bg-subtle);
+}
+.settings-ib-collapsible-group-row:focus-visible .settings-ib-collapsible-group-header {
+  box-shadow: 0 0 0 2px var(--color-focus-ring, #0a84ff);
+}
+.settings-ib-collapsible-group-header {
+  font-weight: 700;
+  font-size: var(--text-body);
+  color: #eab308;
+  background: var(--color-surface-elevated);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  transition: background 0.15s ease;
+}
+.settings-ib-collapsible-chevron {
+  display: inline-block;
+  font-size: 0.65em;
+  transition: transform 0.2s ease;
+  transform: rotate(0deg);
+}
+.settings-ib-collapsible-chevron:not(.open) {
+  transform: rotate(-90deg);
+}
+.settings-ib-collapsible-group-title {
+  letter-spacing: 0.02em;
+}
+
+/* Interactive Brokers Settings table: fixed layout so group rows don't stretch */
+.settings-ib-settings-table-wrap {
+  max-width: 40rem;
+}
+.settings-ib-settings-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.settings-ib-settings-table .flex-query-cell-input,
+.settings-ib-settings-table .flex-query-cell-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-ib-settings-table .flex-query-cell-input input,
+.settings-ib-settings-table .flex-query-cell-input select {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.settings-ib-settings-table .settings-ib-collapsible-group-header {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* IB Configure sheet: Host + Secondary columns, no "Setting" header */
+.settings-ib-config-subtitle {
+  margin: -0.25rem 0 var(--space-3) 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.settings-ib-config-sheet-title {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-main);
+  letter-spacing: 0.02em;
+}
+.settings-ib-config-sheet-title + .settings-ib-config-table-wrap {
+  margin-bottom: 0;
+}
+.settings-ib-section {
+  margin-bottom: 0;
+}
+.settings-ib-section + .settings-ib-section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.settings-ib-preference-section .settings-ib-config-sheet-title {
+  margin-bottom: var(--space-2);
+}
+.settings-flex-preference {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-2);
+}
+.settings-flex-preference-title {
+  margin: 0 0 var(--space-2) 0;
+  font-size: var(--text-body);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-lamp-yellow, #ca8a04);
+}
+.settings-flex-preference .settings-ib-config-subtitle {
+  margin-bottom: var(--space-2);
+}
+.settings-ib-preference-inline {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.settings-ib-preference-yellow {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+  padding-bottom: var(--space-3);
+}
+.settings-ib-preference-yellow .settings-ib-config-sheet-title {
+  color: var(--color-lamp-yellow, #ca8a04);
+}
+.settings-ib-preference-inline .settings-ib-config-sheet-title {
+  margin-bottom: var(--space-1);
+}
+.settings-ib-preference-inline .settings-ib-config-subtitle {
+  margin-bottom: var(--space-2);
+}
+.settings-ib-preference-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  margin-top: 0;
+}
+.settings-ib-preference-range-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.settings-ib-preference-range-row .settings-flex-range-select {
+  width: 5rem;
+}
+.settings-ib-preference-range-row .settings-ib-range-suffix {
+  margin-left: 0;
+}
+.settings-ib-config-table-wrap {
+  max-width: 42rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+.settings-ib-config-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.settings-ib-config-col-label {
+  width: 26%;
+}
+.settings-ib-config-col-host {
+  width: 37%;
+}
+.settings-ib-config-col-secondary {
+  width: 37%;
+}
+.settings-ib-config-th-label {
+  width: 26%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-subtle);
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.settings-ib-config-th-host,
+.settings-ib-config-th-secondary {
+  padding: var(--space-2) var(--space-3);
+  font-weight: 600;
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-ib-config-th-host {
+  background: rgba(0, 122, 255, 0.06);
+  color: var(--color-text-main);
+}
+.settings-ib-config-th-secondary {
+  background: rgba(88, 86, 214, 0.06);
+  color: var(--color-text-main);
+}
+.settings-ib-config-table .flex-query-cell-input,
+.settings-ib-config-table .flex-query-cell-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+.settings-ib-config-table .flex-query-cell-type {
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: var(--color-bg-subtle);
+}
+.settings-ib-config-table .flex-query-cell-input input,
+.settings-ib-config-table .flex-query-cell-input select {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.settings-ib-range-suffix {
+  margin-left: 0.35rem;
+  color: var(--color-text-muted);
+}
+.settings-ib-config-table .settings-ib-collapsible-group-header {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-ib-config-table .settings-ib-collapsible-group-row td {
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-ib-config-table .flex-query-cell-input:first-of-type {
+  background: rgba(0, 122, 255, 0.03);
+}
+.settings-ib-config-table .flex-query-cell-input:last-of-type {
+  background: rgba(88, 86, 214, 0.03);
 }
 
 /* US market holidays: filters and add row */
@@ -1641,6 +1876,55 @@ body::before {
 }
 .daemon-group-body .ib-connection-table .ib-connection-cell .countdown-num {
   white-space: nowrap;
+}
+
+.daemon-group-body .open-orders-table-wrap {
+  overflow-x: auto;
+  margin-top: var(--space-1);
+}
+.daemon-group-body .open-orders-table {
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+  width: 100%;
+  min-width: 360px;
+}
+.daemon-group-body .open-orders-table th,
+.daemon-group-body .open-orders-table td {
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  text-align: left;
+  vertical-align: middle;
+}
+.daemon-group-body .open-orders-table th {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.daemon-group-body .open-orders-table tbody tr:nth-child(even) {
+  background: var(--color-bg-subtle);
+}
+
+/* Live page Open Orders section (same table style) */
+.open-orders-live-card .open-orders-table-wrap {
+  overflow-x: auto;
+  margin-top: var(--space-1);
+}
+.open-orders-live-card .open-orders-table {
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+  width: 100%;
+  min-width: 360px;
+}
+.open-orders-live-card .open-orders-table th,
+.open-orders-live-card .open-orders-table td {
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  text-align: left;
+  vertical-align: middle;
+}
+.open-orders-live-card .open-orders-table th {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.open-orders-live-card .open-orders-table tbody tr:nth-child(even) {
+  background: var(--color-bg-subtle);
 }
 
 .daemon-group-body .controls {

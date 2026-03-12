@@ -11,18 +11,17 @@ export const DEFAULT_HEARTBEAT_SEC = 10
 
 export const SETTINGS_SECTIONS = [
   { id: 'settings-heartbeat', label: 'Daemon App', icon: 'heartbeat' },
-  { id: 'settings-ib-connection', label: 'IB Settings', icon: 'plug' },
+  { id: 'settings-ib-connection', label: 'IB Configure', icon: 'plug' },
   { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' },
-  { id: 'settings-key-value', label: 'Key-Value Config', icon: 'key-value' },
 ] as const
 
+/** Sub-anchors for IB Configure: table groups + Flex Preference (under IB Preference section). */
 export const IB_CONNECTION_SUBSECTIONS = [
-  { id: 'ib-primary', label: 'Host User', icon: 'user-host' },
-  { id: 'ib-second', label: 'Second User', icon: 'user-second' },
-  { id: 'ib-trading-account', label: 'Trading account', icon: 'user-host' },
-  { id: 'ib-stream-accounts', label: 'Stream accounts (Live)', icon: 'stream' },
-  { id: 'ib-client-ids', label: 'Client IDs', icon: 'id' },
-  { id: 'ib-flex', label: 'Flex Settings', icon: 'flex' },
+  { id: 'ib-users', label: 'User', icon: 'user-host' as const },
+  { id: 'ib-client-ids', label: 'Client ID', icon: 'user-host' as const },
+  { id: 'ib-account', label: 'Account', icon: 'stream' as const },
+  { id: 'ib-flex-query', label: 'Flex Query', icon: 'flex' as const },
+  { id: 'flex-preference', label: 'Flex Preference', icon: 'flex' as const },
 ] as const
 
 /** Fixed Flex query types: one row per type, no add/remove. Each maps to a future feature. */

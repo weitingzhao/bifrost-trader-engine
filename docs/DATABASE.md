@@ -310,41 +310,6 @@
 
 - **读取**：`servers.reader.get_flex_config(purpose=None)` 返回 `{ host_token, secondary_token, rows }`（rows 每项含 query_host_id、query_secondary_id、query_label、purpose）；`get_flex_config(purpose='cash_transactions')` 返回 `[{ token, query_id }, ...]`，每行若 query_host_id 非空则一条 (host_token, query_host_id)、若 query_secondary_id 非空则一条 (secondary_token, query_secondary_id)，供 POST /transactions/fetch 对 Host 与 Secondary 各 call。
 
-### 2.24 表 `key_value_config`（Key-Value 映射，按 Group 分组供各下拉/选项复用）
-
-- **用途**：存**按 Group 分组的 key-value**，供 Flex 默认区间、各类下拉选项等复用。每个 **Group**（见 §2.24.1）对应一个“选项集”（如 Flex range preset、未来其他下拉）；组内每条记录为 key（选项值）+ value（显示或存储值）+ 可选 description。
-- **写入**：通过 **Settings 页「Key-Value Config」** 先维护 Group 列表，再在选中 Group 下增删改 key-value；或 API POST /config/key-value（需带 group_id 或 group_name）。
-- **列**：
-
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| group_id | integer NOT NULL | 所属 Group（FK → key_value_group.id） |
-| key | text NOT NULL | 键（组内唯一） |
-| value | text NOT NULL | 值 |
-| description | text | 可选说明 |
-| updated_at | timestamptz | 最后更新时间（默认 now()） |
-
-- **主键**：**(group_id, key)**。同一 key 可出现在不同 Group 中。
-- **常用**：任意 Group 下键值对；后台 `get_key_value(key)` 按 key 查（任意组），`get_key_values_by_group(group_name)` 按组名查。Flex 默认范围已改为 settings.flex_default_range_days（整数天），不再用本表。
-- **读取**：`get_key_value(key)`、`get_key_values_by_group(group_id)`、`get_all_key_values(group_id=None)`；GET /config/key-value/groups、GET /config/key-value?group_id=。
-
-### 2.24.1 表 `key_value_group`（Key-Value 分组，供下拉/选项集复用）
-
-- **用途**：存 **Group 列表**，每个 Group 对应一个选项集；Group 下有若干 key_value_config 行。Flex 默认范围已改为 settings.flex_default_range_days，不再用本表。
-- **写入**：Settings 页 Key-Value Config 或 API POST/DELETE /config/key-value/groups。
-- **列**：
-
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| id | serial PRIMARY KEY | 自增主键 |
-| name | text UNIQUE NOT NULL | 组名，供 API 与下拉识别 |
-| description | text | 可选说明 |
-| sort_order | integer DEFAULT 0 | 显示顺序（小者靠前） |
-| created_at | timestamptz | 创建时间（默认 now()） |
-| updated_at | timestamptz | 最后更新时间（默认 now()） |
-
-- **读取**：`get_key_value_groups()`；GET /config/key-value/groups。删除 Group 时需同时删除该组下所有 key_value_config 行（或 CASCADE）。
-
 ### 2.12 表 `ohlc_bars`（已弃用，由 stock_day / stock_min / option_day / option_min 替代）
 
 - **状态**：**弃用**。表名过于笼统，且股票与期权未区分。替代方案见 §2.13–§2.17。
@@ -573,6 +538,31 @@
 
 - **语义**：监控端读取 `last_ts`、`hedge_running`、`ib_connected`、`ib_client_id`、`next_retry_ts`、`seconds_until_retry`、`graceful_shutdown_at`（如 GET /status 的 `daemon_heartbeat`）；若 `last_ts` 在最近约 30 秒内则视为守护进程存活；若 `graceful_shutdown_at` 非空则表示守护进程已优雅退出，监控可显示「已于 … 停止」；`ib_connected` 为 true 时显示「已连接」及 `ib_client_id`；为 false 时显示「未连接」及 **下次重试时间**（优先用 `seconds_until_retry` 显示「约 N 秒后」），并支持监控端触发立即重试（`daemon_control` 写入 `retry_ib`）。
 
+### 2.6.1 表 `daemon_open_orders`（阶段 3 R-A5：未成交订单，事件驱动）
+
+- **用途**：存守护进程当前可见的**未成交订单**快照（如 Limit 挂单），供监控端 GET /open-orders 或 GET /status 内嵌展示；每次 IB orderStatusEvent/openOrderEvent 回调后由守护进程**全量覆盖**写入。
+- **写入**：仅**守护进程**在订阅 IB orderStatusEvent、openOrderEvent 后，于回调内根据 `ib.openTrades()` 生成列表并调用 sink 的 `write_open_orders(orders)`；采用 **TRUNCATE + INSERT** 或 **DELETE + INSERT** 全量替换，保证与当前 openTrades() 一致。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| id | bigserial | 主键（仅用于插入顺序） |
+| order_id | integer | IB orderId |
+| perm_id | integer | IB permId |
+| account_id | text | 账户 |
+| symbol | text | 标的 |
+| sec_type | text | 合约类型（STK/OPT 等） |
+| action | text | BUY / SELL |
+| total_quantity | numeric | 订单总数量 |
+| filled | numeric | 已成交数量 |
+| remaining | numeric | 剩余数量 |
+| limit_price | numeric | 限价（可为 NULL） |
+| status | text | 状态（Submitted、PreSubmitted、Filled、Cancelled 等） |
+| contract_key | text | 与 account_positions 一致的 contract_key |
+| updated_ts | timestamptz | 本行更新时间 |
+
+- **语义**：监控端读取全表（ORDER BY updated_ts DESC）得到当前挂单列表；无历史保留，仅当前快照。
+
 ### 2.9 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
 
 - **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。**IB 配置**（host、port_type、client_id、primary_account_id、第二 IB）**全部在 DB**，config.yaml 不再定义 client_id 或 primary_account_id；host/port 仅作 DB 无数据时的 fallback。**主账户**由 `ib_primary_account_id` 指定；**第二 IB**（不同 TWS 机器，手动交易账户）由 `ib2_*` 指定，用于统一 Portfolio（R-A4）。
@@ -750,8 +740,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-08 Flex 一行双 Query ID | §2.23 flex_accounts 去掉 account_is_host、query_id，改为 query_host_id（必填）+ query_secondary_id（可选）；同一行同一 Label/Purpose，Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex 一 Token 多 Query | §2.23 flex_accounts 改为「一 Token 多 Query ID + Label」：列 query_id、query_label、purpose；同一 token 可多行；POST /transactions/fetch 仅用 purpose=cash_transactions；reader.get_flex_config(purpose) 支持按用途过滤。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex Token 入 settings | settings 增加 ib_flex_host_token、ib_flex_secondary_token；flex_accounts 去掉 token、account_label，改为 account_is_host (boolean)；GET /status flex_config 为 { host_token, secondary_token, rows }。 | 阶段 3 Performance Phase 0 |
-| 2026-03-10 key_value_config | 新增 §2.24 表 key_value_config（Key-Value 映射）；Settings 页 Key-Value Config 维护；Flex 默认范围已改为 settings.flex_default_range_days（整数天），不再用本表。 | 阶段 3 扩展 |
-| 2026-03-10 key_value_group | 新增 §2.24.1 表 key_value_group（Key-Value 分组）；key_value_config 增加 group_id，(group_id, key) 为主键；Settings 页 Key-Value Config 先维护 Group 列表，再按组维护 key-value；供未来各类下拉/选项集复用。 | 阶段 3 扩展 |
+| 2026-03-11 移除 key_value | 移除 key_value_config、key_value_group 表及 Settings Key-Value Config；Flex 默认范围使用 settings.flex_default_range_days。 | 清理 |
 
 ---
 

@@ -86,6 +86,11 @@ class StatusReader:
             self._conn, since_ts=since_ts, until_ts=until_ts, type_filter=type_filter, limit=limit
         )
 
+    def get_open_orders(self) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        return status_module.get_open_orders(self._conn)
+
     # --- Watchlist domain (delegate to watchlist module) ---
     def get_watchlist(self) -> List[Dict[str, Any]]:
         if not self._connect():
@@ -200,31 +205,6 @@ class StatusReader:
         if not self._connect():
             return [] if purpose is not None else {"host_token": None, "secondary_token": None, "rows": []}
         return settings_module.get_flex_config(self._conn, purpose=purpose)
-
-    def get_key_value(self, key: str) -> Optional[str]:
-        if not self._connect():
-            return None
-        return settings_module.get_key_value(self._conn, key)
-
-    def get_key_value_in_group(self, key: str, group_name: str) -> Optional[str]:
-        if not self._connect():
-            return None
-        return settings_module.get_key_value_in_group(self._conn, key, group_name)
-
-    def get_key_value_groups(self) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return settings_module.get_key_value_groups(self._conn)
-
-    def get_key_values_by_group(self, group_name: str) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return settings_module.get_key_values_by_group(self._conn, group_name)
-
-    def get_all_key_values(self, group_name: Optional[str] = None) -> List[Dict[str, Any]]:
-        if not self._connect():
-            return []
-        return settings_module.get_all_key_values(self._conn, group_name=group_name)
 
     def get_flex_default_range_dates(self) -> Tuple[str, str]:
         if not self._connect():

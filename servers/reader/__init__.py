@@ -30,20 +30,12 @@ from servers.reader.market import (
     write_stock_bars,
 )
 from servers.reader.settings import (
-    create_key_value_group,
-    delete_key_value,
-    delete_key_value_group,
-    set_key_value,
-    update_key_value_group,
     write_flex_config,
     write_ib_config,
 )
 
 __all__ = [
     "StatusReader",
-    "create_key_value_group",
-    "delete_key_value",
-    "delete_key_value_group",
     "delete_all_bars_backfill_jobs",
     "delete_bars_backfill_job",
     "delete_one_execution",
@@ -53,12 +45,10 @@ __all__ = [
     "get_bars_backfill_last_updated",
     "insert_bars_backfill_job",
     "insert_one_execution",
-    "set_key_value",
     "sync_accounts_snapshot_to_db",
     "trim_bars_backfill_jobs",
     "update_bars_backfill_job_result",
     "update_execution_commission",
-    "update_key_value_group",
     "update_one_execution",
     "upsert_account_transactions",
     "write_account_executions_to_db",

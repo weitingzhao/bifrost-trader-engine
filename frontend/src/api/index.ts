@@ -1,4 +1,4 @@
-export { fetchStatus, fetchHealth, fetchOperations } from './status'
+export { fetchStatus, fetchHealth, fetchOperations, fetchOpenOrders } from './status'
 export {
   postSuspend,
   postResume,
@@ -49,13 +49,6 @@ export {
   postSetHeartbeatInterval,
   postIbConfig,
   postFlexConfig,
-  fetchKeyValueConfig,
-  fetchKeyValueGroups,
-  postKeyValueGroup,
-  patchKeyValueGroup,
-  deleteKeyValueGroup,
-  postKeyValueConfig,
-  deleteKeyValueConfig,
   fetchMarketHolidays,
   postMarketHoliday,
   deleteMarketHoliday,

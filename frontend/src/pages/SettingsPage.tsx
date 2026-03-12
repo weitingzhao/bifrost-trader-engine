@@ -8,13 +8,6 @@ import {
   fetchMarketHolidays,
   postMarketHoliday,
   deleteMarketHoliday,
-  fetchKeyValueConfig,
-  fetchKeyValueGroups,
-  postKeyValueGroup,
-  patchKeyValueGroup,
-  deleteKeyValueGroup,
-  postKeyValueConfig,
-  deleteKeyValueConfig,
   type MarketHolidayRow,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -36,8 +29,6 @@ import { SettingsSectionIcon } from './settings/SettingsSectionIcon'
 import { HeartbeatSection } from './settings/HeartbeatSection'
 import { IbConnectionSection } from './settings/IbConnectionSection'
 import { HolidaysSection } from './settings/HolidaysSection'
-import type { KeyValueGroupRow, KeyValueItemRow } from './settings/KeyValueSection'
-import { KeyValueSection } from './settings/KeyValueSection'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -80,22 +71,6 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
   const [defaultFlexRangeDays, setDefaultFlexRangeDays] = useState<number>(30)
   /** Init Flex Query range in days (e.g. 360) for initial/full pull. Stored in settings.flex_init_range_days. */
   const [initFlexRangeDays, setInitFlexRangeDays] = useState<number>(360)
-  const [keyValueItems, setKeyValueItems] = useState<KeyValueItemRow[]>([])
-  const [keyValueLoading, setKeyValueLoading] = useState(false)
-  const [keyValueMsg, setKeyValueMsg] = useState({ text: '', isErr: false })
-  const [keyValueGroups, setKeyValueGroups] = useState<KeyValueGroupRow[]>([])
-  const [selectedGroupName, setSelectedGroupName] = useState<string | null>(null)
-  const [newGroupName, setNewGroupName] = useState('')
-  const [newGroupDesc, setNewGroupDesc] = useState('')
-  const [editingGroupName, setEditingGroupName] = useState<string | null>(null)
-  const [editGroupName, setEditGroupName] = useState('')
-  const [editGroupDesc, setEditGroupDesc] = useState('')
-  const [newKey, setNewKey] = useState('')
-  const [newValue, setNewValue] = useState('')
-  const [newDesc, setNewDesc] = useState('')
-  const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState('')
-  const [editDesc, setEditDesc] = useState('')
 
   useEffect(() => {
     const c = status?.ib_config
@@ -146,21 +121,6 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     setFlexInitialized(true)
   }, [status, status?.flex_config, flexInitialized])
 
-  const loadKeyValueItemsForGroup = async (groupName: string) => {
-    setKeyValueLoading(true)
-    setKeyValueMsg({ text: '', isErr: false })
-    try {
-      const r = await fetchKeyValueConfig({ group_name: groupName })
-      if (r.ok) setKeyValueItems(r.items ?? [])
-      else setKeyValueItems([])
-    } catch (e) {
-      setKeyValueMsg({ text: (e as Error).message, isErr: true })
-      setKeyValueItems([])
-    } finally {
-      setKeyValueLoading(false)
-    }
-  }
-
   useEffect(() => {
     const sec = status?.daemon_heartbeat?.heartbeat_interval_sec
     if (heartbeatInitialized) return
@@ -189,10 +149,10 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     loadHolidays()
   }, [holidaysYear])
 
-  // Sync sidebar active state with hash (GitHub-style: highlight current section). Map ib-* sub-hashes to settings-ib-connection.
+  // Sync sidebar active state with hash (GitHub-style: highlight current section). Map ib-* and flex-preference to settings-ib-connection.
   const hashToSectionId = (hash: string) => {
     const h = hash ? hash.slice(1) : ''
-    if (h && (h.startsWith('ib-') || h === 'settings-ib-connection')) return 'settings-ib-connection'
+    if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     return h || SETTINGS_SECTIONS[0].id
   }
   const [activeSectionId, setActiveSectionId] = useState<string>(() => {
@@ -208,18 +168,6 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     if (window.location.hash) setActiveSectionId(hashToSectionId(window.location.hash))
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
-
-  useEffect(() => {
-    if (activeSectionId === 'settings-key-value') {
-      fetchKeyValueGroups().then((r) => {
-        if (r.ok) setKeyValueGroups(r.items ?? [])
-      })
-    }
-  }, [activeSectionId])
-
-  useEffect(() => {
-    if (activeSectionId === 'settings-key-value' && selectedGroupName != null) loadKeyValueItemsForGroup(selectedGroupName)
-  }, [activeSectionId, selectedGroupName])
 
   const onAddHoliday = async () => {
     const d = addDate.trim().slice(0, 10)
@@ -320,7 +268,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
                   onClick={() => setIbConnectionExpanded((e) => !e)}
                   aria-expanded={ibConnectionExpanded}
                   aria-controls="settings-ib-connection-subs"
-                  aria-label={ibConnectionExpanded ? 'Collapse IB Settings' : 'Expand IB Settings'}
+                  aria-label={ibConnectionExpanded ? 'Collapse IB Configure' : 'Expand IB Configure'}
                 >
                   ▼
                 </button>
@@ -403,6 +351,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
               setInitFlexRangeDays={setInitFlexRangeDays}
               flexAccounts={flexAccounts}
               setFlexAccounts={setFlexAccounts}
+              activeSubId={activeSubId}
             />
             <HolidaysSection
               currentYear={currentYear}
@@ -418,121 +367,6 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
               holidayMsg={holidayMsg}
               onAddHoliday={onAddHoliday}
               onDeleteHoliday={onDeleteHoliday}
-            />
-            <KeyValueSection
-              keyValueItems={keyValueItems}
-              keyValueLoading={keyValueLoading}
-              keyValueMsg={keyValueMsg}
-              keyValueGroups={keyValueGroups}
-              selectedGroupName={selectedGroupName}
-              setSelectedGroupName={setSelectedGroupName}
-              newGroupName={newGroupName}
-              setNewGroupName={setNewGroupName}
-              newGroupDesc={newGroupDesc}
-              setNewGroupDesc={setNewGroupDesc}
-              editingGroupName={editingGroupName}
-              setEditingGroupName={setEditingGroupName}
-              editGroupName={editGroupName}
-              setEditGroupName={setEditGroupName}
-              editGroupDesc={editGroupDesc}
-              setEditGroupDesc={setEditGroupDesc}
-              newKey={newKey}
-              setNewKey={setNewKey}
-              newValue={newValue}
-              setNewValue={setNewValue}
-              newDesc={newDesc}
-              setNewDesc={setNewDesc}
-              editingKey={editingKey}
-              setEditingKey={setEditingKey}
-              editValue={editValue}
-              setEditValue={setEditValue}
-              editDesc={editDesc}
-              setEditDesc={setEditDesc}
-              loadKeyValueItemsForGroup={loadKeyValueItemsForGroup}
-              onAddGroup={async () => {
-                const name = newGroupName.trim()
-                if (!name) return
-                const r = await postKeyValueGroup({ name, description: newGroupDesc.trim() || undefined })
-                if (r.ok) {
-                  setNewGroupName('')
-                  setNewGroupDesc('')
-                  setKeyValueMsg({ text: 'Group added.', isErr: false })
-                  const r2 = await fetchKeyValueGroups()
-                  if (r2.ok) setKeyValueGroups(r2.items ?? [])
-                } else setKeyValueMsg({ text: r.error ?? 'Failed', isErr: true })
-              }}
-              onRefreshGroups={async () => {
-                const r = await fetchKeyValueGroups()
-                if (r.ok) setKeyValueGroups(r.items ?? [])
-              }}
-              onSaveGroup={async (g) => {
-                const r = await patchKeyValueGroup(g.name, { name: editGroupName.trim(), description: editGroupDesc.trim() || undefined })
-                if (r.ok) {
-                  setEditingGroupName(null)
-                  const r2 = await fetchKeyValueGroups()
-                  if (r2.ok) setKeyValueGroups(r2.items ?? [])
-                  if (selectedGroupName === g.name) setSelectedGroupName(editGroupName.trim() || null)
-                } else setKeyValueMsg({ text: r.error ?? 'Failed', isErr: true })
-              }}
-              onCancelEditGroup={() => setEditingGroupName(null)}
-              onStartEditGroup={(g) => {
-                setEditingGroupName(g.name)
-                setEditGroupName(g.name)
-                setEditGroupDesc(g.description ?? '')
-              }}
-              onDeleteGroup={async (g) => {
-                if (!window.confirm(`Delete group "${g.name}" and all its key-values?`)) return
-                const r = await deleteKeyValueGroup(g.name)
-                if (r.ok) {
-                  setKeyValueGroups((prev) => prev.filter((x) => x.name !== g.name))
-                  if (selectedGroupName === g.name) {
-                    setSelectedGroupName(null)
-                    setKeyValueItems([])
-                  }
-                  setKeyValueMsg({ text: 'Group deleted.', isErr: false })
-                } else setKeyValueMsg({ text: r.error ?? 'Delete failed', isErr: true })
-              }}
-              onAddKeyValue={async () => {
-                const k = newKey.trim()
-                if (!k || selectedGroupName == null) return
-                const r = await postKeyValueConfig({ group_name: selectedGroupName, key: k, value: newValue.trim(), description: newDesc.trim() || undefined })
-                if (r.ok) {
-                  setNewKey('')
-                  setNewValue('')
-                  setNewDesc('')
-                  loadKeyValueItemsForGroup(selectedGroupName)
-                  setKeyValueMsg({ text: 'Saved.', isErr: false })
-                } else setKeyValueMsg({ text: r.error ?? 'Save failed', isErr: true })
-              }}
-              onClearSelection={() => {
-                setSelectedGroupName(null)
-                setKeyValueItems([])
-              }}
-              onSaveKeyValue={async (row) => {
-                if (selectedGroupName == null) return
-                const r = await postKeyValueConfig({ group_name: selectedGroupName, key: row.key, value: editValue, description: editDesc.trim() || undefined })
-                if (r.ok) {
-                  setEditingKey(null)
-                  loadKeyValueItemsForGroup(selectedGroupName)
-                  setKeyValueMsg({ text: 'Saved.', isErr: false })
-                } else setKeyValueMsg({ text: r.error ?? 'Failed', isErr: true })
-              }}
-              onCancelEditKey={() => setEditingKey(null)}
-              onStartEditKey={(row) => {
-                setEditingKey(row.key)
-                setEditValue(row.value)
-                setEditDesc(row.description ?? '')
-              }}
-              onDeleteKeyValue={async (row) => {
-                if (!window.confirm(`Delete key "${row.key}"?`)) return
-                if (selectedGroupName == null) return
-                const r = await deleteKeyValueConfig(row.key, selectedGroupName)
-                if (r.ok) {
-                  loadKeyValueItemsForGroup(selectedGroupName)
-                  setKeyValueMsg({ text: 'Deleted.', isErr: false })
-                  if (editingKey === row.key) setEditingKey(null)
-                } else setKeyValueMsg({ text: r.error ?? 'Delete failed', isErr: true })
-              }}
             />
           </div>
       </div>
