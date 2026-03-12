@@ -139,7 +139,6 @@ export function StatusMonitorPanel({
                 <tr>
                   <th scope="row" className="ib-connection-row-label" title="Secondary (Second User)">
                     Sec
-                    <InfoTooltip text="Uses Settings → IB Connection → Second User (IP/Host). Restart Management after changing." />
                   </th>
                   <td className="ib-connection-cell">
                     {monitorAccount2 === undefined ? (
