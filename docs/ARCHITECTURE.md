@@ -155,6 +155,8 @@
 | **读 sink** | 优先读 SQLite 当前视图（或文件），GET /status → JSON；可含 **自检结果**（self_check），供控制台展示与告警。 | 阶段 2.1 |
 | **控制** | POST /control/stop（一键停止，R-C1）；POST /control/flatten（一键平敞口，R-C3）；可选 pause/resume（R-C2）；可选触发自检（守护进程写回 sink）。 | 阶段 2.1（stop、flatten）；细粒度 3.2（pause） |
 
+监控前端 Research 子页包含 Screener、Risk Model、Data、Backtest 与 **Option Discovery**（R-OD1）；Option Discovery 第一步为入口页与占位 API，后续接入期权到期/询价数据。
+
 ### 4.4 非实时市场数据拉取（Worker）
 
 | 组件 | 说明 | 交付 |

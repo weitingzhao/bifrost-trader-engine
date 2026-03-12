@@ -22,6 +22,7 @@ import { ResearchRiskAnalysisPage } from './pages/ResearchRiskAnalysisPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TransferPayPage } from './pages/TransferPayPage'
 import { BacktestPage } from './pages/BacktestPage'
+import { OptionDiscoveryPage } from './pages/OptionDiscoveryPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
 import logoImg from '../img/logo.png'
@@ -160,7 +161,7 @@ export default function App() {
   const [operationsSection, setOperationsSection] = useState<OperationsSection>('daemon')
   const [consoleSection, setConsoleSection] = useState<ConsoleSection>('daemon-console')
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
-  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest'>('risk')
+  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest' | 'options'>('risk')
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
@@ -499,11 +500,12 @@ export default function App() {
     { id: 'research', label: 'Research' },
   ]
 
-  const researchSubtabs: { id: 'risk' | 'screener' | 'data' | 'backtest'; label: string }[] = [
+  const researchSubtabs: { id: 'risk' | 'screener' | 'data' | 'backtest' | 'options'; label: string }[] = [
     { id: 'screener', label: 'Screener' },
     { id: 'risk', label: 'Risk Model' },
     { id: 'data', label: 'Data' },
     { id: 'backtest', label: 'Backtest' },
+    { id: 'options', label: 'Option Discovery' },
   ]
 
   const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
@@ -783,6 +785,14 @@ export default function App() {
           status={status}
           onGoToScreener={() => setResearchView('screener')}
           breadcrumbLabel="Backtest"
+        />
+      )}
+
+      {activeTab === 'research' && researchView === 'options' && (
+        <OptionDiscoveryPage
+          status={status}
+          onGoToScreener={() => setResearchView('screener')}
+          breadcrumbLabel="Option Discovery"
         />
       )}
 

@@ -66,6 +66,14 @@ export function SubmenuIcon({ name }: { name: string }) {
         <polygon points="5 3 19 12 5 21 5 3" />
       </svg>
     ),
+    options: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <line x1="4" y1="9" x2="20" y2="9" />
+        <line x1="4" y1="15" x2="20" y2="15" />
+        <line x1="10" y1="3" x2="8" y2="21" />
+        <line x1="16" y1="3" x2="14" y2="21" />
+      </svg>
+    ),
   }
   return <>{icons[name] ?? null}</>
 }

@@ -47,6 +47,8 @@ export {
   deleteWatchlist,
 } from './watchlist'
 export type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from './watchlist'
+export { fetchOptionExpirations, fetchOptionSnapshot } from './research'
+export type { OptionSnapshotRow } from './research'
 export {
   postSetHeartbeatInterval,
   postIbConfig,

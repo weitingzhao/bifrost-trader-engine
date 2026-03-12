@@ -34,6 +34,7 @@
 | **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | 待实现 | 见分步计划「实时行情」 | §7 | PLAN_NEXT_STEPS「实时行情与联动」 |
 | | **R-RM2** | 事件订阅所得行情写入 Redis 缓存；唯一写入方为守护进程，监控不写 Redis 行情。 | 待实现 | 同上 | §7 | 同上 |
 | | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | 待实现 | 同上 | §7 | 同上 |
+| **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；第一步为 UI 与占位 API。 | 待实现 | Option Discovery 步骤（第一步 阶段 3 扩展） | §2.6 | PLAN_NEXT_STEPS「期权发现」 |
 
 **说明**：  
 - 「说明章节」列指向本文档中该需求的细节描述位置。  
@@ -91,6 +92,12 @@
 - **范围**：监控应用内新增页面或路由（如「复盘」/「风控」）；可查看账户执行交易记录（R-A2）、辅助行情（R-A3）、以及基于历史数据的风险/统计视图；不要求与 R-M5 同屏，通过导航切换。数据由阶段 3 的 R-A2、R-A3 及 R-H2 提供。
 - **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + instrument_prices；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径以实现与 PLAN_NEXT_STEPS 阶段 3 验收为准；分步实现顺序与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8。
 - **与分步计划**：阶段 3（与 R-A2、R-A3 数据能力一并交付）。
+
+### 2.6 期权发现入口（R-OD1）
+
+- **目标**：在 Research 下提供 **Option Discovery** 子页，作为按到期询价与机会发现的入口；操作者可选择标的（来自 Watchlist STK）与到期日，后续步骤展示该到期下的期权报价与 IV 等。
+- **范围**：第一步为 **UI 与占位 API**——Research 二级菜单新增「Option Discovery」、新页面含标的选择（Watchlist STK）、到期选择（占位）、占位表格/说明；后端提供 `GET /research/option-expirations?symbol=...`，可返回空列表或 mock 到期。后续步骤：接入 IB reqSecDefOptParams 返回真实到期与行权价、期权快照与发现逻辑。
+- **与分步计划**：见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「期权发现（Option Discovery）」步骤；验收以该节为准。
 
 ---
 

@@ -364,3 +364,146 @@ class MarketIbClient(BaseMonitorIbClient):
             )
             raise
 
+    async def fetch_option_expirations(self, symbol: str) -> Dict[str, Any]:
+        """Fetch option expirations and strikes for underlying symbol (IB reqSecDefOptParams).
+        Returns { expirations: List[str], strikes: List[float], error: Optional[str] }."""
+        return await self._run_on_client_loop(self._fetch_option_expirations_impl(symbol))
+
+    async def _fetch_option_expirations_impl(self, symbol: str) -> Dict[str, Any]:
+        await self._ensure_connected_impl()
+        assert self.connector is not None
+        out: Dict[str, Any] = {"expirations": [], "strikes": []}
+        try:
+            expirations, strikes = await self.connector.get_sec_def_opt_params_async(
+                symbol.strip(), "", "STK", 0
+            )
+            out["expirations"] = expirations
+            out["strikes"] = strikes
+            self.last_error = None
+        except IBConnectionDroppedError as e:
+            self.last_error = str(e)
+            out["error"] = str(e)
+            logger.warning(
+                "[monitor_ib] MarketIbClient.fetch_option_expirations connection dropped: %s",
+                e,
+                exc_info=True,
+            )
+        except Exception as e:
+            self.last_error = str(e)
+            out["error"] = str(e)
+            logger.warning(
+                "[monitor_ib] MarketIbClient.fetch_option_expirations failed: %s",
+                e,
+                exc_info=True,
+            )
+        return out
+
+    async def fetch_underlying_price(self, symbol: str) -> Optional[float]:
+        """Get mid/last price for underlying stock (for ATM strike selection)."""
+        await self._ensure_connected_impl()
+        if self.connector is None:
+            return None
+        try:
+            return await self.connector.get_underlying_price(symbol.strip())
+        except Exception as e:
+            logger.debug("[monitor_ib] fetch_underlying_price %s: %s", symbol, e)
+            return None
+
+    async def fetch_option_quote(
+        self,
+        symbol: str,
+        expiry: str,
+        strike: float,
+        right: str,
+    ) -> Optional[Dict[str, Optional[float]]]:
+        """Get one option quote (bid/ask/last/mid) and cancel subscription immediately."""
+        await self._ensure_connected_impl()
+        if self.connector is None:
+            return None
+        try:
+            return await self.connector.get_option_quote_one_shot(
+                symbol.strip(), expiry.strip(), float(strike), (right or "C").upper()
+            )
+        except Exception as e:
+            logger.debug(
+                "[monitor_ib] fetch_option_quote %s %s %s %s: %s",
+                symbol,
+                expiry,
+                strike,
+                right,
+                e,
+            )
+            return None
+
+    async def fetch_option_snapshot(
+        self,
+        symbol: str,
+        expiration: str,
+        strikes: List[float],
+        max_contracts: int = 20,
+        pacing_sec: float = 0.35,
+    ) -> Tuple[List[Dict[str, Any]], Optional[float]]:
+        """Fetch option quotes for (symbol, expiration) for a subset of strikes (C and P each).
+        Returns (rows with strike, right, bid, ask, last, mid; underlying_price if available)."""
+        await self._ensure_connected_impl()
+        rows: List[Dict[str, Any]] = []
+        underlying_price: Optional[float] = None
+        try:
+            underlying_price = await self.fetch_underlying_price(symbol)
+        except Exception:
+            pass
+        # Filter out invalid strikes (e.g. 0.5, 1.0 from wrong chain); US equity strikes are dollar amounts.
+        if underlying_price is not None and underlying_price > 0:
+            min_s = max(0.5, underlying_price * 0.01)
+            max_s = underlying_price * 2.5
+            strikes = [s for s in strikes if min_s <= s <= max_s]
+        else:
+            strikes = [s for s in strikes if s >= 5.0]
+        max_strikes = min(max_contracts // 2, len(strikes)) if strikes else 0
+        if max_strikes <= 0:
+            return rows, underlying_price
+        if underlying_price is not None and strikes:
+            sorted_strikes = sorted(strikes, key=lambda s: abs(s - underlying_price))
+            selected_strikes = sorted_strikes[:max_strikes]
+        else:
+            selected_strikes = strikes[:max_strikes]
+        for strike in selected_strikes:
+            for right in ("C", "P"):
+                try:
+                    quote = await self.fetch_option_quote(symbol, expiration, strike, right)
+                    row: Dict[str, Any] = {
+                        "strike": strike,
+                        "right": right,
+                        "bid": None,
+                        "ask": None,
+                        "last": None,
+                        "mid": None,
+                    }
+                    if quote:
+                        row["bid"] = quote.get("bid")
+                        row["ask"] = quote.get("ask")
+                        row["last"] = quote.get("last")
+                        row["mid"] = quote.get("mid")
+                    rows.append(row)
+                except Exception as e:
+                    logger.warning(
+                        "[monitor_ib] fetch_option_snapshot quote %s %s %s %s: %s",
+                        symbol,
+                        expiration,
+                        strike,
+                        right,
+                        e,
+                    )
+                    rows.append(
+                        {
+                            "strike": strike,
+                            "right": right,
+                            "bid": None,
+                            "ask": None,
+                            "last": None,
+                            "mid": None,
+                        }
+                    )
+                await asyncio.sleep(pacing_sec)
+        return rows, underlying_price
+

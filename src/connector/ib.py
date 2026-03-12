@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ib_insync import (
     IB,
@@ -448,6 +448,110 @@ class IBConnector:
         except Exception as e:
             logger.error("get_instrument_price %s %s: %s", sec_type, symbol, e)
             return None
+
+    async def get_option_quote_one_shot(
+        self,
+        symbol: str,
+        expiry: str,
+        strike: float,
+        right: str,
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ) -> Optional[Dict[str, Optional[float]]]:
+        """Get one option quote and cancel subscription immediately (for batch snapshot without exhausting market data lines)."""
+        if not self.is_connected:
+            await self.connect()
+        exp = (expiry or "").strip()
+        rt = (right or "").upper()
+        if not symbol or not exp or rt not in ("C", "P"):
+            return None
+        try:
+            contract = Option(symbol, exp, float(strike), rt, exchange, currency)
+            await self.ib.qualifyContractsAsync(contract)
+            ticker = self.ib.reqMktData(contract, "", False, False)
+            bid = ask = last = mid = None
+            for _ in range(2):
+                await asyncio.sleep(0.5)
+                tbid = getattr(ticker, "bid", None)
+                task = getattr(ticker, "ask", None)
+                tlast = getattr(ticker, "last", None)
+                try:
+                    if tbid is not None:
+                        fb = float(tbid)
+                        if fb > 0:
+                            bid = fb
+                    if task is not None:
+                        fa = float(task)
+                        if fa > 0:
+                            ask = fa
+                    if tlast is not None:
+                        fl = float(tlast)
+                        if fl > 0:
+                            last = fl
+                except (TypeError, ValueError):
+                    pass
+                if bid is not None and ask is not None:
+                    mid = (bid + ask) / 2.0
+                elif last is not None:
+                    mid = last
+                if bid is not None or ask is not None or last is not None or mid is not None:
+                    break
+            try:
+                self.ib.cancelMktData(ticker)
+            except Exception as cancel_err:
+                logger.debug("cancelMktData after option quote: %s", cancel_err)
+            if bid is None and ask is None and last is None and mid is None:
+                return None
+            return {"bid": bid, "ask": ask, "last": last, "mid": mid}
+        except Exception as e:
+            logger.error("get_option_quote_one_shot %s %s %s %s: %s", symbol, exp, strike, rt, e)
+            return None
+
+    async def get_sec_def_opt_params_async(
+        self,
+        underlying_symbol: str,
+        fut_fop_exchange: str = "",
+        underlying_sec_type: str = "STK",
+        underlying_con_id: int = 0,
+    ) -> Tuple[List[str], List[float]]:
+        """Request option expirations and strikes for an underlying (reqSecDefOptParams).
+        Returns (sorted expirations as YYYYMMDD strings, sorted strikes as floats).
+        Caller must ensure connector is connected. Use empty fut_fop_exchange for stock options.
+        For STK, qualifies the underlying first and uses its conId (IB Error 321 if conId is 0)."""
+        sym = underlying_symbol.strip()
+        con_id = underlying_con_id
+        if (not con_id) and underlying_sec_type.upper() == "STK":
+            stock = self._stock(sym)
+            try:
+                await self.ib.qualifyContractsAsync(stock)
+                con_id = int(getattr(stock, "conId", 0) or 0)
+            except Exception as e:
+                logger.warning("get_sec_def_opt_params_async qualify %s: %s", sym, e)
+        timeout_sec = 15.0
+        try:
+            chains = await asyncio.wait_for(
+                self.ib.reqSecDefOptParamsAsync(
+                    sym,
+                    fut_fop_exchange,
+                    underlying_sec_type,
+                    con_id,
+                ),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("get_sec_def_opt_params_async %s: timeout after %ss", underlying_symbol, timeout_sec)
+            raise
+        expirations_set: set = set()
+        strikes_set: set = set()
+        for chain in chains or []:
+            for e in getattr(chain, "expirations", []) or []:
+                expirations_set.add(str(e).strip())
+            for s in getattr(chain, "strikes", []) or []:
+                try:
+                    strikes_set.add(float(s))
+                except (TypeError, ValueError):
+                    pass
+        return (sorted(expirations_set), sorted(strikes_set))
 
     async def subscribe_ticker(
         self,

@@ -34,6 +34,7 @@
 | **阶段 4**（策略与回测） | **R-B1**、**R-B2** | 交易策略框架建立、策略创建与回测（PnL 优化与 Guard 验证） |
 | **阶段 5**（自动对冲与监控） | **R-C2**、**R-C3** | 基于成熟策略的自动交易对冲与监控（暂停/恢复、一键平敞口等） |
 | **实时行情与联动**（R-RM*，可选/阶段 3 之后） | **R-RM1**、**R-RM2**、**R-RM3** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端；步骤与验收见下文「实时行情与联动」 |
+| **期权发现**（R-OD1，阶段 3 扩展） | **R-OD1** | Research 下 Option Discovery 入口；第一步 UI 与占位 API，后续接入 IB 到期/询价；步骤与验收见下文「期权发现（Option Discovery）」 |
 
 **需求编号 → 产品需求文档与验收/Test Case 链接**（便于从需求编号反查描述与验证位置）：
 
@@ -57,6 +58,7 @@
 | R-C2 | 同上 §1.3、§6 | 同上 R-C2 行；**阶段 5** 验证标准与 Test Case 清单 |
 | R-C3 | 同上 §5、§6 | 同上 R-C3 行；**阶段 5**（依赖 R-A1、持仓与策略边界等），验证标准与 Test Case 待该阶段规划时补全 |
 | **R-RM1 / R-RM2 / R-RM3** | 本文档 §6（R-RM*）与下文「实时行情与联动」步骤 | 下文「实时行情与联动」步骤；验收标准见该节 |
+| **R-OD1** | [REQUIREMENTS.md](REQUIREMENTS.md) §2.6 | 下文「期权发现（Option Discovery）」步骤；验收标准见该节 |
 
 ---
 
@@ -118,6 +120,12 @@
 | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅；行情以事件驱动更新。 | **阶段 3 之后或按需** | ① 守护进程同时维护心跳循环（写 PG、轮询控制）与 IB 事件回调（tick/持仓/订单）。② 行情与持仓更新以 IB 事件驱动为主，轮询仅用于控制通道。 |
 | **R-RM2** | 行情写入 Redis；唯一写入方为守护进程；监控不写 Redis 行情。 | **阶段 3 之后或按需** | ① 事件订阅所得行情写入 Redis 缓存（key/TTL 见设计文档 §2.3）。② 仅守护进程写 Redis 行情；监控 Server 不写。③ 无 Redis 时可降级为仅 PG + GET /status 轮询。 |
 | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | **阶段 3 之后或按需** | ① 守护在写 Redis 后发布通知（Pub/Sub 或 XADD）。② 监控 Server 订阅该通道；收到后读 Redis（或消息体）并向前端推送（WebSocket/SSE 或 GET /quotes）。③ 守护与监控仅需同连 Redis，不直连。 |
+
+### 研究与发现（R-OD1）
+
+| 需求编号 | 需求简述 | 完成阶段 | 详细验收标准 |
+|----------|----------|----------|----------------|
+| **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；第一步为 UI 与占位 API。 | **Option Discovery 步骤（第一步）** | ① Research 二级菜单新增「Option Discovery」。② 新页面：标的选择（来自 Watchlist STK）、到期选择（占位）、占位表格/说明（By expiration – Option quotes & IV coming next）。③ 后端 GET /research/option-expirations?symbol=... 返回 { symbol, expirations }（可空或 mock）。④ 通过 Research 进入 Option Discovery 页，可选标的、见到期占位与说明，API 可调通。 |
 
 ---
 
@@ -376,6 +384,22 @@
 | **RM.3** | **前端**：消费监控推送或轮询 GET /quotes，展示行情墙/ticker 等。 | UI 可展示近实时行情 | — |
 
 **里程碑**：守护双线运行且写 Redis + 发布；监控订阅并推前端；UI 可展示由守护事件驱动的行情。**检查方式**：按上文「需求与阶段一一对应及详细验收标准」表中 R-RM1/R-RM2/R-RM3 验收条执行。**阶段通过条件**：R-RM1、R-RM2、R-RM3 对应验收条全部通过。
+
+---
+
+### 期权发现（Option Discovery，R-OD1；阶段 3 扩展）
+
+**本步骤实现并验收的需求**：**R-OD1**（第一步）。
+
+**目标**：在 Research 下提供 Option Discovery 入口页，为按到期询价与机会发现打基础；第一步仅 UI 与占位 API，后续接入 IB reqSecDefOptParams 与期权快照。
+
+| 步骤 | 内容 | 可交付物 | 对应需求 |
+|------|------|----------|----------|
+| **OD.1（第一步）** | Research 二级菜单新增「Option Discovery」；新页面：标的选择（来自 Watchlist STK）、到期选择（占位）、占位表格/说明（By expiration – Option quotes & IV coming next）；后端 GET /research/option-expirations?symbol=... 返回 { symbol, expirations }（可空或 mock）。 | 可通过 Research 进入 Option Discovery 页，可选标的、见到期占位与说明；API 可调通 | R-OD1 |
+| **OD.2（已实现）** | 后端接入 IB reqSecDefOptParams，返回真实到期与 strikes；前端到期下拉绑定该 API，展示错误与 strikes。 | 到期列表来自 IB；API 返回 expirations + strikes；前端可选到期、显示错误 | R-OD1 扩展 |
+| **OD.3（后续）** | 期权快照任务（选定标的+到期+有限 strike，pacing）与发现逻辑；可选「加入 Watchlist」。 | 按到期询价与机会发现 | R-OD1 扩展 |
+
+**第一步验收**：按上文「需求与阶段一一对应及详细验收标准」表中 R-OD1 验收条 ①～④ 执行。**第一步通过条件**：全部通过。
 
 ---
 
