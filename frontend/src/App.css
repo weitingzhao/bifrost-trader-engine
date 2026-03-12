@@ -3841,6 +3841,11 @@ th {
   color: var(--color-warning);
 }
 
+/** Records table: Commission SUM per group (yellow) */
+.performance-records-commission-sum {
+  color: var(--color-warning);
+}
+
 .performance-calendar-contract-pair-table {
   margin-bottom: var(--space-2);
   background: var(--color-bg);

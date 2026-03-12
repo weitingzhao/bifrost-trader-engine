@@ -107,14 +107,14 @@ class BaseMonitorIbClient:
             if self.connected:
                 return
             logger.info(
-                "[monitor_ib] connecting %s to %s:%s clientId=%s",
+                "[monitor_ib] connecting %s to %s:%s clientId=%s (will try +1, +2, ... if in use)",
                 self.name,
                 self.host,
                 self.port,
                 self.client_id,
             )
             self._connector = IBConnector(host=self.host, port=self.port, client_id=self.client_id)
-            ok = await self._connector.connect(max_attempts=3)
+            ok = await self._connector.connect(max_attempts=10)
             if not ok:
                 self.last_error = "connect_failed"
                 self._connected_state = False

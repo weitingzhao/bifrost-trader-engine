@@ -20,6 +20,26 @@ logger = logging.getLogger(__name__)
 _EXEC_EPOCH_E = "extract(epoch from (e.exec_time AT TIME ZONE 'America/Chicago'))"
 _EXEC_EPOCH = "extract(epoch from (exec_time AT TIME ZONE 'America/Chicago'))"
 
+# Normalize quantity so Sell = negative across sources. tws_client already stores Sell as negative;
+# other sources (e.g. flex) store positive for Sell → negate in query for consistent display/aggregation.
+_QTY_NORM_E = (
+    "CASE WHEN lower(trim(COALESCE(e.source, ''))) = 'tws_client' THEN e.quantity "
+    "WHEN upper(trim(COALESCE(e.side, ''))) IN ('SELL', 'SLD', 'S') THEN -e.quantity "
+    "ELSE e.quantity END AS quantity"
+)
+_QTY_NORM = (
+    "CASE WHEN lower(trim(COALESCE(source, ''))) = 'tws_client' THEN quantity "
+    "WHEN upper(trim(COALESCE(side, ''))) IN ('SELL', 'SLD', 'S') THEN -quantity "
+    "ELSE quantity END AS quantity"
+)
+
+# Normalize commission so "cost" convention is consistent. tws_client stores commission as cost (positive);
+# other sources (e.g. flex) may use opposite sign → negate in query when not tws_client.
+_COMM_NORM_E = (
+    "CASE WHEN lower(trim(COALESCE(e.source, ''))) = 'tws_client' THEN c.commission "
+    "WHEN c.commission IS NOT NULL THEN -c.commission ELSE NULL END AS commission"
+)
+
 
 def get_executions(
     conn: Any,
@@ -52,8 +72,8 @@ def get_executions(
                 cur.execute(
                     f"""
                     SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                           e.symbol, e.sec_type, e.side, e.quantity, e.price,
-                           c.commission, e.source,
+                           e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+                           {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                            e.trade_date, e.raw_extra
@@ -70,8 +90,8 @@ def get_executions(
                         cur.execute(
                             f"""
                             SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                                   e.symbol, e.sec_type, e.side, e.quantity, e.price,
-                                   c.commission, e.source,
+                                   e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+                                   {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                    c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                                    e.trade_date, e.raw_extra
@@ -86,7 +106,7 @@ def get_executions(
                         cur.execute(
                             f"""
                                     SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                                           e.symbol, e.sec_type, e.side, e.quantity, e.price,
+                                           e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                                            NULL::double precision AS commission, e.source,
                                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                            NULL::double precision AS realized_pnl, e.contract_key,
@@ -170,8 +190,8 @@ def get_executions_by_contract_keys(
     values.append(limit)
     sql = f"""
                     SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                           e.symbol, e.sec_type, e.side, e.quantity, e.price,
-                           c.commission, e.source,
+                           e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+                           {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                            e.trade_date, e.raw_extra
@@ -191,8 +211,8 @@ def get_executions_by_contract_keys(
                         cur.execute(
                             f"""
                             SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                                   e.symbol, e.sec_type, e.side, e.quantity, e.price,
-                                   c.commission, e.source,
+                                   e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+                                   {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                    c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
                                    e.trade_date, e.raw_extra
@@ -209,7 +229,7 @@ def get_executions_by_contract_keys(
                         cur.execute(
                             f"""
                             SELECT id, account_id, exec_id, {_EXEC_EPOCH} AS time,
-                                   symbol, sec_type, side, quantity, price,
+                                   symbol, sec_type, side, {_QTY_NORM}, price,
                                    NULL::double precision AS commission, source,
                                    expiry, strike, option_right, exchange, order_id, cum_qty,
                                    NULL::double precision AS realized_pnl, contract_key,
@@ -342,8 +362,8 @@ WITH day_keys AS (
 all_legs AS (
   SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
          e.trade_date,
-         e.symbol, e.sec_type, e.side, e.quantity, e.price,
-         c.commission, e.source,
+         e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+         {_COMM_NORM_E}, e.source,
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
          c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra,
          (e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date) AS in_selected_day,
@@ -383,7 +403,7 @@ WITH day_keys AS (
 all_legs AS (
   SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
          e.trade_date,
-         e.symbol, e.sec_type, e.side, e.quantity, e.price,
+         e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
          NULL::double precision AS commission, e.source,
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
          NULL::double precision AS realized_pnl, e.contract_key, NULL::text AS currency,

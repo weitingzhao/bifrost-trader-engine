@@ -9,6 +9,7 @@ import time
 from typing import Any, Dict, Optional
 
 MONITOR_STOP_DISCONNECT_TIMEOUT = 2.5  # seconds; avoid hang if IB disconnect blocks
+MONITOR_STOP_EXIT_DELAY = 3.0  # seconds; give client time to receive 200 before process exits
 
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
@@ -27,7 +28,7 @@ router = APIRouter(tags=["daemon"])
 
 
 def _exit_after_send() -> None:
-    time.sleep(1.5)  # give time for response to be sent and flushed
+    time.sleep(MONITOR_STOP_EXIT_DELAY)  # give client time to receive response before exit
     logger.info("Monitor stop: exiting process.")
     os._exit(0)
 
@@ -36,7 +37,8 @@ def _exit_after_send() -> None:
 async def post_monitor_stop(request: Request) -> JSONResponse:
     """Stop monitor-side IB activity AND terminate the monitor process itself.
     Disconnects are wrapped in a short timeout so a stuck IB API cannot block the response;
-    the exit thread always runs and the process exits shortly after returning 200."""
+    disconnects run concurrently so total wait is one timeout, not three; exit is delayed
+    so the client can receive 200 before the process exits."""
     app = request.app
     app.state.monitor_enabled = False
 
@@ -48,24 +50,18 @@ async def post_monitor_stop(request: Request) -> JSONResponse:
         except Exception as e:
             logger.debug("monitor_stop: %s disconnect error (ignored): %s", name, e)
 
-    try:
-        client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
-        if client is not None:
-            await _disconnect_with_timeout(client, "account_ib_client")
-    except Exception:
-        pass
-    try:
-        mclient: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
-        if mclient is not None:
-            await _disconnect_with_timeout(mclient, "market_ib_client")
-    except Exception:
-        pass
-    try:
-        acc2 = getattr(app.state, "account_ib_client_2", None)
-        if acc2 is not None:
-            await _disconnect_with_timeout(acc2, "account_ib_client_2")
-    except Exception:
-        pass
+    tasks: list = []
+    client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+    if client is not None:
+        tasks.append(_disconnect_with_timeout(client, "account_ib_client"))
+    mclient: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+    if mclient is not None:
+        tasks.append(_disconnect_with_timeout(mclient, "market_ib_client"))
+    acc2 = getattr(app.state, "account_ib_client_2", None)
+    if acc2 is not None:
+        tasks.append(_disconnect_with_timeout(acc2, "account_ib_client_2"))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     threading.Thread(target=_exit_after_send, daemon=True).start()
     return JSONResponse(status_code=200, content={"ok": True, "monitor_enabled": False})

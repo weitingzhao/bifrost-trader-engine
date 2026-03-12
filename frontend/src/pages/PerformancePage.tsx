@@ -864,8 +864,12 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                               const keysBySymbolUnrealized = new Map<string, string[]>()
                               const symbolSumRealized = new Map<string, number>()
                               const symbolSumUnrealized = new Map<string, number>()
+                              const symbolCommissionRealized = new Map<string, number>()
+                              const symbolCommissionUnrealized = new Map<string, number>()
                               let totalRealizedSum = 0
                               let totalUnrealizedSum = 0
+                              let totalCommissionRealized = 0
+                              let totalCommissionUnrealized = 0
                               for (const key of contractKeys) {
                                 const pairs = pairByKey.get(key) ?? (key.startsWith('\t') ? pairByKeyNoAccount.get(key.slice(1)) ?? [] : [])
                                 const execs = byContract.get(key) ?? []
@@ -882,16 +886,23 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                 const groupSumPnl =
                                   unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
                                   pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                const groupCommissionSum =
+                                  pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0) +
+                                  unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
                                 if (pairs.length > 0) {
                                   if (!keysBySymbolRealized.has(symbol)) keysBySymbolRealized.set(symbol, [])
                                   keysBySymbolRealized.get(symbol)!.push(key)
                                   symbolSumRealized.set(symbol, (symbolSumRealized.get(symbol) ?? 0) + groupSumPnl)
+                                  symbolCommissionRealized.set(symbol, (symbolCommissionRealized.get(symbol) ?? 0) + groupCommissionSum)
                                   totalRealizedSum += groupSumPnl
+                                  totalCommissionRealized += groupCommissionSum
                                 } else {
                                   if (!keysBySymbolUnrealized.has(symbol)) keysBySymbolUnrealized.set(symbol, [])
                                   keysBySymbolUnrealized.get(symbol)!.push(key)
                                   symbolSumUnrealized.set(symbol, (symbolSumUnrealized.get(symbol) ?? 0) + groupSumPnl)
+                                  symbolCommissionUnrealized.set(symbol, (symbolCommissionUnrealized.get(symbol) ?? 0) + groupCommissionSum)
                                   totalUnrealizedSum += groupSumPnl
+                                  totalCommissionUnrealized += groupCommissionSum
                                 }
                               }
                               const symbolsRealized = Array.from(keysBySymbolRealized.keys()).sort()
@@ -899,6 +910,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                               const keysBySymbolForType = selectedDayPnLType === 'realized' ? keysBySymbolRealized : keysBySymbolUnrealized
                               const symbolsForType = selectedDayPnLType === 'realized' ? symbolsRealized : symbolsUnrealized
                               const symbolSumForType = selectedDayPnLType === 'realized' ? symbolSumRealized : symbolSumUnrealized
+                              const symbolCommissionForType = selectedDayPnLType === 'realized' ? symbolCommissionRealized : symbolCommissionUnrealized
                               const effectiveSymbol = (selectedDaySymbolTab && symbolsForType.includes(selectedDaySymbolTab) ? selectedDaySymbolTab : symbolsForType[0]) ?? null
                               return (
                                 <>
@@ -924,6 +936,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                               <span className={`performance-calendar-tab-sum ${totalRealizedSum >= 0 ? 'tone-positive' : 'tone-negative'}`}>
                                                 {fmtUsd(totalRealizedSum)}
                                               </span>
+                                              <span className="performance-records-commission-sum"> {fmtUsd(totalCommissionRealized)}</span>
                                             </>
                                           )}
                                         </button>
@@ -941,6 +954,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                               <span className="performance-calendar-tab-sum tone-unrealized">
                                                 {fmtUsd(totalUnrealizedSum)}
                                               </span>
+                                              <span className="performance-records-commission-sum"> {fmtUsd(totalCommissionUnrealized)}</span>
                                             </>
                                           )}
                                         </button>
@@ -948,6 +962,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                       <div className="performance-calendar-symbol-tabs system-tabs" role="tablist" aria-label="Symbol">
                                         {symbolsForType.map((sym) => {
                                           const sum = symbolSumForType.get(sym) ?? 0
+                                          const comm = symbolCommissionForType.get(sym) ?? 0
                                           const sumClass = selectedDayPnLType === 'unrealized'
                                             ? 'tone-unrealized'
                                             : (sum >= 0 ? 'tone-positive' : 'tone-negative')
@@ -964,6 +979,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                               <span className={`performance-calendar-tab-sum ${sumClass}`}>
                                                 {fmtUsd(sum)}
                                               </span>
+                                              <span className="performance-records-commission-sum"> {fmtUsd(comm)}</span>
                                             </button>
                                           )
                                         })}
@@ -1010,6 +1026,9 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                       const groupSumPnl =
                                         unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
                                         pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                      const groupCommissionSum =
+                                        pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0) +
+                                        unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
                                       return (
                                         <div key={key} className="performance-calendar-contract-group">
                                           <h6 className="performance-calendar-contract-title">
@@ -1020,6 +1039,9 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                 : 'tone-unrealized'
                                             }>
                                               {' '}{fmtUsd(groupSumPnl)}
+                                            </span>
+                                            <span className="performance-records-commission-sum">
+                                              {' '}{fmtUsd(groupCommissionSum)}
                                             </span>
                                           </h6>
                                           <table className="performance-calendar-pairs-table performance-calendar-unified-table">

@@ -26,7 +26,7 @@ export function execPnl(e: Execution): number {
   const qty = Number(e.quantity) || 0
   const price = Number(e.price) || 0
   const commission = Number(e.commission) || 0
-  const pnl = -qty * price * 100 - commission
+  const pnl = qty * price * 100 - commission
   return Number.isFinite(pnl) ? pnl : 0
 }
 

@@ -594,7 +594,33 @@ export function PositionsPage({
                     </table>
                   </div>
 
-                  {expandedOpenDetailKeys.length > 0 && (
+                  {expandedOpenDetailKeys.length > 0 && (() => {
+                      const expandedGroups = openOptionGroups.filter(g => expandedOpenDetailKeys.includes(getOpenOptGroupKey(g)))
+                      let detailsTotalPnl = 0
+                      for (const group of expandedGroups) {
+                        if (group.kind === 'live') {
+                          for (const position of group.positions ?? []) {
+                            const qty = Number(position.position)
+                            const absQty = Math.abs(qty)
+                            const pricePerShare = position.avgCost != null && Number.isFinite(Number(position.avgCost))
+                              ? (Number(position.avgCost) >= 10 ? Number(position.avgCost) / 100 : Number(position.avgCost))
+                              : null
+                            const value = (pricePerShare ?? 0) * absQty * 100 - 0
+                            detailsTotalPnl += qty > 0 ? -value : value
+                          }
+                        } else {
+                          for (const ex of group.trades ?? []) {
+                            const s = (ex.side ?? '').toUpperCase()
+                            const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+                            const q = Number(ex.quantity) || 0
+                            const p = Number(ex.price) || 0
+                            const c = Number(ex.commission) || 0
+                            const value = q * p * 100 - c
+                            detailsTotalPnl += isBuy ? -value : value
+                          }
+                        }
+                      }
+                      return (
                     <>
                       <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
                         Details (per trade)
@@ -737,7 +763,9 @@ export function PositionsPage({
                                   const value = q * p * 100 - c
                                   const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
                                   const pnl = isBuy ? -value : value
-                                  const pnlClass = pnl < 0 ? 'replay-pnl-detail-negative' : pnl > 0 ? 'replay-pnl-detail-positive' : ''
+                                  // Sell = premium received → show as positive (profit)
+                                  const displayPnl = !isBuy ? Math.abs(pnl) : pnl
+                                  const pnlClass = displayPnl < 0 ? 'replay-pnl-detail-negative' : displayPnl > 0 ? 'replay-pnl-detail-positive' : ''
                                   return (
                                     <tr key={`${getOpenOptGroupKey(group)}-${ti}-${ex.time ?? ti}`}>
                                       <td className="replay-opt-contract">
@@ -792,7 +820,7 @@ export function PositionsPage({
                                       <td>{fmtUsd(ex.price)}</td>
                                       <td>{fmtUsd(ex.commission ?? 0)}</td>
                                       <td>
-                                        <span className={pnlClass}>{fmtUsd(pnl)}</span>
+                                        <span className={pnlClass}>{fmtUsd(displayPnl)}</span>
                                       </td>
                                       <td>{ex.account_id ?? '—'}</td>
                                       <td>
@@ -825,9 +853,19 @@ export function PositionsPage({
                                 }),
                             )}
                         </tbody>
+                        <tfoot>
+                          <tr>
+                            <td colSpan={9} className="replay-detail-total-label">Total PNL</td>
+                            <td className="replay-pnl-unrealized">
+                              <strong>{fmtUsd(detailsTotalPnl)}</strong>
+                            </td>
+                            <td colSpan={2} />
+                          </tr>
+                        </tfoot>
                       </table>
                     </>
-                  )}
+                  );
+                  })()}
                 </>
               )}
                 </div>

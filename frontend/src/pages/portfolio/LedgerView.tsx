@@ -181,6 +181,26 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
     [closedOptionGroups],
   )
 
+  /** Details sheet: sum of per-trade PnL for expanded rows only (same formula as table). */
+  const ledgerDetailsTotalPnl = useMemo(() => {
+    const expanded = sortedClosedOptionGroups.filter(g =>
+      expandedDetailKeys.includes(getOptGroupKey(g)),
+    )
+    let sum = 0
+    for (const g of expanded) {
+      for (const ex of g.trades ?? []) {
+        const s = (ex.side ?? '').toUpperCase()
+        const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+        const q = Number(ex.quantity) || 0
+        const p = Number(ex.price) || 0
+        const c = Number(ex.commission) || 0
+        const value = q * p * 100 - c
+        sum += isBuy ? -value : value
+      }
+    }
+    return sum
+  }, [sortedClosedOptionGroups, expandedDetailKeys])
+
   const ledgerStockCategoryTabs = useMemo(() => {
     const stockExecs = (executions ?? []).filter(
       ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT',
@@ -949,11 +969,14 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                   const value = q * p * 100 - c
                                   const isBuy =
                                     s === 'BUY' || s === 'BOT' || s === 'B'
+                                  const isSell = !isBuy
                                   const pnl = isBuy ? -value : value
+                                  // Sell = premium received → show as positive (profit)
+                                  const displayPnl = isSell ? Math.abs(pnl) : pnl
                                   const pnlClass =
-                                    pnl < 0
+                                    displayPnl < 0
                                       ? 'replay-pnl-detail-negative'
-                                      : pnl > 0
+                                      : displayPnl > 0
                                         ? 'replay-pnl-detail-positive'
                                         : ''
                                   return (
@@ -1004,7 +1027,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                       </td>
                                       <td>
                                         <span className={pnlClass}>
-                                          {fmtUsd(pnl)}
+                                          {fmtUsd(displayPnl)}
                                         </span>
                                       </td>
                                       <td>{ex.account_id ?? '—'}</td>
@@ -1059,6 +1082,23 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                               )
                           )}
                         </tbody>
+                        <tfoot>
+                          <tr>
+                            <td colSpan={9} className="replay-detail-total-label">Total PNL</td>
+                            <td
+                              className={
+                                ledgerDetailsTotalPnl < 0
+                                  ? 'replay-pnl-detail-negative'
+                                  : ledgerDetailsTotalPnl > 0
+                                    ? 'replay-pnl-detail-positive'
+                                    : ''
+                              }
+                            >
+                              <strong>{fmtUsd(ledgerDetailsTotalPnl)}</strong>
+                            </td>
+                            <td colSpan={2} />
+                          </tr>
+                        </tfoot>
                       </table>
                     </>
                   ) : (

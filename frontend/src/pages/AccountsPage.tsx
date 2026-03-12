@@ -1003,7 +1003,8 @@ export function AccountsPage({
                     <th>Qty</th>
                     <th>Cost</th>
                     <th>Total cost</th>
-                    <th>Market</th>
+                    <th>Total market</th>
+                    <th>Last</th>
                     <th>Daily %</th>
                     <th>Daily $</th>
                     <th>CHANGE %</th>
@@ -1014,7 +1015,7 @@ export function AccountsPage({
                 {categoryOrder.map((catLabel) => (
                   <tbody key={catLabel}>
                     <tr className="ib-stock-group-header">
-                      <td colSpan={10}>
+                      <td colSpan={11}>
                         <button
                           type="button"
                           className="ib-stock-group-header-btn"
@@ -1052,6 +1053,8 @@ export function AccountsPage({
                       daemonUpdatedAt: showSpotForRow ? statusTs : null,
                     })
                     const currPrice = priceInfo.price
+                    const totalMarket =
+                      currPrice != null && Number.isFinite(qty) && Number.isFinite(currPrice) ? qty * currPrice : null
                     const pnl =
                       pos.unrealized_pnl != null && Number.isFinite(pos.unrealized_pnl)
                         ? (priceInfo.source === 'db' ? pos.unrealized_pnl : (
@@ -1085,6 +1088,7 @@ export function AccountsPage({
                         <td>{pos.position != null ? pos.position : '—'}</td>
                         <td>{pos.avgCost != null ? fmtUsd(pos.avgCost) : '—'}</td>
                         <td>{totalCost != null ? fmtUsd(totalCost) : '—'}</td>
+                        <td>{totalMarket != null ? fmtUsd(totalMarket) : '—'}</td>
                         <td style={marketColor ? { color: marketColor, fontWeight: 600 } : undefined}>
                           {currPrice != null ? fmtUsd(currPrice) : '—'}
                         </td>
@@ -1131,6 +1135,7 @@ export function AccountsPage({
                       if (Number.isFinite(qty) && Number.isFinite(cost)) return acc + qty * cost
                       return acc
                     }, 0)
+                    let groupTotalMarket = 0
                     let groupDailyDollar = 0
                     let groupChangeDollar = 0
                     let groupDailyDenom = 0
@@ -1149,6 +1154,7 @@ export function AccountsPage({
                         daemonUpdatedAt: showSpot ? statusTs : null,
                       })
                       const currPrice = priceInfo.price
+                      if (currPrice != null && Number.isFinite(qty) && Number.isFinite(currPrice)) groupTotalMarket += qty * currPrice
                       const bench = benchmarks[sym]
                       const daily = computeDailyChange(bench, currPrice, qty, priceInfo.source === 'db' ? pos.daily_prev_close : undefined)
                       if (daily.pnlVsBench != null && Number.isFinite(daily.pnlVsBench)) groupDailyDollar += daily.pnlVsBench
@@ -1167,6 +1173,7 @@ export function AccountsPage({
                         <td></td>
                         <td></td>
                         <td>{fmtUsd(groupTotalCost)}</td>
+                        <td>{fmtUsd(groupTotalMarket)}</td>
                         <td></td>
                         <td>
                           {groupDailyPct != null && Number.isFinite(groupDailyPct) ? (
@@ -1208,6 +1215,33 @@ export function AccountsPage({
                   const qty = pos.position != null ? Number(pos.position) : NaN
                   const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
                   if (Number.isFinite(qty) && Number.isFinite(cost)) return acc + qty * cost
+                  return acc
+                }, 0)
+                const sumTotalMarket = stockPositions.reduce((acc, pos) => {
+                  const qty = pos.position != null ? Number(pos.position) : NaN
+                  const sym = (pos.symbol ?? '').toString().toUpperCase()
+                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                  const priceInfo = resolvePreferredPrice({
+                    liveQuote: quotesMap[sym],
+                    dbPrice:
+                      pos.price != null && Number.isFinite(Number(pos.price))
+                        ? Number(pos.price)
+                        : null,
+                    dbUpdatedAt:
+                      pos.price_updated_at != null && Number.isFinite(Number(pos.price_updated_at))
+                        ? Number(pos.price_updated_at)
+                        : null,
+                    daemonSpot:
+                      spot != null && Number.isFinite(spot) && sym !== '' && mainSym !== '' && sym === mainSym
+                        ? spot
+                        : null,
+                    daemonUpdatedAt:
+                      spot != null && Number.isFinite(spot) && sym !== '' && mainSym !== '' && sym === mainSym
+                        ? statusTs
+                        : null,
+                  })
+                  const p = priceInfo.price
+                  if (p != null && Number.isFinite(qty) && Number.isFinite(p)) return acc + qty * p
                   return acc
                 }, 0)
                 const sumPnl = stockPositions.reduce((acc, pos) => {
@@ -1284,6 +1318,7 @@ export function AccountsPage({
                 return (
                   <p className="ib-positions-empty" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
                     Stock total cost: {fmtUsd(sumTotal)}
+                    <span style={{ marginLeft: '1rem' }}>Stock total market: {fmtUsd(sumTotalMarket)}</span>
                     <span style={{ marginLeft: '1rem', color: Number.isFinite(sumPnl) ? (sumPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)') : 'var(--color-text-muted)' }}>
                       Change {Number.isFinite(sumPnl) ? fmtUsdRound0(sumPnl) : '—'} / {totalPct != null && Number.isFinite(totalPct) ? (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '%' : '—'}
                     </span>

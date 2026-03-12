@@ -98,6 +98,8 @@ export function StatusPage({
   const runCtrlAction = useControlAction(setCtrlMsg, ctrlMsgClearRef, { onSuccess: loadStatus })
   const runHedgeAction = useControlAction(setHedgeCtrlMsg, hedgeCtrlMsgClearRef)
   const runMonitorAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, { onSuccess: loadStatus })
+  /** Monitor Stop exits the server process shortly after 200; do not call loadStatus so the UI does not hang on a GET to a dead server. */
+  const runMonitorStopAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, {})
   const runCeleryAction = useControlAction(setCeleryCtrlMsg, celeryCtrlMsgClearRef, { onSuccess: loadStatus })
 
   const j = status
@@ -283,7 +285,7 @@ export function StatusPage({
         text: errors.length === 0 ? 'All systems shut down.' : `Shut down requested; some failed: ${errors.join('; ')}`,
         isErr: errors.length > 0,
       })
-      await loadStatus()
+      // Do not call loadStatus() after Management stop: the server process exits, so the request would hang.
     } finally {
       setShutdownAllLoading(false)
     }
@@ -436,7 +438,7 @@ export function StatusPage({
             monitorAccount={monitorAccount}
             monitorAccount2={monitorAccount2}
             monitorMarket={monitorMarket}
-            onMonitorStop={() => runMonitorAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped (no new IB requests).' })}
+            onMonitorStop={() => runMonitorStopAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped (no new IB requests). Server has exited; refresh the page after restarting it.' })}
             onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested (Account + Account2 + Market); check status bar for result.' })}
             onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released (Account + Account2 + Market). Use Connect to reconnect.' })}
             monitorCtrlMsg={monitorCtrlMsg}
