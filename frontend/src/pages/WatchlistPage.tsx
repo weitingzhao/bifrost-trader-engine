@@ -225,9 +225,32 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
         display_label: item.display_label ?? undefined,
         source: item.source ?? undefined,
         category_id,
+        optionable: item.optionable ?? undefined,
       })
       if (res.ok) await loadWatchlist()
       else setWatchlistError(res.error || 'Failed to update category')
+    },
+    [loadWatchlist],
+  )
+
+  const handleOptionableToggle = useCallback(
+    async (item: WatchlistItem) => {
+      setWatchlistError(null)
+      const next = !(item.optionable === true)
+      const res = await postWatchlist({
+        contract_key: item.contract_key,
+        symbol: item.symbol ?? undefined,
+        sec_type: item.sec_type ?? undefined,
+        expiry: item.expiry ?? undefined,
+        strike: item.strike ?? undefined,
+        option_right: item.option_right ?? undefined,
+        display_label: item.display_label ?? undefined,
+        source: item.source ?? undefined,
+        category_id: item.category_id ?? undefined,
+        optionable: next,
+      })
+      if (res.ok) await loadWatchlist()
+      else setWatchlistError(res.error || 'Failed to update Option?')
     },
     [loadWatchlist],
   )
@@ -392,6 +415,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
           <tr>
             <th>Symbol</th>
             <th title="Last price; Bid and Ask shown as spread vs Last (green if above Last, red if below)">Last (Bid / Ask)</th>
+            <th title="Show in Option Discovery when on">Option?</th>
             <th>Category</th>
             <th>Holding</th>
             <th>Actions</th>
@@ -403,16 +427,31 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
           return (
             <tbody key={catLabel}>
               <tr className="ib-stock-group-header">
-                <td colSpan={5}>{catLabel}</td>
+                <td colSpan={6}>{catLabel}</td>
               </tr>
               {items.map((item) => {
                 const sym = symbolFromItem(item)
                 const q = quoteBySymbol[sym]
                 const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
+                const optionableOn = item.optionable === true
                 return (
                   <tr key={item.contract_key}>
                     <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistItemLabel(item)}</td>
                     <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAsk(q)}</td>
+                    <td>
+                      <span
+                        className="toggle-switch"
+                        role="switch"
+                        aria-checked={optionableOn}
+                        aria-label={`Option? for ${watchlistItemLabel(item)}`}
+                        tabIndex={0}
+                        onClick={() => handleOptionableToggle(item)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOptionableToggle(item) } }}
+                      >
+                        <span className="toggle-switch-track" />
+                        <span className={optionableOn ? 'toggle-switch-thumb on' : 'toggle-switch-thumb'} />
+                      </span>
+                    </td>
                     <td>
                       <select
                         className="ib-position-category-select"

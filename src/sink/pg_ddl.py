@@ -558,6 +558,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS category_id integer REFERENCES position_categories(id) ON DELETE SET NULL"
         )
+        cur.execute(
+            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS optionable boolean DEFAULT false"
+        )
         _log("market_streams_symbol_order")
         _log_table("market_streams_symbol_order", "Market Streams symbol order per category")
         cur.execute(

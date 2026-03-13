@@ -428,6 +428,7 @@
 | display_label | text | 可选显示名（如 "NVDA 25/6 C 120"） |
 | source | text | 来源：manual \| position \| execution |
 | category_id | integer | 可选，关联 position_categories.id；与 Accounts 的 Position Category 共用同一分类表，用于给 Watchlist 标的打分类标签 |
+| optionable | boolean | 是否作为 Option Discovery 标的（有可交易期权）；默认 false，在 Watchlist 页「Option?」开关维护 |
 | created_at | timestamptz | 创建时间（默认 now()） |
 
 - **读取**：GET /watchlist 供市场数据页与报价请求使用；Watchlist 标的的报价写入 **instrument_prices**（与持仓共用），监控端拉取报价后 UPSERT 到 instrument_prices，供前端统一展示。

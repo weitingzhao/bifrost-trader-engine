@@ -490,6 +490,8 @@ export interface WatchlistItem {
   category_id?: number | null
   /** Category name (e.g. Dividend, Short-term) */
   category?: string | null
+  /** Show in Option Discovery (has tradeable options); maintained via Option? toggle on Watchlist page */
+  optionable?: boolean | null
   created_at?: number | null
 }
 

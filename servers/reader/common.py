@@ -108,11 +108,12 @@ class StatusReader:
         display_label: Optional[str] = None,
         source: str = "manual",
         category_id: Optional[int] = None,
+        optionable: Optional[bool] = None,
     ) -> bool:
         if not self._connect():
             return False
         return watchlist_module.add_watchlist(
-            self._conn, contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, category_id
+            self._conn, contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, category_id, optionable
         )
 
     def delete_watchlist(self, contract_key: Optional[str] = None, id_: Optional[int] = None) -> bool:

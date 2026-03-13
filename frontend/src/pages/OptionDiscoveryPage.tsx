@@ -41,7 +41,7 @@ interface OptionDiscoveryPageProps {
   breadcrumbLabel?: string
 }
 
-/** STK symbols from Watchlist (sec_type STK or null/empty). */
+/** STK symbols from Watchlist that are optionable (sec_type STK and optionable=true). */
 function useWatchlistStkSymbols(): string[] {
   const [items, setItems] = useState<WatchlistItem[]>([])
   useEffect(() => {
@@ -54,6 +54,7 @@ function useWatchlistStkSymbols(): string[] {
   return useMemo(() => {
     const syms = items
       .filter(i => (i.sec_type || '').trim().toUpperCase() !== 'OPT')
+      .filter(i => i.optionable === true)
       .map(i => (i.symbol || '').trim())
       .filter(Boolean)
     return [...new Set(syms)].sort()
@@ -281,7 +282,7 @@ export function OptionDiscoveryPage({
         ) : (
           <>{breadcrumbLabel}{' '}</>
         )}
-        <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK) and expiration; expirations and strikes from IB. Next: option quotes and IV by expiration." />
+        <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration; expirations and strikes from IB. Next: option quotes and IV by expiration." />
       </h2>
 
       <section className="replay-section option-discovery-conditions-section" aria-label="Option chain selection conditions">
@@ -291,7 +292,7 @@ export function OptionDiscoveryPage({
           <div className="option-discovery-underlying-body">
             {stkSymbols.length === 0 ? (
               <div className="option-discovery-list-wrap option-discovery-list-empty">
-                Add STK in Watchlist.
+                Add STK in Watchlist and turn on Option? for symbols that have options.
               </div>
             ) : (
               <div className="option-discovery-list-with-header">
