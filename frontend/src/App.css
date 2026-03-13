@@ -5305,6 +5305,10 @@ th {
   font-weight: 600;
 }
 
+.replay-time-ago {
+  color: var(--color-lamp-yellow, #ca8a04);
+}
+
 /** Days remaining until option expiry (Positions page) */
 .expiry-days-remaining {
   color: var(--color-warning, #eab308);

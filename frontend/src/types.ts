@@ -264,6 +264,8 @@ export interface Execution {
   paired_execution_ids?: number[]
   /** Trade date (Flex tradeDate / execution date), YYYY-MM-DD. */
   trade_date?: string | null
+  /** Row created_at (Unix seconds); use for Time column when exec_time is updated over time. */
+  created_at?: number | null
 }
 
 /** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */

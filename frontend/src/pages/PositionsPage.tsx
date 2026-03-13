@@ -4,8 +4,9 @@ import { deleteExecution, fetchQuotes, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   daysUntilExpiry,
+  fmtDate,
+  fmtDaysAgo,
   fmtExpiry,
-  fmtTsShort,
   fmtUsd,
   getContractLabelParts,
 } from '../utils/format'
@@ -281,7 +282,7 @@ export function PositionsPage({
     return unique
   }, [status?.accounts])
 
-  /** Pool=On Details: (account_id, contract_key) -> latest execution with id; only show Actions when this position has a matching account_execution. */
+  /** Pool=On Details: match account_executions by (account_id, contract_key); keep latest by exec_time. Used for row Actions (Edit/Delete). TIME column uses backend position_exec_time. */
   const livePositionExecutionMap = useMemo(() => {
     const map = new Map<string, Execution>()
     const opt = (executions || []).filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
@@ -465,8 +466,8 @@ export function PositionsPage({
                           <th rowSpan={2} title="Underlying last price (same as Watchlist Last); (Last − Strike) / Last %">Last</th>
                           <th colSpan={3}>BUY</th>
                           <th colSpan={3}>SELL</th>
-                          <th rowSpan={2} title="Latest time from Details (execution or position update)">Time</th>
-                          <th rowSpan={2}>Unrealized PnL</th>
+                          <th rowSpan={2} title="Same as Detail Time (position_exec_time or trade time); latest if multiple.">Time</th>
+                          <th rowSpan={2}>UN PNL</th>
                           <th rowSpan={2}>Account</th>
                         </tr>
                         <tr>
@@ -550,25 +551,27 @@ export function PositionsPage({
                               <td><span className="replay-premium">{fmtUsd(group.sell_premium)}</span></td>
                               <td>
                                 {(() => {
-                                  // Same source as Details Time column: latest among position/execution times
+                                  // Time: date only + (xd ago) in yellow; same source as Detail
+                                  let ts: number | null = null
                                   if (group.kind === 'live') {
-                                    const positions = group.positions ?? []
-                                    let latestTs: number | null = null
-                                    for (const position of positions) {
-                                      const posTs = position.exec_time != null ? Number(position.exec_time) : (position.updated_at != null ? Number(position.updated_at) : null)
-                                      const exec = livePositionExecutionMap.get(`${(position.account_id ?? '').trim()}|${group.contract_key}`)
-                                      const execTs = exec?.time != null ? Number(exec.time) : null
-                                      const candidate = posTs != null && execTs != null ? Math.max(posTs, execTs) : posTs ?? execTs
-                                      if (candidate != null && Number.isFinite(candidate) && (latestTs == null || candidate > latestTs)) latestTs = candidate
-                                    }
-                                    return latestTs != null ? fmtTsShort(latestTs) : '—'
+                                    const times = (group.positions ?? [])
+                                      .map(p => p.exec_time != null ? Number(p.exec_time) : null)
+                                      .filter((t): t is number => t != null && Number.isFinite(t))
+                                    ts = times.length > 0 ? Math.max(...times) : null
+                                  } else if (group.kind === 'offtrack') {
+                                    const times = (group.trades ?? [])
+                                      .map(ex => ex.time != null ? Number(ex.time) : (ex.created_at != null ? Number(ex.created_at) : null))
+                                      .filter((t): t is number => t != null && Number.isFinite(t))
+                                    ts = times.length > 0 ? Math.max(...times) : null
                                   }
-                                  if (group.kind === 'offtrack') {
-                                    const times = (group.trades ?? []).map(ex => ex.time).filter((t): t is number => t != null && Number.isFinite(t))
-                                    if (times.length === 0) return '—'
-                                    return fmtTsShort(Math.max(...times))
-                                  }
-                                  return '—'
+                                  if (ts == null) return '—'
+                                  const ago = fmtDaysAgo(ts)
+                                  return (
+                                    <>
+                                      {fmtDate(ts)}
+                                      {ago ? <span className="replay-time-ago"> ({ago})</span> : null}
+                                    </>
+                                  )
                                 })()}
                               </td>
                               <td>
@@ -657,7 +660,7 @@ export function PositionsPage({
                             <th>Expiry</th>
                             <th>STRIKE</th>
                             <th title="Underlying last; (Last − Strike) / Last %">Last</th>
-                            <th>Time</th>
+                            <th title="Latest execution time (position_exec_time); local timezone.">Time</th>
                             <th>Side</th>
                             <th>Qty</th>
                             <th>Price</th>
@@ -732,13 +735,15 @@ export function PositionsPage({
                                         })()}
                                       </td>
                                       <td>{(() => {
-                                        // Prefer trade_date (from latest execution), then exec_time, then updated_at
-                                        const tradeDate = position.trade_date ?? null
-                                        if (tradeDate && tradeDate.trim()) {
-                                          return tradeDate.trim().slice(0, 10)
-                                        }
-                                        const ts = position.exec_time != null ? Number(position.exec_time) : (position.updated_at != null ? Number(position.updated_at) : null)
-                                        return ts != null && Number.isFinite(ts) ? fmtTsShort(ts) : '—'
+                                        const ts = position.exec_time != null ? Number(position.exec_time) : null
+                                        if (ts == null || !Number.isFinite(ts)) return '—'
+                                        const ago = fmtDaysAgo(ts)
+                                        return (
+                                          <>
+                                            {fmtDate(ts)}
+                                            {ago ? <span className="replay-time-ago"> ({ago})</span> : null}
+                                          </>
+                                        )
                                       })()}</td>
                                       <td>{qty > 0 ? 'Buy' : qty < 0 ? 'Sell' : '—'}</td>
                                       <td>{Number.isFinite(qty) ? Math.abs(qty) : '—'}</td>
@@ -838,7 +843,17 @@ export function PositionsPage({
                                           )
                                         })()}
                                       </td>
-                                      <td>{ex.time != null ? fmtTsShort(ex.time) : '—'}</td>
+                                      <td>{(() => {
+                                        const t = ex.time != null ? Number(ex.time) : (ex.created_at != null ? Number(ex.created_at) : null)
+                                        if (t == null || !Number.isFinite(t)) return '—'
+                                        const ago = fmtDaysAgo(t)
+                                        return (
+                                          <>
+                                            {fmtDate(t)}
+                                            {ago ? <span className="replay-time-ago"> ({ago})</span> : null}
+                                          </>
+                                        )
+                                      })()}</td>
                                       <td>{sideLabel}</td>
                                       <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
                                       <td>{fmtUsd(ex.price)}</td>
@@ -914,7 +929,7 @@ export function PositionsPage({
                             <th>Qty</th>
                             <th>Avg Cost</th>
                             <th>Mark</th>
-                            <th>Unrealized PnL</th>
+                            <th>UN PNL</th>
                           </tr>
                         </thead>
                         <tbody>

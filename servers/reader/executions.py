@@ -16,9 +16,11 @@ from servers.reader.accounts_helpers import (
 
 logger = logging.getLogger(__name__)
 
-# Exec_time to UTC epoch for comparison with API since_ts/until_ts (Unix seconds = UTC).
-_EXEC_EPOCH_E = "extract(epoch from (e.exec_time AT TIME ZONE 'America/Chicago'))"
-_EXEC_EPOCH = "extract(epoch from (exec_time AT TIME ZONE 'America/Chicago'))"
+# Exec_time as UTC epoch (Unix seconds) for API and frontend display; timestamptz stores UTC.
+_EXEC_EPOCH_E = "extract(epoch from e.exec_time)"
+_EXEC_EPOCH = "extract(epoch from exec_time)"
+_CREATED_AT_E = "extract(epoch from e.created_at) AS created_at"
+_CREATED_AT = "extract(epoch from created_at) AS created_at"
 
 # Normalize quantity so Sell = negative across sources. tws_client already stores Sell as negative;
 # other sources (e.g. flex) store positive for Sell → negate in query for consistent display/aggregation.
@@ -76,7 +78,7 @@ def get_executions(
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
-                           e.trade_date, e.raw_extra
+                           e.trade_date, e.raw_extra, {_CREATED_AT_E}
                     FROM account_executions e
                     LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
                     {where}
@@ -94,7 +96,7 @@ def get_executions(
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                    c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
-                                   e.trade_date, e.raw_extra
+                                   e.trade_date, e.raw_extra, {_CREATED_AT_E}
                             FROM account_executions e
                             LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id
                             {where}
@@ -111,7 +113,7 @@ def get_executions(
                                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                            NULL::double precision AS realized_pnl, e.contract_key,
                                            NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date,
-                                           e.trade_date, e.raw_extra
+                                           e.trade_date, e.raw_extra, {_CREATED_AT_E}
                                     FROM account_executions e
                                     {where}
                             ORDER BY e.trade_date DESC NULLS LAST, e.exec_time DESC NULLS LAST{limit_clause}
@@ -137,8 +139,8 @@ def get_executions_freshness(conn: Any) -> List[Dict[str, Any]]:
                 SELECT
                     account_id,
                     source,
-                    extract(epoch from (max(exec_time) AT TIME ZONE 'America/Chicago')) AS latest_exec_ts,
-                    extract(epoch from (now() - (max(exec_time) AT TIME ZONE 'America/Chicago'))) / 86400.0 AS days_since_latest
+                    extract(epoch from max(exec_time)) AS latest_exec_ts,
+                    extract(epoch from (now() - max(exec_time))) / 86400.0 AS days_since_latest
                 FROM account_executions
                 WHERE exec_time IS NOT NULL
                 GROUP BY account_id, source
@@ -194,7 +196,7 @@ def get_executions_by_contract_keys(
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
-                           e.trade_date, e.raw_extra
+                           e.trade_date, e.raw_extra, {_CREATED_AT_E}
                     FROM account_executions e
                     LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
                     WHERE {where}
@@ -215,7 +217,7 @@ def get_executions_by_contract_keys(
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                    c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
-                                   e.trade_date, e.raw_extra
+                                   e.trade_date, e.raw_extra, {_CREATED_AT_E}
                             FROM account_executions e
                             LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id
                             WHERE {where}
@@ -234,7 +236,7 @@ def get_executions_by_contract_keys(
                                    expiry, strike, option_right, exchange, order_id, cum_qty,
                                    NULL::double precision AS realized_pnl, contract_key,
                                    NULL::text AS currency, NULL::double precision AS yield_, NULL::integer AS yield_redemption_date,
-                                   trade_date, raw_extra
+                                   trade_date, raw_extra, {_CREATED_AT}
                             FROM account_executions
                             WHERE (symbol, expiry, COALESCE(strike::text,''), account_id) IN ({placeholders})
                               AND upper(trim(COALESCE(sec_type,''))) = 'OPT'
@@ -366,6 +368,7 @@ all_legs AS (
          {_COMM_NORM_E}, e.source,
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
          c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra,
+         {_CREATED_AT_E},
          (e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date) AS in_selected_day,
          upper(trim(COALESCE(e.side,''))) AS side_norm
   FROM account_executions e
@@ -408,6 +411,7 @@ all_legs AS (
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
          NULL::double precision AS realized_pnl, e.contract_key, NULL::text AS currency,
          NULL::double precision AS yield_, NULL::integer AS yield_redemption_date, e.raw_extra,
+         {_CREATED_AT_E},
          (e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date) AS in_selected_day,
          upper(trim(COALESCE(e.side,''))) AS side_norm
   FROM account_executions e

@@ -65,12 +65,28 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ap.updated_at AS position_updated_at,
                         (SELECT e.exec_time
                          FROM account_executions e
-                         WHERE e.account_id = ap.account_id AND e.contract_key = ap.contract_key
+                         WHERE e.account_id = ap.account_id
+                           AND (
+                             e.contract_key = ap.contract_key
+                             OR (
+                               upper(trim(COALESCE(ap.sec_type,''))) = 'OPT'
+                               AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
+                               AND substring(e.contract_key from position('|' in e.contract_key) + 1) = substring(ap.contract_key from position('|' in ap.contract_key) + 1)
+                             )
+                           )
                          ORDER BY e.exec_time DESC NULLS LAST
                          LIMIT 1) AS position_exec_time,
                         (SELECT e.trade_date
                          FROM account_executions e
-                         WHERE e.account_id = ap.account_id AND e.contract_key = ap.contract_key
+                         WHERE e.account_id = ap.account_id
+                           AND (
+                             e.contract_key = ap.contract_key
+                             OR (
+                               upper(trim(COALESCE(ap.sec_type,''))) = 'OPT'
+                               AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
+                               AND substring(e.contract_key from position('|' in e.contract_key) + 1) = substring(ap.contract_key from position('|' in ap.contract_key) + 1)
+                             )
+                           )
                          ORDER BY e.exec_time DESC NULLS LAST
                          LIMIT 1) AS position_trade_date,
                         ap.expiry,

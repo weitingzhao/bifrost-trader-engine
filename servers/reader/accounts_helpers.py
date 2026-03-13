@@ -420,6 +420,11 @@ def _rows_to_executions(rows: Any, cur: Any) -> List[Dict[str, Any]]:
                 d["time"] = float(d["time"])
             except (TypeError, ValueError):
                 pass
+        if "created_at" in d and d["created_at"] is not None:
+            try:
+                d["created_at"] = float(d["created_at"])
+            except (TypeError, ValueError):
+                pass
         _fill_contract_key_for_opt(d)
         out.append(d)
     return out

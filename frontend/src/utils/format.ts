@@ -44,6 +44,14 @@ export function fmtSince(ts: number | null | undefined): string {
   return `${Math.floor(elapsed / 86400)}d`
 }
 
+/** Days ago from ts (Unix sec): e.g. "0d ago", "1d ago". */
+export function fmtDaysAgo(ts: number | null | undefined): string {
+  if (ts == null || !Number.isFinite(ts)) return ''
+  const nowSec = Date.now() / 1000
+  const days = Math.max(0, Math.floor((nowSec - ts) / 86400))
+  return `${days}d ago`
+}
+
 /** USD with 0 decimals; placeholder '--' (e.g. for compact nav). */
 export function fmtUsdCompact(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '--'
