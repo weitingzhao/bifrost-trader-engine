@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusResponse, WatchlistItem } from '../types'
-import { fetchWatchlist, fetchOptionExpirations, fetchOptionSnapshot, postWatchlist } from '../api'
+import { fetchWatchlist, fetchOptionExpirations, fetchOptionSnapshot, fetchBarsBenchmark, postWatchlist } from '../api'
 import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
@@ -60,6 +60,38 @@ function useWatchlistStkSymbols(): string[] {
   }, [items])
 }
 
+/** Parse expiration string (YYYYMMDD or YYYY-MM-DD) and return days from today. Returns "x day" / "x days". */
+function expirationDaysFromToday(expiration: string): string {
+  const s = (expiration || '').trim()
+  if (!s) return '—'
+  let y = 0
+  let m = 0
+  let d = 0
+  if (/^\d{8}$/.test(s)) {
+    y = parseInt(s.slice(0, 4), 10)
+    m = parseInt(s.slice(4, 6), 10) - 1
+    d = parseInt(s.slice(6, 8), 10)
+  } else {
+    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (match) {
+      y = parseInt(match[1], 10)
+      m = parseInt(match[2], 10) - 1
+      d = parseInt(match[3], 10)
+    } else {
+      return '—'
+    }
+  }
+  const expDate = new Date(y, m, d)
+  if (Number.isNaN(expDate.getTime())) return '—'
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  expDate.setHours(0, 0, 0, 0)
+  const diffMs = expDate.getTime() - today.getTime()
+  const days = Math.round(diffMs / (24 * 60 * 60 * 1000))
+  if (days < 0) return '—'
+  return days === 1 ? '1 day' : `${days} days`
+}
+
 export function OptionDiscoveryPage({
   status: _status,
   onGoToScreener,
@@ -82,6 +114,8 @@ export function OptionDiscoveryPage({
   const [stdDevOption, setStdDevOption] = useState<StdDevOption>(2)
   const [customStdDev, setCustomStdDev] = useState<string>('2')
   const [multiSelectStrikes, setMultiSelectStrikes] = useState<number[]>([])
+  const [symbolDailyPrices, setSymbolDailyPrices] = useState<Record<string, number | null>>({})
+  const otmCallWrapRef = useRef<HTMLDivElement>(null)
 
   const stdDevValue = useMemo(() => {
     if (stdDevOption === 'custom') {
@@ -103,8 +137,36 @@ export function OptionDiscoveryPage({
   }, [multiSelectStrikes, computedStrikes])
 
   useEffect(() => {
+    const el = otmCallWrapRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [computedStrikes, selectedSymbol])
+
+  useEffect(() => {
     if (stkSymbols.length > 0 && !selectedSymbol.trim()) setSelectedSymbol(stkSymbols[0])
   }, [stkSymbols.join(','), selectedSymbol])
+
+  useEffect(() => {
+    if (stkSymbols.length === 0) {
+      setSymbolDailyPrices({})
+      return
+    }
+    let cancelled = false
+    fetchBarsBenchmark(stkSymbols)
+      .then(({ benchmarks }) => {
+        if (cancelled) return
+        const next: Record<string, number | null> = {}
+        for (const sym of stkSymbols) {
+          const b = benchmarks[sym]
+          const close = b?.close != null && Number.isFinite(b.close) ? b.close : null
+          next[sym] = close ?? null
+        }
+        setSymbolDailyPrices(next)
+      })
+      .catch(() => {
+        if (!cancelled) setSymbolDailyPrices({})
+      })
+    return () => { cancelled = true }
+  }, [stkSymbols.join(',')])
 
   const loadExpirations = useCallback(async (symbol: string) => {
     const s = (symbol || '').trim()
@@ -139,12 +201,16 @@ export function OptionDiscoveryPage({
   }, [])
 
   useEffect(() => {
-    if (selectedSymbol.trim()) loadExpirations(selectedSymbol)
-    else {
+    setMultiSelectStrikes([])
+    setStrikes([])
+    setStockDayLastPrice(null)
+    if (selectedSymbol.trim()) {
       setExpirations([])
-      setStrikes([])
-      setStockDayLastPrice(null)
-      setMultiSelectStrikes([])
+      setSelectedExpiration('')
+      setExpirationsError(null)
+      loadExpirations(selectedSymbol)
+    } else {
+      setExpirations([])
       setExpirationsError(null)
       setSelectedExpiration('')
     }
@@ -218,185 +284,331 @@ export function OptionDiscoveryPage({
         <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK) and expiration; expirations and strikes from IB. Next: option quotes and IV by expiration." />
       </h2>
 
-      <section className="replay-section" aria-labelledby="option-discovery-symbol-head">
-        <h3 id="option-discovery-symbol-head">Underlying</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-          <label htmlFor="option-discovery-symbol" className="replay-bar-symbol-label">
-            Symbol
-          </label>
-          <select
-            id="option-discovery-symbol"
-            value={selectedSymbol}
-            onChange={e => setSelectedSymbol(e.target.value)}
-            aria-label="Select underlying symbol"
-            style={{ minWidth: '8rem' }}
-          >
-            <option value="">—</option>
-            {stkSymbols.map(sym => (
-              <option key={sym} value={sym}>{sym}</option>
-            ))}
-          </select>
-          {selectedSymbol.trim() && (
-            <span className="section-hint" role="status">
-              {stockDayLastPrice != null
-                ? `Current price: ${fmtUsd(stockDayLastPrice)} (daily)`
-                : 'Current price: — (no daily data)'}
-            </span>
-          )}
-          {stkSymbols.length === 0 && (
-            <span className="section-hint">Add symbols in Watchlist (STK) to see options.</span>
-          )}
-        </div>
-      </section>
-
-      <section className="replay-section" aria-labelledby="option-discovery-expiry-head">
-        <h3 id="option-discovery-expiry-head">Expiration</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-          {expirationsLoading ? (
-            <span className="section-hint">Loading…</span>
-          ) : expirations.length === 0 ? (
-            <>
-              <span className="section-hint">
-                {selectedSymbol ? 'No expirations.' : 'Select a symbol first.'}
-              </span>
-              {expirationsError && (
-                <span className="section-hint" style={{ color: 'var(--color-danger, #c00)' }} role="alert">
-                  {expirationsError}
-                </span>
-              )}
-            </>
-          ) : (
-            <>
-              <select
-                id="option-discovery-expiry"
-                value={selectedExpiration}
-                onChange={e => setSelectedExpiration(e.target.value)}
-                aria-label="Select expiration"
-                style={{ minWidth: '10rem' }}
-              >
-                <option value="">—</option>
-                {expirations.map(exp => (
-                  <option key={exp} value={exp}>{exp}</option>
-                ))}
-              </select>
-              {expirationsError && (
-                <span className="section-hint" style={{ color: 'var(--color-danger, #c00)' }} role="alert">
-                  {expirationsError}
-                </span>
-              )}
-            </>
-          )}
-        </div>
-      </section>
-
-      <section className="replay-section" aria-labelledby="option-discovery-strikes-head">
-        <h3 id="option-discovery-strikes-head">Strikes</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem 1.5rem', marginBottom: '0.75rem' }}>
-          <label htmlFor="option-discovery-strike-count" className="replay-bar-symbol-label">
-            Count
-          </label>
-          <select
-            id="option-discovery-strike-count"
-            value={String(strikeCountOption)}
-            onChange={e => setStrikeCountOption(e.target.value === 'all' ? 'all' : (Number(e.target.value) as StrikeCountOption))}
-            aria-label="Strike count (4, 6, 8, 19, 30, or all)"
-            style={{ minWidth: '5rem' }}
-          >
-            {STRIKE_COUNT_OPTIONS.map(c => (
-              <option key={String(c)} value={String(c)}>{c}</option>
-            ))}
-          </select>
-          <label htmlFor="option-discovery-std-dev" className="replay-bar-symbol-label" style={{ marginLeft: '0.5rem' }}>
-            Std deviations
-          </label>
-          <select
-            id="option-discovery-std-dev"
-            value={String(stdDevOption)}
-            onChange={e => setStdDevOption(e.target.value === 'custom' ? 'custom' : (Number(e.target.value) as StdDevOption))}
-            aria-label="Standard deviations range"
-            style={{ minWidth: '5rem' }}
-          >
-            {STD_DEV_OPTIONS.map(d => (
-              <option key={String(d)} value={String(d)}>{d}</option>
-            ))}
-          </select>
-          {stdDevOption === 'custom' && (
-            <input
-              type="number"
-              min={0.1}
-              step={0.1}
-              value={customStdDev}
-              onChange={e => setCustomStdDev(e.target.value)}
-              aria-label="Custom standard deviation value"
-              style={{ width: '4rem' }}
-            />
-          )}
-        </div>
-        <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
-          {computedStrikes.length > 0
-            ? `Using ${effectiveStrikes.length} strike(s)${multiSelectStrikes.length > 0 ? ' (custom selection)' : ' (preset: half above / half below current price)'}. `
-            : strikes.length > 0
-              ? 'Select symbol with daily data for strike range, or adjust count/std dev.'
-              : 'Select symbol and expiration to see strikes.'}
-          {computedStrikes.length > 0 && (
-            <> Range: {computedStrikes.length} strike(s) around current price.</>
-          )}
-        </p>
-        {computedStrikes.length > 0 && (
-          <div style={{ marginTop: '0.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-              <span className="section-hint">Multi-select (½ count below / ½ count above current price):</span>
-              <button
-                type="button"
-                className="button button-secondary button-sm"
-                onClick={() => setMultiSelectStrikes([...computedStrikes])}
-                aria-label="Select all strikes in range"
-              >
-                Select all
-              </button>
-              <button
-                type="button"
-                className="button button-secondary button-sm"
-                onClick={() => setMultiSelectStrikes([])}
-                aria-label="Clear selection (use preset)"
-              >
-                Clear
-              </button>
-            </div>
-            <div
-              style={{
-                maxHeight: '10rem',
-                overflowY: 'auto',
-                border: '1px solid var(--color-border, #ccc)',
-                borderRadius: '4px',
-                padding: '0.35rem',
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '0.25rem',
-              }}
-              role="group"
-              aria-label="Strike multi-select"
-            >
-              {computedStrikes.map(s => {
-                const selected = multiSelectStrikes.includes(s)
-                return (
-                  <label key={s} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => {
-                        if (selected) setMultiSelectStrikes(prev => prev.filter(x => x !== s))
-                        else setMultiSelectStrikes(prev => [...prev, s].sort((a, b) => a - b))
-                      }}
-                      aria-label={`Strike ${s}`}
-                    />
-                    <span style={{ marginLeft: '0.25rem' }}>{s.toFixed(1)}</span>
-                  </label>
-                )
-              })}
-            </div>
+      <section className="replay-section option-discovery-conditions-section" aria-label="Option chain selection conditions">
+        <h3 id="option-discovery-conditions-head">Option chain selection</h3>
+        <div className="option-discovery-top-row">
+        <section className="replay-section option-discovery-underlying" aria-label="Underlying">
+          <div className="option-discovery-underlying-body">
+            {stkSymbols.length === 0 ? (
+              <div className="option-discovery-list-wrap option-discovery-list-empty">
+                Add STK in Watchlist.
+              </div>
+            ) : (
+              <div className="option-discovery-list-with-header">
+                <div className="option-discovery-list-header">Underlying</div>
+                <div className="option-discovery-list-wrap">
+                  <table className="option-discovery-list-table" role="grid" aria-label="Underlying symbol list">
+                    <thead>
+                      <tr>
+                        <th scope="col">Symbol</th>
+                        <th scope="col">Price (daily)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stkSymbols.map(sym => (
+                        <tr
+                          key={sym}
+                          role="button"
+                          tabIndex={0}
+                          className={selectedSymbol === sym ? 'option-discovery-list-row-selected' : ''}
+                          onClick={() => setSelectedSymbol(sym)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSymbol(sym) } }}
+                          aria-label={`Select ${sym}`}
+                          aria-pressed={selectedSymbol === sym}
+                        >
+                          <td>{sym}</td>
+                          <td>
+                            {symbolDailyPrices[sym] != null ? fmtUsd(symbolDailyPrices[sym]!) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        </section>
+
+        <section className="replay-section option-discovery-expiration" aria-label="Expiration">
+          <div className="option-discovery-expiration-body">
+            {expirationsLoading ? (
+              <div className="option-discovery-list-wrap option-discovery-list-empty">Loading…</div>
+            ) : expirations.length === 0 ? (
+              <div className="option-discovery-list-wrap option-discovery-list-empty">
+                {selectedSymbol ? 'No expirations.' : 'Select symbol.'}
+                {expirationsError && (
+                  <span style={{ color: 'var(--color-danger)', display: 'block', marginTop: '0.25rem' }} role="alert">{expirationsError}</span>
+                )}
+              </div>
+            ) : (
+              <div className="option-discovery-list-with-header">
+                <div className="option-discovery-list-header" aria-label="Expiration">Expiration</div>
+                <div className="option-discovery-list-wrap">
+                  <table className="option-discovery-list-table" role="grid" aria-label="Expiration list">
+                    <thead>
+                      <tr>
+                        <th scope="col" className="option-discovery-expiration-col-date" />
+                        <th scope="col" className="option-discovery-expiration-col-days">
+                          Days
+                          {selectedExpiration && (
+                            <span className="option-discovery-expiration-days-header"> · {expirationDaysFromToday(selectedExpiration)}</span>
+                          )}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expirations.map(exp => (
+                        <tr
+                          key={exp}
+                          role="button"
+                          tabIndex={0}
+                          className={selectedExpiration === exp ? 'option-discovery-list-row-selected' : ''}
+                          onClick={() => setSelectedExpiration(exp)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedExpiration(exp) } }}
+                          aria-label={`Select ${exp}, ${expirationDaysFromToday(exp)}`}
+                          aria-pressed={selectedExpiration === exp}
+                        >
+                          <td className="option-discovery-expiration-col-date">{exp}</td>
+                          <td className="option-discovery-expiration-days-cell">{expirationDaysFromToday(exp)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="replay-section option-discovery-strikes" aria-label="Strikes">
+          <div className="option-discovery-strikes-content" style={{ flex: 1, minWidth: 0 }}>
+        {computedStrikes.length > 0 && (() => {
+          const spot = stockDayLastPrice ?? undefined
+          const below = spot != null ? computedStrikes.filter(s => s < spot).sort((a, b) => b - a) : []
+          const at = spot != null ? computedStrikes.filter(s => s === spot) : []
+          const above = spot != null ? computedStrikes.filter(s => s > spot).sort((a, b) => a - b) : []
+          const aboveReversed = [...above].sort((a, b) => b - a)
+          const hasZones = below.length > 0 || at.length > 0 || above.length > 0
+          return (
+            <div className="option-discovery-list-with-header option-discovery-strikes-with-header">
+              <div className="strike-ladder-layout">
+              <div className="strike-ladder-col strike-ladder-col-range">
+                <div className="strike-ladder-col-header">Strikes Range</div>
+                <div className="strike-ladder-controls">
+                <div className="strike-ladder-controls-row">
+                  <label htmlFor="option-discovery-strike-count">Count</label>
+                  <select
+                    id="option-discovery-strike-count"
+                    value={String(strikeCountOption)}
+                    onChange={e => setStrikeCountOption(e.target.value === 'all' ? 'all' : (Number(e.target.value) as StrikeCountOption))}
+                    aria-label="Strike count"
+                  >
+                    {STRIKE_COUNT_OPTIONS.map(c => (
+                      <option key={String(c)} value={String(c)}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="strike-ladder-controls-row">
+                  <label htmlFor="option-discovery-std-dev">Std dev</label>
+                  <select
+                    id="option-discovery-std-dev"
+                    value={String(stdDevOption)}
+                    onChange={e => setStdDevOption(e.target.value === 'custom' ? 'custom' : (Number(e.target.value) as StdDevOption))}
+                    aria-label="Standard deviations"
+                  >
+                    {STD_DEV_OPTIONS.map(d => (
+                      <option key={String(d)} value={String(d)}>{d}</option>
+                    ))}
+                  </select>
+                  {stdDevOption === 'custom' && (
+                    <input
+                      type="number"
+                      min={0.1}
+                      step={0.1}
+                      value={customStdDev}
+                      onChange={e => setCustomStdDev(e.target.value)}
+                      aria-label="Custom std dev"
+                    />
+                  )}
+                </div>
+                {spot != null && (below.length > 0 || above.length > 0 || at.length > 0) && (
+                  <div className="strike-ladder-controls-price">
+                    Current price: {fmtUsd(spot)}
+                  </div>
+                )}
+                <div className="strike-ladder-toolbar">
+                  <button
+                    type="button"
+                    className="button button-secondary button-sm"
+                    onClick={() => setMultiSelectStrikes([...computedStrikes])}
+                    aria-label="Select all"
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-sm"
+                    onClick={() => setMultiSelectStrikes([])}
+                    aria-label="Clear"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="strike-ladder-controls-summary">
+                  <div>{effectiveStrikes.length} selected{multiSelectStrikes.length > 0 ? ' (custom)' : ' (preset)'}</div>
+                  <div>{computedStrikes.length} in range</div>
+                </div>
+              </div>
+              </div>
+              <div className="strike-ladder-two-cols">
+                <div className="strike-ladder-col">
+                  <div className="strike-ladder-col-header strike-ladder-col-header-call">
+                    <label className="strike-ladder-col-header-check">
+                      <input
+                        type="checkbox"
+                        checked={aboveReversed.length + at.length > 0 && [...aboveReversed, ...at].every(s => multiSelectStrikes.includes(s))}
+                        onChange={e => {
+                          if (e.target.checked) setMultiSelectStrikes(prev => [...new Set([...prev, ...aboveReversed, ...at])].sort((a, b) => a - b))
+                          else setMultiSelectStrikes(prev => prev.filter(x => !aboveReversed.includes(x) && !at.includes(x)))
+                        }}
+                        aria-label="Check all OTM Call"
+                      />
+                      <span>OTM Call</span>
+                    </label>
+                  </div>
+                  <div className="strike-ladder-wrap" ref={otmCallWrapRef}>
+                    <table className="strike-ladder-table" role="grid" aria-label="OTM Call strikes">
+                      <thead>
+                        <tr>
+                          <th scope="col">Select</th>
+                          <th scope="col">Strike</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {aboveReversed.length > 0 && aboveReversed.map(s => (
+                          <tr key={s} className="strike-ladder-row-otm-call">
+                            <td className="strike-ladder-cell-check">
+                              <input
+                                type="checkbox"
+                                checked={multiSelectStrikes.includes(s)}
+                                onChange={() => {
+                                  if (multiSelectStrikes.includes(s)) setMultiSelectStrikes(prev => prev.filter(x => x !== s))
+                                  else setMultiSelectStrikes(prev => [...prev, s].sort((a, b) => a - b))
+                                }}
+                                aria-label={`Select strike ${s}`}
+                              />
+                            </td>
+                            <td className="strike-ladder-cell-strike">{s.toFixed(1)}</td>
+                          </tr>
+                        ))}
+                        {at.length > 0 && at.map(s => (
+                          <tr key={s} className="strike-ladder-row-atm">
+                            <td className="strike-ladder-cell-check">
+                              <input
+                                type="checkbox"
+                                checked={multiSelectStrikes.includes(s)}
+                                onChange={() => {
+                                  if (multiSelectStrikes.includes(s)) setMultiSelectStrikes(prev => prev.filter(x => x !== s))
+                                  else setMultiSelectStrikes(prev => [...prev, s].sort((a, b) => a - b))
+                                }}
+                                aria-label={`Select strike ${s}`}
+                              />
+                            </td>
+                            <td className="strike-ladder-cell-strike">{s.toFixed(1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="strike-ladder-col">
+                  <div className="strike-ladder-col-header strike-ladder-col-header-put">
+                    <label className="strike-ladder-col-header-check">
+                      <input
+                        type="checkbox"
+                        checked={below.length > 0 && below.every(s => multiSelectStrikes.includes(s))}
+                        onChange={e => {
+                          if (e.target.checked) setMultiSelectStrikes(prev => [...new Set([...prev, ...below])].sort((a, b) => a - b))
+                          else setMultiSelectStrikes(prev => prev.filter(x => !below.includes(x)))
+                        }}
+                        aria-label="Check all OTM Put"
+                      />
+                      <span>OTM Put</span>
+                    </label>
+                  </div>
+                  <div className="strike-ladder-wrap">
+                    <table className="strike-ladder-table" role="grid" aria-label="OTM Put strikes">
+                      <thead>
+                        <tr>
+                          <th scope="col">Select</th>
+                          <th scope="col">Strike</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {below.length > 0 && below.map(s => (
+                          <tr key={s} className="strike-ladder-row-otm-put">
+                            <td className="strike-ladder-cell-check">
+                              <input
+                                type="checkbox"
+                                checked={multiSelectStrikes.includes(s)}
+                                onChange={() => {
+                                  if (multiSelectStrikes.includes(s)) setMultiSelectStrikes(prev => prev.filter(x => x !== s))
+                                  else setMultiSelectStrikes(prev => [...prev, s].sort((a, b) => a - b))
+                                }}
+                                aria-label={`Select strike ${s}`}
+                              />
+                            </td>
+                            <td className="strike-ladder-cell-strike">{s.toFixed(1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              </div>
+              {!hasZones && (
+                <div className="strike-ladder-wrap" style={{ marginTop: '0.25rem' }}>
+                  <table className="strike-ladder-table" role="grid" aria-label="Strikes">
+                    <thead>
+                      <tr>
+                        <th scope="col">Select</th>
+                        <th scope="col">Strike</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...computedStrikes].sort((a, b) => a - b).map(s => (
+                        <tr key={s}>
+                          <td className="strike-ladder-cell-check">
+                            <input
+                              type="checkbox"
+                              checked={multiSelectStrikes.includes(s)}
+                              onChange={() => {
+                                if (multiSelectStrikes.includes(s)) setMultiSelectStrikes(prev => prev.filter(x => x !== s))
+                                else setMultiSelectStrikes(prev => [...prev, s].sort((a, b) => a - b))
+                              }}
+                              aria-label={`Select strike ${s}`}
+                            />
+                          </td>
+                          <td className="strike-ladder-cell-strike">{s.toFixed(1)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+        {computedStrikes.length === 0 && strikes.length > 0 ? (
+          <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol with daily data or adjust count/std dev.</p>
+        ) : computedStrikes.length === 0 ? (
+          <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol and expiration to see strikes.</p>
+        ) : null}
+          </div>
+        </section>
+        </div>
       </section>
 
       <section className="replay-section" aria-labelledby="option-discovery-table-head">

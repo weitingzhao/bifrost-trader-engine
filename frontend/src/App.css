@@ -3207,6 +3207,286 @@ th {
   font-weight: 600;
 }
 
+/* ---------- Option Discovery: Strike ladder (broker-style) ---------- */
+.strike-ladder-layout {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  margin-top: var(--space-1);
+}
+
+.strike-ladder-controls {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+}
+
+.strike-ladder-controls-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.strike-ladder-controls-row label {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.strike-ladder-controls-row select {
+  min-width: 4rem;
+}
+
+.strike-ladder-controls-row input[type="number"] {
+  width: 3.5rem;
+}
+
+/* Scrollbar: thin, theme-colored (all Option Discovery list/ladder areas) */
+.strike-ladder-wrap,
+.option-discovery-list-wrap {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.strike-ladder-wrap::-webkit-scrollbar,
+.option-discovery-list-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.strike-ladder-wrap::-webkit-scrollbar-track,
+.option-discovery-list-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.strike-ladder-wrap::-webkit-scrollbar-thumb,
+.option-discovery-list-wrap::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+
+.strike-ladder-wrap::-webkit-scrollbar-thumb:hover,
+.option-discovery-list-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
+}
+
+.strike-ladder-wrap {
+  flex: 1;
+  min-width: 0;
+  height: 14rem;
+  min-height: 14rem;
+  max-height: 14rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+}
+
+/* Two columns: OTM Put | OTM Call */
+.strike-ladder-two-cols {
+  display: flex;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.strike-ladder-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.strike-ladder-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: 0.25rem var(--space-2);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+}
+
+.strike-ladder-col-header-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  margin: 0;
+}
+
+.strike-ladder-col-header-check input[type="checkbox"] {
+  width: 0.9rem;
+  height: 0.9rem;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.strike-ladder-col-header-put {
+  color: var(--color-danger);
+}
+
+.strike-ladder-col-header-call {
+  color: var(--color-success);
+}
+
+.strike-ladder-col .strike-ladder-wrap {
+  border-radius: 0 0 8px 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.strike-ladder-col-range {
+  flex: 0 0 auto;
+  min-width: 10rem;
+}
+
+.strike-ladder-col-range .strike-ladder-controls {
+  border-radius: 0 0 8px 8px;
+  border-top: none;
+}
+
+.strike-ladder-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.strike-ladder-table thead th {
+  padding: 0.25rem var(--space-2);
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.strike-ladder-table thead th:first-child { width: 2.25rem; text-align: center; }
+.strike-ladder-table thead th:nth-child(2) { min-width: 4rem; }
+.strike-ladder-table thead th:nth-child(3) { min-width: 4.5rem; }
+
+.strike-ladder-table tbody td {
+  padding: 0.2rem var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.strike-ladder-table tbody tr {
+  transition: background var(--transition-fast);
+}
+
+.strike-ladder-table tbody tr:hover {
+  background: var(--color-accent-soft);
+}
+
+.strike-ladder-table tbody tr.strike-ladder-row-atm {
+  background: var(--color-accent-soft);
+}
+
+.strike-ladder-table tbody tr.strike-ladder-row-atm td {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.strike-ladder-table .strike-ladder-cell-check {
+  width: 2.5rem;
+  text-align: center;
+  padding-left: var(--space-1);
+}
+
+.strike-ladder-table .strike-ladder-cell-strike {
+  font-weight: 500;
+  color: var(--color-text-main);
+}
+
+.strike-ladder-table .strike-ladder-zone {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.strike-ladder-table .strike-ladder-zone-otm-put {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.strike-ladder-table .strike-ladder-zone-atm {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.strike-ladder-table .strike-ladder-zone-otm-call {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.strike-ladder-table .strike-ladder-zone-neutral {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+.strike-ladder-separator td {
+  padding: 0.2rem var(--space-2);
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.strike-ladder-controls-price {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  padding: 0.2rem 0;
+}
+
+.strike-ladder-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  padding: 0.25rem 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.strike-ladder-toolbar .button-sm {
+  padding: 0.2rem 0.5rem;
+}
+
+.strike-ladder-controls-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  padding-top: 0.15rem;
+}
+
 .data-coverage-status { margin-left: 0.35rem; font-size: 0.85em; }
 .data-coverage-actions-nowrap {
   white-space: nowrap;
@@ -3408,6 +3688,295 @@ th {
   font-size: var(--text-title);
   margin-bottom: var(--space-3);
   color: var(--color-text-main);
+}
+
+/* Option Discovery: conditions section — fixed height; list areas get explicit height so they scroll */
+.option-discovery-conditions-section {
+  height: 22rem;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.option-discovery-conditions-section h3 {
+  margin-bottom: var(--space-2);
+  flex-shrink: 0;
+}
+
+.option-discovery-conditions-section .option-discovery-top-row {
+  flex: 1;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* Option Discovery: one row; each box fills section height */
+.option-discovery-top-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  min-height: 20rem;
+}
+
+.option-discovery-top-row .replay-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.option-discovery-top-row .option-discovery-underlying {
+  flex-shrink: 0;
+  min-width: 12rem;
+}
+
+.option-discovery-top-row .option-discovery-underlying .option-discovery-underlying-body,
+.option-discovery-top-row .option-discovery-expiration > div {
+  margin-bottom: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.option-discovery-top-row .option-discovery-expiration {
+  flex-shrink: 0;
+  min-width: 15rem;
+}
+
+.option-discovery-top-row .option-discovery-strikes {
+  flex: 1;
+  min-width: 18rem;
+}
+
+.option-discovery-top-row .option-discovery-strikes .option-discovery-strikes-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each list/box fills available height in the row */
+.option-discovery-top-row .option-discovery-list-with-header {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* In conditions section: explicit height so list scroll works (flex height was not creating scroll) */
+.option-discovery-conditions-section .option-discovery-top-row .option-discovery-list-wrap {
+  height: 17rem;
+  min-height: 17rem;
+  max-height: 17rem;
+  flex: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.option-discovery-top-row .option-discovery-list-wrap {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.option-discovery-top-row .option-discovery-list-empty {
+  flex: 1;
+  min-height: 10rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Strikes ladder fills height */
+.option-discovery-top-row .option-discovery-strikes-with-header {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.option-discovery-top-row .strike-ladder-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* In conditions section: explicit height so strike ladder scroll works */
+.option-discovery-conditions-section .option-discovery-top-row .strike-ladder-wrap,
+.option-discovery-conditions-section .option-discovery-top-row .strike-ladder-col .strike-ladder-wrap {
+  height: 17rem;
+  min-height: 17rem;
+  max-height: 17rem;
+  flex: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.option-discovery-top-row .strike-ladder-col .strike-ladder-wrap {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.option-discovery-top-row .strike-ladder-wrap {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.option-discovery-underlying-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+.option-discovery-underlying-price {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+/* Option Discovery: Underlying & Expiration list (same style as Strikes) */
+.option-discovery-list-with-header {
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+}
+
+.option-discovery-list-header {
+  padding: 0.25rem var(--space-2);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+}
+
+/* Expiration list: xx days in table row and header, highlighted */
+.option-discovery-expiration-col-days {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.option-discovery-expiration-days-header {
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.option-discovery-expiration-col-days .option-discovery-expiration-days-header {
+  margin-left: 0.15rem;
+}
+
+.option-discovery-expiration-days-cell {
+  font-weight: 700;
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+.option-discovery-list-row-selected .option-discovery-expiration-days-cell {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.option-discovery-list-with-header .option-discovery-list-wrap {
+  border-radius: 0 0 8px 8px;
+}
+
+.option-discovery-strikes-with-header .strike-ladder-layout {
+  margin-top: 0;
+}
+
+.option-discovery-list-wrap {
+  height: 14rem;
+  min-height: 14rem;
+  max-height: 14rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+  min-width: 10rem;
+}
+
+.option-discovery-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.option-discovery-list-table thead th {
+  padding: 0.25rem var(--space-2);
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--color-border);
+}
+
+.option-discovery-list-table tbody td {
+  padding: 0.2rem var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.option-discovery-list-table tbody tr {
+  transition: background var(--transition-fast);
+  cursor: pointer;
+}
+
+.option-discovery-list-table tbody tr:hover {
+  background: var(--color-accent-soft);
+}
+
+.option-discovery-list-table tbody tr.option-discovery-list-row-selected {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.option-discovery-list-table tbody tr.option-discovery-list-row-selected td {
+  font-weight: 500;
+}
+
+.option-discovery-list-table td:nth-child(2) {
+  text-align: right;
+  min-width: 4rem;
+}
+
+.option-discovery-list-empty {
+  padding: var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  text-align: center;
 }
 
 /* Trade records section: prevent wide tables from pushing the section (Detail view / Accordion stays in view) */
