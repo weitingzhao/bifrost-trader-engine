@@ -5,6 +5,14 @@ export function fmtTs(ts: number | null | undefined): string {
   return new Date(ts * 1000).toLocaleString()
 }
 
+/** Short 24h time for tables (MM-DD HH:mm) to save horizontal space. */
+export function fmtTsShort(ts: number | null | undefined): string {
+  if (ts == null || !Number.isFinite(ts)) return '—'
+  const d = new Date(ts * 1000)
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export function fmtUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—'
   return new Intl.NumberFormat('en-US', {

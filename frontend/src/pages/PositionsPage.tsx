@@ -5,7 +5,7 @@ import { InfoTooltip } from '../components/InfoTooltip'
 import {
   daysUntilExpiry,
   fmtExpiry,
-  fmtTs,
+  fmtTsShort,
   fmtUsd,
   getContractLabelParts,
 } from '../utils/format'
@@ -465,6 +465,7 @@ export function PositionsPage({
                           <th rowSpan={2} title="Underlying last price (same as Watchlist Last); (Last − Strike) / Last %">Last</th>
                           <th colSpan={3}>BUY</th>
                           <th colSpan={3}>SELL</th>
+                          <th rowSpan={2} title="Latest time from Details (execution or position update)">Time</th>
                           <th rowSpan={2}>Unrealized PnL</th>
                           <th rowSpan={2}>Account</th>
                         </tr>
@@ -548,6 +549,29 @@ export function PositionsPage({
                               <td>{fmtUsd(group.sell_avg_price)}</td>
                               <td><span className="replay-premium">{fmtUsd(group.sell_premium)}</span></td>
                               <td>
+                                {(() => {
+                                  // Same source as Details Time column: latest among position/execution times
+                                  if (group.kind === 'live') {
+                                    const positions = group.positions ?? []
+                                    let latestTs: number | null = null
+                                    for (const position of positions) {
+                                      const posTs = position.exec_time != null ? Number(position.exec_time) : (position.updated_at != null ? Number(position.updated_at) : null)
+                                      const exec = livePositionExecutionMap.get(`${(position.account_id ?? '').trim()}|${group.contract_key}`)
+                                      const execTs = exec?.time != null ? Number(exec.time) : null
+                                      const candidate = posTs != null && execTs != null ? Math.max(posTs, execTs) : posTs ?? execTs
+                                      if (candidate != null && Number.isFinite(candidate) && (latestTs == null || candidate > latestTs)) latestTs = candidate
+                                    }
+                                    return latestTs != null ? fmtTsShort(latestTs) : '—'
+                                  }
+                                  if (group.kind === 'offtrack') {
+                                    const times = (group.trades ?? []).map(ex => ex.time).filter((t): t is number => t != null && Number.isFinite(t))
+                                    if (times.length === 0) return '—'
+                                    return fmtTsShort(Math.max(...times))
+                                  }
+                                  return '—'
+                                })()}
+                              </td>
+                              <td>
                                 <span className="replay-pnl-unrealized">
                                   {fmtUsd(group.unrealized_pnl ?? 0)}
                                 </span>
@@ -583,7 +607,7 @@ export function PositionsPage({
                       </tbody>
                       <tfoot>
                         <tr className="replay-opt-tfoot-total">
-                          <td colSpan={11} className="replay-opt-tfoot-label">Total</td>
+                          <td colSpan={12} className="replay-opt-tfoot-label">Total</td>
                           <td>
                             <span className="replay-pnl-unrealized">
                               {fmtUsd(openOptionGroups.reduce((acc, g) => acc + (g.unrealized_pnl ?? 0), 0))}
@@ -714,7 +738,7 @@ export function PositionsPage({
                                           return tradeDate.trim().slice(0, 10)
                                         }
                                         const ts = position.exec_time != null ? Number(position.exec_time) : (position.updated_at != null ? Number(position.updated_at) : null)
-                                        return ts != null && Number.isFinite(ts) ? fmtTs(ts) : '—'
+                                        return ts != null && Number.isFinite(ts) ? fmtTsShort(ts) : '—'
                                       })()}</td>
                                       <td>{qty > 0 ? 'Buy' : qty < 0 ? 'Sell' : '—'}</td>
                                       <td>{Number.isFinite(qty) ? Math.abs(qty) : '—'}</td>
@@ -814,7 +838,7 @@ export function PositionsPage({
                                           )
                                         })()}
                                       </td>
-                                      <td>{ex.time != null ? fmtTs(ex.time) : '—'}</td>
+                                      <td>{ex.time != null ? fmtTsShort(ex.time) : '—'}</td>
                                       <td>{sideLabel}</td>
                                       <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
                                       <td>{fmtUsd(ex.price)}</td>
