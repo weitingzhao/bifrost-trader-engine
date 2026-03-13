@@ -1,7 +1,5 @@
 """Research: Option Discovery and related endpoints (R-OD1)."""
 
-import json
-import traceback
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Query, Request
@@ -11,8 +9,6 @@ router = APIRouter(tags=["research"])
 MAX_OPTION_SNAPSHOT_CONTRACTS = 20
 MAX_OPTION_SNAPSHOT_CONTRACTS_EXTENDED = 60  # when frontend sends many strikes (e.g. 30)
 OPTION_SNAPSHOT_STRIKES_AROUND_ATM = 10  # number of strikes to each side of ATM (total 2*N+1 or capped)
-
-DEBUG_LOG_PATH = "/Users/vision-mac-trader/Desktop/stocks/bifrost-trader-engine/.cursor/debug-05a4d1.log"
 
 
 def _strikes_around_spot(spot: float, count: int = OPTION_SNAPSHOT_STRIKES_AROUND_ATM) -> List[float]:
@@ -27,29 +23,6 @@ def _strikes_around_spot(spot: float, count: int = OPTION_SNAPSHOT_STRIKES_AROUN
         if s > 0:
             strikes_set.add(s)
     return sorted(strikes_set)
-
-
-def _debug_log(session_id: str, hypothesis_id: str, location: str, message: str, data: Dict[str, Any]) -> None:
-    # #region agent log
-    try:
-        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "sessionId": session_id,
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": __import__("time").time() * 1000,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
 
 @router.get("/research/option-expirations")
@@ -122,15 +95,6 @@ async def post_option_snapshot(
     body: Dict[str, Any] = Body(..., description="symbol, expiration, optional strikes"),
 ) -> Dict[str, Any]:
     """OD.3: Fetch option quotes (bid/ask/last/mid) for symbol+expiration with pacing; returns rows + optional underlying_price."""
-    # #region agent log
-    _debug_log(
-        "05a4d1",
-        "H1",
-        "research.py:post_option_snapshot:entry",
-        "option-snapshot request body",
-        {"body_keys": list(body.keys()), "symbol": body.get("symbol"), "expiration": body.get("expiration"), "has_strikes": "strikes" in body},
-    )
-    # #endregion
     symbol = (body.get("symbol") or "").strip()
     expiration = (body.get("expiration") or "").strip()
     if not symbol or not expiration:
@@ -190,16 +154,6 @@ async def post_option_snapshot(
     else:
         max_contracts = MAX_OPTION_SNAPSHOT_CONTRACTS
 
-    # #region agent log
-    _debug_log(
-        "05a4d1",
-        "H2",
-        "research.py:post_option_snapshot:before_fetch",
-        "before fetch_option_snapshot",
-        {"symbol": symbol, "expiration": expiration, "strikes_len": len(strikes), "strikes_sample": strikes[:3] if strikes else []},
-    )
-    # #endregion
-
     out: Dict[str, Any] = {"symbol": symbol, "expiration": expiration, "rows": []}
     if spot_from_stock_day is not None:
         out["underlying_price"] = spot_from_stock_day
@@ -214,23 +168,4 @@ async def post_option_snapshot(
     except Exception as e:
         err = str(e)
         out["error"] = err
-        # #region agent log
-        _debug_log(
-            "05a4d1",
-            "H3",
-            "research.py:post_option_snapshot:exception",
-            "fetch_option_snapshot exception",
-            {"error": str(e), "type": type(e).__name__, "traceback": traceback.format_exc()},
-        )
-        # #endregion
-
-    # #region agent log
-    _debug_log(
-        "05a4d1",
-        "H4",
-        "research.py:post_option_snapshot:return",
-        "response summary",
-        {"out_error": out.get("error"), "rows_count": len(out.get("rows", []))},
-    )
-    # #endregion
     return out

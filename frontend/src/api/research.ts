@@ -52,15 +52,13 @@ export async function fetchOptionSnapshot(
   if (!s || !e) {
     return { symbol: s, expiration: e, rows: [], error: 'symbol and expiration are required' }
   }
+  const body = { symbol: s, expiration: e, ...(strikes != null ? { strikes } : {}) }
   const r = await fetch(`${API}/research/option-snapshot`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbol: s, expiration: e, ...(strikes != null ? { strikes } : {}) }),
+    body: JSON.stringify(body),
   })
   const j = await r.json().catch(() => ({}))
-  // #region agent log
-  fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '05a4d1' }, body: JSON.stringify({ sessionId: '05a4d1', hypothesisId: 'H5', location: 'research.ts:fetchOptionSnapshot:response', message: 'option-snapshot API response', data: { ok: r.ok, status: r.status, j_error: j.error, rows_len: Array.isArray(j.rows) ? j.rows.length : 0 }, timestamp: Date.now() }) }).catch(() => {})
-  // #endregion
   const rows: OptionSnapshotRow[] = Array.isArray(j.rows)
     ? j.rows.map((row: Record<string, unknown>) => ({
         strike: Number(row.strike),

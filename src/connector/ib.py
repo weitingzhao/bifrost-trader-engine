@@ -458,19 +458,19 @@ class IBConnector:
         exchange: str = "SMART",
         currency: str = "USD",
     ) -> Optional[Dict[str, Optional[float]]]:
-        """Get one option quote and cancel subscription immediately (for batch snapshot without exhausting market data lines)."""
+        """Get one option quote and cancel subscription immediately (for batch snapshot without exhausting market data lines).
+        Tries reqMktData without qualify first (avoids ~3min first-call qualify throttle); falls back to qualify only if needed."""
         if not self.is_connected:
             await self.connect()
         exp = (expiry or "").strip()
         rt = (right or "").upper()
         if not symbol or not exp or rt not in ("C", "P"):
             return None
-        try:
-            contract = Option(symbol, exp, float(strike), rt, exchange, currency)
-            await self.ib.qualifyContractsAsync(contract)
-            ticker = self.ib.reqMktData(contract, "", False, False)
+        contract = Option(symbol, exp, float(strike), rt, exchange, currency)
+
+        async def _read_ticker(ticker: Any) -> tuple:
             bid = ask = last = mid = None
-            for _ in range(2):
+            for _ in range(4):  # up to 2s wait; break early when we have any price
                 await asyncio.sleep(0.5)
                 tbid = getattr(ticker, "bid", None)
                 task = getattr(ticker, "ask", None)
@@ -496,6 +496,34 @@ class IBConnector:
                     mid = last
                 if bid is not None or ask is not None or last is not None or mid is not None:
                     break
+            return bid, ask, last, mid
+
+        ticker = None
+        try:
+            # Try reqMktData without qualify first (first qualify can take ~3min due to IB throttle).
+            ticker = self.ib.reqMktData(contract, "", False, False)
+            bid, ask, last, mid = await _read_ticker(ticker)
+            if bid is not None or ask is not None or last is not None or mid is not None:
+                # Only cancel when we got data; unqualified ticker may have no reqId and cancel logs "No reqId found".
+                try:
+                    self.ib.cancelMktData(ticker)
+                except Exception as cancel_err:
+                    logger.debug("cancelMktData after option quote: %s", cancel_err)
+                ticker = None
+                return {"bid": bid, "ask": ask, "last": last, "mid": mid}
+            # No data: fall back to qualify then reqMktData.
+        except Exception:
+            if ticker is not None:
+                try:
+                    self.ib.cancelMktData(ticker)
+                except Exception:
+                    pass
+
+        # Fallback: qualify then reqMktData (when no-qualify path failed or returned no data).
+        try:
+            await self.ib.qualifyContractsAsync(contract)
+            ticker = self.ib.reqMktData(contract, "", False, False)
+            bid, ask, last, mid = await _read_ticker(ticker)
             try:
                 self.ib.cancelMktData(ticker)
             except Exception as cancel_err:

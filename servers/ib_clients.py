@@ -444,14 +444,17 @@ class MarketIbClient(BaseMonitorIbClient):
         pacing_sec: float = 0.35,
     ) -> Tuple[List[Dict[str, Any]], Optional[float]]:
         """Fetch option quotes for (symbol, expiration) for a subset of strikes (C and P each).
-        Returns (rows with strike, right, bid, ask, last, mid; underlying_price if available)."""
+        Returns (rows with strike, right, bid, ask, last, mid; underlying_price if available).
+        When strikes is non-empty, skips fetch_underlying_price to avoid ~2min first-call delay."""
         await self._ensure_connected_impl()
         rows: List[Dict[str, Any]] = []
         underlying_price: Optional[float] = None
-        try:
-            underlying_price = await self.fetch_underlying_price(symbol)
-        except Exception:
-            pass
+        if not strikes:
+            # Need spot to compute strike list; fetch once (can be slow on first call).
+            try:
+                underlying_price = await self.fetch_underlying_price(symbol)
+            except Exception:
+                pass
         # Filter out invalid strikes (e.g. 0.5, 1.0 from wrong chain); US equity strikes are dollar amounts.
         if underlying_price is not None and underlying_price > 0:
             min_s = max(0.5, underlying_price * 0.01)

@@ -221,11 +221,12 @@ export function OptionDiscoveryPage({
     const sym = selectedSymbol.trim()
     const exp = selectedExpiration.trim()
     if (!sym || !exp) return
+    const strikesToSend = effectiveStrikes.length > 0 ? effectiveStrikes : undefined
     setSnapshotLoading(true)
     setSnapshotError(null)
     setAddWatchlistFeedback(null)
     try {
-      const res = await fetchOptionSnapshot(sym, exp, effectiveStrikes.length > 0 ? effectiveStrikes : undefined)
+      const res = await fetchOptionSnapshot(sym, exp, strikesToSend)
       setSnapshotRows(res.rows ?? [])
       setUnderlyingPrice(res.underlying_price ?? null)
       setSnapshotError(res.error ?? null)
@@ -613,7 +614,10 @@ export function OptionDiscoveryPage({
       </section>
 
       <section className="replay-section" aria-labelledby="option-discovery-table-head">
-        <h3 id="option-discovery-table-head">By expiration – Option quotes</h3>
+        <h3 id="option-discovery-table-head">
+          By expiration – Option quotes
+          <InfoTooltip text="Bid/ask may be empty outside regular trading hours (RTH); TWS may show cached or last price. Data is live from IB API." />
+        </h3>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', marginBottom: '1rem' }}>
           <button
             type="button"
