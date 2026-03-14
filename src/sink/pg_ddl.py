@@ -159,19 +159,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             ON CONFLICT (id) DO NOTHING
         """
         )
-        # 兼容旧库：若存在 ib_client_id_worker 且无 ib_client_id_worker_market，则重命名列
-        cur.execute(
-            """
-            DO $$
-            BEGIN
-                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'settings' AND column_name = 'ib_client_id_worker')
-                   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'settings' AND column_name = 'ib_client_id_worker_market')
-                THEN
-                    ALTER TABLE settings RENAME COLUMN ib_client_id_worker TO ib_client_id_worker_market;
-                END IF;
-            END $$;
-            """
-        )
         for col, default in (
             ("ib_client_id_daemon", 1),
             ("ib_client_id_listener", 2),
@@ -207,7 +194,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS flex_default_range_preset")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_default_range_days integer DEFAULT 30")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_init_range_days integer DEFAULT 360")
-        _log("account, account_positions, instrument_prices")
+        _log("account, account_positions, contract_quote_live")
         _log_table("account", "Account summaries")
         cur.execute(
             """
@@ -269,11 +256,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             ON account_positions (account_id, contract_key)
         """
         )
-        _log_table("instrument_prices", "Last prices for positions/watchlist")
+        _log_table("contract_quote_live", "Last prices for positions/watchlist")
         # R-M6: 每个持仓标的当前价（按 contract_key 聚合），供监控页逐行展示与计算盈亏
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS instrument_prices (
+            CREATE TABLE IF NOT EXISTS contract_quote_live (
                 contract_key text PRIMARY KEY,
                 symbol text,
                 sec_type text,
@@ -428,12 +415,26 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS stock_min_symbol_period_time ON stock_min (symbol, period, bar_time DESC)"
         )
+        _log("stocks table (symbol reference)")
+        _log_table("stocks", "Stock symbol reference")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stocks (
+                stocks_id bigserial PRIMARY KEY,
+                symbol text NOT NULL UNIQUE,
+                name text,
+                exchange text,
+                created_at timestamptz DEFAULT now()
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS stocks_symbol ON stocks (symbol)")
         _log("option_day, option_min tables + indexes")
         _log_table("option_day", "Option daily OHLC bars")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS option_day (
-                id bigserial PRIMARY KEY,
+                option_day_id bigserial PRIMARY KEY,
                 symbol text NOT NULL,
                 expiry text NOT NULL,
                 strike double precision NOT NULL,
@@ -456,7 +457,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS option_min (
-                id bigserial PRIMARY KEY,
+                option_min_id bigserial PRIMARY KEY,
                 symbol text NOT NULL,
                 expiry text NOT NULL,
                 strike double precision NOT NULL,
@@ -476,61 +477,68 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_min_symbol_expiry_strike_right_period_time ON option_min (symbol, expiry, strike, option_right, period, bar_time DESC)"
         )
-        # Release earlier DDL locks before the final watchlist/backfill DDL step.
-        conn.commit()
-        _log("watchlist, job_bars_backfill")
-        _log_table("watchlist", "Watchlist items (STK/OPT)")
+        _log("option_contracts, option_snapshots")
+        _log_table("option_contracts", "Option contract definitions (contract_key)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS watchlist (
-                id bigserial PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS option_contracts (
+                option_contracts_id bigserial PRIMARY KEY,
                 contract_key text NOT NULL UNIQUE,
-                symbol text,
-                sec_type text,
-                expiry text,
-                strike double precision,
-                option_right text,
-                display_label text,
-                source text,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                strike double precision NOT NULL,
+                option_right text NOT NULL,
                 created_at timestamptz DEFAULT now()
             )
-        """
+            """
         )
+        for col_def in (
+            "contract_key text",
+            "symbol text",
+            "expiry text",
+            "strike double precision",
+            "option_right text",
+            "created_at timestamptz DEFAULT now()",
+        ):
+            cur.execute(f"ALTER TABLE option_contracts ADD COLUMN IF NOT EXISTS {col_def}")
+        cur.execute("CREATE INDEX IF NOT EXISTS option_contracts_contract_key ON option_contracts (contract_key)")
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS watchlist_contract_key ON watchlist (contract_key)"
+            "CREATE INDEX IF NOT EXISTS option_contracts_symbol_expiry_strike_right ON option_contracts (symbol, expiry, strike, option_right)"
         )
-        _log_table("job_bars_backfill", "Backfill job queue (Celery worker)")
-        # 阶段 3 非实时拉取 Worker：backfill 任务队列表（见 docs/DATABASE.md §2.18）；表名 job_ 前缀为 Celery/任务表约定
+        _log_table("option_snapshots", "Option snapshot (point-in-time quote)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS job_bars_backfill (
-                job_bars_backfill_id bigserial PRIMARY KEY,
-                symbol text NOT NULL,
-                period text NOT NULL DEFAULT '1 D',
-                years double precision,
-                days integer,
-                override_days double precision,
-                status text NOT NULL DEFAULT 'pending',
-                result jsonb,
-                created_at timestamptz DEFAULT now(),
-                updated_at timestamptz DEFAULT now()
+            CREATE TABLE IF NOT EXISTS option_snapshots (
+                option_snapshots_id bigserial PRIMARY KEY,
+                contract_key text NOT NULL,
+                snapshot_ts timestamptz NOT NULL,
+                last double precision,
+                bid double precision,
+                ask double precision,
+                mid double precision,
+                created_at timestamptz DEFAULT now()
             )
             """
         )
+        for col_def in (
+            "contract_key text",
+            "snapshot_ts timestamptz",
+            "last double precision",
+            "bid double precision",
+            "ask double precision",
+            "mid double precision",
+            "created_at timestamptz DEFAULT now()",
+        ):
+            cur.execute(f"ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS {col_def}")
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS job_bars_backfill_status_created ON job_bars_backfill (status, created_at)"
+            "CREATE INDEX IF NOT EXISTS option_snapshots_contract_key_ts ON option_snapshots (contract_key, snapshot_ts DESC)"
         )
-        for col, default in (("skip_ib", "false"), ("api_interval_sec", "10")):
-            cur.execute(
-                f"ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS {col} {'boolean' if col == 'skip_ib' else 'integer'} DEFAULT {default}"
-            )
-        cur.execute("ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
         conn.commit()
-        _log("position_categories, position_category_tags")
-        _log_table("position_categories", "Position category definitions")
+        _log("preference_position_categories, preference_position_category_tags")
+        _log_table("preference_position_categories", "Position category definitions (preference)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS position_categories (
+            CREATE TABLE IF NOT EXISTS preference_position_categories (
                 id bigserial PRIMARY KEY,
                 name text NOT NULL,
                 description text,
@@ -540,32 +548,26 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        _log_table("position_category_tags", "Position-to-category mapping")
+        _log_table("preference_position_category_tags", "Position-to-category mapping (preference)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS position_category_tags (
+            CREATE TABLE IF NOT EXISTS preference_position_category_tags (
                 account_id text NOT NULL,
                 contract_key text NOT NULL,
-                category_id integer NOT NULL REFERENCES position_categories(id) ON DELETE CASCADE,
+                category_id integer NOT NULL REFERENCES preference_position_categories(id) ON DELETE CASCADE,
                 created_at timestamptz DEFAULT now(),
                 PRIMARY KEY (account_id, contract_key)
             )
             """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS position_category_tags_category_id ON position_category_tags (category_id)"
+            "CREATE INDEX IF NOT EXISTS preference_position_category_tags_category_id ON preference_position_category_tags (category_id)"
         )
-        cur.execute(
-            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS category_id integer REFERENCES position_categories(id) ON DELETE SET NULL"
-        )
-        cur.execute(
-            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS optionable boolean DEFAULT false"
-        )
-        _log("market_streams_symbol_order")
-        _log_table("market_streams_symbol_order", "Market Streams symbol order per category")
+        _log("preference_market_streams_symbol_order")
+        _log_table("preference_market_streams_symbol_order", "Market Streams symbol order per category (preference)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS market_streams_symbol_order (
+            CREATE TABLE IF NOT EXISTS preference_market_streams_symbol_order (
                 category_name text NOT NULL,
                 symbol text NOT NULL,
                 sort_order integer NOT NULL DEFAULT 0,
@@ -575,11 +577,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
         conn.commit()
-        _log("us_market_holidays")
-        _log_table("us_market_holidays", "US market holidays")
+        _log("reference_us_holidays")
+        _log_table("reference_us_holidays", "US market holidays")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS us_market_holidays (
+            CREATE TABLE IF NOT EXISTS reference_us_holidays (
                 exchange text NOT NULL DEFAULT 'NYSE',
                 holiday_date date NOT NULL,
                 label text,
@@ -588,11 +590,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        _log("flex_accounts")
-        _log_table("flex_accounts", "Flex query config")
+        _log("settings_ib_flex")
+        _log_table("settings_ib_flex", "IB Flex query config")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS flex_accounts (
+            CREATE TABLE IF NOT EXISTS settings_ib_flex (
                 id serial PRIMARY KEY,
                 sort_order integer NOT NULL DEFAULT 0,
                 query_label text,
@@ -602,129 +604,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        # Migrate from old schema: query_id_cash_transactions -> query_id, add query_label/purpose
-        try:
-            with conn.cursor() as cur2:
-                cur2.execute(
-                    """
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_schema = current_schema() AND table_name = 'flex_accounts' AND column_name = 'query_id_cash_transactions'
-                    """
-                )
-                if cur2.fetchone():
-                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_id text")
-                    cur2.execute("UPDATE flex_accounts SET query_id = query_id_cash_transactions WHERE query_id IS NULL OR query_id = ''")
-                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_label text")
-                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS purpose text DEFAULT 'cash_transactions'")
-                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS query_id_cash_transactions")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # Ensure new columns exist for tables created before migration
-        for col_def in [
-            ("query_id", "text"),
-            ("query_label", "text"),
-            ("purpose", "text DEFAULT 'cash_transactions'"),
-        ]:
-            try:
-                cur.execute(f"ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}")
-                conn.commit()
-            except Exception:
-                conn.rollback()
-        # Migrate: token -> settings (ib_flex_host_token, ib_flex_secondary_token); account_label -> account_is_host (bool); drop token, account_label
-        try:
-            with conn.cursor() as cur2:
-                cur2.execute(
-                    """
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_schema = current_schema() AND table_name = 'flex_accounts' AND column_name = 'token'
-                    """
-                )
-                if cur2.fetchone():
-                    cur2.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_host_token text")
-                    cur2.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_secondary_token text")
-                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS account_is_host boolean NOT NULL DEFAULT true")
-                    # Backfill settings: first two distinct tokens by sort_order, id
-                    cur2.execute(
-                        """
-                        UPDATE settings SET
-                          ib_flex_host_token = (SELECT token FROM (
-                            SELECT token, ROW_NUMBER() OVER (ORDER BY min_so, min_id) AS rn
-                            FROM (SELECT token, MIN(sort_order) AS min_so, MIN(id) AS min_id FROM flex_accounts GROUP BY token) x
-                          ) y WHERE rn = 1),
-                          ib_flex_secondary_token = (SELECT token FROM (
-                            SELECT token, ROW_NUMBER() OVER (ORDER BY min_so, min_id) AS rn
-                            FROM (SELECT token, MIN(sort_order) AS min_so, MIN(id) AS min_id FROM flex_accounts GROUP BY token) x
-                          ) y WHERE rn = 2)
-                        WHERE id = 1
-                        """
-                    )
-                    cur2.execute(
-                        "UPDATE flex_accounts SET account_is_host = (token = (SELECT ib_flex_host_token FROM settings WHERE id = 1))"
-                    )
-                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS token")
-                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS account_label")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # Ensure account_is_host exists (for tables created before token migration)
-        try:
-            cur.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS account_is_host boolean NOT NULL DEFAULT true")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # Migrate: account_is_host + query_id -> query_host_id + query_secondary_id (one row per label/purpose, both IDs)
-        try:
-            with conn.cursor() as cur2:
-                cur2.execute(
-                    """
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_schema = current_schema() AND table_name = 'flex_accounts' AND column_name = 'account_is_host'
-                    """
-                )
-                if cur2.fetchone():
-                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_host_id text")
-                    cur2.execute("ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS query_secondary_id text")
-                    cur2.execute("UPDATE flex_accounts SET query_host_id = query_id WHERE account_is_host = true AND (query_host_id IS NULL OR query_host_id = '')")
-                    cur2.execute("UPDATE flex_accounts SET query_secondary_id = query_id WHERE account_is_host = false AND (query_secondary_id IS NULL OR query_secondary_id = '')")
-                    # Collapse to one row per purpose: keep min(sort_order), merge query_host_id and query_secondary_id
-                    cur2.execute(
-                        """
-                        CREATE TEMP TABLE flex_accounts_merged AS
-                        SELECT MIN(sort_order) AS sort_order, purpose,
-                               MAX(query_label) AS query_label,
-                               MAX(query_host_id) AS query_host_id,
-                               MAX(query_secondary_id) AS query_secondary_id
-                        FROM flex_accounts
-                        GROUP BY purpose
-                        """
-                    )
-                    cur2.execute("DELETE FROM flex_accounts")
-                    cur2.execute(
-                        """
-                        INSERT INTO flex_accounts (sort_order, query_label, purpose, query_host_id, query_secondary_id)
-                        SELECT sort_order, query_label, purpose,
-                               COALESCE(NULLIF(TRIM(query_host_id), ''), ''),
-                               NULLIF(TRIM(query_secondary_id), '')
-                        FROM flex_accounts_merged
-                        WHERE NULLIF(TRIM(query_host_id), '') IS NOT NULL
-                        """
-                    )
-                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS account_is_host")
-                    cur2.execute("ALTER TABLE flex_accounts DROP COLUMN IF EXISTS query_id")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # Ensure query_host_id / query_secondary_id exist for tables created before this migration
-        for col_def in [
-            ("query_host_id", "text"),
-            ("query_secondary_id", "text"),
-        ]:
-            try:
-                cur.execute(f"ALTER TABLE flex_accounts ADD COLUMN IF NOT EXISTS {col_def[0]} {col_def[1]}")
-                conn.commit()
-            except Exception:
-                conn.rollback()
         # Strategy & gate_safety tables (DATABASE.md §2.24)
         _log("gate_safety_*, strategy_*, settings active_*")
         _log_table("gate_safety_strategy", "Safety boundary set root + strategy layer")
@@ -847,21 +726,97 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
+        _log_table("strategy_history", "Strategy run / state history")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_history (
+                strategy_history_id bigserial PRIMARY KEY,
+                strategy_structure_id bigint REFERENCES strategy_structure(strategy_structure_id),
+                ts timestamptz NOT NULL,
+                state_summary jsonb,
+                created_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        # Migration: ensure columns exist (e.g. if table was created by older schema or manually)
+        cur.execute(
+            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS ts timestamptz NOT NULL DEFAULT now()"
+        )
+        cur.execute(
+            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS strategy_structure_id bigint REFERENCES strategy_structure(strategy_structure_id)"
+        )
+        cur.execute(
+            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS state_summary jsonb"
+        )
+        cur.execute(
+            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_history_ts ON strategy_history (ts DESC)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_history_structure_id ON strategy_history (strategy_structure_id)"
+        )
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_structure_id bigint")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_gate_safety_strategy_id bigint")
+        _log("watchlist, job_bars_backfill")
+        _log_table("watchlist", "Watchlist items (STK/OPT)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS watchlist (
+                contract_key text NOT NULL PRIMARY KEY,
+                symbol text,
+                sec_type text,
+                expiry text,
+                strike double precision,
+                option_right text,
+                display_label text,
+                source text,
+                created_at timestamptz DEFAULT now()
+            )
+        """
+        )
+        cur.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+            ("public", "watchlist", "id"),
+        )
+        if cur.fetchone():
+            cur.execute("ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_pkey")
+            cur.execute("ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_contract_key_key")
+            cur.execute("ALTER TABLE watchlist DROP COLUMN IF EXISTS id")
+            cur.execute("ALTER TABLE watchlist ADD PRIMARY KEY (contract_key)")
+        cur.execute(
+            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS category_id integer REFERENCES preference_position_categories(id) ON DELETE SET NULL"
+        )
+        cur.execute(
+            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS optionable boolean DEFAULT false"
+        )
+        _log_table("job_bars_backfill", "Backfill job queue (Celery worker)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_bars_backfill (
+                job_bars_backfill_id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                period text NOT NULL DEFAULT '1 D',
+                years double precision,
+                days integer,
+                override_days double precision,
+                status text NOT NULL DEFAULT 'pending',
+                result jsonb,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS job_bars_backfill_status_created ON job_bars_backfill (status, created_at)"
+        )
+        for col, default in (("skip_ib", "false"), ("api_interval_sec", "10")):
+            cur.execute(
+                f"ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS {col} {'boolean' if col == 'skip_ib' else 'integer'} DEFAULT {default}"
+            )
+        cur.execute("ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
         conn.commit()
-        # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
-        try:
-            with conn.cursor() as cur2:
-                cur2.execute(
-                    """
-                    UPDATE settings s SET ib_host = d.ib_host, ib_port_type = d.ib_port_type
-                    FROM daemon_ib_config d WHERE d.id = 1 AND s.id = 1
-                """
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
         # R-A2 extended: add columns to account_executions for full IB / Flex data（含期权字段与 Flex Trades 字段）
         # 不再在 account_executions 添加 commission/realized_pnl/currency，已迁至 account_execution_commissions
         for _col, sql in [
@@ -917,39 +872,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             except psycopg2.ProgrammingError as e:
                 conn.rollback()
                 if getattr(e, "pgcode", None) != "42701":
-                    raise
-        # R-A2 §2.11.1 迁移：commission/realized_pnl/currency 迁至 account_execution_commissions，从 account_executions 删除
-        # 若 account_executions 仍有这三列，先拷贝数据再 DROP
-        try:
-            cur.execute(
-                """
-                INSERT INTO account_execution_commissions (exec_id, commission, currency, realized_pnl)
-                SELECT exec_id, commission, currency, realized_pnl
-                FROM account_executions
-                WHERE exec_id IS NOT NULL AND exec_id != ''
-                  AND (commission IS NOT NULL OR realized_pnl IS NOT NULL OR currency IS NOT NULL)
-                ON CONFLICT (exec_id) DO UPDATE SET
-                  commission = COALESCE(EXCLUDED.commission, account_execution_commissions.commission),
-                  currency = COALESCE(EXCLUDED.currency, account_execution_commissions.currency),
-                  realized_pnl = COALESCE(EXCLUDED.realized_pnl, account_execution_commissions.realized_pnl)
-                """
-            )
-            conn.commit()
-        except psycopg2.ProgrammingError as e:
-            conn.rollback()
-            if getattr(e, "pgcode", None) != "42703":
-                raise
-        for drop_sql in [
-            "ALTER TABLE account_executions DROP COLUMN IF EXISTS commission",
-            "ALTER TABLE account_executions DROP COLUMN IF EXISTS realized_pnl",
-            "ALTER TABLE account_executions DROP COLUMN IF EXISTS currency",
-        ]:
-            try:
-                cur.execute(drop_sql)
-                conn.commit()
-            except psycopg2.ProgrammingError as e:
-                conn.rollback()
-                if getattr(e, "pgcode", None) != "42703":  # 42703 = undefined_column
                     raise
         # RE-7: add columns if not exist (each ALTER in its own transaction so duplicate_column doesn't abort the rest)
         for _col, sql in [

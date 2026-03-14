@@ -90,7 +90,7 @@
 
 - **目标**：提供**独立于实时交易监控**的**复盘与风控分析**页面，用于事后查看账户执行交易、辅助行情（如 K 线）及风险模型评估，与当前“红绿灯 + 状态 + 操作列表”的监控页**分离**，避免实时监控与复盘分析混在同一视图。
 - **范围**：监控应用内新增页面或路由（如「复盘」/「风控」）；可查看账户执行交易记录（R-A2）、辅助行情（R-A3）、以及基于历史数据的风险/统计视图；不要求与 R-M5 同屏，通过导航切换。数据由阶段 3 的 R-A2、R-A3 及 R-H2 提供。
-- **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + instrument_prices；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径以实现与 PLAN_NEXT_STEPS 阶段 3 验收为准；分步实现顺序与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8。
+- **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + contract_quote_live；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径以实现与 PLAN_NEXT_STEPS 阶段 3 验收为准；分步实现顺序与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8。
 - **与分步计划**：阶段 3（与 R-A2、R-A3 数据能力一并交付）。
 
 ### 2.6 期权发现入口（R-OD1）
@@ -148,7 +148,7 @@
   - **数据源**：当前阶段仅 **IB**；按标的与周期从 IB 拉取并写入库，减少重复请求。
   - **K 线**：股票与期权**分表存储**——股票日线 **stock_day**、股票分钟/小时线 **stock_min**（周期 1 min、5 mins、1 hour）；期权日线 **option_day**、期权分钟/小时线 **option_min**。日 K 为主；分钟/小时线供复盘与短期回测。
   - **拉取策略**：首次按标的拉取时可请求**全部历史**；后续根据**最新一根 K 线距离当前的时间**智能决定请求的 duration，避免重复拉取已入库区间。
-  - **报价**：持仓与 Watchlist 标的的**当前报价**（bid/ask/last/mid）可获取；Watchlist 的报价在拉取后**写入 instrument_prices**（与持仓共用），供前端统一展示与后续使用。
+  - **报价**：持仓与 Watchlist 标的的**当前报价**（bid/ask/last/mid）可获取；Watchlist 的报价在拉取后**写入 contract_quote_live**（与持仓共用），供前端统一展示与后续使用。
   - **参考指数（Reference Indices）**：为与 Watchlist 股票对比，支持**美股大盘指数**（如 S&P 500 ^GSPC、Dow 30 ^DJI、Nasdaq ^IXIC）的日线数据。数据源为 **TradingView（tvDatafeed）**；在 config 中配置 `reference_indices`（symbol、label、tv_symbol、tv_exchange）；**定时任务**（脚本或 Celery）按配置拉取日线并 UPSERT 写入 **stock_day**（同一 symbol 同一 bar_time 覆盖，保证头部为最终值）；服务重启后可**补齐缺失区间**（gap-fill）。更新频率与请求间隔遵守数据源限流（如 2s 间隔、每日或每数小时一次）。GET /status 返回 `reference_indices` 供前端展示「大盘」行；现有 `/bars/benchmark` 支持传入指数 symbol 获取最新日线。
 - **与分步计划**：阶段 3（数据获取）；回测与复盘策略的具体形态可后续阶段再细化。
 

@@ -73,7 +73,7 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
   若 Settings 里配置了第二 IB（`ib2_host` 非空），再 `AccountIbClient2.fetch_accounts_snapshot()`（第二 TWS）→ 得到列表 2；  
   合并为 `accounts_list = 列表1 + 列表2` →  
   `sync_accounts_snapshot_to_db(control_via_db, accounts_list)`（在 `servers/reader/accounts.py`）→  
-  内部调用 `_sync_accounts_snapshot_to_tables(conn, accounts_list)`（`src/sink/accounts_sync.py`），对列表中 **每个** account 做：  
+  内部调用 `sync_accounts_snapshot_to_tables(conn, accounts_list)`（`src/sink/accounts_sync.py`），对列表中 **每个** account 做：  
   - 写入/更新 `account`（按 `account_id` upsert）；
   - 写入/更新/删除 `account_positions`（按 `account_id` + `contract_key`，并删除该 account 下已不在 snapshot 里的持仓）。
   因此：**Secondary 账户和其持仓只有在执行过 Refresh accounts 且第二 IB 连接成功时才会出现在 `account` / `account_positions`。**

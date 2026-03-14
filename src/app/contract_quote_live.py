@@ -1,4 +1,4 @@
-"""Ticker subscriptions and R-M6 instrument_prices (IB + Redis). Used by GsTrading."""
+"""Ticker subscriptions and R-M6 contract_quote_live (IB + Redis). Used by GsTrading."""
 
 import logging
 import math
@@ -187,9 +187,9 @@ def get_position_stk_instruments(app: Any) -> dict:
 
 
 async def refresh_position_prices(app: Any) -> None:
-    """R-M6：根据当前 accounts_data 按 contract_key 聚合标的，逐标的向 IB 拉价并写入 instrument_prices。"""
+    """R-M6：根据当前 accounts_data 按 contract_key 聚合标的，逐标的向 IB 拉价并写入 contract_quote_live。"""
     if not app._status_sink or not hasattr(
-        app._status_sink, "write_instrument_prices"
+        app._status_sink, "write_contract_quote_live"
     ):
         return
     if not app.connector.is_connected:
@@ -235,13 +235,13 @@ async def refresh_position_prices(app: Any) -> None:
         len(rows),
     )
     if rows:
-        app._status_sink.write_instrument_prices(rows)
+        app._status_sink.write_contract_quote_live(rows)
 
 
-def sync_instrument_prices_from_redis(app: Any) -> None:
-    """R-M6：用 Redis 中 Event 已写入的行情更新 instrument_prices，仅更新有 Redis 数据的持仓标的。"""
+def sync_contract_quote_live_from_redis(app: Any) -> None:
+    """R-M6：用 Redis 中 Event 已写入的行情更新 contract_quote_live，仅更新有 Redis 数据的持仓标的。"""
     if not app._status_sink or not hasattr(
-        app._status_sink, "write_instrument_prices"
+        app._status_sink, "write_contract_quote_live"
     ):
         return
     if not getattr(app, "_redis_quotes", None) or not app._redis_quotes.available:
@@ -302,8 +302,8 @@ def sync_instrument_prices_from_redis(app: Any) -> None:
             }
         )
     if rows:
-        app._status_sink.write_instrument_prices(rows)
+        app._status_sink.write_contract_quote_live(rows)
         logger.debug(
-            "[R-M6] sync_instrument_prices_from_redis: %s rows from Redis",
+            "[R-M6] sync_contract_quote_live_from_redis: %s rows from Redis",
             len(rows),
         )

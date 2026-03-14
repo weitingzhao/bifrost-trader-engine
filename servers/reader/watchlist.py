@@ -15,12 +15,12 @@ def get_watchlist(conn: Any) -> List[Dict[str, Any]]:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT w.id, w.contract_key, w.symbol, w.sec_type, w.expiry, w.strike, w.option_right,
+                SELECT w.contract_key, w.symbol, w.sec_type, w.expiry, w.strike, w.option_right,
                        w.display_label, w.source, w.category_id, w.optionable,
                        pc.name AS category,
                        extract(epoch from w.created_at) AS created_at
                 FROM watchlist w
-                LEFT JOIN position_categories pc ON w.category_id = pc.id
+                LEFT JOIN preference_position_categories pc ON w.category_id = pc.id
                 ORDER BY w.created_at DESC
                 """
             )
@@ -80,16 +80,13 @@ def add_watchlist(
         return False
 
 
-def delete_watchlist(conn: Any, contract_key: Optional[str] = None, id_: Optional[int] = None) -> bool:
-    """Delete one watchlist entry by contract_key or id. Returns True on success."""
+def delete_watchlist(conn: Any, contract_key: Optional[str] = None) -> bool:
+    """Delete one watchlist entry by contract_key. Returns True on success."""
+    if not contract_key or not contract_key.strip():
+        return False
     try:
         with conn.cursor() as cur:
-            if id_ is not None:
-                cur.execute("DELETE FROM watchlist WHERE id = %s", (id_,))
-            elif contract_key and contract_key.strip():
-                cur.execute("DELETE FROM watchlist WHERE contract_key = %s", (contract_key.strip(),))
-            else:
-                return False
+            cur.execute("DELETE FROM watchlist WHERE contract_key = %s", (contract_key.strip(),))
         conn.commit()
         return True
     except Exception as e:

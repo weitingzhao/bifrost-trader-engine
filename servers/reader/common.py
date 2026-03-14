@@ -117,10 +117,10 @@ class StatusReader:
             self._conn, contract_key, symbol, sec_type, expiry, strike, option_right, display_label, source, category_id, optionable
         )
 
-    def delete_watchlist(self, contract_key: Optional[str] = None, id_: Optional[int] = None) -> bool:
+    def delete_watchlist(self, contract_key: Optional[str] = None) -> bool:
         if not self._connect():
             return False
-        return watchlist_module.delete_watchlist(self._conn, contract_key=contract_key, id_=id_)
+        return watchlist_module.delete_watchlist(self._conn, contract_key=contract_key)
 
     # --- Market domain (delegate to market module) ---
     def get_is_us_trading_day(self, date_str: str) -> bool:

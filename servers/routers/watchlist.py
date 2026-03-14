@@ -65,15 +65,14 @@ def post_watchlist(request: Request, body: WatchlistBody = Body(...)) -> Dict[st
 def delete_watchlist(
     request: Request,
     contract_key: Optional[str] = Query(None, description="Delete by contract_key"),
-    id: Optional[int] = Query(None, description="Delete by id"),
 ) -> Dict[str, Any]:
-    """R-A3: Delete one Watchlist item (by contract_key or id)."""
+    """R-A3: Delete one Watchlist item by contract_key."""
     reader = request.app.state.reader
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "Postgres config required to modify watchlist."}
-    if contract_key is None and id is None:
-        return {"ok": False, "error": "Provide contract_key or id query parameter."}
-    if reader.delete_watchlist(contract_key=contract_key, id_=id):
+    if not contract_key or not contract_key.strip():
+        return {"ok": False, "error": "Provide contract_key query parameter."}
+    if reader.delete_watchlist(contract_key=contract_key):
         return {"ok": True, "message": "Deleted."}
     return {"ok": False, "error": "Delete failed (not found or database error)."}

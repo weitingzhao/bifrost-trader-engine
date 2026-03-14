@@ -140,7 +140,7 @@ async def heartbeat(app: Any) -> None:
             minimal = app._build_heartbeat_minimal_dict()
             app._status_sink.write_snapshot(minimal, append_history=False)
             await app._refresh_position_prices()
-            app._instrument_prices_initialized = True
+            app._contract_quote_live_initialized = True
         if (
             cmd == "refresh_replay"
             and app.connector.is_connected
@@ -237,7 +237,7 @@ async def heartbeat(app: Any) -> None:
             minimal = app._build_heartbeat_minimal_dict()
             app._status_sink.write_snapshot(minimal, append_history=False)
             await app._refresh_position_prices()
-            app._instrument_prices_initialized = True
+            app._contract_quote_live_initialized = True
         if (
             cmd == "refresh_replay"
             and app.connector.is_connected
@@ -347,21 +347,21 @@ async def heartbeat(app: Any) -> None:
                         logger.warning(
                             "Redis quote write in heartbeat (minimal): %s", e
                         )
-            if not getattr(app, "_instrument_prices_initialized", False):
+            if not getattr(app, "_contract_quote_live_initialized", False):
                 try:
                     await app._refresh_position_prices()
-                    app._instrument_prices_initialized = True
+                    app._contract_quote_live_initialized = True
                 except Exception as e:
                     logger.debug(
                         "R-M6 initial refresh_position_prices: %s", e
                     )
             try:
                 if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
-                    app._sync_instrument_prices_from_redis()
+                    app._sync_contract_quote_live_from_redis()
                 else:
                     await app._refresh_position_prices()
             except Exception as e:
-                logger.debug("R-M6 instrument_prices sync failed: %s", e)
+                logger.debug("R-M6 contract_quote_live sync failed: %s", e)
             if hasattr(app._status_sink, "write_daemon_heartbeat"):
                 app._status_sink.write_daemon_heartbeat(
                     hedge_running=True,

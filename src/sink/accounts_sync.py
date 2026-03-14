@@ -194,7 +194,3 @@ def sync_accounts_snapshot_to_tables(
                 cur.execute(
                     "DELETE FROM account_positions WHERE account_id = %s", (account_id,)
                 )
-
-
-# Backward-compat alias: existing code imports _sync_accounts_snapshot_to_tables
-_sync_accounts_snapshot_to_tables = sync_accounts_snapshot_to_tables

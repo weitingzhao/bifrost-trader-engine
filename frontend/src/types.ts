@@ -39,7 +39,7 @@ export interface FlexAccountItem {
   purpose?: string | null
 }
 
-/** GET /status flex_config: tokens in settings, rows from flex_accounts. */
+/** GET /status flex_config: tokens in settings, rows from settings_ib_flex. */
 export interface FlexConfig {
   host_token?: string | null
   secondary_token?: string | null
@@ -60,11 +60,11 @@ export interface IbPositionRow {
   expiry?: string
   strike?: number
   right?: string
-  /** 当前价（来自 instrument_prices.mid/last），用于逐行计算盈亏 */
+  /** 当前价（来自 contract_quote_live.mid/last），用于逐行计算盈亏 */
   price?: number | null
-  /** 当前持仓浮动盈亏（后端用 instrument_prices.last 与 position/avg_cost 计算） */
+  /** 当前持仓浮动盈亏（后端用 contract_quote_live.last 与 position/avg_cost 计算） */
   unrealized_pnl?: number | null
-  /** instrument_prices.updated_at 的 Unix 秒，用于 Last Update 显示 */
+  /** contract_quote_live.updated_at 的 Unix 秒，用于 Last Update 显示 */
   price_updated_at?: number | null
   /** 当 price 来自 stock_day fallback 时，前一根日线 close，用于 Daily % / Daily $ 计算 */
   daily_prev_close?: number | null
@@ -107,7 +107,7 @@ export interface StatusResponse {
   /** 账户/持仓数据最后从 IB 拉取并写入 DB 的时间（Unix 秒），供监控页显示数据新鲜度 */
   accounts_fetched_at?: number | null
   ib_config?: IbConfig | null
-  /** Flex config: tokens in settings (ib_flex_host_token, ib_flex_secondary_token), rows in flex_accounts. Configure in Settings → IB Connection → Flex. */
+  /** Flex config: tokens in settings (ib_flex_host_token, ib_flex_secondary_token), rows in settings_ib_flex. Configure in Settings → IB Connection → Flex. */
   flex_config?: FlexConfig | null
   /** 监控端 IB 状态：Account (Host), Account (Secondary), Market (Host) 连接情况与错误信息 */
   monitor_ib_status?: {
@@ -481,9 +481,8 @@ export interface BarsCoverageResponse {
   }
 }
 
-/** R-A3 扩展：Watchlist 项（自选/待操作标的）。 */
+/** R-A3 扩展：Watchlist 项（自选/待操作标的）。主键为 contract_key。 */
 export interface WatchlistItem {
-  id?: number
   contract_key: string
   symbol?: string | null
   sec_type?: string | null

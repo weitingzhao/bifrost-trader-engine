@@ -54,7 +54,7 @@ export async function postIbConfig(
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** Save Flex config: host_token, secondary_token to settings; accounts to flex_accounts; optional flex_default_range_days, flex_init_range_days. */
+/** Save Flex config: host_token, secondary_token to settings; rows to settings_ib_flex; optional flex_default_range_days, flex_init_range_days. */
 export async function postFlexConfig(
   hostToken?: string | null,
   secondaryToken?: string | null,

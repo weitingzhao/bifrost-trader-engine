@@ -23,11 +23,8 @@ from src.sink.pg_connection import (
 from src.sink.pg_ddl import _ensure_tables
 from src.sink.accounts_sync import (
     _has_meaningful_commission,
-    _sync_accounts_snapshot_to_tables,
+    sync_accounts_snapshot_to_tables,
 )
-
-# Re-exports for backward compatibility: _get_conn_params, _ensure_tables, _sync_accounts_snapshot_to_tables
-# are already exposed via the imports above.
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +124,7 @@ class PostgreSQLSink(StatusSink):
                     )
             # R-A1: sync multi-account snapshot into normalized tables (account + account_positions)
             if isinstance(raw_accounts, list) and raw_accounts:
-                _sync_accounts_snapshot_to_tables(self._conn, raw_accounts)
+                sync_accounts_snapshot_to_tables(self._conn, raw_accounts)
             self._conn.commit()
         except Exception as e:
             self._conn.rollback()
@@ -150,14 +147,14 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.warning("PostgreSQL write_operation failed: %s", e)
 
-    def write_instrument_prices(self, rows):
-        """R-M6: 写入每个合约的当前价（按 contract_key upsert）。rows: Iterable[Dict]。
+    def write_contract_quote_live(self, rows):
+        """R-M6: 写入 contract_quote_live（按 contract_key upsert）。rows: Iterable[Dict]。
         过滤 NaN/Null：价格字段若为 NaN、inf 或空则写入 NULL，不污染数据库。若整行无有效价格则跳过该行。"""
         if not rows:
             return
         if not self._ensure_conn():
             return
-        logger.info("[R-M6] write_instrument_prices: %s rows received", len(rows))
+        logger.info("[R-M6] write_contract_quote_live: %s rows received", len(rows))
 
         def _sanitize(v):
             if v is None:
@@ -174,7 +171,7 @@ class PostgreSQLSink(StatusSink):
                     contract_key = r.get("contract_key")
                     if not contract_key:
                         logger.warning(
-                            "[R-M6] write_instrument_prices: missing contract_key in row: %s",
+                            "[R-M6] write_contract_quote_live: missing contract_key in row: %s",
                             r,
                         )
                         continue
@@ -184,13 +181,13 @@ class PostgreSQLSink(StatusSink):
                     mid = _sanitize(r.get("mid"))
                     if last is None and bid is None and ask is None and mid is None:
                         logger.debug(
-                            "[R-M6] write_instrument_prices: skip row (all price fields NaN/Null): %s",
+                            "[R-M6] write_contract_quote_live: skip row (all price fields NaN/Null): %s",
                             contract_key,
                         )
                         continue
                     cur.execute(
                         """
-                        INSERT INTO instrument_prices (
+                        INSERT INTO contract_quote_live (
                             contract_key, symbol, sec_type, expiry, strike, option_right,
                             last, bid, ask, mid, updated_at
                         )
@@ -221,10 +218,10 @@ class PostgreSQLSink(StatusSink):
                         ),
                     )
             self._conn.commit()
-            logger.info("[R-M6] write_instrument_prices: commit ok")
+            logger.info("[R-M6] write_contract_quote_live: commit ok")
         except Exception as e:
             self._conn.rollback()
-            logger.warning("write_instrument_prices failed: %s", e, exc_info=True)
+            logger.warning("write_contract_quote_live failed: %s", e, exc_info=True)
 
     def write_account_executions(self, rows: Any) -> None:
         """R-A2: 写入账户执行/成交记录到 account_executions；CommissionReport 写入 account_execution_commissions。"""

@@ -128,11 +128,9 @@ export async function postWatchlist(item: {
   return { ok: j.ok === true, error: j.error }
 }
 
-/** R-A3: Delete Watchlist item by contract_key or id. */
-export async function deleteWatchlist(by: { contract_key?: string; id?: number }): Promise<{ ok: boolean; error?: string }> {
-  const params = new URLSearchParams()
-  if (by.contract_key) params.set('contract_key', by.contract_key)
-  if (by.id != null) params.set('id', String(by.id))
+/** R-A3: Delete Watchlist item by contract_key. */
+export async function deleteWatchlist(by: { contract_key: string }): Promise<{ ok: boolean; error?: string }> {
+  const params = new URLSearchParams({ contract_key: by.contract_key })
   const r = await fetch(`${API}/watchlist?${params}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: j.ok === true, error: j.error }

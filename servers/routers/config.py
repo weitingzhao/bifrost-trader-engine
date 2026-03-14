@@ -153,7 +153,7 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
 
 @router.post("/config/flex")
 def post_config_flex(request: Request, body: FlexConfigBody = Body(...)) -> JSONResponse:
-    """Update settings (ib_flex_host_token, ib_flex_secondary_token) and flex_accounts rows."""
+    """Update settings (ib_flex_host_token, ib_flex_secondary_token) and settings_ib_flex rows."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})

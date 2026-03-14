@@ -35,7 +35,7 @@ from src.app import symbol_position as _symbol_position
 from src.app import control_heartbeat as _control_heartbeat
 from src.app import hedge_flow as _hedge_flow
 from src.app import daemon_handlers as _daemon_handlers
-from src.app import instrument_prices as _instrument_prices
+from src.app import contract_quote_live as _contract_quote_live
 from src.app import ticker_redis as _ticker_redis
 
 logger = logging.getLogger(__name__)
@@ -196,7 +196,7 @@ class GsTrading:
             0.0  # 对冲用持仓也按同一间隔，避免每心跳请求 IB positions
         )
         # R-M6: 首次有持仓时全量 IB 拉价一次；之后心跳用 Redis（Event）更新，仅 Refresh 时再全量拉价
-        self._instrument_prices_initialized = False
+        self._contract_quote_live_initialized = False
         # R-RM*: optional Redis real-time quotes (daemon is sole writer)
         self._redis_quotes = create_redis_quotes(config)
         if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
@@ -391,27 +391,27 @@ class GsTrading:
 
     async def _refresh_ticker_subscriptions(self) -> None:
         """Sync = Release then Init: unsubscribe all, then subscribe to ideal set."""
-        await _instrument_prices.refresh_ticker_subscriptions(self)
+        await _contract_quote_live.refresh_ticker_subscriptions(self)
 
     async def _release_ticker_subscriptions(self) -> None:
         """Unsubscribe all Real-time ticker subscriptions."""
-        await _instrument_prices.release_ticker_subscriptions(self)
+        await _contract_quote_live.release_ticker_subscriptions(self)
 
     async def _init_ticker_subscriptions(self) -> None:
         """If no subscriptions: subscribe to watchlist + all positions. Else write error to last_control_message."""
-        await _instrument_prices.init_ticker_subscriptions(self)
+        await _contract_quote_live.init_ticker_subscriptions(self)
 
     def _get_position_stk_instruments(self) -> dict:
         """From accounts_data aggregate STK instruments; return contract_key -> meta."""
-        return _instrument_prices.get_position_stk_instruments(self)
+        return _contract_quote_live.get_position_stk_instruments(self)
 
     async def _refresh_position_prices(self) -> None:
-        """R-M6: fetch prices from IB and write instrument_prices."""
-        await _instrument_prices.refresh_position_prices(self)
+        """R-M6: fetch prices from IB and write contract_quote_live."""
+        await _contract_quote_live.refresh_position_prices(self)
 
-    def _sync_instrument_prices_from_redis(self) -> None:
-        """R-M6: update instrument_prices from Redis quotes."""
-        _instrument_prices.sync_instrument_prices_from_redis(self)
+    def _sync_contract_quote_live_from_redis(self) -> None:
+        """R-M6: update contract_quote_live from Redis quotes."""
+        _contract_quote_live.sync_contract_quote_live_from_redis(self)
 
     # --- State handlers: each runs its logic and returns the next state ---
 

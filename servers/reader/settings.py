@@ -147,12 +147,12 @@ def get_flex_config(conn: Any, purpose: Optional[str] = None) -> Any:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if purpose is not None:
                 cur.execute(
-                    "SELECT query_host_id, query_secondary_id, query_label, purpose FROM flex_accounts WHERE purpose = %s ORDER BY sort_order, id",
+                    "SELECT query_host_id, query_secondary_id, query_label, purpose FROM settings_ib_flex WHERE purpose = %s ORDER BY sort_order, id",
                     (purpose,),
                 )
             else:
                 cur.execute(
-                    "SELECT query_host_id, query_secondary_id, query_label, purpose FROM flex_accounts ORDER BY sort_order, id"
+                    "SELECT query_host_id, query_secondary_id, query_label, purpose FROM settings_ib_flex ORDER BY sort_order, id"
                 )
             rows = cur.fetchall()
         if purpose is not None:
@@ -280,28 +280,9 @@ def write_ib_config(
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                for col, default in (
-                    ("ib_client_id_daemon", 1),
-                    ("ib_client_id_listener", 2),
-                    ("ib_client_id_account", 100),
-                    ("ib_client_id_markets", 101),
-                    ("ib_client_id_worker_market", 500),
-                ):
-                    cur.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}")
-                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_host_account_id text")
-                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_host_account_id text")
-                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_secondary_account_id text")
                 host_val = (ib_host_account_id or "").strip() or None
                 stream_host_val = (stream_host_account_id or "").strip() or None
                 stream_secondary_val = (stream_secondary_account_id or "").strip() or None
-                for col, default in (
-                    ("ib2_host", "text"),
-                    ("ib2_port_type", "text DEFAULT 'tws_paper'"),
-                    ("ib2_client_id_listener", "integer DEFAULT 3"),
-                    ("ib2_client_id_account", "integer DEFAULT 102"),
-                ):
-                    cur.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {default}")
-                cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS ib2_client_id_markets")
                 ib2_h = (ib2_host or "").strip() or None
                 ib2_pt = (ib2_port_type or "").strip().lower() or None
                 if ib2_pt and ib2_pt not in _VALID_IB_PORT_TYPES:
@@ -351,7 +332,7 @@ def write_flex_config(
     flex_default_range_days: Optional[int] = None,
     flex_init_range_days: Optional[int] = None,
 ) -> bool:
-    """Write Flex tokens to settings and replace flex_accounts with rows. Returns True on success."""
+    """Write Flex tokens to settings and replace settings_ib_flex with rows. Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     try:
@@ -366,7 +347,7 @@ def write_flex_config(
                     "flex_default_range_days = COALESCE(%s, flex_default_range_days), flex_init_range_days = COALESCE(%s, flex_init_range_days) WHERE id = 1",
                     ((host_token or "").strip() or None, (secondary_token or "").strip() or None, days_val, init_val),
                 )
-                cur.execute("DELETE FROM flex_accounts")
+                cur.execute("DELETE FROM settings_ib_flex")
                 for i, a in enumerate(accounts):
                     if not isinstance(a, dict):
                         continue
@@ -377,7 +358,7 @@ def write_flex_config(
                     query_label = (a.get("query_label") or "").strip() or None
                     purpose = (a.get("purpose") or "cash_transactions").strip() or "cash_transactions"
                     cur.execute(
-                        "INSERT INTO flex_accounts (sort_order, query_label, purpose, query_host_id, query_secondary_id) VALUES (%s, %s, %s, %s, %s)",
+                        "INSERT INTO settings_ib_flex (sort_order, query_label, purpose, query_host_id, query_secondary_id) VALUES (%s, %s, %s, %s, %s)",
                         (i, query_label, purpose, qh, qs),
                     )
             conn.commit()
@@ -403,8 +384,6 @@ def write_active_strategy_and_gates(
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_structure_id bigint")
-                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_gate_safety_strategy_id bigint")
                 cur.execute(
                     """
                     UPDATE settings SET

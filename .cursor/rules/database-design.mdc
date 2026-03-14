@@ -14,13 +14,13 @@ When adding or changing **PostgreSQL** tables in this project, follow the standa
 - **Safety-boundary tables** (gates): use prefix **`gate_safety_`**.
   - `gate_safety_strategy`, `gate_safety_strategy_earnings_dates`, `gate_safety_state`, `gate_safety_intent`, `gate_safety_guard`.
 - **Celery / job-queue tables**: use prefix **`job_`** (e.g. `job_bars_backfill` for bars backfill task queue).
+- **User-preference tables**: use prefix **`preference_`** (e.g. `preference_market_streams_symbol_order` for Market Streams symbol order per category).
 - Other domain tables keep existing names (e.g. `status_current`, `account`, `settings`).
 
 ## 2. Primary Key Column Name
 
-- **Do not** use a generic column name `id` for the primary key.
-- Use **`<table_name>_id`** (e.g. table `strategy_structure` → PK column **`strategy_structure_id`**; table `gate_safety_strategy` → **`gate_safety_strategy_id`**).
-- Exception: single-row tables (e.g. `settings`) may keep `id` if it is a fixed row identifier (e.g. 1).
+- **Multi-row tables**：主键列名必须使用 **`<table_name>_id`**（如 `strategy_structure` → `strategy_structure_id`；`gate_safety_strategy` → `gate_safety_strategy_id`）。不得使用通用列名 `id`。
+- **Single-row tables（单行表）**：允许使用 **`id`** 作为主键列名，且通常取固定值（如 1）。单行表仍需主键以支持 `UPDATE WHERE …` 与 `INSERT … ON CONFLICT (id) DO UPDATE`；列名 `id` 作为项目约定写入本规则，例如 `settings`、`daemon_heartbeat`、`daemon_run_status`。
 
 ## 3. Foreign Key Column Names
 

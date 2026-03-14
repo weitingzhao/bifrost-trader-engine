@@ -1,5 +1,5 @@
 """Accounts: snapshot read/write and execution/transaction write.
-Execution/transaction read and position_categories live in executions and position_categories modules. All logic inlined from legacy; no dependency on _legacy."""
+Execution/transaction read and preference_position_categories live in executions and position_categories modules. All logic inlined from legacy; no dependency on _legacy."""
 
 import json
 import logging
@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from src.sink.postgres_sink import _get_conn_params, _sync_accounts_snapshot_to_tables
+from src.sink.postgres_sink import _get_conn_params, sync_accounts_snapshot_to_tables
 
 from servers.reader import market as market_module
 from servers.reader.accounts_helpers import (
@@ -99,11 +99,11 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         pct.category_id AS position_category_id,
                         pc.name AS position_category_name
                     FROM account_positions ap
-                    LEFT JOIN instrument_prices ip
+                    LEFT JOIN contract_quote_live ip
                         ON ap.contract_key = ip.contract_key
-                    LEFT JOIN position_category_tags pct
+                    LEFT JOIN preference_position_category_tags pct
                         ON ap.account_id = pct.account_id AND ap.contract_key = pct.contract_key
-                    LEFT JOIN position_categories pc
+                    LEFT JOIN preference_position_categories pc
                         ON pct.category_id = pc.id
                     WHERE ap.account_id = %s
                     ORDER BY ap.contract_key
@@ -294,7 +294,7 @@ def sync_accounts_snapshot_to_db(
         try:
             with conn.cursor() as cur:
                 cur.execute("SET lock_timeout = '5s'")
-            _sync_accounts_snapshot_to_tables(conn, accounts_list)
+            sync_accounts_snapshot_to_tables(conn, accounts_list)
             conn.commit()
             return True
         finally:

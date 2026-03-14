@@ -203,9 +203,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   const handleRemoveWatchlist = useCallback(
     async (item: WatchlistItem) => {
       setWatchlistError(null)
-      const res = item.id != null
-        ? await deleteWatchlist({ id: item.id })
-        : await deleteWatchlist({ contract_key: item.contract_key })
+      const res = await deleteWatchlist({ contract_key: item.contract_key })
       if (res.ok) await loadWatchlist()
       else setWatchlistError(res.error || 'Remove failed')
     },

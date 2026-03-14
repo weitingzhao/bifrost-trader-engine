@@ -1,4 +1,4 @@
-"""Position categories CRUD: read and write position_categories / position_category_tags."""
+"""Position categories CRUD: read and write preference_position_categories / preference_position_category_tags."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -16,7 +16,7 @@ def get_position_categories(conn: Any) -> List[Dict[str, Any]]:
             cur.execute(
                 """
                 SELECT id, name, description, sort_order, created_at, updated_at
-                FROM position_categories
+                FROM preference_position_categories
                 ORDER BY COALESCE(sort_order, 999), name
                 """
             )
@@ -39,7 +39,7 @@ def create_position_category(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO position_categories (name, description, sort_order, updated_at)
+                INSERT INTO preference_position_categories (name, description, sort_order, updated_at)
                 VALUES (%s, %s, %s, now())
                 RETURNING id
                 """,
@@ -83,7 +83,7 @@ def update_position_category(
         vals.append(category_id)
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE position_categories SET {', '.join(updates)} WHERE id = %s",
+                f"UPDATE preference_position_categories SET {', '.join(updates)} WHERE id = %s",
                 tuple(vals),
             )
         conn.commit()
@@ -102,7 +102,7 @@ def delete_position_category(conn: Any, category_id: int) -> bool:
         return False
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM position_categories WHERE id = %s", (category_id,))
+            cur.execute("DELETE FROM preference_position_categories WHERE id = %s", (category_id,))
         conn.commit()
         return True
     except Exception as e:
@@ -128,13 +128,13 @@ def set_position_category_tag(
         with conn.cursor() as cur:
             if category_id is None:
                 cur.execute(
-                    "DELETE FROM position_category_tags WHERE account_id = %s AND contract_key = %s",
+                    "DELETE FROM preference_position_category_tags WHERE account_id = %s AND contract_key = %s",
                     (acc, ck),
                 )
             else:
                 cur.execute(
                     """
-                    INSERT INTO position_category_tags (account_id, contract_key, category_id)
+                    INSERT INTO preference_position_category_tags (account_id, contract_key, category_id)
                     VALUES (%s, %s, %s)
                     ON CONFLICT (account_id, contract_key) DO UPDATE SET category_id = EXCLUDED.category_id
                     """,
@@ -152,7 +152,7 @@ def set_position_category_tag(
 
 
 def get_market_streams_symbol_order(conn: Any) -> Dict[str, List[str]]:
-    """Return category_name -> ordered list of symbols from market_streams_symbol_order."""
+    """Return category_name -> ordered list of symbols from preference_market_streams_symbol_order."""
     if conn is None:
         return {}
     try:
@@ -160,7 +160,7 @@ def get_market_streams_symbol_order(conn: Any) -> Dict[str, List[str]]:
             cur.execute(
                 """
                 SELECT category_name, symbol, sort_order
-                FROM market_streams_symbol_order
+                FROM preference_market_streams_symbol_order
                 ORDER BY category_name, sort_order
                 """
             )
@@ -195,13 +195,13 @@ def set_market_streams_symbol_order(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM market_streams_symbol_order WHERE category_name = %s",
+                "DELETE FROM preference_market_streams_symbol_order WHERE category_name = %s",
                 (cat,),
             )
             for i, sym in enumerate(symbols_clean):
                 cur.execute(
                     """
-                    INSERT INTO market_streams_symbol_order (category_name, symbol, sort_order, updated_at)
+                    INSERT INTO preference_market_streams_symbol_order (category_name, symbol, sort_order, updated_at)
                     VALUES (%s, %s, %s, now())
                     """,
                     (cat, sym, i),

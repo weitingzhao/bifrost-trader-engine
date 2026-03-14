@@ -248,7 +248,7 @@ def get_market_holidays(
     year: Optional[int] = Query(None, description="Filter by year"),
     exchange: str = Query("NYSE", description="Exchange (e.g. NYSE)"),
 ) -> List[Dict[str, Any]]:
-    """Return US market holidays from us_market_holidays."""
+    """Return US market holidays from reference_us_holidays."""
     reader = request.app.state.reader
     return reader.get_market_holidays(exchange=exchange, year=year)
 

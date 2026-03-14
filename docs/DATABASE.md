@@ -135,10 +135,10 @@
 
 - **语义**：GET /status 的 `accounts` 从 **account** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 account 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**由监控端维护的 **AccountIbClient** 直接向 IB 拉取账户/持仓并写入 account/account_positions，不写 daemon_control；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
 
-### 2.10 表 `instrument_prices`（阶段 3 R-M6：持仓标的当前价）
+### 2.10 表 `contract_quote_live`（阶段 3 R-M6：持仓标的当前价）
 
 - **用途**：按 `contract_key`（同 `account_positions`）存放**每个持仓标的的当前价**，用于监控页逐行展示「当前价」并计算浮动盈亏。设计为**与账户无关**：同一合约在多个账户持有时仅存一行价格。
-- **写入**：守护进程 **首次有持仓时** 或监控端 **Accounts Refresh** 时，按持仓标的从 IB 全量拉价并 Upsert 到本表；**每次心跳** 则用 Redis 中 Event 已写入的行情（Real-time ticker）更新本表，仅更新有 Redis 数据的标的，不再每心跳向 IB 拉价。
+- **写入**：守护进程 **首次有持仓时** 或监控端 **Accounts Refresh** 时，按持仓标的从 IB 全量拉价并 Upsert 到本表；**每次心跳** 则用 Redis 中 Event 已写入的行情（Real-time ticker）更新本表，仅更新有 Redis 数据的标的，不再每心跳向 IB 拉价。代码与表名一致：写入由 `StatusSink.write_contract_quote_live`、Redis 同步由 `contract_quote_live.sync_contract_quote_live_from_redis` 等完成（模块 `src/app/contract_quote_live.py`）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -247,7 +247,7 @@
 ### 2.21 表 `account_transactions`（阶段 3 Performance Phase 0：资金流水，来自 IB Flex）
 
 - **用途**：存**账户资金流水**（存款、取款、转账、股息等），数据来源为 **IB Flex Web Service**（Activity Flex Query 的 Cash Transactions 节）；供 Performance 页计算净资金流（net_cash_flow）、capital_base 与收益率分母。
-- **写入**：监控端 **POST /transactions/fetch** 时，从 **flex_accounts** 与 **settings** 通过 `get_flex_config(purpose='cash_transactions')` 得到 (token, query_id) 列表（Host 与 Secondary 各 call），请求 Flex 报表，解析 Cash Transactions 后 UPSERT 到本表（按 account_id + ts + amount + type 去重，避免重复拉取导致重复计入）。
+- **写入**：监控端 **POST /transactions/fetch** 时，从 **settings_ib_flex** 与 **settings** 通过 `get_flex_config(purpose='cash_transactions')` 得到 (token, query_id) 列表（Host 与 Secondary 各 call），请求 Flex 报表，解析 Cash Transactions 后 UPSERT 到本表（按 account_id + ts + amount + type 去重，避免重复拉取导致重复计入）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -279,7 +279,7 @@
 - **索引**：`(account_id, ts DESC)`，供按账户与时间范围查询净资金流。
 - **读取**：`servers/reader.get_net_cash_flow(since_ts, until_ts, account_id)` 对本表 SUM(amount)；`get_transactions(...)` 返回明细供 Performance 页展示；GET /performance 的 net_cash_flow、capital_base 使用本表数据。
 
-### 2.22 表 `us_market_holidays`（美股交易日历：NYSE 休市日）
+### 2.22 表 `reference_us_holidays`（美股交易日历：NYSE 休市日）
 
 - **用途**：存**美股（NYSE）休市日**，供 GET /market/trading-day 判断某日是否为交易日；Data 页据此仅在交易日将「(end)」标黄（需 Pull 时）。数据来源为美股休市日历（配置或外部数据源）。
 - **写入**：通过 **Settings 页「US market holidays (NYSE)」** 或 API POST /market/holidays 添加/删除；亦可手动 INSERT。每年 NYSE 公布日历时在 Settings 中追加新年度。
@@ -295,7 +295,7 @@
 - **主键**：**(exchange, holiday_date)**。
 - **读取**：`servers/reader.get_is_us_trading_day(status_config, date_str)` 先判断周末再查本表；GET /market/trading-day 供前端 Data 页使用。
 
-### 2.23 表 `flex_accounts`（Performance Phase 0：IB Flex 配置，Token 在 settings）
+### 2.23 表 `settings_ib_flex`（Performance Phase 0：IB Flex 配置，Token 在 settings）
 
 - **用途**：存 **Flex Query 行**（每行同一 Label/Purpose，对应 Host 与 Secondary 各一个 Query ID）；**Token 不存本表**，存于 **settings** 的 `ib_flex_host_token`（主 IB）、`ib_flex_secondary_token`（第二 IB）。每行 **query_host_id**（必填，用 Host token 拉取）、**query_secondary_id**（可选，用 Secondary token 拉取）；同一用途下系统会对两个 Query 各 call 一次，拿回相同结构的 response。供 POST /transactions/fetch 等按 purpose 拉取（如仅使用 purpose=cash_transactions 的行）。
 - **写入**：通过 **Settings 页「IB Connection → Flex」** 或 API POST /config/flex 写入；Token 写入 settings，本表**整表替换**。
@@ -363,6 +363,11 @@
 - **索引**：建议 `(symbol, period, bar_time DESC)`。
 - **读取**：GET /bars?sec_type=STK&period=1 min（或 5 mins、1 hour）按 symbol、时间范围查询。
 
+### 2.14.1 表 `stocks`（股票标的参考）
+
+- **用途**：股票标的参考表，存 symbol 及可选名称、交易所；与 watchlist、stock_day 等配合使用。
+- **列**：`stocks_id` (bigserial PK)、`symbol` (text NOT NULL UNIQUE)、`name` (text)、`exchange` (text)、`created_at` (timestamptz)。索引 `(symbol)`。
+
 ### 2.15 表 `option_day`（阶段 3 R-A3 扩展：期权日 K 线）
 
 - **用途**：存**期权**的**日线** OHLC 数据；期权按标的+到期+行权价+权利区分合约。
@@ -371,7 +376,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
+| option_day_id | bigserial | 自增主键（符合「表名_id」约定） |
 | symbol | text NOT NULL | 标的代码（期权 underlying，如 NVDA） |
 | expiry | text NOT NULL | 到期（lastTradeDateOrContractMonth，YYYYMM 或 YYYYMMDD） |
 | strike | double precision NOT NULL | 行权价 |
@@ -395,7 +400,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
+| option_min_id | bigserial | 自增主键（符合「表名_id」约定） |
 | symbol | text NOT NULL | 标的代码（期权 underlying） |
 | expiry | text NOT NULL | 到期（YYYYMM 或 YYYYMMDD） |
 | strike | double precision NOT NULL | 行权价 |
@@ -412,16 +417,26 @@
 - **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, period, bar_time)`。
 - **索引**：建议 `(symbol, expiry, strike, option_right, period, bar_time DESC)`。
 
+### 2.16.1 表 `option_contracts`（期权合约定义）
+
+- **用途**：期权合约定义，按 contract_key（与 account_positions、contract_quote_live 一致）唯一标识。
+- **列**：`option_contracts_id` (bigserial PK)、`contract_key` (text NOT NULL UNIQUE)、`symbol`、`expiry`、`strike`、`option_right`、`created_at`。索引 `(contract_key)`、`(symbol, expiry, strike, option_right)`。
+
+### 2.16.2 表 `option_snapshots`（期权时点快照）
+
+- **用途**：期权某时点报价快照（last/bid/ask/mid）。
+- **列**：`option_snapshots_id` (bigserial PK)、`contract_key`、`snapshot_ts`、`last`/`bid`/`ask`/`mid`、`created_at`。索引 `(contract_key, snapshot_ts DESC)`。
+
 ### 2.17 表 `watchlist`（阶段 3 R-A3 扩展：自选/待操作标的）
 
 - **用途**：存用户「想操作的标的」列表（Watchlist），可含股票与期权；用于市场数据页拉取报价与 K 线的标的集合，服务重启后不丢失。
 - **写入**：监控端通过 Watchlist CRUD API（POST/GET/DELETE /watchlist）增删改查；可从当前持仓、曾持仓或手动输入添加。
+- **主键**：**contract_key**（与 account_positions、contract_quote_live 一致的合约唯一键；一行一合约，无需自增 id）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
-| contract_key | text NOT NULL UNIQUE | 合约唯一键：与 account_positions 一致，symbol\|sec_type\|expiry\|strike\|right |
+| contract_key | text NOT NULL PRIMARY KEY | 合约唯一键：symbol\|sec_type\|expiry\|strike\|right，与 account_positions 一致 |
 | symbol | text | 标的代码 |
 | sec_type | text | STK \| OPT |
 | expiry | text | 期权到期（OPT 时） |
@@ -429,11 +444,11 @@
 | option_right | text | 期权权利 C/P（OPT 时） |
 | display_label | text | 可选显示名（如 "NVDA 25/6 C 120"） |
 | source | text | 来源：manual \| position \| execution |
-| category_id | integer | 可选，关联 position_categories.id；与 Accounts 的 Position Category 共用同一分类表，用于给 Watchlist 标的打分类标签 |
+| category_id | integer | 可选，关联 preference_position_categories.id；与 Accounts 的 Position Category 共用同一分类表，用于给 Watchlist 标的打分类标签 |
 | optionable | boolean | 是否作为 Option Discovery 标的（有可交易期权）；默认 false，在 Watchlist 页「Option?」开关维护 |
 | created_at | timestamptz | 创建时间（默认 now()） |
 
-- **读取**：GET /watchlist 供市场数据页与报价请求使用；Watchlist 标的的报价写入 **instrument_prices**（与持仓共用），监控端拉取报价后 UPSERT 到 instrument_prices，供前端统一展示。
+- **读取**：GET /watchlist 供市场数据页与报价请求使用；Watchlist 标的的报价写入 **contract_quote_live**（与持仓共用），监控端拉取报价后 UPSERT 到 contract_quote_live，供前端统一展示。
 
 ### 2.18 表 `job_bars_backfill`（阶段 3 非实时拉取 Worker：任务队列表）
 
@@ -458,9 +473,9 @@
 - **索引**：`(status, created_at)` 便于 Worker 按 pending 取最旧任务；GET /bars/jobs 按 job_bars_backfill_id DESC 分页。
 - **Trim**：可选保留最近 200 条，删除更旧记录，与内存队列"保留 200"行为一致。
 
-### 2.19 表 `position_categories`（持仓分类：STK 分类标签定义）
+### 2.19 表 `preference_position_categories`（偏好：持仓分类 STK 分类标签定义）
 
-- **用途**：存用户定义的**持仓分类**（如「股息回报」「短期持仓」等），用于对 **STK 持仓** 打标签并后续按分类跟踪回报。
+- **用途**：偏好类表。存用户定义的**持仓分类**（如「股息回报」「短期持仓」等），用于对 **STK 持仓** 打标签并后续按分类跟踪回报。
 - **写入**：监控端通过 GET/POST/PATCH/DELETE /position-categories 增删改查；分类可添加、修改、删除。
 - **列**：
 
@@ -473,11 +488,11 @@
 | created_at | timestamptz | 创建时间（默认 now()） |
 | updated_at | timestamptz | 最后更新时间（默认 now()） |
 
-- **读取**：GET /position-categories 供前端下拉与「管理分类」使用；GET /status 的 accounts.positions 中通过 position_category_tags 关联带出 category_id、category（名称）。
+- **读取**：GET /position-categories 供前端下拉与「管理分类」使用；GET /status 的 accounts.positions 中通过 preference_position_category_tags 关联带出 category_id、category（名称）。
 
-### 2.20 表 `position_category_tags`（持仓→分类关联，一持仓一分类）
+### 2.20 表 `preference_position_category_tags`（偏好：持仓→分类关联，一持仓一分类）
 
-- **用途**：将 **position_categories** 中的分类 **Tag** 到 **account_positions** 的某条持仓上；仅对 STK 持仓有意义，用于按分类跟踪回报。
+- **用途**：将 **preference_position_categories** 中的分类 **Tag** 到 **account_positions** 的某条持仓上；仅对 STK 持仓有意义，用于按分类跟踪回报。
 - **主键/唯一**：**(account_id, contract_key)** 唯一，即每条持仓至多一个分类。
 - **写入**：监控端 PUT /position-categories/tag 时 UPSERT 或 DELETE（category_id 为 null 时删除 tag）。
 - **列**：
@@ -486,15 +501,15 @@
 |------|------|------|
 | account_id | text NOT NULL | 账户（与 account_positions 一致） |
 | contract_key | text NOT NULL | 合约唯一键（与 account_positions 一致） |
-| category_id | integer NOT NULL | 关联 position_categories.id |
+| category_id | integer NOT NULL | 关联 preference_position_categories.id |
 | created_at | timestamptz | 创建时间（默认 now()） |
 
-- **外键**：category_id → position_categories(id)；account_id + contract_key 对应 account_positions 中存在的行（应用层保证，或可选 FK）。
-- **读取**：servers/reader.get_accounts_from_tables() 在读取 account_positions 时 LEFT JOIN 本表与 position_categories，将 category_id、category（名称）写入 positions[*]。
+- **外键**：category_id → preference_position_categories(id)；account_id + contract_key 对应 account_positions 中存在的行（应用层保证，或可选 FK）。
+- **读取**：servers/reader.get_accounts_from_tables() 在读取 account_positions 时 LEFT JOIN 本表与 preference_position_categories，将 category_id、category（名称）写入 positions[*]。
 
-### 2.21 表 `market_streams_symbol_order`（Market Streams 页 Symbol 自定义排序）
+### 2.21 表 `preference_market_streams_symbol_order`（偏好：Market Streams 页 Symbol 自定义排序）
 
-- **用途**：存储 Live 页 Market Streams 表格中，**按 Category 分组的 Symbol 显示顺序**。category_name 与 position_categories.name 或前端展示的 "Uncategorized" 一致；同一 category 下按 sort_order 升序显示。
+- **用途**：偏好类表。存储 Live 页 Market Streams 表格中，**按 Category 分组的 Symbol 显示顺序**。category_name 与 preference_position_categories.name 或前端展示的 "Uncategorized" 一致；同一 category 下按 sort_order 升序显示。
 - **写入**：监控端在用户拖拽调整 Symbol 顺序后，PUT /position-categories/symbol-order 写入（按 category_name 整表替换该 category 的排序）。
 - **列**：
 
@@ -589,8 +604,8 @@
 | ib2_port_type | text | 第二 IB 端口类型（tws_live/tws_paper/gateway），默认 tws_paper |
 | ib2_client_id_listener | integer | 第二 IB 监听 Client ID（默认 3），用于获取更新 |
 | ib2_client_id_account | integer | 第二 IB 账户拉取 Client ID（默认 102） |
-| ib_flex_host_token | text | IB Flex Web Service Token（主 IB）；与 flex_accounts 的 query_host_id 配合使用 |
-| ib_flex_secondary_token | text | IB Flex Token（第二 IB）；与 flex_accounts 的 query_secondary_id 配合使用 |
+| ib_flex_host_token | text | IB Flex Web Service Token（主 IB）；与 settings_ib_flex 的 query_host_id 配合使用 |
+| ib_flex_secondary_token | text | IB Flex Token（第二 IB）；与 settings_ib_flex 的 query_secondary_id 配合使用 |
 | flex_default_range_days | integer | Default Flex Query 天数（如 30）；未传 from_date/to_date 时由后台按「昨日 − N 天」计算；默认 30 |
 | flex_init_range_days | integer | Init Flex Query 天数（如 360），用于首次/全量拉取；默认 360 |
 
@@ -740,9 +755,10 @@
 | max_spread_pct | double precision NOT NULL | 允许下单的最大价差% |
 | paper_trade | boolean NOT NULL DEFAULT true | 是否模拟盘 |
 
-#### 2.24.9 表 `strategy_history`（若存在：主键规范）
+#### 2.24.9 表 `strategy_history`（策略运行/状态历史）
 
-若库中存在表 **strategy_history**，其主键列须遵循「表名_id」约定：**`strategy_history_id`**（不得使用 `id`）。`pg_ddl._ensure_tables` 在策略表段落会执行迁移：若该表存在且列为 `id`，则 `ALTER TABLE strategy_history RENAME COLUMN id TO strategy_history_id`。具体列定义以实际建表为准；此处仅约定主键名。
+- **用途**：策略运行或状态历史记录，主键列为 **`strategy_history_id`**（符合「表名_id」约定）。
+- **列**：`strategy_history_id` (bigserial PK)、`strategy_structure_id` (bigint FK)、`ts` (timestamptz)、`state_summary` (jsonb)、`created_at`。索引 `(ts DESC)`、`(strategy_structure_id)`。由 `pg_ddl._ensure_tables` 创建。
 
 #### 2.24.10 settings 表扩展（当前生效的策略与安全边界）
 
@@ -814,7 +830,7 @@
 python scripts/db_refresh_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `daemon_auto_status_current`、`daemon_auto_status_history`、`daemon_auto_operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**account**（账户摘要，表名单数）、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags**、**market_streams_symbol_order** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars，亦不对旧表名 `accounts` 做迁移）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 §2 所列各表（与 `PostgreSQLSink._ensure_tables` 一致）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
 
@@ -886,20 +902,27 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | IB 连接状态（RE-7） | daemon_heartbeat 增加 ib_connected、ib_client_id；daemon_control 支持 command=retry_ib；守护程序不假定 IB 已运行，可观测与重试。 | 阶段 2 |
 | 阶段 3 R-A2/R-A3 | 新增 §2.11 表 account_executions（账户执行/成交）；§2.12 弃用 ohlc_bars，新增 §2.13–§2.17 表 stock_day、stock_min、option_day、option_min、watchlist（股票/期权 K 线与自选标的）；供复盘与风控页及 GET /executions、GET /bars、Watchlist CRUD、报价落库使用。 | 阶段 3 |
 | 2026-03-03 R-A3 扩展 | 弃用 ohlc_bars；新增 stock_day、stock_min、option_day、option_min、watchlist；K 线读写改为分表；Watchlist CRUD 与智能拉取 duration。 | 阶段 3 |
-| 2026-03-08 持仓分类 | 新增 §2.19 表 position_categories（STK 持仓分类定义）、§2.20 表 position_category_tags（持仓→分类 Tag）；GET /position-categories、PUT /position-categories/tag；GET /status 的 positions 带出 category_id/category。 | 阶段 3 扩展 |
-| 2026-03-11 Market Streams 排序落库 | 新增 §2.21 表 market_streams_symbol_order（按 category 的 Symbol 自定义排序）；GET/PUT /position-categories/symbol-order；需执行 db_refresh_schema.py 创建新表。 | 阶段 3 扩展 |
+| 2026-03-08 持仓分类 | 新增 §2.19 表 preference_position_categories（STK 持仓分类定义）、§2.20 表 preference_position_category_tags（持仓→分类 Tag）；GET /position-categories、PUT /position-categories/tag；GET /status 的 positions 带出 category_id/category。 | 阶段 3 扩展 |
+| 2026-03-11 Market Streams 排序落库 | 新增 §2.21 表 preference_market_streams_symbol_order（按 category 的 Symbol 自定义排序）；GET/PUT /position-categories/symbol-order；需执行 db_refresh_schema.py 创建新表。 | 阶段 3 扩展 |
 | 2026-03-08 Flex Transaction | 新增 §2.21 表 account_transactions（IB Flex 资金流水）；POST /transactions/fetch 拉取 Flex Cash Transactions 写入；get_net_cash_flow/get_transactions 供 GET /performance 使用。 | 阶段 3 Performance Phase 0 |
-| 2026-03-08 US market holidays | 新增 §2.22 表 us_market_holidays（NYSE 休市日）；GET /market/trading-day 判断是否交易日；Settings 页 US market holidays 管理添加/删除；Data 页「(end)」标黄仅交易日。 | 阶段 3 扩展 |
-| 2026-03-08 Flex 一行双 Query ID | §2.23 flex_accounts 去掉 account_is_host、query_id，改为 query_host_id（必填）+ query_secondary_id（可选）；同一行同一 Label/Purpose，Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |
-| 2026-03-08 Flex 一 Token 多 Query | §2.23 flex_accounts 改为「一 Token 多 Query ID + Label」：列 query_id、query_label、purpose；同一 token 可多行；POST /transactions/fetch 仅用 purpose=cash_transactions；reader.get_flex_config(purpose) 支持按用途过滤。 | 阶段 3 Performance Phase 0 |
-| 2026-03-08 Flex Token 入 settings | settings 增加 ib_flex_host_token、ib_flex_secondary_token；flex_accounts 去掉 token、account_label，改为 account_is_host (boolean)；GET /status flex_config 为 { host_token, secondary_token, rows }。 | 阶段 3 Performance Phase 0 |
+| 2026-03-08 US market holidays | 新增 §2.22 表 reference_us_holidays（NYSE 休市日）；GET /market/trading-day 判断是否交易日；Settings 页 US market holidays 管理添加/删除；Data 页「(end)」标黄仅交易日。 | 阶段 3 扩展 |
+| 2026-03-08 Flex 一行双 Query ID | §2.23 settings_ib_flex 每行含 query_host_id（必填）+ query_secondary_id（可选）；同一 Label/Purpose 下 Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |
+| 2026-03-08 Flex 一 Token 多 Query | §2.23 settings_ib_flex：列 query_id、query_label、purpose；同一 token 可多行；POST /transactions/fetch 仅用 purpose=cash_transactions；reader.get_flex_config(purpose) 支持按用途过滤。 | 阶段 3 Performance Phase 0 |
+| 2026-03-08 Flex Token 入 settings | settings 增加 ib_flex_host_token、ib_flex_secondary_token；settings_ib_flex 存 Query 行；GET /status flex_config 为 { host_token, secondary_token, rows }。 | 阶段 3 Performance Phase 0 |
 | 2026-03-13 策略与安全边界表 | 新增 §2.24 策略与安全边界表（设计标准与具体表结构）：strategy_structure、strategy_opportunity、strategy_portfolio；gate_safety_strategy、gate_safety_strategy_earnings_dates、gate_safety_state、gate_safety_intent、gate_safety_guard；settings 扩展 active_strategy_structure_id、active_gate_safety_strategy_id。主键列名采用「表名_id」；策略表 strategy_ 前缀、安全边界表 gate_safety_ 前缀；gate_safety 表无 json。标准见 .cursor/rules/database-design.mdc。 | 未来实现 |
 | 2026-03-13 status_history 主键规范 | 表 status_history 主键列采用 `status_history_id`，符合 .cursor/rules/database-design.mdc「表名_id」约定（该表后已重命名为 daemon_auto_status_history）。 | — |
 | 2026-03-13 daemon_auto 表重命名与主键规范 | 表 daemon 自动交易三表命名为 daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations；主键列为 daemon_auto_status_current_id、daemon_auto_status_history_id、daemon_auto_operations_id（符合 database-design.mdc）。由 _ensure_tables 建表；不再支持旧表名。§2.1–§2.3、§3、§4、§4.2。 | — |
+| 2026-03-13 instrument_prices 重命名为 contract_quote_live | 表 instrument_prices 已弃用，当前仅使用 contract_quote_live（§2.10）；含义为按合约的实时报价缓存。代码已统一：模块 contract_quote_live.py、方法 write_contract_quote_live / sync_contract_quote_live_from_redis 等。旧表 instrument_prices 不再使用，若库中仍存在可手动迁移或删除。 | 阶段 3 R-M6 |
 | 2026-03-13 Celery 任务表命名 | 表 `job_bars_backfill`（主键 `job_bars_backfill_id`）；Celery/任务队列表均使用 **`job_`** 前缀，主键为「表名_id」。§2.18、database-design.mdc；reader 层函数统一为 `job_bars_backfill_*`。 | 阶段 3 |
-| 2026-03-13 strategy_history 主键规范 | 若存在表 strategy_history，主键列须为 `strategy_history_id`；pg_ddl 增加迁移：若列为 `id` 则 RENAME 为 `strategy_history_id`；§2.24.9 约定。 | — |
+| 2026-03-13 strategy_history 主键规范 | 若存在表 strategy_history，主键列须为 `strategy_history_id`（§2.24.9 约定）；schema 由建表或手动维护，不提供列名迁移。 | — |
 | 2026-03-13 表 accounts 重命名为 account | 表 `accounts` 重命名为 `account`（单数）；§2.7、所有引用该表名的 SQL 与文档同步。**当前约定**：仅使用表名 `account`，不兼容旧表名 `accounts`，pg_ddl 与 db_refresh_schema 均不包含对旧表名的迁移逻辑。 | — |
 | 2026-03-13 account_executions/account_transactions 主键列名 | §2.11 account_executions、§2.21 account_transactions 主键列由 `id` 改为 `account_executions_id`、`account_transactions_id`（符合 database-design.mdc）。 | 阶段 3 |
+| 2026-03-13 表 market_streams_symbol_order 重命名 | §2.21 表重命名为 preference_market_streams_symbol_order（偏好类）；不兼容旧表名，不提供迁移。 | — |
+| 2026-03-13 表 position_categories/position_category_tags 重命名 | §2.19、§2.20 表重命名为 preference_position_categories、preference_position_category_tags（偏好类）；不兼容旧表名，不提供迁移。 | — |
+| 2026-03-13 删除未使用的 public.stocks 表 | 项目内无任何逻辑依赖表 `public.stocks`；标的列表用 watchlist，股票 K 线用 stock_day/stock_min。若库中存在该表可安全执行 `DROP TABLE IF EXISTS public.stocks;`。 | — |
+| 2026-03-14 表 settings_ib_flex | §2.23 IB Flex 配置表名为 `settings_ib_flex`（无旧表名兼容）。 | — |
+| 2026-03-14 表 reference_us_holidays | §2.22 美股休市日表名为 `reference_us_holidays`。 | — |
+| 2026-03-14 watchlist 主键改为 contract_key | §2.17 表 watchlist 主键由 `id` (bigserial) 改为 `contract_key` (text)；一行一合约，与 account_positions/contract_quote_live 一致；无向下兼容，pg_ddl 对已有表做一次性迁移。Reader/Router/前端删除仅按 contract_key。 | — |
 ---
 
 *本文档与 [分步推进计划](PLAN_NEXT_STEPS.md)、[阶段 1 执行计划](plans/phase1-execution-plan.md) 及运行环境需求保持一致；所有数据库相关设计与改动以本文档为唯一引用。*
