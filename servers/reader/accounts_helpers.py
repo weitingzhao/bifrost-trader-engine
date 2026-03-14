@@ -73,11 +73,15 @@ def _compute_opt_pair_map_and_pairs(
     executions: List[Dict[str, Any]],
 ) -> Tuple[Dict[int, List[int]], List[Dict[str, Any]]]:
     """Pair BUY↔SELL (same symbol, expiry, strike, account_id). FIFO. Returns (pair_map, opt_pairs)."""
+    # Prefer account_executions_id (current schema); fallback to id for legacy.
+    def _exec_id(e: Dict[str, Any]) -> Optional[Any]:
+        return e.get("account_executions_id") if e.get("account_executions_id") is not None else e.get("id")
+
     opt_only = [
         e
         for e in executions
         if (e.get("sec_type") or "").strip().upper() == "OPT"
-        and e.get("id") is not None
+        and _exec_id(e) is not None
     ]
     pair_map: Dict[int, List[int]] = {}
     opt_pairs: List[Dict[str, Any]] = []
@@ -154,7 +158,10 @@ def _compute_opt_pair_map_and_pairs(
             )
             if not math.isfinite(q) or q <= 0 or not math.isfinite(p):
                 continue
-            eid = int(x["account_executions_id"])
+            eid_val = _exec_id(x)
+            eid = int(eid_val) if eid_val is not None else None
+            if eid is None:
+                continue
 
             if side == "BUY":
                 remaining = q
