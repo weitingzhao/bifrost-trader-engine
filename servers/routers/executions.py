@@ -383,33 +383,33 @@ def post_execution(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[s
     """Add one execution record manually (history). body: account_id, time, symbol, sec_type, side, quantity, price; optional fields."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "id": None}
-    new_id = insert_one_execution(control_via_db, body)
-    if new_id is None:
-        return {"ok": False, "error": "添加执行记录失败（请检查必填项：symbol, quantity, price）。", "id": None}
-    return {"ok": True, "id": new_id, "message": "已添加一条执行记录。"}
+        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "account_executions_id": None}
+    new_account_executions_id = insert_one_execution(control_via_db, body)
+    if new_account_executions_id is None:
+        return {"ok": False, "error": "添加执行记录失败（请检查必填项：symbol, quantity, price）。", "account_executions_id": None}
+    return {"ok": True, "account_executions_id": new_account_executions_id, "message": "已添加一条执行记录。"}
 
 
 @router.put("/executions/{execution_id:int}")
 def put_execution(request: Request, execution_id: int, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Update one execution by id (manual correction)."""
+    """Update one execution by account_executions_id (manual correction)."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
     if update_one_execution(control_via_db, execution_id, body):
         return {"ok": True, "message": "已更新执行记录。"}
-    return {"ok": False, "error": "更新失败（id 不存在或数据库错误）。"}
+    return {"ok": False, "error": "更新失败（account_executions_id 不存在或数据库错误）。"}
 
 
 @router.delete("/executions/{execution_id:int}")
 def delete_execution(request: Request, execution_id: int) -> Dict[str, Any]:
-    """Delete one execution by id."""
+    """Delete one execution by account_executions_id."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
     if delete_one_execution(control_via_db, execution_id):
         return {"ok": True, "message": "已删除该条执行记录。"}
-    return {"ok": False, "error": "删除失败（id 不存在或数据库错误）。"}
+    return {"ok": False, "error": "删除失败（account_executions_id 不存在或数据库错误）。"}
 
 
 @router.post("/executions/fetch")

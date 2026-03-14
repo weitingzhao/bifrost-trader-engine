@@ -30,7 +30,7 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra FROM accounts ORDER BY account_id"
+                "SELECT account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra FROM account ORDER BY account_id"
             )
             acc_rows = cur.fetchall()
         if not acc_rows:
@@ -267,7 +267,7 @@ def get_accounts_fetched_at(conn: Any) -> Optional[float]:
         return None
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT max(updated_at) AS t FROM accounts")
+            cur.execute("SELECT max(updated_at) AS t FROM account")
             row = cur.fetchone()
         if row and row[0] is not None:
             ts = row[0]
@@ -693,7 +693,7 @@ def update_execution_commission(
 
 
 def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[int]:
-    """R-A2 扩展：手动添加一条执行记录（历史补录）。返回新行 id，失败返回 None。
+    """R-A2 扩展：手动添加一条执行记录（历史补录）。返回新行 account_executions_id，失败返回 None。
     body: account_id, time(Unix s), symbol, sec_type, side, quantity, price; 可选 source('manual'), exec_id, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key; 可选 commission, realized_pnl, currency。
     若未提供 exec_id 则生成 manual_<uuid> 以便可写 commission 表。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
@@ -731,7 +731,7 @@ def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[
                 placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
                 vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra)
                 cur.execute(
-                    f"INSERT INTO account_executions ({cols}) VALUES ({placeholders}) RETURNING id",
+                    f"INSERT INTO account_executions ({cols}) VALUES ({placeholders}) RETURNING account_executions_id",
                     vals,
                 )
                 row = cur.fetchone()
@@ -889,8 +889,8 @@ def upsert_account_transactions(status_config: dict, rows: List[Dict[str, Any]])
         return 0
 
 
-def update_one_execution(status_config: dict, id_: int, body: Dict[str, Any]) -> bool:
-    """R-A2 扩展：按 id 更新一条执行记录（手动修正）。body 可含任意子集：time, symbol, sec_type, side, quantity, price, account_id, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key; 以及 commission, realized_pnl, currency（写 account_execution_commissions，以该行 exec_id 关联；若无 exec_id 则设为 manual_<id> 再写入）。"""
+def update_one_execution(status_config: dict, account_executions_id: int, body: Dict[str, Any]) -> bool:
+    """R-A2 扩展：按 account_executions_id 更新一条执行记录（手动修正）。body 可含任意子集：time, symbol, sec_type, side, quantity, price, account_id, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key; 以及 commission, realized_pnl, currency（写 account_execution_commissions，以该行 exec_id 关联；若无 exec_id 则设为 manual_<account_executions_id> 再写入）。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     # 可更新列（account_executions）
@@ -913,7 +913,7 @@ def update_one_execution(status_config: dict, id_: int, body: Dict[str, Any]) ->
             v = json.dumps(v) if v else None
         updates.append(f'"{k}" = %s')
         values.append(v)
-    values.append(id_)
+    values.append(account_executions_id)
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -921,7 +921,7 @@ def update_one_execution(status_config: dict, id_: int, body: Dict[str, Any]) ->
             with conn.cursor() as cur:
                 if updates:
                     cur.execute(
-                        "UPDATE account_executions SET " + ", ".join(updates) + " WHERE id = %s",
+                        "UPDATE account_executions SET " + ", ".join(updates) + " WHERE account_executions_id = %s",
                         values,
                     )
                     if cur.rowcount == 0:
@@ -929,12 +929,12 @@ def update_one_execution(status_config: dict, id_: int, body: Dict[str, Any]) ->
                         return False
                 # commission 相关
                 if any(k in body for k in commission_keys):
-                    cur.execute("SELECT exec_id FROM account_executions WHERE id = %s", (id_,))
+                    cur.execute("SELECT exec_id FROM account_executions WHERE account_executions_id = %s", (account_executions_id,))
                     row = cur.fetchone()
                     exec_id = row[0] if row and row[0] and str(row[0]).strip() else None
                     if not exec_id:
-                        exec_id = "manual_" + str(id_)
-                        cur.execute("UPDATE account_executions SET exec_id = %s WHERE id = %s", (exec_id, id_))
+                        exec_id = "manual_" + str(account_executions_id)
+                        cur.execute("UPDATE account_executions SET exec_id = %s WHERE account_executions_id = %s", (exec_id, account_executions_id))
                     comm = body.get("commission")
                     pnl = body.get("realized_pnl")
                     cur_ = body.get("currency")
@@ -954,12 +954,12 @@ def update_one_execution(status_config: dict, id_: int, body: Dict[str, Any]) ->
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("update_one_execution failed: id=%s %s", id_, e)
+        logger.warning("update_one_execution failed: account_executions_id=%s %s", account_executions_id, e)
         return False
 
 
-def delete_one_execution(status_config: dict, id_: int) -> bool:
-    """R-A2 扩展：按 id 删除一条执行记录。先删 account_execution_commissions 中关联的 exec_id，再删 account_executions。"""
+def delete_one_execution(status_config: dict, account_executions_id: int) -> bool:
+    """R-A2 扩展：按 account_executions_id 删除一条执行记录。先删 account_execution_commissions 中关联的 exec_id，再删 account_executions。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     try:
@@ -967,12 +967,12 @@ def delete_one_execution(status_config: dict, id_: int) -> bool:
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT exec_id FROM account_executions WHERE id = %s", (id_,))
+                cur.execute("SELECT exec_id FROM account_executions WHERE account_executions_id = %s", (account_executions_id,))
                 row = cur.fetchone()
                 exec_id = row[0] if row and row[0] and str(row[0]).strip() else None
                 if exec_id:
                     cur.execute("DELETE FROM account_execution_commissions WHERE exec_id = %s", (exec_id,))
-                cur.execute("DELETE FROM account_executions WHERE id = %s", (id_,))
+                cur.execute("DELETE FROM account_executions WHERE account_executions_id = %s", (account_executions_id,))
                 if cur.rowcount == 0:
                     conn.rollback()
                     return False
@@ -981,7 +981,7 @@ def delete_one_execution(status_config: dict, id_: int) -> bool:
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("delete_one_execution failed: id=%s %s", id_, e)
+        logger.warning("delete_one_execution failed: account_executions_id=%s %s", account_executions_id, e)
         return False
 
 

@@ -1,7 +1,7 @@
 # 阶段 3 执行计划（数据获取：账户、持仓、市值、交易历史与统计）
 
 与 [分步推进计划](../PLAN_NEXT_STEPS.md) **阶段 3（数据获取）** 一致。实现 **R-A1**（账户与持仓可获取）、**R-M6**（标的与持仓当前市价可获取）、**R-H2**（历史统计）。  
-**数据库与表结构**：以 [DATABASE.md](../DATABASE.md) 为准；本文仅引用 accounts、account_positions、daemon_auto_status_current（spot）、daemon_auto_status_history、daemon_auto_operations 等。
+**数据库与表结构**：以 [DATABASE.md](../DATABASE.md) 为准；本文仅引用 account、account_positions、daemon_auto_status_current（spot）、daemon_auto_status_history、daemon_auto_operations 等。
 
 **阶段 3 目标**：将账户、持仓、市值、交易历史与统计等**数据的获取**作为本阶段目标，供策略与监控使用。**阶段 4** = 策略框架与回测（R-B1、R-B2）；**阶段 5** = 自动交易对冲与监控（R-C2、R-C3）。详见 PLAN_NEXT_STEPS。
 
@@ -36,7 +36,7 @@
 
 - [x] **3.2.1** 通过 IB API 请求当前持仓（reqPositions/positions），包含策略涉及标的的数量与方向。
 - [x] **3.2.2** 持仓数据可供内部对冲逻辑与风控使用；与账户同间隔更新（如 1 小时）。
-- [x] **3.2.3**（可选）持仓写入 accounts / account_positions 或 snapshot，GET /status 或监控页可展示。
+- [x] **3.2.3**（可选）持仓写入 account / account_positions 或 snapshot，GET /status 或监控页可展示。
 
 ### 步骤 3.3：更新与异常（R-A1）
 
@@ -69,7 +69,7 @@
 
 ### 步骤 3.7：文档与验收
 
-- [x] **3.7.1** 文档：PLAN_NEXT_STEPS 阶段 3 实现说明、REQUIREMENTS.md §1.4/§1.5/§3、DATABASE.md accounts/account_positions。
+- [x] **3.7.1** 文档：PLAN_NEXT_STEPS 阶段 3 实现说明、REQUIREMENTS.md §1.4/§1.5/§3、DATABASE.md account/account_positions。
 - [ ] **3.7.2** **正式验收**：按 [PLAN_NEXT_STEPS](../PLAN_NEXT_STEPS.md) 阶段 3「检查方式」「验证标准」与「本阶段 Test Case 清单」执行，确认全部 TC-3-R-A1-*、TC-3-R-M6-*、TC-3-R-H2-* 通过并记录；更新阶段完成状态与项目里程碑时间线中的验收完成时间。
 
 ---

@@ -288,7 +288,7 @@ export function computeDayRealizedUnrealized(
     `${e.account_id ?? ''}\t${e.symbol ?? ''}\t${e.expiry ?? ''}\t${normalizeStrike(e.strike)}`
   const execById = new Map<number, Execution>()
   for (const e of allExecs) {
-    if (e.id != null) execById.set(e.id, e)
+    if (e.account_executions_id != null) execById.set(e.account_executions_id, e)
   }
   const dayPairsEnriched: DayPair[] = dayPairs.map((p) => ({
     ...p,
@@ -348,7 +348,7 @@ export function computeDayRealizedUnrealized(
       if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
       if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
     }
-    const unmatchedExecs = sortedExecs.filter((e) => e.id == null || !pairedExecIds.has(e.id))
+    const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
     const groupSumPnl =
       unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
       pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)

@@ -207,11 +207,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS flex_default_range_preset")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_default_range_days integer DEFAULT 30")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_init_range_days integer DEFAULT 360")
-        _log("accounts, account_positions, instrument_prices")
-        _log_table("accounts", "Account summaries")
+        _log("account, account_positions, instrument_prices")
+        _log_table("account", "Account summaries")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS accounts (
+            CREATE TABLE IF NOT EXISTS account (
                 account_id text PRIMARY KEY,
                 updated_at timestamptz DEFAULT now(),
                 net_liquidation double precision,
@@ -293,7 +293,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS account_executions (
-                id bigserial PRIMARY KEY,
+                account_executions_id bigserial PRIMARY KEY,
                 account_id text,
                 exec_id text,
                 exec_time timestamptz,
@@ -335,7 +335,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS account_transactions (
-                id bigserial PRIMARY KEY,
+                account_transactions_id bigserial PRIMARY KEY,
                 account_id text NOT NULL,
                 ts timestamptz NOT NULL,
                 amount double precision NOT NULL,

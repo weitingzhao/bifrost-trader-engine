@@ -845,7 +845,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                     const p_ =
                                       ex.price != null ? Number(ex.price) : NaN
                                     const idLabel =
-                                      ex.id != null ? `#${ex.id}` : 'id?'
+                                      ex.account_executions_id != null ? `#${ex.account_executions_id}` : 'id?'
                                     const parts: string[] = []
                                     parts.push(sideLabel)
                                     if (Number.isFinite(q)) parts.push(String(q))
@@ -1032,7 +1032,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                       </td>
                                       <td>{ex.account_id ?? '—'}</td>
                                       <td>
-                                        {ex.id != null ? (
+                                        {ex.account_executions_id != null ? (
                                           <span className="replay-exec-row-actions">
                                             <button
                                               type="button"
@@ -1055,10 +1055,10 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                                 )
                                                   return
                                                 const res = await deleteExecution(
-                                                  ex.id!,
+                                                  ex.account_executions_id!,
                                                 )
                                                 if (res.ok) {
-                                                  if (editExec?.id === ex.id)
+                                                  if (editExec?.account_executions_id === ex.account_executions_id)
                                                     setEditExec(null)
                                                   await loadReplayData()
                                                 } else {
@@ -1191,7 +1191,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                     <td>{fmtUsd(ex.commission ?? 0)}</td>
                                     <td>{ex.source ?? '—'}</td>
                                     <td>
-                                      {ex.id != null ? (
+                                      {ex.account_executions_id != null ? (
                                         <span className="replay-exec-row-actions">
                                           <button
                                             type="button"
@@ -1214,10 +1214,10 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                               )
                                                 return
                                               const res = await deleteExecution(
-                                                ex.id!,
+                                                ex.account_executions_id!,
                                               )
                                               if (res.ok) {
-                                                if (editExec?.id === ex.id)
+                                                if (editExec?.account_executions_id === ex.account_executions_id)
                                                   setEditExec(null)
                                                 await loadReplayData()
                                               } else {
@@ -1316,7 +1316,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                     <td>{fmtUsd(ex.commission ?? 0)}</td>
                                     <td>{ex.source ?? '—'}</td>
                                     <td>
-                                      {ex.id != null ? (
+                                      {ex.account_executions_id != null ? (
                                         <span className="replay-exec-row-actions">
                                           <button
                                             type="button"
@@ -1339,10 +1339,10 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                               )
                                                 return
                                               const res = await deleteExecution(
-                                                ex.id!,
+                                                ex.account_executions_id!,
                                               )
                                               if (res.ok) {
-                                                if (editExec?.id === ex.id)
+                                                if (editExec?.account_executions_id === ex.account_executions_id)
                                                   setEditExec(null)
                                                 await loadReplayData()
                                               } else {

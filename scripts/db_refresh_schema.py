@@ -2,11 +2,11 @@
 """刷新 status 用 PostgreSQL 库表结构（与 PostgreSQLSink._ensure_tables 一致，见 docs/DATABASE.md）。
 
 创建或补齐表：daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations、daemon_control、daemon_run_status、
-daemon_heartbeat、daemon_open_orders、settings、accounts、account_positions、instrument_prices、
+daemon_heartbeat、daemon_open_orders、settings、account、account_positions、instrument_prices、
 account_executions、account_execution_commissions、stock_day、stock_min、option_day、option_min、
 watchlist、job_bars_backfill、position_categories、position_category_tags、market_streams_symbol_order、
 us_market_holidays、flex_accounts。
-不再创建 ohlc_bars（已弃用）。从项目根目录执行。
+不再创建 ohlc_bars（已弃用）；不对旧表名（如 accounts）做迁移，账户摘要表仅使用 account。从项目根目录执行。
 
 Usage:
   python scripts/db_refresh_schema.py [--config PATH]
@@ -103,7 +103,7 @@ def main() -> int:
         conn.commit()
         tables_list = (
             "daemon_auto_status_current, daemon_auto_status_history, daemon_auto_operations, daemon_control, "
-            "daemon_run_status, daemon_heartbeat, daemon_open_orders, settings, accounts, account_positions, "
+            "daemon_run_status, daemon_heartbeat, daemon_open_orders, settings, account, account_positions, "
             "instrument_prices, account_executions, account_execution_commissions, "
             "stock_day, stock_min, option_day, option_min, watchlist, job_bars_backfill, "
             "position_categories, position_category_tags, market_streams_symbol_order, "

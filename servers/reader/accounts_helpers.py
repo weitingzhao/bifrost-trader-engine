@@ -154,7 +154,7 @@ def _compute_opt_pair_map_and_pairs(
             )
             if not math.isfinite(q) or q <= 0 or not math.isfinite(p):
                 continue
-            eid = int(x["id"])
+            eid = int(x["account_executions_id"])
 
             if side == "BUY":
                 remaining = q
@@ -251,7 +251,7 @@ def _get_current_equity(conn: Any) -> Optional[float]:
         return None
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(SUM(net_liquidation), 0) AS total FROM accounts")
+            cur.execute("SELECT COALESCE(SUM(net_liquidation), 0) AS total FROM account")
             row = cur.fetchone()
         if row and row[0] is not None:
             v = float(row[0])

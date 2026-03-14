@@ -73,7 +73,7 @@ def get_executions(
             try:
                 cur.execute(
                     f"""
-                    SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+                    SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                            e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
@@ -91,7 +91,7 @@ def get_executions(
                     try:
                         cur.execute(
                             f"""
-                            SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+                            SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                                    e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
@@ -107,7 +107,7 @@ def get_executions(
                     except Exception:
                         cur.execute(
                             f"""
-                                    SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+                                    SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                                            e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                                            NULL::double precision AS commission, e.source,
                                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
@@ -191,7 +191,7 @@ def get_executions_by_contract_keys(
     where = " AND ".join(conditions)
     values.append(limit)
     sql = f"""
-                    SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+                    SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                            e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
@@ -212,7 +212,7 @@ def get_executions_by_contract_keys(
                     try:
                         cur.execute(
                             f"""
-                            SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+                            SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
                                    e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
@@ -230,7 +230,7 @@ def get_executions_by_contract_keys(
                         vals_no_acc = list(values)
                         cur.execute(
                             f"""
-                            SELECT id, account_id, exec_id, {_EXEC_EPOCH} AS time,
+                            SELECT account_executions_id, account_id, exec_id, {_EXEC_EPOCH} AS time,
                                    symbol, sec_type, side, {_QTY_NORM}, price,
                                    NULL::double precision AS commission, source,
                                    expiry, strike, option_right, exchange, order_id, cum_qty,
@@ -279,7 +279,7 @@ def get_executions_with_opt_pairs(
         since_date = until_date = None
     id_to_trade_date: Dict[int, date] = {}
     for leg in all_legs:
-        eid = leg.get("id")
+        eid = leg.get("account_executions_id")
         if eid is None:
             continue
         td = leg.get("trade_date")
@@ -326,7 +326,7 @@ def get_executions_with_opt_pairs(
             if aid not in pair_map_filtered[bid]:
                 pair_map_filtered[bid].append(aid)
     for e in day_executions:
-        eid = e.get("id")
+        eid = e.get("account_executions_id")
         if eid is not None:
             e["paired_execution_ids"] = pair_map_filtered.get(int(eid), [])
         else:
@@ -362,7 +362,7 @@ WITH day_keys AS (
     {acc_cond}
 ),
 all_legs AS (
-  SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+  SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
          e.trade_date,
          e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
          {_COMM_NORM_E}, e.source,
@@ -404,7 +404,7 @@ WITH day_keys AS (
     {acc_cond}
 ),
 all_legs AS (
-  SELECT e.id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
+  SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
          e.trade_date,
          e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
          NULL::double precision AS commission, e.source,
@@ -484,7 +484,7 @@ def get_transactions(
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             q = """
-                SELECT id, account_id, extract(epoch from ts) AS ts, amount, type, currency, description, created_at
+                SELECT account_transactions_id, account_id, extract(epoch from ts) AS ts, amount, type, currency, description, created_at
                 FROM account_transactions WHERE 1=1
             """
             args: List[Any] = []

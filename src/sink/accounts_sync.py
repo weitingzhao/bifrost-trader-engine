@@ -1,4 +1,4 @@
-"""Normalize and write accounts_snapshot into accounts and account_positions tables.
+"""Normalize and write accounts_snapshot into account and account_positions tables.
 
 Used by the sink (write_snapshot) and by the legacy reader. See docs/DATABASE.md.
 """
@@ -69,8 +69,8 @@ def _parse_summary_floats(
 def sync_accounts_snapshot_to_tables(
     conn, accounts_list: Optional[List[Dict[str, Any]]]
 ) -> None:
-    """Write normalized accounts_snapshot into accounts + account_positions.
-    accounts: upsert by account_id. account_positions: upsert by (account_id, symbol, sec_type);
+    """Write normalized accounts_snapshot into account + account_positions.
+    account: upsert by account_id. account_positions: upsert by (account_id, symbol, sec_type);
     only delete rows for an account that are no longer in the snapshot (position closed).
     """
     if not accounts_list or not isinstance(accounts_list, list):
@@ -90,10 +90,10 @@ def sync_accounts_snapshot_to_tables(
                 summary
             )
             summary_extra_json = _json_safe(summary_extra) if summary_extra else None
-            # accounts: upsert by account_id (no delete)
+            # account: upsert by account_id (no delete)
             cur.execute(
                 """
-                INSERT INTO accounts (account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra)
+                INSERT INTO account (account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra)
                 VALUES (%s, now(), %s, %s, %s, %s)
                 ON CONFLICT (account_id) DO UPDATE SET
                     updated_at = now(),

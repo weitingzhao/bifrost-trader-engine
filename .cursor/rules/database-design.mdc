@@ -14,7 +14,7 @@ When adding or changing **PostgreSQL** tables in this project, follow the standa
 - **Safety-boundary tables** (gates): use prefix **`gate_safety_`**.
   - `gate_safety_strategy`, `gate_safety_strategy_earnings_dates`, `gate_safety_state`, `gate_safety_intent`, `gate_safety_guard`.
 - **Celery / job-queue tables**: use prefix **`job_`** (e.g. `job_bars_backfill` for bars backfill task queue).
-- Other domain tables keep existing names (e.g. `status_current`, `accounts`, `settings`).
+- Other domain tables keep existing names (e.g. `status_current`, `account`, `settings`).
 
 ## 2. Primary Key Column Name
 

@@ -107,7 +107,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
           const execById = new Map<number, Execution>()
           for (const e of execs) {
-            if (e.id != null) execById.set(e.id, e)
+            if (e.account_executions_id != null) execById.set(e.account_executions_id, e)
           }
           const optMap: Record<string, { realized: number; unrealized: number }> = {}
           const stockMap: Record<string, { realized: number; unrealized: number }> = {}
@@ -192,7 +192,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
         const execById = new Map<number, Execution>()
         for (const e of execs) {
-          if (e.id != null) execById.set(e.id, e)
+          if (e.account_executions_id != null) execById.set(e.account_executions_id, e)
         }
         const map: Record<string, { realized: number; unrealized: number }> = {}
         for (let day = 1; day <= lastDay; day++) {
@@ -264,7 +264,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
         const execs = res.executions ?? []
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-        const execByIdForDate = new Map(execs.map((e: Execution) => [e.id!, e]))
+        const execByIdForDate = new Map(execs.map((e: Execution) => [e.account_executions_id!, e]))
         const legDate = (eid: number) => {
           const ex = execByIdForDate.get(eid)
           return ex != null ? executionDateStr(ex) : ''
@@ -731,7 +731,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                               const backendPairs = selectedDayOptPairs ?? []
                               const execById = new Map<number, Execution>()
                               for (const e of allExecs) {
-                                if (e.id != null) execById.set(e.id, e)
+                                if (e.account_executions_id != null) execById.set(e.account_executions_id, e)
                               }
                               const legDateStr = (eid: number) => {
                                 const ex = execById.get(eid)
@@ -882,7 +882,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                   if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
                                   if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
                                 }
-                                const unmatchedExecs = sortedExecs.filter((e) => e.id == null || !pairedExecIds.has(e.id))
+                                const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
                                 const groupSumPnl =
                                   unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
                                   pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
@@ -1018,7 +1018,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                         if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
                                         if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
                                       }
-                                      const unmatchedExecs = sortedExecs.filter((e) => e.id == null || !pairedExecIds.has(e.id))
+                                      const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
                                       const rows: Row[] = [
                                         ...sortedExecs.map((e) => ({ type: 'Execution' as const, e })),
                                         ...pairs.map((p) => ({ type: 'Match' as const, p })),
@@ -1087,9 +1087,9 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                 })() : (
                                                   (() => {
                                                     return (
-                                                  <tr key={row.e.id ?? idx} className="performance-calendar-row-execution">
+                                                  <tr key={row.e.account_executions_id ?? idx} className="performance-calendar-row-execution">
                                                     <td>Execution</td>
-                                                    <td>{row.e.id ?? '—'}</td>
+                                                    <td>{row.e.account_executions_id ?? '—'}</td>
                                                     <td>{row.e.account_id ?? '—'}</td>
                                                     <td>{fmtChicagoTime(row.e.time)}</td>
                                                     <td>{row.e.side ?? '—'}</td>

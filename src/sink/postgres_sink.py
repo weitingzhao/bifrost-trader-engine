@@ -97,7 +97,7 @@ class PostgreSQLSink(StatusSink):
     ) -> None:
         if not self._ensure_conn():
             return
-        # daemon_auto_status_current / daemon_auto_status_history: only SNAPSHOT_KEYS (no account_* or accounts_snapshot; those live in accounts + account_positions)
+        # daemon_auto_status_current / daemon_auto_status_history: only SNAPSHOT_KEYS (no account_* or accounts_snapshot; those live in account + account_positions)
         keys = tuple(SNAPSHOT_KEYS)
         cols = ", ".join(keys)
         placeholders = ", ".join("%s" for _ in keys)
@@ -125,7 +125,7 @@ class PostgreSQLSink(StatusSink):
                         f"INSERT INTO daemon_auto_status_history ({cols}) VALUES ({placeholders})",
                         values,
                     )
-            # R-A1: sync multi-account snapshot into normalized tables (accounts + account_positions)
+            # R-A1: sync multi-account snapshot into normalized tables (account + account_positions)
             if isinstance(raw_accounts, list) and raw_accounts:
                 _sync_accounts_snapshot_to_tables(self._conn, raw_accounts)
             self._conn.commit()

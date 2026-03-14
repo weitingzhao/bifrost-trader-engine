@@ -46,7 +46,7 @@
 
 - **主键/唯一**：单行表使用固定行 daemon_auto_status_current_id=1，upsert 时更新该行。
 
-- **涉及库表**：上述列所在数据库与表为：配置中的 **PostgreSQL**（`config.postgres` 或环境变量 `PGHOST` 等，见 [ARCHITECTURE.md](ARCHITECTURE.md) §2 运行环境）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），daemon_auto_status_current/daemon_auto_status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 daemon_auto_operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
+- **涉及库表**：上述列所在数据库与表为：配置中的 **PostgreSQL**（`config.postgres` 或环境变量 `PGHOST` 等，见 [ARCHITECTURE.md](ARCHITECTURE.md) §2 运行环境）。**账户相关数据**仅存于 **account**、**account_positions** 表（§2.7、§2.8），daemon_auto_status_current/daemon_auto_status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 daemon_auto_operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
 
 ### 2.2 表 `daemon_auto_status_history`（daemon 自动交易状态历史）
 
@@ -81,7 +81,7 @@
 ### 2.4 表 `daemon_control`（阶段 2：控制通道，替代本地文件）
 
 - **用途**：供监控服务（可运行在另一台主机，RE-5）向守护进程发送控制指令（stop/flatten/refresh_replay 等），替代本地控制文件，无需共享文件系统（如 NFS）。
-- **写入**：监控应用在 POST /control/stop、POST /control/flatten、POST /control/retry_ib（RE-7）、**POST /control/refresh_replay** 时 **INSERT** 一行；**POST /control/refresh_accounts 不写本表**，由监控端用其维护的 AccountIbClient 直接向 IB 拉取并写 accounts/account_positions。守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
+- **写入**：监控应用在 POST /control/stop、POST /control/flatten、POST /control/retry_ib（RE-7）、**POST /control/refresh_replay** 时 **INSERT** 一行；**POST /control/refresh_accounts 不写本表**，由监控端用其维护的 AccountIbClient 直接向 IB 拉取并写 account/account_positions。守护进程在每次 heartbeat 轮询并 **消费**（标记 consumed_at）后执行对应逻辑。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -94,8 +94,9 @@
 - **消费语义**：守护进程 `SELECT` 一条 `consumed_at IS NULL` 且 `id` 最小的行，执行对应 command 后 `UPDATE consumed_at = now()`，避免重复触发。监控与守护进程使用同一 PostgreSQL（root `postgres` 配置），故无跨机文件依赖。
 - **过期不执行**：若指令的 `created_at` 早于当前时间超过约 60 秒（如上次运行遗留的 stop），守护进程仍会**消费**该行（标记 `consumed_at`）以清空队列，但**不执行**该指令，避免新启动的守护进程误执行“上一次”的停止。
 
-### 2.7 表 `accounts`（阶段 3.0 R-A1：多账户摘要，由 accounts_snapshot 规范化）
+### 2.7 表 `account`（阶段 3.0 R-A1：多账户摘要，由 accounts_snapshot 规范化）
 
+- **表名**：账户摘要表名为 **`account`**（单数）。项目内已不再使用旧表名 `accounts`，**不提供**从 `accounts` 到 `account` 的迁移或向下兼容；建表与所有 SQL 仅使用 `account`。
 - **用途**：存 IB 多账户摘要，便于按账户查询、更新与后续账户操作；由守护进程在写入 snapshot 时从内存中的 accounts_snapshot 同步写入（每账户一行）。**多账户时**：Host 账户用于守护进程对冲与行情（由 config 或 settings 的 `host_account_id` 指定）；**所有账户**均写入本表，供统一 Portfolio 展示。
 - **写入**：按 **account_id** 唯一键 upsert（`ON CONFLICT (account_id) DO UPDATE`），不删整表、不整表重插；仅更新该账户行。
 - **列**：
@@ -114,7 +115,7 @@
 - **用途**：存每个账户的持仓明细，便于按账户/标的查询与后续风控、对冲逻辑。**多账户时**：Host 账户用于守护进程对冲与行情；**所有账户**的持仓均写入本表，供统一 Portfolio 展示。
 - **主键**：**(account_id, contract_key)**，无自增 id；据此判断插入新行或更新现有行。
 - **contract_key** 格式为 `symbol|sec_type|expiry|strike|right`，期权（OPT）用到期/行权价/权利区分合约，股票（STK）为 `symbol|STK|||`。
-- **写入**：与 `accounts` 同步；对 snapshot 中每条持仓计算 contract_key 后 `INSERT ... ON CONFLICT (account_id, contract_key) DO UPDATE`；仅删除该账户下**不在当前 snapshot** 的行（平仓或移除的持仓），不整表清空。
+- **写入**：与 `account` 同步；对 snapshot 中每条持仓计算 contract_key 后 `INSERT ... ON CONFLICT (account_id, contract_key) DO UPDATE`；仅删除该账户下**不在当前 snapshot** 的行（平仓或移除的持仓），不整表清空。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -132,7 +133,7 @@
 | option_right | text | 期权权利（C/P 或 CALL/PUT）；列名不用 right 因系 PostgreSQL 保留字 |
 | updated_at | timestamptz | 最后更新时间 |
 
-- **语义**：GET /status 的 `accounts` 从 **accounts** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 accounts 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**由监控端维护的 **AccountIbClient** 直接向 IB 拉取账户/持仓并写入 accounts/account_positions，不写 daemon_control；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
+- **语义**：GET /status 的 `accounts` 从 **account** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 account 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**由监控端维护的 **AccountIbClient** 直接向 IB 拉取账户/持仓并写入 account/account_positions，不写 daemon_control；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
 
 ### 2.10 表 `instrument_prices`（阶段 3 R-M6：持仓标的当前价）
 
@@ -164,7 +165,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
+| account_executions_id | bigserial | 自增主键 |
 | account_id | text | 账户标识 |
 | exec_id | text | IB 执行 id（若有，用于去重，Flex 中为 ibExecID） |
 | exec_time | timestamptz | 成交时间（TWS/Flex dateTime 解析后） |
@@ -251,7 +252,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
+| account_transactions_id | bigserial | 自增主键 |
 | account_id | text NOT NULL | 账户标识 |
 | ts | timestamptz NOT NULL | 交易时间（Flex Date/Time） |
 | amount | double precision NOT NULL | 金额（正为流入、负为流出，与 Flex 一致） |
@@ -813,7 +814,7 @@
 python scripts/db_refresh_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `daemon_auto_status_current`、`daemon_auto_status_history`、`daemon_auto_operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags**、**market_streams_symbol_order** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `daemon_auto_status_current`、`daemon_auto_status_history`、`daemon_auto_operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**account**（账户摘要，表名单数）、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags**、**market_streams_symbol_order** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars，亦不对旧表名 `accounts` 做迁移）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
 
@@ -897,6 +898,8 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-13 daemon_auto 表重命名与主键规范 | 表 daemon 自动交易三表命名为 daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations；主键列为 daemon_auto_status_current_id、daemon_auto_status_history_id、daemon_auto_operations_id（符合 database-design.mdc）。由 _ensure_tables 建表；不再支持旧表名。§2.1–§2.3、§3、§4、§4.2。 | — |
 | 2026-03-13 Celery 任务表命名 | 表 `job_bars_backfill`（主键 `job_bars_backfill_id`）；Celery/任务队列表均使用 **`job_`** 前缀，主键为「表名_id」。§2.18、database-design.mdc；reader 层函数统一为 `job_bars_backfill_*`。 | 阶段 3 |
 | 2026-03-13 strategy_history 主键规范 | 若存在表 strategy_history，主键列须为 `strategy_history_id`；pg_ddl 增加迁移：若列为 `id` 则 RENAME 为 `strategy_history_id`；§2.24.9 约定。 | — |
+| 2026-03-13 表 accounts 重命名为 account | 表 `accounts` 重命名为 `account`（单数）；§2.7、所有引用该表名的 SQL 与文档同步。**当前约定**：仅使用表名 `account`，不兼容旧表名 `accounts`，pg_ddl 与 db_refresh_schema 均不包含对旧表名的迁移逻辑。 | — |
+| 2026-03-13 account_executions/account_transactions 主键列名 | §2.11 account_executions、§2.21 account_transactions 主键列由 `id` 改为 `account_executions_id`、`account_transactions_id`（符合 database-design.mdc）。 | 阶段 3 |
 ---
 
 *本文档与 [分步推进计划](PLAN_NEXT_STEPS.md)、[阶段 1 执行计划](plans/phase1-execution-plan.md) 及运行环境需求保持一致；所有数据库相关设计与改动以本文档为唯一引用。*

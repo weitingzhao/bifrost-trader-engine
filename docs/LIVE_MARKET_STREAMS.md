@@ -15,7 +15,7 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
 ## 2. 持仓数据从哪里来
 
 - Live 页使用的 `status.accounts` 来自 **GET /status**。
-- 后台 `get_status` 里 `payload["accounts"] = reader.get_accounts_from_tables()`，即 **从数据库** 读取 `accounts` 与 `account_positions` 表。
+- 后台 `get_status` 里 `payload["accounts"] = reader.get_accounts_from_tables()`，即 **从数据库** 读取 `account` 与 `account_positions` 表。
 - 数据库里的账户/持仓是由 **Refresh accounts** 写进去的：  
   **Status 页（或其它入口）** 调用 **POST /control/refresh_accounts** → 监控端用 **AccountIbClient（Host IB）** 拉取主 TWS 的账户与持仓，若配置了 **第二 IB**（Settings 里 `ib2_host` 非空），还会用 **AccountIbClient2** 拉取第二 TWS 的账户与持仓，合并后写入 DB。
 
@@ -62,10 +62,10 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
 
 - **读路径**：`servers/reader/accounts.py` 的 `get_accounts_from_tables(conn)`  
   1. 查所有账户：  
-     `SELECT account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra FROM accounts ORDER BY account_id`  
+     `SELECT account_id, updated_at, net_liquidation, total_cash, buying_power, summary_extra FROM account ORDER BY account_id`  
   2. 对上面得到的 **每一个** `account_id`，查该账户持仓：  
      `SELECT ap.account_id, ap.symbol, ap.sec_type, ap.exchange, ap.currency, ap.position, ap.avg_cost, ... FROM account_positions ap ... WHERE ap.account_id = %s ORDER BY ap.contract_key`  
-  所以：只要 Secondary 账户在表 `accounts` 里，它的持仓就会在 `account_positions` 里被查出来，和 Host 一起放进 `status.accounts`。**若选 Secondary 没有记录，说明当前 DB 里要么没有 Secondary 这条 account，要么该 account 下没有 STK 持仓。**
+  所以：只要 Secondary 账户在表 `account` 里，它的持仓就会在 `account_positions` 里被查出来，和 Host 一起放进 `status.accounts`。**若选 Secondary 没有记录，说明当前 DB 里要么没有 Secondary 这条 account，要么该 account 下没有 STK 持仓。**
 
 - **写路径（Secondary 如何进 DB）**：只有 **Refresh accounts** 会写：  
   **POST /control/refresh_accounts** →  
@@ -74,9 +74,9 @@ Market Streams 表格中的 **Symbol 列表** 是以下三部分的 **并集**�
   合并为 `accounts_list = 列表1 + 列表2` →  
   `sync_accounts_snapshot_to_db(control_via_db, accounts_list)`（在 `servers/reader/accounts.py`）→  
   内部调用 `_sync_accounts_snapshot_to_tables(conn, accounts_list)`（`src/sink/accounts_sync.py`），对列表中 **每个** account 做：  
-  - 写入/更新 `accounts`（按 `account_id` upsert）；  
-  - 写入/更新/删除 `account_positions`（按 `account_id` + `contract_key`，并删除该 account 下已不在 snapshot 里的持仓）。  
-  因此：**Secondary 账户和其持仓只有在执行过 Refresh accounts 且第二 IB 连接成功时才会出现在 `accounts` / `account_positions`。**
+  - 写入/更新 `account`（按 `account_id` upsert）；
+  - 写入/更新/删除 `account_positions`（按 `account_id` + `contract_key`，并删除该 account 下已不在 snapshot 里的持仓）。
+  因此：**Secondary 账户和其持仓只有在执行过 Refresh accounts 且第二 IB 连接成功时才会出现在 `account` / `account_positions`。**
 
 **排查「选 Secondary 没有一条记录」建议**：  
 1. 在 **Accounts 页** 或直接看 **GET /status** 的 `accounts` 数组里，是否有一个元素的 `account_id` 与你 Settings 里 **Event Account → Secondary** 填的完全一致（忽略大小写和首尾空格）。  

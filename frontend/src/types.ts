@@ -243,7 +243,7 @@ export interface RiskSummaryResponse {
 
 /** Account execution/trade (R-A2). Full IB data. */
 export interface Execution {
-  id?: number
+  account_executions_id?: number
   account_id?: string
   exec_id?: string
   time?: number
@@ -351,7 +351,7 @@ export interface BackendOptPair {
 
 /** One row from account_transactions (Flex cash transactions). GET /transactions, GET /performance.transactions */
 export interface AccountTransaction {
-  id?: number
+  account_transactions_id?: number
   account_id: string
   ts: number
   amount: number

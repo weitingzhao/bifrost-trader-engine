@@ -24,7 +24,7 @@
 - **数据与下单**：均通过 IB API 来自 **TWS**（Trader Workstation）。
 - **账户**：**两个 IB 账户**（见需求 R-A4）。
   - **Host 账户**：数据与下单经当前 IB API 连接 TWS；承担**自动交易**（本项目 Gamma scalping）、**手动交易**及**行情/持仓数据源**。由 settings 表 `host_account_id`（列名 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。**Client ID 与 host_account_id 均在 PostgreSQL settings 表**，config.yaml 不再定义。
-  - **第二账户**：**仅手动交易**；守护进程不对其下单或订阅行情。若与主账户在同一 TWS 同一登录下，由现有守护进程/监控端拉取并写入 `accounts` / `account_positions` 等表；若在**另一 TWS 或另一登录**下，则通过监控端或独立服务的**第二 IB 连接**拉取后写入同一库（当前计划仅文档预留，不实现第二连接）。
+  - **第二账户**：**仅手动交易**；守护进程不对其下单或订阅行情。若与主账户在同一 TWS 同一登录下，由现有守护进程/监控端拉取并写入 `account` / `account_positions` 等表；若在**另一 TWS 或另一登录**下，则通过监控端或独立服务的**第二 IB 连接**拉取后写入同一库（当前计划仅文档预留，不实现第二连接）。
 - **实现方式**：TWS 允许多个 API 连接，用不同的 **client_id** 区分。守护程序使用一个 `client_id`（如 1）；手动交易使用 TWS 界面或另一 `client_id`（如 2）的客户端；监控端 Account/Market、Celery 各用不同 client_id。**不需要**开两个 TWS 实例（同一登录下两 account_id 即可）。
 
 ### 2.2 架构支柱（RE-2）

@@ -287,7 +287,7 @@ export function PositionsPage({
     const map = new Map<string, Execution>()
     const opt = (executions || []).filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
     for (const ex of opt) {
-      if (ex.id == null) continue
+      if (ex.account_executions_id == null) continue
       const ck = (ex.contract_key ?? '').trim()
       const acc = (ex.account_id ?? '').trim()
       const key = `${acc}|${ck}`
@@ -752,7 +752,7 @@ export function PositionsPage({
                                       <td><span className={pnlClass}>{fmtUsd(rowPnl)}</span></td>
                                       <td>{position.account_id ?? '—'}</td>
                                       <td>
-                                        {execForRow?.id != null ? (
+                                        {execForRow?.account_executions_id != null ? (
                                           <span className="replay-exec-row-actions">
                                             <button type="button" className="btn btn-small" onClick={() => { setEditExec(execForRow); setPageError(null) }}>Edit</button>
                                             <button
@@ -760,9 +760,9 @@ export function PositionsPage({
                                               className="btn btn-small btn-x"
                                               onClick={async () => {
                                                 if (!window.confirm('Delete this execution?')) return
-                                                const res = await deleteExecution(execForRow.id!)
+                                                const res = await deleteExecution(execForRow.account_executions_id!)
                                                 if (res.ok) {
-                                                  if (editExec?.id === execForRow.id) setEditExec(null)
+                                                  if (editExec?.account_executions_id === execForRow.account_executions_id) setEditExec(null)
                                                   await loadReplayData()
                                                 } else {
                                                   setPageError(res.error ?? 'Delete failed')
@@ -863,7 +863,7 @@ export function PositionsPage({
                                       </td>
                                       <td>{ex.account_id ?? '—'}</td>
                                       <td>
-                                        {ex.id != null ? (
+                                        {ex.account_executions_id != null ? (
                                           <span className="replay-exec-row-actions">
                                             <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setPageError(null) }}>Edit</button>
                                             <button type="button" className="btn btn-small" onClick={() => { setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
@@ -872,9 +872,9 @@ export function PositionsPage({
                                               className="btn btn-small btn-x"
                                               onClick={async () => {
                                                 if (!window.confirm('Delete this execution?')) return
-                                                const res = await deleteExecution(ex.id!)
+                                                const res = await deleteExecution(ex.account_executions_id!)
                                                 if (res.ok) {
-                                                  if (editExec?.id === ex.id) setEditExec(null)
+                                                  if (editExec?.account_executions_id === ex.account_executions_id) setEditExec(null)
                                                   await loadReplayData()
                                                 } else {
                                                   setPageError(res.error ?? 'Delete failed')

@@ -103,7 +103,7 @@ export async function postExecutionsFetchFlexUpload(xml: string): Promise<Execut
 }
 
 /** R-A2: Add one execution manually (historical entry). */
-export async function createExecution(body: Record<string, unknown>): Promise<{ ok: boolean; id?: number; error?: string }> {
+export async function createExecution(body: Record<string, unknown>): Promise<{ ok: boolean; account_executions_id?: number; error?: string }> {
   const r = await fetch(`${API}/executions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -120,12 +120,12 @@ export async function createExecution(body: Record<string, unknown>): Promise<{ 
         : undefined
   const statusMsg = `${r.status} ${r.statusText || ''}`.trim()
   const error = (j as any).error || detailMsg || (!r.ok ? statusMsg : undefined)
-  return { ok, id: (j as any).id, error }
+  return { ok, account_executions_id: (j as any).account_executions_id, error }
 }
 
-/** R-A2: Update one execution by id (manual correction). */
-export async function updateExecution(id: number, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/executions/${id}`, {
+/** R-A2: Update one execution by account_executions_id (manual correction). */
+export async function updateExecution(account_executions_id: number, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/executions/${account_executions_id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -144,9 +144,9 @@ export async function updateExecution(id: number, body: Record<string, unknown>)
   return { ok, error }
 }
 
-/** R-A2: Delete one execution by id. */
-export async function deleteExecution(id: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/executions/${id}`, { method: 'DELETE' })
+/** R-A2: Delete one execution by account_executions_id. */
+export async function deleteExecution(account_executions_id: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/executions/${account_executions_id}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   const ok = Boolean((j as any).ok) && r.ok
   const detail = (j as any).detail

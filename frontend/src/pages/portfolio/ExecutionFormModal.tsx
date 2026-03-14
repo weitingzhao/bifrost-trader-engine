@@ -136,7 +136,7 @@ export function ExecutionFormModal({
             }
             const sideUpper = (execForm.side || 'BUY').toUpperCase()
             const quantityForDb = sideUpper === 'SELL' ? -q : q
-            if (editExec?.id != null) {
+            if (editExec?.account_executions_id != null) {
               const body: Record<string, unknown> = {
                 exec_time: timeUnix,
                 symbol: sym,
@@ -156,7 +156,7 @@ export function ExecutionFormModal({
               if (isOpt && expiryTrimmed && /^\d{6,8}$/.test(expiryTrimmed)) {
                 body.expiry = expiryTrimmed
               }
-              const res = await updateExecution(editExec.id, body)
+              const res = await updateExecution(editExec.account_executions_id, body)
               if (res.ok) {
                 onClose()
                 await onSuccess()
