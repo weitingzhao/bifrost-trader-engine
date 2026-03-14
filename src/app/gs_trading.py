@@ -306,7 +306,7 @@ class GsTrading:
         cs: CompositeState,
         data_lag_ms: Optional[float],
     ) -> dict:
-        """Build dict for StatusSink (status_current / status_history)."""
+        """Build dict for StatusSink (daemon_auto_status_current / daemon_auto_status_history)."""
         return _snapshot.build_snapshot_dict(self, snapshot, spot, cs, data_lag_ms)
 
     def _build_heartbeat_minimal_dict(self) -> dict:

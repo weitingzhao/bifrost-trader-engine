@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 
 # Snapshot dict keys (R-M1a). Must match docs/DATABASE.md §2.1.
+# Table daemon_auto_status_current uses PK daemon_auto_status_current_id (not in this tuple; sink upserts with id=1).
 SNAPSHOT_KEYS = (
     "daemon_state",
     "trading_state",
@@ -36,6 +37,7 @@ OPTIONAL_SNAPSHOT_KEYS = (
 ACCOUNTS_SNAPSHOT_KEY = "accounts_snapshot"
 
 # Operation record dict keys (R-M4a). Must match docs/DATABASE.md §2.3.
+# Table daemon_auto_operations uses PK daemon_auto_operations_id (bigserial; not in this tuple).
 OPERATION_KEYS = ("ts", "type", "side", "quantity", "price", "state_reason")
 
 
@@ -51,7 +53,7 @@ class StatusSink(ABC):
         """Write state snapshot. Updates current view; optionally appends to history table.
 
         snapshot: dict with keys from SNAPSHOT_KEYS (daemon_state, trading_state, symbol, spot, ...).
-        append_history: if True, also append one row to status_history; if False, only update status_current.
+        append_history: if True, also append one row to daemon_auto_status_history; if False, only update daemon_auto_status_current.
         """
         ...
 

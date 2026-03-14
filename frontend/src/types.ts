@@ -131,7 +131,7 @@ export interface StatusResponse {
   celery_worker_ib_connected?: boolean
   /** Worker 连接 IB 使用的 client_id（与 celery_worker_ib_connected 配套） */
   celery_worker_ib_client_id?: number | null
-  /** bars_backfill_jobs 最近一次 updated_at（Unix 秒），用于判断 Worker 是否有近期活动 */
+  /** job_bars_backfill 最近一次 updated_at（Unix 秒），用于判断 Worker 是否有近期活动 */
   celery_worker_last_updated_ts?: number | null
   /** 当前响应的 Celery Worker 名称列表（inspect ping），用于 Celery 下列出已运行 Worker */
   celery_workers?: string[]
@@ -188,7 +188,9 @@ export interface DaemonHeartbeat {
   last_control_message?: string | null
 }
 
+/** Current status row from daemon_auto_status_current (GET /status). PK: daemon_auto_status_current_id. */
 export interface StatusRow {
+  daemon_auto_status_current_id?: number
   daemon_state?: string
   trading_state?: string
   symbol?: string
@@ -204,12 +206,14 @@ export interface StatusRow {
   [key: string]: unknown
 }
 
-/** Response from GET /operations */
+/** Response from GET /operations (rows from daemon_auto_operations). */
 export interface OperationsResponse {
   operations: Operation[]
 }
 
+/** Single row from daemon_auto_operations. PK: daemon_auto_operations_id. */
 export interface Operation {
+  daemon_auto_operations_id?: number
   ts: number
   type?: string
   side?: string

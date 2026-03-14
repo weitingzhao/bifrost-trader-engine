@@ -90,7 +90,7 @@ function SystemDashboard({
     <section className="card dashboard-strip" aria-label="System dashboard">
       <div className="dashboard-strip-grid">
         <div className="dashboard-system-cluster">
-          <span className="dashboard-group-label">Sys</span>
+          <span className="dashboard-group-label">System</span>
           <div className="dashboard-system-chips">
             {items.map((item) => (
               <button
@@ -115,17 +115,13 @@ function SystemDashboard({
               onClick={() => (onOpenSectionWithConsole ? onOpenSectionWithConsole('celery', 'console') : onOpenSection('celery'))}
               aria-label="Open System and Celery Console"
             >
-              <span className="dashboard-worker-label">Pending</span>
+              <span
+                className={`lamp lamp-sm ${workerRunning != null && workerRunning > 0 ? 'green' : 'yellow'}`}
+                title="Celery: green = jobs running, yellow = none running"
+                aria-hidden
+              />
+              <span className="dashboard-worker-label">Queue</span>
               <span className="dashboard-worker-value">{workerPending != null ? String(workerPending) : '—'}</span>
-            </button>
-            <button
-              type="button"
-              className="dashboard-worker-item dashboard-worker-item-btn"
-              onClick={() => onOpenSection('celery')}
-              aria-label="Open Celery detail"
-            >
-              <span className="dashboard-worker-label">Running</span>
-              <span className="dashboard-worker-value">{workerRunning != null ? String(workerRunning) : '—'}</span>
             </button>
           </div>
         </div>

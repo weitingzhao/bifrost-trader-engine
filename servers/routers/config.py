@@ -11,6 +11,7 @@ from servers.reader import (
     write_flex_config,
     write_ib_config,
 )
+from servers.reader.settings import write_active_strategy_and_gates
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,15 @@ class FlexConfigBody(BaseModel):
     accounts: List[FlexAccountItem] = []
     flex_default_range_days: Optional[int] = None
     flex_init_range_days: Optional[int] = None
+
+    class Config:
+        extra = "ignore"
+
+
+class ActiveStrategyBody(BaseModel):
+    """POST /config/active-strategy body: active_strategy_structure_id, active_gate_safety_strategy_id (null to clear)."""
+    active_strategy_structure_id: Optional[int] = None
+    active_gate_safety_strategy_id: Optional[int] = None
 
     class Config:
         extra = "ignore"
@@ -171,6 +181,28 @@ def post_config_flex(request: Request, body: FlexConfigBody = Body(...)) -> JSON
             },
         )
     return JSONResponse(status_code=500, content={"error": "failed to write flex config"})
+
+
+@router.post("/config/active-strategy")
+def post_config_active_strategy(request: Request, body: ActiveStrategyBody = Body(...)) -> JSONResponse:
+    """Update settings: active_strategy_structure_id, active_gate_safety_strategy_id (null to clear). Daemon uses these on next start when loading gates from DB."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
+    if write_active_strategy_and_gates(
+        control_via_db,
+        active_strategy_structure_id=body.active_strategy_structure_id,
+        active_gate_safety_strategy_id=body.active_gate_safety_strategy_id,
+    ):
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "active_strategy_structure_id": body.active_strategy_structure_id,
+                "active_gate_safety_strategy_id": body.active_gate_safety_strategy_id,
+            },
+        )
+    return JSONResponse(status_code=500, content={"error": "failed to write active strategy and gates"})
 
 
 # --- position-categories ---

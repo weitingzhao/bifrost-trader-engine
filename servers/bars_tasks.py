@@ -1,4 +1,4 @@
-"""Celery tasks for bars backfill. Task updates bars_backfill_jobs row when done.
+"""Celery tasks for bars backfill. Task updates job_bars_backfill row when done.
 
 Worker process hosts a single long-lived IB connection (MarketIbClient) in a dedicated asyncio
 loop thread; tasks reuse it to avoid reconnecting every time (which triggers duplicate data pulls).
@@ -349,11 +349,11 @@ async def _run_backfill_in_loop(
     Uses years/days/override_days/span_hours from the job row (DB) when present, so configured range is applied.
     """
     global _worker_last_bars_job_finished_ts, _worker_last_bars_job_interval_sec
-    from servers.reader import StatusReader, get_bars_backfill_job, update_bars_backfill_job_result
+    from servers.reader import StatusReader, get_job_bars_backfill, update_job_bars_backfill_result
     from servers.bars_backfill import run_one_backfill
 
-    update_bars_backfill_job_result(status_cfg, job_id, "running", None)
-    job_row = get_bars_backfill_job(status_cfg, job_id) or {}
+    update_job_bars_backfill_result(status_cfg, job_id, "running", None)
+    job_row = get_job_bars_backfill(status_cfg, job_id) or {}
     # Prefer job row span params (what API stored when enqueueing) so Custom/Max/Min range is respected
     if job_row.get("years") is not None:
         years = float(job_row["years"])
@@ -389,7 +389,7 @@ async def _run_backfill_in_loop(
                 api_interval_sec=api_interval_sec,
             )
             status = "done" if result.get("ok") else "failed"
-            update_bars_backfill_job_result(status_cfg, job_id, status, result)
+            update_job_bars_backfill_result(status_cfg, job_id, status, result)
             _worker_last_bars_job_finished_ts = __import__("time").time()
             _worker_last_bars_job_interval_sec = float(api_interval_sec) if api_interval_sec is not None and api_interval_sec > 0 else 0.0
             return result
@@ -410,7 +410,7 @@ async def _run_backfill_in_loop(
         "ok": False,
         "error": f"Worker IB connection dropped during backfill and reconnect retry failed: {last_disconnect_error}",
     }
-    update_bars_backfill_job_result(status_cfg, job_id, "failed", result)
+    update_job_bars_backfill_result(status_cfg, job_id, "failed", result)
     _worker_last_bars_job_finished_ts = __import__("time").time()
     _worker_last_bars_job_interval_sec = float(api_interval_sec) if api_interval_sec is not None and api_interval_sec > 0 else 0.0
     return result
@@ -426,8 +426,8 @@ def backfill_bars(
     override_days: float | None = None,
     span_hours: float | None = None,
 ):
-    """Run one bars backfill. task_id must be set to bars_backfill_jobs.id when enqueued.
-    Uses the worker process's shared IB connection; updates bars_backfill_jobs row when done.
+    """Run one bars backfill. task_id must be set to job_bars_backfill.job_bars_backfill_id when enqueued.
+    Uses the worker process's shared IB connection; updates job_bars_backfill row when done.
     """
     job_id_str = self.request.id
     try:
@@ -438,7 +438,7 @@ def backfill_bars(
 
     try:
         from src.app.config import read_config
-        from servers.reader import update_bars_backfill_job_result
+        from servers.reader import update_job_bars_backfill_result
     except ImportError as e:
         logger.exception("backfill_bars: import failed: %s", e)
         _update_result(job_id, "failed", {"ok": False, "error": str(e)})
@@ -488,11 +488,11 @@ def backfill_bars(
     except TimeoutError:
         logger.exception("Bars task job_id=%s timed out after 600s", job_id)
         result = {"ok": False, "error": "Job timed out after 600s"}
-        update_bars_backfill_job_result(control_via_db, job_id, "failed", result)
+        update_job_bars_backfill_result(control_via_db, job_id, "failed", result)
     except Exception as e:
         logger.exception("Bars task job_id=%s failed: %s", job_id, e)
         result = {"ok": False, "error": str(e)}
-        update_bars_backfill_job_result(control_via_db, job_id, "failed", result)
+        update_job_bars_backfill_result(control_via_db, job_id, "failed", result)
 
     status = "done" if result.get("ok") else "failed"
     logger.info("Bars task job_id=%s status=%s", job_id, status)
@@ -507,10 +507,10 @@ def _update_result(
     status_cfg: Optional[Dict[str, Any]] = None,
     config_path: Optional[str] = None,
 ) -> None:
-    """Update bars_backfill_jobs row when status_cfg or config is available."""
+    """Update job_bars_backfill row when status_cfg or config is available."""
     try:
         from src.app.config import read_config
-        from servers.reader import update_bars_backfill_job_result
+        from servers.reader import update_job_bars_backfill_result
         if status_cfg:
             cfg = status_cfg
         elif config_path:
@@ -520,6 +520,6 @@ def _update_result(
             config, _ = read_config()
             cfg = config.get("status") or {}
         if cfg:
-            update_bars_backfill_job_result(cfg, job_id, status, result)
+            update_job_bars_backfill_result(cfg, job_id, status, result)
     except Exception as e:
         logger.warning("_update_result failed: %s", e)

@@ -170,6 +170,14 @@
 - **回测作为手段**：**不连接 TWS 实盘**，用**历史行情与持仓快照**回放，驱动与实盘**同一套** StateClassifier、TradingFSM、ExecutionGuard 逻辑；产出理论 P&L、收益曲线、最大回撤及决策与 block reason。实现依赖历史存储，见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 阶段 4。
 - **策略编辑**：当前阶段以配置（YAML/gates）与回测参数对比为主；若后续支持可视化策略编辑或策略模板，可在本类下扩展需求。
 
+### 4.3 策略与安全边界数据模型与落库（扩展）
+
+- **目标**：策略三层（结构策略、机会策略、组合策略）与安全边界四层（gates：strategy / state / intent / guard）支持**落库**，便于版本管理、回测关联与按版本切换。
+- **范围**：
+  - **结构策略**（strategy_structure）、**机会策略**（strategy_opportunity）、**组合策略**（strategy_portfolio）存于 DB；安全边界以 **gate_safety_strategy**（根表）及 **gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**、**gate_safety_strategy_earnings_dates** 存于 DB，**无 JSON 列**，仅标量列。
+  - 当前生效的结构策略与安全边界由 **settings** 表字段 **active_strategy_structure_id**、**active_gate_safety_strategy_id** 指定；守护进程可**优先从 DB 加载 gates**，未配置时回退 config 文件。
+- **引用**：表结构与命名标准见 [docs/DATABASE.md](docs/DATABASE.md) §2.24 与 [.cursor/rules/database-design.mdc](.cursor/rules/database-design.mdc)。实现步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略与安全边界落库」步骤。
+
 ---
 
 ## 5. 策略应用（自动交易）（e）
@@ -191,7 +199,7 @@
 | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅 | 行情与持仓以 IB 事件驱动更新；轮询仅用于控制通道。 |
 | **R-RM2** | 行情写入 Redis；唯一写入方为守护进程 | 监控 Server 不向 Redis 写入市场行情；监控仅订阅联动通道并读 Redis 后推前端。 |
 | **R-RM3** | 联动机制：Redis Pub/Sub 或 Streams | 守护写 Redis 后发布通知；监控订阅，收到后读 Redis（或消息体）并推给 Web UI。 |
-| **R-RM9**（可选） | 第一里程碑可为「仅建议、不实盘」 | 守护完整跑策略与风控，执行层截断，将 hedge 建议写入 operations，由 Web UI 呈现。 |
+| **R-RM9**（可选） | 第一里程碑可为「仅建议、不实盘」 | 守护完整跑策略与风控，执行层截断，将 hedge 建议写入 daemon_auto_operations，由 Web UI 呈现。 |
 
 **何时在 UI 提供实时行情**：操作中监控、与守护行为对照、同屏决策、建议模式时需要；仅健康检查、事后复盘、只看统计时不需要。**阶段归属**：见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」步骤或阶段。
 

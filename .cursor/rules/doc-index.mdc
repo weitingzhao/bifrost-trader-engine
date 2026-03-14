@@ -26,7 +26,8 @@ alwaysApply: true
 
 ## 3. 项目资源 (docs/index.md § 项目资源)
 
-- **数据库设计（PostgreSQL）** → docs/DATABASE.md  
+- **数据库设计（PostgreSQL）** → docs/DATABASE.md（策略与安全边界表见 §2.24）  
+- **数据库设计标准**（表命名、主外键、无 JSON 约定）→ .cursor/rules/database-design.mdc  
 - **FSM 状态流转** → docs/fsm/linkage.md  
 - **状态空间** (O,D,M,L,E,S) → docs/research/STATE_SPACE_MAPPING.md  
 - **配置安全分类 / 风险模型** → docs/research/CONFIG_SAFETY_TAXONOMY.md  

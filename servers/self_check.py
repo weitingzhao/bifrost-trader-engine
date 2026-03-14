@@ -1,4 +1,4 @@
-"""Derive self_check and status_lamp from status_current row. Phase 2 (R-M2, R-M3)."""
+"""Derive self_check and status_lamp from daemon_auto_status_current row. Phase 2 (R-M2, R-M3)."""
 
 from typing import Any, Dict, List, Optional
 
@@ -14,7 +14,7 @@ def derive_self_check(
     """Compute self_check (ok/degraded/blocked), block_reasons, and status_lamp (green/yellow/red).
 
     Args:
-        row: Single status_current row (dict) or None if no row.
+        row: Single daemon_auto_status_current row (dict) or None if no row.
         data_lag_threshold_ms: From config gates.state.system.data_lag_threshold_ms, or default.
         trading_suspended: From daemon_run_status.suspended; when True, daemon is not placing new hedges (reflect in self_check).
 

@@ -1,7 +1,7 @@
 # 阶段 3 执行计划（数据获取：账户、持仓、市值、交易历史与统计）
 
 与 [分步推进计划](../PLAN_NEXT_STEPS.md) **阶段 3（数据获取）** 一致。实现 **R-A1**（账户与持仓可获取）、**R-M6**（标的与持仓当前市价可获取）、**R-H2**（历史统计）。  
-**数据库与表结构**：以 [DATABASE.md](../DATABASE.md) 为准；本文仅引用 accounts、account_positions、status_current（spot）、status_history、operations 等。
+**数据库与表结构**：以 [DATABASE.md](../DATABASE.md) 为准；本文仅引用 accounts、account_positions、daemon_auto_status_current（spot）、daemon_auto_status_history、daemon_auto_operations 等。
 
 **阶段 3 目标**：将账户、持仓、市值、交易历史与统计等**数据的获取**作为本阶段目标，供策略与监控使用。**阶段 4** = 策略框架与回测（R-B1、R-B2）；**阶段 5** = 自动交易对冲与监控（R-C2、R-C3）。详见 PLAN_NEXT_STEPS。
 
@@ -9,7 +9,7 @@
 
 ## 范围与成功标准（阶段 3：数据获取）
 
-- **交付物**：(1) 守护程序从 IB 获取**账户摘要**与**当前持仓**（R-A1），可供内部对冲与风控使用；(2) 守护程序拉取**标的市价**并写入 sink/status_current（R-M6）；GET /status 返回账户/持仓摘要与标的市价，供监控页展示；(3) 独立脚本/模块**只读历史表**产出统计（按日/周对冲次数、盈亏汇总等）（R-H2）；(4) 账户/持仓/市价的更新与 IB 断连行为明确（RE-7）。
+- **交付物**：(1) 守护程序从 IB 获取**账户摘要**与**当前持仓**（R-A1），可供内部对冲与风控使用；(2) 守护程序拉取**标的市价**并写入 sink/daemon_auto_status_current（R-M6）；GET /status 返回账户/持仓摘要与标的市价，供监控页展示；(3) 独立脚本/模块**只读历史表**产出统计（按日/周对冲次数、盈亏汇总等）（R-H2）；(4) 账户/持仓/市价的更新与 IB 断连行为明确（RE-7）。
 - **成功标准**：[分步推进计划](../PLAN_NEXT_STEPS.md) 阶段 3 的全部 Test Case（TC-3-R-A1-*、TC-3-R-M6-*、TC-3-R-H2-*）通过；R-A1、R-M6、R-H2 验收条全部满足。
 
 ---
@@ -17,8 +17,8 @@
 ## 已实现（阶段 3 落地情况）
 
 - **R-A1**：账户与持仓（见下「当前代码锚点」）；CONNECTED 时拉取，RUNNING 后每 1 小时拉取；断连 WAITING_IB 不拉取。
-- **R-M6**：每次心跳拉取标的现价并写入 status_current.spot；GET /status 含 status.spot；监控页可展示标的与持仓市价、盈亏、期权虚实等。
-- **R-H2**：已实现。`scripts/stats_from_history.py` 只读 status_history、operations 表，产出按日/周对冲次数、盈亏汇总；可离线运行（`python scripts/stats_from_history.py [--days N] [--format json|text]`）。
+- **R-M6**：每次心跳拉取标的现价并写入 daemon_auto_status_current.spot；GET /status 含 status.spot；监控页可展示标的与持仓市价、盈亏、期权虚实等。
+- **R-H2**：已实现。`scripts/stats_from_history.py` 只读 daemon_auto_status_history、daemon_auto_operations 表，产出按日/周对冲次数、盈亏汇总；可离线运行（`python scripts/stats_from_history.py [--days N] [--format json|text]`）。
 
 ---
 
@@ -45,7 +45,7 @@
 
 ### 步骤 3.4：标的与持仓市价（R-M6）
 
-- [x] **3.4.1** 守护程序在 heartbeat 或按配置间隔向 IB 请求标的行情（spot、bid/ask 等），写入 status_current（如 spot 列）。
+- [x] **3.4.1** 守护程序在 heartbeat 或按配置间隔向 IB 请求标的行情（spot、bid/ask 等），写入 daemon_auto_status_current（如 spot 列）。
 - [x] **3.4.2** GET /status 返回的当前视图中包含标的市价（如 status.spot），可供监控页读取。
 - [x] **3.4.3** 监控页能结合持仓与市价展示（持仓+当前价、盈亏、期权虚实等）；多标的时市价可区分。
 
@@ -61,10 +61,10 @@
 
 ### 步骤 3.5a：非实时市场数据拉取 Worker（R-A3 验收条 ⑥）
 
-- [x] **3.5a.1** 表 `bars_backfill_jobs` 已加入 DATABASE.md 与 postgres_sink._ensure_tables；`scripts/db_refresh_schema.py` 可创建表。
+- [x] **3.5a.1** 表 `job_bars_backfill` 已加入 DATABASE.md 与 postgres_sink._ensure_tables；`scripts/db_refresh_schema.py` 可创建表。
 - [x] **3.5a.2** API：POST /bars/backfill（queue=1）入队写入 PG 并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 从 PG 读取；queue=0 时同步执行共用 `run_one_backfill_impl`。
-- [x] **3.5a.3** 共用 backfill 逻辑：`servers/bars_backfill.run_one_backfill`；reader 层：`insert_bars_backfill_job`、`get_bars_backfill_jobs`、`get_bars_backfill_job`、`claim_next_pending_bars_backfill_job`、`update_bars_backfill_job_result`、`trim_bars_backfill_jobs`。
-- [x] **3.5a.4** 独立 Worker 进程：Celery worker（`scripts/run_celery.py`）；从 Redis 队列取任务（task_id = bars_backfill_jobs.id），执行 backfill，更新 PG 行 status/result，任务间由 Celery 串行。
+- [x] **3.5a.3** 共用 backfill 逻辑：`servers/bars_backfill.run_one_backfill`；reader 层：`insert_job_bars_backfill`、`get_job_bars_backfill_list`、`get_job_bars_backfill`、`claim_next_pending_job_bars_backfill`、`update_job_bars_backfill_result`、`trim_job_bars_backfill`。
+- [x] **3.5a.4** 独立 Worker 进程：Celery worker（`scripts/run_celery.py`）；从 Redis 队列取任务（task_id = job_bars_backfill.job_bars_backfill_id），执行 backfill，更新 PG 行 status/result，任务间由 Celery 串行。
 - [ ] **3.5a.5** **TC-3-R-A3-2 验收**：POST /bars/backfill 入队返回 job_id；独立 Worker 运行后 job 变为 done/failed；GET /bars/jobs、GET /bars/jobs/{id} 可查；前端轮询并刷新 coverage；Worker 串行且间隔约 2s。
 
 ### 步骤 3.7：文档与验收
@@ -81,7 +81,7 @@
 | TC-3-R-A1-1 | R-A1 | ① | 守护程序连接 IB 后能请求并获取当前账户基本信息（账户标识、Balance/NetLiquidation 等） | 待执行 |
 | TC-3-R-A1-2 | R-A1 | ② | 守护程序能获取当前持仓（策略涉及标的的数量与方向），可供内部对冲逻辑使用 | 待执行 |
 | TC-3-R-A1-3 | R-A1 | ③ | 账户与持仓在运行中可持续更新；IB 断连或异常时行为明确（重试/降级，不阻塞） | 待执行 |
-| TC-3-R-M6-1 | R-M6 | ① | 守护程序在运行中从 IB 拉取标的市价（spot 等）并写入 status_current/sink | 待执行 |
+| TC-3-R-M6-1 | R-M6 | ① | 守护程序在运行中从 IB 拉取标的市价（spot 等）并写入 daemon_auto_status_current/sink | 待执行 |
 | TC-3-R-M6-2 | R-M6 | ② | GET /status 返回中含标的市价（如 status.spot），可供监控页读取 | 待执行 |
 | TC-3-R-M6-3 | R-M6 | ③ | 监控页能结合持仓与市价展示（持仓+当前价、盈亏、期权虚实等）；多标的时市价可区分 | 待执行 |
 | TC-3-R-H2-1 | R-H2 | ①②③④ | 独立脚本/模块只读历史表；输出含按日/周对冲次数与盈亏相关；可离线运行 | 待执行 |
@@ -102,15 +102,15 @@
 
 | 关注点 | 位置 | 说明 |
 |--------|------|------|
-| 历史统计（R-H2） | scripts/stats_from_history.py | 只读 status_history、operations；产出按日/周对冲次数、盈亏汇总；可离线运行 |
+| 历史统计（R-H2） | scripts/stats_from_history.py | 只读 daemon_auto_status_history、daemon_auto_operations；产出按日/周对冲次数、盈亏汇总；可离线运行 |
 | 账户摘要 | IBConnector / Store | `get_managed_accounts()`、`get_account_summary(account)`；`Store.set_account_summary`、`get_account_id`、`get_accounts_data` |
 | 账户/持仓拉取时机 | gs_trading.py | CONNECTED 时 `_refresh_accounts_data()`；RUNNING 后按 1 小时间隔拉取账户与持仓 |
 | 持仓 | IBConnector / Store | `_refresh_positions(account)`，与账户同间隔；供对冲与风控使用 |
-| 标的市价 | gs_trading.py / status_current | 每次心跳拉取标的现价并写入 `status_current.spot`；GET /status 的 status.spot 来源于此 |
-| GET /status 组装 | servers/ | 从 status_current、accounts、account_positions、daemon_heartbeat 等组装；见 [DATABASE.md](../DATABASE.md) §2.7、§2.8 |
+| 标的市价 | gs_trading.py / daemon_auto_status_current | 每次心跳拉取标的现价并写入 `daemon_auto_status_current.spot`；GET /status 的 status.spot 来源于此 |
+| GET /status 组装 | servers/ | 从 daemon_auto_status_current、accounts、account_positions、daemon_heartbeat 等组装；见 [DATABASE.md](../DATABASE.md) §2.7、§2.8 |
 | 刷新账户 | daemon_control | POST /control/refresh_accounts 写入 daemon_control；守护进程消费后拉取账户/持仓并写 DB |
-| Backfill 队列表 | DATABASE.md §2.18、postgres_sink | bars_backfill_jobs；API 入队、GET /bars/jobs、GET /bars/jobs/{id}；独立 Worker 消费 |
-| 独立 Bars Worker | scripts/run_celery.py（Celery + Redis） | 从 Redis 取任务，执行 servers.bars_backfill.run_one_backfill，更新 bars_backfill_jobs status/result |
+| Backfill 队列表 | DATABASE.md §2.18、postgres_sink | job_bars_backfill；API 入队、GET /bars/jobs、GET /bars/jobs/{id}；独立 Worker 消费 |
+| 独立 Bars Worker | scripts/run_celery.py（Celery + Redis） | 从 Redis 取任务，执行 servers.bars_backfill.run_one_backfill，更新 job_bars_backfill status/result |
 | 断连行为 | gs_trading.py | 进入 WAITING_IB 时不拉取账户/持仓；重连后再次拉取 |
 
 ---

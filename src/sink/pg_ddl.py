@@ -3,7 +3,7 @@
 import psycopg2
 
 def _ensure_tables(conn, log=None, log_table=None) -> None:
-    """Create status_current, status_history, operations if not exist (per DATABASE.md §2).
+    """Create daemon_auto_status_current, daemon_auto_status_history, daemon_auto_operations if not exist (per DATABASE.md §2).
     If log is callable, it is called with a short step name before each DDL section (for progress/debug).
     If log_table is callable, it is called as log_table(table_name, purpose) before each table is created/updated.
     """
@@ -18,12 +18,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
     except Exception:
         pass
     with conn.cursor() as cur:
-        _log("status_current, status_history, operations")
-        _log_table("status_current", "Current run status snapshot (single row)")
+        _log("daemon_auto_status_current, daemon_auto_status_history, daemon_auto_operations")
+        _log_table("daemon_auto_status_current", "Daemon auto-trading current status snapshot (single row)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS status_current (
-                id integer PRIMARY KEY DEFAULT 1,
+            CREATE TABLE IF NOT EXISTS daemon_auto_status_current (
+                daemon_auto_status_current_id integer PRIMARY KEY DEFAULT 1,
                 daemon_state text,
                 trading_state text,
                 symbol text,
@@ -41,11 +41,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        _log_table("status_history", "Status snapshot history")
+        _log_table("daemon_auto_status_history", "Daemon auto-trading status snapshot history")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS status_history (
-                id bigserial PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS daemon_auto_status_history (
+                daemon_auto_status_history_id bigserial PRIMARY KEY,
                 daemon_state text,
                 trading_state text,
                 symbol text,
@@ -61,13 +61,13 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 config_summary text,
                 ts double precision
             )
-        """
+            """
         )
-        _log_table("operations", "Operations log")
+        _log_table("daemon_auto_operations", "Daemon auto-trading operations log")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS operations (
-                id bigserial PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS daemon_auto_operations (
+                daemon_auto_operations_id bigserial PRIMARY KEY,
                 ts double precision,
                 type text,
                 side text,
@@ -478,7 +478,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         # Release earlier DDL locks before the final watchlist/backfill DDL step.
         conn.commit()
-        _log("watchlist, bars_backfill_jobs")
+        _log("watchlist, job_bars_backfill")
         _log_table("watchlist", "Watchlist items (STK/OPT)")
         cur.execute(
             """
@@ -499,12 +499,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS watchlist_contract_key ON watchlist (contract_key)"
         )
-        _log_table("bars_backfill_jobs", "Backfill job queue")
-        # 阶段 3 非实时拉取 Worker：backfill 任务队列表（见 docs/DATABASE.md §2.x bars_backfill_jobs）
+        _log_table("job_bars_backfill", "Backfill job queue (Celery worker)")
+        # 阶段 3 非实时拉取 Worker：backfill 任务队列表（见 docs/DATABASE.md §2.18）；表名 job_ 前缀为 Celery/任务表约定
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS bars_backfill_jobs (
-                id bigserial PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS job_bars_backfill (
+                job_bars_backfill_id bigserial PRIMARY KEY,
                 symbol text NOT NULL,
                 period text NOT NULL DEFAULT '1 D',
                 years double precision,
@@ -518,13 +518,13 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS bars_backfill_jobs_status_created ON bars_backfill_jobs (status, created_at)"
+            "CREATE INDEX IF NOT EXISTS job_bars_backfill_status_created ON job_bars_backfill (status, created_at)"
         )
         for col, default in (("skip_ib", "false"), ("api_interval_sec", "10")):
             cur.execute(
-                f"ALTER TABLE bars_backfill_jobs ADD COLUMN IF NOT EXISTS {col} {'boolean' if col == 'skip_ib' else 'integer'} DEFAULT {default}"
+                f"ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS {col} {'boolean' if col == 'skip_ib' else 'integer'} DEFAULT {default}"
             )
-        cur.execute("ALTER TABLE bars_backfill_jobs ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
+        cur.execute("ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
         conn.commit()
         _log("position_categories, position_category_tags")
         _log_table("position_categories", "Position category definitions")
@@ -725,6 +725,131 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 conn.commit()
             except Exception:
                 conn.rollback()
+        # Strategy & gate_safety tables (DATABASE.md §2.24)
+        _log("gate_safety_*, strategy_*, settings active_*")
+        _log_table("gate_safety_strategy", "Safety boundary set root + strategy layer")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gate_safety_strategy (
+                gate_safety_strategy_id bigserial PRIMARY KEY,
+                name text NOT NULL,
+                version integer NOT NULL DEFAULT 1,
+                structure_type text,
+                is_active boolean NOT NULL DEFAULT true,
+                min_dte integer NOT NULL,
+                max_dte integer NOT NULL,
+                atm_band_pct double precision NOT NULL,
+                blackout_days_before integer NOT NULL,
+                blackout_days_after integer NOT NULL,
+                trading_hours_only boolean NOT NULL DEFAULT true,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        _log_table("gate_safety_strategy_earnings_dates", "Strategy layer earnings blacklist dates")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gate_safety_strategy_earnings_dates (
+                gate_safety_strategy_id bigint NOT NULL REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE,
+                holiday_date date NOT NULL,
+                PRIMARY KEY (gate_safety_strategy_id, holiday_date)
+            )
+            """
+        )
+        _log_table("gate_safety_state", "State layer")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gate_safety_state (
+                gate_safety_strategy_id bigint PRIMARY KEY REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE,
+                epsilon_band integer NOT NULL,
+                threshold_hedge_shares integer NOT NULL,
+                max_delta_limit integer NOT NULL,
+                vol_window_min integer NOT NULL,
+                stale_ts_threshold_ms integer NOT NULL,
+                wide_spread_pct double precision NOT NULL,
+                extreme_spread_pct double precision NOT NULL,
+                data_lag_threshold_ms integer NOT NULL
+            )
+            """
+        )
+        _log_table("gate_safety_intent", "Intent layer")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gate_safety_intent (
+                gate_safety_strategy_id bigint PRIMARY KEY REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE,
+                min_hedge_shares integer NOT NULL,
+                cooldown_seconds integer NOT NULL,
+                max_hedge_shares_per_order integer NOT NULL,
+                min_price_move_pct double precision NOT NULL
+            )
+            """
+        )
+        _log_table("gate_safety_guard", "Guard layer")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gate_safety_guard (
+                gate_safety_strategy_id bigint PRIMARY KEY REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE,
+                max_daily_hedge_count integer NOT NULL,
+                max_position_shares integer NOT NULL,
+                max_daily_loss_usd double precision NOT NULL,
+                max_net_delta_shares integer NOT NULL,
+                max_spread_pct double precision NOT NULL,
+                paper_trade boolean NOT NULL DEFAULT true
+            )
+            """
+        )
+        _log_table("strategy_structure", "Structure strategy")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure (
+                strategy_structure_id bigserial PRIMARY KEY,
+                name text NOT NULL,
+                structure_type text NOT NULL,
+                legs jsonb NOT NULL,
+                constraints jsonb,
+                version integer NOT NULL DEFAULT 1,
+                is_active boolean NOT NULL DEFAULT true,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now(),
+                metadata jsonb
+            )
+            """
+        )
+        _log_table("strategy_opportunity", "Opportunity strategy")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_opportunity (
+                strategy_opportunity_id bigserial PRIMARY KEY,
+                name text NOT NULL,
+                strategy_structure_id bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id),
+                default_gate_safety_strategy_id bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id),
+                symbol_scope jsonb,
+                entry_conditions jsonb,
+                is_active boolean NOT NULL DEFAULT true,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        _log_table("strategy_portfolio", "Portfolio strategy")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_portfolio (
+                strategy_portfolio_id bigserial PRIMARY KEY,
+                name text NOT NULL,
+                strategy_opportunity_ids jsonb NOT NULL,
+                gate_safety_strategy_id bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id),
+                portfolio_limits jsonb,
+                is_active boolean NOT NULL DEFAULT true,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_structure_id bigint")
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_gate_safety_strategy_id bigint")
+        conn.commit()
         # Migrate from legacy daemon_ib_config if present (one-time, safe to skip if table missing)
         try:
             with conn.cursor() as cur2:

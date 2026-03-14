@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""R-H2 历史统计：只读 status_history、operations 表，产出按日/周对冲次数、盈亏汇总等。
+"""R-H2 历史统计：只读 daemon_auto_status_history、daemon_auto_operations 表，产出按日/周对冲次数、盈亏汇总等。
 
 不跑 FSM/Guard/StateClassifier；可离线运行，不依赖守护进程在线。
 数据来源与守护程序写出一致（阶段 1 sink 写入的历史表）。
@@ -73,12 +73,12 @@ def run_stats(
     cursor_factory,
     days: int = 30,
 ) -> Dict[str, Any]:
-    """Read status_history and operations; aggregate daily/weekly hedge counts and PnL.
+    """Read daemon_auto_status_history and daemon_auto_operations; aggregate daily/weekly hedge counts and PnL.
 
     Returns dict with:
       - daily_hedge_counts: [{date, fill_count, hedge_intent_count, total}, ...]
       - weekly_hedge_counts: [{week_start, fill_count, hedge_intent_count, total}, ...]
-      - daily_pnl: [{date, daily_pnl, snapshot_count}, ...]  (from status_history last snapshot per day)
+      - daily_pnl: [{date, daily_pnl, snapshot_count}, ...]  (from daemon_auto_status_history last snapshot per day)
       - summary: {total_fills, total_hedge_intents, total_daily_pnl, ...}
     """
     out: Dict[str, Any] = {
@@ -99,7 +99,7 @@ def run_stats(
             time_filter = " WHERE ts >= %s"
             params.append(cutoff_ts)
 
-        # 1. 按日对冲次数（operations: fill 与 hedge_intent）
+        # 1. 按日对冲次数（daemon_auto_operations: fill 与 hedge_intent）
         cur.execute(
             f"""
             SELECT
@@ -107,7 +107,7 @@ def run_stats(
                 COUNT(*) FILTER (WHERE type = 'fill') AS fill_count,
                 COUNT(*) FILTER (WHERE type = 'hedge_intent') AS intent_count,
                 COUNT(*) AS total
-            FROM operations{time_filter}
+            FROM daemon_auto_operations{time_filter}
             GROUP BY date_trunc('day', to_timestamp(ts))::date
             ORDER BY d DESC
             LIMIT 500
@@ -134,7 +134,7 @@ def run_stats(
                 COUNT(*) FILTER (WHERE type = 'fill') AS fill_count,
                 COUNT(*) FILTER (WHERE type = 'hedge_intent') AS intent_count,
                 COUNT(*) AS total
-            FROM operations{time_filter}
+            FROM daemon_auto_operations{time_filter}
             GROUP BY date_trunc('week', to_timestamp(ts))::date
             ORDER BY w DESC
             LIMIT 100
@@ -153,7 +153,7 @@ def run_stats(
                     "total": int(r.get("total") or 0),
                 })
 
-        # 3. 按日盈亏（status_history：每天取 ts 最大的一条的 daily_pnl）
+        # 3. 按日盈亏（daemon_auto_status_history：每天取 ts 最大的一条的 daily_pnl）
         hist_filter = " WHERE h.ts >= %s" if time_filter else ""
         cur.execute(
             f"""
@@ -162,10 +162,10 @@ def run_stats(
                     date_trunc('day', to_timestamp(h.ts))::date AS d,
                     h.daily_pnl,
                     ROW_NUMBER() OVER (PARTITION BY date_trunc('day', to_timestamp(h.ts))::date ORDER BY h.ts DESC) AS rn
-                FROM status_history h{hist_filter}
+                FROM daemon_auto_status_history h{hist_filter}
             )
             SELECT d, daily_pnl,
-                   (SELECT COUNT(*) FROM status_history h2
+                   (SELECT COUNT(*) FROM daemon_auto_status_history h2
                     WHERE date_trunc('day', to_timestamp(h2.ts))::date = ranked.d) AS snapshot_count
             FROM ranked
             WHERE rn = 1
@@ -193,7 +193,7 @@ def run_stats(
                 COUNT(*) FILTER (WHERE type = 'fill') AS total_fills,
                 COUNT(*) FILTER (WHERE type = 'hedge_intent') AS total_intents,
                 COUNT(*) AS total_ops
-            FROM operations{time_filter}
+            FROM daemon_auto_operations{time_filter}
             """,
             params if time_filter else [],
         )
@@ -217,7 +217,7 @@ def run_stats(
 def format_text(data: Dict[str, Any]) -> str:
     """Format stats as human-readable text."""
     lines: List[str] = []
-    lines.append("=== R-H2 历史统计（只读 status_history、operations）===")
+    lines.append("=== R-H2 历史统计（只读 daemon_auto_status_history、daemon_auto_operations）===")
     lines.append("")
     s = data.get("summary") or {}
     lines.append("【汇总】")
@@ -251,7 +251,7 @@ def format_text(data: Dict[str, Any]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="R-H2 历史统计：只读 status_history、operations，产出按日/周对冲次数、盈亏汇总。"
+        description="R-H2 历史统计：只读 daemon_auto_status_history、daemon_auto_operations，产出按日/周对冲次数、盈亏汇总。"
     )
     parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
     parser.add_argument("--format", choices=["json", "text"], default="text", help="输出格式")

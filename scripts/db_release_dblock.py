@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Force-release PostgreSQL locks on daemon_heartbeat (and related Phase 2 tables).
 
-Use when daemon_heartbeat (or status_current, daemon_control) appears locked and
+Use when daemon_heartbeat (or daemon_auto_status_current, daemon_control) appears locked and
 normal operation is blocked. Finds backends holding or waiting for locks on these
 tables and terminates them (pg_terminate_backend). Run from project root.
 
@@ -28,7 +28,7 @@ os.chdir(_PROJECT_ROOT)
 # Tables we care about (Phase 2 + settings; stock_day/stock_min often locked by API/bars_worker during CREATE INDEX)
 _TABLES = (
     "daemon_heartbeat",
-    "status_current",
+    "daemon_auto_status_current",
     "daemon_control",
     "daemon_run_status",
     "settings",

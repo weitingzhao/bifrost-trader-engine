@@ -20,7 +20,7 @@
 
 阶段 1 引入三张表：**当前状态**（单行）、**状态历史**（追加）、**操作记录**（仅对冲相关事件）。后续阶段如需新增表或字段，在本文档中增加对应章节并注明引入阶段。
 
-### 2.1 表 `status_current`（当前视图）
+### 2.1 表 `daemon_auto_status_current`（daemon 自动交易当前视图）
 
 - **用途**：仅保留一行“最新”运行状态快照，供监控（阶段 2 GET /status）与运维查看，无需查历史表。
 - **写入**：由守护程序在**每次 heartbeat** 时 upsert（或 replace）一行；列与 snapshot 字典一致。**每次心跳**会向 IB 拉取标的现价并更新 `spot`，供监控页计算持仓盈亏与期权内在价值/虚实（ITM/OTM）。
@@ -28,6 +28,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
+| daemon_auto_status_current_id | integer | 主键，固定为 1（单行表） |
 | daemon_state | text | DaemonFSM 状态，如 RUNNING |
 | trading_state | text | TradingFSM 状态，如 MONITOR |
 | symbol | text | 当前活跃标的；由守护进程根据持仓推导，无活跃标的时可为空 |
@@ -43,25 +44,25 @@
 | config_summary | text | 配置摘要（如 gates 的 hash 或关键键） |
 | ts | double precision 或 timestamptz | 快照时间戳 |
 
-- **主键/唯一**：单行表使用固定行 id=1，upsert 时更新该行。
+- **主键/唯一**：单行表使用固定行 daemon_auto_status_current_id=1，upsert 时更新该行。
 
-- **涉及库表**：上述列所在数据库与表为：配置中的 **PostgreSQL**（`config.postgres` 或环境变量 `PGHOST` 等，见 [ARCHITECTURE.md](ARCHITECTURE.md) §2 运行环境）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），status_current/status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
+- **涉及库表**：上述列所在数据库与表为：配置中的 **PostgreSQL**（`config.postgres` 或环境变量 `PGHOST` 等，见 [ARCHITECTURE.md](ARCHITECTURE.md) §2 运行环境）。**账户相关数据**仅存于 **accounts**、**account_positions** 表（§2.7、§2.8），daemon_auto_status_current/daemon_auto_status_history 不再包含 account_* 或 accounts_snapshot 列；GET /status 的 `accounts` 从这两张表组装。同一库内还有 daemon_auto_operations、daemon_control、daemon_heartbeat、daemon_run_status 等表。
 
-### 2.2 表 `status_history`（状态历史）
+### 2.2 表 `daemon_auto_status_history`（daemon 自动交易状态历史）
 
 - **用途**：按时间序保留状态快照，供**阶段 3**历史统计与后续分析；R-H1 要求“当前 + 历史”同一 sink。
 - **写入**：仅在**有意义**时追加（见下文「写入策略」），例如发生对冲相关操作时或可选每心跳一条；纯无操作心跳不追加。
-- **列**：与 `status_current` 列一致，另加自增主键便于分页与保留策略：
+- **列**：与 `daemon_auto_status_current` 数据列一致，主键采用「表名_id」约定（见 .cursor/rules/database-design.mdc）：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键 |
-| daemon_state | text | 同 status_current |
-| trading_state | text | 同 status_current |
-| … | … | 其余同 status_current |
+| daemon_auto_status_history_id | bigserial | 自增主键 |
+| daemon_state | text | 同 daemon_auto_status_current |
+| trading_state | text | 同 daemon_auto_status_current |
+| … | … | 其余同 daemon_auto_status_current |
 | ts | double precision 或 timestamptz | 快照时间戳 |
 
-### 2.3 表 `operations`（操作记录）
+### 2.3 表 `daemon_auto_operations`（daemon 自动交易操作记录）
 
 - **用途**：记录与持仓变化相关的操作，供审计、排障与阶段 2 GET /operations 查询；R-M4a。
 - **写入**：仅在对冲**意图发出、订单发出、成交、拒绝/撤单**时插入一行。
@@ -69,7 +70,7 @@
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键（可选，便于分页） |
+| daemon_auto_operations_id | bigserial | 自增主键（便于分页） |
 | ts | double precision 或 timestamptz | 操作时间戳 |
 | type | text | hedge_intent \| order_sent \| fill \| reject \| cancel |
 | side | text | BUY \| SELL |
@@ -157,7 +158,7 @@
 
 ### 2.11 表 `account_executions`（阶段 3 R-A2：账户执行/成交记录）
 
-- **用途**：存**账户级**执行/成交记录（含手动与机器），供复盘与风控（GET /executions、复盘页）查询；与 `operations`（仅本程序对冲事件）区分。对应 IB 的 **Execution** 结构，不含手续费/实现盈亏（见 §2.11.1）。
+- **用途**：存**账户级**执行/成交记录（含手动与机器），供复盘与风控（GET /executions、复盘页）查询；与 `daemon_auto_operations`（仅本程序对冲事件）区分。对应 IB 的 **Execution** 结构，不含手续费/实现盈亏（见 §2.11.1）。
 - **写入**：由守护程序周期从 IB 拉取 executions/fills，或独立脚本/服务拉取后写入；按 `exec_id` 去重（若 IB 提供），避免重复插入。手续费与实现盈亏写入 **account_execution_commissions**（§2.11.1）。
 - **列**：
 
@@ -433,16 +434,16 @@
 
 - **读取**：GET /watchlist 供市场数据页与报价请求使用；Watchlist 标的的报价写入 **instrument_prices**（与持仓共用），监控端拉取报价后 UPSERT 到 instrument_prices，供前端统一展示。
 
-### 2.18 表 `bars_backfill_jobs`（阶段 3 非实时拉取 Worker：任务队列表）
+### 2.18 表 `job_bars_backfill`（阶段 3 非实时拉取 Worker：任务队列表）
 
-- **用途**：非实时 K 线拉取（backfill）的**任务队列**；API 入队时 INSERT，独立 Worker 进程用 `SELECT ... FOR UPDATE SKIP LOCKED` 取 pending 任务并执行，完成后 UPDATE status 与 result。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。
+- **用途**：非实时 K 线拉取（backfill）的**任务队列**；API 入队时 INSERT，独立 Worker 进程用 `SELECT ... FOR UPDATE SKIP LOCKED` 取 pending 任务并执行，完成后 UPDATE status 与 result。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。表名采用 **`job_`** 前缀，与 .cursor/rules/database-design.mdc 中「Celery/任务表」约定一致。
 - **写入**：监控 API 在 POST /bars/backfill（queue=1）时 **INSERT** 一行 status='pending'；Worker 取任务时 **UPDATE** status='running'，执行结束后 **UPDATE** status='done'|'failed' 与 result（jsonb）。
-- **消费语义**：Worker 使用 `SELECT id, symbol, period, years, days, override_days FROM bars_backfill_jobs WHERE status='pending' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED` 取一条，随后在同一事务内 `UPDATE ... SET status='running', updated_at=now() WHERE id=:id`，避免多 Worker 抢同一 job。
+- **消费语义**：Worker 使用 `SELECT job_bars_backfill_id, symbol, period, years, days, override_days FROM job_bars_backfill WHERE status='pending' ORDER BY job_bars_backfill_id LIMIT 1 FOR UPDATE SKIP LOCKED` 取一条，随后在同一事务内 `UPDATE ... SET status='running', updated_at=now() WHERE job_bars_backfill_id=:id`，避免多 Worker 抢同一 job。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| id | bigserial | 自增主键（作为 job_id 返回给客户端） |
+| job_bars_backfill_id | bigserial | 自增主键（作为 job_id 返回给客户端） |
 | symbol | text NOT NULL | 标的代码（如 NVDA） |
 | period | text NOT NULL | 周期：'1 D' \| '1 min' \| '5 mins' \| '1 hour' |
 | years | double precision | 拉取跨度（年），仅当无数据时用 |
@@ -453,7 +454,7 @@
 | created_at | timestamptz | 创建时间（默认 now()） |
 | updated_at | timestamptz | 最后更新时间（默认 now()） |
 
-- **索引**：`(status, created_at)` 便于 Worker 按 pending 取最旧任务；GET /bars/jobs 按 id DESC 分页。
+- **索引**：`(status, created_at)` 便于 Worker 按 pending 取最旧任务；GET /bars/jobs 按 job_bars_backfill_id DESC 分页。
 - **Trim**：可选保留最近 200 条，删除更旧记录，与内存队列"保留 200"行为一致。
 
 ### 2.19 表 `position_categories`（持仓分类：STK 分类标签定义）
@@ -518,7 +519,7 @@
 | suspended | boolean NOT NULL | true=挂起（不执行新对冲），false=运行 |
 | updated_at | timestamptz | 最后更新时间 |
 
-- **语义**：守护进程轮询 `SELECT suspended FROM daemon_run_status WHERE id = 1`，不消费、不修改；为 true 时跳过 _eval_hedge（heartbeat 仍写 status_current，但不调用 maybe_hedge）。
+- **语义**：守护进程轮询 `SELECT suspended FROM daemon_run_status WHERE id = 1`，不消费、不修改；为 true 时跳过 _eval_hedge（heartbeat 仍写 daemon_auto_status_current，但不调用 maybe_hedge）。
 
 ### 2.6 表 `daemon_heartbeat`（阶段 2：守护进程心跳，监控区分守护/对冲与 IB 连接）
 
@@ -604,13 +605,162 @@
 
 - **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。**config.yaml 不再定义 client_id 或 host_account_id**，均由本表提供。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`；否则使用 config 的 `ib.host`、`ib.port`（client_id 默认 1）。**Host 账户**：若本表 `ib_host_account_id` 非空，守护进程使用该 account_id 作为对冲与行情账户；否则使用 TWS managed accounts 首个（R-A4）。**第二 IB**：若 `ib2_host` 非空，监控端创建 AccountIbClient2 连接第二 TWS，用于拉取该账户的持仓/执行，供统一 Portfolio；第二 IB 无 daemon、无 market data（无 `ib2_client_id_markets` 列）。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`（仅 Host）；**Celery** 使用 `ib_client_id_worker_market`。**Flex**：`ib_flex_host_token` 与 `ib_flex_secondary_token` 由 Settings 页 Flex 区块或 POST /config/flex 写入。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
 
+### 2.24 策略与安全边界表（设计标准与具体表结构，未来实现）
+
+以下为**策略三层**（结构 → 机会 → 组合）与**安全边界四层**（gates：strategy / state / intent / guard）的数据库设计终版。命名与主外键约定见 **.cursor/rules/database-design.mdc**；新增/变更表时须在本文档同步更新并记入 §6 变更记录。
+
+**表名约定**：策略表以 **`strategy_`** 为前缀；安全边界表以 **`gate_safety_`** 为前缀。主键列名均为 **`<表名>_id`**（如 `strategy_structure_id`、`gate_safety_strategy_id`），外键列名与所引用主键列名一致。**gate_safety_*** 表不使用 json/jsonb，仅标量列。
+
+#### 2.24.1 表 `strategy_structure`（结构策略）
+
+- **用途**：存期权结构策略（腿 + 约束），可被多条机会策略引用；支持类型如 straddle_strangle、cash_secured_put、iron_condor、leaps、calendar_spread、custom。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_id | bigserial PRIMARY KEY | 主键 |
+| name | text NOT NULL | 策略名称（如 "Straddle 21-35 DTE ATM"） |
+| structure_type | text NOT NULL | straddle_strangle \| cash_secured_put \| covered_call \| iron_condor \| leaps \| calendar_spread \| custom |
+| legs | jsonb NOT NULL | 腿数组：每项含 role, direction, option_right, quantity, strike, expiration |
+| constraints | jsonb | 腿间约束：same_expiry_legs, same_strike_legs 等 |
+| version | integer NOT NULL DEFAULT 1 | 版本号 |
+| is_active | boolean NOT NULL DEFAULT true | 是否可用 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+| metadata | jsonb | 备注、标签等（可选） |
+
+#### 2.24.2 表 `strategy_opportunity`（机会策略）
+
+- **用途**：存机会策略，引用一条结构策略与可选默认安全边界；标的范围与入场条件可为 jsonb。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_opportunity_id | bigserial PRIMARY KEY | 主键 |
+| name | text NOT NULL | 机会策略名称 |
+| strategy_structure_id | bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) | 引用的结构策略 |
+| default_gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 可选，默认安全边界集 |
+| symbol_scope | jsonb | 标的范围，如 { "type": "watchlist_stk" } 或 { "symbols": ["NVDA"] } |
+| entry_conditions | jsonb | 入场/筛选条件（IV、DTE、财报等） |
+| is_active | boolean NOT NULL DEFAULT true | 是否可用 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+
+#### 2.24.3 表 `strategy_portfolio`（组合策略）
+
+- **用途**：存组合策略，包含多条机会策略 ID 与可选组合级安全边界及组合约束。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_portfolio_id | bigserial PRIMARY KEY | 主键 |
+| name | text NOT NULL | 组合名称 |
+| strategy_opportunity_ids | jsonb NOT NULL | 机会策略 ID 数组，如 [1, 2] |
+| gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 可选，组合级安全边界集 |
+| portfolio_limits | jsonb | 组合约束：max_positions, max_bp_pct 等 |
+| is_active | boolean NOT NULL DEFAULT true | 是否可用 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+
+#### 2.24.4 表 `gate_safety_strategy`（安全边界集根 + strategy 层）
+
+- **用途**：安全边界集根表，同时存 gates.strategy 层参数（structure、earnings、trading_hours_only）；id 即 boundary_set_id，供 state/intent/guard 子表及 settings 引用。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| gate_safety_strategy_id | bigserial PRIMARY KEY | 边界集主键 |
+| name | text NOT NULL | 边界集名称 |
+| version | integer NOT NULL DEFAULT 1 | 版本号 |
+| structure_type | text | 可选，关联结构类型（如 straddle_strangle） |
+| is_active | boolean NOT NULL DEFAULT true | 是否可用 |
+| min_dte | integer NOT NULL | structure：最小 DTE |
+| max_dte | integer NOT NULL | structure：最大 DTE |
+| atm_band_pct | double precision NOT NULL | structure：近 ATM 带（如 0.03） |
+| blackout_days_before | integer NOT NULL | earnings：财报前 N 天禁止 |
+| blackout_days_after | integer NOT NULL | earnings：财报后 N 天禁止 |
+| trading_hours_only | boolean NOT NULL DEFAULT true | 是否仅交易时段 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+
+#### 2.24.5 表 `gate_safety_strategy_earnings_dates`（strategy 层财报黑名单日期）
+
+- **用途**：存 gates.strategy.earnings.dates[]，一行一个黑名单日期。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| gate_safety_strategy_id | bigint NOT NULL REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE | 所属边界集 |
+| holiday_date | date NOT NULL | 黑名单日期（如财报日） |
+| PRIMARY KEY (gate_safety_strategy_id, holiday_date) | | 复合主键 |
+
+#### 2.24.6 表 `gate_safety_state`（state 层）
+
+- **用途**：存 gates.state（delta、market、liquidity、system 阈值）。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| gate_safety_strategy_id | bigint PRIMARY KEY REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE | 所属边界集 |
+| epsilon_band | integer NOT NULL | delta：\|net_delta\| ≤ 此值为 D0 IN_BAND |
+| threshold_hedge_shares | integer NOT NULL | delta：D2 HEDGE_NEEDED 阈值 |
+| max_delta_limit | integer NOT NULL | delta：D3 FORCE_HEDGE 上限 |
+| vol_window_min | integer NOT NULL | market：波动率窗口最小 bar 数 |
+| stale_ts_threshold_ms | integer NOT NULL | market：报价过期阈值(ms) |
+| wide_spread_pct | double precision NOT NULL | liquidity：宽 spread 比例 |
+| extreme_spread_pct | double precision NOT NULL | liquidity：极端 spread 比例 |
+| data_lag_threshold_ms | integer NOT NULL | system：数据延迟阈值(ms) |
+
+#### 2.24.7 表 `gate_safety_intent`（intent 层）
+
+- **用途**：存 gates.intent.hedge（对冲规模与成本门控）。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| gate_safety_strategy_id | bigint PRIMARY KEY REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE | 所属边界集 |
+| min_hedge_shares | integer NOT NULL | 最小对冲股数 |
+| cooldown_seconds | integer NOT NULL | 对冲冷却(秒) |
+| max_hedge_shares_per_order | integer NOT NULL | 单笔最大对冲股数 |
+| min_price_move_pct | double precision NOT NULL | 最小价格变动% |
+
+#### 2.24.8 表 `gate_safety_guard`（guard 层）
+
+- **用途**：存 gates.guard.risk（下单前熔断与限制）。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| gate_safety_strategy_id | bigint PRIMARY KEY REFERENCES gate_safety_strategy(gate_safety_strategy_id) ON DELETE CASCADE | 所属边界集 |
+| max_daily_hedge_count | integer NOT NULL | 每日最大对冲次数 |
+| max_position_shares | integer NOT NULL | 最大净股票仓位(股) |
+| max_daily_loss_usd | double precision NOT NULL | 当日亏损熔断(美元) |
+| max_net_delta_shares | integer NOT NULL | 最大净 delta(股) |
+| max_spread_pct | double precision NOT NULL | 允许下单的最大价差% |
+| paper_trade | boolean NOT NULL DEFAULT true | 是否模拟盘 |
+
+#### 2.24.9 表 `strategy_history`（若存在：主键规范）
+
+若库中存在表 **strategy_history**，其主键列须遵循「表名_id」约定：**`strategy_history_id`**（不得使用 `id`）。`pg_ddl._ensure_tables` 在策略表段落会执行迁移：若该表存在且列为 `id`，则 `ALTER TABLE strategy_history RENAME COLUMN id TO strategy_history_id`。具体列定义以实际建表为准；此处仅约定主键名。
+
+#### 2.24.10 settings 表扩展（当前生效的策略与安全边界）
+
+在 **settings** 表（id=1 单行）上增加两列：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| active_strategy_structure_id | bigint REFERENCES strategy_structure(strategy_structure_id) | 当前生效的结构策略；NULL 表示用 config 或默认 |
+| active_gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 当前生效的安全边界集；NULL 表示用 config.gates |
+
+- **语义**：守护进程启动时若上述两列非空，则从对应表组装「结构」与「gates」；否则回退 config。写 snapshot 时可在 config_summary 中附带两 id 或 hash 便于追溯。
+
 ---
 
 ## 3. 阶段 1 写入策略
 
-- **status_current**：每次 **heartbeat** 调用 `write_snapshot(snapshot, append_history=False)`，仅更新当前表。
-- **status_history**：仅在 `append_history=True` 时追加；调用方（GsTrading）在**发生对冲相关操作**时（对冲意图、下单、成交、拒绝）传入 `append_history=True`，或可选每心跳一次。纯无操作心跳不追加历史。
-- **operations**：仅在对冲意图、order_sent、fill、reject 四处插入记录。
+- **daemon_auto_status_current**：每次 **heartbeat** 调用 `write_snapshot(snapshot, append_history=False)`，仅更新当前表。
+- **daemon_auto_status_history**：仅在 `append_history=True` 时追加；调用方（GsTrading）在**发生对冲相关操作**时（对冲意图、下单、成交、拒绝）传入 `append_history=True`，或可选每心跳一次。纯无操作心跳不追加历史。
+- **daemon_auto_operations**：仅在对冲意图、order_sent、fill、reject 四处插入记录。
 
 上述策略的代码与配置说明见 [plans/phase1-execution-plan.md](plans/phase1-execution-plan.md)。
 
@@ -621,9 +771,10 @@
 - **Python 依赖**：阶段 1 使用 **psycopg2-binary** 连接 PostgreSQL，已在 `pyproject.toml` 中声明。安装环境后执行 `pip install -e .` 即可。
 - **PostgreSQL 实例**：需本地或 Docker 提供 PostgreSQL；创建数据库与用户后，在 `config/config.yaml` 中配置 root `postgres`（或使用环境变量 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`）。不配置或未连接时守护程序照常运行，仅不写入状态与操作。
 - **用 psql 查看**：连接后可直接查询各表，例如：
-  - 当前状态：`SELECT * FROM status_current;`
-  - 最近历史：`SELECT * FROM status_history ORDER BY ts DESC LIMIT 20;`
-  - 操作记录：`SELECT * FROM operations ORDER BY ts DESC LIMIT 20;`
+  - 当前状态：`SELECT * FROM daemon_auto_status_current;`
+  - 最近历史：`SELECT * FROM daemon_auto_status_history ORDER BY ts DESC LIMIT 20;`
+  - 操作记录：`SELECT * FROM daemon_auto_operations ORDER BY ts DESC LIMIT 20;`
+- **API 与主键列名**：GET /status 返回的当前状态行包含主键列 `daemon_auto_status_current_id`；GET /operations 返回的每条记录包含主键列 `daemon_auto_operations_id`。程序与前端类型定义均使用上述列名，便于与表结构一致维护。
   - 控制指令（阶段 2）：`SELECT * FROM daemon_control ORDER BY id DESC LIMIT 10;`
   - 挂起/恢复状态（阶段 2）：`SELECT * FROM daemon_run_status WHERE id = 1;`
   - 守护进程心跳（阶段 2）：`SELECT * FROM daemon_heartbeat WHERE id = 1;`
@@ -654,7 +805,7 @@
    sudo systemctl reload postgresql
    ```
 
-### 4.2 表不存在或自检报 "Table 'status_current' missing or empty columns"
+### 4.2 表不存在或自检报 "Table 'daemon_auto_status_current' missing or empty columns"
 
 若数据库已能连接，但 **PostgreSQL schema（表或列）** 不符合要求，说明当前库中尚未创建阶段 1/2 所需的表（或列不一致）。在项目根目录执行：
 
@@ -662,7 +813,7 @@
 python scripts/db_refresh_schema.py
 ```
 
-脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `status_current`、`status_history`、`operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags**、**market_streams_symbol_order** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。**已有库**若之前建过 status_current 上的 account_id、account_net_liquidation、account_total_cash、account_buying_power、accounts_snapshot 列，可选择性执行 `ALTER TABLE status_current DROP COLUMN IF EXISTS account_id, ...` 等清理（不执行也可，代码已不再读写这些列）。
+脚本会按 `config/config.yaml` 中的 root `postgres` 配置连接当前库，并创建/补齐 `daemon_auto_status_current`、`daemon_auto_status_history`、`daemon_auto_operations`、`daemon_control`、`daemon_run_status`、`daemon_heartbeat`、`settings`、**accounts**、**account_positions**、**instrument_prices**、**account_executions**、**account_execution_commissions**、**account_transactions**、**flex_accounts**、**stock_day**、**stock_min**、**option_day**、**option_min**、**watchlist**、**position_categories**、**position_category_tags**、**market_streams_symbol_order** 等表（与 `PostgreSQLSink._ensure_tables` 一致；不再创建 ohlc_bars）。完成后可启动守护进程或通过 psql 验证表与列是否符合 [DATABASE.md](DATABASE.md) §2。
 
 4. **仍连不上时**：确认服务器防火墙放行 5432、且 config 里 `host`/`port`/`database`/`user`/`password` 与服务器实际一致。
 
@@ -714,8 +865,8 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 
 以下为占位说明，具体表结构或字段在对应阶段实现时在本文档中补充。
 
-- **阶段 2**：独立应用**只读** `status_current`、`operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
-- **阶段 3.1（历史统计）**：只读 `status_history`、`operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
+- **阶段 2**：独立应用**只读** `daemon_auto_status_current`、`daemon_auto_operations`、`daemon_run_status`、`daemon_heartbeat`（GET /status 含 trading_suspended 与守护/对冲分开显示）；控制通道使用表 **daemon_control**（stop/flatten，见 §2.4）与 **daemon_run_status**（挂起/恢复，见 §2.5）。**daemon_heartbeat**（§2.6）由稳定守护进程写入，用于监控端区分守护进程存活与对冲程序是否在跑。启动守护程序仅在交易机执行，监控机不提供 subprocess/start。
+- **阶段 3.1（历史统计）**：只读 `daemon_auto_status_history`、`daemon_auto_operations` 做聚合（按日/周对冲次数、盈亏等）；不新增表，仅查询。
 - **阶段 3 R-A2/R-A3（复盘与风控）**：**account_executions**（§2.11）存账户执行/成交；**stock_day**、**stock_min**、**option_day**、**option_min**（§2.13–§2.16）存股票与期权 K 线；**watchlist**（§2.17）存自选标的。GET /executions、GET /bars、GET/POST/DELETE /watchlist 与复盘/市场数据页读上述表；写入由监控端或独立脚本在阶段 3 实现时接入。
 - **阶段 4（回测）**：若回测结果需要落库，可新增 schema 或表（如 `backtest_runs`、`backtest_ticks`），在本文档 §6 增加。
 - **其他**：控制指令、告警、用户配置等若未来落库，均在本文档中新增章节并注明引入阶段。
@@ -726,7 +877,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 
 | 日期 | 变更内容 | 引入阶段 |
 |------|----------|----------|
-| （初版） | 新增 §1–§4：连接配置、阶段 1 三表（status_current、status_history、operations）、写入策略；§5 后续阶段预留。 | 阶段 1 |
+| （初版） | 新增 §1–§4：连接配置、阶段 1 三表（daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations）、写入策略；§5 后续阶段预留。 | 阶段 1 |
 | 阶段 1 落地 | 新增 §4：依赖（psycopg2-binary）、配置说明、psql 查看示例；§5/§6 章节号顺延。 | 阶段 1 |
 | 控制通道改 DB | 新增 §2.4 表 daemon_control；控制指令由本地文件改为 PostgreSQL，支持监控与守护进程分离部署（RE-5）。 | 阶段 2 |
 | 挂起/恢复状态 | 新增 §2.5 表 daemon_run_status；监控机写入、交易机轮询，实现挂起/恢复对冲；监控机移除 subprocess/start。 | 阶段 2 |
@@ -741,8 +892,11 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-08 Flex 一行双 Query ID | §2.23 flex_accounts 去掉 account_is_host、query_id，改为 query_host_id（必填）+ query_secondary_id（可选）；同一行同一 Label/Purpose，Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex 一 Token 多 Query | §2.23 flex_accounts 改为「一 Token 多 Query ID + Label」：列 query_id、query_label、purpose；同一 token 可多行；POST /transactions/fetch 仅用 purpose=cash_transactions；reader.get_flex_config(purpose) 支持按用途过滤。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex Token 入 settings | settings 增加 ib_flex_host_token、ib_flex_secondary_token；flex_accounts 去掉 token、account_label，改为 account_is_host (boolean)；GET /status flex_config 为 { host_token, secondary_token, rows }。 | 阶段 3 Performance Phase 0 |
-| 2026-03-11 移除 key_value | 移除 key_value_config、key_value_group 表及 Settings Key-Value Config；Flex 默认范围使用 settings.flex_default_range_days。 | 清理 |
-
+| 2026-03-13 策略与安全边界表 | 新增 §2.24 策略与安全边界表（设计标准与具体表结构）：strategy_structure、strategy_opportunity、strategy_portfolio；gate_safety_strategy、gate_safety_strategy_earnings_dates、gate_safety_state、gate_safety_intent、gate_safety_guard；settings 扩展 active_strategy_structure_id、active_gate_safety_strategy_id。主键列名采用「表名_id」；策略表 strategy_ 前缀、安全边界表 gate_safety_ 前缀；gate_safety 表无 json。标准见 .cursor/rules/database-design.mdc。 | 未来实现 |
+| 2026-03-13 status_history 主键规范 | 表 status_history 主键列采用 `status_history_id`，符合 .cursor/rules/database-design.mdc「表名_id」约定（该表后已重命名为 daemon_auto_status_history）。 | — |
+| 2026-03-13 daemon_auto 表重命名与主键规范 | 表 daemon 自动交易三表命名为 daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations；主键列为 daemon_auto_status_current_id、daemon_auto_status_history_id、daemon_auto_operations_id（符合 database-design.mdc）。由 _ensure_tables 建表；不再支持旧表名。§2.1–§2.3、§3、§4、§4.2。 | — |
+| 2026-03-13 Celery 任务表命名 | 表 `job_bars_backfill`（主键 `job_bars_backfill_id`）；Celery/任务队列表均使用 **`job_`** 前缀，主键为「表名_id」。§2.18、database-design.mdc；reader 层函数统一为 `job_bars_backfill_*`。 | 阶段 3 |
+| 2026-03-13 strategy_history 主键规范 | 若存在表 strategy_history，主键列须为 `strategy_history_id`；pg_ddl 增加迁移：若列为 `id` 则 RENAME 为 `strategy_history_id`；§2.24.9 约定。 | — |
 ---
 
 *本文档与 [分步推进计划](PLAN_NEXT_STEPS.md)、[阶段 1 执行计划](plans/phase1-execution-plan.md) 及运行环境需求保持一致；所有数据库相关设计与改动以本文档为唯一引用。*

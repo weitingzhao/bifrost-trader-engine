@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
-from servers.reader import get_bars_backfill_last_updated
+from servers.reader import get_job_bars_backfill_last_updated
 from servers.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
@@ -191,7 +191,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             payload["celery_worker_ib_connected"] = False
             payload["celery_worker_ib_client_id"] = None
             payload["celery_workers"] = []
-        payload["celery_worker_last_updated_ts"] = get_bars_backfill_last_updated(control_via_db) if control_via_db else None
+        payload["celery_worker_last_updated_ts"] = get_job_bars_backfill_last_updated(control_via_db) if control_via_db else None
         dl = (payload.get("daemon_lamp") or "red").strip().lower()
         ml = (payload.get("monitor_lamp") or "red").strip().lower()
         sl = (payload.get("status_lamp") or "red").strip().lower()

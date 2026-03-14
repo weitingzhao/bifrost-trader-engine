@@ -12,13 +12,13 @@ from pydantic import BaseModel
 from servers.reader import (
     write_ohlc_bars_to_db,
     delete_stock_bars_for_symbol,
-    insert_bars_backfill_job,
-    get_bars_backfill_jobs,
-    get_bars_backfill_job,
-    delete_bars_backfill_job,
-    delete_all_bars_backfill_jobs,
-    trim_bars_backfill_jobs,
-    update_bars_backfill_job_result,
+    insert_job_bars_backfill,
+    get_job_bars_backfill_list,
+    get_job_bars_backfill,
+    delete_job_bars_backfill,
+    delete_all_job_bars_backfill,
+    trim_job_bars_backfill,
+    update_job_bars_backfill_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ def _job_row_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
     if hasattr(updated_ts, "timestamp"):
         updated_ts = updated_ts.timestamp()
     return {
-        "job_id": str(j.get("id", "")),
+        "job_id": str(j.get("job_bars_backfill_id", "")),
         "type": "backfill",
         "symbol": j.get("symbol"),
         "period": j.get("period"),
@@ -89,7 +89,7 @@ def _get_watchlist_stock_symbols(reader) -> List[str]:
     return list(dict.fromkeys(sym_list))
 
 
-def _enqueue_bars_backfill_job(
+def _enqueue_job_bars_backfill(
     control_via_db,
     symbol: str,
     period: str,
@@ -101,8 +101,8 @@ def _enqueue_bars_backfill_job(
     is_test: bool = False,
     api_interval_sec: int = 10,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
-    """Insert one bars backfill job and enqueue the matching Celery task."""
-    jid = insert_bars_backfill_job(
+    """Insert one job_bars_backfill row and enqueue the matching Celery task."""
+    jid = insert_job_bars_backfill(
         control_via_db,
         symbol,
         period,
@@ -128,7 +128,7 @@ def _enqueue_bars_backfill_job(
         )
     except Exception as e:
         logger.exception("Celery enqueue failed: %s", e)
-        update_bars_backfill_job_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
+        update_job_bars_backfill_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
         return False, None, f"Celery 入队失败: {e}"
     return True, str(jid), None
 
@@ -538,12 +538,12 @@ async def post_bars_backfill(
     per = (period or "1 D").strip()
     if not queue:
         return {"ok": False, "error": "Backfill 仅支持 queue=true，由 Celery Worker 在后台拉取（IB 速率限制）。", "count": 0}
-    ok, job_id, error = _enqueue_bars_backfill_job(
+    ok, job_id, error = _enqueue_job_bars_backfill(
         control_via_db, sym, per, years=years, days=days, override_days=override_days, span_hours=span_hours, is_test=is_test, api_interval_sec=api_interval_sec
     )
     if not ok or not job_id:
         return {"ok": False, "error": error or "入队失败。", "count": 0}
-    trim_bars_backfill_jobs(control_via_db, keep=200)
+    trim_job_bars_backfill(control_via_db, keep=200)
     return {"ok": True, "job_id": job_id, "message": "Queued (Celery). Poll GET /bars/jobs/{job_id} for status."}
 
 
@@ -570,12 +570,12 @@ async def post_watchlist_eod_refresh(
     failures = []
     for sym in symbols:
         for per in periods:
-            ok, job_id, error = _enqueue_bars_backfill_job(control_via_db, sym, per, override_days=override_days, is_test=is_test, api_interval_sec=api_interval_sec)
+            ok, job_id, error = _enqueue_job_bars_backfill(control_via_db, sym, per, override_days=override_days, is_test=is_test, api_interval_sec=api_interval_sec)
             if ok and job_id:
                 queued_jobs.append({"job_id": job_id, "symbol": sym, "period": per})
             else:
                 failures.append({"symbol": sym, "period": per, "error": error or "入队失败。"})
-    trim_bars_backfill_jobs(control_via_db, keep=200)
+    trim_job_bars_backfill(control_via_db, keep=200)
     queued_count = len(queued_jobs)
     failed_count = len(failures)
     if queued_count == 0:
@@ -604,9 +604,9 @@ def get_bars_jobs(
         return {"jobs": [], "total": 0, "error": "No Postgres config. Set postgres in config or PGHOST."}
     effective_limit = limit if limit and limit > 0 else 500
     try:
-        rows, total = get_bars_backfill_jobs(db_config, limit=effective_limit, offset=offset, status=status)
+        rows, total = get_job_bars_backfill_list(db_config, limit=effective_limit, offset=offset, status=status)
     except Exception as e:
-        logger.warning("GET /bars/jobs: get_bars_backfill_jobs failed: %s", e)
+        logger.warning("GET /bars/jobs: get_job_bars_backfill_list failed: %s", e)
         return {"jobs": [], "total": 0, "error": str(e)}
     list_jobs = [_job_row_to_api(r) for r in rows]
     return {"jobs": list_jobs, "total": total}
@@ -620,7 +620,7 @@ def get_bars_job(request: Request, job_id: str) -> Dict[str, Any]:
     db_config = control_via_db or status_cfg_for_read
     if not db_config:
         return {"ok": False, "error": "No DB"}
-    job = get_bars_backfill_job(db_config, job_id)
+    job = get_job_bars_backfill(db_config, job_id)
     if job is None:
         return {"ok": False, "error": "Job not found"}
     return {"ok": True, "job": _job_row_to_api(job)}
@@ -632,7 +632,7 @@ def delete_bars_job(request: Request, job_id: str) -> Dict[str, Any]:
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "No DB"}
-    if delete_bars_backfill_job(control_via_db, job_id):
+    if delete_job_bars_backfill(control_via_db, job_id):
         return {"ok": True}
     return {"ok": False, "error": "Delete failed"}
 
@@ -646,5 +646,5 @@ def delete_all_bars_jobs(
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "No DB", "deleted": 0}
-    deleted = delete_all_bars_backfill_jobs(control_via_db, status_filter=status)
+    deleted = delete_all_job_bars_backfill(control_via_db, status_filter=status)
     return {"ok": True, "deleted": deleted}

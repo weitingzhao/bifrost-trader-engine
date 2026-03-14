@@ -46,10 +46,11 @@ def _row_to_heartbeat(row: tuple) -> Dict[str, Any]:
 
 
 def get_status_current(conn: Any) -> Optional[Dict[str, Any]]:
-    """Return the single row from status_current as a dict, or None if empty/unavailable."""
+    """Return the single row from daemon_auto_status_current as a dict, or None if empty/unavailable.
+    Row keys include daemon_auto_status_current_id (PK), daemon_state, trading_state, symbol, spot, ts, etc."""
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM status_current WHERE id = 1")
+            cur.execute("SELECT * FROM daemon_auto_status_current WHERE daemon_auto_status_current_id = 1")
             row = cur.fetchone()
         if row is None:
             return None
@@ -252,7 +253,8 @@ def get_operations(
     type_filter: Optional[str] = None,
     limit: int = 100,
 ) -> List[Dict[str, Any]]:
-    """Return rows from operations, optionally filtered by time and type. Newest first."""
+    """Return rows from daemon_auto_operations, optionally filtered by time and type. Newest first.
+    Each row dict includes daemon_auto_operations_id (PK), ts, type, side, quantity, price, state_reason."""
     try:
         conditions = []
         values: List[Any] = []
@@ -269,7 +271,7 @@ def get_operations(
         values.append(limit)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                f"SELECT * FROM operations{where} ORDER BY ts DESC LIMIT %s",
+                f"SELECT * FROM daemon_auto_operations{where} ORDER BY ts DESC LIMIT %s",
                 values,
             )
             rows = cur.fetchall()
@@ -369,7 +371,7 @@ def write_heartbeat_interval(status_config: dict, heartbeat_interval_sec: int) -
 
 
 def get_risk_summary(conn: Any) -> Dict[str, Any]:
-    """Return risk/post-mortem summary: status_current (daily_hedge_count, daily_pnl) + operations count in last 24h + block_reasons."""
+    """Return risk/post-mortem summary: daemon_auto_status_current (daily_hedge_count, daily_pnl) + daemon_auto_operations count in last 24h + block_reasons."""
     out: Dict[str, Any] = {
         "daily_hedge_count": None,
         "daily_pnl": None,

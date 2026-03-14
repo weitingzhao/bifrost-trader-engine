@@ -725,7 +725,7 @@ export function StatusPage({
                   </tr>
                 ) : (
                   operations.map((op, i) => (
-                    <tr key={`${op.ts}-${i}`}>
+                    <tr key={op.daemon_auto_operations_id ?? `op-${op.ts}-${i}`}>
                       <td>{fmtTs(op.ts)}</td>
                       <td>{op.type ?? ''}</td>
                       <td>{op.side ?? ''}</td>

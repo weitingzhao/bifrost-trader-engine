@@ -10,6 +10,7 @@ from src.sink.postgres_sink import _get_conn_params
 
 from servers.reader import accounts as accounts_module
 from servers.reader import executions as executions_module
+from servers.reader import gate_safety as gate_safety_module
 from servers.reader import market as market_module
 from servers.reader import position_categories as position_categories_module
 from servers.reader import settings as settings_module
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class StatusReader:
-    """Read status_current and operations from PostgreSQL. Uses the same root postgres config as daemon.
+    """Read daemon_auto_status_current and daemon_auto_operations from PostgreSQL. Uses the same root postgres config as daemon.
     Holds connection and delegates to domain modules (status, watchlist, market, settings, accounts)."""
 
     def __init__(self, status_config: dict) -> None:
@@ -221,6 +222,25 @@ class StatusReader:
         if not self._connect():
             return ("", "")
         return settings_module.get_flex_init_range_dates(self._conn)
+
+    # --- Gate safety (strategy & safety boundary from DB) ---
+    def get_gates_by_id(self, gate_safety_strategy_id: int) -> Optional[Dict[str, Any]]:
+        """Return gates dict (shape of config['gates']) for the given boundary set id. None if missing."""
+        if not self._connect():
+            return None
+        return gate_safety_module.get_gates_by_id(self._conn, gate_safety_strategy_id)
+
+    def get_active_gate_safety_strategy_id(self) -> Optional[int]:
+        """Return settings.active_gate_safety_strategy_id for id=1, or None."""
+        if not self._connect():
+            return None
+        return gate_safety_module.get_active_gate_safety_strategy_id(self._conn)
+
+    def get_active_strategy_structure_id(self) -> Optional[int]:
+        """Return settings.active_strategy_structure_id for id=1, or None."""
+        if not self._connect():
+            return None
+        return gate_safety_module.get_active_strategy_structure_id(self._conn)
 
     # --- Risk (delegate to status module) ---
     def get_risk_summary(self) -> Dict[str, Any]:

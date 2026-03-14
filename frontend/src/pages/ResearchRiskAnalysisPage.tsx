@@ -51,10 +51,10 @@ export function ResearchRiskAnalysisPage({ onGoToScreener, breadcrumbLabel = 'Ri
         ) : (
           <>Risk Model{' '}</>
         )}
-        <InfoTooltip text="Risk model summary from status_current and operations (daily hedge count, daily PnL, spot, ops 24h). Data from GET /risk_summary." />
+        <InfoTooltip text="Risk model summary from daemon auto status and operations (daily hedge count, daily PnL, spot, ops 24h). Data from GET /risk_summary." />
       </h2>
       <p className="section-hint">
-        Summary of risk model metrics; refreshes every 30s. Source: status_current + operations (last 24h).
+        Summary of risk model metrics; refreshes every 30s. Source: daemon auto status + operations (last 24h).
       </p>
 
       <section className="replay-section" aria-labelledby="research-risk-model-head">

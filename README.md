@@ -52,7 +52,7 @@ Run as a daemon via systemd, supervisor, or Docker.
 
 ### Phase 2: Status server (monitoring and control)
 
-The **status server** (monitoring and control) is a **separate process** from the trading daemon (RE-5). **Default deployment** is **cross-host**: status server on one machine (monitoring host), daemon (`run_engine.py`) on another (trading host, same machine as IB). The daemon must run on the same machine as IB; the status server can run anywhere that can reach PostgreSQL. Control (stop/flatten/suspend/resume) uses **PostgreSQL** (`daemon_control`, `daemon_run_status`); no shared filesystem is required. Run the status server; it reads PostgreSQL (`status_current`, `operations`) and exposes HTTP API.
+The **status server** (monitoring and control) is a **separate process** from the trading daemon (RE-5). **Default deployment** is **cross-host**: status server on one machine (monitoring host), daemon (`run_engine.py`) on another (trading host, same machine as IB). The daemon must run on the same machine as IB; the status server can run anywhere that can reach PostgreSQL. Control (stop/flatten/suspend/resume) uses **PostgreSQL** (`daemon_control`, `daemon_run_status`); no shared filesystem is required. Run the status server; it reads PostgreSQL (`daemon_auto_status_current`, `daemon_auto_operations`) and exposes HTTP API.
 
 **Config** (in `config/config.yaml`):
 

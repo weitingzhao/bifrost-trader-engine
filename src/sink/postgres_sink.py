@@ -40,7 +40,7 @@ IB_PORT_TYPE_TO_PORT = {
 
 
 class PostgreSQLSink(StatusSink):
-    """Writes snapshot to status_current (and optionally status_history) and operations to operations table."""
+    """Writes snapshot to daemon_auto_status_current (and optionally daemon_auto_status_history) and operations to daemon_auto_operations table."""
 
     def __init__(self, config: dict):
         self._config = config
@@ -52,7 +52,7 @@ class PostgreSQLSink(StatusSink):
         for attempt in (1, 2):
             try:
                 self._conn = psycopg2.connect(**params)
-                # Avoid blocking forever if another session holds a lock on daemon_heartbeat/status_current
+                # Avoid blocking forever if another session holds a lock on daemon_heartbeat/daemon_auto_status_current
                 with self._conn.cursor() as cur:
                     cur.execute("SET lock_timeout = '5s'")
                 self._conn.commit()
@@ -97,7 +97,7 @@ class PostgreSQLSink(StatusSink):
     ) -> None:
         if not self._ensure_conn():
             return
-        # status_current / status_history: only SNAPSHOT_KEYS (no account_* or accounts_snapshot; those live in accounts + account_positions)
+        # daemon_auto_status_current / daemon_auto_status_history: only SNAPSHOT_KEYS (no account_* or accounts_snapshot; those live in accounts + account_positions)
         keys = tuple(SNAPSHOT_KEYS)
         cols = ", ".join(keys)
         placeholders = ", ".join("%s" for _ in keys)
@@ -109,19 +109,20 @@ class PostgreSQLSink(StatusSink):
         )
         try:
             with self._conn.cursor() as cur:
-                # Upsert single row (id=1) for status_current
-                updates = ", ".join(f"{k} = EXCLUDED.{k}" for k in keys if k != "id")
+                # Upsert single row (daemon_auto_status_current_id=1) for daemon_auto_status_current
+                pk_col = "daemon_auto_status_current_id"
+                updates = ", ".join(f"{k} = EXCLUDED.{k}" for k in keys if k != pk_col)
                 cur.execute(
                     f"""
-                    INSERT INTO status_current (id, {cols})
+                    INSERT INTO daemon_auto_status_current ({pk_col}, {cols})
                     VALUES (1, {placeholders})
-                    ON CONFLICT (id) DO UPDATE SET {updates}
+                    ON CONFLICT ({pk_col}) DO UPDATE SET {updates}
                     """,
                     values,
                 )
                 if append_history:
                     cur.execute(
-                        f"INSERT INTO status_history ({cols}) VALUES ({placeholders})",
+                        f"INSERT INTO daemon_auto_status_history ({cols}) VALUES ({placeholders})",
                         values,
                     )
             # R-A1: sync multi-account snapshot into normalized tables (accounts + account_positions)
@@ -141,7 +142,7 @@ class PostgreSQLSink(StatusSink):
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
-                    f"INSERT INTO operations ({cols}) VALUES ({placeholders})",
+                    f"INSERT INTO daemon_auto_operations ({cols}) VALUES ({placeholders})",
                     values,
                 )
             self._conn.commit()

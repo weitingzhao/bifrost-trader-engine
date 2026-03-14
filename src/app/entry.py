@@ -11,9 +11,34 @@ from src.app.gs_trading import GsTrading
 logger = logging.getLogger(__name__)
 
 
+def _inject_gates_from_db_if_configured(config: dict) -> dict:
+    """When settings.active_gate_safety_strategy_id is set and postgres is configured, load gates from DB and merge into config. Returns config (possibly with config['gates'] overridden)."""
+    if not config or (config.get("sink") != "postgres" and not config.get("postgres")):
+        return config
+    try:
+        import psycopg2
+        from src.sink.postgres_sink import _get_conn_params
+        from servers.reader.gate_safety import get_active_gate_safety_strategy_id, get_gates_by_id
+        params = _get_conn_params(config)
+        conn = psycopg2.connect(**params)
+        try:
+            gid = get_active_gate_safety_strategy_id(conn)
+            if gid is not None:
+                gates = get_gates_by_id(conn, gid)
+                if gates:
+                    config = {**config, "gates": gates}
+                    logger.info("[Daemon] loaded gates from DB (gate_safety_strategy_id=%s)", gid)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("[Daemon] could not load gates from DB: %s; using config file", e)
+    return config
+
+
 async def _run_daemon_main(config_path: Optional[str] = None) -> None:
     """Load config, register signals, run GsTrading. SIGTERM/SIGINT call app.stop() on main loop."""
     config, resolved_path = read_config(config_path)
+    config = _inject_gates_from_db_if_configured(config)
     app = GsTrading(config, config_path=resolved_path)
     loop = asyncio.get_running_loop()
 

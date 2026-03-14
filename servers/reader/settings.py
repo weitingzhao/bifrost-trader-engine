@@ -390,7 +390,45 @@ def write_flex_config(
         return False
 
 
+def write_active_strategy_and_gates(
+    status_config: dict,
+    active_strategy_structure_id: Optional[int] = None,
+    active_gate_safety_strategy_id: Optional[int] = None,
+) -> bool:
+    """Update settings (id=1): active_strategy_structure_id, active_gate_safety_strategy_id. Returns True on success."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_structure_id bigint")
+                cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_gate_safety_strategy_id bigint")
+                cur.execute(
+                    """
+                    UPDATE settings SET
+                        active_strategy_structure_id = %s,
+                        active_gate_safety_strategy_id = %s
+                    WHERE id = 1
+                    """,
+                    (active_strategy_structure_id, active_gate_safety_strategy_id),
+                )
+            conn.commit()
+            logger.info(
+                "write_active_strategy_and_gates: active_strategy_structure_id=%s active_gate_safety_strategy_id=%s",
+                active_strategy_structure_id, active_gate_safety_strategy_id,
+            )
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("write_active_strategy_and_gates failed: %s", e)
+        return False
+
+
 __all__ = [
     "write_ib_config",
     "write_flex_config",
+    "write_active_strategy_and_gates",
 ]

@@ -29,7 +29,7 @@
 
 ### 步骤 2：PostgreSQLSink
 
-- [x] **2.1** 实现 `PostgreSQLSink`：建表 `status_current`、`status_history`、`operations`（列与计划一致）；`write_snapshot(..., append_history: bool)` 更新当前表，仅在 `append_history=True` 时追加历史表；`write_operation` 插入操作表。处理连接与重连。
+- [x] **2.1** 实现 `PostgreSQLSink`：建表 `daemon_auto_status_current`、`daemon_auto_status_history`、`daemon_auto_operations`（列与计划一致）；`write_snapshot(..., append_history: bool)` 更新当前表，仅在 `append_history=True` 时追加历史表；`write_operation` 插入操作表。处理连接与重连。
 - [x] **2.2** 在 `src/sink/__init__.py` 中导出 `StatusSink`、`PostgreSQLSink`。
 
 ### 步骤 3：GsTrading 挂接快照（按写入策略）
@@ -53,7 +53,7 @@
 
 ### 步骤 7：文档与验收
 
-- [x] **7.1** 在 README 或 docs 中增加：阶段 1 依赖 PostgreSQL；root `postgres` 配置说明；用 psql 或脚本查看 `status_current`/`operations` 的示例。
+- [x] **7.1** 在 README 或 docs 中增加：阶段 1 依赖 PostgreSQL；root `postgres` 配置说明；用 psql 或脚本查看 `daemon_auto_status_current`/`daemon_auto_operations` 的示例。
 - [ ] **7.2** 按分步计划阶段 1「检查方式」与「本阶段 Test Case 清单」执行验收，确认全部 TC-1-* 通过（R-C1a 仅验收信号停止）。
 
 ---
@@ -66,7 +66,7 @@
 
 - **Config**：确认 `config/config.yaml` 中 root `postgres` 配置正确。
 - **Sink 接口**：核对 `src/sink/base.py` 中 SNAPSHOT_KEYS、OPERATION_KEYS 与 [DATABASE.md](../DATABASE.md) §2 一致。
-- **PostgreSQL schema**：执行 `python scripts/db_refresh_schema.py` 后，用 psql 或启动守护进程确认 `status_current`、`status_history`、`operations`、`daemon_heartbeat`、`settings` 等表及列存在且符合 DATABASE.md。
+- **PostgreSQL schema**：执行 `python scripts/db_refresh_schema.py` 后，用 psql 或启动守护进程确认 `daemon_auto_status_current`、`daemon_auto_status_history`、`daemon_auto_operations`、`daemon_heartbeat`、`settings` 等表及列存在且符合 DATABASE.md。
 - **IB 连通性**：启动守护进程或直连 TWS/Gateway，确认能连接（IB 配置来自 PostgreSQL settings）。
 - **SIGTERM 停止**（可选）：启动 `python scripts/run_engine.py config/config.yaml`，对其发 SIGTERM，确认数秒内退出。
 
@@ -101,9 +101,9 @@
 ### 步骤 2：PostgreSQLSink 实现（R-M1a、R-M4a、R-H1）
 
 - **表结构**：以 [数据库设计](../DATABASE.md) 为准。摘要：
-  - **当前视图**：表 `status_current`，仅保留一行“最新”快照（列见 DATABASE.md §2.1）；upsert 或 replace。
-  - **历史表**：表 `status_history`，列与当前一致，可加自增 `id`；仅在 `append_history=True` 时追加（见 DATABASE.md §3）。R-H1：同一 sink 内同时支持“当前 + 历史”。
-  - **操作表**：表 `operations`，列见 DATABASE.md §2.3（ts、type、side、quantity、price、state_reason 等）。
+  - **当前视图**：表 `daemon_auto_status_current`，仅保留一行“最新”快照（列见 DATABASE.md §2.1）；upsert 或 replace。
+  - **历史表**：表 `daemon_auto_status_history`，列与当前一致，主键 `daemon_auto_status_history_id`；仅在 `append_history=True` 时追加（见 DATABASE.md §3）。R-H1：同一 sink 内同时支持“当前 + 历史”。
+  - **操作表**：表 `daemon_auto_operations`，列见 DATABASE.md §2.3（ts、type、side、quantity、price、state_reason 等）。
 - **PostgreSQLSink**：实现 `StatusSink`；使用 psycopg2 或 asyncpg 连接 PostgreSQL；若表不存在则建表；`write_snapshot(snapshot, append_history)` 更新当前表，`append_history=True` 时追加历史表；`write_operation` 插入操作表。需处理连接与重连（仅从主循环调用时可使用同步驱动）。
 - **写入策略**：调用方（GsTrading）负责区分：**当前表**每次 heartbeat 调用 `write_snapshot(..., append_history=False)`；**历史表**仅在发生对冲相关操作时（或可选每心跳一次）调用 `write_snapshot(..., append_history=True)`；**操作表**仅在对冲意图/下单/成交/拒绝时写入。纯无操作心跳不追加历史，仅更新当前表。
 
@@ -134,7 +134,7 @@
 
 ### 步骤 7：文档与验收
 
-- **README/docs**：说明阶段 1 依赖 PostgreSQL；root `postgres` 配置；用 psql 或脚本查询 `status_current`/`operations` 的示例。
+- **README/docs**：说明阶段 1 依赖 PostgreSQL；root `postgres` 配置；用 psql 或脚本查询 `daemon_auto_status_current`/`daemon_auto_operations` 的示例。
 - **验收清单**：按 [分步推进计划](../PLAN_NEXT_STEPS.md) 阶段 1「检查方式」与「本阶段 Test Case 清单」执行，确认全部 TC-1-* 通过（R-C1a 仅验收信号停止，不含控制文件）。
 
 ## 数据流（概念）

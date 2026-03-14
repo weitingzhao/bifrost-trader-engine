@@ -56,6 +56,7 @@
 | 优先级 | 待办项 | 说明 |
 |--------|--------|------|
 | **必选** | **阶段 3 执行计划与验收** | 已有 [phase3-execution-plan.md](phase3-execution-plan.md)（阶段 3 数据获取）。按该执行计划或 PLAN_NEXT_STEPS 的 TC-3-* 逐条执行阶段 3 验收并记录（含 R-H2 实现后）；可选新增验收脚本做 GET /status 字段与账户/持仓/spot 的校验。 |
+| **进行中/待开始** | **策略与安全边界落库** | 见 PLAN_NEXT_STEPS「策略与安全边界落库」步骤：strategy_*、gate_safety_* 表与 settings 扩展；Reader 从 DB 组装 gates；可选守护进程从 DB 加载。验收：TC-策略落库-1/2（必选）、TC-策略落库-3（可选）。 |
 | 已完成 | **Option Discovery 第一步（R-OD1）** | Research → Option Discovery 入口页与 GET /research/option-expirations 占位 API 已实现；见 PLAN_NEXT_STEPS「期权发现」步骤。 |
 | 可选 | phase2 自检脚本 | 可新增脚本：请求 GET /status、GET /operations，校验 status_lamp、self_check 等字段存在；可与已运行 daemon 配合测 POST /control/stop。 |
 
@@ -79,7 +80,7 @@
 | 步骤 | 内容 | 状态 | **完成时间** | 说明 |
 |------|------|------|--------------|------|
 | 1.1–1.3 | 配置与 StatusSink 接口 | ✅ | 2026-02-14 | root `config.postgres`，`src/sink/base.py`，GsTrading 按 PostgreSQL 配置创建 sink |
-| 2.1–2.2 | PostgreSQLSink | ✅ | 2026-02-14 | `status_current` / `status_history` / `operations`，`write_snapshot(append_history)`、`write_operation` |
+| 2.1–2.2 | PostgreSQLSink | ✅ | 2026-02-14 | `daemon_auto_status_current` / `daemon_auto_status_history` / `daemon_auto_operations`，`write_snapshot(append_history)`、`write_operation` |
 | 3.1–3.3 | GsTrading 挂接快照 | ✅ | 2026-02-14 | heartbeat 写当前表；进入 RUNNING 立即写一次；spot 不可用时写 minimal；有操作时 append_history |
 | 4.1–4.2 | 操作记录写入 | ✅ | 2026-02-14 | hedge_intent、order_sent、fill、reject 处 `write_operation`，必要时 `write_snapshot(..., append_history=True)` |
 | 5.1 | 信号停止 | ✅ | 2026-02-14 | `run_engine.py` / `_run_daemon_main` 注册 SIGTERM/SIGINT → `app.stop()`，asyncio 安全退出 |
@@ -90,7 +91,7 @@
 ### 2.3 运行环境与体验（近期补齐）
 
 - **IB 连接**：`ib_insync` 已改为 async 用法，避免 “event loop already running”；Client ID 冲突（326）时自动换 ID 重试，单次尝试约 15–20s 超时并打明确日志。
-- **status_current**：进入 RUNNING 即写一条；heartbeat 在 spot 不可用时也写 minimal，保证表里始终有当前状态。
+- **daemon_auto_status_current**：进入 RUNNING 即写一条；heartbeat 在 spot 不可用时也写 minimal，保证表里始终有当前状态。
 - **控制台**：统一 `[Daemon] state=...` 前缀，便于一眼看出当前状态与流转。
 
 ### 2.4 阶段 1 结论
@@ -107,10 +108,10 @@
 | TC-1-R-M1a-1 | R-M1a | 人工 | 需启动守护程序后查 sink 是否有新 snapshot |
 | TC-1-R-M1a-2 | R-M1a | **人工** | 从 sink（PostgreSQL）查表存在且可读，列符合 DATABASE.md §2 |
 | TC-1-R-M1a-3 | R-M1a | **人工** | 核对 SNAPSHOT_KEYS 与 DATABASE.md 一致 |
-| TC-1-R-M4a-1 | R-M4a | 人工 | 需有对冲/下单/成交发生后再查 operations 表 |
+| TC-1-R-M4a-1 | R-M4a | 人工 | 需有对冲/下单/成交发生后再查 daemon_auto_operations 表 |
 | TC-1-R-M4a-2 | R-M4a | **人工** | 核对 OPERATION_KEYS 一致 |
-| TC-1-R-M4a-3 | R-M4a | **人工** | 核对 operations 表及列存在 |
-| TC-1-R-H1-1 | R-H1 | **人工** | 核对 status_current + status_history 表及列 |
+| TC-1-R-M4a-3 | R-M4a | **人工** | 核对 daemon_auto_operations 表及列存在 |
+| TC-1-R-H1-1 | R-H1 | **人工** | 核对 daemon_auto_status_current + daemon_auto_status_history 表及列 |
 | TC-1-R-H1-2 | R-H1 | 设计/文档 | 无需改写逻辑即可扩展历史读；无独立自动化 |
 | TC-1-R-H1-3 | R-H1 | **人工** | 核对 postgres 配置 |
 | TC-1-R-C1a-1 | R-C1a | **人工** | 起 daemon、发 SIGTERM、断言数秒内退出 |
@@ -205,7 +206,7 @@
 | TC-3-R-A1-1 | R-A1 | 人工/未自动化 | 守护程序连接 IB 后能请求并获取当前账户基本信息 |
 | TC-3-R-A1-2 | R-A1 | 人工/未自动化 | 守护程序能获取当前持仓，可供内部对冲逻辑使用 |
 | TC-3-R-A1-3 | R-A1 | 人工/未自动化 | 账户与持仓在运行中可持续更新；IB 断连或异常时行为明确 |
-| TC-3-R-M6-1 | R-M6 | 人工/未自动化 | 守护程序在运行中从 IB 拉取标的市价并写入 status_current/sink |
+| TC-3-R-M6-1 | R-M6 | 人工/未自动化 | 守护程序在运行中从 IB 拉取标的市价并写入 daemon_auto_status_current/sink |
 | TC-3-R-M6-2 | R-M6 | 人工/未自动化 | GET /status 返回中含标的市价（如 status.spot），可供监控页读取 |
 | TC-3-R-M6-3 | R-M6 | 人工/未自动化 | 监控页能结合持仓与市价展示（持仓+当前价、盈亏、期权虚实等） |
 | TC-3-R-H2-1 | R-H2 | 人工/已实现 | `scripts/stats_from_history.py` 只读历史表；输出含按日/周对冲次数与盈亏相关；可离线运行 |

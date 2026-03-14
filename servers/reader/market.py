@@ -530,7 +530,7 @@ def delete_stock_bars_for_symbol(
         return {"ok": False, "error": str(e)}
 
 
-def insert_bars_backfill_job(
+def insert_job_bars_backfill(
     status_config: dict,
     symbol: str,
     period: str,
@@ -541,7 +541,7 @@ def insert_bars_backfill_job(
     skip_ib: bool = False,
     api_interval_sec: int = 10,
 ) -> Optional[int]:
-    """Insert a pending bars backfill job. Returns job id or None on failure."""
+    """Insert a pending job_bars_backfill row. Returns job_bars_backfill_id or None on failure."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None
     try:
@@ -551,9 +551,9 @@ def insert_bars_backfill_job(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO bars_backfill_jobs (symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, created_at, updated_at)
+                    INSERT INTO job_bars_backfill (symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', now(), now())
-                    RETURNING id
+                    RETURNING job_bars_backfill_id
                     """,
                     (
                         (symbol or "").strip(),
@@ -572,17 +572,17 @@ def insert_bars_backfill_job(
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("insert_bars_backfill_job failed: %s", e)
+        logger.warning("insert_job_bars_backfill failed: %s", e)
         return None
 
 
-def get_bars_backfill_jobs(
+def get_job_bars_backfill_list(
     status_config: dict,
     limit: int = 50,
     offset: int = 0,
     status: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """Return bars_backfill_jobs (newest first) with optional status filter and pagination. Returns (rows, total_count)."""
+    """Return job_bars_backfill rows (newest first) with optional status filter and pagination. Returns (rows, total_count)."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return [], 0
     try:
@@ -604,18 +604,18 @@ def get_bars_backfill_jobs(
                 where = "WHERE status = %s" if st else ""
                 args_count = [st] if st else []
                 cur.execute(
-                    f"SELECT COUNT(*) AS count FROM bars_backfill_jobs {where}",
+                    f"SELECT COUNT(*) AS count FROM job_bars_backfill {where}",
                     args_count,
                 )
                 total = int(cur.fetchone()["count"])
                 args_list = (args_count + [limit, offset]) if st else [limit, offset]
                 cur.execute(
                     f"""
-                    SELECT id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, result,
+                    SELECT job_bars_backfill_id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, result,
                            created_at, updated_at
-                    FROM bars_backfill_jobs
+                    FROM job_bars_backfill
                     {where}
-                    ORDER BY id DESC
+                    ORDER BY job_bars_backfill_id DESC
                     LIMIT %s OFFSET %s
                     """,
                     args_list,
@@ -625,12 +625,12 @@ def get_bars_backfill_jobs(
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("get_bars_backfill_jobs failed: %s", e)
+        logger.warning("get_job_bars_backfill_list failed: %s", e)
         raise
 
 
-def delete_bars_backfill_job(status_config: dict, job_id: Any) -> bool:
-    """Delete one bars_backfill_job by id. Returns True if deleted (or not found)."""
+def delete_job_bars_backfill(status_config: dict, job_id: Any) -> bool:
+    """Delete one job_bars_backfill row by job_bars_backfill_id. Returns True if deleted (or not found)."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     try:
@@ -642,18 +642,18 @@ def delete_bars_backfill_job(status_config: dict, job_id: Any) -> bool:
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM bars_backfill_jobs WHERE id = %s", (jid,))
+                cur.execute("DELETE FROM job_bars_backfill WHERE job_bars_backfill_id = %s", (jid,))
             conn.commit()
             return True
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("delete_bars_backfill_job failed: %s", e)
+        logger.warning("delete_job_bars_backfill failed: %s", e)
         return False
 
 
-def delete_all_bars_backfill_jobs(status_config: dict, status_filter: Optional[str] = None) -> int:
-    """Delete all bars_backfill_jobs, optionally only those with given status. Returns number deleted."""
+def delete_all_job_bars_backfill(status_config: dict, status_filter: Optional[str] = None) -> int:
+    """Delete all job_bars_backfill rows, optionally only those with given status. Returns number deleted."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return 0
     try:
@@ -662,21 +662,21 @@ def delete_all_bars_backfill_jobs(status_config: dict, status_filter: Optional[s
         try:
             with conn.cursor() as cur:
                 if status_filter and status_filter.strip().lower() in ("pending", "running", "done", "failed"):
-                    cur.execute("DELETE FROM bars_backfill_jobs WHERE status = %s", (status_filter.strip().lower(),))
+                    cur.execute("DELETE FROM job_bars_backfill WHERE status = %s", (status_filter.strip().lower(),))
                 else:
-                    cur.execute("DELETE FROM bars_backfill_jobs")
+                    cur.execute("DELETE FROM job_bars_backfill")
                 deleted = cur.rowcount
             conn.commit()
             return deleted
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("delete_all_bars_backfill_jobs failed: %s", e)
+        logger.warning("delete_all_job_bars_backfill failed: %s", e)
         return 0
 
 
-def get_bars_backfill_job(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:
-    """Return one bars_backfill_job by id, or None."""
+def get_job_bars_backfill(status_config: dict, job_id: Any) -> Optional[Dict[str, Any]]:
+    """Return one job_bars_backfill row by job_bars_backfill_id, or None."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None
     try:
@@ -690,10 +690,10 @@ def get_bars_backfill_job(status_config: dict, job_id: Any) -> Optional[Dict[str
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, result,
+                    SELECT job_bars_backfill_id, symbol, period, years, days, override_days, span_hours, skip_ib, api_interval_sec, status, result,
                            created_at, updated_at
-                    FROM bars_backfill_jobs
-                    WHERE id = %s
+                    FROM job_bars_backfill
+                    WHERE job_bars_backfill_id = %s
                     """,
                     (jid,),
                 )
@@ -702,12 +702,12 @@ def get_bars_backfill_job(status_config: dict, job_id: Any) -> Optional[Dict[str
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("get_bars_backfill_job failed: %s", e)
+        logger.warning("get_job_bars_backfill failed: %s", e)
         return None
 
 
-def claim_next_pending_bars_backfill_job(status_config: dict) -> Optional[Dict[str, Any]]:
-    """Select one pending job with FOR UPDATE SKIP LOCKED, set status=running, return job row."""
+def claim_next_pending_job_bars_backfill(status_config: dict) -> Optional[Dict[str, Any]]:
+    """Select one pending job_bars_backfill row with FOR UPDATE SKIP LOCKED, set status=running, return job row."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None
     try:
@@ -717,10 +717,10 @@ def claim_next_pending_bars_backfill_job(status_config: dict) -> Optional[Dict[s
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT id, symbol, period, years, days, override_days
-                    FROM bars_backfill_jobs
+                    SELECT job_bars_backfill_id, symbol, period, years, days, override_days
+                    FROM job_bars_backfill
                     WHERE status = 'pending'
-                    ORDER BY id ASC
+                    ORDER BY job_bars_backfill_id ASC
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
                     """
@@ -728,12 +728,12 @@ def claim_next_pending_bars_backfill_job(status_config: dict) -> Optional[Dict[s
                 row = cur.fetchone()
                 if not row:
                     return None
-                jid = row["id"]
+                jid = row["job_bars_backfill_id"]
                 cur.execute(
                     """
-                    UPDATE bars_backfill_jobs
+                    UPDATE job_bars_backfill
                     SET status = 'running', updated_at = now()
-                    WHERE id = %s
+                    WHERE job_bars_backfill_id = %s
                     """,
                     (jid,),
                 )
@@ -742,11 +742,11 @@ def claim_next_pending_bars_backfill_job(status_config: dict) -> Optional[Dict[s
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("claim_next_pending_bars_backfill_job failed: %s", e)
+        logger.warning("claim_next_pending_job_bars_backfill failed: %s", e)
         return None
 
 
-def update_bars_backfill_job_result(
+def update_job_bars_backfill_result(
     status_config: dict,
     job_id: int,
     status: str,
@@ -762,9 +762,9 @@ def update_bars_backfill_job_result(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE bars_backfill_jobs
+                    UPDATE job_bars_backfill
                     SET status = %s, result = %s, updated_at = now()
-                    WHERE id = %s
+                    WHERE job_bars_backfill_id = %s
                     """,
                     (status, json.dumps(result) if result is not None else None, job_id),
                 )
@@ -773,11 +773,11 @@ def update_bars_backfill_job_result(
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("update_bars_backfill_job_result failed: %s", e)
+        logger.warning("update_job_bars_backfill_result failed: %s", e)
         return False
 
 
-def trim_bars_backfill_jobs(status_config: dict, keep: int = 200) -> None:
+def trim_job_bars_backfill(status_config: dict, keep: int = 200) -> None:
     """Keep only the most recent keep jobs; delete older ones."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return
@@ -788,8 +788,8 @@ def trim_bars_backfill_jobs(status_config: dict, keep: int = 200) -> None:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    WITH kept AS (SELECT id FROM bars_backfill_jobs ORDER BY id DESC LIMIT %s)
-                    DELETE FROM bars_backfill_jobs WHERE id NOT IN (SELECT id FROM kept)
+                    WITH kept AS (SELECT job_bars_backfill_id FROM job_bars_backfill ORDER BY job_bars_backfill_id DESC LIMIT %s)
+                    DELETE FROM job_bars_backfill WHERE job_bars_backfill_id NOT IN (SELECT job_bars_backfill_id FROM kept)
                     """,
                     (max(1, keep),),
                 )
@@ -797,11 +797,11 @@ def trim_bars_backfill_jobs(status_config: dict, keep: int = 200) -> None:
         finally:
             conn.close()
     except Exception as e:
-        logger.warning("trim_bars_backfill_jobs failed: %s", e)
+        logger.warning("trim_job_bars_backfill failed: %s", e)
 
 
-def get_bars_backfill_last_updated(status_config: dict) -> Optional[float]:
-    """Return max(updated_at) from bars_backfill_jobs as Unix timestamp, or None."""
+def get_job_bars_backfill_last_updated(status_config: dict) -> Optional[float]:
+    """Return max(updated_at) from job_bars_backfill as Unix timestamp, or None."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None
     try:
@@ -810,14 +810,14 @@ def get_bars_backfill_last_updated(status_config: dict) -> Optional[float]:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT EXTRACT(EPOCH FROM max(updated_at))::double precision FROM bars_backfill_jobs"
+                    "SELECT EXTRACT(EPOCH FROM max(updated_at))::double precision FROM job_bars_backfill"
                 )
                 row = cur.fetchone()
             return float(row[0]) if row and row[0] is not None else None
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("get_bars_backfill_last_updated failed: %s", e)
+        logger.debug("get_job_bars_backfill_last_updated failed: %s", e)
         return None
 
 
@@ -897,15 +897,15 @@ __all__ = [
     "write_ohlc_bars_to_db",
     "write_stock_bars",
     "delete_stock_bars_for_symbol",
-    "insert_bars_backfill_job",
-    "get_bars_backfill_jobs",
-    "get_bars_backfill_job",
-    "delete_bars_backfill_job",
-    "delete_all_bars_backfill_jobs",
-    "claim_next_pending_bars_backfill_job",
-    "update_bars_backfill_job_result",
-    "trim_bars_backfill_jobs",
-    "get_bars_backfill_last_updated",
+    "insert_job_bars_backfill",
+    "get_job_bars_backfill_list",
+    "get_job_bars_backfill",
+    "delete_job_bars_backfill",
+    "delete_all_job_bars_backfill",
+    "claim_next_pending_job_bars_backfill",
+    "update_job_bars_backfill_result",
+    "trim_job_bars_backfill",
+    "get_job_bars_backfill_last_updated",
     "get_is_us_trading_day",
     "get_market_holidays",
     "add_market_holiday",

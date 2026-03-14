@@ -1,0 +1,48 @@
+---
+description: Database design standards — naming, PK/FK, strategy & safety boundary tables
+alwaysApply: false
+---
+
+# Database Design Standards (数据库设计标准)
+
+When adding or changing **PostgreSQL** tables in this project, follow the standards below. The **authoritative schema** for all tables is **docs/DATABASE.md**; strategy and safety-boundary tables are defined in **docs/DATABASE.md §2.24**.
+
+## 1. Table Naming
+
+- **Strategy-related tables** (option structure, opportunity, portfolio): use prefix **`strategy_`**.
+  - `strategy_structure`, `strategy_opportunity`, `strategy_portfolio`.
+- **Safety-boundary tables** (gates): use prefix **`gate_safety_`**.
+  - `gate_safety_strategy`, `gate_safety_strategy_earnings_dates`, `gate_safety_state`, `gate_safety_intent`, `gate_safety_guard`.
+- **Celery / job-queue tables**: use prefix **`job_`** (e.g. `job_bars_backfill` for bars backfill task queue).
+- Other domain tables keep existing names (e.g. `status_current`, `accounts`, `settings`).
+
+## 2. Primary Key Column Name
+
+- **Do not** use a generic column name `id` for the primary key.
+- Use **`<table_name>_id`** (e.g. table `strategy_structure` → PK column **`strategy_structure_id`**; table `gate_safety_strategy` → **`gate_safety_strategy_id`**).
+- Exception: single-row tables (e.g. `settings`) may keep `id` if it is a fixed row identifier (e.g. 1).
+
+## 3. Foreign Key Column Names
+
+- Name FK columns to match the referenced table’s PK column name (e.g. `strategy_structure_id` in `strategy_opportunity` references `strategy_structure.strategy_structure_id`).
+- For gate_safety child tables, use **`gate_safety_strategy_id`** (not `boundary_set_id`) when referencing `gate_safety_strategy`.
+
+## 4. Safety-Boundary Tables: No JSON
+
+- **gate_safety_*** tables must use **scalar columns only** (integer, double precision, boolean, text, date, timestamptz). **No jsonb/json** in these tables.
+- Multi-value data (e.g. earnings blacklist dates) uses a separate table: `gate_safety_strategy_earnings_dates(gate_safety_strategy_id, holiday_date)`.
+
+## 5. Strategy Tables: Where JSON Is Allowed
+
+- **strategy_structure**: `legs` (jsonb) and `constraints` (jsonb) are allowed for flexible option leg definitions; `metadata` (jsonb) optional.
+- **strategy_opportunity** / **strategy_portfolio**: `symbol_scope`, `entry_conditions`, `portfolio_limits`, `opportunity_strategy_ids` may be jsonb where a fixed schema is not required.
+
+## 6. Where to Define and Update Schemas
+
+- **All** new or changed tables and columns must be documented in **docs/DATABASE.md** with section number, purpose, column list, types, and FK references.
+- After changing the design, add an entry to **§6 变更记录** in DATABASE.md.
+
+## 7. Reference
+
+- **Full table structures** (strategy_*, gate_safety_*, settings extension): **docs/DATABASE.md §2.24**.
+- **Connection, existing tables, writing strategy**: docs/DATABASE.md §1–§5.

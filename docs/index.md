@@ -38,7 +38,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 
 | 文档 | 说明 |
 |------|------|
-| **[数据库设计（PostgreSQL）](DATABASE.md)** | 与 PostgreSQL 交互的唯一设计说明：连接配置、表结构（status_current、status_history、operations、daemon_control 等）、写入策略、阶段预留与变更记录 |
+| **[数据库设计（PostgreSQL）](DATABASE.md)** | 与 PostgreSQL 交互的唯一设计说明：连接配置、表结构（daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations、daemon_control 等）、写入策略、阶段预留与变更记录 |
 | **[FSM 状态流转](fsm/linkage.md)** | Daemon、Trading、Hedge 三状态机图示与串联说明 |
 | **[状态空间](research/STATE_SPACE_MAPPING.md)** | O、D、M、L、E、S 与代码/配置的对应关系 |
 | **[配置安全分类（风险模型）](research/CONFIG_SAFETY_TAXONOMY.md)** | 配置中的安全边界分类与风险维度 |
@@ -56,7 +56,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 |----------|------|------------------------------|
 | **Engine** | 自动交易守护程序，连接 TWS、执行对冲、写状态与心跳；运行在**守护程序主机**（Mac Mini 或 Linux）。 | **[scripts/run_engine.py](../scripts/run_engine.py)**：`python scripts/run_engine.py config/config.yaml` |
 | **Server** | 监控与控制独立进程，读 PostgreSQL，提供 GET /status、GET /operations、POST /control/*；默认运行在**监控机**，端口 8765。 | **[scripts/run_server.py](../scripts/run_server.py)**：`python scripts/run_server.py` 或 `python scripts/run_server.py config/config.yaml` |
-| **Bars Worker（可选）** | 非实时 K 线拉取（backfill）的独立 Worker，使用 **Celery + Redis**；任务仍写入 bars_backfill_jobs 表，API 入队后返回 job_id，前端轮询 GET /bars/jobs/{id}。需 Redis（config.redis）与 root `postgres` 配置。**须单进程启动**（`--concurrency=1`）以便复用同一 IB client_id。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。 | **[scripts/run_celery.py](../scripts/run_celery.py)**：`python scripts/run_celery.py` 或 `celery -A servers.celery_app worker -l info -Q bars --concurrency=1`。 |
+| **Bars Worker（可选）** | 非实时 K 线拉取（backfill）的独立 Worker，使用 **Celery + Redis**；任务仍写入 job_bars_backfill 表，API 入队后返回 job_id，前端轮询 GET /bars/jobs/{id}。需 Redis（config.redis）与 root `postgres` 配置。**须单进程启动**（`--concurrency=1`）以便复用同一 IB client_id。见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4。 | **[scripts/run_celery.py](../scripts/run_celery.py)**：`python scripts/run_celery.py` 或 `celery -A servers.celery_app worker -l info -Q bars --concurrency=1`。 |
 | **Frontend** | 监控 UI，调用 Server API。 | **[scripts/run_frontend.sh](../scripts/run_frontend.sh)**：`./scripts/run_frontend.sh dev`（开发，端口见 `config/config.yaml` 的 `frontend.port`，默认 5173）、`./scripts/run_frontend.sh build`（构建到 `frontend/dist`）、`./scripts/run_frontend.sh install`（仅安装依赖） |
 | **Docs** | 文档站点（MkDocs）。 | 生成 FSM：`python scripts/fsm_build_docs.py` → `mkdocs build`；本地预览：`mkdocs serve` 或 `python scripts/run_docs.py`（默认 http://127.0.0.1:8000） |
 

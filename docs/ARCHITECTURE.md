@@ -79,7 +79,7 @@
 **原则**：**非实时要求的市场数据拉取**（如 K 线 backfill、历史补全）**不在 API 进程内同步执行**，而是通过**任务队列 + 独立 Worker 进程**在后台执行，以保证 API 响应不受拉取耗时与 IB 限速影响，且与守护程序、监控服务进程隔离。
 
 **要求**：
-- **队列**：拉取任务（如 backfill 请求）写入**队列**；当前实现采用 **Celery + Redis**（broker 与 result backend 使用同一 Redis，与实时行情可选共用实例、不同 db）；任务行仍写入 **bars_backfill_jobs** 表（job_id 即 Celery task_id），便于 GET /bars/jobs 与前端轮询。
+- **队列**：拉取任务（如 backfill 请求）写入**队列**；当前实现采用 **Celery + Redis**（broker 与 result backend 使用同一 Redis，与实时行情可选共用实例、不同 db）；任务行仍写入 **job_bars_backfill** 表（job_id 即 Celery task_id），便于 GET /bars/jobs 与前端轮询。
 - **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A servers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
 - **API 行为**：监控/数据 API 收到 backfill 等请求时**仅入队并返回 job_id**；客户端通过 **GET /bars/jobs/{job_id}**（或等效）轮询任务状态与结果；任务完成后可刷新 coverage/列表。
 - **限速与串行**：Worker 串行处理任务并在任务间留间隔（如 2s），以符合 IB 官方历史数据 Pacing 限制。
@@ -161,7 +161,7 @@
 
 | 组件 | 说明 | 交付 |
 |------|------|------|
-| **任务队列** | backfill 等非实时拉取请求入队；**实现**：**Celery + Redis**（broker/result backend），任务行仍写 bars_backfill_jobs 表。 | 阶段 3（与 R-A3 一并） |
+| **任务队列** | backfill 等非实时拉取请求入队；**实现**：**Celery + Redis**（broker/result backend），任务行仍写 job_bars_backfill 表。 | 阶段 3（与 R-A3 一并） |
 | **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A servers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
 | **API 入队与查询** | POST /bars/backfill（或等效）入队并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态。 | 阶段 3 |
 
@@ -257,7 +257,7 @@
 - **守护程序主机（Mac Mini 或 Linux 服务器）**：
   - **守护进程**（`run_engine.py`）：连接 Mac Mini 上的 TWS（`ib.client_id` 如 1），执行全部对冲逻辑（Gamma Scalping、FSM、写 status/operations）；轮询 PostgreSQL（`daemon_control`、`daemon_run_status`）。**运行不依赖 IB**（RE-7）：若 TWS 不可用则进入 WAITING_IB，持续写心跳（`ib_connected=false`、`next_retry_ts`）、轮询 stop/retry_ib，并按配置间隔**自动重试**连接；监控端显示**黄灯**（degraded）。收到 **stop** 则消费并退出；**suspend**/ **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED，同一进程内不再执行 maybe_hedge 或恢复执行。
 - **监控机（Monitoring Host）**：运行 **status server**（`run_server.py`），读 PostgreSQL，提供 GET /status、GET /operations、POST /control/stop 等。不提供「启动」；守护进程在**守护程序主机**执行 `run_engine.py`（SSH/systemd/手动）。
-- **非实时数据拉取 Worker**（§2.7）：**独立进程**（Celery worker），可与监控机或守护程序主机同机部署；从 **Celery 队列**（Redis broker）取 backfill 任务，任务行存 bars_backfill_jobs 表，串行执行并遵守 IB Pacing；与 status server、守护进程隔离。API 入队并返回 job_id，客户端通过 GET /bars/jobs/{id} 轮询状态。
+- **非实时数据拉取 Worker**（§2.7）：**独立进程**（Celery worker），可与监控机或守护程序主机同机部署；从 **Celery 队列**（Redis broker）取 backfill 任务，任务行存 job_bars_backfill 表，串行执行并遵守 IB Pacing；与 status server、守护进程隔离。API 入队并返回 job_id，客户端通过 GET /bars/jobs/{id} 轮询状态。
 - **PostgreSQL**：可与守护程序主机或监控机同机或独立；守护进程、status server、Worker（若用 PG 队列）均需能连同一实例。
 
 **启停语义**：
@@ -341,7 +341,7 @@
 **结论**：  
 - **不必** 把“当前运行用哪份配置”的 **运行时来源** 从文件改为 DB；守护进程继续用 **文件** 作为单源即可，热重载保留。  
 - **必须** 的是：**每次写入状态或回测输出时，都带上“当时生效的配置标识”**，这样历史/回测才能与策略版本对应。  
-- 若后续需要集中管理多组参数、按版本切换、与回测结果表关联，可再引入 **配置注册表**（见下），与“运行时仍用文件”兼容。
+- **已落实**：集中管理多组参数、按版本切换已通过 **gate_safety_*** 表与 **strategy_*** 表实现（见 §9.3）；**settings** 表字段 **active_strategy_structure_id**、**active_gate_safety_strategy_id** 指定当前生效项；守护进程在两者非空时可**优先从 DB 加载** gates/结构，未配置时回退文件，与“运行时仍可用文件”并存。
 
 ### 9.2 可追溯性（最低要求）
 
@@ -360,22 +360,25 @@
    - **方案 B（git）**：配置文件随仓库版本控制，实盘/回测记录 `config_path` + 可选 `git_commit`，通过 commit 对应到版本。  
    - **方案 C（配置注册表）**：见下。
 
-### 9.3 配置注册表（按需演进）
+### 9.3 策略与安全边界表（已落实，DATABASE.md §2.24）
 
-若需要 **多组参数集中管理、按版本切换、与回测结果表一一对应**，可增加 **配置注册表**：
+**配置注册表**已落实为以下表结构（与状态 sink 同库；详见 [DATABASE.md](DATABASE.md) §2.24）：
 
-- **存储**：与状态 sink 同库或独立库均可。表结构示例：`config_registry(id, version_name, config_json, created_at)`，其中 `config_json` 为完整 gates（及必要顶层项）的 JSON。
-- **守护进程**：仍以 **文件** 为运行时来源。切换版本时：从注册表导出所选版本的 `config_json` 写为当前使用的 config 文件，再热重载或重启；或启动时指定“使用注册表中 version_id=X”并导出到临时文件后加载。这样不改动“从文件读配置”的主流程。
-- **回测**：支持从注册表按 `version_id` 加载配置，或继续使用“配置文件路径 + 覆盖”。回测结果表增加 `config_version_id`（或 `config_hash`），与 `config_registry` 或与 sink 历史中的 config_hash 对齐。
-- **匹配关系**：实盘某时段 ↔ sink 中 config_hash / config_version_id；回测某 run ↔ 回测结果中的 config_version_id / config_hash；二者一致即“同一策略版本”。
+- **安全边界**：根表 **gate_safety_strategy**（边界集主键 + strategy 层标量列）；子表 **gate_safety_strategy_earnings_dates**、**gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**（均以 gate_safety_strategy_id 为 PK/FK），**无 JSON 列**。
+- **策略三层**：**strategy_structure**（结构策略）、**strategy_opportunity**（机会策略，引用 structure + 可选 default_gate_safety_strategy_id）、**strategy_portfolio**（组合策略，引用 gate_safety_strategy_id）。
+- **当前生效**：**settings** 表列 **active_strategy_structure_id**、**active_gate_safety_strategy_id**；守护进程启动时若两列非空，则从 DB 组装「结构」与「gates」，否则回退 config 文件。
+
+**守护进程**：支持“从 DB 取当前生效的 gate_safety_strategy_id 对应的 gates”并注入 config；未配置或读不到时仍以**文件**为运行时来源。切换版本：更新 settings 的 active_gate_safety_strategy_id / active_strategy_structure_id 后重启或热重载（若实现）。
+
+**回测**：支持从 DB 按 gate_safety_strategy_id 加载配置，或继续使用“配置文件路径 + 覆盖”。回测结果可记录 **config_hash** 或 **gate_safety_strategy_id**，与 sink 历史中的 config_summary 对齐。
 
 ### 9.4 小结
 
 | 问题 | 建议 |
 |------|------|
-| 当前用文件保存安全边界配置，回测会调整这些参数，文件方式还适用吗？ | **适用**。守护进程继续用 **文件** 作为运行时配置源；回测可接受“配置文件 + 覆盖”或“从注册表加载某版本”。 |
-| 是否需要存到数据库？ | **运行时不必**；若需多版本管理与回测结果关联，可增加 **配置注册表**（DB），守护进程仍通过“导出为文件”或“按版本生成文件”使用。 |
-| 如何按版本管理并匹配策略与回测结果？ | **最低要求**：sink 写入 **config 摘要或 config_hash**；回测输出写入 **所用参数或 config_version/config_hash**；可选在 YAML 中设 `config_version` 或在注册表中维护版本。**进阶**：配置注册表 + 回测结果表与实盘历史表均带 config_version_id/config_hash，实现策略版本与回测结果的一一对应。 |
+| 当前用文件保存安全边界配置，回测会调整这些参数，文件方式还适用吗？ | **适用**。守护进程可优先从 **DB**（settings 指定 active_gate_safety_strategy_id）加载 gates，未配置时仍用 **文件**；回测可接受“配置文件 + 覆盖”或“从 DB 按 gate_safety_strategy_id 加载”。 |
+| 是否需要存到数据库？ | **已落实**：gate_safety_* 与 strategy_* 表（DATABASE.md §2.24）；settings 存当前生效 id；守护进程在 id 非空时从 DB 加载，否则回退文件。 |
+| 如何按版本管理并匹配策略与回测结果？ | **最低要求**：sink 写入 **config 摘要或 config_hash**（可含 gate_safety_strategy_id）；回测输出写入 **所用参数或 gate_safety_strategy_id**。**已落实**：gate_safety_strategy 等表提供多版本；回测与实盘历史均可挂 gate_safety_strategy_id 实现一一对应。 |
 
 ---
 

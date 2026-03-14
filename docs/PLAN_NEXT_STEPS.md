@@ -77,7 +77,7 @@
 | **R-M4a** | 操作可查·写出侧：守护程序将执行过的操作（尤其持仓变化）写入 sink，供外部查询。 | **阶段 1** | ① 守护程序在发生**对冲意图、下单、成交、撤单**等时，向 sink **操作/事件表**写入一条记录。② 每条记录至少含：时间、类型、方向（BUY/SELL）、数量、价格（若已成交）、状态/原因（如 D2/D3、block_reason）等。③ 外部可从 sink 读到上述记录。 |
 | **R-M4b** | 操作可查·读与查询：通过独立应用或接口查询执行过的操作（尤其涉及持仓变化）。 | **阶段 2** | ① 独立应用提供 **GET /operations**（或等效），支持按时间范围或类型筛选。② 通过该接口能返回**涉及持仓变化的操作列表**，供审计与排障。 |
 
-| **R-M6** | 标的与持仓当前市价可获取：监控页须能获取并展示交易标的与持仓的当前市价（spot/last/mid 等），供评估持仓盈亏、期权虚实与风险；对自动交易程序为必备能力。 | **阶段 3** | ① 守护程序在运行中从 IB（或既有数据源）拉取**交易标的**的当前市价（如 spot、bid/ask 或 last/mid），并写入 sink/status_current。② GET /status（或等效）返回的当前视图中**包含标的市价**（如 spot 等），可供监控页读取并展示。③ 若有持仓数据（R-A1），监控页能结合持仓与市价展示（如持仓+当前价、盈亏、期权虚实等）；多标的/多腿时各标的市价可区分获取。 |
+| **R-M6** | 标的与持仓当前市价可获取：监控页须能获取并展示交易标的与持仓的当前市价（spot/last/mid 等），供评估持仓盈亏、期权虚实与风险；对自动交易程序为必备能力。 | **阶段 3** | ① 守护程序在运行中从 IB（或既有数据源）拉取**交易标的**的当前市价（如 spot、bid/ask 或 last/mid），并写入 sink/daemon_auto_status_current。② GET /status（或等效）返回的当前视图中**包含标的市价**（如 spot 等），可供监控页读取并展示。③ 若有持仓数据（R-A1），监控页能结合持仓与市价展示（如持仓+当前价、盈亏、期权虚实等）；多标的/多腿时各标的市价可区分获取。 |
 | **R-M7** | 复盘与风控分析页面：提供独立于实时监控的复盘与风控分析页面，用于查看账户执行交易、辅助行情（如 K 线）及风险模型评估。 | **阶段 3** | ① 监控应用提供**独立页面或路由**（如「复盘」/「风控」），与当前交易监控页**分离**，通过导航切换。② 复盘页可展示**账户执行交易记录**（R-A2 数据）、**辅助行情**（R-A3，如 K 线或 OHLC）及基于历史数据的风险/统计视图。③ 不要求与 R-M5 同屏；数据由 GET /executions（或等效）及 K 线/行情接口提供。④ Performance 页计算与展示的细化验收见本文档步骤 3.8 与阶段 3 验收清单。 |
 
 ### 交易基础（R-A*）
@@ -269,7 +269,7 @@
 | 步骤 | 内容 | 可交付物 | 对应需求 |
 |------|------|----------|----------|
 | **3.1** | **账户与持仓**：连接 IB 后请求账户摘要与当前持仓；可选写入 sink 供 GET /status 展示；按配置间隔更新，断连行为与 RE-7 一致。 | 守护程序内可读账户/持仓；GET /status 可选展示 | R-A1 |
-| **3.2** | **标的市价**：heartbeat 或按间隔向 IB 请求标的行情（spot、bid/ask），写入 status_current；GET /status 含市价；监控页可展示持仓+当前价、盈亏、期权虚实。 | GET /status 含 spot 等；监控页可展示标的与持仓市价 | R-M6 |
+| **3.2** | **标的市价**：heartbeat 或按间隔向 IB 请求标的行情（spot、bid/ask），写入 daemon_auto_status_current；GET /status 含市价；监控页可展示持仓+当前价、盈亏、期权虚实。 | GET /status 含 spot 等；监控页可展示标的与持仓市价 | R-M6 |
 | **3.3** | **账户执行交易**：从 IB 获取账户执行/成交（executions、fills 或报表）；写入 sink 或独立表；独立应用提供 GET /executions（或 /trades），支持按时间筛选。 | 可查询账户级执行/成交记录，供复盘与风控 | R-A2 |
 | **3.4** | **复盘辅助行情（R-A3 扩展）**：K 线**股票与期权分表**——股票日线 **stock_day**、股票分钟/小时线 **stock_min**（1 min、5 mins、1 hour）；期权日线 **option_day**、期权分钟/小时线 **option_min**。从 IB 拉取并 UPSERT；**Watchlist** 表落库（CRUD），市场数据页标的 = 持仓 + Watchlist。**智能拉取**：首次可请求全部历史，后续根据最新一根 K 线时间决定 duration。GET /bars 支持 sec_type、period、标的（或 contract_key）；**报价**：Watchlist 与持仓的报价拉取后写入 **instrument_prices**，供前端展示。 | 复盘页与市场数据页可读股票/期权 K 线；Watchlist 持久化；报价落库 | R-A3 |
 | **3.5** | **非实时市场数据拉取 Worker**（[ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§4.4）：backfill 等非实时拉取**不入 API 进程同步执行**，而是**入队 + 独立 Worker 进程**。队列推荐 PostgreSQL 表或 Redis+RQ；Worker 单独进程从队列取任务、串行执行并遵守 IB Pacing（如任务间间隔 2s）。API：POST /bars/backfill 入队并返回 **job_id**；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态并在完成后刷新 coverage。 | 独立 Worker 进程；API 入队与 job 查询；前端轮询 job 状态 | R-A3 |
@@ -316,7 +316,7 @@
 | TC-3-R-A2-1 | R-A2 | ①②③ | 能从 IB 获取账户执行/成交记录；数据写入存储；GET /executions 或 /trades 可查询且记录含时间/标的/方向/数量/成交价等 |
 | TC-3-R-A3-1 | R-A3 | ①②③④⑤ | 股票/期权 K 线存 stock_day/stock_min/option_day/option_min；Watchlist 表 CRUD；首次拉取全历史、后续智能 duration；GET /bars 支持 sec_type/period/标的；Watchlist 与持仓报价拉取后写入 instrument_prices，复盘页或市场数据页可读 |
 | TC-3-R-A3-2 | R-A3 | ⑥ | 非实时拉取（backfill）经队列入队；API 返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 可查状态与结果；独立 Worker 进程（或同进程 worker）串行执行并遵守 IB Pacing；前端可轮询 job 并刷新 coverage |
-| TC-3-R-M6-1 | R-M6 | ① | 守护程序在运行中从 IB 拉取标的市价（spot 等）并写入 status_current/sink |
+| TC-3-R-M6-1 | R-M6 | ① | 守护程序在运行中从 IB 拉取标的市价（spot 等）并写入 daemon_auto_status_current/sink |
 | TC-3-R-M6-2 | R-M6 | ② | GET /status 返回中含标的市价（如 status.spot 或等价字段），可供监控页读取 |
 | TC-3-R-M6-3 | R-M6 | ③ | 监控页能结合持仓与市价展示（如持仓+当前价、盈亏、期权虚实等）；多标的时市价可区分 |
 | TC-3-R-M7-1 | R-M7 | ①②③ | 监控应用提供复盘/风控独立页面或路由；通过导航可进入；页内可展示执行交易、辅助行情、风险/统计视图，与 R-M5 分离 |
@@ -329,7 +329,7 @@
 
 **阶段 3 实现说明（部分已落地）**：  
 - **R-A1**：`IBConnector.get_managed_accounts()`、`get_account_summary(account)`；Store 存 account_summary、accounts_data；CONNECTED 时拉取，RUNNING 后**每 1 小时**拉取；sink/GET /status 可选展示 account_id、account_net_liquidation 等。`_refresh_positions(account)` 与账户同间隔；断连时 WAITING_IB 不拉取，重连后再次拉取。  
-- **R-M6**：**每次心跳**向 IB 拉取标的现价并写入 `status_current.spot`；GET /status 含 `status.spot`；监控页 IB 账户区块有刷新按钮（POST /control/refresh_accounts）、1 小时自动刷新、accounts_fetched_at 展示。  
+- **R-M6**：**每次心跳**向 IB 拉取标的现价并写入 `daemon_auto_status_current.spot`；GET /status 含 `status.spot`；监控页 IB 账户区块有刷新按钮（POST /control/refresh_accounts）、1 小时自动刷新、accounts_fetched_at 展示。  
 - **R-A2**：待实现（从 IB 获取账户执行/成交，写入存储，GET /executions 或 /trades）。  
 - **R-A3**：待实现（扩展：股票/期权 K 线分表 stock_day、stock_min、option_day、option_min；Watchlist 落库与 CRUD；智能拉取 duration；GET /bars 支持 sec_type/period/标的；Watchlist 报价写入 instrument_prices；**非实时拉取经队列+独立 Worker 进程**，API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id}；当前可实现为同进程 asyncio worker，再演进为独立进程+PG 表或 RQ）。  
 - **R-M7**：待实现（监控应用内复盘/风控独立页面或路由，与 R-M5 分离）。  
@@ -404,6 +404,23 @@
 ---
 
 **按需项**（不绑定阶段 3/4/5）：可选 Redis/PostgreSQL sink 扩展；部署与进程管理（systemd/supervisor、文档）。
+
+---
+
+### 策略与安全边界落库（Strategy & gate_safety tables；阶段 3 扩展 / 阶段 4 前）
+
+**本步骤实现并验收的需求**：与 [REQUIREMENTS.md](REQUIREMENTS.md) §4.3（策略与安全边界数据模型与落库）对应；为阶段 4 回测与策略版本管理提供 DB 基础。
+
+**目标**：策略三层（structure / opportunity / portfolio）与安全边界四层（gate_safety_strategy / state / intent / guard）表落库；settings 存当前生效 id；监控端 Reader 支持从 DB 按 gate_safety_strategy_id 组装 gates；可选地守护进程在 active_gate_safety_strategy_id 非空时从 DB 加载 gates。
+
+| 步骤 | 内容 | 可交付物 | 验收 |
+|------|------|----------|------|
+| **SG.1** | DDL：创建 strategy_structure、strategy_opportunity、strategy_portfolio、gate_safety_strategy、gate_safety_strategy_earnings_dates、gate_safety_state、gate_safety_intent、gate_safety_guard；settings 增加 active_strategy_structure_id、active_gate_safety_strategy_id。 | 执行 db_refresh_schema 后上述表存在且符合 [DATABASE.md](docs/DATABASE.md) §2.24 | ① TC-策略落库-1：表存在性检查 |
+| **SG.2** | Reader：get_gates_by_id(conn, gate_safety_strategy_id) 从 DB 组装为与 config["gates"] 同形的字典；get_active_gate_safety_strategy_id、get_active_strategy_structure_id 从 settings 读取。StatusReader 暴露上述接口。 | 监控端可按 id 读取 gates；可读当前生效 id | ② TC-策略落库-2：Reader 返回结构与 get_hedge_config 兼容 |
+| **SG.3**（可选） | 守护进程：启动时若 settings.active_gate_safety_strategy_id 非空，则从 DB 加载 gates 并注入 config，否则回退文件。 | 实盘可优先使用 DB 中的安全边界集 | ③ TC-策略落库-3：守护进程使用 DB gates 时 hedge 参数正确 |
+| **SG.4**（可选） | API 与种子：POST /config/active-strategy 写入 active_*；脚本从 config.yaml 的 gates 生成一条 gate_safety_* 种子数据。 | 可从前端或 API 切换当前生效；可一键从现有 config 落一条边界集 | — |
+
+**验收标准**：① 执行 db_refresh_schema 后 strategy_*、gate_safety_* 表及 settings 两列存在。② Reader 提供 get_gates_by_id(conn, gate_safety_strategy_id)，返回可与 get_hedge_config 兼容的扁平 dict 或 gates 子树；settings 可读写 active_*。③（可选）守护进程在 active_gate_safety_strategy_id 非空时使用 DB gates。**通过条件**：①、② 必须通过；③、SG.4 可选。
 
 ---
 
