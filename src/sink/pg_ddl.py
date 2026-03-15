@@ -694,6 +694,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             """
         )
         cur.execute("ALTER TABLE strategy_structure ADD COLUMN IF NOT EXISTS notes text")
+        cur.execute("ALTER TABLE strategy_structure ADD COLUMN IF NOT EXISTS structure_subtype text")
         cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS legs")
         cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS constraints")
         cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS metadata")

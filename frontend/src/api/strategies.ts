@@ -5,6 +5,8 @@ export interface StrategyStructure {
   strategy_structure_id: number
   name: string
   structure_type: string | null
+  /** For covered_call: otm | atm | itm | deep_otm; null for other types. */
+  structure_subtype?: string | null
   is_active: boolean
   version: string | number | null
   created_at: string | null
@@ -40,6 +42,8 @@ export interface StructureMetaEntry {
 export interface StructurePayload {
   name: string
   structure_type: string
+  /** For covered_call: otm | atm | itm | deep_otm; omit or null for other types. */
+  structure_subtype?: string | null
   legs: StructureLeg[]
   constraints?: StructureConstraint[]
   version?: number
@@ -189,6 +193,13 @@ export async function fetchStructure(id: number): Promise<StrategyStructure> {
   return r.json()
 }
 
+/** Fetch default legs for a structure type (industry-aligned defaults API). Returns empty legs for custom/unknown. */
+export async function fetchStructureTypeDefaultLegs(structureType: string): Promise<{ legs: StructureLeg[] }> {
+  const r = await fetch(`${API}/strategies/structure-types/${encodeURIComponent(structureType)}/default-legs`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
 export async function createStructure(payload: StructurePayload): Promise<{ strategy_structure_id: number }> {
   const r = await fetch(`${API}/strategies/structures`, {
     method: 'POST',
@@ -209,6 +220,14 @@ export async function updateStructure(id: number, payload: StructurePayload): Pr
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error((j as { detail?: string }).detail || r.statusText)
   return j as { ok: boolean }
+}
+
+export async function deleteStructure(id: number): Promise<void> {
+  const r = await fetch(`${API}/strategies/structures/${id}`, { method: 'DELETE' })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}))
+    throw new Error((j as { detail?: string }).detail || r.statusText)
+  }
 }
 
 export interface StrategyHistoryParams {

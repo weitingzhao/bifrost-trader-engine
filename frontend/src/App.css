@@ -2348,6 +2348,39 @@ button:disabled {
   color: var(--color-text-main);
   margin: 0 0 var(--space-1) 0;
 }
+.structure-legs-caption {
+  color: var(--color-text-muted, #666);
+  font-size: var(--text-caption, 0.875rem);
+}
+.structure-leg-optional {
+  color: var(--color-text-muted, #666);
+}
+.structure-leg-optional input::placeholder {
+  color: var(--color-text-muted, #999);
+}
+.structure-leg-preset-th {
+  white-space: nowrap;
+}
+.structure-leg-preset-th .structure-leg-th-label {
+  font-weight: inherit;
+}
+.structure-leg-preset-th .structure-leg-th-toggle {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+.structure-leg-preset-th .structure-leg-th-toggle .toggle-switch-caption {
+  display: none;
+}
+.structure-leg-resolved {
+  font-size: var(--text-caption, 0.875rem);
+  color: var(--color-text-muted, #666);
+  font-style: italic;
+}
+.structure-leg-qty-default {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+}
 .gates-form-row {
   display: flex;
   align-items: center;
@@ -2359,6 +2392,259 @@ button:disabled {
   font-size: var(--text-caption);
   color: var(--color-text-muted);
 }
+.gates-form-row--structure-type {
+  align-items: flex-start;
+}
+.gates-form-row--structure-type .gates-form-row-label {
+  min-width: 10rem;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  padding-top: var(--space-1);
+}
+.structure-type-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+.structure-type-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.85rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+.structure-type-option input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.structure-type-option:hover {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-border-strong);
+}
+.structure-type-option--selected {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+.structure-type-option--selected:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+.structure-type-option--legacy {
+  color: var(--color-text-muted);
+}
+.structure-type-option:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* New Structure wizard stepper — step-by-step with circles and connectors */
+.structure-wizard-stepper {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) 0;
+  width: 100%;
+  max-width: 28rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+.structure-wizard-step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.structure-wizard-step-item-last {
+  flex: 0 0 auto;
+}
+.structure-wizard-step-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  justify-content: flex-start;
+}
+.structure-wizard-step-item-last .structure-wizard-step-head {
+  justify-content: center;
+}
+.structure-wizard-step-circle {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: border-color 0.2s, background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.structure-wizard-step-connector {
+  flex: 1;
+  min-width: 1.5rem;
+  height: 2px;
+  margin: 0 var(--space-1);
+  background: var(--color-border);
+  align-self: center;
+  transition: background 0.2s;
+}
+.structure-wizard-step-label {
+  margin-top: var(--space-2);
+  font-size: var(--text-caption, 0.875rem);
+  color: var(--color-text-muted);
+  text-align: center;
+  line-height: 1.3;
+  transition: color 0.2s;
+}
+.structure-wizard-step-item.structure-wizard-step-active .structure-wizard-step-circle {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft, rgba(59, 130, 246, 0.12));
+  color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft, rgba(59, 130, 246, 0.2));
+}
+.structure-wizard-step-item.structure-wizard-step-active .structure-wizard-step-label {
+  color: var(--color-text-main);
+  font-weight: 500;
+}
+.structure-wizard-step-item.structure-wizard-step-done .structure-wizard-step-circle {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-surface, #fff);
+}
+.structure-wizard-step-item.structure-wizard-step-done .structure-wizard-step-check {
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.structure-wizard-step-item.structure-wizard-step-done .structure-wizard-step-label {
+  color: var(--color-text-muted);
+}
+.structure-wizard-step-item.structure-wizard-step-done .structure-wizard-step-connector {
+  background: var(--color-accent);
+}
+.structure-wizard-step-item.structure-wizard-step-active .structure-wizard-step-connector {
+  background: linear-gradient(to right, var(--color-accent), var(--color-border));
+}
+.structure-wizard-step-item.structure-wizard-step-skip .structure-wizard-step-circle,
+.structure-wizard-step-item.structure-wizard-step-skip .structure-wizard-step-label {
+  opacity: 0.5;
+}
+.structure-wizard-step {
+  margin-bottom: var(--space-3);
+}
+
+/* Covered Call subtype picker (wizard step 2) */
+.structure-wizard-subtype-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.covered-call-subtype-option {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  cursor: pointer;
+}
+.covered-call-subtype-option input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.covered-call-subtype-option:hover {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-border-strong);
+}
+.covered-call-subtype-option--selected {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+.covered-call-subtype-option:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Covered Call subtype description block (wizard Step 2) */
+.covered-call-subtype-description {
+  padding: var(--space-3);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.covered-call-subtype-list {
+  list-style: disc;
+}
+
+/* Structure list: Active filter pills (All | Active | Inactive) */
+.structure-active-filter-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--color-border);
+  border: 1px solid var(--color-border-strong);
+}
+.structure-active-filter-pill {
+  padding: 0.25rem 0.75rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.structure-active-filter-pill:hover {
+  color: var(--color-text-main);
+  background: var(--color-surface);
+}
+.structure-active-filter-pill.active {
+  background: var(--color-surface-elevated);
+  color: var(--color-accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.structure-active-filter-pill:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .gates-form-row input[type="text"],
 .gates-form-row input[type="number"],
 .gates-form-row input[type="date"] {
@@ -2769,6 +3055,7 @@ select:focus {
 
 .msg-ok { color: var(--color-lamp-green); }
 .msg-error { color: var(--color-danger); }
+.msg-warning { color: var(--color-warning); }
 
 /* ---------- 状态摘要网格 ---------- */
 .statusSummary {

@@ -5,9 +5,43 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 
+from servers.reader import structure_type_schema
 from src.sink.postgres_sink import _get_conn_params
 
 logger = logging.getLogger(__name__)
+
+COVERED_CALL_SUBTYPES = ("otm", "atm", "itm", "deep_otm")
+
+# Legacy/alias -> canonical for role (and optionally direction/option_right) per structure_type and leg index.
+# Used so existing strategies with old values (e.g. role "stock" for covered_call leg 0) still pass validation.
+_LEG_ROLE_ALIASES: Dict[str, Dict[int, Dict[str, str]]] = {
+    "covered_call": {
+        0: {"stock": "underlying", "equity": "underlying"},
+    },
+}
+
+
+def _normalize_legs(structure_type: str, legs: List[Any]) -> List[Dict[str, Any]]:
+    """Return a copy of legs with role/direction/option_right normalized to canonical values. Used before validate_legs."""
+    key = (structure_type or "").strip().lower()
+    aliases_by_index = _LEG_ROLE_ALIASES.get(key, {})
+    if not aliases_by_index or not isinstance(legs, list):
+        return [dict(leg) for leg in legs] if isinstance(legs, list) else []
+    out = []
+    for i, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            out.append(leg if isinstance(leg, dict) else {})
+            continue
+        leg_copy = dict(leg)
+        role_aliases = aliases_by_index.get(i, {})
+        if role_aliases:
+            r = leg_copy.get("role")
+            if r is not None:
+                r_str = str(r).strip().lower()
+                if r_str in role_aliases:
+                    leg_copy["role"] = role_aliases[r_str]
+        out.append(leg_copy)
+    return out
 
 
 def _conn_from_config(status_config: Optional[dict]) -> Any:
@@ -100,6 +134,8 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
         raise ValueError("legs is required")
     if not isinstance(legs, list):
         raise ValueError("legs must be an array")
+    legs = _normalize_legs(structure_type, legs)
+    structure_type_schema.validate_legs(structure_type, legs)
 
     version = int(payload["version"]) if payload.get("version") is not None else 1
     is_active = bool(payload["is_active"]) if payload.get("is_active") is not None else True
@@ -111,6 +147,12 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
     if meta is not None and not isinstance(meta, list):
         raise ValueError("meta must be an array")
 
+    structure_subtype = None
+    if structure_type == "covered_call":
+        raw = (payload.get("structure_subtype") or "").strip().lower()
+        if raw in COVERED_CALL_SUBTYPES:
+            structure_subtype = raw
+
     conn = _conn_from_config(status_config)
     if conn is None:
         return None
@@ -119,11 +161,11 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
             cur.execute(
                 """
                 INSERT INTO strategy_structure (
-                    name, structure_type, version, is_active, notes
-                ) VALUES (%s, %s, %s, %s, %s)
+                    name, structure_type, structure_subtype, version, is_active, notes
+                ) VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING strategy_structure_id
                 """,
-                (name, structure_type, version, is_active, notes),
+                (name, structure_type, structure_subtype, version, is_active, notes),
             )
             row = cur.fetchone()
             if not row:
@@ -163,6 +205,8 @@ def update_structure(
         raise ValueError("legs is required")
     if not isinstance(legs, list):
         raise ValueError("legs must be an array")
+    legs = _normalize_legs(structure_type, legs)
+    structure_type_schema.validate_legs(structure_type, legs)
 
     version = int(payload["version"]) if payload.get("version") is not None else 1
     is_active = bool(payload["is_active"]) if payload.get("is_active") is not None else True
@@ -174,6 +218,12 @@ def update_structure(
     if meta is not None and not isinstance(meta, list):
         raise ValueError("meta must be an array")
 
+    structure_subtype = None
+    if structure_type == "covered_call":
+        raw = (payload.get("structure_subtype") or "").strip().lower()
+        if raw in COVERED_CALL_SUBTYPES:
+            structure_subtype = raw
+
     conn = _conn_from_config(status_config)
     if conn is None:
         return False
@@ -182,10 +232,10 @@ def update_structure(
             cur.execute(
                 """
                 UPDATE strategy_structure SET
-                    name = %s, structure_type = %s, version = %s, is_active = %s, notes = %s, updated_at = now()
+                    name = %s, structure_type = %s, structure_subtype = %s, version = %s, is_active = %s, notes = %s, updated_at = now()
                 WHERE strategy_structure_id = %s
                 """,
-                (name, structure_type, version, is_active, notes, strategy_structure_id),
+                (name, structure_type, structure_subtype, version, is_active, notes, strategy_structure_id),
             )
             if cur.rowcount == 0:
                 conn.rollback()
@@ -205,6 +255,40 @@ def update_structure(
         logger.warning("update_structure failed: %s", e)
         conn.rollback()
         return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def deactivate_structure(status_config: Optional[dict], strategy_structure_id: int) -> bool:
+    """Soft-delete: set strategy_structure.is_active = false; clear settings.active_strategy_structure_id if it pointed here. Returns False if structure not found or no config."""
+    conn = _conn_from_config(status_config)
+    if conn is None:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE strategy_structure SET is_active = false WHERE strategy_structure_id = %s",
+                (strategy_structure_id,),
+            )
+            if cur.rowcount == 0:
+                conn.rollback()
+                return False
+            cur.execute(
+                """
+                UPDATE settings SET active_strategy_structure_id = NULL
+                WHERE id = 1 AND active_strategy_structure_id = %s
+                """,
+                (strategy_structure_id,),
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.warning("deactivate_structure failed: %s", e)
+        conn.rollback()
+        raise
     finally:
         try:
             conn.close()

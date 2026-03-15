@@ -637,6 +637,7 @@
 | strategy_structure_id | bigserial PRIMARY KEY | 主键 |
 | name | text NOT NULL | 策略名称（如 "Straddle 21-35 DTE ATM"） |
 | structure_type | text NOT NULL | straddle_strangle \| cash_secured_put \| covered_call \| iron_condor \| leaps \| calendar_spread \| custom |
+| structure_subtype | text | 仅 covered_call 时使用：otm \| atm \| itm \| deep_otm；其他类型 NULL。供 Wizard Step 2 与列表展示，不参与业务校验。 |
 | version | integer NOT NULL DEFAULT 1 | 版本号 |
 | is_active | boolean NOT NULL DEFAULT true | 是否可用 |
 | created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
@@ -645,7 +646,7 @@
 
 #### 2.24.1a 表 `strategy_structure_leg`（结构策略腿，一行一条腿）
 
-- **用途**：存结构策略的每条腿，标量列便于筛选、聚合与数据挖掘；替代 strategy_structure.legs 的 JSON 存储。
+- **用途**：存结构策略的每条腿，标量列便于筛选、聚合与数据挖掘；替代 strategy_structure.legs 的 JSON 存储。strike、expiration 为可选预设，null/空表示在应用结构时再解析（如 ATM、按 DTE/日历）。
 - **列**（无 json/jsonb）：
 
 | 列名 | 类型 | 说明 |
@@ -1028,6 +1029,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 机会策略去 JSON（scope_type + 子表） | strategy_opportunity 增加 scope_type 列；新增子表 strategy_opportunity_symbol（一行一标的）、strategy_opportunity_entry_condition（一行一条条件）；新数据仅写子表。§2.24.2、§2.24.2a、§2.24.2b；database-design.mdc 更新。 | — |
 | 机会策略移除 jsonb 列 | strategy_opportunity 表删除列 symbol_scope、entry_conditions（无历史数据需迁移）；pg_ddl 建表不再包含两列，并对已有表执行 DROP COLUMN IF EXISTS；Reader 仅从子表组装 symbols/entry_conditions。§2.24.2。 | — |
 | 策略分配（strategy_allocation）| 表 strategy_allocation、strategy_allocation_opportunity；主键 strategy_allocation_id；无 jsonb，机会列表通过关联表与 sort_order；API 请求/响应使用 allocation_limits（max_positions、max_bp_pct）。§2.24.3、§2.24.3a。 | — |
+| strategy_structure.structure_subtype | §2.24.1 表 strategy_structure 增加列 structure_subtype (text NULL)；covered_call 时存 otm/atm/itm/deep_otm，供 Edit Wizard 还原 Step 2 状态。 | — |
 
 ---
 

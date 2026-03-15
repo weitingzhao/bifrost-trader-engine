@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from servers.reader import gate_safety_write as gate_safety_write_module
 from servers.reader import strategy_allocation_write as strategy_allocation_write_module
 from servers.reader import strategy_opportunity_write as strategy_opportunity_write_module
+from servers.reader import structure_type_schema as structure_type_schema_module
 from servers.reader import strategy_structure_write as strategy_structure_write_module
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,13 @@ class AllocationUpdateBody(BaseModel):
     is_active: Optional[bool] = None
 
 
+@router.get("/structure-types/{structure_type}/default-legs")
+def get_structure_type_default_legs(structure_type: str) -> Dict[str, Any]:
+    """Return default legs for the given structure type (industry-aligned defaults API)."""
+    legs = structure_type_schema_module.get_default_legs(structure_type)
+    return {"legs": legs}
+
+
 @router.get("/structures")
 def list_structures(
     request: Request,
@@ -91,10 +99,18 @@ def get_structure(request: Request, structure_id: int) -> Dict[str, Any]:
 
 @router.post("/structures")
 def create_structure_endpoint(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a new strategy structure. Body: name, structure_type, legs (array), optional constraints, version, is_active, metadata."""
+    """Create a new strategy structure.
+
+    Body: name, structure_type, legs (array), optional constraints, version, is_active, metadata.
+    Per leg: quantity = ratio per leg (structural); strike and expiration are optional presets
+    (null/blank = resolve when structure is applied, e.g. ATM or DTE).
+    """
     control_via_db = getattr(request.app.state, "control_via_db", None)
     if not control_via_db:
         raise HTTPException(status_code=503, detail="Database control not configured")
+    _legs = body.get("legs")
+    if isinstance(_legs, list) and body.get("structure_type"):
+        body = {**body, "legs": strategy_structure_write_module._normalize_legs((body.get("structure_type") or "").strip(), _legs)}
     try:
         sid = strategy_structure_write_module.create_structure(control_via_db, body)
     except (ValueError, TypeError) as e:
@@ -106,16 +122,35 @@ def create_structure_endpoint(request: Request, body: Dict[str, Any]) -> Dict[st
 
 @router.put("/structures/{structure_id}")
 def update_structure_endpoint(request: Request, structure_id: int, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Update an existing strategy structure. Body same as POST."""
+    """Update an existing strategy structure. Body same as POST (legs: quantity=ratio, strike/expiration=optional preset)."""
     control_via_db = getattr(request.app.state, "control_via_db", None)
     if not control_via_db:
         raise HTTPException(status_code=503, detail="Database control not configured")
+    # Normalize legs in request body so legacy role/direction/option_right pass validation (e.g. role "stock" -> "underlying" for covered_call leg 0).
+    _legs = body.get("legs")
+    if isinstance(_legs, list) and body.get("structure_type"):
+        body = {**body, "legs": strategy_structure_write_module._normalize_legs((body.get("structure_type") or "").strip(), _legs)}
     try:
         ok = strategy_structure_write_module.update_structure(control_via_db, structure_id, body)
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not ok:
         raise HTTPException(status_code=404, detail="Structure not found or update failed")
+    return {"ok": True}
+
+
+@router.delete("/structures/{structure_id}")
+def delete_structure_endpoint(request: Request, structure_id: int) -> Dict[str, Any]:
+    """Soft-delete a strategy structure (set is_active = false). Clears settings.active_strategy_structure_id if it pointed to this structure."""
+    control_via_db = getattr(request.app.state, "control_via_db", None)
+    if not control_via_db:
+        raise HTTPException(status_code=503, detail="Database control not configured")
+    try:
+        ok = strategy_structure_write_module.deactivate_structure(control_via_db, structure_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    if not ok:
+        raise HTTPException(status_code=404, detail="Structure not found")
     return {"ok": True}
 
 

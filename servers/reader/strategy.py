@@ -11,7 +11,7 @@ def get_structure_by_id(conn: Any, strategy_structure_id: int) -> Optional[Dict[
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT strategy_structure_id, name, structure_type, version, is_active,
+                SELECT strategy_structure_id, name, structure_type, structure_subtype, version, is_active,
                        created_at, updated_at, notes
                 FROM strategy_structure WHERE strategy_structure_id = %s
                 """,
@@ -90,7 +90,7 @@ def list_structures(conn: Any, active_only: bool = True) -> List[Dict[str, Any]]
             if active_only:
                 cur.execute(
                     """
-                    SELECT strategy_structure_id, name, structure_type, version, is_active,
+                    SELECT strategy_structure_id, name, structure_type, structure_subtype, version, is_active,
                            created_at, updated_at, notes
                     FROM strategy_structure WHERE is_active = true
                     ORDER BY name
@@ -99,7 +99,7 @@ def list_structures(conn: Any, active_only: bool = True) -> List[Dict[str, Any]]
             else:
                 cur.execute(
                     """
-                    SELECT strategy_structure_id, name, structure_type, version, is_active,
+                    SELECT strategy_structure_id, name, structure_type, structure_subtype, version, is_active,
                            created_at, updated_at, notes
                     FROM strategy_structure
                     ORDER BY name
