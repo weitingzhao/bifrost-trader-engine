@@ -10,6 +10,7 @@ from servers.routers.watchlist import router as watchlist_router
 from servers.routers.research import router as research_router
 from servers.routers.daemon import router as daemon_router
 from servers.routers.config import router as config_router
+from servers.routers.strategies import router as strategies_router
 
 __all__ = [
     "core_router",
@@ -22,4 +23,5 @@ __all__ = [
     "research_router",
     "daemon_router",
     "config_router",
+    "strategies_router",
 ]

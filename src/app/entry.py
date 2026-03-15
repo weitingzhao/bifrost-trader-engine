@@ -35,10 +35,36 @@ def _inject_gates_from_db_if_configured(config: dict) -> dict:
     return config
 
 
+def _inject_structure_from_db_if_configured(config: dict) -> dict:
+    """When settings.active_strategy_structure_id is set and postgres is configured, load structure row from DB and set config['active_strategy_structure']. Returns config (possibly with key set)."""
+    if not config or (config.get("sink") != "postgres" and not config.get("postgres")):
+        return config
+    try:
+        import psycopg2
+        from src.sink.postgres_sink import _get_conn_params
+        from servers.reader.gate_safety import get_active_strategy_structure_id
+        from servers.reader.strategy import get_structure_by_id
+        params = _get_conn_params(config)
+        conn = psycopg2.connect(**params)
+        try:
+            sid = get_active_strategy_structure_id(conn)
+            if sid is not None:
+                row = get_structure_by_id(conn, sid)
+                if row is not None:
+                    config = {**config, "active_strategy_structure": row}
+                    logger.info("[Daemon] loaded active structure from DB (strategy_structure_id=%s)", sid)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("[Daemon] could not load structure from DB: %s", e)
+    return config
+
+
 async def _run_daemon_main(config_path: Optional[str] = None) -> None:
     """Load config, register signals, run GsTrading. SIGTERM/SIGINT call app.stop() on main loop."""
     config, resolved_path = read_config(config_path)
     config = _inject_gates_from_db_if_configured(config)
+    config = _inject_structure_from_db_if_configured(config)
     app = GsTrading(config, config_path=resolved_path)
     loop = asyncio.get_running_loop()
 

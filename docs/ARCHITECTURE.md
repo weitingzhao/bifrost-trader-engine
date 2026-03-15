@@ -365,10 +365,12 @@
 **配置注册表**已落实为以下表结构（与状态 sink 同库；详见 [DATABASE.md](DATABASE.md) §2.24）：
 
 - **安全边界**：根表 **gate_safety_strategy**（边界集主键 + strategy 层标量列）；子表 **gate_safety_strategy_earnings_dates**、**gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**（均以 gate_safety_strategy_id 为 PK/FK），**无 JSON 列**。
-- **策略三层**：**strategy_structure**（结构策略）、**strategy_opportunity**（机会策略，引用 structure + 可选 default_gate_safety_strategy_id）、**strategy_portfolio**（组合策略，引用 gate_safety_strategy_id）。
-- **当前生效**：**settings** 表列 **active_strategy_structure_id**、**active_gate_safety_strategy_id**；守护进程启动时若两列非空，则从 DB 组装「结构」与「gates」，否则回退 config 文件。
+- **策略三层**：**strategy_structure**（结构策略）、**strategy_opportunity**（机会策略，引用 structure + 可选 default_gate_safety_strategy_id）、**strategy_allocation**（策略分配 Allocations，引用 gate_safety_strategy_id）。
+- **当前生效**：**settings** 表列 **active_strategy_structure_id**、**active_gate_safety_strategy_id**；守护进程启动时若两列非空，则从 DB 组装「结构」与「gates」，否则回退 config 文件。**后续重构预留**：Settings 表可能聚焦为仅承载系统级配置（IB、Flex、心跳等）；「当前生效」的 strategy/gate id 可迁至独立表（如 runtime_strategy_config 或与 daemon_run_status 合并）。迁出时仅需调整 reader 与 POST /config/active-strategy 的读写对象，API 与前端语义不变。
 
-**守护进程**：支持“从 DB 取当前生效的 gate_safety_strategy_id 对应的 gates”并注入 config；未配置或读不到时仍以**文件**为运行时来源。切换版本：更新 settings 的 active_gate_safety_strategy_id / active_strategy_structure_id 后重启或热重载（若实现）。
+**守护进程**：支持“从 DB 取当前生效的 gate_safety_strategy_id 对应的 gates”并注入 config；未配置或读不到时仍以**文件**为运行时来源。**Phase A**：若 active_strategy_structure_id 非空，则从 DB 加载 structure 并注入 config[\"active_strategy_structure\"]；PostgresSink 在 append_history 时写入 strategy_history。切换版本：更新 settings 的 active_gate_safety_strategy_id / active_strategy_structure_id 后重启或热重载（若实现）。
+
+**后台**：GET /status 返回 active_strategy_structure_id、active_gate_safety_strategy_id 及对应 name；GET /strategies/structures、/structures/{id}、/history、/gate-safety、/gate-safety/{id} 及 POST/PUT /gate-safety 供管理与策略使用情况查询及 CRUD。**监控前端**在 **Research → Strategy** 提供策略管理页（当前生效、列表、Set active）；在 **Research → Gates** 提供 Gates 配置管理页（列表、创建、编辑、Set active、复制）。
 
 **回测**：支持从 DB 按 gate_safety_strategy_id 加载配置，或继续使用“配置文件路径 + 覆盖”。回测结果可记录 **config_hash** 或 **gate_safety_strategy_id**，与 sink 历史中的 config_summary 对齐。
 

@@ -12,6 +12,7 @@ from servers.reader import accounts as accounts_module
 from servers.reader import executions as executions_module
 from servers.reader import gate_safety as gate_safety_module
 from servers.reader import market as market_module
+from servers.reader import strategy as strategy_module
 from servers.reader import position_categories as position_categories_module
 from servers.reader import settings as settings_module
 from servers.reader import status as status_module
@@ -241,6 +242,78 @@ class StatusReader:
         if not self._connect():
             return None
         return gate_safety_module.get_active_strategy_structure_id(self._conn)
+
+    def get_gate_safety_name(self, gate_safety_strategy_id: int) -> Optional[str]:
+        """Return name of gate_safety_strategy row, or None."""
+        if not self._connect():
+            return None
+        return gate_safety_module.get_gate_safety_name(self._conn, gate_safety_strategy_id)
+
+    def list_gate_safety_sets(self) -> List[Dict[str, Any]]:
+        """Return list of gate_safety_strategy rows for management dropdown."""
+        if not self._connect():
+            return []
+        return gate_safety_module.list_gate_safety_sets(self._conn)
+
+    def get_gate_safety_full_by_id(self, gate_safety_strategy_id: int) -> Optional[Dict[str, Any]]:
+        """Return full gate set for UI edit: metadata + gates + earnings_dates. None if not found."""
+        if not self._connect():
+            return None
+        return gate_safety_module.get_gate_safety_full_by_id(self._conn, gate_safety_strategy_id)
+
+    def get_structure_by_id(self, strategy_structure_id: int) -> Optional[Dict[str, Any]]:
+        """Return one strategy_structure row as dict, or None."""
+        if not self._connect():
+            return None
+        return strategy_module.get_structure_by_id(self._conn, strategy_structure_id)
+
+    def list_structures(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Return list of strategy_structure rows."""
+        if not self._connect():
+            return []
+        return strategy_module.list_structures(self._conn, active_only=active_only)
+
+    def list_opportunities(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Return list of strategy_opportunity rows (with structure_name from JOIN)."""
+        if not self._connect():
+            return []
+        return strategy_module.list_opportunities(self._conn, active_only=active_only)
+
+    def get_opportunity_by_id(self, strategy_opportunity_id: int) -> Optional[Dict[str, Any]]:
+        """Return one strategy_opportunity row by id. None if not found."""
+        if not self._connect():
+            return None
+        return strategy_module.get_opportunity_by_id(self._conn, strategy_opportunity_id)
+
+    def list_allocations(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Return list of strategy_allocation rows (with gate_safety_name from JOIN)."""
+        if not self._connect():
+            return []
+        return strategy_module.list_allocations(self._conn, active_only=active_only)
+
+    def get_allocation_by_id(self, strategy_allocation_id: int) -> Optional[Dict[str, Any]]:
+        """Return one strategy_allocation row by id. None if not found."""
+        if not self._connect():
+            return None
+        return strategy_module.get_allocation_by_id(self._conn, strategy_allocation_id)
+
+    def get_strategy_history(
+        self,
+        from_ts: Optional[float] = None,
+        to_ts: Optional[float] = None,
+        strategy_structure_id: Optional[int] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Return strategy_history rows with optional filters."""
+        if not self._connect():
+            return []
+        return strategy_module.get_strategy_history(
+            self._conn,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            strategy_structure_id=strategy_structure_id,
+            limit=limit,
+        )
 
     # --- Risk (delegate to status module) ---
     def get_risk_summary(self) -> Dict[str, Any]:

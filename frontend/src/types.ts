@@ -141,6 +141,14 @@ export interface StatusResponse {
   reference_indices?: { symbol: string; label?: string }[]
   /** R-A5: current open/unfilled orders from daemon (symbol, action, status, filled, remaining, limit_price). */
   open_orders?: OpenOrder[]
+  /** Phase A: current active strategy structure id (settings); daemon uses on next start. */
+  active_strategy_structure_id?: number | null
+  /** Phase A: current active gate safety set id (settings); daemon uses on next start. */
+  active_gate_safety_strategy_id?: number | null
+  /** Phase A: name of active structure for display. */
+  active_strategy_structure_name?: string | null
+  /** Phase A: name of active gate safety set for display. */
+  active_gate_safety_strategy_name?: string | null
 }
 
 /** R-A5: one row from daemon_open_orders (GET /status or GET /open-orders). */

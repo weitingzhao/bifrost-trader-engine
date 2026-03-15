@@ -1,6 +1,6 @@
 """Gate safety: load gates from DB by gate_safety_strategy_id. Shape compatible with config['gates'] for get_hedge_config."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from psycopg2.extras import RealDictCursor
 
@@ -150,3 +150,71 @@ def get_active_strategy_structure_id(conn: Any) -> Optional[int]:
         return int(row["active_strategy_structure_id"])
     except Exception:
         return None
+
+
+def get_gate_safety_name(conn: Any, gate_safety_strategy_id: int) -> Optional[str]:
+    """Return name of the gate_safety_strategy row, or None if not found."""
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT name FROM gate_safety_strategy WHERE gate_safety_strategy_id = %s",
+                (gate_safety_strategy_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return str(row["name"]) if row.get("name") is not None else None
+    except Exception:
+        return None
+
+
+def get_gate_safety_full_by_id(conn: Any, gate_safety_strategy_id: int) -> Optional[Dict[str, Any]]:
+    """Return full gate set for UI edit: metadata + gates (config shape) + earnings_dates array.
+    Returns None if not found or any child row missing.
+    """
+    gates = get_gates_by_id(conn, gate_safety_strategy_id)
+    if gates is None:
+        return None
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT gate_safety_strategy_id, name, version, structure_type, is_active
+                FROM gate_safety_strategy WHERE gate_safety_strategy_id = %s
+                """,
+                (gate_safety_strategy_id,),
+            )
+            root = cur.fetchone()
+        if root is None:
+            return None
+        strategy_node = gates.get("strategy") or {}
+        earnings_node = strategy_node.get("earnings") or {}
+        earnings_dates = earnings_node.get("dates") or []
+        return {
+            "gate_safety_strategy_id": int(root["gate_safety_strategy_id"]),
+            "name": str(root["name"]) if root.get("name") is not None else "",
+            "version": int(root["version"]) if root.get("version") is not None else 1,
+            "structure_type": str(root["structure_type"]) if root.get("structure_type") is not None else None,
+            "is_active": bool(root["is_active"]) if root.get("is_active") is not None else True,
+            "gates": gates,
+            "earnings_dates": [str(d) for d in earnings_dates],
+        }
+    except Exception:
+        return None
+
+
+def list_gate_safety_sets(conn: Any) -> List[Dict[str, Any]]:
+    """Return list of gate_safety_strategy rows (id, name, version, structure_type, is_active)."""
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT gate_safety_strategy_id, name, version, structure_type, is_active
+                FROM gate_safety_strategy
+                ORDER BY name
+                """
+            )
+            rows = cur.fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []

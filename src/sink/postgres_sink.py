@@ -1,5 +1,6 @@
 """PostgreSQL implementation of StatusSink. See docs/DATABASE.md."""
 
+import json
 import logging
 import math
 import time
@@ -121,6 +122,34 @@ class PostgreSQLSink(StatusSink):
                     cur.execute(
                         f"INSERT INTO daemon_auto_status_history ({cols}) VALUES ({placeholders})",
                         values,
+                    )
+                    # Phase A: append one row to strategy_history (strategy run/state history)
+                    cur.execute(
+                        "SELECT active_strategy_structure_id FROM settings WHERE id = 1"
+                    )
+                    set_row = cur.fetchone()
+                    structure_id = set_row[0] if set_row and set_row[0] is not None else None
+                    ts_val = snapshot.get("ts")
+                    if ts_val is None:
+                        ts_val = time.time()
+                    state_summary = {
+                        k: snapshot.get(k)
+                        for k in (
+                            "daemon_state",
+                            "trading_state",
+                            "symbol",
+                            "net_delta",
+                            "daily_hedge_count",
+                            "daily_pnl",
+                            "config_summary",
+                        )
+                    }
+                    cur.execute(
+                        """
+                        INSERT INTO strategy_history (strategy_structure_id, ts, state_summary, created_at)
+                        VALUES (%s, to_timestamp(%s), %s::jsonb, now())
+                        """,
+                        (structure_id, ts_val, json.dumps(state_summary)),
                     )
             # R-A1: sync multi-account snapshot into normalized tables (account + account_positions)
             if isinstance(raw_accounts, list) and raw_accounts:

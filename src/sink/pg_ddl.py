@@ -685,15 +685,69 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 strategy_structure_id bigserial PRIMARY KEY,
                 name text NOT NULL,
                 structure_type text NOT NULL,
-                legs jsonb NOT NULL,
-                constraints jsonb,
                 version integer NOT NULL DEFAULT 1,
                 is_active boolean NOT NULL DEFAULT true,
                 created_at timestamptz NOT NULL DEFAULT now(),
                 updated_at timestamptz NOT NULL DEFAULT now(),
-                metadata jsonb
+                notes text
             )
             """
+        )
+        cur.execute("ALTER TABLE strategy_structure ADD COLUMN IF NOT EXISTS notes text")
+        cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS legs")
+        cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS constraints")
+        cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS metadata")
+        _log_table("strategy_structure_leg", "Structure strategy leg (one row per leg)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_leg (
+                strategy_structure_leg_id bigserial PRIMARY KEY,
+                strategy_structure_id bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) ON DELETE CASCADE,
+                sort_order integer NOT NULL DEFAULT 0,
+                role text,
+                direction text,
+                option_right text,
+                quantity integer NOT NULL DEFAULT 1,
+                strike double precision,
+                expiration text,
+                created_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_leg_structure_id ON strategy_structure_leg (strategy_structure_id)"
+        )
+        _log_table("strategy_structure_constraint", "Structure strategy constraint (typed key-value)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_constraint (
+                strategy_structure_constraint_id bigserial PRIMARY KEY,
+                strategy_structure_id bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) ON DELETE CASCADE,
+                constraint_type text NOT NULL,
+                constraint_value_text text,
+                constraint_value_int integer,
+                created_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_constraint_structure_id ON strategy_structure_constraint (strategy_structure_id)"
+        )
+        _log_table("strategy_structure_meta", "Structure strategy metadata key-value")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_meta (
+                strategy_structure_meta_id bigserial PRIMARY KEY,
+                strategy_structure_id bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) ON DELETE CASCADE,
+                meta_key text NOT NULL,
+                meta_value_text text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (strategy_structure_id, meta_key)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_meta_structure_id ON strategy_structure_meta (strategy_structure_id)"
         )
         _log_table("strategy_opportunity", "Opportunity strategy")
         cur.execute(
@@ -703,28 +757,75 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 name text NOT NULL,
                 strategy_structure_id bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id),
                 default_gate_safety_strategy_id bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id),
-                symbol_scope jsonb,
-                entry_conditions jsonb,
                 is_active boolean NOT NULL DEFAULT true,
                 created_at timestamptz NOT NULL DEFAULT now(),
                 updated_at timestamptz NOT NULL DEFAULT now()
             )
             """
         )
-        _log_table("strategy_portfolio", "Portfolio strategy")
+        cur.execute("ALTER TABLE strategy_opportunity ADD COLUMN IF NOT EXISTS scope_type text")
+        cur.execute("ALTER TABLE strategy_opportunity DROP COLUMN IF EXISTS symbol_scope")
+        cur.execute("ALTER TABLE strategy_opportunity DROP COLUMN IF EXISTS entry_conditions")
+        _log_table("strategy_opportunity_symbol", "Opportunity strategy symbols")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS strategy_portfolio (
-                strategy_portfolio_id bigserial PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS strategy_opportunity_symbol (
+                strategy_opportunity_symbol_id bigserial PRIMARY KEY,
+                strategy_opportunity_id bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE CASCADE,
+                symbol text NOT NULL,
+                sort_order integer NOT NULL DEFAULT 0,
+                UNIQUE (strategy_opportunity_id, symbol)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_opportunity_symbol_opportunity_id ON strategy_opportunity_symbol (strategy_opportunity_id)"
+        )
+        _log_table("strategy_opportunity_entry_condition", "Opportunity strategy entry conditions")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_opportunity_entry_condition (
+                strategy_opportunity_entry_condition_id bigserial PRIMARY KEY,
+                strategy_opportunity_id bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE CASCADE,
+                condition_type text NOT NULL,
+                value_text text,
+                value_numeric double precision,
+                sort_order integer NOT NULL DEFAULT 0
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_opportunity_entry_condition_opportunity_id ON strategy_opportunity_entry_condition (strategy_opportunity_id)"
+        )
+        _log_table("strategy_allocation", "Strategy allocation")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_allocation (
+                strategy_allocation_id bigserial PRIMARY KEY,
                 name text NOT NULL,
-                strategy_opportunity_ids jsonb NOT NULL,
                 gate_safety_strategy_id bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id),
-                portfolio_limits jsonb,
+                max_positions integer,
+                max_bp_pct numeric,
                 is_active boolean NOT NULL DEFAULT true,
                 created_at timestamptz NOT NULL DEFAULT now(),
                 updated_at timestamptz NOT NULL DEFAULT now()
             )
             """
+        )
+        _log_table("strategy_allocation_opportunity", "Allocation-opportunity junction")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_allocation_opportunity (
+                strategy_allocation_id bigint NOT NULL REFERENCES strategy_allocation(strategy_allocation_id) ON DELETE CASCADE,
+                strategy_opportunity_id bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE CASCADE,
+                sort_order integer NOT NULL DEFAULT 0,
+                PRIMARY KEY (strategy_allocation_id, strategy_opportunity_id)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_allocation_opportunity_opportunity_id "
+            "ON strategy_allocation_opportunity (strategy_opportunity_id)"
         )
         _log_table("strategy_history", "Strategy run / state history")
         cur.execute(

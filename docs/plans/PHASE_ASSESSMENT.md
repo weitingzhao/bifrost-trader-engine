@@ -44,6 +44,7 @@
 | **2026-02-26** | 阶段验收 | **阶段 2** 正式验收通过（全部 TC-2-* 通过并记录） |
 | — | 阶段验收 | 阶段 3 正式验收通过（R-A1、**R-A4**、R-M6、R-H2 全部验收条通过） |
 | **2026-03-12** | 阶段实现/扩展 | **Option Discovery 第一步（R-OD1）**：Research 子菜单新增 Option Discovery；新页面（标的来自 Watchlist STK、到期占位、占位说明）；GET /research/option-expirations 占位 API。 |
+| **2026-03-14** | 阶段实现/扩展 | **Strategy 管理页（Research → Strategy）与 Status 面板增强**：Research 子菜单新增 Strategy；StrategyPage（当前生效、结构表、安全边界表、策略历史、Set active）；Status 面板展示 active 结构/边界名称及 Manage» 入口。 |
 
 **使用说明**：阶段实现完成或正式验收通过后，将上表对应行日期更新为实际完成日（YYYY-MM-DD），并同步更新「当前项目进展」表中的**实现完成时间**或**验收完成时间**。是否进入下一阶段或是否调整需求/架构，由负责人在评估后给出结论，见 [项目工作流](PROJECT_WORKFLOW.md)。
 
@@ -56,7 +57,8 @@
 | 优先级 | 待办项 | 说明 |
 |--------|--------|------|
 | **必选** | **阶段 3 执行计划与验收** | 已有 [phase3-execution-plan.md](phase3-execution-plan.md)（阶段 3 数据获取）。按该执行计划或 PLAN_NEXT_STEPS 的 TC-3-* 逐条执行阶段 3 验收并记录（含 R-H2 实现后）；可选新增验收脚本做 GET /status 字段与账户/持仓/spot 的校验。 |
-| **进行中/待开始** | **策略与安全边界落库** | 见 PLAN_NEXT_STEPS「策略与安全边界落库」步骤：strategy_*、gate_safety_* 表与 settings 扩展；Reader 从 DB 组装 gates；可选守护进程从 DB 加载。验收：TC-策略落库-1/2（必选）、TC-策略落库-3（可选）。 |
+| **Phase A 已完成** | **策略与安全边界落库（含 Phase A）** | SG.1–SG.4 已实现；Phase A：Reader 扩展（get_structure_by_id、list_structures、get_strategy_history、list_gate_safety_sets、get_gate_safety_name）、Daemon 加载 structure、PostgresSink 写入 strategy_history、GET /status 含 active 策略/边界 id 与 name、GET /strategies/structures、/structures/{id}、/history、/gate-safety。 |
+| 已完成 | **Strategy 管理页（方案 B）** | Research → Strategy 页面实现（结构策略列表、安全边界列表、策略历史、Set active）；Status 面板展示当前生效策略/边界名称及 Manage» 入口。 |
 | 已完成 | **Option Discovery 第一步（R-OD1）** | Research → Option Discovery 入口页与 GET /research/option-expirations 占位 API 已实现；见 PLAN_NEXT_STEPS「期权发现」步骤。 |
 | 可选 | phase2 自检脚本 | 可新增脚本：请求 GET /status、GET /operations，校验 status_lamp、self_check 等字段存在；可与已运行 daemon 配合测 POST /control/stop。 |
 

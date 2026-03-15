@@ -58,6 +58,44 @@ export {
   deleteMarketHoliday,
 } from './config'
 export type { MarketHolidayRow } from './config'
+export {
+  fetchStructures,
+  fetchStructure,
+  createStructure,
+  updateStructure,
+  fetchOpportunities,
+  fetchOpportunity,
+  createOpportunity,
+  updateOpportunity,
+  fetchPortfolios,
+  fetchPortfolio,
+  createPortfolio,
+  updatePortfolio,
+  fetchStrategyHistory,
+  fetchGateSafetySets,
+  fetchGateSafetyFull,
+  createGateSafety,
+  updateGateSafety,
+  postActiveStrategy,
+} from './strategies'
+export type {
+  StrategyStructure,
+  StructureLeg,
+  StructureConstraint,
+  StructureMetaEntry,
+  StructurePayload,
+  EntryConditionItem,
+  StrategyOpportunity,
+  OpportunityPayload,
+  StrategyAllocation,
+  AllocationPayload,
+  GateSafetySet,
+  GateSafetyFull,
+  GateSafetyGates,
+  GateSafetyPayload,
+  StrategyHistoryRow,
+  StrategyHistoryParams,
+} from './strategies'
 export { fetchQuotes, subscribeQuotes } from './quotes'
 export {
   fetchPositionCategories,

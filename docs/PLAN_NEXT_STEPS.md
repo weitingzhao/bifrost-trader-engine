@@ -415,12 +415,16 @@
 
 | 步骤 | 内容 | 可交付物 | 验收 |
 |------|------|----------|------|
-| **SG.1** | DDL：创建 strategy_structure、strategy_opportunity、strategy_portfolio、gate_safety_strategy、gate_safety_strategy_earnings_dates、gate_safety_state、gate_safety_intent、gate_safety_guard；settings 增加 active_strategy_structure_id、active_gate_safety_strategy_id。 | 执行 db_refresh_schema 后上述表存在且符合 [DATABASE.md](docs/DATABASE.md) §2.24 | ① TC-策略落库-1：表存在性检查 |
+| **SG.1** | DDL：创建 strategy_structure、strategy_opportunity、strategy_allocation、gate_safety_strategy、gate_safety_strategy_earnings_dates、gate_safety_state、gate_safety_intent、gate_safety_guard；settings 增加 active_strategy_structure_id、active_gate_safety_strategy_id。 | 执行 db_refresh_schema 后上述表存在且符合 [DATABASE.md](docs/DATABASE.md) §2.24 | ① TC-策略落库-1：表存在性检查 |
 | **SG.2** | Reader：get_gates_by_id(conn, gate_safety_strategy_id) 从 DB 组装为与 config["gates"] 同形的字典；get_active_gate_safety_strategy_id、get_active_strategy_structure_id 从 settings 读取。StatusReader 暴露上述接口。 | 监控端可按 id 读取 gates；可读当前生效 id | ② TC-策略落库-2：Reader 返回结构与 get_hedge_config 兼容 |
 | **SG.3**（可选） | 守护进程：启动时若 settings.active_gate_safety_strategy_id 非空，则从 DB 加载 gates 并注入 config，否则回退文件。 | 实盘可优先使用 DB 中的安全边界集 | ③ TC-策略落库-3：守护进程使用 DB gates 时 hedge 参数正确 |
 | **SG.4**（可选） | API 与种子：POST /config/active-strategy 写入 active_*；脚本从 config.yaml 的 gates 生成一条 gate_safety_* 种子数据。 | 可从前端或 API 切换当前生效；可一键从现有 config 落一条边界集 | — |
 
 **验收标准**：① 执行 db_refresh_schema 后 strategy_*、gate_safety_* 表及 settings 两列存在。② Reader 提供 get_gates_by_id(conn, gate_safety_strategy_id)，返回可与 get_hedge_config 兼容的扁平 dict 或 gates 子树；settings 可读写 active_*。③（可选）守护进程在 active_gate_safety_strategy_id 非空时使用 DB gates。**通过条件**：①、② 必须通过；③、SG.4 可选。
+
+**阶段 A（Phase A）**：在 SG.1–SG.4 基础上，完成「只读闭环 + 后台管理与监控」：Reader 扩展（get_structure_by_id、list_structures、list_gate_safety_sets、get_gate_safety_name、get_strategy_history）；守护进程启动时若 active_strategy_structure_id 非空则从 DB 加载 structure 并注入 config[\"active_strategy_structure\"]；PostgresSink 在 append_history=True 时同步写入 strategy_history（strategy_structure_id 来自 settings，state_summary 为 snapshot 子集）；GET /status 返回 active_strategy_structure_id、active_gate_safety_strategy_id 及对应 name；新增 GET /strategies/structures、GET /strategies/structures/{id}、GET /strategies/history、GET /strategies/gate-safety。验收：守护进程使用 DB structure 时 config 含 active_strategy_structure；GET /status 含当前生效策略/边界 id 与 name；发生对冲相关操作后 strategy_history 有新增行；GET /strategies/* 可返回数据。详见 .cursor/plans 中 Phase A 计划。
+
+**Phase A 监控端 UI（Strategy 管理页）**：监控前端在 Research 下新增 Strategy 子页，提供结构策略列表、安全边界列表、策略历史表及 Set active 操作；Status 页 Strategy 面板展示当前生效结构/边界名称并提供「Manage»」进入 Research → Strategy。验收：通过 Research → Strategy 可查看列表与历史、可设置当前生效；Status 面板显示当前生效名称并可跳转 Strategy 页。
 
 ---
 

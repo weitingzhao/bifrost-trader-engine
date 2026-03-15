@@ -23,6 +23,10 @@ import { SettingsPage } from './pages/SettingsPage'
 import { TransferPayPage } from './pages/TransferPayPage'
 import { BacktestPage } from './pages/BacktestPage'
 import { OptionDiscoveryPage } from './pages/OptionDiscoveryPage'
+import { StrategyStructurePage } from './pages/StrategyStructurePage'
+import { StrategyOpportunityPage } from './pages/StrategyOpportunityPage'
+import { StrategyAllocationPage } from './pages/StrategyAllocationPage'
+import { GatesConfigPage } from './pages/GatesConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
 import logoImg from '../img/logo.png'
@@ -158,6 +162,7 @@ export default function App() {
   const [consoleSection, setConsoleSection] = useState<ConsoleSection>('daemon-console')
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest' | 'options'>('risk')
+  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist'>('structure')
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
@@ -491,7 +496,7 @@ export default function App() {
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
     { id: 'system', label: 'System', lamp: systemLamp },
     { id: 'live', label: 'Live', lamp: liveLamp },
-    { id: 'watchlist', label: 'Watchlist' },
+    { id: 'strategy', label: 'Strategy', lamp: strategyLamp },
     { id: 'replay', label: 'Portfolio' },
     { id: 'research', label: 'Research' },
   ]
@@ -502,6 +507,14 @@ export default function App() {
     { id: 'data', label: 'Data' },
     { id: 'backtest', label: 'Backtest' },
     { id: 'options', label: 'Option Discovery' },
+  ]
+
+  const strategySubtabs: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist'; label: string }[] = [
+    { id: 'watchlist', label: 'Watchlist' },
+    { id: 'structure', label: 'Structure' },
+    { id: 'opportunity', label: 'Opportunity' },
+    { id: 'allocations', label: 'Allocations' },
+    { id: 'gates', label: 'Gates' },
   ]
 
   const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
@@ -544,7 +557,7 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
-          <nav className="app-tabs" aria-label="System, Live, Watchlist, Portfolio, Research">
+          <nav className="app-tabs" aria-label="System, Live, Strategy, Portfolio, Research">
             {tabList.map(({ id, label, lamp }) => {
               if (id === 'replay') {
                 return (
@@ -606,6 +619,42 @@ export default function App() {
                           onClick={() => {
                             setActiveTab('research')
                             setResearchView(viewId)
+                          }}
+                        >
+                          <SubmenuIcon name={viewId} />
+                          <span>{viewLabel}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              }
+              if (id === 'strategy') {
+                return (
+                  <div key={id} className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
+                    <button
+                      type="button"
+                      className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
+                      onClick={() => setActiveTab(id)}
+                      aria-current={activeTab === id ? 'page' : undefined}
+                      aria-haspopup="menu"
+                    >
+                      <MainTabIcon id={id} />
+                      {lamp != null && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
+                      <span>{label}</span>
+                      <span className="app-tab-caret" aria-hidden>▾</span>
+                    </button>
+                    <div className="app-submenu" role="menu" aria-label="Strategy sections">
+                      {strategySubtabs.map(({ id: viewId, label: viewLabel }) => (
+                        <button
+                          key={viewId}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={activeTab === 'strategy' && strategyView === viewId}
+                          className={`app-submenu-item ${activeTab === 'strategy' && strategyView === viewId ? 'active' : ''}`}
+                          onClick={() => {
+                            setActiveTab('strategy')
+                            setStrategyView(viewId)
                           }}
                         >
                           <SubmenuIcon name={viewId} />
@@ -705,6 +754,7 @@ export default function App() {
           operations={operations}
           loadStatus={loadStatus}
           onNavigateToSettings={() => setActiveTab('settings')}
+          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
           currentSection={operationsSection}
           onSectionChange={setOperationsSection}
           showSectionTabs={false}
@@ -792,12 +842,45 @@ export default function App() {
         />
       )}
 
-      {activeTab === 'live' && (
-        <LivePage status={status} />
+      {activeTab === 'strategy' && strategyView === 'structure' && (
+        <StrategyStructurePage
+          status={status}
+          loadStatus={loadStatus}
+          breadcrumbLabel="Structure"
+        />
       )}
 
-      {activeTab === 'watchlist' && (
+      {activeTab === 'strategy' && strategyView === 'opportunity' && (
+        <StrategyOpportunityPage
+          status={status}
+          loadStatus={loadStatus}
+          breadcrumbLabel="Opportunity"
+        />
+      )}
+
+      {activeTab === 'strategy' && strategyView === 'allocations' && (
+        <StrategyAllocationPage
+          status={status}
+          loadStatus={loadStatus}
+          breadcrumbLabel="Allocations"
+        />
+      )}
+
+      {activeTab === 'strategy' && strategyView === 'gates' && (
+        <GatesConfigPage
+          status={status}
+          loadStatus={loadStatus}
+          onGoToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          breadcrumbLabel="Gates"
+        />
+      )}
+
+      {activeTab === 'strategy' && strategyView === 'watchlist' && (
         <WatchlistPage status={status} />
+      )}
+
+      {activeTab === 'live' && (
+        <LivePage status={status} />
       )}
 
       {activeTab === 'settings' && (

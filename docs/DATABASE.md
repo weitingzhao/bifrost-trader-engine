@@ -629,26 +629,76 @@
 
 #### 2.24.1 表 `strategy_structure`（结构策略）
 
-- **用途**：存期权结构策略（腿 + 约束），可被多条机会策略引用；支持类型如 straddle_strangle、cash_secured_put、iron_condor、leaps、calendar_spread、custom。
-- **列**：
+- **用途**：存期权结构策略（腿 + 约束），可被多条机会策略引用；支持类型如 straddle_strangle、cash_secured_put、iron_condor、leaps、calendar_spread、custom。腿、约束、元数据存于子表 strategy_structure_leg、strategy_structure_constraint、strategy_structure_meta，本表仅标量列 + notes。
+- **列**（无 json/jsonb）：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | strategy_structure_id | bigserial PRIMARY KEY | 主键 |
 | name | text NOT NULL | 策略名称（如 "Straddle 21-35 DTE ATM"） |
 | structure_type | text NOT NULL | straddle_strangle \| cash_secured_put \| covered_call \| iron_condor \| leaps \| calendar_spread \| custom |
-| legs | jsonb NOT NULL | 腿数组：每项含 role, direction, option_right, quantity, strike, expiration |
-| constraints | jsonb | 腿间约束：same_expiry_legs, same_strike_legs 等 |
 | version | integer NOT NULL DEFAULT 1 | 版本号 |
 | is_active | boolean NOT NULL DEFAULT true | 是否可用 |
 | created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
 | updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
-| metadata | jsonb | 备注、标签等（可选） |
+| notes | text | 备注（可选），标量列便于查询与数据挖掘 |
+
+#### 2.24.1a 表 `strategy_structure_leg`（结构策略腿，一行一条腿）
+
+- **用途**：存结构策略的每条腿，标量列便于筛选、聚合与数据挖掘；替代 strategy_structure.legs 的 JSON 存储。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_leg_id | bigserial PRIMARY KEY | 主键 |
+| strategy_structure_id | bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) ON DELETE CASCADE | 所属结构策略 |
+| sort_order | integer NOT NULL DEFAULT 0 | 腿顺序 |
+| role | text | 腿角色 |
+| direction | text | 方向（如 long/short） |
+| option_right | text | 期权方向（C/P） |
+| quantity | integer NOT NULL DEFAULT 1 | 数量 |
+| strike | double precision | 行权价 |
+| expiration | text | 到期（如 YYYYMMDD） |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+
+- **索引**：`(strategy_structure_id)`。
+
+#### 2.24.1b 表 `strategy_structure_constraint`（结构策略约束，类型化键值）
+
+- **用途**：存结构策略的约束（如 same_expiry_legs、same_strike_legs），标量列便于按约束类型查询与统计。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_constraint_id | bigserial PRIMARY KEY | 主键 |
+| strategy_structure_id | bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) ON DELETE CASCADE | 所属结构策略 |
+| constraint_type | text NOT NULL | 约束类型（如 same_expiry_legs、same_strike_legs） |
+| constraint_value_text | text | 约束值（文本） |
+| constraint_value_int | integer | 约束值（整数） |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+
+- **索引**：`(strategy_structure_id)`。
+
+#### 2.24.1c 表 `strategy_structure_meta`（结构策略元数据键值）
+
+- **用途**：存结构策略的键值型元数据（标签、备注键值等），替代 strategy_structure.metadata 的 JSON 存储，便于按 key 查询。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_meta_id | bigserial PRIMARY KEY | 主键 |
+| strategy_structure_id | bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) ON DELETE CASCADE | 所属结构策略 |
+| meta_key | text NOT NULL | 键 |
+| meta_value_text | text | 值（文本） |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| UNIQUE (strategy_structure_id, meta_key) | | 同一结构下键唯一 |
+
+- **索引**：`(strategy_structure_id)`。
 
 #### 2.24.2 表 `strategy_opportunity`（机会策略）
 
-- **用途**：存机会策略，引用一条结构策略与可选默认安全边界；标的范围与入场条件可为 jsonb。
-- **列**：
+- **用途**：存机会策略，引用一条结构策略与可选默认安全边界；标的范围用 **scope_type** + 子表 **strategy_opportunity_symbol**，入场条件用子表 **strategy_opportunity_entry_condition**（便于按标的、条件类型做 SQL 查询与数据挖掘）。无 jsonb 列。
+- **列**（仅标量）：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
@@ -656,27 +706,74 @@
 | name | text NOT NULL | 机会策略名称 |
 | strategy_structure_id | bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id) | 引用的结构策略 |
 | default_gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 可选，默认安全边界集 |
-| symbol_scope | jsonb | 标的范围，如 { "type": "watchlist_stk" } 或 { "symbols": ["NVDA"] } |
-| entry_conditions | jsonb | 入场/筛选条件（IV、DTE、财报等） |
+| scope_type | text | 标的范围类型：watchlist_stk、explicit_symbols；NULL 表示未设置 |
 | is_active | boolean NOT NULL DEFAULT true | 是否可用 |
 | created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
 | updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
 
-#### 2.24.3 表 `strategy_portfolio`（组合策略）
+#### 2.24.2a 表 `strategy_opportunity_symbol`（机会策略标的，一行一标的）
 
-- **用途**：存组合策略，包含多条机会策略 ID 与可选组合级安全边界及组合约束。
+- **用途**：存机会策略的标的列表，标量列便于按 symbol 查询与统计。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_opportunity_symbol_id | bigserial PRIMARY KEY | 主键 |
+| strategy_opportunity_id | bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE CASCADE | 所属机会策略 |
+| symbol | text NOT NULL | 标的代码 |
+| sort_order | integer NOT NULL DEFAULT 0 | 顺序 |
+| UNIQUE (strategy_opportunity_id, symbol) | | 同一机会下标的唯一 |
+
+- **索引**：`(strategy_opportunity_id)`。
+
+#### 2.24.2b 表 `strategy_opportunity_entry_condition`（机会策略入场条件，一行一条）
+
+- **用途**：存机会策略的入场条件（类型 + 值），标量列便于按 condition_type、数值范围做筛选与聚合。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_opportunity_entry_condition_id | bigserial PRIMARY KEY | 主键 |
+| strategy_opportunity_id | bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE CASCADE | 所属机会策略 |
+| condition_type | text NOT NULL | 条件类型：iv_min、iv_max、dte_min、dte_max、earnings_blackout_days、min_volume 等 |
+| value_text | text | 值（文本） |
+| value_numeric | double precision | 值（数值） |
+| sort_order | integer NOT NULL DEFAULT 0 | 顺序 |
+
+- **索引**：`(strategy_opportunity_id)`。
+
+#### 2.24.3 表 `strategy_allocation`（策略分配 / Allocations）
+
+- **用途**：存策略分配（Allocations），包含多条机会策略（通过关联表 strategy_allocation_opportunity）与可选分配级安全边界及标量约束；无 jsonb 列，便于数据挖掘与策略统计。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
-| strategy_portfolio_id | bigserial PRIMARY KEY | 主键 |
-| name | text NOT NULL | 组合名称 |
-| strategy_opportunity_ids | jsonb NOT NULL | 机会策略 ID 数组，如 [1, 2] |
-| gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 可选，组合级安全边界集 |
-| portfolio_limits | jsonb | 组合约束：max_positions, max_bp_pct 等 |
+| strategy_allocation_id | bigserial PRIMARY KEY | 主键 |
+| name | text NOT NULL | 分配名称 |
+| gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 可选，分配级安全边界集 |
+| max_positions | integer | 约束：最大持仓数，可选 |
+| max_bp_pct | numeric | 约束：最大资金使用比例，可选 |
 | is_active | boolean NOT NULL DEFAULT true | 是否可用 |
 | created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
 | updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+
+- **机会策略列表**：由表 strategy_allocation_opportunity（§2.24.3a）按 sort_order 关联得到；Reader 组装为 strategy_opportunity_ids 数组供 API。
+- **API 命名**：请求/响应中限额使用 **allocation_limits**（对象含 max_positions、max_bp_pct），与表列一致，避免与顶栏 Portfolio 混淆。
+
+#### 2.24.3a 表 `strategy_allocation_opportunity`（分配–机会关联，一行一机会）
+
+- **用途**：存策略分配与机会策略的多对多关系，支持 FK 与按 opportunity 反查 allocation。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_allocation_id | bigint NOT NULL REFERENCES strategy_allocation(strategy_allocation_id) ON DELETE CASCADE | 策略分配 |
+| strategy_opportunity_id | bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE CASCADE | 机会策略 |
+| sort_order | integer NOT NULL DEFAULT 0 | 顺序 |
+| PRIMARY KEY (strategy_allocation_id, strategy_opportunity_id) | | 复合主键 |
+
+- **索引**：`(strategy_allocation_id)`（建表时隐式或显式）、`(strategy_opportunity_id)` 便于反查。
 
 #### 2.24.4 表 `gate_safety_strategy`（安全边界集根 + strategy 层）
 
@@ -759,6 +856,7 @@
 
 - **用途**：策略运行或状态历史记录，主键列为 **`strategy_history_id`**（符合「表名_id」约定）。
 - **列**：`strategy_history_id` (bigserial PK)、`strategy_structure_id` (bigint FK)、`ts` (timestamptz)、`state_summary` (jsonb)、`created_at`。索引 `(ts DESC)`、`(strategy_structure_id)`。由 `pg_ddl._ensure_tables` 创建。
+- **写入**：由守护进程在 `append_history=True` 时经 PostgresSink 写入；`strategy_structure_id` 来自 `settings.active_strategy_structure_id`；`state_summary` 为 snapshot 子集（daemon_state、trading_state、symbol、net_delta、daily_hedge_count、daily_pnl、config_summary）的 jsonb。
 
 #### 2.24.10 settings 表扩展（当前生效的策略与安全边界）
 
@@ -770,6 +868,7 @@
 | active_gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 当前生效的安全边界集；NULL 表示用 config.gates |
 
 - **语义**：守护进程启动时若上述两列非空，则从对应表组装「结构」与「gates」；否则回退 config。写 snapshot 时可在 config_summary 中附带两 id 或 hash 便于追溯。
+- **后续重构预留**：Settings 表可能重构为仅承载系统级配置；active_strategy_structure_id / active_gate_safety_strategy_id 可迁至独立表（如 runtime_strategy_config 单行表）。迁出时仅需调整 reader 与 POST /config/active-strategy 的读写目标，API 路径与请求体可保持不变。
 
 ---
 
@@ -909,7 +1008,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-08 Flex 一行双 Query ID | §2.23 settings_ib_flex 每行含 query_host_id（必填）+ query_secondary_id（可选）；同一 Label/Purpose 下 Host 与 Secondary 各一个 Query，Fetch 时两个都 call。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex 一 Token 多 Query | §2.23 settings_ib_flex：列 query_id、query_label、purpose；同一 token 可多行；POST /transactions/fetch 仅用 purpose=cash_transactions；reader.get_flex_config(purpose) 支持按用途过滤。 | 阶段 3 Performance Phase 0 |
 | 2026-03-08 Flex Token 入 settings | settings 增加 ib_flex_host_token、ib_flex_secondary_token；settings_ib_flex 存 Query 行；GET /status flex_config 为 { host_token, secondary_token, rows }。 | 阶段 3 Performance Phase 0 |
-| 2026-03-13 策略与安全边界表 | 新增 §2.24 策略与安全边界表（设计标准与具体表结构）：strategy_structure、strategy_opportunity、strategy_portfolio；gate_safety_strategy、gate_safety_strategy_earnings_dates、gate_safety_state、gate_safety_intent、gate_safety_guard；settings 扩展 active_strategy_structure_id、active_gate_safety_strategy_id。主键列名采用「表名_id」；策略表 strategy_ 前缀、安全边界表 gate_safety_ 前缀；gate_safety 表无 json。标准见 .cursor/rules/database-design.mdc。 | 未来实现 |
+| 2026-03-13 策略与安全边界表 | 新增 §2.24 策略与安全边界表（设计标准与具体表结构）：strategy_structure、strategy_opportunity、strategy_allocation；gate_safety_strategy、gate_safety_strategy_earnings_dates、gate_safety_state、gate_safety_intent、gate_safety_guard；settings 扩展 active_strategy_structure_id、active_gate_safety_strategy_id。主键列名采用「表名_id」；策略表 strategy_ 前缀、安全边界表 gate_safety_ 前缀；gate_safety 表无 json。标准见 .cursor/rules/database-design.mdc。 | 未来实现 |
 | 2026-03-13 status_history 主键规范 | 表 status_history 主键列采用 `status_history_id`，符合 .cursor/rules/database-design.mdc「表名_id」约定（该表后已重命名为 daemon_auto_status_history）。 | — |
 | 2026-03-13 daemon_auto 表重命名与主键规范 | 表 daemon 自动交易三表命名为 daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations；主键列为 daemon_auto_status_current_id、daemon_auto_status_history_id、daemon_auto_operations_id（符合 database-design.mdc）。由 _ensure_tables 建表；不再支持旧表名。§2.1–§2.3、§3、§4、§4.2。 | — |
 | 2026-03-13 instrument_prices 重命名为 contract_quote_live | 表 instrument_prices 已弃用，当前仅使用 contract_quote_live（§2.10）；含义为按合约的实时报价缓存。代码已统一：模块 contract_quote_live.py、方法 write_contract_quote_live / sync_contract_quote_live_from_redis 等。旧表 instrument_prices 不再使用，若库中仍存在可手动迁移或删除。 | 阶段 3 R-M6 |
@@ -923,6 +1022,13 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-14 表 settings_ib_flex | §2.23 IB Flex 配置表名为 `settings_ib_flex`（无旧表名兼容）。 | — |
 | 2026-03-14 表 reference_us_holidays | §2.22 美股休市日表名为 `reference_us_holidays`。 | — |
 | 2026-03-14 watchlist 主键改为 contract_key | §2.17 表 watchlist 主键由 `id` (bigserial) 改为 `contract_key` (text)；一行一合约，与 account_positions/contract_quote_live 一致；无向下兼容，pg_ddl 对已有表做一次性迁移。Reader/Router/前端删除仅按 contract_key。 | — |
+| Phase A 策略与安全边界闭环 | Reader：get_structure_by_id、list_structures、get_strategy_history、list_gate_safety_sets、get_gate_safety_name；Daemon 从 DB 加载 active_strategy_structure；PostgresSink 在 append_history 时写入 strategy_history；GET /status 返回 active 策略/边界 id 与 name；GET /strategies/structures、/structures/{id}、/history、/gate-safety。§2.24.9 写入说明。 | Phase A |
+| 策略结构表扩展（去 JSON 化） | 新增表 strategy_structure_leg、strategy_structure_constraint、strategy_structure_meta；strategy_structure 增加 notes 列；legs/constraints/metadata 保留兼容，新数据与数据挖掘优先使用子表与标量列。§2.24.1、§2.24.1a–c。 | — |
+| strategy_structure 移除 JSON 列 | 表 strategy_structure 删除列 legs、constraints、metadata；读写仅通过子表与 notes。Reader 从子表组装 legs/constraints/metadata 供 API 与 daemon；Writer 只写主表标量 + notes 与三张子表。§2.24.1。 | — |
+| 机会策略去 JSON（scope_type + 子表） | strategy_opportunity 增加 scope_type 列；新增子表 strategy_opportunity_symbol（一行一标的）、strategy_opportunity_entry_condition（一行一条条件）；新数据仅写子表。§2.24.2、§2.24.2a、§2.24.2b；database-design.mdc 更新。 | — |
+| 机会策略移除 jsonb 列 | strategy_opportunity 表删除列 symbol_scope、entry_conditions（无历史数据需迁移）；pg_ddl 建表不再包含两列，并对已有表执行 DROP COLUMN IF EXISTS；Reader 仅从子表组装 symbols/entry_conditions。§2.24.2。 | — |
+| 策略分配（strategy_allocation）| 表 strategy_allocation、strategy_allocation_opportunity；主键 strategy_allocation_id；无 jsonb，机会列表通过关联表与 sort_order；API 请求/响应使用 allocation_limits（max_positions、max_bp_pct）。§2.24.3、§2.24.3a。 | — |
+
 ---
 
 *本文档与 [分步推进计划](PLAN_NEXT_STEPS.md)、[阶段 1 执行计划](plans/phase1-execution-plan.md) 及运行环境需求保持一致；所有数据库相关设计与改动以本文档为唯一引用。*

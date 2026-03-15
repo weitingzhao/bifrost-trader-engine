@@ -2261,6 +2261,17 @@ button:disabled {
   background: #4a5568;
 }
 
+.btn-manage,
+.btn-set-active {
+  background: var(--color-border-strong);
+  color: var(--color-text-main);
+}
+
+.btn-manage:hover:not(:disabled),
+.btn-set-active:hover:not(:disabled) {
+  background: #4a5568;
+}
+
 .btn-retry-ib {
   background: var(--color-link);
   color: #0a0c0f;
@@ -2315,6 +2326,81 @@ button:disabled {
 
 .link-button:hover {
   color: var(--color-link-hover);
+}
+
+/* Gates config page: form groups and rows */
+.gates-form-section .section-subtitle {
+  margin-bottom: var(--space-3);
+}
+.gates-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.gates-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.gates-form-group-title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-main);
+  margin: 0 0 var(--space-1) 0;
+}
+.gates-form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.gates-form-row label {
+  min-width: 10rem;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+.gates-form-row input[type="text"],
+.gates-form-row input[type="number"],
+.gates-form-row input[type="date"] {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  font: inherit;
+  min-width: 8rem;
+}
+.gates-form-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.btn-primary {
+  background: var(--color-accent);
+  color: #0a0c0f;
+  border: none;
+  padding: var(--space-2) var(--space-4);
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  background: var(--color-border-strong);
+  color: var(--color-text-main);
+  border: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-border);
 }
 
 /* Settings page: full width — left sidebar nav + main content */
@@ -2739,6 +2825,17 @@ select:focus {
 .strategy-compact-msg {
   font-size: 0.75rem;
   margin-top: var(--space-1);
+}
+
+.strategy-active-names {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.strategy-panel-compact .strategy-active-names {
+  margin-top: 0.25rem;
 }
 
 .statusSummary span {

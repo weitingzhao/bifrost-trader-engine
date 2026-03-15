@@ -37,7 +37,7 @@ CATEGORY_ORDER = [
     "watchlist",
 ]
 
-# Expected 37 tables by category (canonical list). Used to report counts and missing tables.
+# Expected 38 tables by category (canonical list). Used to report counts and missing tables.
 EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     "account": [
         "account",
@@ -74,10 +74,16 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     "settings": ["settings", "settings_ib_flex"],
     "stock": ["stock_day", "stock_min", "stocks"],
     "strategy": [
+        "strategy_allocation",
+        "strategy_allocation_opportunity",
         "strategy_history",
         "strategy_opportunity",
-        "strategy_portfolio",
+        "strategy_opportunity_entry_condition",
+        "strategy_opportunity_symbol",
         "strategy_structure",
+        "strategy_structure_constraint",
+        "strategy_structure_leg",
+        "strategy_structure_meta",
     ],
     "watchlist": ["watchlist"],
 }
@@ -188,32 +194,37 @@ def main() -> int:
     try:
         _progress("Running _ensure_tables (if it hangs, the last table in progress holds the lock).", no_color)
         tables_by_category: Dict[str, List[Tuple[str, str]]] = {c: [] for c in CATEGORY_ORDER}
+        last_cat: List[Optional[str]] = [None]
 
         def step_for_category(cat: str) -> None:
             idx = CATEGORY_ORDER.index(cat) + 1 if cat in CATEGORY_ORDER else 0
             label = f"{idx}. {cat}" if idx else cat
             _step(f"Category {label}", no_color)
 
+        def flush_category(cat: str) -> None:
+            items = tables_by_category.get(cat, [])
+            if not items:
+                return
+            step_for_category(cat)
+            for table_name, purpose in items:
+                _log_table(table_name, purpose, no_color)
+
         def log_table_by_category(table_name: str, purpose: str) -> None:
             cat = TABLE_TO_CATEGORY.get(table_name, "other")
             if cat not in tables_by_category:
                 tables_by_category[cat] = []
+            if last_cat[0] is not None and cat != last_cat[0]:
+                flush_category(last_cat[0])
             tables_by_category[cat].append((table_name, purpose))
+            last_cat[0] = cat
 
         def step_log(msg: str) -> None:
             _step(msg, no_color)
 
         _ensure_tables(conn, log=step_log, log_table=log_table_by_category)
+        if last_cat[0] is not None:
+            flush_category(last_cat[0])
         conn.commit()
-
-        # Print steps and tables in category order 1..12
-        for cat in CATEGORY_ORDER:
-            items = tables_by_category.get(cat, [])
-            if not items:
-                continue
-            step_for_category(cat)
-            for table_name, purpose in items:
-                _log_table(table_name, purpose, no_color)
 
         total_expected = sum(len(tables) for tables in EXPECTED_TABLES_BY_CATEGORY.values())
         total_updated = 0

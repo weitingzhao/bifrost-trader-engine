@@ -16,6 +16,12 @@ export interface StatusStrategyPanelProps {
   className?: string
   /** Compact layout for Stream Event (1/4 width) */
   compact?: boolean
+  /** Phase A: active structure name for display */
+  activeStructureName?: string | null
+  /** Phase A: active gate safety set name for display */
+  activeGateSafetyName?: string | null
+  /** Navigate to Research → Strategy (Manage) */
+  onManage?: () => void
 }
 
 export function StatusStrategyPanel({
@@ -30,6 +36,9 @@ export function StatusStrategyPanel({
   hedgeCtrlMsg,
   className,
   compact = false,
+  activeStructureName,
+  activeGateSafetyName,
+  onManage,
 }: StatusStrategyPanelProps) {
   const panelClass = `system-tab-panel ${className ?? ''} ${compact ? 'strategy-panel-compact' : ''}`.trim()
 
@@ -44,6 +53,12 @@ export function StatusStrategyPanel({
           {j ? `${hedgeLabel}` : 'Fetch failed'}
           {j && hedgeBlockReasons && hedgeBlockReasons !== 'None' ? ` · ${hedgeBlockReasons}` : ''}
         </div>
+        {(activeStructureName != null || activeGateSafetyName != null) && (
+          <div className="strategy-active-names">
+            <span>Structure: {activeStructureName ?? '—'}</span>
+            <span>Gate safety: {activeGateSafetyName ?? '—'}</span>
+          </div>
+        )}
         <div className="strategy-compact-summary">
           {statusSummaryItems
             .filter(({ label }) => label !== 'Updated at' && label !== 'Daemon state')
@@ -55,6 +70,11 @@ export function StatusStrategyPanel({
             ))}
         </div>
         <div className="controls strategy-compact-controls">
+          {onManage && (
+            <button type="button" className="btn-manage" title="Open Strategy management" onClick={onManage}>
+              Manage»
+            </button>
+          )}
           <button
             type="button"
             className="btn-flatten"
@@ -91,6 +111,12 @@ export function StatusStrategyPanel({
         </div>
       </div>
       <p className="section-hint">{hedgeHint}</p>
+      {(activeStructureName != null || activeGateSafetyName != null) && (
+        <div className="strategy-active-names" style={{ marginTop: '0.5rem' }}>
+          <div><strong>Active structure:</strong> {activeStructureName ?? '—'}</div>
+          <div><strong>Active gate safety:</strong> {activeGateSafetyName ?? '—'}</div>
+        </div>
+      )}
       <div className="statusSummary" style={{ marginTop: '0.5rem' }}>
         {statusSummaryItems.map(({ label, value }) => (
           <div key={label}>
@@ -100,6 +126,11 @@ export function StatusStrategyPanel({
         ))}
       </div>
       <div className="controls" style={{ marginTop: '0.5rem' }}>
+        {onManage && (
+          <button type="button" className="btn-manage" title="Open Strategy management" onClick={onManage}>
+            Manage»
+          </button>
+        )}
         <button
           type="button"
           className="btn-flatten"

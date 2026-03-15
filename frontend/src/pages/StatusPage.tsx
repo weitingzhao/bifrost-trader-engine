@@ -23,6 +23,8 @@ export interface StatusPageProps {
   loadStatus: () => Promise<StatusResponse | null>
   /** Navigate to Settings tab (for "edit in Settings" entry) */
   onNavigateToSettings?: () => void
+  /** Navigate to Research → Strategy (Manage) */
+  onNavigateToStrategy?: () => void
   currentSection?: OperationsSection
   onSectionChange?: (section: OperationsSection) => void
   showSectionTabs?: boolean
@@ -44,6 +46,7 @@ export function StatusPage({
   operations,
   loadStatus,
   onNavigateToSettings: _onNavigateToSettings,
+  onNavigateToStrategy,
   currentSection,
   onSectionChange,
   showSectionTabs = true,
@@ -467,6 +470,9 @@ export function StatusPage({
               statusSummaryItems={statusSummaryItems}
               onFlatten={() => runHedgeAction(postFlatten, { loading: 'Requesting flatten…', success: 'Flatten sent; hedge process will consume and execute.' })}
               hedgeCtrlMsg={hedgeCtrlMsg}
+              activeStructureName={status?.active_strategy_structure_name}
+              activeGateSafetyName={status?.active_gate_safety_strategy_name}
+              onManage={onNavigateToStrategy}
             />
           </div>
           <div className="status-panel-section status-management-celery-half stream-event-subscribe-rest card-event-subscribe event-subscribe-section">

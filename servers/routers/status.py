@@ -100,6 +100,22 @@ def get_status(request: Request) -> Dict[str, Any]:
         }
         payload["flex_config"] = reader.get_flex_config()
         payload["open_orders"] = reader.get_open_orders()
+        # Phase A: active strategy structure and gate safety set (management & monitoring)
+        payload["active_strategy_structure_id"] = reader.get_active_strategy_structure_id()
+        payload["active_gate_safety_strategy_id"] = reader.get_active_gate_safety_strategy_id()
+        try:
+            sid = payload.get("active_strategy_structure_id")
+            row = reader.get_structure_by_id(sid) if sid is not None else None
+            payload["active_strategy_structure_name"] = row.get("name") if row else None
+        except Exception:
+            payload["active_strategy_structure_name"] = None
+        try:
+            gid = payload.get("active_gate_safety_strategy_id")
+            payload["active_gate_safety_strategy_name"] = (
+                reader.get_gate_safety_name(gid) if gid is not None else None
+            )
+        except Exception:
+            payload["active_gate_safety_strategy_name"] = None
         try:
             from servers.ib_clients import AccountIbClient, MarketIbClient
 
@@ -227,6 +243,10 @@ def get_status(request: Request) -> Dict[str, Any]:
             },
             "flex_config": {"host_token": None, "secondary_token": None, "rows": []},
             "open_orders": [],
+            "active_strategy_structure_id": None,
+            "active_gate_safety_strategy_id": None,
+            "active_strategy_structure_name": None,
+            "active_gate_safety_strategy_name": None,
             "monitor_ib_status": None,
             "monitor_enabled": False,
             "monitor_health": "ok",

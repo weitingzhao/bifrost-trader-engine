@@ -83,7 +83,7 @@
 
 ### 2.4 监控 Web 界面（R-M5）
 
-- **目标**：操作者通过**浏览器**打开监控应用提供的 Web 页面，**直观看到**守护程序的运行状态。界面须包含：红绿灯（R-M3）、自检结论（R-M2）、与 IB 连接状态及 Client ID、状态摘要、操作列表（R-M4）、控制（停止、一键平敞口、重试连接 IB 等）。启动守护程序在交易机执行，不在 Web 提供。
+- **目标**：操作者通过**浏览器**打开监控应用提供的 Web 页面，**直观看到**守护程序的运行状态。界面须包含：红绿灯（R-M3）、自检结论（R-M2）、与 IB 连接状态及 Client ID、状态摘要、操作列表（R-M4）、控制（停止、一键平敞口、重试连接 IB 等）、**当前生效的结构策略与安全边界**（可在 Status 或独立页展示），以及**策略与安全边界的查看与切换**（如 Research → Strategy 页面：结构策略列表、安全边界列表、策略历史、Set active）。启动守护程序在交易机执行，不在 Web 提供。
 - **范围**：局域网内浏览器访问；不要求公网或手机 App。
 
 ### 2.5 复盘与风控分析页面（R-M7）
@@ -172,11 +172,11 @@
 
 ### 4.3 策略与安全边界数据模型与落库（扩展）
 
-- **目标**：策略三层（结构策略、机会策略、组合策略）与安全边界四层（gates：strategy / state / intent / guard）支持**落库**，便于版本管理、回测关联与按版本切换。
+- **目标**：策略三层（结构策略、机会策略、策略分配 Allocations）与安全边界四层（gates：strategy / state / intent / guard）支持**落库**，便于版本管理、回测关联与按版本切换。
 - **范围**：
-  - **结构策略**（strategy_structure）、**机会策略**（strategy_opportunity）、**组合策略**（strategy_portfolio）存于 DB；安全边界以 **gate_safety_strategy**（根表）及 **gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**、**gate_safety_strategy_earnings_dates** 存于 DB，**无 JSON 列**，仅标量列。
+  - **结构策略**（strategy_structure）、**机会策略**（strategy_opportunity）、**策略分配**（strategy_allocation / Allocations）存于 DB；安全边界以 **gate_safety_strategy**（根表）及 **gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**、**gate_safety_strategy_earnings_dates** 存于 DB，**无 JSON 列**，仅标量列。
   - 当前生效的结构策略与安全边界由 **settings** 表字段 **active_strategy_structure_id**、**active_gate_safety_strategy_id** 指定；守护进程可**优先从 DB 加载 gates**，未配置时回退 config 文件。
-- **引用**：表结构与命名标准见 [docs/DATABASE.md](docs/DATABASE.md) §2.24 与 [.cursor/rules/database-design.mdc](.cursor/rules/database-design.mdc)。实现步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略与安全边界落库」步骤。
+- **引用**：表结构与命名标准见 [docs/DATABASE.md](docs/DATABASE.md) §2.24 与 [.cursor/rules/database-design.mdc](.cursor/rules/database-design.mdc)。实现步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略与安全边界落库」步骤。**Phase A** 提供后台管理与监控：GET /status 返回当前生效策略与安全边界 id/name；GET /strategies/structures、/history、/gate-safety、/gate-safety/{id} 及 POST/PUT /gate-safety 供管理端与策略使用情况查询及 Gates CRUD；strategy_history 由守护进程在 append_history 时写入。**监控端提供 Research → Strategy 页面**，用于查看当前生效策略/边界、结构策略列表、安全边界列表、策略使用历史，并支持在页面上将某条结构或某条安全边界设为当前生效（POST /config/active-strategy）；**Research → Gates 页面**用于 Gates 参数配置管理：创建、编辑、复制边界集，以及将某条设为当前生效；守护进程在下次启动或重载时使用新生效 id。
 
 ---
 

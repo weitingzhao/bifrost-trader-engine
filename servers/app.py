@@ -257,7 +257,7 @@ def create_app(
         except Exception:
             pass
 
-    from servers.routers import core_router, quotes_router, logs_router, status_router, executions_router, market_router, watchlist_router, research_router, daemon_router, config_router
+    from servers.routers import core_router, quotes_router, logs_router, status_router, executions_router, market_router, watchlist_router, research_router, daemon_router, config_router, strategies_router
 
     app.include_router(core_router)
     app.include_router(quotes_router)
@@ -269,6 +269,7 @@ def create_app(
     app.include_router(research_router)
     app.include_router(daemon_router)
     app.include_router(config_router)
+    app.include_router(strategies_router)
 
     return app
 
