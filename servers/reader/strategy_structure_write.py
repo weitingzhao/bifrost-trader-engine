@@ -24,9 +24,11 @@ _LEG_ROLE_ALIASES: Dict[str, Dict[int, Dict[str, str]]] = {
 def _normalize_legs(structure_type: str, legs: List[Any]) -> List[Dict[str, Any]]:
     """Return a copy of legs with role/direction/option_right normalized to canonical values. Used before validate_legs."""
     key = (structure_type or "").strip().lower()
+    schema = structure_type_schema.get_schema(structure_type)
+    expected_legs = (schema.get("legs", []) if schema else [])
     aliases_by_index = _LEG_ROLE_ALIASES.get(key, {})
-    if not aliases_by_index or not isinstance(legs, list):
-        return [dict(leg) for leg in legs] if isinstance(legs, list) else []
+    if not isinstance(legs, list):
+        return []
     out = []
     for i, leg in enumerate(legs):
         if not isinstance(leg, dict):
@@ -40,6 +42,16 @@ def _normalize_legs(structure_type: str, legs: List[Any]) -> List[Dict[str, Any]
                 r_str = str(r).strip().lower()
                 if r_str in role_aliases:
                     leg_copy["role"] = role_aliases[r_str]
+        # Option leg: client may send role "option"; normalize to schema role (call/put) so validation passes
+        if i < len(expected_legs):
+            exp_role = expected_legs[i].get("role")
+            if exp_role in ("call", "put"):
+                got_role = (leg_copy.get("role") or "").strip().lower()
+                if got_role == "option":
+                    leg_copy["role"] = exp_role
+        # Stock leg: schema says option_right must be empty; normalize so validation passes
+        if i < len(expected_legs) and expected_legs[i].get("option_right") is None:
+            leg_copy["option_right"] = None
         out.append(leg_copy)
     return out
 

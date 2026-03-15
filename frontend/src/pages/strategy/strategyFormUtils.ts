@@ -119,6 +119,9 @@ export function inferCoveredCallSubtypeFromMeta(
   return null
 }
 
+/** Meta keys controlled by Covered Call wizard (subtype + otm_pct/itm_pct). When building payload, filter these from existing meta and replace with fresh subtype meta so edits persist and subtype changes remove old keys. */
+export const COVERED_CALL_SUBTYPE_META_KEYS = ['call_strike_rule', 'otm_pct', 'itm_pct'] as const
+
 /** Build structure meta entries for Covered Call from subtype and optional params. */
 export function getCoveredCallSubtypeMeta(
   subtype: CoveredCallSubtype,

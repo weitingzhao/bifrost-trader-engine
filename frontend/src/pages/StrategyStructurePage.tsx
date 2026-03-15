@@ -28,6 +28,7 @@ import {
   COVERED_CALL_SUBTYPE_LABELS,
   COVERED_CALL_SUBTYPE_DESCRIPTIONS,
   getCoveredCallSubtypeMeta,
+  COVERED_CALL_SUBTYPE_META_KEYS,
   inferCoveredCallSubtypeFromMeta,
   type CoveredCallSubtype,
   type CoveredCallSubtypeParams,
@@ -83,6 +84,23 @@ export function StrategyStructurePage({
   const [availabilityInProgress, setAvailabilityInProgress] = useState<number | null>(null)
   /** When set, show modal with this error (e.g. backend validation failed when toggling Available). */
   const [availabilityError, setAvailabilityError] = useState<string | null>(null)
+  /** When editing, the name at open (for name-change confirmation). */
+  const [originalEditName, setOriginalEditName] = useState<string | null>(null)
+  /** When set, show dialog: structure name would change; user can confirm new name, edit it, or keep original. */
+  const [nameConfirmDialog, setNameConfirmDialog] = useState<{
+    originalName: string
+    suggestedName: string
+    editedName: string
+  } | null>(null)
+  /** When editing, snapshot at open for version dialog: version, type, subtype, meta. */
+  const [originalEditVersion, setOriginalEditVersion] = useState<number | null>(null)
+  const [originalEditStructureType, setOriginalEditStructureType] = useState<string | null>(null)
+  const [originalEditStructureSubtype, setOriginalEditStructureSubtype] = useState<string | null>(null)
+  const [originalEditMeta, setOriginalEditMeta] = useState<StructureMetaEntry[] | null>(null)
+  /** After name is resolved, if version dialog is shown this is the name to use on Save. */
+  const [pendingSubmitName, setPendingSubmitName] = useState<string | null>(null)
+  /** When set, show dialog: Type/SubType/Meta changed — use new version? (Apple switch, default on). */
+  const [versionConfirmDialog, setVersionConfirmDialog] = useState<{ useNewVersion: boolean } | null>(null)
 
   const isWizard = (formOpen === 'create' && !formIsCopy) || typeof formOpen === 'number'
 
@@ -201,6 +219,7 @@ export function StrategyStructurePage({
     setFormIsCopy(false)
     setFormLoading(true)
     setFormError(null)
+    setOriginalEditName(null)
     setFixedLegCount(0)
     setDefaultLegsLoading(false)
     setDefaultLegsFallbackMsg(null)
@@ -213,6 +232,12 @@ export function StrategyStructurePage({
         setFormConstraints(p.constraints ?? [])
         setFormNotes(p.notes ?? '')
         setFormMeta(p.meta ?? [])
+        setOriginalEditName(row.name ?? null)
+        const v = typeof row.version === 'number' ? row.version : typeof row.version === 'string' ? parseInt(String(row.version), 10) || 1 : 1
+        setOriginalEditVersion(v)
+        setOriginalEditStructureType(row.structure_type ?? null)
+        setOriginalEditStructureSubtype(row.structure_subtype ?? null)
+        setOriginalEditMeta(p.meta != null ? [...p.meta] : null)
         const fixedCount = getDefaultLegsFallback(p.structure_type ?? '').length
         setFixedLegCount(fixedCount)
         const legs = p.legs ?? []
@@ -270,6 +295,14 @@ export function StrategyStructurePage({
   const closeForm = () => {
     setFormOpen(null)
     setFormError(null)
+    setOriginalEditName(null)
+    setOriginalEditVersion(null)
+    setOriginalEditStructureType(null)
+    setOriginalEditStructureSubtype(null)
+    setOriginalEditMeta(null)
+    setPendingSubmitName(null)
+    setNameConfirmDialog(null)
+    setVersionConfirmDialog(null)
     setWizardStep(1)
     setCoveredCallSubtype(null)
   }
@@ -303,6 +336,102 @@ export function StrategyStructurePage({
     }
   }
 
+  /** Current meta as would be in payload (filtered + subtype meta for covered_call). */
+  const getCurrentBuiltMeta = (): StructureMetaEntry[] => {
+    const subtypeMetaKeys = new Set<string>(COVERED_CALL_SUBTYPE_META_KEYS)
+    let meta: StructureMetaEntry[] =
+      formPayload.structure_type === 'covered_call' && coveredCallSubtype
+        ? (formMeta ?? []).filter((m) => m.meta_key && !subtypeMetaKeys.has(m.meta_key))
+        : [...(formMeta ?? [])]
+    if (formPayload.structure_type === 'covered_call' && coveredCallSubtype) {
+      const params: CoveredCallSubtypeParams = {}
+      if (coveredCallSubtype === 'otm' || coveredCallSubtype === 'deep_otm') params.otm_pct = wizardOtmPct
+      if (coveredCallSubtype === 'itm' && wizardItmPct !== '') params.itm_pct = Number(wizardItmPct)
+      const subtypeMeta = getCoveredCallSubtypeMeta(coveredCallSubtype, Object.keys(params).length ? params : undefined)
+      meta = [...meta, ...subtypeMeta]
+    }
+    return meta
+  }
+
+  const metaEntriesEqual = (a: StructureMetaEntry[], b: StructureMetaEntry[]): boolean => {
+    const norm = (arr: StructureMetaEntry[]) =>
+      [...arr]
+        .filter((m) => m.meta_key)
+        .sort((x, y) => (x.meta_key ?? '').localeCompare(y.meta_key ?? ''))
+        .map((m) => `${m.meta_key}:${m.meta_value_text ?? ''}`)
+        .join('|')
+    return norm(a) === norm(b)
+  }
+
+  const haveTypeSubtypeOrMetaChanged = (): boolean => {
+    if (originalEditStructureType == null) return false
+    const currentType = (formPayload.structure_type || '').trim()
+    if (currentType !== originalEditStructureType) return true
+    const currentSubtype =
+      formPayload.structure_type === 'covered_call' && coveredCallSubtype ? coveredCallSubtype : null
+    const origSubtype = originalEditStructureSubtype ?? null
+    if (currentSubtype !== origSubtype) return true
+    if (originalEditMeta == null) return getCurrentBuiltMeta().length > 0
+    return !metaEntriesEqual(getCurrentBuiltMeta(), originalEditMeta)
+  }
+
+  /** Build wizard payload with a given name and optional version override. */
+  const buildWizardPayload = (name: string, versionOverride?: number): StructurePayload => {
+    const structure_type = (formPayload.structure_type || '').trim()
+    const meta = getCurrentBuiltMeta()
+    return {
+      name: name.trim(),
+      structure_type,
+      structure_subtype: formPayload.structure_type === 'covered_call' && coveredCallSubtype ? coveredCallSubtype : null,
+      legs: formLegs,
+      constraints: formConstraints.length ? formConstraints : undefined,
+      version: versionOverride !== undefined ? versionOverride : (formPayload.version ?? 1),
+      is_active: formPayload.is_active ?? true,
+      notes: formNotes.trim() || undefined,
+      meta: meta.length ? meta : undefined,
+    }
+  }
+
+  const doWizardSubmit = async (chosenName: string, versionOverride?: number) => {
+    const name = chosenName.trim()
+    if (!name) {
+      setFormError('Name is required')
+      return
+    }
+    setFormError(null)
+    setFormLoading(true)
+    setNameConfirmDialog(null)
+    setVersionConfirmDialog(null)
+    setPendingSubmitName(null)
+    try {
+      const payload = buildWizardPayload(name, versionOverride)
+      if (formOpen === 'create') {
+        await createStructure(payload)
+      } else {
+        await updateStructure(formOpen as number, payload)
+      }
+      closeForm()
+      loadStructures()
+      loadStatus()
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setFormLoading(false)
+    }
+  }
+
+  /** If edit and Type/SubType/Meta changed, show version dialog and store chosenName; else submit. */
+  const trySubmitWithVersionCheck = (chosenName: string) => {
+    const isEdit = typeof formOpen === 'number'
+    if (isEdit && haveTypeSubtypeOrMetaChanged()) {
+      setPendingSubmitName(chosenName)
+      setNameConfirmDialog(null)
+      setVersionConfirmDialog({ useNewVersion: true })
+      return
+    }
+    void doWizardSubmit(chosenName)
+  }
+
   const submitWizardForm = async () => {
     const name = (formPayload.name || '').trim()
     if (!name) {
@@ -318,47 +447,17 @@ export function StrategyStructurePage({
       setFormError('Please select a Covered Call subtype in step 2.')
       return
     }
-    setFormError(null)
-    setFormLoading(true)
-    let meta: StructureMetaEntry[] = [...(formMeta ?? [])]
-    if (formPayload.structure_type === 'covered_call' && coveredCallSubtype) {
-      const params: CoveredCallSubtypeParams = {}
-      if (coveredCallSubtype === 'otm' || coveredCallSubtype === 'deep_otm') params.otm_pct = wizardOtmPct
-      if (coveredCallSubtype === 'itm' && wizardItmPct !== '') params.itm_pct = Number(wizardItmPct)
-      const subtypeMeta = getCoveredCallSubtypeMeta(coveredCallSubtype, Object.keys(params).length ? params : undefined)
-      const existingKeys = new Set(meta.map((m) => m.meta_key))
-      for (const m of subtypeMeta) {
-        if (!existingKeys.has(m.meta_key)) {
-          meta.push(m)
-          existingKeys.add(m.meta_key)
-        }
-      }
+    const suggestedName = buildWizardDefaultName()
+    const isEdit = typeof formOpen === 'number'
+    if (isEdit && originalEditName != null && suggestedName !== originalEditName) {
+      setNameConfirmDialog({
+        originalName: originalEditName,
+        suggestedName,
+        editedName: suggestedName,
+      })
+      return
     }
-    const payload: StructurePayload = {
-      name,
-      structure_type,
-      structure_subtype: formPayload.structure_type === 'covered_call' && coveredCallSubtype ? coveredCallSubtype : null,
-      legs: formLegs,
-      constraints: formConstraints.length ? formConstraints : undefined,
-      version: formPayload.version ?? 1,
-      is_active: formPayload.is_active ?? true,
-      notes: formNotes.trim() || undefined,
-      meta: meta.length ? meta : undefined,
-    }
-    try {
-      if (formOpen === 'create') {
-        await createStructure(payload)
-      } else {
-        await updateStructure(formOpen as number, payload)
-      }
-      closeForm()
-      loadStructures()
-      loadStatus()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setFormLoading(false)
-    }
+    trySubmitWithVersionCheck(name)
   }
 
   const updateForm = (patch: Partial<StructurePayload>) => {
@@ -457,6 +556,142 @@ export function StrategyStructurePage({
                 onClick={() => setAvailabilityError(null)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {nameConfirmDialog != null && (
+        <div
+          className="data-reset-modal-overlay"
+          onClick={() => setNameConfirmDialog(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="name-confirm-modal-title"
+        >
+          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="name-confirm-modal-title">Structure name will change</h3>
+            <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+              Current name: <strong>{nameConfirmDialog.originalName}</strong>
+            </p>
+            <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
+              The suggested new name (based on type and parameters) is below. You can keep it, edit it, or abandon the name change and save with the current name.
+            </p>
+            <div className="gates-form-row" style={{ marginBottom: 'var(--space-3)' }}>
+              <label htmlFor="name-confirm-new-name">New name</label>
+              <input
+                id="name-confirm-new-name"
+                type="text"
+                value={nameConfirmDialog.editedName}
+                onChange={(e) =>
+                  setNameConfirmDialog((prev) =>
+                    prev ? { ...prev, editedName: e.target.value } : null
+                  )
+                }
+                placeholder="Structure name"
+                style={{ width: '100%', maxWidth: '400px' }}
+              />
+            </div>
+            <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() =>
+                  trySubmitWithVersionCheck(
+                    (nameConfirmDialog.editedName || '').trim() || nameConfirmDialog.suggestedName
+                  )
+                }
+                disabled={formLoading}
+              >
+                Use new name and save
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => originalEditName && trySubmitWithVersionCheck(originalEditName)}
+                disabled={formLoading}
+              >
+                Keep current name and save
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setNameConfirmDialog(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {versionConfirmDialog != null && pendingSubmitName != null && originalEditVersion != null && (
+        <div
+          className="data-reset-modal-overlay"
+          onClick={() => {
+            setVersionConfirmDialog(null)
+            setPendingSubmitName(null)
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="version-confirm-modal-title"
+        >
+          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="version-confirm-modal-title">Type, SubType, or Meta changed</h3>
+            <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
+              Use a new version (Version + 1) for this structure? If not, changes will be saved with the current version.
+            </p>
+            <div
+              className="gates-form-row"
+              style={{
+                alignItems: 'center',
+                gap: 'var(--space-2)',
+                marginBottom: 'var(--space-3)',
+              }}
+            >
+              <label
+                className="toggle-switch"
+                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+                htmlFor="version-confirm-use-new"
+              >
+                <input
+                  id="version-confirm-use-new"
+                  type="checkbox"
+                  checked={versionConfirmDialog.useNewVersion}
+                  onChange={(e) =>
+                    setVersionConfirmDialog((prev) =>
+                      prev ? { ...prev, useNewVersion: e.target.checked } : null
+                    )
+                  }
+                  aria-label="Use new version (Version + 1)"
+                />
+                <span className="toggle-switch-caption">Use new version (Version + 1)</span>
+              </label>
+            </div>
+            <div className="data-reset-modal-actions" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() =>
+                  doWizardSubmit(
+                    pendingSubmitName,
+                    versionConfirmDialog.useNewVersion ? originalEditVersion + 1 : originalEditVersion
+                  )
+                }
+                disabled={formLoading}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setVersionConfirmDialog(null)
+                  setPendingSubmitName(null)
+                }}
+              >
+                Cancel
               </button>
             </div>
           </div>
@@ -837,12 +1072,21 @@ export function StrategyStructurePage({
                     </div>
                     <div className="gates-form-row">
                       <label>Version</label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={formPayload.version ?? 1}
-                        onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
-                      />
+                      <div>
+                        <input
+                          type="number"
+                          min={1}
+                          value={formPayload.version ?? 1}
+                          onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
+                          disabled={typeof formOpen === 'number'}
+                          aria-label="Version"
+                        />
+                        {typeof formOpen === 'number' && (
+                          <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
+                            Read-only when editing. Use new version (Version + 1) is offered on Save when Type, SubType, or Meta change.
+                          </p>
+                        )}
+                      </div>
                     </div>
                     <div className="gates-form-row">
                       <label className="toggle-switch" style={{ cursor: 'pointer' }}>
@@ -1008,12 +1252,21 @@ export function StrategyStructurePage({
               </div>
               <div className="gates-form-row">
                 <label>Version</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={formPayload.version ?? 1}
-                  onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
-                />
+                <div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={formPayload.version ?? 1}
+                    onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
+                    disabled={typeof formOpen === 'number'}
+                    aria-label="Version"
+                  />
+                  {typeof formOpen === 'number' && (
+                    <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
+                      Read-only when editing. Use new version (Version + 1) is offered on Save when Type, SubType, or Meta change.
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="gates-form-row">
                 <label className="toggle-switch" style={{ cursor: 'pointer' }}>
