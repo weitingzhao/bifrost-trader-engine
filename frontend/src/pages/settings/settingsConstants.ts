@@ -10,6 +10,7 @@ export const DEFAULT_WORKER = 500
 export const DEFAULT_HEARTBEAT_SEC = 10
 
 export const SETTINGS_SECTIONS = [
+  { id: 'settings-system', label: 'System', icon: 'system' },
   { id: 'settings-heartbeat', label: 'Daemon App', icon: 'heartbeat' },
   { id: 'settings-ib-connection', label: 'IB Configure', icon: 'plug' },
   { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' },

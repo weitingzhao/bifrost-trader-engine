@@ -39,7 +39,7 @@ export function StatusCeleryPanel({
           <div>
             <h2 className="daemon-card-title">Celery</h2>
             <div>
-              <strong>Status: {j ? (celeryBrokerConnected ? (celeryWorkersAlive ? 'Broker connected, worker(s) running (ping ok)' : 'Broker connected, no workers (start: python scripts/run_celery.py)') : 'Broker not connected') : 'Fetch failed'}</strong>
+              <strong>Status: {j ? (celeryBrokerConnected ? (celeryWorkersAlive ? 'Running (OK)' : 'Broker connected, no workers (start: python scripts/run_celery.py)') : 'Broker not connected') : 'Fetch failed'}</strong>
             </div>
           </div>
         </div>
@@ -84,19 +84,19 @@ export function StatusCeleryPanel({
                 : 'None (start worker: python scripts/run_celery.py)'}
             </p>
             <p className="section-hint countdown-line">
-              Last job activity:{' '}
+              Last job:{' '}
               {celeryLastTs != null && Number.isFinite(celeryLastTs)
                 ? `${fmtTs(celeryLastTs)} (${fmtSince(celeryLastTs)} ago)`
-                : 'No job activity yet'}
+                : 'None yet'}
             </p>
             <p className="section-hint countdown-line">
-              IB Client ID:{' '}
+              IB:{' '}
               {celeryWorkerIbConnected ? (
                 <span className="countdown-num">Connected @ {celeryWorkerIbClientId ?? '—'}</span>
               ) : (
                 <>
                   Not connected{' '}
-                  <InfoTooltip text="IB connection is inside the Worker process. Start worker first: python scripts/run_celery.py (uses Settings → Celery worker_market)." />
+                  <InfoTooltip text="IB runs inside Worker. Start worker first (python scripts/run_celery.py); client_id in Settings → Celery worker_market." />
                 </>
               )}
             </p>

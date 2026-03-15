@@ -1,15 +1,8 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import type { IbAccountSnapshot, StatusResponse, Operation, RealtimeQuote } from './types'
-import {
-  fetchStatus,
-  fetchOperations,
-  postRefreshAccounts,
-  fetchQuotes,
-  subscribeQuotes,
-  fetchBarsBenchmark,
-  fetchBarsJobs,
-} from './api'
-import { StatusPage, type ConsoleSection, type OperationsSection } from './pages/StatusPage'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import type { IbAccountSnapshot, StatusResponse, Operation } from './types'
+import { fetchStatus, fetchOperations, postRefreshAccounts } from './api'
+import { postStop } from './api/control'
+import { postMonitorStop, postCeleryStop } from './api/monitor'
 import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
@@ -30,7 +23,6 @@ import { GatesConfigPage } from './pages/GatesConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
 import logoImg from '../img/logo.png'
-import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import './App.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
@@ -50,116 +42,16 @@ function applyTheme(theme: ThemeId) {
 
 type LampId = 'green' | 'yellow' | 'red' | 'none'
 
-interface DashboardItem {
-  id: OperationsSection
-  label: string
-  lamp: LampId
-}
-
-type StreamTone = 'neutral' | 'positive' | 'negative'
-
-interface StreamSummaryItem {
-  label: string
-  value: string
-  tone: StreamTone
-}
-
-function SystemDashboard({
-  items,
-  onOpenSection,
-  onOpenSectionWithConsole,
-  streamLamp,
-  streamItems,
-  onStreamClick,
-  workerPending,
-  workerRunning,
-}: {
-  items: DashboardItem[]
-  onOpenSection: (section: OperationsSection) => void
-  onOpenSectionWithConsole?: (section: OperationsSection, consoleSection: ConsoleSection) => void
-  streamLamp: LampId
-  streamItems: StreamSummaryItem[]
-  onStreamClick?: () => void
-  workerPending?: number | null
-  workerRunning?: number | null
-}) {
-  const tickerItems = streamItems.length > 0
-    ? [...streamItems, ...streamItems]
-    : [
-        { label: 'Streams', value: 'No data', tone: 'neutral' as const },
-        { label: 'Streams', value: 'No data', tone: 'neutral' as const },
-      ]
-
-  return (
-    <section className="card dashboard-strip" aria-label="System dashboard">
-      <div className="dashboard-strip-grid">
-        <div className="dashboard-system-cluster">
-          <span className="dashboard-group-label">System</span>
-          <div className="dashboard-system-chips">
-            {items.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className="dashboard-chip"
-                onClick={() => onOpenSection(item.id)}
-                aria-label={`Open System detail for ${item.label}`}
-              >
-                <span className={`lamp lamp-sm ${item.lamp}`} aria-hidden />
-                <span className="dashboard-chip-label" aria-hidden>{item.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="dashboard-worker-cluster" aria-label="Celery bars worker queue">
-          <div className="dashboard-worker-counts">
-            <button
-              type="button"
-              className="dashboard-worker-item dashboard-worker-item-btn"
-              onClick={() => (onOpenSectionWithConsole ? onOpenSectionWithConsole('celery', 'console') : onOpenSection('celery'))}
-              aria-label="Open System and Celery Console"
-            >
-              <span
-                className={`lamp lamp-sm ${workerRunning != null && workerRunning > 0 ? 'green' : 'yellow'}`}
-                title="Celery: green = jobs running, yellow = none running"
-                aria-hidden
-              />
-              <span className="dashboard-worker-label">Queue</span>
-              <span className="dashboard-worker-value">{workerPending != null ? String(workerPending) : '—'}</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="dashboard-streams-cluster" aria-label="Market streams summary">
-          <button
-            type="button"
-            className="dashboard-streams-inline dashboard-streams-btn"
-            onClick={onStreamClick}
-            aria-label="Go to Live page"
-            title="Go to Live page"
-          >
-            <span className={`lamp lamp-sm ${streamLamp}`} aria-hidden />
-            <div className="dashboard-streams-marquee">
-              <div className="dashboard-streams-track">
-                {tickerItems.map((item, index) => (
-                  <span key={`${item.label}-${item.value}-${index}`} className="dashboard-streams-item">
-                    <span className="dashboard-streams-item-label">{item.label}</span>
-                    <span className={`dashboard-streams-item-value tone-${item.tone}`}>{item.value}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          </button>
-        </div>
-      </div>
-    </section>
-  )
-}
-
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('system')
-  const [operationsSection, setOperationsSection] = useState<OperationsSection>('daemon')
-  const [consoleSection, setConsoleSection] = useState<ConsoleSection>('daemon-console')
+  const [activeTab, setActiveTab] = useState<TabId>('live')
+  type LampPopoverId = 'daemon' | 'monitor' | 'celery'
+  const [lampHoverPopover, setLampHoverPopover] = useState<LampPopoverId | null>(null)
+  const lampLeaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const systemLampRef = useRef<HTMLDivElement>(null)
+  const [shutdownConfirmOpen, setShutdownConfirmOpen] = useState(false)
+  const [shutdownAllLoading, setShutdownAllLoading] = useState(false)
+  const [shutdownAllMsg, setShutdownAllMsg] = useState({ text: '', isErr: false })
+  const [quickCtrlMsg, setQuickCtrlMsg] = useState({ text: '', isErr: false })
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest' | 'options'>('risk')
   const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist'>('structure')
@@ -169,13 +61,8 @@ export default function App() {
   const [ibAccountIndex, setIbAccountIndex] = useState(0)
   const [accountsDisplay, setAccountsDisplay] = useState<IbAccountSnapshot[] | null>(null)
   const [ibAccountsRefreshing, setIbAccountsRefreshing] = useState(false)
-  const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
-  const [benchmarks, setBenchmarks] = useState<Record<string, { bar_time: number; close: number; prev_close?: number | null; is_today?: boolean; is_stale?: boolean }>>({})
   /** Short feedback after account refresh (success/fail/timeout); auto-cleared after a few seconds */
   const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
-  /** Celery bars worker queue counts (polled every 3s for dashboard) */
-  const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
-  const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
 
@@ -187,6 +74,26 @@ export default function App() {
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [headerMenuOpen])
+
+  useEffect(() => {
+    if (!lampHoverPopover) return
+    const onDocClick = (e: MouseEvent) => {
+      if (systemLampRef.current && !systemLampRef.current.contains(e.target as Node)) setLampHoverPopover(null)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [lampHoverPopover])
+
+  const openLampPopover = (id: LampPopoverId) => {
+    if (lampLeaveTimeoutRef.current) {
+      clearTimeout(lampLeaveTimeoutRef.current)
+      lampLeaveTimeoutRef.current = null
+    }
+    setLampHoverPopover(id)
+  }
+  const closeLampPopover = () => {
+    lampLeaveTimeoutRef.current = setTimeout(() => setLampHoverPopover(null), 120)
+  }
 
   useEffect(() => {
     applyTheme(theme)
@@ -227,24 +134,6 @@ export default function App() {
   }, [loadStatus, loadOperations])
 
   useEffect(() => {
-    const pollWorkerJobs = () => {
-      Promise.all([
-        fetchBarsJobs(1, 0, 'pending'),
-        fetchBarsJobs(1, 0, 'running'),
-      ]).then(([pendingRes, runningRes]) => {
-        setWorkerJobPending(pendingRes.total)
-        setWorkerJobRunning(runningRes.total)
-      }).catch(() => {
-        setWorkerJobPending(null)
-        setWorkerJobRunning(null)
-      })
-    }
-    pollWorkerJobs()
-    const t = setInterval(pollWorkerJobs, 3000)
-    return () => clearInterval(t)
-  }, [])
-
-  useEffect(() => {
     if (status?.accounts != null && accountsDisplay === null)
       setAccountsDisplay(status.accounts ? [...status.accounts] : [])
   }, [status?.accounts, accountsDisplay])
@@ -274,24 +163,6 @@ export default function App() {
     const t = setTimeout(() => setAccountsRefreshFeedback(null), 5000)
     return () => clearTimeout(t)
   }, [accountsRefreshFeedback])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchQuotes()
-      .then((res) => {
-        if (!cancelled && res.quotes?.length) {
-          setQuotesMap(() => Object.fromEntries(res.quotes.map((q) => [q.symbol, q])))
-        }
-      })
-      .catch(() => {})
-    const unsub = subscribeQuotes((q) => {
-      setQuotesMap((prev) => ({ ...prev, [q.symbol]: q }))
-    })
-    return () => {
-      cancelled = true
-      unsub()
-    }
-  }, [])
 
   const onRefreshAccounts = useCallback(async () => {
     setIbAccountsRefreshing(true)
@@ -344,15 +215,6 @@ export default function App() {
       ? ((status?.celery_workers?.length ?? 0) > 0 ? 'green' : 'yellow')
       : 'red'
   const daemonHeartbeat = status?.daemon_heartbeat
-  const watchlistSymbols = useMemo(
-    () => [...new Set([...(status?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
-    [status?.subscribed_tickers, quotesMap],
-  )
-  const benchmarkSymbols = useMemo(
-    () =>
-      [...new Set([...watchlistSymbols, ...(status?.reference_indices?.map((r) => r.symbol) ?? [])])].sort(),
-    [watchlistSymbols, status?.reference_indices],
-  )
   // Market Streams: green only when daemon is alive, subscribed to ticker, and monitor can read Redis quotes
   const liveLamp: LampId =
     status?.redis_quotes_connected === true &&
@@ -361,140 +223,7 @@ export default function App() {
       ? 'green'
       : 'red'
 
-  const dashboardItems: DashboardItem[] = [
-    {
-      id: 'daemon',
-      label: 'Daemon',
-      lamp: (status?.daemon_lamp as LampId | undefined) ?? 'red',
-    },
-    {
-      id: 'monitor',
-      label: 'Management',
-      lamp: (status?.monitor_lamp as LampId | undefined) ?? 'red',
-    },
-    {
-      id: 'celery',
-      label: 'Celery',
-      lamp: celeryLamp,
-    },
-    {
-      id: 'strategy',
-      label: 'Trading Strategy',
-      lamp: strategyLamp,
-    },
-  ]
-
-  const streamSummaryItems = useMemo<StreamSummaryItem[]>(() => {
-    const accountsList = status?.accounts ?? []
-    const rows = watchlistSymbols.map((symbol) => {
-      let qty = 0
-      let totalCost = 0
-      let hasCost = false
-      for (const acc of accountsList) {
-        for (const p of acc?.positions ?? []) {
-          const sym = (p.symbol || '').trim()
-          const secType = (p.secType || '').toString().toUpperCase()
-          const posQty = typeof p.position === 'number' ? p.position : 0
-          if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
-          qty += posQty
-          if (p.avgCost != null && Number.isFinite(p.avgCost as number)) {
-            totalCost += (p.avgCost as number) * posQty
-            hasCost = true
-          }
-        }
-      }
-      const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
-      const quote = quotesMap[symbol]
-      const bench = benchmarks[symbol]
-      let changePct: number | null = null
-      let pnlVsBench: number | null = null
-      if (bench && quote && Number.isFinite(quote.last) && Number.isFinite(bench.close) && bench.close > 0) {
-        changePct = ((quote.last - bench.close) / bench.close) * 100
-        pnlVsBench = Number.isFinite(qty) ? (quote.last - bench.close) * qty : null
-      }
-      const pnlCost =
-        quote && avgCost != null && Number.isFinite(quote.last) && Number.isFinite(qty) && qty !== 0
-          ? (quote.last - avgCost) * qty
-          : null
-      return { qty, avgCost, pnlCost, pnlVsBench, changePct }
-    })
-
-    const totalDailyDollar = rows.reduce((acc, row) => acc + (row.pnlVsBench != null && Number.isFinite(row.pnlVsBench) ? row.pnlVsBench : 0), 0)
-    const sumLastQty = watchlistSymbols.reduce((acc, symbol, index) => {
-      const qty = Number.isFinite(rows[index]?.qty) ? rows[index].qty : 0
-      const last = quotesMap[symbol]?.last != null && Number.isFinite(quotesMap[symbol].last) ? quotesMap[symbol].last : 0
-      return acc + last * qty
-    }, 0)
-    const totalDailyDenom = sumLastQty - totalDailyDollar
-    const totalDailyPct = totalDailyDenom > 0 && Number.isFinite(totalDailyDollar)
-      ? (totalDailyDollar / totalDailyDenom) * 100
-      : null
-
-    const toneForNumber = (value: number | null | undefined): StreamTone => {
-      if (value == null || !Number.isFinite(value)) return 'neutral'
-      if (value > 0) return 'positive'
-      if (value < 0) return 'negative'
-      return 'neutral'
-    }
-
-    const items: StreamSummaryItem[] = [
-      {
-        label: 'Market Streams',
-        value: liveLamp === 'green' ? 'Online' : 'Offline',
-        tone: liveLamp === 'green' ? 'positive' : 'negative',
-      },
-      ...watchlistSymbols.map((symbol, i) => {
-        const row = rows[i]
-        const pct = row?.changePct ?? null
-        const dollar = row?.pnlVsBench ?? null
-        const valueStr =
-          pct != null && dollar != null
-            ? `${fmtPctCompact(pct)} / ${fmtUsdCompact(dollar)}`
-            : pct != null
-              ? fmtPctCompact(pct)
-              : dollar != null
-                ? fmtUsdCompact(dollar)
-                : '—'
-        return {
-          label: symbol,
-          value: valueStr,
-          tone: toneForNumber(pct ?? dollar),
-        }
-      }),
-      {
-        label: 'Daily %',
-        value: fmtPctCompact(totalDailyPct),
-        tone: toneForNumber(totalDailyPct),
-      },
-      {
-        label: 'Daily $',
-        value: fmtUsdCompact(totalDailyDollar),
-        tone: toneForNumber(totalDailyDollar),
-      },
-    ]
-    return items
-  }, [status?.accounts, watchlistSymbols, quotesMap, benchmarks, liveLamp])
-
-  useEffect(() => {
-    if (benchmarkSymbols.length === 0) {
-      setBenchmarks({})
-      return
-    }
-    let cancelled = false
-    fetchBarsBenchmark(benchmarkSymbols)
-      .then((res) => {
-        if (!cancelled) setBenchmarks(res.benchmarks ?? {})
-      })
-      .catch(() => {
-        if (!cancelled) setBenchmarks({})
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [benchmarkSymbols.join(',')])
-
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'system', label: 'System', lamp: systemLamp },
     { id: 'live', label: 'Live', lamp: liveLamp },
     { id: 'strategy', label: 'Strategy', lamp: strategyLamp },
     { id: 'replay', label: 'Portfolio' },
@@ -525,18 +254,48 @@ export default function App() {
     { id: 'transfer', label: 'Transfer & Pay' },
   ]
 
-  const openSystemSection = (section: OperationsSection) => {
-    setActiveTab('system')
-    setOperationsSection(section)
+  const openSystemInSettings = () => {
+    setActiveTab('settings')
+    window.location.hash = '#settings-system'
+    setSystemLampDropdownOpen(false)
   }
 
-  const openSystemSectionWithConsole = (section: OperationsSection, consoleSection: ConsoleSection) => {
-    setActiveTab('system')
-    setOperationsSection(section)
-    setConsoleSection(consoleSection)
+  const doShutdownAll = async () => {
+    setShutdownConfirmOpen(false)
+    setShutdownAllLoading(true)
+    const errors: string[] = []
+    try {
+      setShutdownAllMsg({ text: 'Stopping Celery…', isErr: false })
+      const r3 = await postCeleryStop()
+      if (!r3.ok) errors.push(`Celery: ${r3.error ?? r3.statusText ?? 'failed'}`)
+      setShutdownAllMsg({ text: 'Stopping Daemon…', isErr: false })
+      const r1 = await postStop()
+      if (!r1.ok) errors.push(`Daemon: ${r1.error ?? r1.statusText ?? 'failed'}`)
+      setShutdownAllMsg({ text: 'Stopping Management…', isErr: false })
+      const r2 = await postMonitorStop()
+      if (!r2.ok) errors.push(`Management: ${r2.error ?? r2.statusText ?? 'failed'}`)
+      setShutdownAllMsg({
+        text: errors.length === 0 ? 'All systems shut down.' : `Shut down requested; some failed: ${errors.join('; ')}`,
+        isErr: errors.length > 0,
+      })
+    } finally {
+      setShutdownAllLoading(false)
+    }
   }
 
-  const showDashboard = activeTab !== 'system'
+  const runQuickStop = async (
+    api: () => Promise<{ ok?: boolean; error?: string }>,
+    label: string,
+  ) => {
+    setQuickCtrlMsg({ text: `${label}…`, isErr: false })
+    try {
+      const r = await api()
+      setQuickCtrlMsg({ text: r.ok === true ? 'Done.' : (r.error ?? 'Failed'), isErr: r.ok !== true })
+    } catch (e) {
+      setQuickCtrlMsg({ text: (e instanceof Error ? e.message : 'Failed'), isErr: true })
+    }
+    setTimeout(() => setQuickCtrlMsg({ text: '', isErr: false }), 3000)
+  }
 
   const renderTabButton = (id: TabId, label: string, lamp?: 'green' | 'yellow' | 'red' | 'none') => (
     <button
@@ -554,10 +313,37 @@ export default function App() {
 
   return (
     <div className="app">
+      {shutdownConfirmOpen && (
+        <div
+          className="data-reset-modal-overlay"
+          onClick={() => setShutdownConfirmOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="shutdown-modal-title"
+        >
+          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+            <h3 id="shutdown-modal-title">Shutdown entire system?</h3>
+            <p>
+              Celery, then Daemon, then Management will be stopped in order. This cannot be undone.
+            </p>
+            <div className="data-reset-modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="btn-shutdown-all" onClick={doShutdownAll}>
+                Shutdown
+              </button>
+            </div>
+            {shutdownAllMsg.text ? (
+              <p className={`status-page-msg ${shutdownAllMsg.isErr ? 'err' : 'ok'}`}>{shutdownAllMsg.text}</p>
+            ) : null}
+          </div>
+        </div>
+      )}
       <header className="app-header">
         <div className="app-header-left">
           <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
-          <nav className="app-tabs" aria-label="System, Live, Strategy, Portfolio, Research">
+          <nav className="app-tabs" aria-label="Live, Strategy, Portfolio, Research">
             {tabList.map(({ id, label, lamp }) => {
               if (id === 'replay') {
                 return (
@@ -671,6 +457,74 @@ export default function App() {
           </nav>
         </div>
         <div className="app-header-right" ref={headerMenuRef}>
+          <div className="app-header-system-lamps-wrap" ref={systemLampRef}>
+            <div
+              className="app-header-lamp-cell"
+              onMouseEnter={() => openLampPopover('daemon')}
+              onMouseLeave={closeLampPopover}
+              aria-label="Daemon status"
+            >
+              <span className={`lamp lamp-sm ${(status?.daemon_lamp as LampId) ?? 'red'}`} aria-hidden />
+              {lampHoverPopover === 'daemon' && (
+                <div className="app-header-lamp-popover" role="tooltip">
+                  <span className="app-header-lamp-popover-name">Daemon</span>
+                  <button
+                    type="button"
+                    className="app-header-lamp-switch"
+                    onClick={() => { runQuickStop(postStop, 'Stop Daemon'); setLampHoverPopover(null) }}
+                    title="Stop Daemon"
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
+            </div>
+            <div
+              className="app-header-lamp-cell"
+              onMouseEnter={() => openLampPopover('monitor')}
+              onMouseLeave={closeLampPopover}
+              aria-label="Management status"
+            >
+              <span className={`lamp lamp-sm ${(status?.monitor_lamp as LampId) ?? 'red'}`} aria-hidden />
+              {lampHoverPopover === 'monitor' && (
+                <div className="app-header-lamp-popover" role="tooltip">
+                  <span className="app-header-lamp-popover-name">Management</span>
+                  <button
+                    type="button"
+                    className="app-header-lamp-switch"
+                    onClick={() => { runQuickStop(postMonitorStop, 'Stop Management'); setLampHoverPopover(null) }}
+                    title="Stop Management"
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
+            </div>
+            <div
+              className="app-header-lamp-cell"
+              onMouseEnter={() => openLampPopover('celery')}
+              onMouseLeave={closeLampPopover}
+              aria-label="Celery status"
+            >
+              <span className={`lamp lamp-sm ${celeryLamp}`} aria-hidden />
+              {lampHoverPopover === 'celery' && (
+                <div className="app-header-lamp-popover" role="tooltip">
+                  <span className="app-header-lamp-popover-name">Celery</span>
+                  <button
+                    type="button"
+                    className="app-header-lamp-switch"
+                    onClick={() => { runQuickStop(postCeleryStop, 'Stop Celery'); setLampHoverPopover(null) }}
+                    title="Stop Celery"
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          {quickCtrlMsg.text ? (
+            <span className={`app-header-system-msg ${quickCtrlMsg.isErr ? 'err' : ''}`}>{quickCtrlMsg.text}</span>
+          ) : null}
           <button
             type="button"
             className={`app-header-icon-btn ${headerMenuOpen ? 'active' : ''} ${activeTab === 'settings' ? 'active' : ''}`}
@@ -688,6 +542,26 @@ export default function App() {
           </button>
           {headerMenuOpen && (
             <div className="app-header-menu" role="menu" aria-label="App menu">
+              <div className="app-header-menu-row-system" role="presentation">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="app-header-menu-item app-header-menu-item-system"
+                  onClick={() => { openSystemInSettings(); setHeaderMenuOpen(false) }}
+                >
+                  <span className={`lamp lamp-sm ${systemLamp}`} aria-hidden />
+                  System
+                </button>
+                <button
+                  type="button"
+                  className="app-header-lamp-switch app-header-menu-shutdown"
+                  onClick={() => { setShutdownConfirmOpen(true); setHeaderMenuOpen(false) }}
+                  disabled={shutdownAllLoading}
+                  title="Shutdown entire system"
+                >
+                  Shutdown
+                </button>
+              </div>
               <button
                 type="button"
                 role="menuitem"
@@ -734,39 +608,6 @@ export default function App() {
           )}
         </div>
       </header>
-
-      {showDashboard && (
-        <SystemDashboard
-          items={dashboardItems}
-          onOpenSection={openSystemSection}
-          onOpenSectionWithConsole={openSystemSectionWithConsole}
-          streamLamp={liveLamp}
-          streamItems={streamSummaryItems}
-          onStreamClick={() => setActiveTab('live')}
-          workerPending={workerJobPending}
-          workerRunning={workerJobRunning}
-        />
-      )}
-
-      {activeTab === 'system' && (
-        <StatusPage
-          status={status}
-          operations={operations}
-          loadStatus={loadStatus}
-          onNavigateToSettings={() => setActiveTab('settings')}
-          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
-          currentSection={operationsSection}
-          onSectionChange={setOperationsSection}
-          showSectionTabs={false}
-          showAllSystemSections={true}
-          showSystemSection={true}
-          showConsoleSection={true}
-          currentConsoleSection={consoleSection}
-          onConsoleSectionChange={setConsoleSection}
-          showConsoleTabs={true}
-          consoleCardTitle="Console"
-        />
-      )}
 
       {activeTab === 'replay' && (
         <>
@@ -884,7 +725,12 @@ export default function App() {
       )}
 
       {activeTab === 'settings' && (
-        <SettingsPage status={status} loadStatus={loadStatus} />
+        <SettingsPage
+          status={status}
+          loadStatus={loadStatus}
+          operations={operations}
+          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+        />
       )}
     </div>
   )

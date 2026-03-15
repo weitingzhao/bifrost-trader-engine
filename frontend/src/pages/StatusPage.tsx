@@ -331,7 +331,7 @@ export function StatusPage({
       {showSystemSection && (
       <div className="card process-section system-tabs-wrapper">
         <div className="status-section-heading-row">
-          <h2 className="status-section-heading">Status</h2>
+          <h2 className="status-section-heading">System Status</h2>
           <div className="status-section-actions">
             <button
               type="button"
@@ -411,7 +411,7 @@ export function StatusPage({
 
         {(showAllSystemSections || systemTab === 'monitor' || systemTab === 'celery') && (
           <div className="status-management-celery-row" id="system-panel-monitor-celery" role="tabpanel" aria-labelledby="tab-monitor-celery">
-            <div className="status-panel-section status-management-celery-half">
+            <div className="status-panel-section status-management-celery-col status-management-celery-col-management">
               <StatusMonitorPanel
                 status={j}
                 monitorLamp={monitorLamp}
@@ -431,7 +431,7 @@ export function StatusPage({
                 className={showAllSystemSections ? 'system-stack-section' : undefined}
               />
             </div>
-            <div className="status-panel-section status-management-celery-half">
+            <div className="status-panel-section status-management-celery-col status-management-celery-col-celery">
               <StatusCeleryPanel
                 status={j}
                 celeryLamp={celeryLamp}

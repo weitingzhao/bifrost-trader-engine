@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { StatusResponse } from '../types'
+import type { Operation, StatusResponse } from '../types'
 import type { FlexAccountItem } from '../types'
 import {
   postIbConfig,
@@ -29,13 +29,16 @@ import { SettingsSectionIcon } from './settings/SettingsSectionIcon'
 import { HeartbeatSection } from './settings/HeartbeatSection'
 import { IbConnectionSection } from './settings/IbConnectionSection'
 import { HolidaysSection } from './settings/HolidaysSection'
+import { StatusPage } from './StatusPage'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
+  operations?: Operation[]
+  onNavigateToStrategy?: () => void
 }
 
-export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
+export function SettingsPage({ status, loadStatus, operations = [], onNavigateToStrategy }: SettingsPageProps) {
   const [msg, setMsg] = useState({ text: '', isErr: false })
   const [ibHost, setIbHost] = useState(DEFAULT_HOST)
   const [ibPortType, setIbPortType] = useState<'tws_live' | 'tws_paper' | 'gateway'>(DEFAULT_PORT_TYPE)
@@ -239,6 +242,8 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
     }
   }
 
+  const isSystemSection = activeSectionId === 'settings-system'
+
   return (
     <div className="settings-page">
       <nav className="settings-sidebar" aria-label="Settings sections">
@@ -290,6 +295,20 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
         })}
       </nav>
       <div className="settings-main">
+        {isSystemSection ? (
+          <StatusPage
+            status={status}
+            operations={operations}
+            loadStatus={loadStatus}
+            onNavigateToStrategy={onNavigateToStrategy}
+            showSectionTabs={false}
+            showAllSystemSections={true}
+            showSystemSection={true}
+            showConsoleSection={true}
+            showConsoleTabs={false}
+            consoleCardTitle="Console"
+          />
+        ) : (
         <div className="settings-page-card card">
           <div className="settings-page-header">
             <h2 className="settings-page-title">
@@ -370,6 +389,7 @@ export function SettingsPage({ status, loadStatus }: SettingsPageProps) {
             />
           </div>
       </div>
+        )}
       </div>
     </div>
   )

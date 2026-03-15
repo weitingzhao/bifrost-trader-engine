@@ -63,7 +63,7 @@ export function StatusDaemonPanel({
           <div>
             <h2 className="daemon-card-title">Daemon</h2>
             <div>
-              <strong>Status: {j ? `${daemonLabel} (${daemonSelfCheckText})` : 'Fetch failed'}</strong>
+              <strong>Status: {j ? (daemonLabel === 'Running' ? 'Running (OK)' : `${daemonLabel} (${daemonSelfCheckText})`) : 'Fetch failed'}</strong>
               {j && daemonBlockReasons && daemonBlockReasons !== 'None' ? ` Block reasons: ${daemonBlockReasons}` : ''}
             </div>
           </div>

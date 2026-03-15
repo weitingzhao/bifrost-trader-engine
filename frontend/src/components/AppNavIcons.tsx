@@ -1,4 +1,4 @@
-export type TabId = 'system' | 'live' | 'replay' | 'research' | 'strategy' | 'settings'
+export type TabId = 'live' | 'replay' | 'research' | 'strategy' | 'settings'
 
 /** Small outline icon for submenu items (Portfolio & Research). */
 export function SubmenuIcon({ name }: { name: string }) {
@@ -131,13 +131,6 @@ export function MainTabIcon({ id }: { id: TabId }) {
   const className = 'app-tab-icon'
   const svgProps = { width: size, height: size, className, fill: 'none' as const, stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
   const icons: Record<TabId, JSX.Element> = {
-    system: (
-      <svg viewBox="0 0 24 24" {...svgProps}>
-        <rect x="2" y="3" width="20" height="14" rx="2" />
-        <line x1="8" y1="21" x2="16" y2="21" />
-        <line x1="12" y1="17" x2="12" y2="21" />
-      </svg>
-    ),
     live: (
       <svg viewBox="0 0 24 24" {...svgProps}>
         <polygon points="5 3 19 12 5 21 5 3" />
