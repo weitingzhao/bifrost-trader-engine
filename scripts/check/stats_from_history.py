@@ -5,7 +5,7 @@
 数据来源与守护程序写出一致（阶段 1 sink 写入的历史表）。
 
 Usage:
-  python scripts/stats_from_history.py [--config PATH] [--format json|text] [--days N]
+  python scripts/check/stats_from_history.py [--config PATH] [--format json|text] [--days N]
   --config  配置文件路径（默认 config/config.yaml）
   --format  输出格式：json 或 text（默认 text）
   --days    统计最近 N 天的数据（默认 30，0 表示全部）
@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)

@@ -20,6 +20,7 @@ import { StrategyStructurePage } from './pages/StrategyStructurePage'
 import { StrategyOpportunityPage } from './pages/StrategyOpportunityPage'
 import { StrategyAllocationPage } from './pages/StrategyAllocationPage'
 import { GatesConfigPage } from './pages/GatesConfigPage'
+import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
 import logoImg from '../img/logo.png'
@@ -54,7 +55,7 @@ export default function App() {
   const [quickCtrlMsg, setQuickCtrlMsg] = useState({ text: '', isErr: false })
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest' | 'options'>('risk')
-  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist'>('structure')
+  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig'>('structure')
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
@@ -238,12 +239,13 @@ export default function App() {
     { id: 'options', label: 'Option Discovery' },
   ]
 
-  const strategySubtabs: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist'; label: string }[] = [
+  const strategySubtabs: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig'; label: string }[] = [
     { id: 'watchlist', label: 'Watchlist' },
     { id: 'structure', label: 'Structure' },
     { id: 'opportunity', label: 'Opportunity' },
     { id: 'allocations', label: 'Allocations' },
     { id: 'gates', label: 'Gates' },
+    { id: 'typeConfig', label: 'Type Config' },
   ]
 
   const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
@@ -257,7 +259,6 @@ export default function App() {
   const openSystemInSettings = () => {
     setActiveTab('settings')
     window.location.hash = '#settings-system'
-    setSystemLampDropdownOpen(false)
   }
 
   const doShutdownAll = async () => {
@@ -718,6 +719,10 @@ export default function App() {
 
       {activeTab === 'strategy' && strategyView === 'watchlist' && (
         <WatchlistPage status={status} />
+      )}
+
+      {activeTab === 'strategy' && strategyView === 'typeConfig' && (
+        <StructureTypeConfigPage breadcrumbLabel="Type Config" />
       )}
 
       {activeTab === 'live' && (

@@ -627,6 +627,152 @@
 
 **表名约定**：策略表以 **`strategy_`** 为前缀；安全边界表以 **`gate_safety_`** 为前缀。主键列名均为 **`<表名>_id`**（如 `strategy_structure_id`、`gate_safety_strategy_id`），外键列名与所引用主键列名一致。**gate_safety_*** 表不使用 json/jsonb，仅标量列。
 
+#### 2.24.0 结构类型配置表（可配置 Structure 类型/子类型，无 JSON）
+
+以下 6 张表用于可配置的「结构类型」与「子类型」定义，供 Structure 页 Add/Edit 时读取（类型列表、默认腿、子类型说明、meta 参数与反推规则）。全部为标量列与子表，无 json/jsonb。
+
+##### 2.24.0a 表 `strategy_structure_type`（结构类型模板）
+
+- **用途**：可配置的结构类型定义（如 covered_call、cash_secured_put），供类型列表、展示顺序、是否含子类型及类型级说明。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| structure_type | text PRIMARY KEY | 类型代码：covered_call、cash_secured_put、iron_condor、straddle_strangle、leaps、calendar_spread、custom |
+| display_label | text NOT NULL | 展示名称（如 "Covered Call"） |
+| sort_order | integer NOT NULL DEFAULT 0 | 列表/下拉展示顺序 |
+| has_subtypes | boolean NOT NULL DEFAULT false | 是否有子类型（如 covered_call 为 true） |
+| type_explanation | text | 类型级说明（可选） |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+
+##### 2.24.0b 表 `strategy_structure_type_leg`（类型默认腿，一行一条）
+
+- **用途**：每个结构类型的默认腿模板，替代代码中写死的 default legs。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_type_leg_id | bigserial PRIMARY KEY | 主键 |
+| structure_type | text NOT NULL REFERENCES strategy_structure_type(structure_type) ON DELETE CASCADE | 所属结构类型 |
+| sort_order | integer NOT NULL DEFAULT 0 | 腿顺序 |
+| role | text | 腿角色（如 underlying、call、put） |
+| direction | text | 方向（long/short） |
+| option_right | text | 期权方向（C/P）；空表示股票腿 |
+| quantity_default | integer NOT NULL DEFAULT 1 | 默认数量 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+
+- **硬约束**：`role`、`direction`、`option_right` 的允许值由后端 allowlist 定义，与 param_kind / meta_key 等一致；写入时由 `structure_type_config_write.replace_structure_type_legs` 校验，允许值见 `servers/reader/structure_type_config_constants.py`（LEG_ROLE_ALLOWED、LEG_DIRECTION_ALLOWED、LEG_OPTION_RIGHT_ALLOWED）。
+- **索引**：`(structure_type)`。**唯一约束**：`UNIQUE (structure_type, sort_order)`。
+
+##### 2.24.0c 表 `strategy_structure_subtype`（子类型模板）
+
+- **用途**：某结构类型下的子类型（如 covered_call 下的 otm、atm、itm、deep_otm），存展示标签、Example、Typical use、说明等。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| structure_type | text NOT NULL | 所属结构类型 |
+| subtype | text NOT NULL | 子类型代码（如 otm、atm、itm、deep_otm） |
+| display_label | text NOT NULL | 展示名称（如 "OTM Covered Call"） |
+| example | text | Example 文案 |
+| typical_use | text | Typical use 文案 |
+| subtype_explanation | text | 子类型级说明（如 Configurable parameters…） |
+| nature | text | 可选（如 "Synthetic limit sell"） |
+| sort_order | integer NOT NULL DEFAULT 0 | 同类型下子类型展示顺序 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+| PRIMARY KEY (structure_type, subtype) | | |
+| FOREIGN KEY (structure_type) REFERENCES strategy_structure_type(structure_type) ON DELETE CASCADE | | |
+
+- **索引**：`(structure_type)`。
+
+##### 2.24.0d 表 `strategy_structure_subtype_leg`（子类型默认腿，一行一条）
+
+- **用途**：为特定子类型定义专属的默认腿模板（可覆盖类型级默认腿）。若某 `(structure_type, subtype)` 无任何记录，则该子类型继承 `strategy_structure_type_leg` 的腿集。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_subtype_leg_id | bigserial PRIMARY KEY | 主键 |
+| structure_type | text NOT NULL | 所属结构类型 |
+| subtype | text NOT NULL | 所属子类型 |
+| sort_order | integer NOT NULL DEFAULT 0 | 腿顺序（在该 subtype 内） |
+| role | text | 腿角色（如 underlying、call、put），允许值由 `LEG_ROLE_ALLOWED` 控制 |
+| direction | text | 方向（long/short），允许值由 `LEG_DIRECTION_ALLOWED` 控制 |
+| option_right | text | 期权方向（C/P）；空表示股票腿，允许值由 `LEG_OPTION_RIGHT_ALLOWED` 控制 |
+| quantity_default | integer NOT NULL DEFAULT 1 | 默认数量 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+
+- **约束与索引**：
+  - 约束：`UNIQUE (structure_type, subtype, sort_order)`。
+  - 外键：`FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE`。
+  - 索引：`(structure_type, subtype)`。
+
+##### 2.24.0e 表 `strategy_structure_subtype_characteristic`（子类型特点，一行一条）
+
+- **用途**：子类型的 Characteristics 列表，每条一行。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_subtype_characteristic_id | bigserial PRIMARY KEY | 主键 |
+| structure_type | text NOT NULL | 所属结构类型 |
+| subtype | text NOT NULL | 所属子类型 |
+| sort_order | integer NOT NULL DEFAULT 0 | 展示顺序 |
+| characteristic_text | text NOT NULL | 一条特点文案 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE | | |
+
+- **索引**：`(structure_type, subtype)`。
+
+##### 2.24.0f 表 `strategy_structure_subtype_meta_param`（子类型可配置 meta 参数定义）
+
+- **用途**：定义每个子类型在 Wizard 中要展示的 meta 参数（如 otm_pct、itm_pct、call_strike_rule），以及默认值、展示标签、参数种类。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_subtype_meta_param_id | bigserial PRIMARY KEY | 主键 |
+| structure_type | text NOT NULL | 所属结构类型 |
+| subtype | text NOT NULL | 所属子类型 |
+| meta_key | text NOT NULL | 写入 strategy_structure_meta 的键 |
+| display_label | text | 表单项标签 |
+| default_value_text | text | 默认值 |
+| param_kind | text | 参数种类：fixed、integer、percent 等 |
+| sort_order | integer NOT NULL DEFAULT 0 | 表单项顺序 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE | | |
+
+- **索引**：`(structure_type, subtype)`。**唯一约束**：`UNIQUE (structure_type, subtype, meta_key)`。
+
+##### 2.24.0f 表 `strategy_structure_subtype_rule`（从 meta 反推子类型）
+
+- **用途**：定义当 strategy_structure_meta 中某 key 为某 value 时对应的 subtype，用于 Edit 时根据已有 meta 还原子类型。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_structure_subtype_rule_id | bigserial PRIMARY KEY | 主键 |
+| structure_type | text NOT NULL | 所属结构类型 |
+| subtype | text NOT NULL | 对应的子类型 |
+| meta_key | text NOT NULL | 用于推断的 meta 键 |
+| meta_value_text | text NOT NULL | 用于推断的 meta 值 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE | | |
+
+- **索引**：`(structure_type, meta_key, meta_value_text)`。**唯一约束**：`UNIQUE (structure_type, meta_key, meta_value_text)`。
+
+##### 2.24.0g Structure type config 硬约束（allowlist）
+
+以下字段为下游 Wizard、子类型推断、分析与自动化所依赖，写入时**必须**落在后端 allowlist 内；未纳入的值不允许写入，避免“配置了却不生效”的误导。单一事实来源：`servers/reader/structure_type_config_constants.py`。
+
+- **param_kind**（meta_param 表）：仅允许 `fixed`、`percent`（及未来约定的如 `integer`）。`fixed` 表示固定选项不编辑；`percent` 表示数字输入（如 Wizard 中 1–50）。新增取值需先修改常量并发布。
+- **meta_key**（meta_param 与 infer rule）：按 `structure_type` 允许列表配置。当前仅 `covered_call` 有下游逻辑，允许 `call_strike_rule`、`otm_pct`、`itm_pct`；其余 type 允许列表为空，即暂不允许配置 meta（避免无效配置）。新增 key 需先在常量中登记。
+- **meta_value_text**（infer rule 与 fixed 类 default_value_text）：对部分 `(structure_type, meta_key)` 仅允许枚举值。当前仅 `("covered_call", "call_strike_rule")` 有枚举：`normal_otm`、`atm`、`itm`、`deep_otm`，表示概念上的 OTM 档位，而非固定百分比；具体 `%` 由 `otm_pct` / `itm_pct` 这类数值参数控制。数值类 key（如 `otm_pct`、`itm_pct`）可不做枚举约束。新增枚举值需在常量中登记。
+
+Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/structure-types/{type}/meta-key-options`、`/structure-types/{type}/meta-value-options?meta_key=...` 获取选项并仅允许下拉选择；写接口（PUT meta-params、PUT infer-rules）对非法值返回 400。
+
 #### 2.24.1 表 `strategy_structure`（结构策略）
 
 - **用途**：存期权结构策略（腿 + 约束），可被多条机会策略引用；支持类型如 straddle_strangle、cash_secured_put、iron_condor、leaps、calendar_spread、custom。腿、约束、元数据存于子表 strategy_structure_leg、strategy_structure_constraint、strategy_structure_meta，本表仅标量列 + notes。
@@ -1030,6 +1176,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 机会策略移除 jsonb 列 | strategy_opportunity 表删除列 symbol_scope、entry_conditions（无历史数据需迁移）；pg_ddl 建表不再包含两列，并对已有表执行 DROP COLUMN IF EXISTS；Reader 仅从子表组装 symbols/entry_conditions。§2.24.2。 | — |
 | 策略分配（strategy_allocation）| 表 strategy_allocation、strategy_allocation_opportunity；主键 strategy_allocation_id；无 jsonb，机会列表通过关联表与 sort_order；API 请求/响应使用 allocation_limits（max_positions、max_bp_pct）。§2.24.3、§2.24.3a。 | — |
 | strategy_structure.structure_subtype | §2.24.1 表 strategy_structure 增加列 structure_subtype (text NULL)；covered_call 时存 otm/atm/itm/deep_otm，供 Edit Wizard 还原 Step 2 状态。 | — |
+| 结构类型配置表（方案 A） | 新增 6 张表：strategy_structure_type、strategy_structure_type_leg、strategy_structure_subtype、strategy_structure_subtype_characteristic、strategy_structure_subtype_meta_param、strategy_structure_subtype_rule。由 _ensure_tables 创建；初始数据由 scripts/db_init/seed_structure_type_config.py 写入。§2.24.0、§2.24.0a–f。 | — |
 
 ---
 

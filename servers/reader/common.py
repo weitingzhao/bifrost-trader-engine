@@ -13,6 +13,7 @@ from servers.reader import executions as executions_module
 from servers.reader import gate_safety as gate_safety_module
 from servers.reader import market as market_module
 from servers.reader import strategy as strategy_module
+from servers.reader import structure_type_config as structure_type_config_module
 from servers.reader import position_categories as position_categories_module
 from servers.reader import settings as settings_module
 from servers.reader import status as status_module
@@ -272,6 +273,24 @@ class StatusReader:
         if not self._connect():
             return []
         return strategy_module.list_structures(self._conn, active_only=active_only)
+
+    def list_structure_types(self) -> List[Dict[str, Any]]:
+        """Return structure types from config table (for Wizard Step 1)."""
+        if not self._connect():
+            return []
+        return structure_type_config_module.list_structure_types(self._conn)
+
+    def get_structure_type_default_legs(self, structure_type: str) -> List[Dict[str, Any]]:
+        """Return default legs for a structure type from config table."""
+        if not self._connect():
+            return []
+        return structure_type_config_module.get_default_legs(self._conn, structure_type)
+
+    def get_structure_type_subtypes(self, structure_type: str) -> Dict[str, Any]:
+        """Return subtypes with characteristics and meta_params, plus infer_rules (for Wizard Step 2)."""
+        if not self._connect():
+            return {"subtypes": [], "infer_rules": []}
+        return structure_type_config_module.get_subtypes_with_detail(self._conn, structure_type)
 
     def list_opportunities(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Return list of strategy_opportunity rows (with structure_name from JOIN)."""

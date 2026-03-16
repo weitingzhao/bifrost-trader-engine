@@ -3,7 +3,10 @@ import type { StatusResponse } from '../types'
 import {
   fetchStructures,
   fetchStructure,
+  fetchStructureTypes,
   fetchStructureTypeDefaultLegs,
+  fetchStructureSubtypeDefaultLegs,
+  fetchStructureTypeSubtypes,
   fetchStrategyHistory,
   postActiveStrategy,
   createStructure,
@@ -14,6 +17,9 @@ import {
   type StructureConstraint,
   type StructureMetaEntry,
   type StrategyHistoryRow,
+  type StructureTypeItem,
+  type SubtypeItem,
+  type InferRuleItem,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
@@ -73,10 +79,22 @@ export function StrategyStructurePage({
   const [allowQtyPreset, setAllowQtyPreset] = useState(false)
   const [allowStrikePreset, setAllowStrikePreset] = useState(false)
   const [allowExpirationPreset, setAllowExpirationPreset] = useState(false)
-  /** Wizard for New structure only: step 1=type, 2=subtype (Covered Call), 3=details. */
+  /** Wizard for New structure only: step 1=type, 2=subtype (when has_subtypes), 3=details. */
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
+  /** Structure types from config API (for Step 1). Fallback to STRUCTURE_TYPES when empty. */
+  const [structureTypes, setStructureTypes] = useState<StructureTypeItem[]>([])
+  /** Subtypes + infer_rules for current structure_type when has_subtypes (for Step 2 / Edit). */
+  const [subtypesConfig, setSubtypesConfig] = useState<{
+    subtypes: SubtypeItem[]
+    infer_rules: InferRuleItem[]
+  } | null>(null)
+  /** Selected subtype code (e.g. otm, atm). Replaces covered_call-specific state. */
+  const [selectedSubtype, setSelectedSubtype] = useState<string | null>(null)
+  /** Configurable meta param values (e.g. otm_pct, itm_pct) for current subtype. */
+  const [wizardParamValues, setWizardParamValues] = useState<Record<string, string | number>>({})
+  /** @deprecated Use selectedSubtype; kept for fallback when API fails (covered_call only). */
   const [coveredCallSubtype, setCoveredCallSubtype] = useState<CoveredCallSubtype | null>(null)
-  /** Step 3 optional params for Covered Call (OTM % / ITM %). */
+  /** Step 3 optional params for Covered Call (OTM % / ITM %); used when subtype meta_params drive same keys. */
   const [wizardOtmPct, setWizardOtmPct] = useState<number>(10)
   const [wizardItmPct, setWizardItmPct] = useState<number | ''>('')
   const [setActiveInProgress, setSetActiveInProgress] = useState(false)
@@ -101,6 +119,11 @@ export function StrategyStructurePage({
   const [pendingSubmitName, setPendingSubmitName] = useState<string | null>(null)
   /** When set, show dialog: Type/SubType/Meta changed — use new version? (Apple switch, default on). */
   const [versionConfirmDialog, setVersionConfirmDialog] = useState<{ useNewVersion: boolean } | null>(null)
+  /** Subtype default legs from API (null = not loaded / no subtype; [] = inherit type legs; non-empty = subtype-specific). */
+  const [subtypeDefaultLegs, setSubtypeDefaultLegs] = useState<StructureLeg[] | null>(null)
+  const [subtypeDefaultLegsLoading, setSubtypeDefaultLegsLoading] = useState(false)
+  /** When true, last save failed with legs/schema error so we highlight "Use subtype default legs" if applicable. */
+  const [formErrorIsSchemaMismatch, setFormErrorIsSchemaMismatch] = useState(false)
 
   const isWizard = (formOpen === 'create' && !formIsCopy) || typeof formOpen === 'number'
 
@@ -109,6 +132,28 @@ export function StrategyStructurePage({
     if (structureActiveFilter === 'active') return row.is_active === true
     return row.is_active !== true
   })
+
+  /** Heuristic: backend validation error about legs/schema (for highlighting "Use subtype default legs"). */
+  const isSchemaMismatchError = useCallback((msg: string): boolean => {
+    const s = msg.toLowerCase()
+    return /leg\s*\d|requires exactly|must be/.test(s) || s.includes('schema')
+  }, [])
+
+  /** Compare legs by count and role/direction/option_right (for subtype default vs current). */
+  const legsMatch = useCallback((a: StructureLeg[], b: StructureLeg[]): boolean => {
+    if (a.length !== b.length) return false
+    return a.every((leg, i) => {
+      const o = b[i]
+      if (!o) return false
+      const r = (leg.role ?? '').toString().trim().toUpperCase()
+      const r2 = (o.role ?? '').toString().trim().toUpperCase()
+      const d = (leg.direction ?? '').toString().trim().toUpperCase()
+      const d2 = (o.direction ?? '').toString().trim().toUpperCase()
+      const opt = (leg.option_right ?? '').toString().trim().toUpperCase()
+      const opt2 = (o.option_right ?? '').toString().trim().toUpperCase()
+      return r === r2 && d === d2 && opt === opt2
+    })
+  }, [])
 
   const loadStructures = useCallback(() => {
     setStructuresLoading(true)
@@ -122,6 +167,44 @@ export function StrategyStructurePage({
   useEffect(() => {
     loadStructures()
   }, [loadStructures])
+
+  /** Load structure types from config API on mount (for Wizard type list). */
+  useEffect(() => {
+    fetchStructureTypes()
+      .then((res) => setStructureTypes(res.items ?? []))
+      .catch(() => setStructureTypes([]))
+  }, [])
+
+  /** When subtype is selected, fetch subtype default legs (for "Use subtype default legs" in step 3). */
+  useEffect(() => {
+    const typeVal = (formPayload.structure_type || '').trim()
+    const subVal = selectedSubtype ?? null
+    if (!typeVal || !subVal || formOpen === null) {
+      setSubtypeDefaultLegs(null)
+      return
+    }
+    let cancelled = false
+    setSubtypeDefaultLegsLoading(true)
+    setSubtypeDefaultLegs(null)
+    fetchStructureSubtypeDefaultLegs(typeVal, subVal)
+      .then((res) => {
+        if (!cancelled) setSubtypeDefaultLegs(res.legs ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setSubtypeDefaultLegs(null)
+      })
+      .finally(() => {
+        if (!cancelled) setSubtypeDefaultLegsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [formPayload.structure_type, selectedSubtype, formOpen])
+
+  /** Whether current form structure_type has subtypes (from API or fallback covered_call). */
+  const currentTypeHasSubtypes =
+    structureTypes.some((t) => t.structure_type === formPayload.structure_type && t.has_subtypes) ||
+    (structureTypes.length === 0 && formPayload.structure_type === 'covered_call')
 
   useEffect(() => {
     let cancelled = false
@@ -202,6 +285,7 @@ export function StrategyStructurePage({
     setFormNotes('')
     setFormMeta([])
     setFormError(null)
+    setFormErrorIsSchemaMismatch(false)
     setFixedLegCount(defaultLegs.length)
     setDefaultLegsLoading(false)
     setDefaultLegsFallbackMsg(null)
@@ -209,6 +293,10 @@ export function StrategyStructurePage({
     setAllowStrikePreset(false)
     setAllowExpirationPreset(false)
     setWizardStep(1)
+    setSelectedSubtype(null)
+    setSubtypeDefaultLegs(null)
+    setSubtypesConfig(null)
+    setWizardParamValues({})
     setCoveredCallSubtype(null)
     setWizardOtmPct(10)
     setWizardItmPct('')
@@ -219,6 +307,8 @@ export function StrategyStructurePage({
     setFormIsCopy(false)
     setFormLoading(true)
     setFormError(null)
+    setFormErrorIsSchemaMismatch(false)
+    setSubtypeDefaultLegs(null)
     setOriginalEditName(null)
     setFixedLegCount(0)
     setDefaultLegsLoading(false)
@@ -245,7 +335,68 @@ export function StrategyStructurePage({
         setAllowStrikePreset(legs.some((leg: StructureLeg) => leg.strike != null))
         setAllowExpirationPreset(legs.some((leg: StructureLeg) => leg.expiration != null && String(leg.expiration).trim() !== ''))
         setWizardStep(3)
-        if (row.structure_type === 'covered_call') {
+        if (row.structure_type) {
+          fetchStructureTypeSubtypes(row.structure_type)
+            .then((data) => {
+              setSubtypesConfig({ subtypes: data.subtypes ?? [], infer_rules: data.infer_rules ?? [] })
+              const meta = row.metadata as Record<string, unknown> | null | undefined
+              let inferred: string | null = null
+              if (row.structure_subtype && (data.subtypes ?? []).some((s) => s.subtype === row.structure_subtype)) {
+                inferred = row.structure_subtype
+              } else if (data.infer_rules?.length && meta && typeof meta === 'object') {
+                for (const rule of data.infer_rules) {
+                  const v = meta[rule.meta_key]
+                  const match = v != null && String(v) === rule.meta_value_text
+                  if (match) {
+                    inferred = rule.subtype
+                    break
+                  }
+                }
+              }
+              if (!inferred && row.structure_type === 'covered_call') {
+                inferred = inferCoveredCallSubtypeFromMeta(row.metadata ?? null)
+              }
+              if (inferred) {
+                setSelectedSubtype(inferred)
+                setCoveredCallSubtype(inferred as CoveredCallSubtype)
+              } else {
+                setSelectedSubtype(null)
+                setCoveredCallSubtype(null)
+              }
+              const paramValues: Record<string, string | number> = {}
+              if (meta && typeof meta === 'object') {
+                if (meta.otm_pct != null) {
+                  paramValues.otm_pct = Number(meta.otm_pct)
+                  setWizardOtmPct(Number(meta.otm_pct))
+                }
+                if (meta.itm_pct != null) {
+                  paramValues.itm_pct = Number(meta.itm_pct)
+                  setWizardItmPct(Number(meta.itm_pct))
+                }
+                data.subtypes?.find((s) => s.subtype === inferred)?.meta_params?.forEach((mp) => {
+                  if (mp.param_kind !== 'fixed' && meta[mp.meta_key] != null) {
+                    const val = meta[mp.meta_key]
+                    paramValues[mp.meta_key] = typeof val === 'number' ? val : Number(val) || String(val)
+                  }
+                })
+              }
+              setWizardParamValues(paramValues)
+            })
+            .catch(() => {
+              if (row.structure_type === 'covered_call') {
+                const subtype =
+                  row.structure_subtype && (COVERED_CALL_SUBTYPES as readonly string[]).includes(row.structure_subtype)
+                    ? (row.structure_subtype as CoveredCallSubtype)
+                    : inferCoveredCallSubtypeFromMeta(row.metadata ?? null)
+                setCoveredCallSubtype(subtype)
+                const meta = row.metadata
+                if (meta && typeof meta === 'object') {
+                  if (meta.otm_pct != null) setWizardOtmPct(Number(meta.otm_pct))
+                  if (meta.itm_pct != null) setWizardItmPct(Number(meta.itm_pct))
+                }
+              }
+            })
+        } else if (row.structure_type === 'covered_call') {
           const subtype =
             row.structure_subtype && (COVERED_CALL_SUBTYPES as readonly string[]).includes(row.structure_subtype)
               ? (row.structure_subtype as CoveredCallSubtype)
@@ -258,6 +409,9 @@ export function StrategyStructurePage({
           }
         } else {
           setCoveredCallSubtype(null)
+          setSelectedSubtype(null)
+          setSubtypesConfig(null)
+          setWizardParamValues({})
         }
       })
       .catch((e) => setFormError(e instanceof Error ? e.message : String(e)))
@@ -268,6 +422,8 @@ export function StrategyStructurePage({
     setFormIsCopy(true)
     setFormLoading(true)
     setFormError(null)
+    setFormErrorIsSchemaMismatch(false)
+    setSubtypeDefaultLegs(null)
     setFixedLegCount(0)
     setDefaultLegsLoading(false)
     setDefaultLegsFallbackMsg(null)
@@ -295,6 +451,8 @@ export function StrategyStructurePage({
   const closeForm = () => {
     setFormOpen(null)
     setFormError(null)
+    setFormErrorIsSchemaMismatch(false)
+    setSubtypeDefaultLegs(null)
     setOriginalEditName(null)
     setOriginalEditVersion(null)
     setOriginalEditStructureType(null)
@@ -304,20 +462,26 @@ export function StrategyStructurePage({
     setNameConfirmDialog(null)
     setVersionConfirmDialog(null)
     setWizardStep(1)
+    setSelectedSubtype(null)
+    setSubtypesConfig(null)
+    setWizardParamValues({})
     setCoveredCallSubtype(null)
   }
 
   /** Build default structure name from type + subtype + params (used when entering step 3). */
   const buildWizardDefaultName = (): string => {
-    const typeLabel = getStructureTypeLabel(formPayload.structure_type)
-    if (formPayload.structure_type === 'covered_call' && coveredCallSubtype) {
-      const subLabel = COVERED_CALL_SUBTYPE_LABELS[coveredCallSubtype]
-      if (coveredCallSubtype === 'otm' || coveredCallSubtype === 'deep_otm') {
-        return `${typeLabel} - ${subLabel} (${wizardOtmPct}%)`
-      }
-      if (coveredCallSubtype === 'itm' && wizardItmPct !== '') {
-        return `${typeLabel} - ${subLabel} (${wizardItmPct}%)`
-      }
+    const typeLabel =
+      structureTypes.find((t) => t.structure_type === formPayload.structure_type)?.display_label ??
+      getStructureTypeLabel(formPayload.structure_type)
+    const sub = selectedSubtype ?? coveredCallSubtype
+    const subLabel =
+      subtypesConfig?.subtypes?.find((s) => s.subtype === sub)?.display_label ??
+      (coveredCallSubtype ? COVERED_CALL_SUBTYPE_LABELS[coveredCallSubtype] : null)
+    if (sub && subLabel) {
+      const pct = wizardParamValues['otm_pct'] ?? wizardOtmPct
+      const itmPct = wizardParamValues['itm_pct'] ?? wizardItmPct
+      if ((sub === 'otm' || sub === 'deep_otm') && pct != null) return `${typeLabel} - ${subLabel} (${pct}%)`
+      if (sub === 'itm' && itmPct !== '' && itmPct != null) return `${typeLabel} - ${subLabel} (${itmPct}%)`
       return `${typeLabel} - ${subLabel}`
     }
     return typeLabel
@@ -325,7 +489,10 @@ export function StrategyStructurePage({
 
   const goWizardNext = () => {
     if (wizardStep === 1) {
-      if (formPayload.structure_type === 'covered_call') setWizardStep(2)
+      const hasSubtypesToShow =
+        currentTypeHasSubtypes &&
+        (subtypesConfig?.subtypes?.length || formPayload.structure_type === 'covered_call')
+      if (hasSubtypesToShow) setWizardStep(2)
       else {
         setWizardStep(3)
         updateForm({ name: buildWizardDefaultName() })
@@ -336,8 +503,29 @@ export function StrategyStructurePage({
     }
   }
 
-  /** Current meta as would be in payload (filtered + subtype meta for covered_call). */
+  /** Current meta as would be in payload (from infer_rules + wizardParamValues or fallback covered_call). */
   const getCurrentBuiltMeta = (): StructureMetaEntry[] => {
+    if (subtypesConfig && selectedSubtype) {
+      const subtypeMetaKeys = new Set(
+        [
+          ...subtypesConfig.infer_rules.map((r) => r.meta_key),
+          ...(subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)?.meta_params.map((p) => p.meta_key) ?? []),
+        ]
+      )
+      let meta: StructureMetaEntry[] = (formMeta ?? []).filter((m) => m.meta_key && !subtypeMetaKeys.has(m.meta_key))
+      subtypesConfig.infer_rules
+        .filter((r) => r.subtype === selectedSubtype)
+        .forEach((r) => meta.push({ meta_key: r.meta_key, meta_value_text: r.meta_value_text }))
+      subtypesConfig.subtypes
+        .find((s) => s.subtype === selectedSubtype)
+        ?.meta_params?.forEach((p) => {
+          if (p.param_kind !== 'fixed') {
+            const v = wizardParamValues[p.meta_key]
+            if (v !== undefined && v !== '') meta.push({ meta_key: p.meta_key, meta_value_text: String(v) })
+          }
+        })
+      return meta
+    }
     const subtypeMetaKeys = new Set<string>(COVERED_CALL_SUBTYPE_META_KEYS)
     let meta: StructureMetaEntry[] =
       formPayload.structure_type === 'covered_call' && coveredCallSubtype
@@ -367,8 +555,7 @@ export function StrategyStructurePage({
     if (originalEditStructureType == null) return false
     const currentType = (formPayload.structure_type || '').trim()
     if (currentType !== originalEditStructureType) return true
-    const currentSubtype =
-      formPayload.structure_type === 'covered_call' && coveredCallSubtype ? coveredCallSubtype : null
+    const currentSubtype = selectedSubtype ?? (formPayload.structure_type === 'covered_call' && coveredCallSubtype ? coveredCallSubtype : null)
     const origSubtype = originalEditStructureSubtype ?? null
     if (currentSubtype !== origSubtype) return true
     if (originalEditMeta == null) return getCurrentBuiltMeta().length > 0
@@ -379,10 +566,11 @@ export function StrategyStructurePage({
   const buildWizardPayload = (name: string, versionOverride?: number): StructurePayload => {
     const structure_type = (formPayload.structure_type || '').trim()
     const meta = getCurrentBuiltMeta()
+    const sub = selectedSubtype ?? coveredCallSubtype
     return {
       name: name.trim(),
       structure_type,
-      structure_subtype: formPayload.structure_type === 'covered_call' && coveredCallSubtype ? coveredCallSubtype : null,
+      structure_subtype: currentTypeHasSubtypes && sub ? sub : null,
       legs: formLegs,
       constraints: formConstraints.length ? formConstraints : undefined,
       version: versionOverride !== undefined ? versionOverride : (formPayload.version ?? 1),
@@ -414,7 +602,9 @@ export function StrategyStructurePage({
       loadStructures()
       loadStatus()
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setFormError(msg)
+      setFormErrorIsSchemaMismatch(isSchemaMismatchError(msg))
     } finally {
       setFormLoading(false)
     }
@@ -464,6 +654,53 @@ export function StrategyStructurePage({
     setFormPayload((prev) => ({ ...prev, ...patch }))
   }
 
+  /** When user selects a structure type: load default legs and, if has_subtypes, load subtypes. */
+  const handleStructureTypeChange = useCallback(
+    (structure_type: string) => {
+      updateForm({ structure_type })
+      setDefaultLegsLoading(true)
+      setDefaultLegsFallbackMsg(null)
+      setSubtypesConfig(null)
+      setSelectedSubtype(null)
+      setWizardParamValues({})
+      setCoveredCallSubtype(null)
+      const typeHasSubtypes =
+        structureTypes.some((t) => t.structure_type === structure_type && t.has_subtypes) ||
+        (structureTypes.length === 0 && structure_type === 'covered_call')
+
+      fetchStructureTypeDefaultLegs(structure_type)
+        .then((res) => {
+          const legs = res.legs ?? []
+          if (legs.length > 0) {
+            setFormLegs(legs)
+            setFixedLegCount(legs.length)
+            setDefaultLegsFallbackMsg(null)
+          } else {
+            const fallback = getDefaultLegsFallback(structure_type)
+            setFormLegs(fallback)
+            setFixedLegCount(fallback.length)
+            setDefaultLegsFallbackMsg(fallback.length > 0 ? 'Default legs from local fallback.' : null)
+          }
+        })
+        .catch(() => {
+          const fallback = getDefaultLegsFallback(structure_type)
+          setFormLegs(fallback)
+          setFixedLegCount(fallback.length)
+          setDefaultLegsFallbackMsg(
+            fallback.length > 0 ? 'Default legs from local fallback (API failed).' : null
+          )
+        })
+        .finally(() => setDefaultLegsLoading(false))
+
+      if (typeHasSubtypes) {
+        fetchStructureTypeSubtypes(structure_type)
+          .then((data) => setSubtypesConfig({ subtypes: data.subtypes ?? [], infer_rules: data.infer_rules ?? [] }))
+          .catch(() => setSubtypesConfig(null))
+      }
+    },
+    [structureTypes, updateForm]
+  )
+
   const submitForm = async () => {
     const name = (formPayload.name || '').trim()
     if (!name) {
@@ -477,10 +714,11 @@ export function StrategyStructurePage({
     }
     setFormError(null)
     setFormLoading(true)
+    const sub = selectedSubtype ?? (formPayload.structure_type === 'covered_call' ? coveredCallSubtype : null) ?? formPayload.structure_subtype ?? null
     const payload: StructurePayload = {
       name,
       structure_type,
-      structure_subtype: formPayload.structure_type === 'covered_call' ? (formPayload.structure_subtype ?? null) : undefined,
+      structure_subtype: formPayload.structure_type === 'covered_call' ? sub : undefined,
       legs: formLegs,
       constraints: formConstraints.length ? formConstraints : undefined,
       version: formPayload.version ?? 1,
@@ -498,7 +736,9 @@ export function StrategyStructurePage({
       loadStructures()
       loadStatus()
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setFormError(msg)
+      setFormErrorIsSchemaMismatch(isSchemaMismatchError(msg))
     } finally {
       setFormLoading(false)
     }
@@ -840,7 +1080,16 @@ export function StrategyStructurePage({
             {formOpen === 'create' ? (formIsCopy ? 'New structure (copy)' : 'New structure') : `Edit structure ${formOpen}`}
           </h3>
           {formLoading && !formPayload.name && <p className="section-hint">Loading…</p>}
-          {formError && <p className="msg-error">{formError}</p>}
+          {formError && (
+            <div className="msg-error" style={{ marginBottom: 'var(--space-2)' }}>
+              <p>{formError}</p>
+              {formErrorIsSchemaMismatch && selectedSubtype && (
+                <p className="form-hint" style={{ marginTop: 'var(--space-1)' }}>
+                  Legs do not match the expected schema for subtype &quot;{selectedSubtype}&quot;. You can reset to subtype defaults from the legs section.
+                </p>
+              )}
+            </div>
+          )}
           {defaultLegsFallbackMsg && (
             <p className="form-hint msg-warning" style={{ marginBottom: 'var(--space-2)' }} role="alert">
               {defaultLegsFallbackMsg}
@@ -907,44 +1156,27 @@ export function StrategyStructurePage({
                   <h4 className="gates-form-group-title">Choose structure type</h4>
                   <div className="gates-form-row gates-form-row--structure-type">
                     <div className="structure-type-picker" role="radiogroup" aria-label="Structure type">
-                      {STRUCTURE_TYPES.map((t) => (
+                      {(structureTypes.length > 0
+                        ? structureTypes
+                        : STRUCTURE_TYPES.map((st, i) => ({
+                            structure_type: st,
+                            display_label: getStructureTypeLabel(st),
+                            sort_order: i,
+                            has_subtypes: st === 'covered_call',
+                          }))
+                      ).map((typeItem) => (
                         <label
-                          key={t}
-                          className={`structure-type-option ${formPayload.structure_type === t ? 'structure-type-option--selected' : ''}`}
+                          key={typeItem.structure_type}
+                          className={`structure-type-option ${formPayload.structure_type === typeItem.structure_type ? 'structure-type-option--selected' : ''}`}
                         >
                           <input
                             type="radio"
                             name="structure_type_wizard"
-                            value={t}
-                            checked={formPayload.structure_type === t}
-                            onChange={() => {
-                              updateForm({ structure_type: t })
-                              setDefaultLegsLoading(true)
-                              setDefaultLegsFallbackMsg(null)
-                              fetchStructureTypeDefaultLegs(t)
-                                .then((res) => {
-                                  const legs = res.legs ?? []
-                                  if (legs.length > 0) {
-                                    setFormLegs(legs)
-                                    setFixedLegCount(legs.length)
-                                    setDefaultLegsFallbackMsg(null)
-                                  } else {
-                                    const fallback = getDefaultLegsFallback(t)
-                                    setFormLegs(fallback)
-                                    setFixedLegCount(fallback.length)
-                                    setDefaultLegsFallbackMsg(fallback.length > 0 ? 'Default legs from local fallback.' : null)
-                                  }
-                                })
-                                .catch(() => {
-                                  const fallback = getDefaultLegsFallback(t)
-                                  setFormLegs(fallback)
-                                  setFixedLegCount(fallback.length)
-                                  setDefaultLegsFallbackMsg(fallback.length > 0 ? 'Default legs from local fallback (API failed).' : null)
-                                })
-                                .finally(() => setDefaultLegsLoading(false))
-                            }}
+                            value={typeItem.structure_type}
+                            checked={formPayload.structure_type === typeItem.structure_type}
+                            onChange={() => handleStructureTypeChange(typeItem.structure_type)}
                           />
-                          <span>{getStructureTypeLabel(t)}</span>
+                          <span>{typeItem.display_label}</span>
                         </label>
                       ))}
                     </div>
@@ -953,101 +1185,200 @@ export function StrategyStructurePage({
                 </div>
               )}
 
-              {wizardStep === 2 && formPayload.structure_type === 'covered_call' && (
+              {wizardStep === 2 && currentTypeHasSubtypes && (
                 <div className="structure-wizard-step">
-                  <h4 className="gates-form-group-title">Choose Covered Call subtype</h4>
-                  <div className="structure-wizard-subtype-picker" role="radiogroup" aria-label="Covered Call subtype">
-                    {COVERED_CALL_SUBTYPES.map((sub) => (
-                      <label
-                        key={sub}
-                        className={`covered-call-subtype-option ${coveredCallSubtype === sub ? 'covered-call-subtype-option--selected' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          name="covered_call_subtype"
-                          value={sub}
-                          checked={coveredCallSubtype === sub}
-                          onChange={() => {
-                            setCoveredCallSubtype(sub)
-                            if (sub === 'deep_otm') setWizardOtmPct(20)
-                            else if (sub === 'otm') setWizardOtmPct(10)
-                          }}
-                        />
-                        <span>{COVERED_CALL_SUBTYPE_LABELS[sub]}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  {coveredCallSubtype && COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype] && (
-                    <div className="covered-call-subtype-description" style={{ marginTop: 'var(--space-4)' }}>
-                      <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>{COVERED_CALL_SUBTYPE_LABELS[coveredCallSubtype]}</h5>
-                      <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                        <strong>Example:</strong> {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].example}
-                      </p>
-                      <p className="form-hint" style={{ marginBottom: 'var(--space-1)' }}>
-                        <strong>Characteristics:</strong>
-                      </p>
-                      <ul className="covered-call-subtype-list" style={{ marginBottom: 'var(--space-2)', paddingLeft: '1.25rem' }}>
-                        {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].characteristics.map((c, i) => (
-                          <li key={i} className="form-hint" style={{ marginBottom: 'var(--space-1)' }}>{c}</li>
+                  {subtypesConfig?.subtypes?.length ? (
+                    <>
+                      <h4 className="gates-form-group-title">Choose subtype</h4>
+                      <div className="structure-wizard-subtype-picker" role="radiogroup" aria-label="Subtype">
+                        {subtypesConfig.subtypes.map((subItem) => (
+                          <label
+                            key={subItem.subtype}
+                            className={`covered-call-subtype-option ${selectedSubtype === subItem.subtype ? 'covered-call-subtype-option--selected' : ''}`}
+                          >
+                            <input
+                              type="radio"
+                              name="structure_subtype"
+                              value={subItem.subtype}
+                              checked={selectedSubtype === subItem.subtype}
+                              onChange={() => {
+                                setSelectedSubtype(subItem.subtype)
+                                setCoveredCallSubtype(subItem.subtype as CoveredCallSubtype)
+                                const initial: Record<string, string | number> = {}
+                                subItem.meta_params.forEach((p) => {
+                                  if (p.param_kind !== 'fixed' && p.default_value_text != null && p.default_value_text !== '') {
+                                    const num = Number(p.default_value_text)
+                                    initial[p.meta_key] = Number.isFinite(num) ? num : p.default_value_text
+                                  }
+                                })
+                                setWizardParamValues(initial)
+                                if (subItem.subtype === 'deep_otm') setWizardOtmPct(20)
+                                else if (subItem.subtype === 'otm') setWizardOtmPct(10)
+                              }}
+                            />
+                            <span>{subItem.display_label}</span>
+                          </label>
                         ))}
-                      </ul>
-                      {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].nature && (
-                        <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                          <strong>Nature:</strong> {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].nature}
-                        </p>
-                      )}
-                      <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
-                        <strong>Typical use:</strong> {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].use}
-                      </p>
-
-                      <div className="gates-form-group" style={{ marginTop: 'var(--space-3)' }}>
-                        <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>Configurable parameters (strategy_structure_meta)</h5>
-                        <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                          Underlying is stock by default. Option strike is resolved when the structure is applied; set below to constrain (e.g. OTM %).
-                        </p>
-                        {(coveredCallSubtype === 'otm' || coveredCallSubtype === 'deep_otm') && (
-                          <div className="gates-form-row" style={{ alignItems: 'center' }}>
-                            <label style={{ minWidth: '100px' }}>OTM % (call strike)</label>
-                            <input
-                              type="number"
-                              min={1}
-                              max={50}
-                              value={wizardOtmPct}
-                              onChange={(e) => setWizardOtmPct(parseInt(e.target.value, 10) || 10)}
-                              aria-label="OTM percentage for short call"
-                            />
-                            <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>
-                              {coveredCallSubtype === 'deep_otm' ? 'Default 20%' : 'Default 10%'} — stored as otm_pct in meta
-                            </span>
-                          </div>
-                        )}
-                        {coveredCallSubtype === 'atm' && (
-                          <p className="form-hint">No extra parameters. Call strike rule: ATM (resolved at trade).</p>
-                        )}
-                        {coveredCallSubtype === 'itm' && (
-                          <div className="gates-form-row" style={{ alignItems: 'center' }}>
-                            <label style={{ minWidth: '120px' }}>ITM % (optional)</label>
-                            <input
-                              type="number"
-                              min={0}
-                              value={wizardItmPct}
-                              onChange={(e) => setWizardItmPct(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                              placeholder="Optional"
-                              aria-label="ITM percentage for short call"
-                            />
-                            <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>Stored as itm_pct in meta when set</span>
-                          </div>
-                        )}
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
 
-              {wizardStep === 2 && formPayload.structure_type !== 'covered_call' && (
-                <div className="structure-wizard-step">
-                  <p className="form-hint">No subtype for this structure type. Click Next to continue.</p>
+                      {selectedSubtype && (() => {
+                        const subItem = subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)
+                        if (!subItem) return null
+                        return (
+                          <div className="covered-call-subtype-description" style={{ marginTop: 'var(--space-4)' }}>
+                            <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>{subItem.display_label}</h5>
+                            {subItem.example != null && (
+                              <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                                <strong>Example:</strong> {subItem.example}
+                              </p>
+                            )}
+                            {subItem.characteristics?.length > 0 && (
+                              <>
+                                <p className="form-hint" style={{ marginBottom: 'var(--space-1)' }}><strong>Characteristics:</strong></p>
+                                <ul className="covered-call-subtype-list" style={{ marginBottom: 'var(--space-2)', paddingLeft: '1.25rem' }}>
+                                  {subItem.characteristics.map((c, i) => (
+                                    <li key={i} className="form-hint" style={{ marginBottom: 'var(--space-1)' }}>{c}</li>
+                                  ))}
+                                </ul>
+                              </>
+                            )}
+                            {subItem.nature != null && subItem.nature !== '' && (
+                              <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                                <strong>Nature:</strong> {subItem.nature}
+                              </p>
+                            )}
+                            {subItem.typical_use != null && (
+                              <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
+                                <strong>Typical use:</strong> {subItem.typical_use}
+                              </p>
+                            )}
+                            {(subItem.subtype_explanation != null || subItem.meta_params?.some((p) => p.param_kind !== 'fixed')) && (
+                              <div className="gates-form-group" style={{ marginTop: 'var(--space-3)' }}>
+                                <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>Configurable parameters (strategy_structure_meta)</h5>
+                                {subItem.subtype_explanation != null && subItem.subtype_explanation !== '' && (
+                                  <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>{subItem.subtype_explanation}</p>
+                                )}
+                                {subItem.meta_params
+                                  ?.filter((p) => p.param_kind !== 'fixed')
+                                  .map((p) => (
+                                    <div key={p.meta_key} className="gates-form-row" style={{ alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                                      <label style={{ minWidth: '120px' }}>{p.display_label ?? p.meta_key}</label>
+                                      <input
+                                        type="number"
+                                        min={p.param_kind === 'percent' ? 1 : 0}
+                                        max={p.param_kind === 'percent' ? 50 : undefined}
+                                        value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
+                                        onChange={(e) => {
+                                          const v = e.target.value === '' ? '' : (parseInt(e.target.value, 10) ?? e.target.value)
+                                          setWizardParamValues((prev) => ({ ...prev, [p.meta_key]: v as string | number }))
+                                          if (p.meta_key === 'otm_pct') setWizardOtmPct(typeof v === 'number' ? v : 10)
+                                          if (p.meta_key === 'itm_pct') setWizardItmPct(typeof v === 'number' ? v : '')
+                                        }}
+                                        aria-label={p.display_label ?? p.meta_key}
+                                      />
+                                      {p.default_value_text != null && (
+                                        <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>Default {p.default_value_text}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                {subItem.meta_params?.some((p) => p.param_kind === 'fixed') && subItem.meta_params?.filter((p) => p.param_kind === 'fixed').length === subItem.meta_params?.length && (
+                                  <p className="form-hint">No extra parameters (strike rule from subtype).</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </>
+                  ) : formPayload.structure_type === 'covered_call' ? (
+                    <>
+                      <h4 className="gates-form-group-title">Choose Covered Call subtype</h4>
+                      <div className="structure-wizard-subtype-picker" role="radiogroup" aria-label="Covered Call subtype">
+                        {COVERED_CALL_SUBTYPES.map((sub) => (
+                          <label
+                            key={sub}
+                            className={`covered-call-subtype-option ${coveredCallSubtype === sub ? 'covered-call-subtype-option--selected' : ''}`}
+                          >
+                            <input
+                              type="radio"
+                              name="covered_call_subtype"
+                              value={sub}
+                              checked={coveredCallSubtype === sub}
+                              onChange={() => {
+                                setCoveredCallSubtype(sub)
+                                if (sub === 'deep_otm') setWizardOtmPct(20)
+                                else if (sub === 'otm') setWizardOtmPct(10)
+                              }}
+                            />
+                            <span>{COVERED_CALL_SUBTYPE_LABELS[sub]}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {coveredCallSubtype && COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype] && (
+                        <div className="covered-call-subtype-description" style={{ marginTop: 'var(--space-4)' }}>
+                          <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>{COVERED_CALL_SUBTYPE_LABELS[coveredCallSubtype]}</h5>
+                          <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                            <strong>Example:</strong> {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].example}
+                          </p>
+                          <p className="form-hint" style={{ marginBottom: 'var(--space-1)' }}><strong>Characteristics:</strong></p>
+                          <ul className="covered-call-subtype-list" style={{ marginBottom: 'var(--space-2)', paddingLeft: '1.25rem' }}>
+                            {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].characteristics.map((c, i) => (
+                              <li key={i} className="form-hint" style={{ marginBottom: 'var(--space-1)' }}>{c}</li>
+                            ))}
+                          </ul>
+                          {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].nature && (
+                            <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                              <strong>Nature:</strong> {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].nature}
+                            </p>
+                          )}
+                          <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
+                            <strong>Typical use:</strong> {COVERED_CALL_SUBTYPE_DESCRIPTIONS[coveredCallSubtype].use}
+                          </p>
+                          <div className="gates-form-group" style={{ marginTop: 'var(--space-3)' }}>
+                            <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>Configurable parameters (strategy_structure_meta)</h5>
+                            <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                              Underlying is stock by default. Option strike is resolved when the structure is applied; set below to constrain (e.g. OTM %).
+                            </p>
+                            {(coveredCallSubtype === 'otm' || coveredCallSubtype === 'deep_otm') && (
+                              <div className="gates-form-row" style={{ alignItems: 'center' }}>
+                                <label style={{ minWidth: '100px' }}>OTM % (call strike)</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={50}
+                                  value={wizardOtmPct}
+                                  onChange={(e) => setWizardOtmPct(parseInt(e.target.value, 10) || 10)}
+                                  aria-label="OTM percentage for short call"
+                                />
+                                <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>
+                                  {coveredCallSubtype === 'deep_otm' ? 'Default 20%' : 'Default 10%'} — stored as otm_pct in meta
+                                </span>
+                              </div>
+                            )}
+                            {coveredCallSubtype === 'atm' && (
+                              <p className="form-hint">No extra parameters. Call strike rule: ATM (resolved at trade).</p>
+                            )}
+                            {coveredCallSubtype === 'itm' && (
+                              <div className="gates-form-row" style={{ alignItems: 'center' }}>
+                                <label style={{ minWidth: '120px' }}>ITM % (optional)</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={wizardItmPct}
+                                  onChange={(e) => setWizardItmPct(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                                  placeholder="Optional"
+                                  aria-label="ITM percentage for short call"
+                                />
+                                <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>Stored as itm_pct in meta when set</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="form-hint">No subtype for this structure type. Click Next to continue.</p>
+                  )}
                 </div>
               )}
 
@@ -1099,7 +1430,35 @@ export function StrategyStructurePage({
                         <span className="toggle-switch-caption">Available</span>
                       </label>
                     </div>
-                    {formPayload.structure_type === 'covered_call' && coveredCallSubtype && (
+                    {(subtypesConfig && selectedSubtype && subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)?.meta_params?.some((p) => p.param_kind !== 'fixed')) ? (
+                      <div className="gates-form-group" style={{ marginTop: 'var(--space-3)' }}>
+                        <h4 className="gates-form-group-title">Subtype options</h4>
+                        {subtypesConfig.subtypes
+                          .find((s) => s.subtype === selectedSubtype)
+                          ?.meta_params?.filter((p) => p.param_kind !== 'fixed')
+                          .map((p) => (
+                            <div key={p.meta_key} className="gates-form-row" style={{ alignItems: 'center' }}>
+                              <label style={{ minWidth: '100px' }}>{p.display_label ?? p.meta_key}</label>
+                              <input
+                                type="number"
+                                min={p.param_kind === 'percent' ? 1 : 0}
+                                max={p.param_kind === 'percent' ? 50 : undefined}
+                                value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
+                                onChange={(e) => {
+                                  const v = e.target.value === '' ? '' : (parseInt(e.target.value, 10) ?? e.target.value)
+                                  setWizardParamValues((prev) => ({ ...prev, [p.meta_key]: v as string | number }))
+                                  if (p.meta_key === 'otm_pct') setWizardOtmPct(typeof v === 'number' ? v : 10)
+                                  if (p.meta_key === 'itm_pct') setWizardItmPct(typeof v === 'number' ? v : '')
+                                }}
+                                aria-label={p.display_label ?? p.meta_key}
+                              />
+                              {p.default_value_text != null && (
+                                <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>Default {p.default_value_text}</span>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    ) : formPayload.structure_type === 'covered_call' && coveredCallSubtype ? (
                       <div className="gates-form-group" style={{ marginTop: 'var(--space-3)' }}>
                         <h4 className="gates-form-group-title">Covered Call options</h4>
                         {(coveredCallSubtype === 'otm' || coveredCallSubtype === 'deep_otm') && (
@@ -1128,7 +1487,7 @@ export function StrategyStructurePage({
                           </div>
                         )}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                   <div className="gates-form-group">
                     <h4 className="gates-form-group-title">Legs (read-only)</h4>
@@ -1165,7 +1524,11 @@ export function StrategyStructurePage({
                     type="button"
                     className="btn-primary"
                     onClick={goWizardNext}
-                    disabled={wizardStep === 2 && formPayload.structure_type === 'covered_call' && !coveredCallSubtype}
+                    disabled={
+                        wizardStep === 2 &&
+                        currentTypeHasSubtypes &&
+                        (subtypesConfig?.subtypes?.length ? !selectedSubtype : !coveredCallSubtype)
+                      }
                   >
                     Next
                   </button>
@@ -1192,51 +1555,30 @@ export function StrategyStructurePage({
               <div className="gates-form-row gates-form-row--structure-type">
                 <span className="gates-form-row-label">Structure type</span>
                 <div className="structure-type-picker" role="radiogroup" aria-label="Structure type">
-                  {STRUCTURE_TYPES.map((t) => (
+                  {(structureTypes.length > 0
+                    ? structureTypes
+                    : STRUCTURE_TYPES.map((st, i) => ({
+                        structure_type: st,
+                        display_label: getStructureTypeLabel(st),
+                        sort_order: i,
+                        has_subtypes: st === 'covered_call',
+                      }))
+                  ).map((typeItem) => (
                     <label
-                      key={t}
-                      className={`structure-type-option ${formPayload.structure_type === t ? 'structure-type-option--selected' : ''}`}
+                      key={typeItem.structure_type}
+                      className={`structure-type-option ${formPayload.structure_type === typeItem.structure_type ? 'structure-type-option--selected' : ''}`}
                     >
                       <input
                         type="radio"
                         name="structure_type"
-                        value={t}
-                        checked={formPayload.structure_type === t}
-                        onChange={() => {
-                          updateForm({ structure_type: t })
-                          setDefaultLegsLoading(true)
-                          setDefaultLegsFallbackMsg(null)
-                          fetchStructureTypeDefaultLegs(t)
-                            .then((res) => {
-                              const legs = res.legs ?? []
-                              if (legs.length > 0) {
-                                setFormLegs(legs)
-                                setFixedLegCount(legs.length)
-                                setDefaultLegsFallbackMsg(null)
-                              } else {
-                                const fallback = getDefaultLegsFallback(t)
-                                setFormLegs(fallback)
-                                setFixedLegCount(fallback.length)
-                                setDefaultLegsFallbackMsg(fallback.length > 0
-                                  ? 'Default legs from local fallback (default-legs API returned empty or type not defined on server).'
-                                  : null)
-                              }
-                            })
-                            .catch(() => {
-                              const fallback = getDefaultLegsFallback(t)
-                              setFormLegs(fallback)
-                              setFixedLegCount(fallback.length)
-                              setDefaultLegsFallbackMsg(fallback.length > 0
-                                ? 'Default legs from local fallback (default-legs API failed or unavailable—check backend).'
-                                : 'Could not load default legs (API failed). Add legs manually or check backend.')
-                            })
-                            .finally(() => setDefaultLegsLoading(false))
-                        }}
+                        value={typeItem.structure_type}
+                        checked={formPayload.structure_type === typeItem.structure_type}
+                        onChange={() => handleStructureTypeChange(typeItem.structure_type)}
                       />
-                      <span>{getStructureTypeLabel(t)}</span>
+                      <span>{typeItem.display_label}</span>
                     </label>
                   ))}
-                  {formPayload.structure_type === 'custom' && (
+                  {formPayload.structure_type === 'custom' && (structureTypes.length === 0 || !structureTypes.some((t) => t.structure_type === 'custom')) && (
                     <label className="structure-type-option structure-type-option--legacy structure-type-option--selected">
                       <input
                         type="radio"
@@ -1288,6 +1630,41 @@ export function StrategyStructurePage({
               </p>
               {defaultLegsLoading && (
                 <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading default legs…</p>
+              )}
+              {selectedSubtype && subtypeDefaultLegs !== null && subtypeDefaultLegs.length > 0 && !legsMatch(formLegs, subtypeDefaultLegs) && (
+                <div
+                  className="form-hint"
+                  style={{
+                    marginBottom: 'var(--space-2)',
+                    padding: 'var(--space-2)',
+                    background: formErrorIsSchemaMismatch ? 'var(--color-error-subtle, #fef2f2)' : 'var(--color-surface-elevated)',
+                    borderRadius: '6px',
+                    border: formErrorIsSchemaMismatch ? '1px solid var(--color-error, #b91c1c)' : undefined,
+                  }}
+                  role="alert"
+                >
+                  This subtype has its own default legs.
+                  {' '}
+                  <button
+                    type="button"
+                    className={formErrorIsSchemaMismatch ? 'btn-primary' : 'btn-secondary'}
+                    style={formErrorIsSchemaMismatch ? { fontWeight: 600 } : undefined}
+                    onClick={() => {
+                      setFormLegs([...subtypeDefaultLegs])
+                      setFixedLegCount(subtypeDefaultLegs.length)
+                      setFormError(null)
+                      setFormErrorIsSchemaMismatch(false)
+                    }}
+                  >
+                    Use subtype default legs
+                  </button>
+                </div>
+              )}
+              {selectedSubtype && subtypeDefaultLegs !== null && subtypeDefaultLegs.length === 0 && (
+                <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Using type-level default legs.</p>
+              )}
+              {subtypeDefaultLegsLoading && selectedSubtype && (
+                <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading subtype default legs…</p>
               )}
               <div className="table-wrap">
                 <table className="data-table">

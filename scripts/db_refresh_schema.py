@@ -84,6 +84,12 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
         "strategy_structure_constraint",
         "strategy_structure_leg",
         "strategy_structure_meta",
+        "strategy_structure_type",
+        "strategy_structure_type_leg",
+        "strategy_structure_subtype",
+        "strategy_structure_subtype_characteristic",
+        "strategy_structure_subtype_meta_param",
+        "strategy_structure_subtype_rule",
     ],
     "watchlist": ["watchlist"],
 }

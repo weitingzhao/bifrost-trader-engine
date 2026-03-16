@@ -21,11 +21,16 @@ _LEG_ROLE_ALIASES: Dict[str, Dict[int, Dict[str, str]]] = {
 }
 
 
-def _normalize_legs(structure_type: str, legs: List[Any]) -> List[Dict[str, Any]]:
+def _normalize_legs(
+    structure_type: str, legs: List[Any], schema: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
     """Return a copy of legs with role/direction/option_right normalized to canonical values. Used before validate_legs."""
     key = (structure_type or "").strip().lower()
-    schema = structure_type_schema.get_schema(structure_type)
-    expected_legs = (schema.get("legs", []) if schema else [])
+    if schema is not None:
+        expected_legs = schema.get("legs", [])
+    else:
+        s = structure_type_schema.get_schema(structure_type)
+        expected_legs = (s.get("legs", []) if s else [])
     aliases_by_index = _LEG_ROLE_ALIASES.get(key, {})
     if not isinstance(legs, list):
         return []
@@ -146,9 +151,6 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
         raise ValueError("legs is required")
     if not isinstance(legs, list):
         raise ValueError("legs must be an array")
-    legs = _normalize_legs(structure_type, legs)
-    structure_type_schema.validate_legs(structure_type, legs)
-
     version = int(payload["version"]) if payload.get("version") is not None else 1
     is_active = bool(payload["is_active"]) if payload.get("is_active") is not None else True
     notes = (payload.get("notes") or "").strip() or None
@@ -166,6 +168,14 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
             structure_subtype = raw
 
     conn = _conn_from_config(status_config)
+    schema = None
+    if conn:
+        schema = structure_type_schema.get_schema_from_db(conn, structure_type, structure_subtype)
+    if schema is None:
+        schema = structure_type_schema.get_schema(structure_type)
+    legs = _normalize_legs(structure_type, legs, schema)
+    structure_type_schema.validate_legs(structure_type, legs, schema=schema)
+
     if conn is None:
         return None
     try:
@@ -217,9 +227,6 @@ def update_structure(
         raise ValueError("legs is required")
     if not isinstance(legs, list):
         raise ValueError("legs must be an array")
-    legs = _normalize_legs(structure_type, legs)
-    structure_type_schema.validate_legs(structure_type, legs)
-
     version = int(payload["version"]) if payload.get("version") is not None else 1
     is_active = bool(payload["is_active"]) if payload.get("is_active") is not None else True
     notes = (payload.get("notes") or "").strip() or None
@@ -237,6 +244,16 @@ def update_structure(
             structure_subtype = raw
 
     conn = _conn_from_config(status_config)
+    schema = None
+    if conn:
+        schema = structure_type_schema.get_schema_from_db(conn, structure_type, structure_subtype)
+    if schema is None:
+        schema = structure_type_schema.get_schema(structure_type)
+    legs = _normalize_legs(structure_type, legs, schema)
+    structure_type_schema.validate_legs(structure_type, legs, schema=schema)
+
+    if conn is None:
+        return False
     if conn is None:
         return False
     try:

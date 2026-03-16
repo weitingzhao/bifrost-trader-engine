@@ -9,8 +9,10 @@ from pydantic import BaseModel, Field
 from servers.reader import gate_safety_write as gate_safety_write_module
 from servers.reader import strategy_allocation_write as strategy_allocation_write_module
 from servers.reader import strategy_opportunity_write as strategy_opportunity_write_module
-from servers.reader import structure_type_schema as structure_type_schema_module
 from servers.reader import strategy_structure_write as strategy_structure_write_module
+from servers.reader import structure_type_config as structure_type_config_module
+from servers.reader import structure_type_config_constants as structure_type_config_constants_module
+from servers.reader import structure_type_config_write as structure_type_config_write_module
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +71,278 @@ class AllocationUpdateBody(BaseModel):
     is_active: Optional[bool] = None
 
 
+@router.get("/structure-types")
+def list_structure_types_endpoint(request: Request) -> Dict[str, Any]:
+    """Return structure types from config table for Wizard Step 1 (display_label, sort_order, has_subtypes)."""
+    reader = request.app.state.reader
+    items: List[Dict[str, Any]] = reader.list_structure_types()
+    return {"items": items}
+
+
+@router.get("/structure-types/param-kind-options")
+def get_param_kind_options_endpoint() -> Dict[str, Any]:
+    """Return allowed param_kind values with display labels for Type Config UI. options: [{ value, label }]."""
+    options = structure_type_config_constants_module.get_param_kind_options_with_labels()
+    return {"options": options}
+
+
+@router.get("/structure-types/leg-role-options")
+def get_leg_role_options_endpoint() -> Dict[str, Any]:
+    """Return allowed leg role values with display labels for Type Config Default legs. options: [{ value, label }]."""
+    options = structure_type_config_constants_module.get_leg_role_options_with_labels()
+    return {"options": options}
+
+
+@router.get("/structure-types/leg-direction-options")
+def get_leg_direction_options_endpoint() -> Dict[str, Any]:
+    """Return allowed leg direction values with display labels for Type Config Default legs. options: [{ value, label }]."""
+    options = structure_type_config_constants_module.get_leg_direction_options_with_labels()
+    return {"options": options}
+
+
+@router.get("/structure-types/leg-option-right-options")
+def get_leg_option_right_options_endpoint() -> Dict[str, Any]:
+    """Return allowed leg option_right values (empty = stock) with display labels. options: [{ value, label }]."""
+    options = structure_type_config_constants_module.get_leg_option_right_options_with_labels()
+    return {"options": options}
+
+
 @router.get("/structure-types/{structure_type}/default-legs")
-def get_structure_type_default_legs(structure_type: str) -> Dict[str, Any]:
-    """Return default legs for the given structure type (industry-aligned defaults API)."""
-    legs = structure_type_schema_module.get_default_legs(structure_type)
+def get_structure_type_default_legs(request: Request, structure_type: str) -> Dict[str, Any]:
+    """Return default legs for the given structure type from config table (strategy_structure_type_leg)."""
+    reader = request.app.state.reader
+    legs = reader.get_structure_type_default_legs(structure_type)
     return {"legs": legs}
+
+
+@router.get("/structure-types/{structure_type}/subtypes")
+def get_structure_type_subtypes(request: Request, structure_type: str) -> Dict[str, Any]:
+    """Return subtypes with characteristics and meta_params, plus infer_rules for Wizard Step 2 / Edit."""
+    reader = request.app.state.reader
+    data = reader.get_structure_type_subtypes(structure_type)
+    return data
+
+
+@router.get("/structure-types/{structure_type}/meta-key-options")
+def get_meta_key_options_endpoint(structure_type: str) -> Dict[str, Any]:
+    """Return allowed meta_key values with display labels for the structure type. options: [{ value, label }]."""
+    options = structure_type_config_constants_module.get_meta_key_options_with_labels(structure_type)
+    return {"options": options}
+
+
+@router.get("/structure-types/{structure_type}/meta-value-options")
+def get_meta_value_options_endpoint(
+    structure_type: str, meta_key: str = Query(..., description="meta_key to get allowed values for")
+) -> Dict[str, Any]:
+    """Return allowed meta_value_text with display labels for (structure_type, meta_key). options: [{ value, label }]."""
+    options = structure_type_config_constants_module.get_meta_value_options_with_labels(
+        structure_type, meta_key
+    )
+    return {"options": options}
+
+
+@router.get("/structure-types/{structure_type}/subtypes/{subtype}/default-legs")
+def get_structure_subtype_default_legs(
+    request: Request, structure_type: str, subtype: str
+) -> Dict[str, Any]:
+    """Return default legs for the given (structure_type, subtype).
+
+    If subtype has its own legs (strategy_structure_subtype_leg), use those; otherwise fall back to type-level legs.
+    """
+    reader = request.app.state.reader
+    conn = getattr(reader, "_conn", None)
+    if conn is None:
+        # Fall back to reader-level helper if available; otherwise return type-level legs only.
+        legs = reader.get_structure_type_default_legs(structure_type)
+        return {"legs": legs}
+    legs = structure_type_config_module.get_default_legs_for_subtype(conn, structure_type, subtype)
+    return {"legs": legs}
+
+
+@router.put("/structure-types/{structure_type}/subtypes/{subtype}/default-legs")
+def replace_structure_subtype_legs_endpoint(
+    request: Request, structure_type: str, subtype: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Replace default legs for the subtype. Body: legs (list of role, direction, option_right, quantity_default?, sort_order?). Empty list = inherit type-level legs."""
+    config = _require_control_via_db(request)
+    legs = body.get("legs")
+    if not isinstance(legs, list):
+        raise HTTPException(status_code=400, detail="legs array is required")
+    try:
+        structure_type_config_write_module.replace_structure_subtype_legs(
+            config, structure_type, subtype, legs
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
+
+
+def _require_control_via_db(request: Request) -> Optional[dict]:
+    """Return control_via_db config or raise 503."""
+    control_via_db = getattr(request.app.state, "control_via_db", None)
+    if not control_via_db:
+        raise HTTPException(status_code=503, detail="Database control not configured")
+    return control_via_db
+
+
+@router.post("/structure-types")
+def create_structure_type_endpoint(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new structure type. Body: structure_type, display_label, sort_order, has_subtypes, type_explanation."""
+    config = _require_control_via_db(request)
+    try:
+        structure_type_config_write_module.create_structure_type(config, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"structure_type": (body.get("structure_type") or "").strip()}
+
+
+@router.put("/structure-types/{structure_type}")
+def update_structure_type_endpoint(
+    request: Request, structure_type: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Update structure type. Body: display_label?, sort_order?, has_subtypes?, type_explanation?."""
+    config = _require_control_via_db(request)
+    try:
+        ok = structure_type_config_write_module.update_structure_type(
+            config, structure_type, body
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not ok:
+        raise HTTPException(status_code=404, detail="Structure type not found")
+    return {"ok": True}
+
+
+@router.delete("/structure-types/{structure_type}")
+def delete_structure_type_endpoint(request: Request, structure_type: str) -> Dict[str, Any]:
+    """Delete structure type. Fails if referenced by strategy_structure or gate_safety_strategy."""
+    config = _require_control_via_db(request)
+    try:
+        ok = structure_type_config_write_module.delete_structure_type(config, structure_type)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    if not ok:
+        raise HTTPException(status_code=404, detail="Structure type not found")
+    return {"ok": True}
+
+
+@router.put("/structure-types/{structure_type}/default-legs")
+def replace_structure_type_legs_endpoint(
+    request: Request, structure_type: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Replace default legs for the structure type. Body: legs (list of role, direction, option_right, quantity_default?, sort_order?)."""
+    config = _require_control_via_db(request)
+    legs = body.get("legs")
+    if not isinstance(legs, list):
+        raise HTTPException(status_code=400, detail="legs array is required")
+    try:
+        structure_type_config_write_module.replace_structure_type_legs(
+            config, structure_type, legs
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
+
+
+@router.post("/structure-types/{structure_type}/subtypes")
+def create_subtype_endpoint(
+    request: Request, structure_type: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Create a new subtype. Body: subtype, display_label?, example?, typical_use?, subtype_explanation?, nature?, sort_order?."""
+    config = _require_control_via_db(request)
+    try:
+        structure_type_config_write_module.create_subtype(config, structure_type, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"subtype": (body.get("subtype") or "").strip()}
+
+
+@router.put("/structure-types/{structure_type}/subtypes/{subtype}")
+def update_subtype_endpoint(
+    request: Request, structure_type: str, subtype: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Update subtype. Body: display_label?, example?, typical_use?, subtype_explanation?, nature?, sort_order?."""
+    config = _require_control_via_db(request)
+    try:
+        ok = structure_type_config_write_module.update_subtype(
+            config, structure_type, subtype, body
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not ok:
+        raise HTTPException(status_code=404, detail="Subtype not found")
+    return {"ok": True}
+
+
+@router.delete("/structure-types/{structure_type}/subtypes/{subtype}")
+def delete_subtype_endpoint(
+    request: Request, structure_type: str, subtype: str
+) -> Dict[str, Any]:
+    """Delete subtype and its characteristics, meta_params, and infer rules."""
+    config = _require_control_via_db(request)
+    try:
+        ok = structure_type_config_write_module.delete_subtype(
+            config, structure_type, subtype
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not ok:
+        raise HTTPException(status_code=404, detail="Subtype not found")
+    return {"ok": True}
+
+
+@router.put("/structure-types/{structure_type}/subtypes/{subtype}/characteristics")
+def replace_subtype_characteristics_endpoint(
+    request: Request, structure_type: str, subtype: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Replace characteristics for the subtype. Body: items (list of strings)."""
+    config = _require_control_via_db(request)
+    items = body.get("items")
+    if items is not None and not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be an array")
+    try:
+        structure_type_config_write_module.replace_subtype_characteristics(
+            config, structure_type, subtype, items or []
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
+
+
+@router.put("/structure-types/{structure_type}/subtypes/{subtype}/meta-params")
+def replace_subtype_meta_params_endpoint(
+    request: Request, structure_type: str, subtype: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Replace meta params for the subtype. Body: items (list of { meta_key, display_label?, default_value_text?, param_kind?, sort_order? })."""
+    config = _require_control_via_db(request)
+    items = body.get("items")
+    if items is not None and not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be an array")
+    try:
+        structure_type_config_write_module.replace_subtype_meta_params(
+            config, structure_type, subtype, items or []
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
+
+
+@router.put("/structure-types/{structure_type}/infer-rules")
+def replace_infer_rules_endpoint(
+    request: Request, structure_type: str, body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Replace infer rules for the structure type. Body: items (list of { meta_key, meta_value_text, subtype })."""
+    config = _require_control_via_db(request)
+    items = body.get("items")
+    if items is not None and not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be an array")
+    try:
+        structure_type_config_write_module.replace_subtype_infer_rules(
+            config, structure_type, items or []
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
 
 
 @router.get("/structures")

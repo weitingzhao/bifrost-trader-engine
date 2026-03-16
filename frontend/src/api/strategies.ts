@@ -52,6 +52,101 @@ export interface StructurePayload {
   meta?: StructureMetaEntry[]
 }
 
+/** Structure type from config API (GET /strategies/structure-types). */
+export interface StructureTypeItem {
+  structure_type: string
+  display_label: string
+  sort_order: number
+  has_subtypes: boolean
+  type_explanation?: string | null
+}
+
+/** Meta param definition per subtype (from config API). */
+export interface MetaParamItem {
+  meta_key: string
+  display_label?: string | null
+  default_value_text?: string | null
+  param_kind?: string | null
+  sort_order: number
+}
+
+/** Subtype from config API (GET /strategies/structure-types/:type/subtypes). */
+export interface SubtypeItem {
+  subtype: string
+  display_label: string
+  example?: string | null
+  typical_use?: string | null
+  subtype_explanation?: string | null
+  nature?: string | null
+  sort_order: number
+  characteristics: string[]
+  meta_params: MetaParamItem[]
+}
+
+/** Rule to infer subtype from metadata (Edit flow). */
+export interface InferRuleItem {
+  meta_key: string
+  meta_value_text: string
+  subtype: string
+}
+
+/** Payload for create structure type. */
+export interface StructureTypePayload {
+  structure_type: string
+  display_label?: string
+  sort_order?: number
+  has_subtypes?: boolean
+  type_explanation?: string | null
+}
+
+/** Payload for update structure type (all optional). */
+export interface StructureTypeUpdatePayload {
+  display_label?: string
+  sort_order?: number
+  has_subtypes?: boolean
+  type_explanation?: string | null
+}
+
+/** One default leg for replace default-legs. */
+export interface StructureTypeLegPayload {
+  role?: string | null
+  direction?: string | null
+  option_right?: string | null
+  quantity_default?: number
+  quantity?: number
+  sort_order?: number
+}
+
+/** Payload for create subtype. */
+export interface SubtypePayload {
+  subtype: string
+  display_label?: string
+  example?: string | null
+  typical_use?: string | null
+  subtype_explanation?: string | null
+  nature?: string | null
+  sort_order?: number
+}
+
+/** Payload for update subtype (all optional). */
+export interface SubtypeUpdatePayload {
+  display_label?: string
+  example?: string | null
+  typical_use?: string | null
+  subtype_explanation?: string | null
+  nature?: string | null
+  sort_order?: number
+}
+
+/** One meta param for replace meta-params. */
+export interface MetaParamPayload {
+  meta_key: string
+  display_label?: string | null
+  default_value_text?: string | null
+  param_kind?: string | null
+  sort_order?: number
+}
+
 export interface GateSafetySet {
   gate_safety_strategy_id: number
   name: string
@@ -193,11 +288,223 @@ export async function fetchStructure(id: number): Promise<StrategyStructure> {
   return r.json()
 }
 
+/** Fetch structure types from config (for Wizard Step 1). */
+export async function fetchStructureTypes(): Promise<{ items: StructureTypeItem[] }> {
+  const r = await fetch(`${API}/strategies/structure-types`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
 /** Fetch default legs for a structure type (industry-aligned defaults API). Returns empty legs for custom/unknown. */
 export async function fetchStructureTypeDefaultLegs(structureType: string): Promise<{ legs: StructureLeg[] }> {
   const r = await fetch(`${API}/strategies/structure-types/${encodeURIComponent(structureType)}/default-legs`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
+}
+
+/** Fetch default legs for a specific subtype (falls back to type-level legs when no subtype override). */
+export async function fetchStructureSubtypeDefaultLegs(
+  structureType: string,
+  subtype: string,
+): Promise<{ legs: StructureLeg[] }> {
+  const r = await fetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/default-legs`
+  )
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Fetch subtypes with characteristics and meta_params, plus infer_rules (for Wizard Step 2 / Edit). */
+export async function fetchStructureTypeSubtypes(
+  structureType: string
+): Promise<{ subtypes: SubtypeItem[]; infer_rules: InferRuleItem[] }> {
+  const r = await fetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes`
+  )
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** One option for Type Config dropdowns: value (stored/API) and label (display). */
+export interface StructureTypeConfigOption {
+  value: string
+  label: string
+}
+
+/** Allowed param_kind values with display labels (single source of truth from backend). */
+export async function fetchParamKindOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/structure-types/param-kind-options`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Allowed leg role values with display labels for Type Config Default legs. */
+export async function fetchLegRoleOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/structure-types/leg-role-options`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Allowed leg direction values with display labels for Type Config Default legs. */
+export async function fetchLegDirectionOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/structure-types/leg-direction-options`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Allowed leg option_right values (empty = stock) with display labels for Type Config Default legs. */
+export async function fetchLegOptionRightOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/structure-types/leg-option-right-options`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Allowed meta_key values with display labels for a structure type (Type Config). */
+export async function fetchMetaKeyOptions(
+  structureType: string
+): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/meta-key-options`
+  )
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+/** Allowed meta_value_text with display labels for (structure_type, meta_key). Empty if no enum. */
+export async function fetchMetaValueOptions(
+  structureType: string,
+  metaKey: string
+): Promise<{ options: StructureTypeConfigOption[] }> {
+  const params = new URLSearchParams({ meta_key: metaKey })
+  const r = await fetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/meta-value-options?${params}`
+  )
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+async function structureTypeConfigFetch(
+  url: string,
+  options: { method: string; body?: string }
+): Promise<unknown> {
+  const r = await fetch(url, {
+    method: options.method,
+    headers: { 'Content-Type': 'application/json' },
+    body: options.body,
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error((j as { detail?: string }).detail || r.statusText)
+  return j
+}
+
+export async function createStructureType(
+  payload: StructureTypePayload
+): Promise<{ structure_type: string }> {
+  return structureTypeConfigFetch(`${API}/strategies/structure-types`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<{ structure_type: string }>
+}
+
+export async function updateStructureType(
+  structureType: string,
+  payload: StructureTypeUpdatePayload
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}`,
+    { method: 'PUT', body: JSON.stringify(payload) }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function deleteStructureType(structureType: string): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}`,
+    { method: 'DELETE' }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function replaceStructureTypeLegs(
+  structureType: string,
+  legs: StructureTypeLegPayload[]
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/default-legs`,
+    { method: 'PUT', body: JSON.stringify({ legs }) }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function replaceStructureSubtypeLegs(
+  structureType: string,
+  subtype: string,
+  legs: StructureTypeLegPayload[]
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/default-legs`,
+    { method: 'PUT', body: JSON.stringify({ legs }) }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function createSubtype(
+  structureType: string,
+  payload: SubtypePayload
+): Promise<{ subtype: string }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  ) as Promise<{ subtype: string }>
+}
+
+export async function updateSubtype(
+  structureType: string,
+  subtype: string,
+  payload: SubtypeUpdatePayload
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}`,
+    { method: 'PUT', body: JSON.stringify(payload) }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function deleteSubtype(
+  structureType: string,
+  subtype: string
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}`,
+    { method: 'DELETE' }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function replaceSubtypeCharacteristics(
+  structureType: string,
+  subtype: string,
+  items: string[]
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/characteristics`,
+    { method: 'PUT', body: JSON.stringify({ items }) }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function replaceSubtypeMetaParams(
+  structureType: string,
+  subtype: string,
+  items: MetaParamPayload[]
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/meta-params`,
+    { method: 'PUT', body: JSON.stringify({ items }) }
+  ) as Promise<{ ok: boolean }>
+}
+
+export async function replaceInferRules(
+  structureType: string,
+  items: InferRuleItem[]
+): Promise<{ ok: boolean }> {
+  return structureTypeConfigFetch(
+    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/infer-rules`,
+    { method: 'PUT', body: JSON.stringify({ items }) }
+  ) as Promise<{ ok: boolean }>
 }
 
 export async function createStructure(payload: StructurePayload): Promise<{ strategy_structure_id: number }> {

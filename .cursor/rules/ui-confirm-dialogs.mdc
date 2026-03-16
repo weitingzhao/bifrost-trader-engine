@@ -1,0 +1,38 @@
+---
+description: Prefer custom confirm dialogs over window.confirm for destructive actions
+alwaysApply: true
+---
+
+# UI Confirm Dialogs (Destructive Actions)
+
+- **Do not use** `window.confirm`, `window.alert`, 或浏览器默认弹窗来确认危险操作。
+- **统一使用应用内自定义弹窗 / 对话框组件**，保证样式、文案、多语言和可访问性一致。
+
+## Scope
+
+- 删除数据（如结构类型、子类型、策略、风控配置等）
+- 会影响交易行为、风控或生产运行状态的高级操作
+- 任何不可逆或用户预期中“高风险”的操作
+
+## Recommended Pattern (React)
+
+- 使用本页/本模块级的 `confirmState`（或类似命名）管理确认弹窗：
+  - `open: boolean`
+  - `title: string`
+  - `message: string`
+  - `confirming: boolean`
+  - `action: () => Promise<void> | void`
+- 触发删除时：
+  - 设置 `confirmState`，填好标题和说明文案
+  - 在确认按钮里调用 `action`，处理 loading / 错误，再关闭弹窗
+- 弹窗按钮文案统一使用：
+  - 主动：`Confirm delete` / `Confirm`
+  - 取消：`Cancel`
+
+## Example Copy Guidelines
+
+- 标题简洁说明对象：`Delete structure type`、`Delete subtype` 等
+- 文案明确后果和限制，例如：
+  - `This will remove its default legs and subtypes. It will fail if any strategy or gate set references this type.`
+- 保持与项目中现有 Type Config、Strategy 页面风格一致。
+

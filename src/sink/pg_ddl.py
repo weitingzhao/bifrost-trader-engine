@@ -750,6 +750,142 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_structure_meta_structure_id ON strategy_structure_meta (strategy_structure_id)"
         )
+        _log_table("strategy_structure_type", "Structure type template (config)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_type (
+                structure_type text PRIMARY KEY,
+                display_label text NOT NULL,
+                sort_order integer NOT NULL DEFAULT 0,
+                has_subtypes boolean NOT NULL DEFAULT false,
+                type_explanation text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        _log_table("strategy_structure_type_leg", "Structure type default legs (one row per leg)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_type_leg (
+                strategy_structure_type_leg_id bigserial PRIMARY KEY,
+                structure_type text NOT NULL REFERENCES strategy_structure_type(structure_type) ON DELETE CASCADE,
+                sort_order integer NOT NULL DEFAULT 0,
+                role text,
+                direction text,
+                option_right text,
+                quantity_default integer NOT NULL DEFAULT 1,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (structure_type, sort_order)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_type_leg_structure_type ON strategy_structure_type_leg (structure_type)"
+        )
+        _log_table("strategy_structure_subtype_leg", "Structure subtype default legs (one row per leg)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_leg (
+                strategy_structure_subtype_leg_id bigserial PRIMARY KEY,
+                structure_type text NOT NULL,
+                subtype text NOT NULL,
+                sort_order integer NOT NULL DEFAULT 0,
+                role text,
+                direction text,
+                option_right text,
+                quantity_default integer NOT NULL DEFAULT 1,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (structure_type, subtype, sort_order),
+                FOREIGN KEY (structure_type, subtype)
+                    REFERENCES strategy_structure_subtype(structure_type, subtype)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS strategy_structure_subtype_leg_type_subtype
+            ON strategy_structure_subtype_leg (structure_type, subtype)
+            """
+        )
+        _log_table("strategy_structure_subtype", "Structure subtype template (config)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_subtype (
+                structure_type text NOT NULL REFERENCES strategy_structure_type(structure_type) ON DELETE CASCADE,
+                subtype text NOT NULL,
+                display_label text NOT NULL,
+                example text,
+                typical_use text,
+                subtype_explanation text,
+                nature text,
+                sort_order integer NOT NULL DEFAULT 0,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (structure_type, subtype)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_structure_type ON strategy_structure_subtype (structure_type)"
+        )
+        _log_table("strategy_structure_subtype_characteristic", "Subtype characteristic (one row per item)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_characteristic (
+                strategy_structure_subtype_characteristic_id bigserial PRIMARY KEY,
+                structure_type text NOT NULL,
+                subtype text NOT NULL,
+                sort_order integer NOT NULL DEFAULT 0,
+                characteristic_text text NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_char_type_sub ON strategy_structure_subtype_characteristic (structure_type, subtype)"
+        )
+        _log_table("strategy_structure_subtype_meta_param", "Subtype meta param definition")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_meta_param (
+                strategy_structure_subtype_meta_param_id bigserial PRIMARY KEY,
+                structure_type text NOT NULL,
+                subtype text NOT NULL,
+                meta_key text NOT NULL,
+                display_label text,
+                default_value_text text,
+                param_kind text,
+                sort_order integer NOT NULL DEFAULT 0,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE,
+                UNIQUE (structure_type, subtype, meta_key)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_meta_param_type_sub ON strategy_structure_subtype_meta_param (structure_type, subtype)"
+        )
+        _log_table("strategy_structure_subtype_rule", "Subtype inference rule from meta")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_rule (
+                strategy_structure_subtype_rule_id bigserial PRIMARY KEY,
+                structure_type text NOT NULL,
+                subtype text NOT NULL,
+                meta_key text NOT NULL,
+                meta_value_text text NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE,
+                UNIQUE (structure_type, meta_key, meta_value_text)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_rule_lookup ON strategy_structure_subtype_rule (structure_type, meta_key, meta_value_text)"
+        )
         _log_table("strategy_opportunity", "Opportunity strategy")
         cur.execute(
             """

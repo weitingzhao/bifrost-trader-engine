@@ -18,7 +18,7 @@
 
 - **R-A1**：账户与持仓（见下「当前代码锚点」）；CONNECTED 时拉取，RUNNING 后每 1 小时拉取；断连 WAITING_IB 不拉取。
 - **R-M6**：每次心跳拉取标的现价并写入 daemon_auto_status_current.spot；GET /status 含 status.spot；监控页可展示标的与持仓市价、盈亏、期权虚实等。
-- **R-H2**：已实现。`scripts/stats_from_history.py` 只读 daemon_auto_status_history、daemon_auto_operations 表，产出按日/周对冲次数、盈亏汇总；可离线运行（`python scripts/stats_from_history.py [--days N] [--format json|text]`）。
+- **R-H2**：已实现。`scripts/check/stats_from_history.py` 只读 daemon_auto_status_history、daemon_auto_operations 表，产出按日/周对冲次数、盈亏汇总；可离线运行（`python scripts/check/stats_from_history.py [--days N] [--format json|text]`）。
 
 ---
 
@@ -51,7 +51,7 @@
 
 ### 步骤 3.5：历史与统计（R-H2）
 
-- [x] **3.5.1** 独立脚本或模块（如 `scripts/stats_from_history.py` 或 `src/stats/`）只读阶段 1 历史表，做聚合；不跑 FSM/Guard。
+- [x] **3.5.1** 独立脚本或模块（如 `scripts/check/stats_from_history.py` 或 `src/stats/`）只读阶段 1 历史表，做聚合；不跑 FSM/Guard。
 - [x] **3.5.2** 输出至少含：按日/周对冲次数、盈亏分布或汇总；可离线运行。
 
 ### 步骤 3.6：监控与控制（可选）
@@ -102,7 +102,7 @@
 
 | 关注点 | 位置 | 说明 |
 |--------|------|------|
-| 历史统计（R-H2） | scripts/stats_from_history.py | 只读 daemon_auto_status_history、daemon_auto_operations；产出按日/周对冲次数、盈亏汇总；可离线运行 |
+| 历史统计（R-H2） | scripts/check/stats_from_history.py | 只读 daemon_auto_status_history、daemon_auto_operations；产出按日/周对冲次数、盈亏汇总；可离线运行 |
 | 账户摘要 | IBConnector / Store | `get_managed_accounts()`、`get_account_summary(account)`；`Store.set_account_summary`、`get_account_id`、`get_accounts_data` |
 | 账户/持仓拉取时机 | gs_trading.py | CONNECTED 时 `_refresh_accounts_data()`；RUNNING 后按 1 小时间隔拉取账户与持仓 |
 | 持仓 | IBConnector / Store | `_refresh_positions(account)`，与账户同间隔；供对冲与风控使用 |

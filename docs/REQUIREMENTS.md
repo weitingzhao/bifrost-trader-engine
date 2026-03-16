@@ -160,7 +160,7 @@
 ### 4.1 历史统计（R-H2）
 
 - **目标**：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。
-- **形态**：存在**独立脚本或模块**（如 `scripts/stats_from_history.py` 或 `src/stats/`），**只读**阶段 1 sink 写入的历史表；**不跑** FSM/Guard/StateClassifier。输出至少包含按日/周对冲次数、盈亏分布或汇总；可离线运行，不依赖守护进程在线。
+- **形态**：存在**独立脚本或模块**（如 `scripts/check/stats_from_history.py` 或 `src/stats/`），**只读**阶段 1 sink 写入的历史表；**不跑** FSM/Guard/StateClassifier。输出至少包含按日/周对冲次数、盈亏分布或汇总；可离线运行，不依赖守护进程在线。
 - **Performance 计算逻辑**：按日/周/月汇总、胜率、盈亏分布及 Performance 页的**计算逻辑**与 R-M7 的 Performance 子页一致，按 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8 与阶段 3 验收清单分阶段实现并验收。
 - **与分步计划**：阶段 3。
 

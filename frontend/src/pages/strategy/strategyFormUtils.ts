@@ -112,10 +112,10 @@ export function inferCoveredCallSubtypeFromMeta(
   const rule = metadata.call_strike_rule
   if (typeof rule !== 'string') return null
   const r = rule.trim().toLowerCase()
-  if (r === 'otm_10pct') return 'otm'
+  if (r === 'normal_otm') return 'otm'
   if (r === 'atm') return 'atm'
   if (r === 'itm') return 'itm'
-  if (r === 'deep_otm_20pct') return 'deep_otm'
+  if (r === 'deep_otm') return 'deep_otm'
   return null
 }
 
@@ -130,7 +130,7 @@ export function getCoveredCallSubtypeMeta(
   const meta: StructureMetaEntry[] = []
   switch (subtype) {
     case 'otm':
-      meta.push({ meta_key: 'call_strike_rule', meta_value_text: 'otm_10pct' })
+      meta.push({ meta_key: 'call_strike_rule', meta_value_text: 'normal_otm' })
       if (params?.otm_pct != null) meta.push({ meta_key: 'otm_pct', meta_value_text: String(params.otm_pct) })
       break
     case 'atm':
@@ -141,7 +141,7 @@ export function getCoveredCallSubtypeMeta(
       if (params?.itm_pct != null) meta.push({ meta_key: 'itm_pct', meta_value_text: String(params.itm_pct) })
       break
     case 'deep_otm':
-      meta.push({ meta_key: 'call_strike_rule', meta_value_text: 'deep_otm_20pct' })
+      meta.push({ meta_key: 'call_strike_rule', meta_value_text: 'deep_otm' })
       if (params?.otm_pct != null) meta.push({ meta_key: 'otm_pct', meta_value_text: String(params.otm_pct) })
       break
     default:
