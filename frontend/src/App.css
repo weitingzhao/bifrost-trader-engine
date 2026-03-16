@@ -210,6 +210,16 @@ body::before {
   flex-shrink: 0;
 }
 
+/* Celery in header: reuse Dashboard Queue pill style (dashboard-worker-counts) */
+.app-header-system-lamps-wrap .dashboard-worker-counts {
+  margin: 0;
+}
+.app-header-system-lamps-wrap .dashboard-worker-counts .lamp-sm {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
 .app-header-lamp-popover {
   position: absolute;
   top: 100%;
@@ -231,6 +241,22 @@ body::before {
   font-size: var(--text-body);
   font-weight: 600;
   color: var(--color-text-main);
+}
+
+.app-header-lamp-popover-name-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--color-link);
+  cursor: pointer;
+  text-decoration: none;
+  transition: color var(--transition-fast), text-decoration var(--transition-fast);
+}
+.app-header-lamp-popover-name-link:hover {
+  color: var(--color-link-hover);
+  text-decoration: underline;
 }
 
 .app-header-lamp-switch {
@@ -1129,6 +1155,22 @@ body::before {
   border-top: none;
 }
 
+/* Highlight when navigating from header lamp (e.g. click "Daemon" → scroll to section). */
+.system-section-highlight {
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--color-accent);
+  animation: system-section-highlight-pulse 2s ease-out 1;
+}
+
+@keyframes system-section-highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 3px var(--color-accent-glow), 0 0 12px var(--color-accent-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 2px var(--color-accent);
+  }
+}
+
 .console-card-header {
   display: flex;
   align-items: flex-start;
@@ -1290,6 +1332,43 @@ body::before {
   max-width: 10rem;
   opacity: 1;
   transform: translateX(0);
+}
+
+.dashboard-open-orders-cluster {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.dashboard-open-orders-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-elevated);
+  color: inherit;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.dashboard-open-orders-btn:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-hover, rgba(128, 128, 128, 0.08));
+}
+
+.dashboard-open-orders-label {
+  color: var(--color-text-muted);
+}
+
+.dashboard-open-orders-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+  min-width: 1.25rem;
+  text-align: right;
 }
 
 .dashboard-streams-cluster {

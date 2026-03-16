@@ -44,6 +44,20 @@ export function PositionsPage({
   const [openTab, setOpenTab] = useState<'options' | 'stocks'>('options')
   const getOpenOptGroupKey = (g: OpenOptionGroup) => `${g.contract_key}-${g.strike}-${g.expiry}-${g.pool_label}`
   const [expandedOpenDetailKeys, setExpandedOpenDetailKeys] = useState<string[]>([])
+  type OpenOptSortCol =
+    | 'contract'
+    | 'expiry'
+    | 'strike'
+    | 'last'
+    | 'sell_size'
+    | 'sell_at'
+    | 'sell_premium'
+    | 'time'
+    | 'un_pnl'
+  const [openOptSort, setOpenOptSort] = useState<{ column: OpenOptSortCol; dir: 'asc' | 'desc' }>({
+    column: 'expiry',
+    dir: 'desc',
+  })
 
   const [openAccordionMode, setOpenAccordionMode] = useState<boolean>(false)
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
@@ -270,6 +284,112 @@ export function PositionsPage({
     return result
   }, [openFilterPool, liveOptionPositions, openOffTrackBaseExecutions])
 
+  /** Latest time (unix ts) for sorting; null if none. */
+  const getOpenOptGroupTime = (g: OpenOptionGroup): number | null => {
+    if (g.kind === 'live') {
+      const times = (g.positions ?? [])
+        .map(p => (p.exec_time != null ? Number(p.exec_time) : null))
+        .filter((t): t is number => t != null && Number.isFinite(t))
+      return times.length > 0 ? Math.max(...times) : null
+    }
+    if (g.kind === 'offtrack') {
+      const times = (g.trades ?? [])
+        .map(ex => (ex.time != null ? Number(ex.time) : ex.created_at != null ? Number(ex.created_at) : null))
+        .filter((t): t is number => t != null && Number.isFinite(t))
+      return times.length > 0 ? Math.max(...times) : null
+    }
+    return null
+  }
+
+  /** Underlying last price for sorting; null if no quote. */
+  const getOpenOptGroupLast = (
+    g: OpenOptionGroup,
+    quotes: Record<string, RealtimeQuote>,
+  ): number | null => {
+    const symbol = getContractLabelParts(g.contract_key).symbol
+    if (!symbol) return null
+    const q = quotes[symbol]
+    const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
+    return last
+  }
+
+  const sortedOpenOptionGroups = useMemo((): OpenOptionGroup[] => {
+    const list = [...openOptionGroups]
+    const { column, dir } = openOptSort
+    const mult = dir === 'asc' ? 1 : -1
+    list.sort((a, b) => {
+      if (column === 'contract') {
+        const aParts = getContractLabelParts(a.contract_key)
+        const bParts = getContractLabelParts(b.contract_key)
+        const cmpSymbol = (aParts.symbol ?? '').localeCompare(bParts.symbol ?? '')
+        if (cmpSymbol !== 0) return mult * cmpSymbol
+        const cmpExp = (a.expiry ?? '').localeCompare(b.expiry ?? '')
+        if (cmpExp !== 0) return mult * cmpExp
+        const cmpStrike = (a.strike ?? 0) - (b.strike ?? 0)
+        return mult * (cmpStrike !== 0 ? cmpStrike : (a.contract_key ?? '').localeCompare(b.contract_key ?? ''))
+      }
+      if (column === 'expiry') {
+        const cmp = (a.expiry ?? '').localeCompare(b.expiry ?? '')
+        if (cmp !== 0) return mult * cmp
+        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+        return mult * aSym.localeCompare(bSym)
+      }
+      if (column === 'strike') {
+        const cmp = (a.strike ?? 0) - (b.strike ?? 0)
+        if (cmp !== 0) return mult * cmp
+        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+        return mult * aSym.localeCompare(bSym)
+      }
+      if (column === 'last') {
+        const aLast = getOpenOptGroupLast(a, quotesMap) ?? -Infinity
+        const bLast = getOpenOptGroupLast(b, quotesMap) ?? -Infinity
+        if (aLast !== bLast) return mult * (aLast - bLast)
+        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+        return mult * aSym.localeCompare(bSym)
+      }
+      if (column === 'sell_size') {
+        const cmp = (a.sell_volume ?? 0) - (b.sell_volume ?? 0)
+        if (cmp !== 0) return mult * cmp
+        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+        return mult * aSym.localeCompare(bSym)
+      }
+      if (column === 'sell_at') {
+        const aVal = a.sell_avg_price != null && Number.isFinite(a.sell_avg_price) ? a.sell_avg_price : -Infinity
+        const bVal = b.sell_avg_price != null && Number.isFinite(b.sell_avg_price) ? b.sell_avg_price : -Infinity
+        if (aVal !== bVal) return mult * (aVal - bVal)
+        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+        return mult * aSym.localeCompare(bSym)
+      }
+      if (column === 'sell_premium') {
+        const cmp = (a.sell_premium ?? 0) - (b.sell_premium ?? 0)
+        if (cmp !== 0) return mult * cmp
+        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+        return mult * aSym.localeCompare(bSym)
+      }
+      if (column === 'time') {
+        const aTs = getOpenOptGroupTime(a) ?? 0
+        const bTs = getOpenOptGroupTime(b) ?? 0
+        if (aTs !== bTs) return mult * (aTs - bTs)
+        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+        return mult * aSym.localeCompare(bSym)
+      }
+      // column === 'un_pnl'
+      const cmp = (a.unrealized_pnl ?? 0) - (b.unrealized_pnl ?? 0)
+      if (cmp !== 0) return mult * cmp
+      const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
+      const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
+      return mult * aSym.localeCompare(bSym)
+    })
+    return list
+  }, [openOptionGroups, openOptSort, quotesMap])
+
   const liveStockPositions = useMemo(
     () => livePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT'),
     [livePositions],
@@ -460,27 +580,273 @@ export function PositionsPage({
                       <thead>
                         <tr>
                           <th rowSpan={2} className="replay-opt-expand-col"></th>
-                          <th rowSpan={2}>Contract</th>
-                          <th rowSpan={2}>Expiry</th>
-                          <th rowSpan={2}>STRIKE</th>
-                          <th rowSpan={2} title="Underlying last price (same as Watchlist Last); (Last − Strike) / Last %">Last</th>
+                          <th
+                            rowSpan={2}
+                            className="replay-th-sortable"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'contract'
+                                  ? { column: 'contract', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'contract', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'contract'
+                                    ? { column: 'contract', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'contract', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            title="Sort by Contract"
+                            aria-sort={openOptSort.column === 'contract' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            Contract{' '}
+                            {openOptSort.column === 'contract' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
+                          </th>
+                          <th
+                            rowSpan={2}
+                            className="replay-th-sortable"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'expiry'
+                                  ? { column: 'expiry', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'expiry', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'expiry'
+                                    ? { column: 'expiry', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'expiry', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            title="Sort by Expiry"
+                            aria-sort={openOptSort.column === 'expiry' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            Expiry{' '}
+                            {openOptSort.column === 'expiry' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
+                          </th>
+                          <th
+                            rowSpan={2}
+                            className="replay-th-sortable"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'strike'
+                                  ? { column: 'strike', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'strike', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'strike'
+                                    ? { column: 'strike', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'strike', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            title="Sort by Strike"
+                            aria-sort={openOptSort.column === 'strike' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            STRIKE{' '}
+                            {openOptSort.column === 'strike' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
+                          </th>
+                          <th
+                            rowSpan={2}
+                            className="replay-th-sortable"
+                            title="Underlying last price (same as Watchlist Last); (Last − Strike) / Last %"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'last'
+                                  ? { column: 'last', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'last', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'last'
+                                    ? { column: 'last', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'last', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            aria-sort={openOptSort.column === 'last' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            Last{' '}
+                            {openOptSort.column === 'last' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
+                          </th>
                           <th colSpan={3}>BUY</th>
                           <th colSpan={3}>SELL</th>
-                          <th rowSpan={2} title="Same as Detail Time (position_exec_time or trade time); latest if multiple.">Time</th>
-                          <th rowSpan={2}>UN PNL</th>
+                          <th
+                            rowSpan={2}
+                            className="replay-th-sortable"
+                            title="Same as Detail Time (position_exec_time or trade time); latest if multiple."
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'time'
+                                  ? { column: 'time', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'time', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'time'
+                                    ? { column: 'time', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'time', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            aria-sort={openOptSort.column === 'time' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            Time{' '}
+                            {openOptSort.column === 'time' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
+                          </th>
+                          <th
+                            rowSpan={2}
+                            className="replay-th-sortable"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'un_pnl'
+                                  ? { column: 'un_pnl', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'un_pnl', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'un_pnl'
+                                    ? { column: 'un_pnl', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'un_pnl', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            title="Sort by Unrealized PnL"
+                            aria-sort={openOptSort.column === 'un_pnl' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            UN PNL{' '}
+                            {openOptSort.column === 'un_pnl' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
+                          </th>
                           <th rowSpan={2}>Account</th>
                         </tr>
                         <tr>
                           <th className="replay-th-sub">Size</th>
                           <th className="replay-th-sub">@</th>
                           <th className="replay-th-sub">Cost</th>
-                          <th className="replay-th-sub">Size</th>
-                          <th className="replay-th-sub">@</th>
-                          <th className="replay-th-sub">Premium</th>
+                          <th
+                            className="replay-th-sub replay-th-sortable"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'sell_size'
+                                  ? { column: 'sell_size', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'sell_size', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'sell_size'
+                                    ? { column: 'sell_size', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'sell_size', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            title="Sort by Sell size"
+                            aria-sort={openOptSort.column === 'sell_size' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            Size{openOptSort.column === 'sell_size' ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </th>
+                          <th
+                            className="replay-th-sub replay-th-sortable"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'sell_at'
+                                  ? { column: 'sell_at', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'sell_at', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'sell_at'
+                                    ? { column: 'sell_at', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'sell_at', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            title="Sort by Sell @"
+                            aria-sort={openOptSort.column === 'sell_at' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            @{openOptSort.column === 'sell_at' ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </th>
+                          <th
+                            className="replay-th-sub replay-th-sortable"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setOpenOptSort(prev =>
+                                prev.column === 'sell_premium'
+                                  ? { column: 'sell_premium', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                  : { column: 'sell_premium', dir: 'desc' },
+                              )
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setOpenOptSort(prev =>
+                                  prev.column === 'sell_premium'
+                                    ? { column: 'sell_premium', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+                                    : { column: 'sell_premium', dir: 'desc' },
+                                )
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            title="Sort by Sell premium"
+                            aria-sort={openOptSort.column === 'sell_premium' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                          >
+                            Premium{openOptSort.column === 'sell_premium' ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {openOptionGroups.map(group => {
+                        {sortedOpenOptionGroups.map(group => {
                           const groupKey = getOpenOptGroupKey(group)
                           const isExpanded = expandedOpenDetailKeys.includes(groupKey)
                           return (
@@ -622,7 +988,7 @@ export function PositionsPage({
                   </div>
 
                   {expandedOpenDetailKeys.length > 0 && (() => {
-                      const expandedGroups = openOptionGroups.filter(g => expandedOpenDetailKeys.includes(getOpenOptGroupKey(g)))
+                      const expandedGroups = sortedOpenOptionGroups.filter(g => expandedOpenDetailKeys.includes(getOpenOptGroupKey(g)))
                       let detailsTotalPnl = 0
                       for (const group of expandedGroups) {
                         if (group.kind === 'live') {
@@ -671,7 +1037,7 @@ export function PositionsPage({
                           </tr>
                         </thead>
                         <tbody>
-                          {openOptionGroups
+                          {sortedOpenOptionGroups
                             .filter(group => expandedOpenDetailKeys.includes(getOpenOptGroupKey(group)))
                             .flatMap(group =>
                               group.kind === 'live'

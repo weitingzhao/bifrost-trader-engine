@@ -169,7 +169,17 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   }, [])
 
   const quoteBySymbol = useMemo(
-    () => Object.fromEntries(realtimeQuotes.map(q => [q.symbol, q])),
+    () => Object.fromEntries(
+      realtimeQuotes.filter(q => !q.contract_key).map(q => [q.symbol, q]),
+    ),
+    [realtimeQuotes],
+  )
+  const quoteByContractKey = useMemo(
+    () => Object.fromEntries(
+      realtimeQuotes
+        .filter((q): q is RealtimeQuote & { contract_key: string } => Boolean(q.contract_key))
+        .map(q => [q.contract_key, q]),
+    ),
     [realtimeQuotes],
   )
 
@@ -532,8 +542,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                 <td colSpan={8}>{catLabel}</td>
               </tr>
               {items.map((item) => {
-                const sym = symbolFromItem(item)
-                const q = quoteBySymbol[sym]
+                const q = quoteByContractKey[item.contract_key] ?? quoteBySymbol[symbolFromItem(item)]
                 const hasHolding = contractKeysWithPosition.has(item.contract_key.trim())
                 return (
                   <tr key={item.contract_key}>

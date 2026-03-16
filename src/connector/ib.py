@@ -45,6 +45,7 @@ class IBConnector:
         self._commission_registered = False
         self._stock_contract: Optional[Stock] = None
         self._tickers: Dict[str, Ticker] = {}  # symbol -> Ticker for multi-symbol subscription
+        self._option_tickers: Dict[str, Ticker] = {}  # contract_key -> Ticker for Watchlist OPT subscription
         self._commission_report_callback: Optional[
             Callable[[str, Optional[float], Optional[float], Optional[str], Optional[float], Optional[int]], None]
         ] = None
@@ -264,6 +265,12 @@ class IBConnector:
         """Disconnect from IB."""
         if not self._connected:
             return
+        for ck, ticker in list(self._option_tickers.items()):
+            try:
+                self.ib.cancelMktData(ticker)
+            except Exception as e:
+                logger.debug("disconnect cancelMktData option %s: %s", ck, e)
+        self._option_tickers.clear()
         self._tickers.clear()
         if self._commission_registered:
             try:
@@ -652,6 +659,93 @@ class IBConnector:
             logger.warning("unsubscribe_ticker %s: %s", s, e)
         finally:
             self._tickers.pop(s, None)
+
+    async def subscribe_option_ticker(
+        self,
+        contract_key: str,
+        symbol: str,
+        expiry: str,
+        strike: float,
+        right: str,
+        on_update: Callable[[str, Ticker], None],
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ) -> Optional[Ticker]:
+        """Subscribe to live ticker for one option contract. on_update(contract_key, ticker) on each tick.
+        Tries reqMktData without qualify first; falls back to qualify then reqMktData if no data. Returns Ticker or None."""
+        if not self.is_connected:
+            logger.warning("subscribe_option_ticker: not connected")
+            return None
+        exp = (expiry or "").strip()
+        rt = (right or "C").upper()
+        if rt not in ("C", "P"):
+            return None
+        if not symbol or not exp or strike is None:
+            return None
+        contract = Option(symbol.strip(), exp, float(strike), rt, exchange, currency)
+        try:
+            ticker = self.ib.reqMktData(contract, "", False, False)
+            ticker.updateEvent += lambda t: on_update(contract_key, t)
+            self._option_tickers[contract_key] = ticker
+            return ticker
+        except Exception as e:
+            logger.debug("subscribe_option_ticker (no qualify) %s: %s", contract_key, e)
+        try:
+            await self.ib.qualifyContractsAsync(contract)
+            ticker = self.ib.reqMktData(contract, "", False, False)
+            ticker.updateEvent += lambda t: on_update(contract_key, t)
+            self._option_tickers[contract_key] = ticker
+            return ticker
+        except Exception as e:
+            logger.error("subscribe_option_ticker %s: %s", contract_key, e)
+            return None
+
+    async def subscribe_option_tickers(
+        self,
+        contracts: List[Dict[str, Any]],
+        on_update: Callable[[str, Ticker], None],
+    ) -> Dict[str, Ticker]:
+        """Subscribe to live tickers for multiple option contracts. on_update(contract_key, ticker) on each tick.
+        contracts: list of dicts with contract_key, symbol, expiry, strike, option_right. Returns dict contract_key -> Ticker."""
+        out: Dict[str, Ticker] = {}
+        if not self.is_connected:
+            logger.warning("subscribe_option_tickers: not connected")
+            return out
+        seen: set = set()
+        for c in contracts:
+            ck = (c.get("contract_key") or "").strip()
+            if not ck or ck in seen:
+                continue
+            seen.add(ck)
+            symbol = (c.get("symbol") or "").strip()
+            expiry = (c.get("expiry") or "").strip()
+            strike = c.get("strike")
+            right = (c.get("option_right") or "C").strip().upper() or "C"
+            if not symbol or not expiry or strike is None:
+                continue
+            ticker = await self.subscribe_option_ticker(
+                ck, symbol, expiry, float(strike), right, on_update
+            )
+            if ticker is not None:
+                out[ck] = ticker
+        return out
+
+    def unsubscribe_option_ticker(self, contract_key: str) -> None:
+        """Cancel market data for one option contract and remove from _option_tickers."""
+        ck = (contract_key or "").strip()
+        if not ck or ck not in self._option_tickers:
+            return
+        ticker = self._option_tickers[ck]
+        try:
+            self.ib.cancelMktData(ticker)
+        except Exception as e:
+            logger.warning("unsubscribe_option_ticker %s: %s", ck, e)
+        finally:
+            self._option_tickers.pop(ck, None)
+
+    def get_subscribed_option_contract_keys(self) -> List[str]:
+        """Return list of contract_keys currently subscribed for option market data."""
+        return list(self._option_tickers.keys())
 
     def subscribe_positions(self, on_update: Callable[[], None]) -> None:
         """Subscribe to position updates; on_update() called when positions change."""

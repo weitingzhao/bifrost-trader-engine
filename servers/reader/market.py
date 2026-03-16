@@ -321,6 +321,47 @@ def get_stock_day_fallback_price(conn: Any, symbol: str) -> Optional[Tuple[float
         return None
 
 
+def get_contract_quotes_conn(conn: Any, contract_keys: List[str]) -> List[Dict[str, Any]]:
+    """Return bid/ask/last/mid from contract_quote_live for given contract_keys. Used by GET /quotes for OPT rows."""
+    if not contract_keys:
+        return []
+    keys = [k for k in contract_keys if k and str(k).strip()]
+    if not keys:
+        return []
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            placeholders = ", ".join("%s" for _ in keys)
+            cur.execute(
+                """
+                SELECT contract_key, symbol, sec_type, expiry, strike, option_right, bid, ask, last, mid,
+                       extract(epoch from updated_at) AS ts
+                FROM contract_quote_live
+                WHERE contract_key IN (""" + placeholders + """)
+                """,
+                tuple(keys),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "contract_key": r["contract_key"],
+                "symbol": r["symbol"],
+                "sec_type": r["sec_type"],
+                "expiry": r["expiry"],
+                "strike": r["strike"],
+                "option_right": r["option_right"],
+                "bid": float(r["bid"]) if r["bid"] is not None else None,
+                "ask": float(r["ask"]) if r["ask"] is not None else None,
+                "last": float(r["last"]) if r["last"] is not None else None,
+                "mid": float(r["mid"]) if r["mid"] is not None else None,
+                "ts": float(r["ts"]) if r["ts"] is not None else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.debug("get_contract_quotes_conn failed: %s", e)
+        return []
+
+
 def get_bars_stats(conn: Any, symbol: Optional[str] = None) -> Dict[str, Any]:
     """Return row counts for the given symbol in stock_day and stock_min (per period)."""
     if not symbol or not symbol.strip():

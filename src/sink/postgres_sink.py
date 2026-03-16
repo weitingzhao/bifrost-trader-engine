@@ -1022,6 +1022,79 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             return []
 
+    def get_watchlist_opt_contracts(self) -> List[Dict[str, Any]]:
+        """Return watchlist rows where sec_type is OPT (contract_key, symbol, sec_type, expiry, strike, option_right).
+        Used by daemon to subscribe to Real-time ticker for Watchlist options. Ordered by created_at DESC for consistent truncation."""
+        if not self._ensure_conn():
+            return []
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT contract_key, symbol, sec_type, expiry, strike, option_right
+                    FROM watchlist
+                    WHERE sec_type IS NOT NULL AND UPPER(TRIM(sec_type)) = 'OPT'
+                    ORDER BY created_at DESC NULLS LAST
+                    """
+                )
+                rows = cur.fetchall()
+            return [
+                {
+                    "contract_key": str(r[0]),
+                    "symbol": str(r[1]) if r[1] else "",
+                    "sec_type": str(r[2]) if r[2] else "OPT",
+                    "expiry": str(r[3]) if r[3] else "",
+                    "strike": float(r[4]) if r[4] is not None else None,
+                    "option_right": str(r[5]) if r[5] else "",
+                }
+                for r in rows
+                if r and r[0]
+            ]
+        except Exception as e:
+            logger.debug("get_watchlist_opt_contracts failed: %s", e)
+            self._conn.rollback()
+            return []
+
+    def get_contract_quotes(self, contract_keys: List[str]) -> List[Dict[str, Any]]:
+        """Return bid/ask/last/mid from contract_quote_live for given contract_keys. Used by GET /quotes for OPT rows."""
+        if not contract_keys or not self._ensure_conn():
+            return []
+        keys = [k for k in contract_keys if k and str(k).strip()]
+        if not keys:
+            return []
+        try:
+            with self._conn.cursor() as cur:
+                placeholders = ", ".join("%s" for _ in keys)
+                cur.execute(
+                    """
+                    SELECT contract_key, symbol, sec_type, expiry, strike, option_right, bid, ask, last, mid
+                    FROM contract_quote_live
+                    WHERE contract_key IN (""" + placeholders + """)
+                    """,
+                    tuple(keys),
+                )
+                rows = cur.fetchall()
+            return [
+                {
+                    "contract_key": r[0],
+                    "symbol": r[1],
+                    "sec_type": r[2],
+                    "expiry": r[3],
+                    "strike": r[4],
+                    "option_right": r[5],
+                    "bid": float(r[6]) if r[6] is not None else None,
+                    "ask": float(r[7]) if r[7] is not None else None,
+                    "last": float(r[8]) if r[8] is not None else None,
+                    "mid": float(r[9]) if r[9] is not None else None,
+                }
+                for r in rows
+                if r
+            ]
+        except Exception as e:
+            logger.debug("get_contract_quotes failed: %s", e)
+            self._conn.rollback()
+            return []
+
     def get_stream_position_stk_symbols(self) -> List[str]:
         """Return distinct STK symbols from account_positions for stream host/secondary accounts (settings.stream_host_account_id, stream_secondary_account_id). Used by daemon to include Market Streams position symbols in ticker subscription."""
         if not self._ensure_conn():

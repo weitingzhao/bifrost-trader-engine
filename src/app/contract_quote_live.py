@@ -3,9 +3,12 @@ Ticker subscribe/unsubscribe use Host Listener (listener_connector), not Host Tr
 
 import logging
 import math
-from typing import Any, Set
+from typing import Any, Dict, List, Set
 
 logger = logging.getLogger(__name__)
+
+# Max Watchlist OPT contracts to subscribe (IB ~100 lines total; reserve room for STK).
+MAX_OPTION_TICKER_CONTRACTS = 50
 
 
 def _ticker_connector(app: Any) -> Any:
@@ -37,15 +40,19 @@ def _redis_remove_subscribed_and_quote(app: Any, symbol: str) -> None:
 
 
 async def release_ticker_subscriptions(app: Any) -> None:
-    """Unsubscribe all Real-time ticker subscriptions; clear Redis quotes and ticker:subscribed set. Clears last_control_message."""
+    """Unsubscribe all Real-time ticker subscriptions (STK + OPT); clear Redis quotes and ticker:subscribed set. Clears last_control_message."""
     conn = _ticker_connector(app)
     if not conn or not conn.is_connected:
         return
-    current = set(conn.get_subscribed_ticker_symbols())
-    for sym in sorted(current):
+    current_stk = set(conn.get_subscribed_ticker_symbols())
+    for sym in sorted(current_stk):
         conn.unsubscribe_ticker(sym)
         _redis_remove_subscribed_and_quote(app, sym)
         logger.info("[Daemon] Real-time ticker unsubscribed: %s", sym)
+    current_opt = list(conn.get_subscribed_option_contract_keys())
+    for ck in current_opt:
+        conn.unsubscribe_option_ticker(ck)
+        logger.info("[Daemon] Real-time option ticker unsubscribed: %s", ck)
     if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
         app._redis_quotes.clear_subscribed_set()
     _clear_control_message(app)
@@ -66,6 +73,79 @@ def _build_init_desired_symbols(app: Any) -> set:
         if sym:
             desired.add(sym)
     return desired
+
+
+def _build_desired_option_contracts(app: Any) -> List[Dict[str, Any]]:
+    """Watchlist OPT contracts for ticker subscription; truncated to MAX_OPTION_TICKER_CONTRACTS."""
+    if not app._status_sink or not hasattr(app._status_sink, "get_watchlist_opt_contracts"):
+        return []
+    contracts = getattr(app._status_sink, "get_watchlist_opt_contracts")() or []
+    return contracts[:MAX_OPTION_TICKER_CONTRACTS]
+
+
+def _parse_contract_key(contract_key: str) -> dict:
+    """Parse contract_key (symbol|sec_type|expiry|strike|right) into meta dict. Returns {} if invalid."""
+    if not contract_key or "|" not in contract_key:
+        return {}
+    parts = contract_key.split("|")
+    if len(parts) < 5:
+        return {}
+    try:
+        strike = float(parts[3]) if parts[3] else None
+    except (TypeError, ValueError):
+        strike = None
+    return {
+        "symbol": (parts[0] or "").strip(),
+        "sec_type": (parts[1] or "OPT").strip().upper() or "OPT",
+        "expiry": (parts[2] or "").strip(),
+        "strike": strike,
+        "option_right": (parts[4] or "C").strip().upper() or "C",
+    }
+
+
+def on_ticker_for_contract_key(app: Any, contract_key: str, ticker: Any) -> None:
+    """On OPT ticker update: build row and write to contract_quote_live. Does not write Redis."""
+    if not app._status_sink or not hasattr(app._status_sink, "write_contract_quote_live"):
+        return
+    meta = _parse_contract_key(contract_key)
+    if not meta:
+        return
+    bid = getattr(ticker, "bid", None)
+    ask = getattr(ticker, "ask", None)
+    last = getattr(ticker, "last", None)
+    try:
+        bid_f = float(bid) if bid is not None else None
+        ask_f = float(ask) if ask is not None else None
+        last_f = float(last) if last is not None else None
+    except (TypeError, ValueError):
+        bid_f = ask_f = last_f = None
+    if bid_f is not None and not math.isfinite(bid_f):
+        bid_f = None
+    if ask_f is not None and not math.isfinite(ask_f):
+        ask_f = None
+    if last_f is not None and not math.isfinite(last_f):
+        last_f = None
+    if bid_f is None and ask_f is None and last_f is None:
+        return
+    mid = (bid_f + ask_f) / 2.0 if bid_f is not None and ask_f is not None else last_f
+    if mid is not None and not math.isfinite(mid):
+        mid = last_f
+    row = {
+        "contract_key": contract_key,
+        "symbol": meta["symbol"],
+        "sec_type": meta["sec_type"],
+        "expiry": meta["expiry"],
+        "strike": meta["strike"],
+        "option_right": meta["option_right"],
+        "bid": bid_f,
+        "ask": ask_f,
+        "last": last_f,
+        "mid": mid,
+    }
+    try:
+        app._status_sink.write_contract_quote_live([row])
+    except Exception as e:
+        logger.debug("on_ticker_for_contract_key write_contract_quote_live %s: %s", contract_key, e)
 
 
 async def init_ticker_subscriptions(app: Any) -> None:
@@ -93,6 +173,16 @@ async def init_ticker_subscriptions(app: Any) -> None:
             logger.info(
                 "[Daemon] Real-time ticker (init) subscribed: %s",
                 sorted(added.keys()),
+            )
+    opt_contracts = _build_desired_option_contracts(app)
+    if opt_contracts:
+        opt_added = await conn.subscribe_option_tickers(
+            opt_contracts, app._on_ticker_for_contract_key
+        )
+        if opt_added:
+            logger.info(
+                "[Daemon] Real-time option ticker (init) subscribed: %s",
+                sorted(opt_added.keys()),
             )
 
 
@@ -144,6 +234,22 @@ async def sync_ticker_subscriptions_from_redis(
         if added:
             _redis_add_subscribed(app, set(added.keys()))
             logger.info("[Daemon] Real-time ticker subscribed (new): %s", sorted(added.keys()))
+    # OPT: sync desired OPT contracts (watchlist) vs currently subscribed OPT
+    desired_opt_list = _build_desired_option_contracts(app)
+    desired_opt = {c["contract_key"] for c in desired_opt_list if c.get("contract_key")}
+    subscribed_opt = set(conn.get_subscribed_option_contract_keys())
+    opt_unsub = subscribed_opt - desired_opt
+    opt_sub = desired_opt - subscribed_opt
+    for ck in sorted(opt_unsub):
+        conn.unsubscribe_option_ticker(ck)
+        logger.info("[Daemon] Real-time option ticker unsubscribed (not in target): %s", ck)
+    if opt_sub:
+        opt_contracts_by_key = {c["contract_key"]: c for c in desired_opt_list if c.get("contract_key") in opt_sub}
+        to_add = [opt_contracts_by_key[ck] for ck in sorted(opt_sub) if ck in opt_contracts_by_key]
+        if to_add:
+            opt_added = await conn.subscribe_option_tickers(to_add, app._on_ticker_for_contract_key)
+            if opt_added:
+                logger.info("[Daemon] Real-time option ticker subscribed (new): %s", sorted(opt_added.keys()))
 
 
 async def refresh_ticker_subscriptions(app: Any) -> None:

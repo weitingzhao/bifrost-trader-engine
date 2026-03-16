@@ -1,6 +1,14 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
-import type { IbAccountSnapshot, StatusResponse, Operation } from './types'
-import { fetchStatus, fetchOperations, postRefreshAccounts } from './api'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import type { IbAccountSnapshot, StatusResponse, Operation, RealtimeQuote } from './types'
+import {
+  fetchStatus,
+  fetchOperations,
+  postRefreshAccounts,
+  fetchQuotes,
+  subscribeQuotes,
+  fetchBarsBenchmark,
+  fetchBarsJobs,
+} from './api'
 import { postStop } from './api/control'
 import { postMonitorStop, postCeleryStop } from './api/monitor'
 import { LivePage } from './pages/LivePage'
@@ -24,9 +32,85 @@ import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
 import logoImg from '../img/logo.png'
+import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import './App.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
+
+type StreamTone = 'neutral' | 'positive' | 'negative'
+
+interface StreamSummaryItem {
+  label: string
+  value: string
+  tone: StreamTone
+}
+
+/** Dashboard strip: Open orders summary + Market Streams marquee. */
+function DashboardStrip({
+  streamLamp,
+  streamItems,
+  onStreamClick,
+  openOrderCount,
+  onOpenOrdersClick,
+  openOrdersLamp,
+}: {
+  streamLamp: 'green' | 'yellow' | 'red' | 'none'
+  streamItems: StreamSummaryItem[]
+  onStreamClick?: () => void
+  openOrderCount: number
+  onOpenOrdersClick?: () => void
+  /** Lamp shown before "Open orders" (e.g. green when there are orders). */
+  openOrdersLamp?: 'green' | 'yellow' | 'red' | 'none'
+}) {
+  const tickerItems =
+    streamItems.length > 0
+      ? [...streamItems, ...streamItems]
+      : [
+          { label: 'Streams', value: 'No data', tone: 'neutral' as const },
+          { label: 'Streams', value: 'No data', tone: 'neutral' as const },
+        ]
+
+  return (
+    <section className="card dashboard-strip" aria-label="Dashboard">
+      <div className="dashboard-strip-grid">
+        <div className="dashboard-open-orders-cluster" aria-label="Open orders summary">
+          <button
+            type="button"
+            className="dashboard-open-orders-btn"
+            onClick={onOpenOrdersClick}
+            aria-label="Open orders"
+            title="View open orders on Live page"
+          >
+            {openOrdersLamp != null && <span className={`lamp lamp-sm ${openOrdersLamp}`} aria-hidden title={openOrdersLamp === 'green' ? 'Daemon alive; open orders data available' : 'Daemon down or no data'} />}
+            <span className="dashboard-open-orders-label">Open orders</span>
+            <span className="dashboard-open-orders-value">{openOrderCount}</span>
+          </button>
+        </div>
+        <div className="dashboard-streams-cluster" aria-label="Market streams summary">
+          <button
+            type="button"
+            className="dashboard-streams-inline dashboard-streams-btn"
+            onClick={onStreamClick}
+            aria-label="Go to Live page"
+            title="Go to Live page"
+          >
+            <span className={`lamp lamp-sm ${streamLamp}`} aria-hidden />
+            <div className="dashboard-streams-marquee">
+              <div className="dashboard-streams-track">
+                {tickerItems.map((item, index) => (
+                  <span key={`${item.label}-${item.value}-${index}`} className="dashboard-streams-item">
+                    <span className="dashboard-streams-item-label">{item.label}</span>
+                    <span className={`dashboard-streams-item-value tone-${item.tone}`}>{item.value}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
 type ThemeId = 'dark' | 'light'
 
 function loadTheme(): ThemeId {
@@ -64,6 +148,13 @@ export default function App() {
   const [ibAccountsRefreshing, setIbAccountsRefreshing] = useState(false)
   /** Short feedback after account refresh (success/fail/timeout); auto-cleared after a few seconds */
   const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
+  const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+  const [benchmarks, setBenchmarks] = useState<
+    Record<string, { bar_time: number; close: number; prev_close?: number | null; is_today?: boolean; is_stale?: boolean }>
+  >({})
+  /** Celery bars worker queue counts (polled every 3s for dashboard) */
+  const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
+  const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
 
@@ -135,6 +226,44 @@ export default function App() {
   }, [loadStatus, loadOperations])
 
   useEffect(() => {
+    const pollWorkerJobs = () => {
+      Promise.all([
+        fetchBarsJobs(1, 0, 'pending'),
+        fetchBarsJobs(1, 0, 'running'),
+      ])
+        .then(([pendingRes, runningRes]) => {
+          setWorkerJobPending(pendingRes.total)
+          setWorkerJobRunning(runningRes.total)
+        })
+        .catch(() => {
+          setWorkerJobPending(null)
+          setWorkerJobRunning(null)
+        })
+    }
+    pollWorkerJobs()
+    const t = setInterval(pollWorkerJobs, 3000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchQuotes()
+      .then((res) => {
+        if (!cancelled && res.quotes?.length) {
+          setQuotesMap(() => Object.fromEntries(res.quotes!.map((q) => [q.symbol, q])))
+        }
+      })
+      .catch(() => {})
+    const unsub = subscribeQuotes((q) => {
+      setQuotesMap((prev) => ({ ...prev, [q.symbol]: q }))
+    })
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [])
+
+  useEffect(() => {
     if (status?.accounts != null && accountsDisplay === null)
       setAccountsDisplay(status.accounts ? [...status.accounts] : [])
   }, [status?.accounts, accountsDisplay])
@@ -201,7 +330,10 @@ export default function App() {
   // System status lamp: green only when daemon/monitor/status all green; otherwise worst of the three
   const dl = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'red'
   const ml = (j?.monitor_lamp as 'green' | 'yellow' | 'red') || 'red'
-  const strategyLamp: LampId = 'green'
+  // Strategy tab lamp = Trading Strategy status (same as System → Daemon Event → Trading Strategy)
+  const hb = j?.daemon_heartbeat
+  const strategyLamp: LampId =
+    !hb || !hb.daemon_alive ? 'red' : j?.trading_suspended === true ? 'yellow' : 'green'
   const systemLamp: 'green' | 'yellow' | 'red' | 'none' =
     dl === 'red' || ml === 'red'
       ? 'red'
@@ -223,6 +355,136 @@ export default function App() {
     daemonHeartbeat?.event_subscribe_ticker === true
       ? 'green'
       : 'red'
+
+  const watchlistSymbols = useMemo(
+    () => [...new Set([...(status?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
+    [status?.subscribed_tickers, quotesMap],
+  )
+  const benchmarkSymbols = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...watchlistSymbols,
+          ...(status?.reference_indices?.map((r) => r.symbol) ?? []),
+        ]),
+      ].sort(),
+    [watchlistSymbols, status?.reference_indices],
+  )
+  const streamSummaryItems = useMemo<StreamSummaryItem[]>(() => {
+    const accountsList = status?.accounts ?? []
+    const rows = watchlistSymbols.map((symbol) => {
+      let qty = 0
+      let totalCost = 0
+      let hasCost = false
+      for (const acc of accountsList) {
+        for (const p of acc?.positions ?? []) {
+          const sym = (p.symbol || '').trim()
+          const secType = (p.secType || '').toString().toUpperCase()
+          const posQty = typeof p.position === 'number' ? p.position : 0
+          if (!sym || sym !== symbol || secType !== 'STK' || !Number.isFinite(posQty) || posQty === 0) continue
+          qty += posQty
+          if (p.avgCost != null && Number.isFinite(p.avgCost as number)) {
+            totalCost += (p.avgCost as number) * posQty
+            hasCost = true
+          }
+        }
+      }
+      const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
+      const quote = quotesMap[symbol]
+      const bench = benchmarks[symbol]
+      let changePct: number | null = null
+      let pnlVsBench: number | null = null
+      if (bench && quote && Number.isFinite(quote.last) && Number.isFinite(bench.close) && bench.close > 0) {
+        changePct = ((quote.last - bench.close) / bench.close) * 100
+        pnlVsBench = Number.isFinite(qty) ? (quote.last - bench.close) * qty : null
+      }
+      const pnlCost =
+        quote && avgCost != null && Number.isFinite(quote.last) && Number.isFinite(qty) && qty !== 0
+          ? (quote.last - avgCost) * qty
+          : null
+      return { qty, avgCost, pnlCost, pnlVsBench, changePct }
+    })
+
+    const totalDailyDollar = rows.reduce(
+      (acc, row) => acc + (row.pnlVsBench != null && Number.isFinite(row.pnlVsBench) ? row.pnlVsBench : 0),
+      0,
+    )
+    const sumLastQty = watchlistSymbols.reduce((acc, symbol, index) => {
+      const qty = Number.isFinite(rows[index]?.qty) ? rows[index]!.qty : 0
+      const last =
+        quotesMap[symbol]?.last != null && Number.isFinite(quotesMap[symbol].last)
+          ? quotesMap[symbol].last
+          : 0
+      return acc + last * qty
+    }, 0)
+    const totalDailyDenom = sumLastQty - totalDailyDollar
+    const totalDailyPct =
+      totalDailyDenom > 0 && Number.isFinite(totalDailyDollar)
+        ? (totalDailyDollar / totalDailyDenom) * 100
+        : null
+
+    const toneForNumber = (value: number | null | undefined): StreamTone => {
+      if (value == null || !Number.isFinite(value)) return 'neutral'
+      if (value > 0) return 'positive'
+      if (value < 0) return 'negative'
+      return 'neutral'
+    }
+
+    const items: StreamSummaryItem[] = [
+      {
+        label: 'Market Streams',
+        value: liveLamp === 'green' ? 'Online' : 'Offline',
+        tone: liveLamp === 'green' ? 'positive' : 'negative',
+      },
+      ...watchlistSymbols.map((symbol, i) => {
+        const row = rows[i]
+        const pct = row?.changePct ?? null
+        const dollar = row?.pnlVsBench ?? null
+        const valueStr =
+          pct != null && dollar != null
+            ? `${fmtPctCompact(pct)} / ${fmtUsdCompact(dollar)}`
+            : pct != null
+              ? fmtPctCompact(pct)
+              : dollar != null
+                ? fmtUsdCompact(dollar)
+                : '—'
+        return {
+          label: symbol,
+          value: valueStr,
+          tone: toneForNumber(pct ?? dollar),
+        }
+      }),
+      {
+        label: 'Daily %',
+        value: fmtPctCompact(totalDailyPct),
+        tone: toneForNumber(totalDailyPct),
+      },
+      {
+        label: 'Daily $',
+        value: fmtUsdCompact(totalDailyDollar),
+        tone: toneForNumber(totalDailyDollar),
+      },
+    ]
+    return items
+  }, [status?.accounts, status?.reference_indices, watchlistSymbols, quotesMap, benchmarks, liveLamp])
+
+  useEffect(() => {
+    if (benchmarkSymbols.length === 0) {
+      setBenchmarks({})
+      return
+    }
+    let cancelled = false
+    fetchBarsBenchmark(benchmarkSymbols)
+      .then((res) => {
+        if (!cancelled) setBenchmarks(res.benchmarks ?? {})
+      })
+      .catch(() => {
+        if (!cancelled) setBenchmarks({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [benchmarkSymbols.join(',')])
 
   const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
     { id: 'live', label: 'Live', lamp: liveLamp },
@@ -259,6 +521,12 @@ export default function App() {
   const openSystemInSettings = () => {
     setActiveTab('settings')
     window.location.hash = '#settings-system'
+  }
+
+  /** Open Settings → System and scroll to a specific section (daemon / monitor / celery). */
+  const openSystemInSettingsToSection = (section: 'daemon' | 'monitor' | 'celery') => {
+    setActiveTab('settings')
+    window.location.hash = `#settings-system-${section}`
   }
 
   const doShutdownAll = async () => {
@@ -468,7 +736,14 @@ export default function App() {
               <span className={`lamp lamp-sm ${(status?.daemon_lamp as LampId) ?? 'red'}`} aria-hidden />
               {lampHoverPopover === 'daemon' && (
                 <div className="app-header-lamp-popover" role="tooltip">
-                  <span className="app-header-lamp-popover-name">Daemon</span>
+                  <button
+                    type="button"
+                    className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
+                    onClick={() => { openSystemInSettingsToSection('daemon'); setLampHoverPopover(null) }}
+                    title="Go to System → Daemon"
+                  >
+                    Daemon
+                  </button>
                   <button
                     type="button"
                     className="app-header-lamp-switch"
@@ -489,7 +764,14 @@ export default function App() {
               <span className={`lamp lamp-sm ${(status?.monitor_lamp as LampId) ?? 'red'}`} aria-hidden />
               {lampHoverPopover === 'monitor' && (
                 <div className="app-header-lamp-popover" role="tooltip">
-                  <span className="app-header-lamp-popover-name">Management</span>
+                  <button
+                    type="button"
+                    className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
+                    onClick={() => { openSystemInSettingsToSection('monitor'); setLampHoverPopover(null) }}
+                    title="Go to System → Management"
+                  >
+                    Management
+                  </button>
                   <button
                     type="button"
                     className="app-header-lamp-switch"
@@ -507,10 +789,35 @@ export default function App() {
               onMouseLeave={closeLampPopover}
               aria-label="Celery status"
             >
-              <span className={`lamp lamp-sm ${celeryLamp}`} aria-hidden />
+              <div className="dashboard-worker-counts">
+                <button
+                  type="button"
+                  className="dashboard-worker-item dashboard-worker-item-btn"
+                  onClick={openSystemInSettings}
+                  aria-label="Open System and Celery"
+                  title="Queue: pending bars jobs"
+                >
+                  <span
+                    className={`lamp lamp-sm ${workerJobRunning != null && workerJobRunning > 0 ? 'green' : 'yellow'}`}
+                    title="Celery: green = jobs running, yellow = none running"
+                    aria-hidden
+                  />
+                  <span className="dashboard-worker-label">Queue</span>
+                  <span className="dashboard-worker-value">
+                    {workerJobPending != null ? (workerJobPending > 99 ? '99+' : String(workerJobPending)) : '—'}
+                  </span>
+                </button>
+              </div>
               {lampHoverPopover === 'celery' && (
                 <div className="app-header-lamp-popover" role="tooltip">
-                  <span className="app-header-lamp-popover-name">Celery</span>
+                  <button
+                    type="button"
+                    className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
+                    onClick={() => { openSystemInSettingsToSection('celery'); setLampHoverPopover(null) }}
+                    title="Go to System → Celery"
+                  >
+                    Celery
+                  </button>
                   <button
                     type="button"
                     className="app-header-lamp-switch"
@@ -609,6 +916,17 @@ export default function App() {
           )}
         </div>
       </header>
+
+      {(activeTab === 'live' || activeTab === 'strategy' || activeTab === 'replay' || activeTab === 'research') && (
+        <DashboardStrip
+          streamLamp={liveLamp}
+          streamItems={streamSummaryItems}
+          onStreamClick={() => setActiveTab('live')}
+          openOrderCount={(status?.open_orders ?? []).length}
+          onOpenOrdersClick={() => setActiveTab('live')}
+          openOrdersLamp={status?.daemon_heartbeat?.daemon_alive === true ? 'green' : 'red'}
+        />
+      )}
 
       {activeTab === 'replay' && (
         <>

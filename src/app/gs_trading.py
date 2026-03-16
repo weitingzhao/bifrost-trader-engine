@@ -331,6 +331,10 @@ class GsTrading:
         """Called on each ticker update from IB for a symbol (may be from IB thread)."""
         _ticker_redis.on_ticker_for_symbol(self, symbol, ticker)
 
+    def _on_ticker_for_contract_key(self, contract_key: str, ticker: Any) -> None:
+        """Called on each ticker update from IB for an option contract (Watchlist OPT). Writes to contract_quote_live."""
+        _contract_quote_live.on_ticker_for_contract_key(self, contract_key, ticker)
+
     def _quote_payload_from_ticker(self, symbol: str, ticker: Any) -> Optional[dict]:
         """Build quote dict for Redis from ticker. Used for non-strategy symbols."""
         return _ticker_redis.quote_payload_from_ticker(symbol, ticker)

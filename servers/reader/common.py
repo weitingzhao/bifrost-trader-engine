@@ -135,6 +135,12 @@ class StatusReader:
             return []
         return market_module.get_market_holidays_conn(self._conn, exchange=exchange, year=year)
 
+    def get_contract_quotes(self, contract_keys: List[str]) -> List[Dict[str, Any]]:
+        """Return bid/ask/last/mid from contract_quote_live for given contract_keys. Used by GET /quotes for OPT rows."""
+        if not self._connect():
+            return []
+        return market_module.get_contract_quotes_conn(self._conn, contract_keys)
+
     def add_market_holiday(
         self, date_str: str, label: Optional[str] = None, exchange: str = "NYSE"
     ) -> bool:

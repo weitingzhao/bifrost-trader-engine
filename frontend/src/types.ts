@@ -514,15 +514,22 @@ export interface WatchlistItem {
   created_at?: number | null
 }
 
-/** R-RM*: 实时行情（从 Redis 读取，守护进程写入）。 */
+/** R-RM*: 实时行情（STK 从 Redis，OPT 从 contract_quote_live）。OPT 项带 contract_key。 */
 export interface RealtimeQuote {
   symbol: string
   bid?: number | null
   ask?: number | null
-  last: number
+  last?: number | null
   ts: number
   /** 可选：相对前价的涨跌，前端可算 */
   change?: number | null
+  /** OPT 报价：合约键，用于 Watchlist OPT 行匹配 */
+  contract_key?: string | null
+  sec_type?: string | null
+  expiry?: string | null
+  strike?: number | null
+  option_right?: string | null
+  mid?: number | null
 }
 
 export interface QuotesResponse {

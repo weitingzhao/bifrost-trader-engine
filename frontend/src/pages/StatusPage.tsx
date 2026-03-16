@@ -36,6 +36,8 @@ export interface StatusPageProps {
   showConsoleSection?: boolean
   consoleCardTitle?: string
   consoleCardDescription?: string
+  /** When set, scroll to this system section and add highlight (e.g. from header lamp link). */
+  highlightSection?: 'daemon' | 'monitor' | 'celery'
 }
 
 export type OperationsSection = 'daemon' | 'monitor' | 'celery' | 'strategy'
@@ -57,6 +59,7 @@ export function StatusPage({
   showSystemSection = true,
   showConsoleSection = true,
   consoleCardTitle,
+  highlightSection,
 }: StatusPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
@@ -96,6 +99,15 @@ export function StatusPage({
     subscribeLogs: subscribeCeleryLogs,
     clearLogs: clearCeleryLogs,
   })
+
+  useEffect(() => {
+    if (!highlightSection) return
+    const id = `system-section-${highlightSection}`
+    const el = document.getElementById(id)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [highlightSection])
 
   const runCtrlAction = useControlAction(setCtrlMsg, ctrlMsgClearRef, { onSuccess: loadStatus })
   const runHedgeAction = useControlAction(setHedgeCtrlMsg, hedgeCtrlMsgClearRef)
@@ -430,7 +442,10 @@ export function StatusPage({
 
         <div className={`system-tab-content ${showAllSystemSections ? 'system-stack' : ''}`}>
         {(showAllSystemSections || systemTab === 'daemon') && (
-          <div className="status-panel-section status-panel-section-daemon">
+          <div
+            id="system-section-daemon"
+            className={`status-panel-section status-panel-section-daemon ${highlightSection === 'daemon' ? 'system-section-highlight' : ''}`}
+          >
             <StatusDaemonPanel
               status={j}
               hb={hb}
@@ -458,7 +473,10 @@ export function StatusPage({
 
         {(showAllSystemSections || systemTab === 'monitor' || systemTab === 'celery') && (
           <div className="status-management-celery-row" id="system-panel-monitor-celery" role="tabpanel" aria-labelledby="tab-monitor-celery">
-            <div className="status-panel-section status-management-celery-col status-management-celery-col-management">
+            <div
+              id="system-section-monitor"
+              className={`status-panel-section status-management-celery-col status-management-celery-col-management ${highlightSection === 'monitor' ? 'system-section-highlight' : ''}`}
+            >
               <StatusMonitorPanel
                 status={j}
                 monitorLamp={monitorLamp}
@@ -478,7 +496,10 @@ export function StatusPage({
                 className={showAllSystemSections ? 'system-stack-section' : undefined}
               />
             </div>
-            <div className="status-panel-section status-management-celery-col status-management-celery-col-celery">
+            <div
+              id="system-section-celery"
+              className={`status-panel-section status-management-celery-col status-management-celery-col-celery ${highlightSection === 'celery' ? 'system-section-highlight' : ''}`}
+            >
               <StatusCeleryPanel
                 status={j}
                 celeryLamp={celeryLamp}
@@ -608,7 +629,11 @@ export function StatusPage({
                   <td className="event-subscribe-col-subscription">Open orders</td>
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <div className={`lamp lamp-sm ${hb?.daemon_alive ? 'green' : 'red'}`} title="Open orders (Host)" aria-hidden />
+                      <div
+                        className={`lamp lamp-sm ${!hb?.daemon_alive ? 'red' : hostOpenOrderCount > 0 ? 'green' : 'none'}`}
+                        title={hb?.daemon_alive ? (hostOpenOrderCount > 0 ? 'Open orders (Host)' : 'No open orders (Host)') : 'Daemon down'}
+                        aria-hidden
+                      />
                       <span className="event-subscribe-status-text">
                         {hb?.daemon_alive
                           ? (
@@ -624,7 +649,11 @@ export function StatusPage({
                   {hasSecondary && (
                     <td>
                       <div className="event-subscribe-status-cell">
-                        <div className={`lamp lamp-sm ${hb?.daemon_alive ? 'green' : 'red'}`} title="Open orders (Secondary)" aria-hidden />
+                        <div
+                          className={`lamp lamp-sm ${!hb?.daemon_alive ? 'red' : secondaryOpenOrderCount > 0 ? 'green' : 'none'}`}
+                          title={hb?.daemon_alive ? (secondaryOpenOrderCount > 0 ? 'Open orders (Secondary)' : 'No open orders (Secondary)') : 'Daemon down'}
+                          aria-hidden
+                        />
                         <span className="event-subscribe-status-text">
                           {hb?.daemon_alive
                             ? (

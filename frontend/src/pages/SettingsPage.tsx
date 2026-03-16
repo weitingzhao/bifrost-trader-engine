@@ -152,10 +152,11 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
     loadHolidays()
   }, [holidaysYear])
 
-  // Sync sidebar active state with hash (GitHub-style: highlight current section). Map ib-* and flex-preference to settings-ib-connection.
+  // Sync sidebar active state with hash (GitHub-style: highlight current section). Map ib-* and flex-preference to settings-ib-connection. Map settings-system-* to settings-system.
   const hashToSectionId = (hash: string) => {
     const h = hash ? hash.slice(1) : ''
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
+    if (h && h.startsWith('settings-system')) return 'settings-system'
     return h || SETTINGS_SECTIONS[0].id
   }
   const [activeSectionId, setActiveSectionId] = useState<string>(() => {
@@ -243,6 +244,14 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
   }
 
   const isSystemSection = activeSectionId === 'settings-system'
+  const systemHighlightSection =
+    currentHash === 'settings-system-daemon'
+      ? 'daemon'
+      : currentHash === 'settings-system-monitor'
+        ? 'monitor'
+        : currentHash === 'settings-system-celery'
+          ? 'celery'
+          : undefined
 
   return (
     <div className="settings-page">
@@ -307,6 +316,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
             showConsoleSection={true}
             showConsoleTabs={false}
             consoleCardTitle="Console"
+            highlightSection={systemHighlightSection}
           />
         ) : (
         <div className="settings-page-card card">
