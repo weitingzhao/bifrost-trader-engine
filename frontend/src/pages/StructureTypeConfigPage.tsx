@@ -38,7 +38,7 @@ export interface StructureTypeConfigPageProps {
 }
 
 export function StructureTypeConfigPage({
-  breadcrumbLabel = 'Type Config',
+  breadcrumbLabel = 'Option Type Config',
 }: StructureTypeConfigPageProps) {
   const [types, setTypes] = useState<StructureTypeItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -229,6 +229,16 @@ export function StructureTypeConfigPage({
     setSubtypeLegsLoadingByKey({})
     setSubtypeLegsSavingByKey({})
   }, [selectedType])
+
+  useEffect(() => {
+    if (!selectedType) {
+      setExpandedSubtype(null)
+      return
+    }
+    if (!expandedSubtype && detailSubtypes.length > 0) {
+      setExpandedSubtype(detailSubtypes[0].subtype)
+    }
+  }, [selectedType, detailSubtypes, expandedSubtype])
 
   const openCreateType = () => {
     setCreateTypePayload({
@@ -636,7 +646,21 @@ export function StructureTypeConfigPage({
           ) : (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)', padding: 'var(--space-2) var(--space-2) 0' }}>
-                <h3 className="section-subtitle" style={{ margin: 0 }}>Structure types</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                  <h3 className="section-subtitle" style={{ margin: 0 }}>Structure types</h3>
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn-add"
+                    onClick={openCreateType}
+                    title="Add structure type"
+                    aria-label="Add structure type"
+                    style={{
+                      fontSize: 'var(--text-body)',
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="btn-secondary"
@@ -649,9 +673,6 @@ export function StructureTypeConfigPage({
                 </button>
               </div>
               <div style={{ padding: '0 var(--space-2)', flex: 1, minHeight: 0, overflow: 'auto' }}>
-                <button type="button" className="btn-primary" onClick={openCreateType} style={{ width: '100%', marginBottom: 'var(--space-2)' }}>
-                  Add type
-                </button>
                 {loading && <p className="section-hint">Loading…</p>}
                 {error && <p className="msg-error">{error}</p>}
                 {!loading && !error && (
@@ -676,9 +697,6 @@ export function StructureTypeConfigPage({
                           }}
                         >
                           <strong>{t.display_label}</strong>
-                          <span style={{ marginLeft: 'var(--space-2)', color: 'var(--color-text-muted)', fontSize: 'var(--text-caption)' }}>
-                            {t.structure_type}
-                          </span>
                         </button>
                       </li>
                     ))}
@@ -759,7 +777,19 @@ export function StructureTypeConfigPage({
                 </div>
 
                 <div className="strategy-section" style={{ minWidth: 0 }}>
-                  <h4 className="section-subtitle" style={{ fontSize: 'var(--text-body)' }}>Default legs</h4>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+                    <h4 className="section-subtitle" style={{ fontSize: 'var(--text-body)', margin: 0 }}>Default legs</h4>
+                    <button
+                      type="button"
+                      className="icon-btn icon-btn-add"
+                      onClick={addLeg}
+                      title="Add default leg"
+                      aria-label="Add default leg"
+                      style={{ padding: '0 0.45rem', minWidth: 'auto', fontSize: 'var(--text-body)', lineHeight: 1.2 }}
+                    >
+                      +
+                    </button>
+                  </div>
                   <div className="table-wrap" style={{ width: '100%' }}>
                     <table className="data-table">
                       <thead>
@@ -837,8 +867,14 @@ export function StructureTypeConfigPage({
                               />
                             </td>
                             <td>
-                              <button type="button" className="btn-secondary" onClick={() => removeLeg(i)}>
-                                Remove
+                              <button
+                                type="button"
+                                className="icon-btn icon-btn-remove"
+                                onClick={() => removeLeg(i)}
+                                aria-label="Remove leg"
+                                title="Remove leg"
+                              >
+                                x
                               </button>
                             </td>
                           </tr>
@@ -846,9 +882,6 @@ export function StructureTypeConfigPage({
                       </tbody>
                     </table>
                   </div>
-                  <button type="button" className="btn-secondary" onClick={addLeg} style={{ marginRight: 'var(--space-2)' }}>
-                    Add leg
-                  </button>
                   <button type="button" className="btn-primary" onClick={saveLegs} disabled={legsSaving}>
                     {legsSaving ? 'Saving…' : 'Save legs'}
                   </button>
@@ -866,7 +899,7 @@ export function StructureTypeConfigPage({
                     paddingBottom: 'var(--space-2)',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <h4
                       className="section-subtitle"
                       style={{ margin: 0, fontSize: 'var(--text-body)' }}
@@ -875,10 +908,10 @@ export function StructureTypeConfigPage({
                     </h4>
                     {detailSubtypes.length > 0 && (
                       <div
-                        className="structure-subtype-tabs"
+                        className="system-tabs replay-portfolio-tabs"
                         role="tablist"
                         aria-label="Subtypes"
-                        style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}
+                        style={{ marginTop: 'var(--space-2)' }}
                       >
                         {detailSubtypes.map((sub) => {
                           const isActive = expandedSubtype === sub.subtype
@@ -888,26 +921,13 @@ export function StructureTypeConfigPage({
                               type="button"
                               role="tab"
                               aria-selected={isActive}
-                              className={`structure-subtype-tab ${isActive ? 'structure-subtype-tab--active' : ''
-                                }`}
+                              aria-controls={`subtype-panel-${sub.subtype}`}
+                              className={`system-tab ${isActive ? 'active' : ''}`}
                               onClick={() =>
                                 setExpandedSubtype((prev) =>
                                   prev === sub.subtype ? null : sub.subtype
                                 )
                               }
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 999,
-                                border: '1px solid var(--color-border)',
-                                background: isActive
-                                  ? 'var(--color-accent-soft)'
-                                  : 'var(--color-surface)',
-                                fontSize: 'var(--text-caption)',
-                                cursor: 'pointer',
-                                color: isActive
-                                  ? 'var(--color-text-main)'
-                                  : 'var(--color-text-muted)',
-                              }}
                             >
                               {sub.display_label || sub.subtype}
                             </button>
@@ -920,39 +940,76 @@ export function StructureTypeConfigPage({
                     Add subtype
                   </button>
                 </div>
-                {detailSubtypes.length === 0 && <p className="section-hint">No subtypes. Add one if this type has variants (e.g. covered_call: otm, atm, itm).</p>}
-                {detailSubtypes.map((sub) => (
-                  <SubtypeBlock
-                    key={sub.subtype}
-                    subtype={sub}
-                    structureType={selectedType!}
-                    typeDefaultLegs={detailLegs}
-                    subtypeLegs={subtypeLegsByKey[subtypeKey(selectedType!, sub.subtype)] ?? null}
-                    subtypeMode={subtypeModeByKey[subtypeKey(selectedType!, sub.subtype)] ?? 'inherit'}
-                    subtypeLegsLoading={subtypeLegsLoadingByKey[subtypeKey(selectedType!, sub.subtype)] ?? false}
-                    subtypeLegsSaving={subtypeLegsSavingByKey[subtypeKey(selectedType!, sub.subtype)] ?? false}
-                    onLoadSubtypeLegs={() => loadSubtypeLegs(selectedType!, sub.subtype)}
-                    onSwitchToInherit={() => switchSubtypeToInherit(selectedType!, sub.subtype)}
-                    onSwitchToOverride={() => switchSubtypeToOverride(selectedType!, sub.subtype)}
-                    onSaveSubtypeLegs={(legs) => saveSubtypeLegs(selectedType!, sub.subtype, legs)}
-                    legRoleOptions={legRoleOptions}
-                    legDirectionOptions={legDirectionOptions}
-                    legOptionRightOptions={legOptionRightOptions}
-                    metaKeyOptions={metaKeyOptions}
-                    paramKindOptions={paramKindOptions}
-                    expanded={expandedSubtype === sub.subtype}
-                    onToggle={() => setExpandedSubtype((x) => (x === sub.subtype ? null : sub.subtype))}
-                    onSaveSubtype={(payload) => saveSubtype(sub.subtype, payload)}
-                    onSaveCharacteristics={(items) => saveCharacteristics(sub.subtype, items)}
-                    onSaveMetaParams={(items) => saveMetaParams(sub.subtype, items)}
-                    onDelete={() => handleDeleteSubtype(sub.subtype)}
-                    saving={subtypeSaveState[sub.subtype] === 'saving'}
-                  />
-                ))}
+                {detailSubtypes.length === 0 && (
+                  <p className="section-hint">
+                    No subtypes. Add one if this type has variants (e.g. covered_call: otm, atm, itm).
+                  </p>
+                )}
+                {detailSubtypes.length > 0 && !expandedSubtype && (
+                  <p className="section-hint">
+                    Select a subtype tab above to edit its config.
+                  </p>
+                )}
+                {detailSubtypes
+                  .filter((sub) => sub.subtype === expandedSubtype)
+                  .map((sub) => (
+                    <SubtypeBlock
+                      key={sub.subtype}
+                      subtype={sub}
+                      structureType={selectedType!}
+                      typeDefaultLegs={detailLegs}
+                      subtypeLegs={subtypeLegsByKey[subtypeKey(selectedType!, sub.subtype)] ?? null}
+                      subtypeMode={subtypeModeByKey[subtypeKey(selectedType!, sub.subtype)] ?? 'inherit'}
+                      subtypeLegsLoading={subtypeLegsLoadingByKey[subtypeKey(selectedType!, sub.subtype)] ?? false}
+                      subtypeLegsSaving={subtypeLegsSavingByKey[subtypeKey(selectedType!, sub.subtype)] ?? false}
+                      onLoadSubtypeLegs={() => loadSubtypeLegs(selectedType!, sub.subtype)}
+                      onSwitchToInherit={() => switchSubtypeToInherit(selectedType!, sub.subtype)}
+                      onSwitchToOverride={() => switchSubtypeToOverride(selectedType!, sub.subtype)}
+                      onSaveSubtypeLegs={(legs) => saveSubtypeLegs(selectedType!, sub.subtype, legs)}
+                      legRoleOptions={legRoleOptions}
+                      legDirectionOptions={legDirectionOptions}
+                      legOptionRightOptions={legOptionRightOptions}
+                      metaKeyOptions={metaKeyOptions}
+                      paramKindOptions={paramKindOptions}
+                      expanded
+                      onToggle={() => setExpandedSubtype(null)}
+                      onSaveSubtype={(payload) => saveSubtype(sub.subtype, payload)}
+                      onSaveCharacteristics={(items) => saveCharacteristics(sub.subtype, items)}
+                      onSaveMetaParams={(items) => saveMetaParams(sub.subtype, items)}
+                      onDelete={() => handleDeleteSubtype(sub.subtype)}
+                      saving={subtypeSaveState[sub.subtype] === 'saving'}
+                    />
+                  ))}
               </div>
 
               <div className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
-                <h4 className="section-subtitle" style={{ fontSize: 'var(--text-body)' }}>Infer rules (meta → subtype)</h4>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <h4 className="section-subtitle" style={{ fontSize: 'var(--text-body)', margin: 0 }}>Infer rules (meta → subtype)</h4>
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn-add"
+                    onClick={() =>
+                      updateInferRules([
+                        ...detailInferRules,
+                        {
+                          meta_key: metaKeyOptions[0]?.value ?? '',
+                          meta_value_text: '',
+                          subtype: detailSubtypes[0]?.subtype ?? '',
+                        },
+                      ])
+                    }
+                    disabled={metaKeyOptions.length === 0 || detailSubtypes.length === 0}
+                    title={metaKeyOptions.length === 0
+                      ? 'No meta_key allowed for this structure type'
+                      : detailSubtypes.length === 0
+                        ? 'Add at least one subtype first'
+                        : 'Add infer rule'}
+                    aria-label="Add infer rule"
+                    style={{ fontSize: 'var(--text-body)' }}
+                  >
+                    +
+                  </button>
+                </div>
                 <p className="section-hint" style={{ marginBottom: 'var(--space-2)' }}>
                   When editing a structure, these rules infer the subtype from strategy_structure_meta.
                 </p>
@@ -1038,10 +1095,12 @@ export function StructureTypeConfigPage({
                             <td>
                               <button
                                 type="button"
-                                className="btn-secondary"
+                                className="icon-btn icon-btn-remove"
                                 onClick={() => updateInferRules(detailInferRules.filter((_, j) => j !== i))}
+                                aria-label="Remove rule"
+                                title="Remove rule"
                               >
-                                Remove
+                                x
                               </button>
                             </td>
                           </tr>
@@ -1050,16 +1109,6 @@ export function StructureTypeConfigPage({
                     </tbody>
                   </table>
                 </div>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => updateInferRules([...detailInferRules, { meta_key: metaKeyOptions[0]?.value ?? '', meta_value_text: '', subtype: detailSubtypes[0]?.subtype ?? '' }])}
-                  disabled={metaKeyOptions.length === 0 || detailSubtypes.length === 0}
-                  style={{ marginRight: 'var(--space-2)' }}
-                  title={metaKeyOptions.length === 0 ? 'No meta_key allowed for this structure type' : detailSubtypes.length === 0 ? 'Add at least one subtype first' : undefined}
-                >
-                  Add rule
-                </button>
                 <button type="button" className="btn-primary" onClick={saveInferRules} disabled={inferRulesSaving}>
                   {inferRulesSaving ? 'Saving…' : 'Save infer rules'}
                 </button>
@@ -1366,45 +1415,116 @@ function SubtypeBlock({
       </button>
       {expanded && (
         <div style={{ padding: 'var(--space-3)', borderTop: '1px solid var(--color-border)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto 1fr', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-            <label>Display label</label>
-            <input
-              type="text"
-              value={displayLabel}
-              onChange={(e) => setEdit((p) => ({ ...p, display_label: e.target.value }))}
-            />
-            <label>Example</label>
-            <input
-              type="text"
-              value={example ?? ''}
-              onChange={(e) => setEdit((p) => ({ ...p, example: e.target.value || null }))}
-            />
-            <label>Typical use</label>
-            <input
-              type="text"
-              value={typicalUse ?? ''}
-              onChange={(e) => setEdit((p) => ({ ...p, typical_use: e.target.value || null }))}
-            />
-            <label>Subtype explanation</label>
-            <input
-              type="text"
-              value={subtypeExplanation ?? ''}
-              onChange={(e) => setEdit((p) => ({ ...p, subtype_explanation: e.target.value || null }))}
-              placeholder="Optional"
-            />
-            <label>Nature</label>
-            <input
-              type="text"
-              value={nature ?? ''}
-              onChange={(e) => setEdit((p) => ({ ...p, nature: e.target.value || null }))}
-              placeholder="Optional"
-            />
-            <label>Sort order</label>
-            <input
-              type="number"
-              value={sortOrder}
-              onChange={(e) => setEdit((p) => ({ ...p, sort_order: parseInt(e.target.value, 10) || 0 }))}
-            />
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-start',
+              marginBottom: 'var(--space-3)',
+            }}
+          >
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                Display label
+              </label>
+              <input
+                type="text"
+                value={displayLabel}
+                onChange={(e) => setEdit((p) => ({ ...p, display_label: e.target.value }))}
+                placeholder="e.g. OTM Covered Call"
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                Sort order
+              </label>
+              <input
+                type="number"
+                value={sortOrder}
+                onChange={(e) => setEdit((p) => ({ ...p, sort_order: parseInt(e.target.value, 10) || 0 }))}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-start',
+              marginBottom: 'var(--space-3)',
+            }}
+          >
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                Example
+              </label>
+              <input
+                type="text"
+                value={example ?? ''}
+                onChange={(e) => setEdit((p) => ({ ...p, example: e.target.value || null }))}
+                placeholder="Optional example of this subtype"
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                Typical use
+              </label>
+              <input
+                type="text"
+                value={typicalUse ?? ''}
+                onChange={(e) => setEdit((p) => ({ ...p, typical_use: e.target.value || null }))}
+                placeholder="Optional: when to prefer this subtype"
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
+              gap: 'var(--space-3)',
+              alignItems: 'flex-start',
+              marginBottom: 'var(--space-3)',
+            }}
+          >
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                Subtype explanation
+              </label>
+              <textarea
+                value={subtypeExplanation ?? ''}
+                onChange={(e) => setEdit((p) => ({ ...p, subtype_explanation: e.target.value || null }))}
+                placeholder="Explain what this subtype means in plain language."
+                rows={2}
+                style={{
+                  width: '100%',
+                  resize: 'vertical',
+                  borderRadius: 6,
+                  border: '1px solid var(--color-border)',
+                  padding: 'var(--space-2)',
+                  fontSize: 'var(--text-body)',
+                  lineHeight: 1.4,
+                }}
+              />
+            </div>
+            <div>
+              <label className="form-label" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                Nature
+              </label>
+              <input
+                type="text"
+                value={nature ?? ''}
+                onChange={(e) => setEdit((p) => ({ ...p, nature: e.target.value || null }))}
+                placeholder="Optional tag, e.g. Income / Hedge"
+                style={{ width: '100%' }}
+              />
+            </div>
           </div>
           <button type="button" className="btn-primary" onClick={() => onSaveSubtype(edit)} disabled={saving} style={{ marginRight: 'var(--space-2)' }}>
             {saving ? 'Saving…' : 'Save subtype'}
@@ -1413,7 +1533,32 @@ function SubtypeBlock({
             Delete subtype
           </button>
 
-          <h5 style={{ marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>Subtype default legs</h5>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
+            <h5 style={{ margin: 0, fontSize: 'var(--text-body)' }}>Subtype default legs</h5>
+            {subtypeMode === 'override' && (
+              <button
+                type="button"
+                className="icon-btn icon-btn-add"
+                onClick={() =>
+                  setLegRows((prev) => [
+                    ...prev,
+                    {
+                      role: legRoleOptions[0]?.value ?? null,
+                      direction: legDirectionOptions[0]?.value ?? null,
+                      option_right: legOptionRightOptions[0]?.value ?? null,
+                      quantity_default: 1,
+                      sort_order: prev.length,
+                    },
+                  ])
+                }
+                title="Add subtype leg"
+                aria-label="Add subtype leg"
+                disabled={subtypeLegsSaving}
+              >
+                +
+              </button>
+            )}
+          </div>
           {subtypeLegsLoading && (
             <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
               Loading…
@@ -1565,14 +1710,16 @@ function SubtypeBlock({
                             <td>
                               <button
                                 type="button"
-                                className="btn-secondary"
+                                className="icon-btn icon-btn-remove"
                                 onClick={() =>
                                   setLegRows((prev) =>
                                     prev.filter((_, j) => j !== i).map((l, j) => ({ ...l, sort_order: j }))
                                   )
                                 }
+                                aria-label="Remove leg"
+                                title="Remove leg"
                               >
-                                Remove
+                                x
                               </button>
                             </td>
                           </tr>
@@ -1580,25 +1727,6 @@ function SubtypeBlock({
                       </tbody>
                     </table>
                   </div>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() =>
-                      setLegRows((prev) => [
-                        ...prev,
-                        {
-                          role: legRoleOptions[0]?.value ?? null,
-                          direction: legDirectionOptions[0]?.value ?? null,
-                          option_right: legOptionRightOptions[0]?.value ?? null,
-                          quantity_default: 1,
-                          sort_order: prev.length,
-                        },
-                      ])
-                    }
-                    style={{ marginRight: 'var(--space-2)' }}
-                  >
-                    Add leg
-                  </button>
                   <button
                     type="button"
                     className="btn-primary"
@@ -1612,19 +1740,62 @@ function SubtypeBlock({
             </>
           )}
 
-          <h5 style={{ marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>Characteristics</h5>
+          <div style={{ marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+            <h5 style={{ margin: 0, fontSize: 'var(--text-body)' }}>Characteristics</h5>
+            <span className="form-hint" style={{ fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>
+              One per line, short phrases.
+            </span>
+          </div>
           <textarea
             value={charEdit.join('\n')}
             onChange={(e) => setCharEdit(e.target.value.split('\n'))}
             rows={3}
-            placeholder="One per line"
-            style={{ width: '100%', minWidth: 0, marginBottom: 'var(--space-2)' }}
+            placeholder="e.g. Short premium, Low risk, Covered by stock"
+            style={{
+              width: '100%',
+              minWidth: 0,
+              marginBottom: 'var(--space-2)',
+              borderRadius: 6,
+              border: '1px solid var(--color-border)',
+              padding: 'var(--space-2)',
+              fontSize: 'var(--text-body)',
+              lineHeight: 1.4,
+              resize: 'vertical',
+            }}
           />
-          <button type="button" className="btn-primary" onClick={() => onSaveCharacteristics(charEdit)} disabled={saving}>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => onSaveCharacteristics(charEdit)}
+            disabled={saving}
+          >
             {saving ? 'Saving…' : 'Save characteristics'}
           </button>
 
-          <h5 style={{ marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)', fontSize: 'var(--text-body)' }}>Meta params</h5>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--space-4)', marginBottom: 'var(--space-2)' }}>
+            <h5 style={{ margin: 0, fontSize: 'var(--text-body)' }}>Meta params</h5>
+            <button
+              type="button"
+              className="icon-btn icon-btn-add"
+              onClick={() =>
+                setMetaEdit((prev) => [
+                  ...prev,
+                  {
+                    meta_key: metaKeyOptions[0]?.value ?? '',
+                    display_label: null,
+                    default_value_text: null,
+                    param_kind: paramKindOptions.find((opt) => opt.value !== 'fixed')?.value ?? null,
+                    sort_order: prev.length,
+                  },
+                ])
+              }
+              disabled={metaKeyOptions.length === 0}
+              title={metaKeyOptions.length === 0 ? 'No meta_key allowed for this structure type' : 'Add meta param'}
+              aria-label="Add meta param"
+            >
+              +
+            </button>
+          </div>
           <div className="table-wrap" style={{ width: '100%' }}>
             <table className="data-table">
               <thead>
@@ -1726,10 +1897,12 @@ function SubtypeBlock({
                         {!isFixed && (
                           <button
                             type="button"
-                            className="btn-secondary"
+                            className="icon-btn icon-btn-remove"
                             onClick={() => setMetaEdit((prev) => prev.filter((_, j) => j !== i))}
+                            aria-label="Remove meta param"
+                            title="Remove meta param"
                           >
-                            Remove
+                            x
                           </button>
                         )}
                       </td>
@@ -1739,27 +1912,6 @@ function SubtypeBlock({
               </tbody>
             </table>
           </div>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() =>
-              setMetaEdit((prev) => [
-                ...prev,
-                {
-                  meta_key: metaKeyOptions[0]?.value ?? '',
-                  display_label: null,
-                  default_value_text: null,
-                  param_kind: paramKindOptions.find((opt) => opt.value !== 'fixed')?.value ?? null,
-                  sort_order: prev.length,
-                },
-              ])
-            }
-            disabled={metaKeyOptions.length === 0}
-            style={{ marginRight: 'var(--space-2)' }}
-            title={metaKeyOptions.length === 0 ? 'No meta_key allowed for this structure type' : undefined}
-          >
-            Add meta param
-          </button>
           <button type="button" className="btn-primary" onClick={() => onSaveMetaParams(metaEdit)} disabled={saving} style={{ marginTop: 'var(--space-2)' }}>
             {saving ? 'Saving…' : 'Save meta params'}
           </button>

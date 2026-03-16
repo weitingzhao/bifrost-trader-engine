@@ -245,7 +245,7 @@ export default function App() {
     { id: 'opportunity', label: 'Opportunity' },
     { id: 'allocations', label: 'Allocations' },
     { id: 'gates', label: 'Gates' },
-    { id: 'typeConfig', label: 'Type Config' },
+    { id: 'typeConfig', label: 'Option Type Config' },
   ]
 
   const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
@@ -722,7 +722,7 @@ export default function App() {
       )}
 
       {activeTab === 'strategy' && strategyView === 'typeConfig' && (
-        <StructureTypeConfigPage breadcrumbLabel="Type Config" />
+        <StructureTypeConfigPage breadcrumbLabel="Option Type Config" />
       )}
 
       {activeTab === 'live' && (
