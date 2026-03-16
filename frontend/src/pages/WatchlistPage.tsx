@@ -438,7 +438,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                     <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAsk(q)}</td>
                     <td>
                       <span
-                        className="toggle-switch"
+                        className="watchlist-toggle-switch"
                         role="switch"
                         aria-checked={optionableOn}
                         aria-label={`Option? for ${watchlistItemLabel(item)}`}
@@ -446,8 +446,8 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
                         onClick={() => handleOptionableToggle(item)}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOptionableToggle(item) } }}
                       >
-                        <span className="toggle-switch-track" />
-                        <span className={optionableOn ? 'toggle-switch-thumb on' : 'toggle-switch-thumb'} />
+                        <span className="watchlist-toggle-switch-track" />
+                        <span className={optionableOn ? 'watchlist-toggle-switch-thumb on' : 'watchlist-toggle-switch-thumb'} />
                       </span>
                     </td>
                     <td>

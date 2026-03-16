@@ -3661,21 +3661,21 @@ th {
 }
 
 /* Data page: Apple-style toggle switch (Is test) */
-.toggle-switch {
+.watchlist-toggle-switch {
   position: relative;
   display: inline-block;
   width: 44px;
   height: 26px;
   flex-shrink: 0;
 }
-.toggle-switch-track {
+.watchlist-toggle-switch-track {
   position: absolute;
   inset: 0;
   background: var(--color-border-strong);
   border-radius: 13px;
   transition: background var(--transition-fast);
 }
-.toggle-switch-thumb {
+.watchlist-toggle-switch-thumb {
   position: absolute;
   top: 2px;
   left: 2px;
@@ -3686,16 +3686,16 @@ th {
   box-shadow: 0 1px 3px rgba(0,0,0,0.3);
   transition: transform var(--transition-fast);
 }
-.toggle-switch-thumb.on {
+.watchlist-toggle-switch-thumb.on {
   transform: translateX(18px);
 }
-.toggle-switch:hover .toggle-switch-track {
+.watchlist-toggle-switch:hover .watchlist-toggle-switch-track {
   background: var(--color-text-dim);
 }
-.toggle-switch[aria-checked="true"] .toggle-switch-track {
+.watchlist-toggle-switch[aria-checked="true"] .watchlist-toggle-switch-track {
   background: var(--color-accent);
 }
-.toggle-switch:focus-visible {
+.watchlist-toggle-switch:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: 14px;

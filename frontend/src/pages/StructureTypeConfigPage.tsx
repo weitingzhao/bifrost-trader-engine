@@ -734,11 +734,8 @@ export function StructureTypeConfigPage({
                       value={typeForm.sort_order ?? selectedTypeItem?.sort_order ?? 0}
                       onChange={(e) => setTypeForm((p) => ({ ...p, sort_order: parseInt(e.target.value, 10) || 0 }))}
                     />
-                    <label
-                      className="toggle-switch"
-                      style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
-                    >
-                      <span>Has subtypes</span>
+                    <label>Has subtypes</label>
+                    <div className="toggle-switch">
                       <input
                         type="checkbox"
                         checked={typeForm.has_subtypes ?? selectedTypeItem?.has_subtypes ?? false}
@@ -747,7 +744,7 @@ export function StructureTypeConfigPage({
                         }
                         aria-label="Has subtypes"
                       />
-                    </label>
+                    </div>
                     <label>Type explanation</label>
                     <input
                       type="text"
