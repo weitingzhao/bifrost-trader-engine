@@ -3216,7 +3216,8 @@ button:disabled {
 /* ---------- 表单控件 ---------- */
 input[type="text"],
 input[type="number"],
-select {
+select,
+textarea {
   font-family: var(--font-mono);
   font-size: var(--text-body);
   padding: var(--space-1) var(--space-2);
@@ -3228,9 +3229,32 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+/* Textarea scrollbars: match dark theme surfaces */
+textarea {
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+textarea::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
 }
 
 /* ---------- 消息与状态 ---------- */
