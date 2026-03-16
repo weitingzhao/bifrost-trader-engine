@@ -159,6 +159,20 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.warning("PostgreSQL write_snapshot failed: %s", e, exc_info=True)
 
+    def sync_accounts_only(self, accounts_list: Optional[List[Dict[str, Any]]]) -> None:
+        """R-A1 / Secondary: write only the given accounts to account + account_positions (upsert by account_id).
+        Used by Secondary position callback to push listener_connector_2 data without full snapshot."""
+        if not accounts_list or not isinstance(accounts_list, list):
+            return
+        if not self._ensure_conn():
+            return
+        try:
+            sync_accounts_snapshot_to_tables(self._conn, accounts_list)
+            self._conn.commit()
+        except Exception as e:
+            self._conn.rollback()
+            logger.warning("PostgreSQL sync_accounts_only failed: %s", e, exc_info=True)
+
     def write_operation(self, record: Dict[str, Any]) -> None:
         if not self._ensure_conn():
             return
@@ -793,16 +807,21 @@ class PostgreSQLSink(StatusSink):
         event_subscribe_positions: bool = False,
         event_subscribe_fills: bool = False,
         event_subscribe_commission: bool = False,
+        event_subscribe_positions_ib2: bool = False,
+        event_subscribe_fills_ib2: bool = False,
+        event_subscribe_commission_ib2: bool = False,
         listener_connected: bool = False,
         listener_client_id: Optional[int] = None,
         listener_2_connected: bool = False,
         listener_2_client_id: Optional[int] = None,
+        mock_hedging: bool = True,
     ) -> None:
         """Update daemon_heartbeat row (id=1). RE-6: daemon vs hedge; RE-7: ib_connected, ib_client_id, next_retry_ts.
         seconds_until_retry: relative countdown from daemon clock, avoids clock skew on UI (optional).
         heartbeat_interval_sec: interval in use by daemon, for monitor countdown.
         redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*).
         event_subscribe_*: daemon IB event subscription status for System page (ticker, positions, fills, commission).
+        event_subscribe_*_ib2: Secondary (listener_connector_2) subscription status.
         listener_connected/listener_client_id: daemon Listener on Host (settings.ib_client_id_listener).
         listener_2_connected/listener_2_client_id: daemon Listener on Secondary host (settings.ib2_host, ib2_client_id_listener)."""
         if not self._ensure_conn():
@@ -824,8 +843,10 @@ class PostgreSQLSink(StatusSink):
                                 graceful_shutdown_at = NULL, heartbeat_interval_sec = %s, redis_quotes_connected = %s,
                                 event_subscribe_ticker = %s, event_subscribe_positions = %s,
                                 event_subscribe_fills = %s, event_subscribe_commission = %s,
+                                event_subscribe_positions_ib2 = %s, event_subscribe_fills_ib2 = %s, event_subscribe_commission_ib2 = %s,
                                 listener_connected = %s, listener_client_id = %s,
-                                listener_2_connected = %s, listener_2_client_id = %s
+                                listener_2_connected = %s, listener_2_client_id = %s,
+                                mock_hedging = %s
                             WHERE id = 1
                             """,
                             (
@@ -840,10 +861,14 @@ class PostgreSQLSink(StatusSink):
                                 event_subscribe_positions,
                                 event_subscribe_fills,
                                 event_subscribe_commission,
+                                event_subscribe_positions_ib2,
+                                event_subscribe_fills_ib2,
+                                event_subscribe_commission_ib2,
                                 listener_connected,
                                 listener_client_id,
                                 listener_2_connected,
                                 listener_2_client_id,
+                                mock_hedging,
                             ),
                         )
                     else:
@@ -855,13 +880,17 @@ class PostgreSQLSink(StatusSink):
                                 heartbeat_interval_sec = %s, redis_quotes_connected = %s,
                                 event_subscribe_ticker = %s, event_subscribe_positions = %s,
                                 event_subscribe_fills = %s, event_subscribe_commission = %s,
+                                event_subscribe_positions_ib2 = %s, event_subscribe_fills_ib2 = %s, event_subscribe_commission_ib2 = %s,
                                 listener_connected = %s, listener_client_id = %s,
-                                listener_2_connected = %s, listener_2_client_id = %s
+                                listener_2_connected = %s, listener_2_client_id = %s,
+                                mock_hedging = %s
                             WHERE id = 1
                             """,
                             (hedge_running, ib_connected, ib_client_id, iv, redis_quotes_connected,
                              event_subscribe_ticker, event_subscribe_positions, event_subscribe_fills, event_subscribe_commission,
-                             listener_connected, listener_client_id, listener_2_connected, listener_2_client_id),
+                             event_subscribe_positions_ib2, event_subscribe_fills_ib2, event_subscribe_commission_ib2,
+                             listener_connected, listener_client_id, listener_2_connected, listener_2_client_id,
+                             mock_hedging),
                         )
                 self._conn.commit()
                 return
@@ -1061,9 +1090,11 @@ class PostgreSQLSink(StatusSink):
                 return
 
     def poll_run_status(self) -> tuple[bool, Optional[float]]:
-        """Read daemon_run_status (id=1). Returns (suspended, heartbeat_interval_sec). suspended=True => no new hedges; interval from DB or None (use config default)."""
+        """Read daemon_run_status (id=1). Returns (suspended, heartbeat_interval_sec). suspended=True => no new hedges; interval from DB or None (use config default).
+        Default when no row or error: suspended=True so Daemon does not connect Trading Client until explicit Resume."""
         if not self._ensure_conn():
-            return False, None
+            logger.debug("poll_run_status: _ensure_conn failed → suspended=True, interval=None (default)")
+            return True, None
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
@@ -1071,9 +1102,11 @@ class PostgreSQLSink(StatusSink):
                 )
                 row = cur.fetchone()
             if row is None:
-                return False, None
+                logger.debug("poll_run_status: no row for id=1 → suspended=True, interval=None (default)")
+                return True, None
             suspended = bool(row[0])
             interval = float(row[1]) if row[1] is not None else None
+            logger.debug("poll_run_status: row id=1 → suspended=%s, interval=%s", suspended, interval)
             return suspended, interval
         except Exception as e:
             self._conn.rollback()
@@ -1086,12 +1119,15 @@ class PostgreSQLSink(StatusSink):
                         )
                         row = cur.fetchone()
                     if row is None:
-                        return False, None
-                    return bool(row[0]), None
+                        logger.debug("poll_run_status: fallback query no row → suspended=True, interval=None")
+                        return True, None
+                    out = bool(row[0]), None
+                    logger.debug("poll_run_status: fallback query → suspended=%s, interval=None", out[0])
+                    return out
                 except Exception:
                     pass
-            logger.debug("poll_run_status failed: %s", e)
-            return False, None
+            logger.debug("poll_run_status failed: %s → suspended=True, interval=None (default)", e)
+            return True, None
 
     def close(self) -> None:
         if self._conn:

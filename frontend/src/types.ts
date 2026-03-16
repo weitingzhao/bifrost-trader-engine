@@ -192,6 +192,12 @@ export interface DaemonHeartbeat {
   /** Listener on Secondary host (settings.ib2_host, ib2_client_id_listener) */
   listener_2_connected?: boolean
   listener_2_client_id?: number | null
+  /** Secondary IB event subscribe: positions, fills, commission (no ticker). */
+  event_subscribe_positions_ib2?: boolean
+  event_subscribe_fills_ib2?: boolean
+  event_subscribe_commission_ib2?: boolean
+  /** Mock hedging mode: treat as live for Status lamp (green when running). */
+  mock_hedging?: boolean
   /** Last control message (e.g. init_ticker error: 请清空订阅). Cleared on success. */
   last_control_message?: string | null
 }

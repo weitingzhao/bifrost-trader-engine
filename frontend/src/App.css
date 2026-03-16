@@ -768,6 +768,36 @@ body::before {
   white-space: nowrap;
 }
 
+/* Event Subscribe table: account group label row (Host account / Secondary account) */
+.table-event-subscribe .event-subscribe-account-group-row .event-subscribe-account-group-cell {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+.table-event-subscribe .event-subscribe-account-group-row:first-child .event-subscribe-account-group-cell {
+  border-top: none;
+  padding-top: 0;
+}
+
+/* Event Subscribe horizontal layout: Subscription | Host account | Secondary account */
+.table-event-subscribe-horizontal {
+  table-layout: fixed;
+  width: 100%;
+}
+.table-event-subscribe-horizontal .event-subscribe-col-account {
+  min-width: 6rem;
+  font-weight: 600;
+  font-size: var(--text-small);
+  color: var(--color-text-muted);
+}
+.table-event-subscribe-horizontal .event-subscribe-no-need {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 /* Event Subscribe section: constrain height so it doesn’t overflow the page */
 .event-subscribe-section {
   display: flex;
@@ -1828,6 +1858,20 @@ body::before {
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: 0;
+}
+
+/* Daemon panel: IB 1/2, Heartbeat 1/4, Event 1/4 */
+.daemon-groups-layout {
+  flex-wrap: nowrap;
+}
+.daemon-groups-layout .daemon-group-ib {
+  flex: 2;
+  min-width: 0;
+}
+.daemon-groups-layout .daemon-group-heartbeat,
+.daemon-groups-layout .daemon-group-event {
+  flex: 1;
+  min-width: 0;
 }
 
 .daemon-group {
@@ -6464,6 +6508,10 @@ th {
 
   .daemon-header .btn-stop {
     align-self: flex-end;
+  }
+
+  .daemon-groups-layout {
+    flex-wrap: wrap;
   }
 
   .daemon-group {

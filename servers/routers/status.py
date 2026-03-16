@@ -54,6 +54,9 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "event_subscribe_positions": hb.get("event_subscribe_positions", False),
                 "event_subscribe_fills": hb.get("event_subscribe_fills", False),
                 "event_subscribe_commission": hb.get("event_subscribe_commission", False),
+                "event_subscribe_positions_ib2": hb.get("event_subscribe_positions_ib2", False),
+                "event_subscribe_fills_ib2": hb.get("event_subscribe_fills_ib2", False),
+                "event_subscribe_commission_ib2": hb.get("event_subscribe_commission_ib2", False),
                 "last_control_message": hb.get("last_control_message"),
             }
             dsc = derive_daemon_self_check(payload["daemon_heartbeat"])

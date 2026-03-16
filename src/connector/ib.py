@@ -659,11 +659,11 @@ class IBConnector:
             return
         self.ib.positionEvent += lambda _: on_update()
 
-    def subscribe_fills(self, on_fill: Callable[[Trade], None]) -> None:
-        """Subscribe to fill/trade updates."""
+    def subscribe_fills(self, on_fill: Callable[[Trade, Any], None]) -> None:
+        """Subscribe to fill/trade updates. Callback receives (trade, fill); fill is the Fill for execution row."""
         if not self.is_connected:
             return
-        self.ib.execDetailsEvent += lambda trade, fill: on_fill(trade)
+        self.ib.execDetailsEvent += lambda trade, fill: on_fill(trade, fill)
 
     def subscribe_order_status(self, on_status: Callable[[Trade], None]) -> None:
         """Subscribe to order status changes (e.g. Submitted, Filled, Cancelled). R-A5."""
@@ -731,11 +731,13 @@ class IBConnector:
         self, include_all_from_tws: bool = False
     ) -> List[Dict[str, Any]]:
         """Return current open orders from ib.openTrades(). R-A5.
-        If include_all_from_tws is True, call reqAllOpenOrdersAsync() first so TWS manual orders are included."""
+        If include_all_from_tws is True, call reqAllOpenOrdersAsync() and reqOpenOrdersAsync()
+        so both API orders and this client's orders (e.g. manual TWS orders bound to this client) are included."""
         if not self.is_connected:
             await self.connect()
         if include_all_from_tws:
             await self.ib.reqAllOpenOrdersAsync()
+            await self.ib.reqOpenOrdersAsync()
         return self.get_open_orders_snapshot()
 
     def _exec_side_to_buy_sell(self, side: Optional[str]) -> str:
@@ -761,6 +763,110 @@ class IBConnector:
             right = getattr(contract, "right", "") or ""
             return f"{sym}|{st}|{exp}|{strike}|{right}"
         return f"{sym}|{st}||||"
+
+    def fill_to_execution_row(
+        self,
+        fill: Any,
+        commission_by_exec_id: Optional[Dict[str, Dict[str, Any]]] = None,
+        source: str = "tws_event",
+    ) -> Optional[Dict[str, Any]]:
+        """Build one execution row dict from a single Fill for DB (R-A2). Used by subscribe_fills callback.
+        commission_by_exec_id: optional map exec_id -> {commission, realizedPNL, currency, yield_, yieldRedemptionDate}."""
+        if not isinstance(fill, Fill):
+            return None
+        ex = getattr(fill, "execution", None)
+        contract = getattr(fill, "contract", None)
+        comm_report = getattr(fill, "commissionReport", None)
+        fill_time = getattr(fill, "time", None) or (ex.time if ex else None)
+        exec_id = ex.execId if ex else None
+        if not ex:
+            return None
+        acct = ex.acctNumber if ex else None
+        side = self._exec_side_to_buy_sell(ex.side if ex else None)
+        shares = ex.shares if ex else None
+        price = ex.price if ex else None
+        commission = None
+        realized_pnl = None
+        comm_currency = None
+        if comm_report is not None:
+            commission = getattr(comm_report, "commission", None)
+            realized_pnl = getattr(comm_report, "realizedPNL", None)
+            comm_currency = getattr(comm_report, "currency", None)
+        if commission is None and exec_id and commission_by_exec_id and exec_id in commission_by_exec_id:
+            rec = commission_by_exec_id[exec_id]
+            commission = rec.get("commission")
+            realized_pnl = realized_pnl if realized_pnl is not None else rec.get("realizedPNL")
+            comm_currency = comm_currency or rec.get("currency")
+        symbol = ""
+        sec_type = ""
+        expiry = ""
+        strike = None
+        option_right = ""
+        exchange = ""
+        currency = ""
+        local_symbol = ""
+        con_id = None
+        if contract is not None:
+            symbol = getattr(contract, "symbol", "") or ""
+            sec_type = getattr(contract, "secType", "") or ""
+            exchange = getattr(contract, "exchange", "") or ""
+            currency = getattr(contract, "currency", "") or ""
+            local_symbol = getattr(contract, "localSymbol", "") or ""
+            con_id = getattr(contract, "conId", None)
+            if sec_type == "OPT":
+                expiry = getattr(contract, "lastTradeDateOrContractMonth", "") or ""
+                strike = getattr(contract, "strike", None)
+                option_right = getattr(contract, "right", "") or ""
+        if ex and not exchange:
+            exchange = getattr(ex, "exchange", "") or ""
+        ts = None
+        if fill_time is not None:
+            try:
+                ts = fill_time.timestamp()
+            except Exception:
+                pass
+        contract_key = self._contract_key(contract)
+        raw_extra: Dict[str, Any] = {}
+        if ex:
+            for attr in ("permId", "clientId", "orderId", "liquidation", "cumQty", "avgPrice", "orderRef", "evRule", "evMultiplier", "modelCode", "lastLiquidity"):
+                v = getattr(ex, attr, None)
+                if v is not None and v != "" and v != 0:
+                    raw_extra[attr] = v
+        if comm_report:
+            for attr in ("yield_", "yieldRedemptionDate"):
+                v = getattr(comm_report, attr, None)
+                if v is not None:
+                    raw_extra[attr] = v
+        yield_val = getattr(comm_report, "yield_", None) if comm_report else None
+        yield_redemption = getattr(comm_report, "yieldRedemptionDate", None) if comm_report else None
+        if contract and con_id is not None:
+            raw_extra["conId"] = con_id
+        if local_symbol:
+            raw_extra["localSymbol"] = local_symbol
+        return {
+            "exec_id": exec_id,
+            "time": ts,
+            "account_id": acct,
+            "symbol": symbol,
+            "sec_type": sec_type,
+            "side": side,
+            "quantity": float(shares) if shares is not None else None,
+            "price": float(price) if price is not None else None,
+            "commission": float(commission) if commission is not None else None,
+            "source": source,
+            "expiry": expiry or None,
+            "strike": float(strike) if strike is not None else None,
+            "option_right": option_right or None,
+            "exchange": exchange or None,
+            "currency": (comm_currency or currency or None),
+            "order_id": ex.orderId if ex else None,
+            "cum_qty": float(ex.cumQty) if ex and hasattr(ex, "cumQty") and ex.cumQty is not None else None,
+            "realized_pnl": float(realized_pnl) if realized_pnl is not None else None,
+            "contract_key": contract_key or None,
+            "raw_extra": raw_extra if raw_extra else None,
+            "yield_": float(yield_val) if yield_val is not None else None,
+            "yield_redemption_date": int(yield_redemption) if yield_redemption is not None else None,
+        }
 
     async def get_executions_async(
         self,

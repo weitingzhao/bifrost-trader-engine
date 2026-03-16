@@ -89,19 +89,19 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        _log_table("daemon_run_status", "Run suspended flag (single row)")
+        _log_table("daemon_run_status", "Run suspended flag (single row). Default suspended=true so Trading Strategy and IB Trading Client stay off until Resume.")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_run_status (
                 id integer PRIMARY KEY DEFAULT 1,
-                suspended boolean NOT NULL DEFAULT false,
+                suspended boolean NOT NULL DEFAULT true,
                 updated_at timestamptz DEFAULT now()
             )
         """
         )
         cur.execute(
             """
-            INSERT INTO daemon_run_status (id, suspended) VALUES (1, false)
+            INSERT INTO daemon_run_status (id, suspended) VALUES (1, true)
             ON CONFLICT (id) DO NOTHING
         """
         )
@@ -1174,12 +1174,28 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 "ALTER TABLE daemon_heartbeat ADD COLUMN listener_2_client_id integer",
             ),
             (
+                "event_subscribe_positions_ib2",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_positions_ib2 boolean DEFAULT false",
+            ),
+            (
+                "event_subscribe_fills_ib2",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_fills_ib2 boolean DEFAULT false",
+            ),
+            (
+                "event_subscribe_commission_ib2",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_commission_ib2 boolean DEFAULT false",
+            ),
+            (
                 "last_control_message",
                 "ALTER TABLE daemon_heartbeat ADD COLUMN last_control_message text",
             ),
             (
                 "subscribed_tickers",
                 "ALTER TABLE daemon_heartbeat ADD COLUMN subscribed_tickers text[]",
+            ),
+            (
+                "mock_hedging",
+                "ALTER TABLE daemon_heartbeat ADD COLUMN mock_hedging boolean DEFAULT true",
             ),
             (
                 "run_status_heartbeat_interval",

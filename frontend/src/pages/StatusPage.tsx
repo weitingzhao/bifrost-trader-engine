@@ -117,6 +117,15 @@ export function StatusPage({
       : null
   const suspended = j?.trading_suspended === true
   const ibConnected = hb?.ib_connected === true
+  const streamHostAccountId = (j?.ib_config?.stream_host_account_id ?? '').toString().trim()
+  const streamSecondaryAccountId = (j?.ib_config?.stream_secondary_account_id ?? '').toString().trim()
+  const openOrdersList = j?.open_orders ?? []
+  const hostOpenOrderCount = streamHostAccountId
+    ? openOrdersList.filter((o) => (o.account_id ?? '').toString().trim() === streamHostAccountId).length
+    : openOrdersList.length
+  const secondaryOpenOrderCount = streamSecondaryAccountId
+    ? openOrdersList.filter((o) => (o.account_id ?? '').toString().trim() === streamSecondaryAccountId).length
+    : 0
 
   useEffect(() => {
     return () => {
@@ -184,8 +193,6 @@ export function StatusPage({
     hedgeHint = 'In dual-process mode, hedge does not run when daemon is down'
   }
 
-  const daemonLamp = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'none'
-  const hedgeLamp: 'green' | 'yellow' | 'red' | 'none' = 'green'
   const monitorEnabled = j?.monitor_enabled !== false
   const monitorStatus = (j?.monitor_ib_status as any) || {}
   const monitorAccount = monitorStatus.account as { connected?: boolean; client_id?: number; last_error?: string } | undefined
@@ -250,8 +257,50 @@ export function StatusPage({
 
   const runStatusLabel = suspended ? 'Suspended (no new hedges)' : 'Running'
   const heartbeatGroupLamp = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
-  const ibGroupLamp = !hb?.daemon_alive ? 'none' : ibConnected ? 'green' : 'red'
-  const strategyGroupLamp = suspended ? 'red' : 'green'
+  // Daemon IB Connection: green = both Listener Host and Secondary connected; yellow = at least one of (Host, Secondary, Trading) connected; red = neither listener connected.
+  const listenerHost = hb?.listener_connected === true
+  const listenerSecondary = hb?.listener_2_connected === true
+  const ibGroupLamp: 'green' | 'yellow' | 'red' | 'none' =
+    !hb?.daemon_alive
+      ? 'none'
+      : listenerHost && listenerSecondary
+        ? 'green'
+        : !listenerHost && !listenerSecondary
+          ? 'red'
+          : 'yellow'
+  // Red: daemon heartbeat red (no hb or !daemon_alive). Yellow: daemon running but strategy suspended. Green: mock mode or live running.
+  const tradingStrategyLamp: 'green' | 'yellow' | 'red' | 'none' =
+    !hb || !hb.daemon_alive ? 'red' : suspended ? 'yellow' : 'green'
+  const eventSubscribeLamp: 'green' | 'yellow' | 'red' =
+    !hb?.daemon_alive
+      ? 'red'
+      : (() => {
+          const tickerOk = hb.event_subscribe_ticker
+          const positionsOk = hb.event_subscribe_positions
+          const fillsOk = hb.event_subscribe_fills
+          const commissionOk = hb.event_subscribe_commission
+          const allOk = tickerOk && positionsOk && fillsOk && commissionOk
+          const anyOk = tickerOk || positionsOk || fillsOk || commissionOk
+          return allOk ? 'green' : anyOk ? 'yellow' : 'red'
+        })()
+  /** Event lamp: green when Trading Strategy running (green) and Event Subscribe green; red when Trading Strategy or Event Subscribe red; else yellow. */
+  const strategyGroupLamp: 'green' | 'yellow' | 'red' | 'none' =
+    tradingStrategyLamp === 'green' && eventSubscribeLamp === 'green'
+      ? 'green'
+      : tradingStrategyLamp === 'red' || eventSubscribeLamp === 'red'
+        ? 'red'
+        : 'yellow'
+
+  /** Daemon status: all green → green; any yellow → yellow; all red (or any red when no yellow) → red. Treat 'none' as red. */
+  const daemonLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
+    const asRedYellowGreen = (v: string): 'green' | 'yellow' | 'red' => (v === 'none' ? 'red' : v as 'green' | 'yellow' | 'red')
+    const h = asRedYellowGreen(heartbeatGroupLamp)
+    const i = asRedYellowGreen(ibGroupLamp)
+    const e = asRedYellowGreen(strategyGroupLamp)
+    if (h === 'green' && i === 'green' && e === 'green') return 'green'
+    if (h === 'yellow' || i === 'yellow' || e === 'yellow') return 'yellow'
+    return 'red'
+  })()
 
   const s = j?.status ?? {}
   const statusSummaryItems = STATUS_FIELDS.map(([k, label]) => {
@@ -400,8 +449,6 @@ export function StatusPage({
               daemonIbLine={daemonIbLine}
               ibConfig={j?.ib_config}
               onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
-              onSuspend={() => runCtrlAction(postSuspend, { loading: 'Setting suspend…', success: 'Suspend set; daemon will pause new hedges on next heartbeat.' })}
-              onResume={() => runCtrlAction(postResume, { loading: 'Setting resume…', success: 'Resume set; daemon will resume hedging on next heartbeat.' })}
               onReleaseIb={() => runCtrlAction(postReleaseIb, { loading: 'Requesting release IB…', success: 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB (daemon keeps running). Use «Retry IB connection» below to reconnect when ready.' })}
               ctrlMsg={ctrlMsg}
               className={showAllSystemSections ? 'system-stack-section' : undefined}
@@ -455,14 +502,14 @@ export function StatusPage({
       {showConsoleSection && (
       <div className="card process-section system-tabs-wrapper stream-event-card">
         <div className="status-section-heading-row">
-          <h2 className="status-section-heading">Event</h2>
+          <h2 className="status-section-heading">Daemon Event</h2>
         </div>
         <div className="status-management-celery-row stream-event-row">
           <div className="status-panel-section status-management-celery-half stream-event-strategy-quarter">
             <StatusStrategyPanel
               compact
               status={j}
-              hedgeLamp={hedgeLamp}
+              hedgeLamp={tradingStrategyLamp}
               hedgeLabel={hedgeLabel}
               hedgeSelfCheckText={hedgeSelfCheckText}
               hedgeBlockReasons={hedgeBlockReasons}
@@ -470,6 +517,9 @@ export function StatusPage({
               statusSummaryItems={statusSummaryItems}
               onFlatten={() => runHedgeAction(postFlatten, { loading: 'Requesting flatten…', success: 'Flatten sent; hedge process will consume and execute.' })}
               hedgeCtrlMsg={hedgeCtrlMsg}
+              suspended={suspended}
+              onSuspend={() => runCtrlAction(postSuspend, { loading: 'Setting suspend…', success: 'Suspend set; daemon will pause new hedges on next heartbeat.' })}
+              onResume={() => runCtrlAction(postResume, { loading: 'Setting resume…', success: 'Resume set; daemon will resume hedging on next heartbeat.' })}
               activeStructureName={status?.active_strategy_structure_name}
               activeGateSafetyName={status?.active_gate_safety_strategy_name}
               onManage={onNavigateToStrategy}
@@ -479,26 +529,12 @@ export function StatusPage({
             <div className="event-subscribe-header-row">
               <div className="daemon-header-with-lamp" style={{ marginBottom: 0 }}>
                 <div className="lamp-wrap-span">
-                  <div className={`lamp lamp-sm ${(() => {
-                    if (!hb?.daemon_alive) return 'red'
-                    const tickerOk = hb.event_subscribe_ticker
-                    const positionsOk = hb.event_subscribe_positions
-                    const fillsOk = hb.event_subscribe_fills
-                    const commissionOk = hb.event_subscribe_commission
-                    const allOk = tickerOk && positionsOk && fillsOk && commissionOk
-                    const anyOk = tickerOk || positionsOk || fillsOk || commissionOk
-                    return allOk ? 'green' : anyOk ? 'yellow' : 'red'
-                  })()}`} title="Event Subscribe: green = all subscribed, yellow = some not, red = none or daemon down" aria-hidden />
+                  <div className={`lamp lamp-sm ${eventSubscribeLamp}`} title="Event Subscribe: green = all subscribed, yellow = some not, red = none or daemon down" aria-hidden />
                 </div>
                 <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
                   Event Subscribe
                   <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Watchlist STK + strategy symbol)." />
                 </h2>
-                {hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.subscribed_tickers?.length ?? 0) >= 0 && (
-                  <span className="event-subscribe-ticker-count" aria-label="Subscribed ticker count">
-                    {j?.subscribed_tickers?.length ?? 0} ticker{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'}
-                  </span>
-                )}
               </div>
               <div className="event-subscribe-buttons">
                 <button
@@ -526,71 +562,150 @@ export function StatusPage({
               </div>
             </div>
             <div className="event-subscribe-body">
-            <table className="table-operations table-event-subscribe">
+            {(() => {
+              const hasSecondary = !!(j?.ib_config?.ib2_host ?? j?.ib_config?.ib2_client_id_listener != null)
+              return (
+            <table className="table-operations table-event-subscribe table-event-subscribe-horizontal">
               <thead>
                 <tr>
                   <th className="event-subscribe-col-subscription">Subscription</th>
-                  <th>Status</th>
+                  <th className="event-subscribe-col-account">Host account</th>
+                  {hasSecondary && <th className="event-subscribe-col-account">Secondary account</th>}
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td className="event-subscribe-col-subscription">Real-time ticker</td>
+                  <td className="event-subscribe-col-subscription">Real-time ticker (Host only)</td>
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker" aria-hidden />
-                      <span className="event-subscribe-status-text">
+                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker (Host only)" aria-hidden />
+                      <span
+                        className="event-subscribe-status-text"
+                        title={hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.subscribed_tickers?.length ?? 0) > 0
+                          ? `Subscribed symbols: ${(j?.subscribed_tickers ?? []).join(', ')}`
+                          : undefined}
+                      >
                         {hb?.daemon_alive && hb?.event_subscribe_ticker
-                          ? `${j?.subscribed_tickers?.length ?? 0} ticker${(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'}`
+                          ? (
+                              <>
+                                <span className="countdown-num">{j?.subscribed_tickers?.length ?? 0}</span>
+                                {' ticker'}{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'}
+                              </>
+                            )
                           : hb?.daemon_alive
                             ? 'Not subscribed'
                             : '—'}
                       </span>
-                      {hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.subscribed_tickers?.length ?? 0) > 0 && (
-                        <div className="dashboard-streams-marquee event-subscribe-ticker-marquee">
-                          <div className="dashboard-streams-track event-subscribe-track">
-                            {(() => {
-                              const tickers = j?.subscribed_tickers ?? []
-                              const short = tickers.length > 8 ? tickers.slice(0, 8) : tickers
-                              return [...short, ...short].map((sym, idx) => (
-                                <span key={`${sym}-${idx}`} className="dashboard-streams-item">{sym}</span>
-                              ))
-                            })()}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </td>
+                  {hasSecondary && (
+                    <td>
+                      <span className="event-subscribe-status-text event-subscribe-no-need">No need</span>
+                    </td>
+                  )}
+                </tr>
+                <tr>
+                  <td className="event-subscribe-col-subscription">Open orders</td>
+                  <td>
+                    <div className="event-subscribe-status-cell">
+                      <div className={`lamp lamp-sm ${hb?.daemon_alive ? 'green' : 'red'}`} title="Open orders (Host)" aria-hidden />
+                      <span className="event-subscribe-status-text">
+                        {hb?.daemon_alive
+                          ? (
+                              <>
+                                <span className="countdown-num">{hostOpenOrderCount}</span>
+                                {' open order'}{hostOpenOrderCount === 1 ? '' : 's'}
+                              </>
+                            )
+                          : '—'}
+                      </span>
+                    </div>
+                  </td>
+                  {hasSecondary && (
+                    <td>
+                      <div className="event-subscribe-status-cell">
+                        <div className={`lamp lamp-sm ${hb?.daemon_alive ? 'green' : 'red'}`} title="Open orders (Secondary)" aria-hidden />
+                        <span className="event-subscribe-status-text">
+                          {hb?.daemon_alive
+                            ? (
+                                <>
+                                  <span className="countdown-num">{secondaryOpenOrderCount}</span>
+                                  {' open order'}{secondaryOpenOrderCount === 1 ? '' : 's'}
+                                </>
+                              )
+                            : '—'}
+                        </span>
+                      </div>
+                    </td>
+                  )}
                 </tr>
                 <tr>
                   <td className="event-subscribe-col-subscription">Position updates</td>
                   <td>
-                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Position updates" aria-hidden />
-                    <span className="event-subscribe-status-text">
-                      {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                    </span>
+                    <div className="event-subscribe-status-cell">
+                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host position updates" aria-hidden />
+                      <span className="event-subscribe-status-text">
+                        {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                      </span>
+                    </div>
                   </td>
+                  {hasSecondary && (
+                    <td>
+                      <div className="event-subscribe-status-cell">
+                        <div className={`lamp lamp-sm ${hb?.listener_2_connected && hb?.event_subscribe_positions_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary position updates" aria-hidden />
+                        <span className="event-subscribe-status-text">
+                          {hb?.listener_2_connected && hb?.event_subscribe_positions_ib2 ? 'Subscribed' : hb?.listener_2_connected ? 'Not subscribed' : '—'}
+                        </span>
+                      </div>
+                    </td>
+                  )}
                 </tr>
                 <tr>
                   <td className="event-subscribe-col-subscription">Fill / execution report</td>
                   <td>
-                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Fill / execution report" aria-hidden />
-                    <span className="event-subscribe-status-text">
-                      {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                    </span>
+                    <div className="event-subscribe-status-cell">
+                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host fill / execution" aria-hidden />
+                      <span className="event-subscribe-status-text">
+                        {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                      </span>
+                    </div>
                   </td>
+                  {hasSecondary && (
+                    <td>
+                      <div className="event-subscribe-status-cell">
+                        <div className={`lamp lamp-sm ${hb?.listener_2_connected && hb?.event_subscribe_fills_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary fill / execution" aria-hidden />
+                        <span className="event-subscribe-status-text">
+                          {hb?.listener_2_connected && hb?.event_subscribe_fills_ib2 ? 'Subscribed' : hb?.listener_2_connected ? 'Not subscribed' : '—'}
+                        </span>
+                      </div>
+                    </td>
+                  )}
                 </tr>
                 <tr>
                   <td className="event-subscribe-col-subscription">Commission report</td>
                   <td>
-                    <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Commission report" aria-hidden />
-                    <span className="event-subscribe-status-text">
-                      {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
-                    </span>
+                    <div className="event-subscribe-status-cell">
+                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host commission" aria-hidden />
+                      <span className="event-subscribe-status-text">
+                        {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
+                      </span>
+                    </div>
                   </td>
+                  {hasSecondary && (
+                    <td>
+                      <div className="event-subscribe-status-cell">
+                        <div className={`lamp lamp-sm ${hb?.listener_2_connected && hb?.event_subscribe_commission_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary commission" aria-hidden />
+                        <span className="event-subscribe-status-text">
+                          {hb?.listener_2_connected && hb?.event_subscribe_commission_ib2 ? 'Subscribed' : hb?.listener_2_connected ? 'Not subscribed' : '—'}
+                        </span>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               </tbody>
             </table>
+              )
+            })()}
             {syncTickerMsg.text ? (
               <div className={`msg ${syncTickerMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
                 {syncTickerMsg.text}

@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Any, Optional, Tuple
 
+from src.app.accounts import _connector_for_read
 from src.config.settings import get_state_space_config
 from src.core.state.classifier import StateClassifier
 from src.core.state.composite import CompositeState
@@ -183,7 +184,9 @@ async def refresh_and_build_snapshot(
     stock_shares = app.store.get_stock_position()
     spot = app.store.get_underlying_price()
     if spot is None or spot <= 0:
-        spot = await app.connector.get_underlying_price(app.symbol)
+        conn = _connector_for_read(app)
+        if conn:
+            spot = await conn.get_underlying_price(app.symbol)
         if spot is not None and spot > 0:
             app.store.set_underlying_price(spot)
     if spot is None or spot <= 0:

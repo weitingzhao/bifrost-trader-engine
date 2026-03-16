@@ -1,10 +1,16 @@
-"""Ticker subscriptions and R-M6 contract_quote_live (IB + Redis). Used by GsTrading."""
+"""Ticker subscriptions and R-M6 contract_quote_live (IB + Redis). Used by GsTrading.
+Ticker subscribe/unsubscribe use Host Listener (listener_connector), not Host Trading."""
 
 import logging
 import math
 from typing import Any, Set
 
 logger = logging.getLogger(__name__)
+
+
+def _ticker_connector(app: Any) -> Any:
+    """Connector used for Real-time ticker: Host Listener."""
+    return getattr(app, "listener_connector", None)
 
 STALE_TICKER_SEC = 30.0
 
@@ -32,11 +38,12 @@ def _redis_remove_subscribed_and_quote(app: Any, symbol: str) -> None:
 
 async def release_ticker_subscriptions(app: Any) -> None:
     """Unsubscribe all Real-time ticker subscriptions; clear Redis quotes and ticker:subscribed set. Clears last_control_message."""
-    if not app.connector.is_connected:
+    conn = _ticker_connector(app)
+    if not conn or not conn.is_connected:
         return
-    current = set(app.connector.get_subscribed_ticker_symbols())
+    current = set(conn.get_subscribed_ticker_symbols())
     for sym in sorted(current):
-        app.connector.unsubscribe_ticker(sym)
+        conn.unsubscribe_ticker(sym)
         _redis_remove_subscribed_and_quote(app, sym)
         logger.info("[Daemon] Real-time ticker unsubscribed: %s", sym)
     if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
@@ -63,7 +70,8 @@ def _build_init_desired_symbols(app: Any) -> set:
 
 async def init_ticker_subscriptions(app: Any) -> None:
     """If no subscriptions (per Redis set): build desired set (watchlist + all positions) and subscribe. If Redis set non-empty, write error and return."""
-    if not app.connector.is_connected:
+    conn = _ticker_connector(app)
+    if not conn or not conn.is_connected:
         return
     subscribed: Set[str] = set()
     if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
@@ -77,7 +85,7 @@ async def init_ticker_subscriptions(app: Any) -> None:
     _clear_control_message(app)
     desired = _build_init_desired_symbols(app)
     if desired:
-        added = await app.connector.subscribe_tickers(
+        added = await conn.subscribe_tickers(
             sorted(desired), app._on_ticker_for_symbol
         )
         if added:
@@ -97,7 +105,8 @@ async def sync_ticker_subscriptions_from_redis(
     b) In target but not subscribed: subscribe.
     c) Subscribed but not in target: unsubscribe.
     """
-    if not app.connector.is_connected:
+    conn = _ticker_connector(app)
+    if not conn or not conn.is_connected:
         return
     rq = getattr(app, "_redis_quotes", None)
     if not rq or not rq.available:
@@ -115,21 +124,21 @@ async def sync_ticker_subscriptions_from_redis(
             to_refresh.add(sym)
     # (c) Unsubscribe and remove from Redis
     for sym in sorted(c):
-        app.connector.unsubscribe_ticker(sym)
+        conn.unsubscribe_ticker(sym)
         _redis_remove_subscribed_and_quote(app, sym)
         logger.info("[Daemon] Real-time ticker unsubscribed (not in target): %s", sym)
     # (a) Refresh: unsub then sub (do not change Redis set)
     for sym in sorted(to_refresh):
-        app.connector.unsubscribe_ticker(sym)
+        conn.unsubscribe_ticker(sym)
     if to_refresh:
-        added = await app.connector.subscribe_tickers(
+        added = await conn.subscribe_tickers(
             sorted(to_refresh), app._on_ticker_for_symbol
         )
         if added:
             logger.info("[Daemon] Real-time ticker refreshed (stale >%ss): %s", stale_sec, sorted(added.keys()))
     # (b) Subscribe and add to Redis set
     if b:
-        added = await app.connector.subscribe_tickers(
+        added = await conn.subscribe_tickers(
             sorted(b), app._on_ticker_for_symbol
         )
         if added:
@@ -139,7 +148,7 @@ async def sync_ticker_subscriptions_from_redis(
 
 async def refresh_ticker_subscriptions(app: Any) -> None:
     """Sync: use Redis subscription state and per-symbol age; refresh stale (>30s), subscribe new, unsubscribe removed. If Redis unavailable, fallback to Release then Init."""
-    if not app.connector.is_connected:
+    if not _ticker_connector(app) or not _ticker_connector(app).is_connected:
         return
     rq = getattr(app, "_redis_quotes", None)
     if rq and rq.available:
@@ -192,14 +201,15 @@ async def refresh_position_prices(app: Any) -> None:
         app._status_sink, "write_contract_quote_live"
     ):
         return
-    if not app.connector.is_connected:
+    conn = _ticker_connector(app)
+    if not conn or not conn.is_connected:
         return
     instruments = get_position_stk_instruments(app)
     if not instruments:
         return
     rows = []
     for ck, meta in instruments.items():
-        price = await app.connector.get_instrument_price(
+        price = await conn.get_instrument_price(
             symbol=meta["symbol"],
             sec_type=meta["sec_type"],
             expiry=meta["expiry"],

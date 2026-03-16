@@ -86,3 +86,4 @@ gates:
       max_net_delta_shares: null   # alert threshold; exceed = force hedge (null = no limit)
       max_spread_pct: null         # pause hedge if bid-ask spread > this % (null = disabled)
       paper_trade: true
+      mock_hedging: true           # when true: no real IB order, daemon logs "Mock Hedging, not using IB" (for testing Resume/UI)

@@ -215,13 +215,14 @@ def post_control_suspend(request: Request) -> JSONResponse:
 
 @router.post("/control/resume")
 def post_control_resume(request: Request) -> JSONResponse:
-    """Set daemon_run_status.suspended=false; daemon will resume hedging."""
+    """Set daemon_run_status.suspended=false; daemon will resume hedging. Also write retry_ib so daemon in WAITING_IB reconnects Trading Client."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
-    if write_run_status(control_via_db, suspended=False):
-        return JSONResponse(status_code=200, content={"ok": True, "message": "trading resumed"})
-    return JSONResponse(status_code=500, content={"error": "failed to set run status"})
+    if not write_run_status(control_via_db, suspended=False):
+        return JSONResponse(status_code=500, content={"error": "failed to set run status"})
+    write_control_command(control_via_db, "retry_ib")
+    return JSONResponse(status_code=200, content={"ok": True, "message": "trading resumed; retry_ib written for daemon to reconnect IB Trading Client"})
 
 
 @router.post("/control/retry_ib")

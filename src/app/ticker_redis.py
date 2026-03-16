@@ -56,8 +56,7 @@ def on_ticker_for_symbol(app: Any, symbol: str, ticker: Any) -> None:
                 logger.warning(
                     "Redis quote write/publish in _on_ticker_for_symbol: %s", e
                 )
-        if symbol == app.symbol:
-            eval_hedge_threadsafe(app)
+        # Hedge evaluation is driven only by heartbeat (control_heartbeat), not by every ticker update.
     except Exception as e:
         logger.debug("ticker callback error for %s: %s", symbol, e)
 

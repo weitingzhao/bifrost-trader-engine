@@ -12,16 +12,30 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_idle(app: Any) -> DaemonState:
-    """IDLE: ready to start. Transition to CONNECTING."""
+    """IDLE: ready to start. If daemon_run_status.suspended=true (default), go to WAITING_IB without connecting IB Trading Client; else CONNECTING."""
+    suspended, interval = app._poll_run_status()
+    logger.debug(
+        "[Daemon] state=IDLE | poll_run_status → suspended=%s, interval=%s; next state=%s",
+        suspended,
+        interval,
+        "WAITING_IB" if suspended else "CONNECTING",
+    )
+    if suspended:
+        logger.info(
+            "[Daemon] state=IDLE → WAITING_IB (daemon_run_status.suspended=true; Trading Strategy and Trading Client off until Resume)"
+        )
+        return DaemonState.WAITING_IB
     logger.info("[Daemon] state=IDLE → CONNECTING (connecting to IB)")
     return DaemonState.CONNECTING
 
 
 async def handle_connecting(app: Any) -> DaemonState:
     """CONNECTING: try IB with client_id, client_id+1, ... (up to 10 attempts); if all fail → WAITING_IB (RE-7)."""
+    cid = getattr(app.connector, "client_id", None)
+    logger.debug("[Daemon] state=CONNECTING | Trading Client connecting client_id=%s", cid)
     logger.info(
         "[Daemon] state=CONNECTING | connecting to IB (clientId=%s; will try +1, +2, ... if already in use)",
-        getattr(app.connector, "client_id", None),
+        cid,
     )
     ok = await app.connector.connect(max_attempts=10)
     if not ok:
@@ -29,6 +43,7 @@ async def handle_connecting(app: Any) -> DaemonState:
             "[Daemon] state=CONNECTING | IB connect failed after 10 attempts → WAITING_IB (daemon stays up, will retry)"
         )
         return DaemonState.WAITING_IB
+    logger.debug("[Daemon] state=CONNECTING | Trading Client connected client_id=%s", getattr(app.connector, "client_id", None))
     logger.info("[Daemon] state=CONNECTING → CONNECTED (IB connected)")
     return DaemonState.CONNECTED
 
@@ -48,6 +63,7 @@ async def handle_waiting_ib(app: Any) -> DaemonState:
             seconds_until_retry=sec_until,
             heartbeat_interval_sec=app._effective_heartbeat_interval(),
             redis_quotes_connected=app._redis_quotes_connected(),
+            mock_hedging=getattr(app, "mock_hedging", True),
             **app._event_subscribe_flags(),
             **app._listener_heartbeat_kwargs(),
         )
@@ -62,26 +78,40 @@ async def handle_waiting_ib(app: Any) -> DaemonState:
             logger.info("[Daemon] state=WAITING_IB | control stop → STOPPING")
             return DaemonState.STOPPING
         if cmd == "retry_ib" or time.time() >= next_retry_ts:
-            logger.info(
-                "[Daemon] state=WAITING_IB | %s → connecting to IB (clientId=%s; will try +1, +2, ... if in use)",
+            # WAITING_IB: connect Listener (Host) for read-only; do not connect Trading until user Resume
+            listener = getattr(app, "listener_connector", None)
+            if listener is None:
+                logger.warning("[Daemon] state=WAITING_IB | no listener_connector; skip connect")
+                await asyncio.sleep(1.0)
+                continue
+            cid = getattr(listener, "client_id", None)
+            logger.debug(
+                "[Daemon] state=WAITING_IB | Listener (Host) connecting (%s) client_id=%s",
                 "retry_ib" if cmd == "retry_ib" else "retry timer",
-                getattr(app.connector, "client_id", None),
+                cid,
             )
-            ok = await app.connector.connect(max_attempts=10)
+            logger.info(
+                "[Daemon] state=WAITING_IB | %s → connecting Listener (Host) to IB (clientId=%s; will try +1, +2, ... if in use)",
+                "retry_ib" if cmd == "retry_ib" else "retry timer",
+                cid,
+            )
+            ok = await listener.connect(max_attempts=10)
             if ok:
+                logger.debug("[Daemon] state=WAITING_IB | Listener (Host) connected client_id=%s", getattr(listener, "client_id", None))
                 if app._status_sink and hasattr(
                     app._status_sink, "write_daemon_heartbeat"
                 ):
                     app._status_sink.write_daemon_heartbeat(
                         hedge_running=False,
-                        ib_connected=True,
-                        ib_client_id=getattr(app.connector, "client_id", None),
+                        ib_connected=False,
+                        ib_client_id=None,
                         heartbeat_interval_sec=app._effective_heartbeat_interval(),
                         redis_quotes_connected=app._redis_quotes_connected(),
+                        mock_hedging=getattr(app, "mock_hedging", True),
                         **app._event_subscribe_flags(),
                         **app._listener_heartbeat_kwargs(),
                     )
-                logger.info("[Daemon] state=WAITING_IB → CONNECTED (IB connected)")
+                logger.info("[Daemon] state=WAITING_IB → CONNECTED (Listener connected)")
                 return DaemonState.CONNECTED
             now_t = time.time()
             interval = app._effective_heartbeat_interval()
@@ -98,6 +128,7 @@ async def handle_waiting_ib(app: Any) -> DaemonState:
                     seconds_until_retry=sec_until,
                     heartbeat_interval_sec=app._effective_heartbeat_interval(),
                     redis_quotes_connected=app._redis_quotes_connected(),
+                    mock_hedging=getattr(app, "mock_hedging", True),
                     **app._event_subscribe_flags(),
                     **app._listener_heartbeat_kwargs(),
                 )
@@ -117,6 +148,7 @@ async def handle_connected(app: Any) -> DaemonState:
             ib_client_id=getattr(app.connector, "client_id", None),
             heartbeat_interval_sec=app._effective_heartbeat_interval(),
             redis_quotes_connected=app._redis_quotes_connected(),
+            mock_hedging=getattr(app, "mock_hedging", True),
             **app._event_subscribe_flags(),
             **app._listener_heartbeat_kwargs(),
         )
@@ -145,70 +177,19 @@ async def handle_connected(app: Any) -> DaemonState:
 
 
 async def handle_running(app: Any) -> DaemonState:
-    """RUNNING: subscribe to Watchlist STK + active symbol, start background tasks, loop until stop requested."""
+    """RUNNING: Host Listener = all Host events (ticker, positions, open orders, fills).
+    Secondary Listener = Secondary open orders, positions, fills, commission. Host Trading = no logic/subscriptions."""
     logger.info(
-        "[Daemon] state=RUNNING | subscribing to tickers (Watchlist STK + active symbol) and positions..."
+        "[Daemon] state=RUNNING | connecting Host Listener, then subscribing tickers and positions..."
     )
-    symbols_to_subscribe: list = []
-    if app._status_sink and hasattr(app._status_sink, "get_watchlist_stk_symbols"):
-        symbols_to_subscribe = (
-            getattr(app._status_sink, "get_watchlist_stk_symbols")() or []
-        )
-    logger.info("[Daemon] Watchlist STK symbols from DB: %s", symbols_to_subscribe)
-    symbols_set = set(
-        s.strip() for s in symbols_to_subscribe if s and str(s).strip()
-    )
-    if app.symbol:
-        symbols_set.add(app.symbol)
-    symbols_set = {s for s in symbols_set if s and str(s).strip()}
-    symbols_list = sorted(symbols_set)
-    if symbols_list:
-        await app.connector.subscribe_tickers(
-            symbols_list, app._on_ticker_for_symbol
-        )
-        logger.info(
-            "[Daemon] subscribed to %s symbol(s): %s",
-            len(symbols_list),
-            symbols_list,
-        )
-    else:
-        logger.info(
-            "[Daemon] no watchlist or active symbol available; skip ticker subscribe"
-        )
-    app.connector.subscribe_positions(app._eval_hedge_threadsafe)
-
-    # R-A5: open orders — sync callback from IB thread: refresh list and write sink
-    def _on_open_orders_update() -> None:
-        try:
-            orders = app.connector.get_open_orders_snapshot()
-            if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
-                app._status_sink.write_open_orders(orders)
-        except Exception as e:
-            logger.warning("[Daemon] open orders callback error: %s", e)
-
-    app.connector.subscribe_order_status(lambda _: _on_open_orders_update())
-    app.connector.subscribe_open_order(lambda _: _on_open_orders_update())
-    # Optional R-A5: subscribe to fills so Event Subscribe "Fill / execution report" lamp turns green
+    # Connect Host Listener first (all Host-side event subscriptions use it; Host Trading is not used here)
     try:
-        app.connector.subscribe_fills(lambda _: None)
-        app._event_subscribe_fills_registered = True
-    except Exception as e:
-        logger.warning("[Daemon] subscribe_fills failed: %s", e)
-    # Optional: include TWS manual orders in initial snapshot
-    try:
-        initial_orders = await app.connector.get_open_orders_async(
-            include_all_from_tws=True
-        )
-        if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
-            app._status_sink.write_open_orders(initial_orders)
-    except Exception as e:
-        logger.warning("[Daemon] initial open orders snapshot failed: %s", e)
-
-    listener_just_connected = False
-    try:
+        host_cid = getattr(app.listener_connector, "client_id", None)
+        logger.debug("[Daemon] state=RUNNING | Listener (Host) connecting client_id=%s", host_cid)
         ok = await app.listener_connector.connect(max_attempts=3)
         if ok:
             listener_just_connected = True
+            logger.debug("[Daemon] state=RUNNING | Listener (Host) connected client_id=%s", app.listener_connector.client_id)
             logger.info(
                 "[Daemon] Listener (Host) IB connected (client_id=%s)",
                 app.listener_connector.client_id,
@@ -219,23 +200,188 @@ async def handle_running(app: Any) -> DaemonState:
             )
     except Exception as e:
         logger.warning("[Daemon] Listener (Host) IB connect error: %s", e)
+    listener = getattr(app, "listener_connector", None)
+    if listener is not None and getattr(listener, "is_connected", False):
+        symbols_to_subscribe: list = []
+        if app._status_sink and hasattr(app._status_sink, "get_watchlist_stk_symbols"):
+            symbols_to_subscribe = (
+                getattr(app._status_sink, "get_watchlist_stk_symbols")() or []
+            )
+        logger.info("[Daemon] Watchlist STK symbols from DB: %s", symbols_to_subscribe)
+        symbols_set = set(
+            s.strip() for s in symbols_to_subscribe if s and str(s).strip()
+        )
+        if app.symbol:
+            symbols_set.add(app.symbol)
+        symbols_set = {s for s in symbols_set if s and str(s).strip()}
+        symbols_list = sorted(symbols_set)
+        if symbols_list:
+            await listener.subscribe_tickers(symbols_list, app._on_ticker_for_symbol)
+            logger.info(
+                "[Daemon] subscribed to %s symbol(s) (Host Listener): %s",
+                len(symbols_list),
+                symbols_list,
+            )
+        else:
+            logger.info(
+                "[Daemon] no watchlist or active symbol available; skip ticker subscribe"
+            )
+        # Hedge evaluation is driven only by heartbeat; do not trigger on every position update.
+        listener.subscribe_positions(lambda: None)
+
+    # R-A5: open orders — merge only Host Listener + Secondary Listener (no Host Trading)
+    def _merged_open_orders() -> list:
+        orders: list = []
+        seen: set = set()
+        host_listener_count = 0
+        if listener is not None and getattr(listener, "is_connected", False):
+            try:
+                orders = list(listener.get_open_orders_snapshot() or [])
+                host_listener_count = len(orders)
+                seen = {(o.get("order_id"), o.get("account_id")) for o in orders}
+            except Exception as e:
+                logger.warning("[Daemon] Host listener open orders snapshot: %s", e)
+        listener_2 = getattr(app, "listener_connector_2", None)
+        has_listener_2 = listener_2 is not None
+        listener_2_connected = getattr(listener_2, "is_connected", False) if listener_2 else False
+        secondary_count = 0
+        if listener_2 is not None and getattr(listener_2, "is_connected", False):
+            try:
+                orders_2 = list(listener_2.get_open_orders_snapshot() or [])
+                secondary_count = len(orders_2)
+                for o in orders_2:
+                    key = (o.get("order_id"), o.get("account_id"))
+                    if key not in seen:
+                        seen.add(key)
+                        orders.append(o)
+            except Exception as e:
+                logger.warning("[Daemon] Secondary open orders snapshot: %s", e)
+        return orders
+
+    def _on_open_orders_update() -> None:
+        try:
+            merged = _merged_open_orders()
+            if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
+                app._status_sink.write_open_orders(merged)
+        except Exception as e:
+            logger.warning("[Daemon] open orders callback error: %s", e)
+
+    if listener is not None and getattr(listener, "is_connected", False):
+        listener.subscribe_order_status(lambda _: _on_open_orders_update())
+        listener.subscribe_open_order(lambda _: _on_open_orders_update())
+        try:
+            listener.subscribe_fills(lambda _t, _f: None)
+            app._event_subscribe_fills_registered = True
+        except Exception as e:
+            logger.warning("[Daemon] Host listener subscribe_fills failed: %s", e)
+
+    # Optional: include TWS manual orders in initial snapshot (Host Listener + Secondary merged after listener_2 connect below)
+    def _write_initial_open_orders() -> None:
+        try:
+            merged = _merged_open_orders()
+            if app._status_sink and hasattr(app._status_sink, "write_open_orders"):
+                app._status_sink.write_open_orders(merged)
+        except Exception as e:
+            logger.warning("[Daemon] initial open orders snapshot failed: %s", e)
+
     listener_2_just_connected = False
     listener_2 = getattr(app, "listener_connector_2", None)
     if listener_2 is not None:
         try:
+            sec_cid = getattr(listener_2, "client_id", None)
+            logger.debug("[Daemon] state=RUNNING | Listener (Secondary) connecting client_id=%s", sec_cid)
             ok2 = await listener_2.connect(max_attempts=3)
             if ok2:
                 listener_2_just_connected = True
+                logger.debug("[Daemon] state=RUNNING | Listener (Secondary) connected client_id=%s", getattr(listener_2, "client_id", None))
                 logger.info(
                     "[Daemon] Listener (Secondary) IB connected (client_id=%s)",
                     listener_2.client_id,
                 )
+                # Secondary: one-time merge so store and DB have Secondary accounts
+                try:
+                    from src.app import accounts as _accounts
+                    await _accounts.refresh_secondary_accounts_and_sync(app)
+                except Exception as e:
+                    logger.warning("[Daemon] Secondary initial accounts sync: %s", e)
+                # Secondary: subscribe positions (no per-event sync to avoid flood of tasks; heartbeat syncs Secondary)
+                try:
+                    listener_2.subscribe_positions(lambda: None)
+                    app._event_subscribe_positions_ib2_registered = True
+                except Exception as e:
+                    logger.warning("[Daemon] Secondary subscribe_positions: %s", e)
+                    app._event_subscribe_positions_ib2_registered = False
+                # Secondary: open order / order status → same merged write
+                try:
+                    listener_2.subscribe_order_status(lambda _: _on_open_orders_update())
+                    listener_2.subscribe_open_order(lambda _: _on_open_orders_update())
+                except Exception as e:
+                    logger.warning("[Daemon] Secondary subscribe_order_status/open_order: %s", e)
+                # Secondary: fills → one row per fill, write to account_executions
+                try:
+                    def _on_secondary_fill(_trade: Any, fill: Any) -> None:
+                        row = listener_2.fill_to_execution_row(fill, source="tws_event")
+                        if not row:
+                            return
+                        loop = getattr(app, "_loop", None)
+                        sink = getattr(app, "_status_sink", None)
+                        if loop is not None and sink is not None and hasattr(sink, "write_account_executions"):
+
+                            def _write() -> None:
+                                try:
+                                    sink.write_account_executions([row])
+                                except Exception as e:
+                                    logger.warning("[Daemon] Secondary fill write: %s", e)
+
+                            loop.call_soon_threadsafe(_write)
+
+                    listener_2.subscribe_fills(_on_secondary_fill)
+                    app._event_subscribe_fills_ib2_registered = True
+                except Exception as e:
+                    logger.warning("[Daemon] Secondary subscribe_fills: %s", e)
+                    app._event_subscribe_fills_ib2_registered = False
+                # Secondary: commission report → same sink
+                try:
+                    if app._status_sink and hasattr(app._status_sink, "update_execution_commission"):
+                        listener_2.set_commission_report_callback(
+                            lambda eid, c, pnl, cur, y_, yrd, sink=app._status_sink: sink.update_execution_commission(
+                                eid, c, pnl, cur, y_, yrd
+                            )
+                        )
+                    app._event_subscribe_commission_ib2_registered = True
+                except Exception as e:
+                    logger.warning("[Daemon] Secondary set_commission_report_callback: %s", e)
+                    app._event_subscribe_commission_ib2_registered = False
             else:
                 logger.warning(
                     "[Daemon] Listener (Secondary) IB connect failed"
                 )
+                app._event_subscribe_positions_ib2_registered = False
+                app._event_subscribe_fills_ib2_registered = False
+                app._event_subscribe_commission_ib2_registered = False
         except Exception as e:
             logger.warning("[Daemon] Listener (Secondary) IB connect error: %s", e)
+            app._event_subscribe_positions_ib2_registered = False
+            app._event_subscribe_fills_ib2_registered = False
+            app._event_subscribe_commission_ib2_registered = False
+    else:
+        app._event_subscribe_positions_ib2_registered = False
+        app._event_subscribe_fills_ib2_registered = False
+        app._event_subscribe_commission_ib2_registered = False
+    # Request all open orders from TWS so existing/manual orders appear in openTrades() (R-A5). Only Listeners (no Host Trading).
+    if listener is not None and getattr(listener, "is_connected", False):
+        try:
+            await listener.get_open_orders_async(include_all_from_tws=True)
+        except Exception as e:
+            logger.warning("[Daemon] reqAllOpenOrders (Host Listener) failed: %s", e)
+    listener_2 = getattr(app, "listener_connector_2", None)
+    if listener_2 is not None and getattr(listener_2, "is_connected", False):
+        try:
+            await listener_2.get_open_orders_async(include_all_from_tws=True)
+        except Exception as e:
+            logger.warning("[Daemon] reqAllOpenOrders (Secondary) failed: %s", e)
+    # Initial open orders (Host + Secondary merged)
+    _write_initial_open_orders()
     app._apply_run_status_transition()
     if app._status_sink:
         app._status_sink.write_snapshot(
@@ -243,12 +389,18 @@ async def handle_running(app: Any) -> DaemonState:
         )
         if hasattr(app._status_sink, "write_daemon_heartbeat"):
             listener_kw = app._listener_heartbeat_kwargs()
+            host_listener = getattr(app, "listener_connector", None)
+            # ib_connected/ib_client_id = Trading connector only; Listener in listener_kw
+            connector = getattr(app, "connector", None)
+            _ib_conn = bool(connector and connector.is_connected)
+            _ib_cid = getattr(connector, "client_id", None) if connector else None
             app._status_sink.write_daemon_heartbeat(
                 hedge_running=True,
-                ib_connected=app.connector.is_connected,
-                ib_client_id=getattr(app.connector, "client_id", None),
+                ib_connected=_ib_conn,
+                ib_client_id=_ib_cid,
                 heartbeat_interval_sec=app._effective_heartbeat_interval(),
                 redis_quotes_connected=app._redis_quotes_connected(),
+                mock_hedging=getattr(app, "mock_hedging", True),
                 **app._event_subscribe_flags(),
                 **listener_kw,
             )
@@ -331,9 +483,10 @@ async def handle_stopping(app: Any) -> DaemonState:
             logger.debug("Status sink close: %s", e)
     if getattr(app, "_redis_quotes", None):
         try:
+            host_listener = getattr(app, "listener_connector", None)
             symbols = (
-                app.connector.get_subscribed_ticker_symbols()
-                if getattr(app.connector, "get_subscribed_ticker_symbols", None)
+                host_listener.get_subscribed_ticker_symbols()
+                if host_listener and getattr(host_listener, "get_subscribed_ticker_symbols", None)
                 else []
             )
             for sym in symbols:

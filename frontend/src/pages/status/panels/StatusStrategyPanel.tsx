@@ -13,6 +13,10 @@ export interface StatusStrategyPanelProps {
   statusSummaryItems: { label: string; value: string | number }[]
   onFlatten: () => void
   hedgeCtrlMsg: { text: string; isErr: boolean }
+  /** Suspend/Resume (moved from Event); when set, show Suspend/Resume in Trading Strategy section */
+  suspended?: boolean
+  onSuspend?: () => void
+  onResume?: () => void
   className?: string
   /** Compact layout for Stream Event (1/4 width) */
   compact?: boolean
@@ -34,6 +38,9 @@ export function StatusStrategyPanel({
   statusSummaryItems,
   onFlatten,
   hedgeCtrlMsg,
+  suspended = false,
+  onSuspend,
+  onResume,
   className,
   compact = false,
   activeStructureName,
@@ -74,6 +81,28 @@ export function StatusStrategyPanel({
             <button type="button" className="btn-manage" title="Open Strategy management" onClick={onManage}>
               Manage»
             </button>
+          )}
+          {onSuspend != null && onResume != null && (
+            <>
+              <button
+                type="button"
+                className="btn-resume"
+                disabled={!suspended}
+                title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
+                onClick={onResume}
+              >
+                Resume
+              </button>
+              <button
+                type="button"
+                className="btn-suspend"
+                disabled={suspended}
+                title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
+                onClick={onSuspend}
+              >
+                Suspend
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -130,6 +159,28 @@ export function StatusStrategyPanel({
           <button type="button" className="btn-manage" title="Open Strategy management" onClick={onManage}>
             Manage»
           </button>
+        )}
+        {onSuspend != null && onResume != null && (
+          <>
+            <button
+              type="button"
+              className="btn-resume"
+              disabled={!suspended}
+              title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
+              onClick={onResume}
+            >
+              Resume
+            </button>
+            <button
+              type="button"
+              className="btn-suspend"
+              disabled={suspended}
+              title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
+              onClick={onSuspend}
+            >
+              Suspend
+            </button>
+          </>
         )}
         <button
           type="button"

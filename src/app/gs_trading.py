@@ -134,6 +134,8 @@ class GsTrading:
         # 1.c Active symbol is inferred from live positions; no fixed config symbol.
         self.symbol = ""
         self.paper_trade = self._risk_cfg.get("paper_trade", True)
+        # When True, hedge logic runs but no real IB order (log "Mock Hedging, not using IB"); for testing Resume/UI before live trading.
+        self.mock_hedging = self._risk_cfg.get("mock_hedging", True)
         self.order_type = config.get("order", {}).get("order_type", "market")
 
         # 1.d Hedge Configuration
@@ -231,6 +233,8 @@ class GsTrading:
         self._risk_cfg = get_risk_config(config)
         if "paper_trade" in self._risk_cfg:
             self.paper_trade = self._risk_cfg["paper_trade"]
+        if "mock_hedging" in self._risk_cfg:
+            self.mock_hedging = self._risk_cfg["mock_hedging"]
         self.order_type = config.get("order", {}).get("order_type", self.order_type)
         self.guard.update_config(
             cooldown_sec=self._hedge_cfg["cooldown_sec"],

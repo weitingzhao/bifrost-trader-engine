@@ -161,6 +161,33 @@ async def hedge(
             app._status_sink.write_snapshot(snap_dict, append_history=True)
         app._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
         return
+    if getattr(app, "mock_hedging", True):
+        logger.info(
+            "[Daemon] Mock Hedging, not using IB: would %s %s shares (delta=%.1f)",
+            intent.side,
+            intent.quantity,
+            cs.net_delta,
+        )
+        _write_op("order_sent")
+        log_order_status(
+            order_status="mock_send", side=intent.side, quantity=intent.quantity
+        )
+        app._fsm_hedge.on_order_placed()
+        app._fsm_hedge.on_ack_ok()
+        app.guard.record_hedge_sent()
+        app.store.set_last_hedge_time(now_ts)
+        app.store.set_last_hedge_price(spot)
+        app.store.inc_daily_hedge_count()
+        app._metrics.inc_hedge_count()
+        app._fsm_hedge.on_full_fill()
+        _write_op("fill")
+        if app._status_sink:
+            snap_dict = app._build_snapshot_dict(
+                snapshot, spot, cs, snapshot.data_lag_ms
+            )
+            app._status_sink.write_snapshot(snap_dict, append_history=True)
+        app._fsm_trading.apply_transition(TradingEvent.HEDGE_DONE, snapshot)
+        return
     app._fsm_hedge.on_order_placed()
     _write_op("order_sent")
     log_order_status(

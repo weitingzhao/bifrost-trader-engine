@@ -2,7 +2,8 @@
 RE-7: CONNECTING fail -> WAITING_IB (daemon keeps running, retry IB periodically); never STOPPED solely due to IB fail.
 
 Transition implementation (gs_trading.py):
-- IDLE -> CONNECTING: _handle_idle
+- IDLE -> CONNECTING: _handle_idle (when daemon_run_status.suspended=false)
+- IDLE -> WAITING_IB: _handle_idle (when daemon_run_status.suspended=true, default; no Trading Client until Resume)
 - IDLE -> STOPPED: request_stop() when IDLE
 - CONNECTING -> CONNECTED: _handle_connecting (connect success)
 - CONNECTING -> WAITING_IB: _handle_connecting (connect fail; daemon stays up, retry later)
@@ -43,7 +44,7 @@ class DaemonState(str, enum.Enum):
 
 # Valid transitions: from_state -> set of allowed to_states
 _TRANSITIONS: dict[DaemonState, set[DaemonState]] = {
-    DaemonState.IDLE: {DaemonState.CONNECTING, DaemonState.STOPPED},
+    DaemonState.IDLE: {DaemonState.CONNECTING, DaemonState.WAITING_IB, DaemonState.STOPPED},
     DaemonState.CONNECTING: {
         DaemonState.CONNECTED,
         DaemonState.WAITING_IB,

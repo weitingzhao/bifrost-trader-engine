@@ -536,6 +536,7 @@
 | updated_at | timestamptz | 最后更新时间 |
 
 - **语义**：守护进程轮询 `SELECT suspended FROM daemon_run_status WHERE id = 1`，不消费、不修改；为 true 时跳过 _eval_hedge（heartbeat 仍写 daemon_auto_status_current，但不调用 maybe_hedge）。
+- **默认**：新建表/新插入行时 `suspended` 默认为 **true**，即 Trading Strategy 默认挂起；守护进程启动时若读到 suspended=true 则直接进入 WAITING_IB（不连接 IB Trading Client），直到用户在监控端点击 Resume 后才连接 Trading Client 并进入 RUNNING。**已有库**若之前已插入过 id=1 行（ON CONFLICT DO NOTHING 不会覆盖），需手动执行 `UPDATE daemon_run_status SET suspended = true WHERE id = 1` 方可采用「启动不连 Trading Client」行为。
 
 ### 2.6 表 `daemon_heartbeat`（阶段 2：守护进程心跳，监控区分守护/对冲与 IB 连接）
 
@@ -619,7 +620,7 @@
 | Monitor | Market data | ib_client_id_markets | — | 监控端拉取市场数据/K 线（POST /bars/fetch）；仅主账户有数据订阅，第二 IB 无此列 |
 | Celery | Market Data | ib_client_id_worker_market | — | Celery worker（如 Bars 补全）连接 IB，与 Daemon/Monitor 隔离 |
 
-- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。**config.yaml 不再定义 client_id 或 host_account_id**，均由本表提供。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`；否则使用 config 的 `ib.host`、`ib.port`（client_id 默认 1）。**Host 账户**：若本表 `ib_host_account_id` 非空，守护进程使用该 account_id 作为对冲与行情账户；否则使用 TWS managed accounts 首个（R-A4）。**第二 IB**：若 `ib2_host` 非空，监控端创建 AccountIbClient2 连接第二 TWS，用于拉取该账户的持仓/执行，供统一 Portfolio；第二 IB 无 daemon、无 market data（无 `ib2_client_id_markets` 列）。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`（仅 Host）；**Celery** 使用 `ib_client_id_worker_market`。**Flex**：`ib_flex_host_token` 与 `ib_flex_secondary_token` 由 Settings 页 Flex 区块或 POST /config/flex 写入。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
+- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。**config.yaml 不再定义 client_id 或 host_account_id**，均由本表提供。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`；否则使用 config 的 `ib.host`、`ib.port`（client_id 默认 1）。**Host 账户**：若本表 `ib_host_account_id` 非空，守护进程使用该 account_id 作为对冲与行情账户；否则使用 TWS managed accounts 首个（R-A4）。**第二 IB**：若 `ib2_host` 非空，监控端创建 AccountIbClient2 连接第二 TWS，用于拉取该账户的持仓/执行，供统一 Portfolio；第二 IB 无 daemon、无 market data（无 `ib2_client_id_markets` 列）。**Daemon 对第二 IB 的订阅**：当 `ib2_host` 非空时，守护进程会使用 `ib2_client_id_listener` 建立 listener_connector_2 连接，并订阅 Secondary 的 **Position updates、Open orders、Fill/execution、Commission**（不订阅 Real-time ticker，行情由 Host 承担）；订阅结果写入 `account` / `account_positions`、`daemon_open_orders`、`account_executions` / `account_execution_commissions`，与 Host 数据按 `account_id` 区分。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`（仅 Host）；**Celery** 使用 `ib_client_id_worker_market`。**Flex**：`ib_flex_host_token` 与 `ib_flex_secondary_token` 由 Settings 页 Flex 区块或 POST /config/flex 写入。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
 
 ### 2.24 策略与安全边界表（设计标准与具体表结构，未来实现）
 
