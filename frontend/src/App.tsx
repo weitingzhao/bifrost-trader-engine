@@ -795,11 +795,11 @@ export default function App() {
                   className="dashboard-worker-item dashboard-worker-item-btn"
                   onClick={openSystemInSettings}
                   aria-label="Open System and Celery"
-                  title="Queue: pending bars jobs"
+                  title="Celery: same as System status (red = broker down, yellow = no workers, green = OK)"
                 >
                   <span
-                    className={`lamp lamp-sm ${workerJobRunning != null && workerJobRunning > 0 ? 'green' : 'yellow'}`}
-                    title="Celery: green = jobs running, yellow = none running"
+                    className={`lamp lamp-sm ${celeryLamp}`}
+                    title="Celery: red = broker not connected, yellow = no workers, green = broker + workers OK"
                     aria-hidden
                   />
                   <span className="dashboard-worker-label">Queue</span>
