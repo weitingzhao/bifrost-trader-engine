@@ -2440,21 +2440,32 @@ body::before {
   box-shadow: 0 0 0 2px var(--color-focus-ring, #0a84ff);
 }
 .settings-ib-collapsible-group-header {
-  font-weight: 700;
+  font-weight: 600;
   font-size: var(--text-body);
-  color: #eab308;
+  color: var(--color-text-main);
   background: var(--color-surface-elevated);
   padding: var(--space-2) var(--space-3);
+  padding-left: var(--space-3);
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  transition: background 0.15s ease;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  border-left: 3px solid var(--color-accent);
+}
+.settings-ib-collapsible-group-row:hover .settings-ib-collapsible-group-header {
+  border-left-color: var(--color-accent);
 }
 .settings-ib-collapsible-chevron {
-  display: inline-block;
-  font-size: 0.65em;
-  transition: transform 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6em;
+  color: var(--color-text-muted);
+  transition: transform var(--transition-normal), color var(--transition-fast);
   transform: rotate(0deg);
+}
+.settings-ib-collapsible-group-row:hover .settings-ib-collapsible-chevron {
+  color: var(--color-text-main);
 }
 .settings-ib-collapsible-chevron:not(.open) {
   transform: rotate(-90deg);
@@ -2486,19 +2497,21 @@ body::before {
   text-overflow: ellipsis;
 }
 
-/* IB Configure sheet: Host + Secondary columns, no "Setting" header */
+/* IB Configure sheet: Host + Secondary columns, refined typography and spacing */
 .settings-ib-config-subtitle {
-  margin: -0.25rem 0 var(--space-3) 0;
+  margin: 0 0 var(--space-3) 0;
   font-size: var(--text-caption);
   color: var(--color-text-muted);
   font-weight: 500;
+  line-height: 1.45;
 }
 .settings-ib-config-sheet-title {
   margin: 0 0 var(--space-2) 0;
-  font-size: var(--text-body);
+  font-size: var(--text-caption);
   font-weight: 600;
-  color: var(--color-text-main);
-  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .settings-ib-config-sheet-title + .settings-ib-config-table-wrap {
   margin-bottom: 0;
@@ -2507,8 +2520,8 @@ body::before {
   margin-bottom: 0;
 }
 .settings-ib-section + .settings-ib-section {
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
   border-top: 1px solid var(--color-border);
 }
 .settings-ib-preference-section .settings-ib-config-sheet-title {
@@ -2516,9 +2529,10 @@ body::before {
 }
 .settings-flex-preference {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: var(--space-3) var(--space-4);
-  margin-top: var(--space-2);
+  border-radius: 10px;
+  padding: var(--space-4) var(--space-4);
+  margin-top: var(--space-3);
+  background: var(--color-surface-elevated);
 }
 .settings-flex-preference-title {
   margin: 0 0 var(--space-2) 0;
@@ -2537,10 +2551,9 @@ body::before {
 }
 .settings-ib-preference-yellow {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding-left: var(--space-4);
-  padding-right: var(--space-4);
-  padding-bottom: var(--space-3);
+  border-radius: 10px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-elevated);
 }
 .settings-ib-preference-yellow .settings-ib-config-sheet-title {
   color: var(--color-lamp-yellow, #ca8a04);
@@ -2561,7 +2574,7 @@ body::before {
 .settings-ib-preference-range-row {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--space-2);
 }
 .settings-ib-preference-range-row .settings-flex-range-select {
   width: 5rem;
@@ -2569,11 +2582,13 @@ body::before {
 .settings-ib-preference-range-row .settings-ib-range-suffix {
   margin-left: 0;
 }
+/* Table container: softer border, rounded corners */
 .settings-ib-config-table-wrap {
   max-width: 42rem;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--color-border);
   overflow: hidden;
+  background: var(--color-surface-elevated);
 }
 .settings-ib-config-table {
   table-layout: fixed;
@@ -2594,6 +2609,7 @@ body::before {
   background: var(--color-bg-subtle);
   border-bottom: 1px solid var(--color-border);
   font-weight: 600;
+  font-size: var(--text-caption);
   color: var(--color-text-muted);
 }
 .settings-ib-config-th-host,
@@ -2603,16 +2619,18 @@ body::before {
   font-size: var(--text-caption);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border);
 }
 .settings-ib-config-th-host {
-  background: rgba(0, 122, 255, 0.06);
+  background: var(--color-accent-soft);
   color: var(--color-text-main);
 }
 .settings-ib-config-th-secondary {
-  background: rgba(88, 86, 214, 0.06);
+  background: rgba(125, 211, 252, 0.08);
   color: var(--color-text-main);
+}
+[data-theme="light"] .settings-ib-config-th-secondary {
+  background: rgba(2, 132, 199, 0.06);
 }
 .settings-ib-config-table .flex-query-cell-input,
 .settings-ib-config-table .flex-query-cell-type {
@@ -2631,6 +2649,7 @@ body::before {
 .settings-ib-config-table .flex-query-cell-input select {
   max-width: 100%;
   box-sizing: border-box;
+  border-radius: 6px;
 }
 .settings-ib-range-suffix {
   margin-left: 0.35rem;
@@ -2645,37 +2664,61 @@ body::before {
 .settings-ib-config-table .settings-ib-collapsible-group-row td {
   border-bottom: 1px solid var(--color-border);
 }
+.settings-ib-config-table tbody tr:hover .flex-query-cell-type {
+  background: var(--color-surface-elevated);
+}
 .settings-ib-config-table .flex-query-cell-input:first-of-type {
-  background: rgba(0, 122, 255, 0.03);
+  background: rgba(163, 230, 53, 0.03);
 }
 .settings-ib-config-table .flex-query-cell-input:last-of-type {
-  background: rgba(88, 86, 214, 0.03);
+  background: rgba(125, 211, 252, 0.04);
+}
+[data-theme="light"] .settings-ib-config-table .flex-query-cell-input:first-of-type {
+  background: rgba(14, 165, 233, 0.04);
+}
+[data-theme="light"] .settings-ib-config-table .flex-query-cell-input:last-of-type {
+  background: rgba(2, 132, 199, 0.03);
 }
 
-/* US market holidays: filters and add row */
+/* US market holidays: filters, add row, table — aligned with IB Configure styling */
+#settings-holidays .daemon-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.settings-holidays-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
 .settings-holidays-filters label {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-muted);
 }
 .settings-holidays-input {
-  padding: var(--space-1) var(--space-2);
-  border-radius: 4px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 6px;
   border: 1px solid var(--color-border);
   background: var(--color-bg);
   color: var(--color-text-main);
   font-size: var(--text-body);
+  transition: border-color var(--transition-fast);
 }
 .settings-holidays-input:focus {
   outline: none;
-  border-color: var(--color-border-strong);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
 .settings-holidays-add-row {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-4);
-  margin-bottom: var(--space-4);
 }
 .settings-holidays-add-label {
   display: flex;
@@ -2684,6 +2727,7 @@ body::before {
   font-weight: 500;
   color: var(--color-text-muted);
   font-size: var(--text-caption);
+  letter-spacing: 0.02em;
 }
 .settings-holidays-add-label .settings-holidays-input {
   min-width: 10rem;
@@ -2691,6 +2735,63 @@ body::before {
 .settings-holidays-input-text {
   width: 14rem;
   min-width: 10rem;
+}
+.settings-holidays-msg {
+  margin-bottom: 0;
+  font-size: var(--text-caption);
+}
+.settings-holidays-empty {
+  margin: 0;
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+}
+.settings-holidays-table-wrap {
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  background: var(--color-surface-elevated);
+}
+.settings-holidays-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body);
+}
+.settings-holidays-table thead {
+  background: var(--color-bg-subtle);
+}
+.settings-holidays-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font-weight: 600;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-holidays-table th:last-child {
+  width: 5rem;
+  text-align: right;
+}
+.settings-holidays-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+.settings-holidays-table tbody tr:hover {
+  background: var(--color-bg-subtle);
+}
+.settings-holidays-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.settings-holidays-table td:last-child {
+  text-align: right;
+}
+.settings-holidays-table .settings-holidays-date-cell {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main);
+}
+.settings-holidays-table .settings-holidays-label-cell {
+  color: var(--color-text-muted);
 }
 
 .daemon-group-body .section-hint {
@@ -3533,7 +3634,7 @@ button:disabled {
   max-width: none;
   margin: 0;
   padding: 0 var(--space-4);
-  gap: 0;
+  gap: var(--space-4);
   min-height: 0;
 }
 
@@ -3682,10 +3783,11 @@ button:disabled {
   flex: 1;
   min-width: 0;
   padding: var(--space-4) var(--space-6);
+  padding-left: var(--space-8);
 }
 
 .settings-page-card {
-  padding: var(--space-4) 0;
+  padding: var(--space-4) var(--space-4);
 }
 
 .settings-page-header {
@@ -3702,6 +3804,25 @@ button:disabled {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* Settings page: buttons match System Status compact style */
+.settings-page .btn-resume,
+.settings-page .btn-suspend,
+.settings-page .btn-flatten,
+.settings-page .btn-pause,
+.settings-page .btn-secondary {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+}
+
+/* Secondary/cancel style for Refresh, Delete etc. in Settings (btn-pause used in HolidaysSection) */
+.settings-page .btn-pause {
+  background: var(--color-border-strong);
+  color: var(--color-text-main);
+}
+.settings-page .btn-pause:hover:not(:disabled) {
+  background: #4a5568;
 }
 
 /* Host IB User / Second IB User: consistent input widths */

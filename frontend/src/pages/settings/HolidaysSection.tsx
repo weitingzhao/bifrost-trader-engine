@@ -39,9 +39,9 @@ export function HolidaysSection({
         <InfoTooltip text="Holidays used to decide trading days (e.g. Data page yellow (end)). Add or delete as needed." />
       </div>
       <div className="daemon-group-body">
-        <div className="controls settings-holidays-filters" style={{ flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <div className="controls settings-holidays-filters">
           <label>
-            Year:
+            Year
             <select
               value={holidaysYear}
               onChange={(e) => setHolidaysYear(e.target.value)}
@@ -85,37 +85,39 @@ export function HolidaysSection({
           </button>
         </div>
         {holidayMsg.text && (
-          <div className={holidayMsg.isErr ? 'msg-error' : 'msg-ok'} style={{ marginBottom: '0.5rem' }}>
+          <div className={`settings-holidays-msg ${holidayMsg.isErr ? 'msg-error' : 'msg-ok'}`}>
             {holidayMsg.text}
           </div>
         )}
         {holidaysLoading ? (
-          <p>Loading…</p>
+          <p className="settings-holidays-empty">Loading…</p>
         ) : holidays.length === 0 ? (
-          <p>No holidays in database. Add a date and label below.</p>
+          <p className="settings-holidays-empty">No holidays in database. Add a date and label below.</p>
         ) : (
-          <table className="settings-holidays-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem' }}>Date</th>
-                <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem' }}>Label</th>
-                <th style={{ width: '4rem' }} />
-              </tr>
-            </thead>
-            <tbody>
-              {holidays.map((h) => (
-                <tr key={h.holiday_date}>
-                  <td style={{ padding: '0.25rem 0.5rem' }}>{h.holiday_date}</td>
-                  <td style={{ padding: '0.25rem 0.5rem' }}>{h.label ?? '—'}</td>
-                  <td style={{ padding: '0.25rem' }}>
-                    <button type="button" className="btn-pause" onClick={() => onDeleteHoliday(h.holiday_date)} style={{ padding: '0.15rem 0.4rem', fontSize: '0.8rem' }}>
-                      Delete
-                    </button>
-                  </td>
+          <div className="settings-holidays-table-wrap">
+            <table className="settings-holidays-table" aria-label="US market holidays">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Label</th>
+                  <th aria-label="Actions" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {holidays.map((h) => (
+                  <tr key={h.holiday_date}>
+                    <td className="settings-holidays-date-cell">{h.holiday_date}</td>
+                    <td className="settings-holidays-label-cell">{h.label ?? '—'}</td>
+                    <td>
+                      <button type="button" className="btn-pause" onClick={() => onDeleteHoliday(h.holiday_date)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
