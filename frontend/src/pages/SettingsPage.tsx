@@ -332,7 +332,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
             showAllSystemSections={true}
             showSystemSection={true}
             showConsoleSection={true}
-            showConsoleTabs={false}
+            showConsoleTabs={true}
             consoleCardTitle="Console"
             highlightSection={systemHighlightSection}
           />

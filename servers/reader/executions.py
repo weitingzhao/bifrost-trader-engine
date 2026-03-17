@@ -86,7 +86,8 @@ def get_executions(
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
-                           e.trade_date, e.raw_extra, {_CREATED_AT_E},
+                           e.trade_date, e.report_date, e.settle_date_target, e.transaction_type, e.taxes, e.net_cash,
+                           e.raw_extra, {_CREATED_AT_E},
                            e.strategy_opportunity_id, e.strategy_instance_id,
                            so.name AS strategy_opportunity_name, si.label AS strategy_instance_label
                     FROM account_executions e
@@ -208,7 +209,8 @@ def get_executions_by_contract_keys(
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
-                           e.trade_date, e.raw_extra, {_CREATED_AT_E}
+                           e.trade_date, e.report_date, e.settle_date_target, e.transaction_type, e.taxes, e.net_cash,
+                           e.raw_extra, {_CREATED_AT_E}
                     FROM account_executions e
                     LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
                     WHERE {where}

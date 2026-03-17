@@ -294,6 +294,16 @@ export interface Execution {
   paired_execution_ids?: number[]
   /** Trade date (Flex tradeDate / execution date), YYYY-MM-DD. */
   trade_date?: string | null
+  /** Report date (Flex), YYYY-MM-DD. */
+  report_date?: string | null
+  /** Settle date target, YYYY-MM-DD. */
+  settle_date_target?: string | null
+  /** Transaction type (e.g. from Flex). */
+  transaction_type?: string | null
+  /** Taxes amount. */
+  taxes?: number | null
+  /** Net cash. */
+  net_cash?: number | null
   /** Row created_at (Unix seconds); use for Time column when exec_time is updated over time. */
   created_at?: number | null
   /** Strategy opportunity ID (trade attribution, SI.2). */
@@ -393,6 +403,7 @@ export interface StrategyInstance {
   label?: string | null
   notes?: string | null
   created_at?: string
+  created_at_epoch?: number
   updated_at?: string
   strategy_opportunity_name?: string | null
 }

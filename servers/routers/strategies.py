@@ -493,10 +493,12 @@ class StrategyInstanceCreateBody(BaseModel):
 
 
 class StrategyInstanceUpdateBody(BaseModel):
-    """Request body for PATCH strategy instance; label and notes optional."""
+    """Request body for PATCH strategy instance; label, notes, created_at, opened_at optional."""
 
     label: Optional[str] = None
     notes: Optional[str] = None
+    created_at: Optional[str] = None  # ISO 8601 or Unix seconds (number as string)
+    opened_at: Optional[str] = None  # ISO 8601 or Unix seconds (number as string)
 
 
 @router.get("/instances")
@@ -504,11 +506,16 @@ def list_strategy_instances(
     request: Request,
     account_id: Optional[str] = Query(None, description="Filter by account ID"),
     strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
+    opened_at_from: Optional[float] = Query(None, description="Filter: opened_at >= (Unix seconds)"),
+    opened_at_until: Optional[float] = Query(None, description="Filter: opened_at <= (Unix seconds)"),
 ) -> Dict[str, Any]:
-    """Return list of strategy_instance rows (SI.2). Optional filters: account_id, strategy_opportunity_id."""
+    """Return list of strategy_instance rows (SI.2). Optional filters: account_id, strategy_opportunity_id, opened_at range."""
     reader = request.app.state.reader
     items: List[Dict[str, Any]] = reader.list_strategy_instances(
-        account_id=account_id, strategy_opportunity_id=strategy_opportunity_id
+        account_id=account_id,
+        strategy_opportunity_id=strategy_opportunity_id,
+        opened_at_from=opened_at_from,
+        opened_at_until=opened_at_until,
     )
     return {"items": items}
 
@@ -551,19 +558,48 @@ def create_strategy_instance_endpoint(request: Request, body: StrategyInstanceCr
     return {"strategy_instance_id": sid}
 
 
+def _parse_optional_ts(value: Any, field_name: str) -> Any:
+    """Parse optional timestamp from payload: ISO 8601 or Unix seconds. Returns float or None."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            s = value.strip()
+            if s.replace(".", "").replace("-", "").replace(":", "").replace("Z", "").isdigit():
+                return float(s)
+            from datetime import datetime, timezone
+            # ISO 8601: support Z and +00:00 (Python 3.10 fromisoformat accepts +00:00)
+            normalized = s.replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(normalized).timestamp()
+            except ValueError:
+                # Fallback: date-only YYYY-MM-DD
+                if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+                    return datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+    except (ValueError, TypeError):
+        pass
+    raise HTTPException(status_code=400, detail=f"{field_name} must be ISO 8601 or Unix timestamp")
+
+
 @router.patch("/instances/{strategy_instance_id}")
 def update_strategy_instance_endpoint(
     request: Request, strategy_instance_id: int, body: StrategyInstanceUpdateBody
 ) -> Dict[str, Any]:
-    """Update strategy instance label/notes. Partial update supported."""
+    """Update strategy instance label/notes/created_at/opened_at. Partial update supported."""
     reader = request.app.state.reader
     payload = body.model_dump(exclude_unset=True)
     if not payload:
         return {"ok": True}
+    created_at_val = _parse_optional_ts(payload.get("created_at"), "created_at") if "created_at" in payload else payload.get("created_at")
+    opened_at_val = _parse_optional_ts(payload.get("opened_at"), "opened_at") if "opened_at" in payload else payload.get("opened_at")
     ok = reader.update_strategy_instance(
         strategy_instance_id,
         label=payload.get("label"),
         notes=payload.get("notes"),
+        created_at=created_at_val,
+        opened_at=opened_at_val,
     )
     if not ok:
         raise HTTPException(status_code=404, detail="Strategy instance not found or update failed")

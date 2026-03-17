@@ -4,6 +4,8 @@ import { API } from './constants'
 export interface StrategyInstancesParams {
   account_id?: string
   strategy_opportunity_id?: number
+  opened_at_from?: number
+  opened_at_until?: number
 }
 
 export async function fetchStrategyInstances(
@@ -12,6 +14,8 @@ export async function fetchStrategyInstances(
   const search = new URLSearchParams()
   if (params?.account_id) search.set('account_id', params.account_id)
   if (params?.strategy_opportunity_id != null) search.set('strategy_opportunity_id', String(params.strategy_opportunity_id))
+  if (params?.opened_at_from != null) search.set('opened_at_from', String(params.opened_at_from))
+  if (params?.opened_at_until != null) search.set('opened_at_until', String(params.opened_at_until))
   const q = search.toString()
   const r = await fetch(`${API}/strategies/instances${q ? `?${q}` : ''}`)
   if (!r.ok) throw new Error(r.statusText)
@@ -49,7 +53,7 @@ export async function createStrategyInstance(
 
 export async function updateStrategyInstance(
   strategy_instance_id: number,
-  payload: { label?: string; notes?: string }
+  payload: { label?: string; notes?: string; created_at?: string; opened_at?: string }
 ): Promise<void> {
   const r = await fetch(`${API}/strategies/instances/${strategy_instance_id}`, {
     method: 'PATCH',

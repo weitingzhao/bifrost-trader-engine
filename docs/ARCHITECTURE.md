@@ -372,6 +372,8 @@
 
 **后台**：GET /status 返回 active_strategy_structure_id、active_gate_safety_strategy_id 及对应 name；GET /strategies/structures、/structures/{id}、/history、/gate-safety、/gate-safety/{id} 及 POST/PUT /gate-safety 供管理与策略使用情况查询及 CRUD。**监控前端**在 **Research → Strategy** 提供策略管理页（当前生效、列表、Set active）；在 **Research → Gates** 提供 Gates 配置管理页（列表、创建、编辑、Set active、复制）。
 
+**策略实例页面**：监控前端提供**策略实例**独立页面（列表 + 详情）。列表按账户、机会策略、时间范围筛选，展示 instance 元数据与汇总 PnL；详情页以单条 strategy_instance 为主体，分块展示：策略信息（来自 strategy_opportunity / strategy_structure）、盈亏（调用 GET /performance?strategy_instance_id、GET /executions?strategy_instance_id 等）、预留风险/回测/资金占用等区块。数据流：GET /strategies/instances（列表）、GET /strategies/instances/{id}（详情元数据）、GET /executions、GET /performance 按 strategy_instance_id 筛选；与 Strategy 定义页（Structure/Opportunity/Allocations）、Portfolio 账户视角（Accounts/Trade History/Performance）并列。
+
 **回测**：支持从 DB 按 gate_safety_strategy_id 加载配置，或继续使用“配置文件路径 + 覆盖”。回测结果可记录 **config_hash** 或 **gate_safety_strategy_id**，与 sink 历史中的 config_summary 对齐。
 
 ### 9.4 小结

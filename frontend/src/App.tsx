@@ -26,6 +26,7 @@ import { BacktestPage } from './pages/BacktestPage'
 import { OptionDiscoveryPage } from './pages/OptionDiscoveryPage'
 import { StrategyStructurePage } from './pages/StrategyStructurePage'
 import { StrategyOpportunityPage } from './pages/StrategyOpportunityPage'
+import { StrategyInstancesPage } from './pages/StrategyInstancesPage'
 import { StrategyAllocationPage } from './pages/StrategyAllocationPage'
 import { GatesConfigPage } from './pages/GatesConfigPage'
 import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
@@ -149,7 +150,9 @@ export default function App() {
   const [quickCtrlMsg, setQuickCtrlMsg] = useState({ text: '', isErr: false })
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest' | 'options'>('risk')
-  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig'>('structure')
+  const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'>('structure')
+  /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
+  const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
@@ -186,6 +189,23 @@ export default function App() {
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [activeTab, hashToSettingsViewSection])
+
+  /** Sync tab/view and instance id from hash #/strategies/instances and #/strategies/instances/:id (e.g. new tab with direct link). */
+  useEffect(() => {
+    const syncFromHash = () => {
+      const raw = window.location.hash
+      const h = raw.startsWith('#') ? raw.slice(1) : raw
+      const match = /^\/strategies\/instances(?:\/(\d+))?\/?$/.exec(h)
+      if (match) {
+        setActiveTab('strategy')
+        setStrategyView('instances')
+        setUrlStrategyInstanceId(match[1] != null ? Number(match[1]) : null)
+      }
+    }
+    syncFromHash()
+    window.addEventListener('hashchange', syncFromHash)
+    return () => window.removeEventListener('hashchange', syncFromHash)
+  }, [])
 
   useEffect(() => {
     if (!headerMenuOpen) return
@@ -530,10 +550,11 @@ export default function App() {
     { id: 'options', label: 'Option Discovery' },
   ]
 
-  const strategySubtabs: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig'; label: string }[] = [
+  const strategySubtabs: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'; label: string }[] = [
     { id: 'watchlist', label: 'Watchlist' },
     { id: 'structure', label: 'Structure' },
     { id: 'opportunity', label: 'Opportunity' },
+    { id: 'instances', label: 'Instances' },
     { id: 'allocations', label: 'Allocations' },
     { id: 'gates', label: 'Gates' },
     { id: 'typeConfig', label: 'Option Type Config' },
@@ -1127,6 +1148,16 @@ export default function App() {
           status={status}
           loadStatus={loadStatus}
           breadcrumbLabel="Opportunity"
+        />
+      )}
+
+      {activeTab === 'strategy' && strategyView === 'instances' && (
+        <StrategyInstancesPage
+          status={status}
+          loadStatus={loadStatus}
+          urlStrategyInstanceId={urlStrategyInstanceId}
+          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          breadcrumbLabel="Instances"
         />
       )}
 

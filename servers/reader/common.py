@@ -351,12 +351,18 @@ class StatusReader:
         self,
         account_id: Optional[str] = None,
         strategy_opportunity_id: Optional[int] = None,
+        opened_at_from: Optional[float] = None,
+        opened_at_until: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
-        """Return strategy_instance rows, optionally filtered by account_id and/or strategy_opportunity_id."""
+        """Return strategy_instance rows, optionally filtered by account_id, strategy_opportunity_id, opened_at range (Unix seconds)."""
         if not self._connect():
             return []
         return strategy_instance_module.list_instances(
-            self._conn, account_id=account_id, strategy_opportunity_id=strategy_opportunity_id
+            self._conn,
+            account_id=account_id,
+            strategy_opportunity_id=strategy_opportunity_id,
+            opened_at_from=opened_at_from,
+            opened_at_until=opened_at_until,
         )
 
     def get_strategy_instance_by_id(self, strategy_instance_id: int) -> Optional[Dict[str, Any]]:
@@ -390,12 +396,14 @@ class StatusReader:
         strategy_instance_id: int,
         label: Optional[str] = None,
         notes: Optional[str] = None,
+        created_at: Optional[Any] = None,
+        opened_at: Optional[Any] = None,
     ) -> bool:
-        """Update label/notes of a strategy instance. Returns True if updated."""
+        """Update label, notes, created_at, and/or opened_at of a strategy instance. Returns True if updated."""
         if not self._connect():
             return False
         return strategy_instance_module.update_instance(
-            self._conn, strategy_instance_id, label=label, notes=notes
+            self._conn, strategy_instance_id, label=label, notes=notes, created_at=created_at, opened_at=opened_at
         )
 
     # --- Risk (delegate to status module) ---

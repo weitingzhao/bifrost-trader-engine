@@ -9,7 +9,20 @@ import {
   fmtExpiry,
   fmtUsd,
   getContractLabelParts,
+  parseOptionContractKey,
 } from '../utils/format'
+
+/** Option Last-column (Last − Strike) / Last %: color by right and side. Call+Sell: +% red, −% green; Call+Buy: opposite; Put+Sell: +% green, −% red; Put+Buy: opposite. */
+function optionLastStrikePctClass(right: string, side: 'Buy' | 'Sell', pct: number): string {
+  if (pct === 0 || (right !== 'C' && right !== 'P')) return ''
+  const positive = pct > 0
+  if (right === 'C') {
+    if (side === 'Sell') return positive ? 'pnl-negative' : 'pnl-positive'
+    return positive ? 'pnl-positive' : 'pnl-negative'
+  }
+  if (side === 'Sell') return positive ? 'pnl-positive' : 'pnl-negative'
+  return positive ? 'pnl-negative' : 'pnl-positive'
+}
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
 import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
@@ -883,7 +896,7 @@ export function PositionsPage({
                                 {(() => {
                                   const days = daysUntilExpiry(group.expiry)
                                   if (days == null) return null
-                                  const label = days >= 0 ? (days === 0 ? ' (today)' : ` (${days}d)`) : ` (${-days}d ago)`
+                                  const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
                                   return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
                                 })()}
                               </td>
@@ -897,12 +910,15 @@ export function PositionsPage({
                                   const pct = last != null && strike != null && last !== 0
                                     ? ((last - strike) / last) * 100
                                     : null
+                                  const right = parseOptionContractKey(group.contract_key).right
+                                  const side: 'Buy' | 'Sell' = (group.net_qty ?? 0) > 0 ? 'Buy' : 'Sell'
+                                  const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
                                   return (
                                     <>
                                       {last != null ? fmtUsd(last) : '—'}
                                       {pct != null && (
-                                        <span className="replay-last-strike-pct" title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
-                                          {' '}({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)
+                                        <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
+                                          {' '}{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
                                         </span>
                                       )}
                                     </>
@@ -935,7 +951,7 @@ export function PositionsPage({
                                   return (
                                     <>
                                       {fmtDate(ts)}
-                                      {ago ? <span className="replay-time-ago"> ({ago})</span> : null}
+                                      {ago ? <span className="replay-time-ago"> {ago}</span> : null}
                                     </>
                                   )
                                 })()}
@@ -1076,7 +1092,7 @@ export function PositionsPage({
                                               {fmtExpiry(exp)}
                                               {days != null && (
                                                 <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>
-                                                  {' '}({days >= 0 ? `${days}d` : `-${-days}d`})
+                                                  {' '}{days >= 0 ? `${days}d` : `-${-days}d`}
                                                 </span>
                                               )}
                                             </>
@@ -1092,10 +1108,13 @@ export function PositionsPage({
                                           const strike = position.strike ?? group.strike
                                           const strikeNum = strike != null && Number.isFinite(strike) ? strike : null
                                           const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
+                                          const right = parseOptionContractKey(group.contract_key).right
+                                          const side: 'Buy' | 'Sell' = qty > 0 ? 'Buy' : 'Sell'
+                                          const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
                                           return (
                                             <>
                                               {last != null ? fmtUsd(last) : '—'}
-                                              {pct != null && <span className="replay-last-strike-pct"> ({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)</span>}
+                                              {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
                                             </>
                                           )
                                         })()}
@@ -1107,7 +1126,7 @@ export function PositionsPage({
                                         return (
                                           <>
                                             {fmtDate(ts)}
-                                            {ago ? <span className="replay-time-ago"> ({ago})</span> : null}
+                                            {ago ? <span className="replay-time-ago"> {ago}</span> : null}
                                           </>
                                         )
                                       })()}</td>
@@ -1185,7 +1204,7 @@ export function PositionsPage({
                                               {fmtExpiry(exp)}
                                               {days != null && (
                                                 <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>
-                                                  {' '}({days >= 0 ? `${days}d` : `-${-days}d`})
+                                                  {' '}{days >= 0 ? `${days}d` : `-${-days}d`}
                                                 </span>
                                               )}
                                             </>
@@ -1201,10 +1220,13 @@ export function PositionsPage({
                                           const strike = ex.strike ?? group.strike
                                           const strikeNum = strike != null && Number.isFinite(strike) ? strike : null
                                           const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
+                                          const right = parseOptionContractKey(group.contract_key).right
+                                          const side: 'Buy' | 'Sell' = isBuy ? 'Buy' : 'Sell'
+                                          const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
                                           return (
                                             <>
                                               {last != null ? fmtUsd(last) : '—'}
-                                              {pct != null && <span className="replay-last-strike-pct"> ({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)</span>}
+                                              {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
                                             </>
                                           )
                                         })()}
@@ -1216,7 +1238,7 @@ export function PositionsPage({
                                         return (
                                           <>
                                             {fmtDate(t)}
-                                            {ago ? <span className="replay-time-ago"> ({ago})</span> : null}
+                                            {ago ? <span className="replay-time-ago"> {ago}</span> : null}
                                           </>
                                         )
                                       })()}</td>

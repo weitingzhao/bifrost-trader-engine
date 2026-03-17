@@ -76,11 +76,14 @@ export function ExecutionFormModal({
 
   const oppIdForm = execForm.strategy_opportunity_id.trim() ? Number(execForm.strategy_opportunity_id) : null
   useEffect(() => {
-    if (!open || oppIdForm == null || !Number.isFinite(oppIdForm)) {
+    if (!open) {
       setInstances([])
       return
     }
-    fetchStrategyInstances({ strategy_opportunity_id: oppIdForm })
+    const params = oppIdForm != null && Number.isFinite(oppIdForm)
+      ? { strategy_opportunity_id: oppIdForm }
+      : undefined
+    fetchStrategyInstances(params)
       .then(r => setInstances(r.items ?? []))
       .catch(() => setInstances([]))
   }, [open, oppIdForm])
@@ -256,8 +259,17 @@ export function ExecutionFormModal({
             <label>Instance (optional)</label>
             <select
               value={execForm.strategy_instance_id}
-              onChange={e => setExecForm(f => ({ ...f, strategy_instance_id: e.target.value }))}
-              disabled={!execForm.strategy_opportunity_id}
+              onChange={e => {
+                const instanceId = e.target.value
+                const instance = instanceId ? instances.find(si => String(si.strategy_instance_id) === instanceId) : null
+                setExecForm(f => ({
+                  ...f,
+                  strategy_instance_id: instanceId,
+                  strategy_opportunity_id: instance && !f.strategy_opportunity_id?.trim()
+                    ? String(instance.strategy_opportunity_id)
+                    : f.strategy_opportunity_id,
+                }))
+              }}
             >
               <option value="">—</option>
               {instances.map(si => (

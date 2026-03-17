@@ -426,10 +426,11 @@
 | **SI.2** | Reader/API：GET /status 的 positions 返回 strategy_opportunity_id、strategy_instance_id（及可选 opportunity/instance 名称）；GET /executions 支持按 strategy_opportunity_id、strategy_instance_id 筛选并返回两字段；GET /strategies/instances 或等效（列表/详情，按 account + opportunity 可选）；POST 创建 strategy_instance 的 API（开仓时由前端或 daemon 创建实例）。 | API 文档与验收用例通过。 |
 | **SI.3** | 写入路径：① 前端 Add Trade / 从 Opportunity 下单：可传 strategy_opportunity_id、strategy_instance_id（新建实例时先 POST instance 再写 execution/position）；② IB 拉取 account_positions/account_executions：默认 NULL，可选后处理或人工 tagging；③ Daemon 对冲：若支持「当前 opportunity」，写入 execution 时带 strategy_opportunity_id（及可选 strategy_instance_id）。 | 至少一种路径能写入归属；手动补录可带 opportunity/instance。 |
 | **SI.4** | Performance 与统计：GET /performance 或统计模块支持按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）、Unrealized（positions + quote）；按日/周/月汇总；Performance 页或复盘页支持「按策略」「按实例」筛选与展示。 | 按策略/实例的 PnL 与 calendar 可查可展示。 |
+| **SI.5** | 策略实例独立页面：前端新增策略实例列表页与详情页。列表：GET /strategies/instances，支持 account_id、strategy_opportunity_id 筛选；表格列含 strategy_instance_id、机会策略名称、account_id、opened_at、label、汇总 PnL（可选）。详情：GET /strategies/instances/{id}，展示策略信息（机会/结构）、该实例的成交列表（GET /executions?strategy_instance_id）、该实例的绩效与日历（GET /performance?strategy_instance_id）；预留「风险」「回测」「资金占用」等区块占位或链接。入口：Strategy 子菜单「Instances」或 Portfolio 子菜单「Strategy Instances」。 | 从导航可进入列表；列表支持筛选并展示实例元数据；详情展示策略、成交与绩效；预留扩展区块。 |
 
-**验收标准**（精简）：① 表与 FK 存在且可读写。② GET /status 的 positions、GET /executions 含归属字段并可筛选。③ 至少一种写入路径（如前端 Add Trade + 选 Opportunity/创建 Instance）能落库。④ GET /performance 或等价接口支持按 strategy_opportunity_id 聚合并展示。
+**验收标准**（精简）：① 表与 FK 存在且可读写。② GET /status 的 positions、GET /executions 含归属字段并可筛选。③ 至少一种写入路径（如前端 Add Trade + 选 Opportunity/创建 Instance）能落库。④ GET /performance 或等价接口支持按 strategy_opportunity_id 聚合并展示。⑤ **策略实例独立页面**：从导航可进入策略实例列表；列表支持按账户、机会筛选并展示实例元数据；点击实例进入详情，展示策略信息、成交与绩效（按 instance 筛选）；详情页预留风险/回测/资金占用扩展位。
 
-**依赖**：阶段 3 的 account_positions、account_executions、GET /performance 与三层策略（strategy_opportunity）已存在。数据库设计见 [DATABASE.md](docs/DATABASE.md) §2.24.11。
+**依赖**：阶段 3 的 account_positions、account_executions、GET /performance 与三层策略（strategy_opportunity）已存在；SI.1–SI.4 已完成。数据库设计见 [DATABASE.md](docs/DATABASE.md) §2.24.11。策略实例页面设计见 [plans/STRATEGY_INSTANCE_PAGE.md](plans/STRATEGY_INSTANCE_PAGE.md)。
 
 ---
 
