@@ -113,3 +113,42 @@ export function summarizeStateSummary(state_summary: unknown): string {
     return '—'
   }
 }
+
+/** One-line summary of structure legs for sheet display. */
+export function summarizeLegs(legs: StructureLeg[] | null | undefined): string {
+  if (!legs?.length) return '—'
+  return legs
+    .map((l) => {
+      const q = l.quantity ?? 1
+      const d = l.direction ?? ''
+      const r = l.role ?? ''
+      const o = l.option_right ?? ''
+      const parts = [r, d, o].filter(Boolean)
+      return `${q}× ${parts.join(' ')}`.trim() || '—'
+    })
+    .join(', ')
+}
+
+/** One-line summary of structure constraints for sheet display. */
+export function summarizeConstraints(constraints: StructureConstraint[] | null | undefined): string {
+  if (!constraints?.length) return '—'
+  return constraints
+    .map((c) => {
+      const t = (c.constraint_type ?? '').trim()
+      if (!t) return ''
+      const v = c.constraint_value_text ?? c.constraint_value_int ?? ''
+      return `${t}: ${v}`
+    })
+    .filter(Boolean)
+    .join(', ')
+}
+
+/** Sub type for sheet display: prefer display label, else raw subtype (e.g. otm, atm), else —. */
+export function summarizeSubtype(
+  subtype: string | null | undefined,
+  subtypeLabel?: string | null
+): string {
+  if (subtypeLabel != null && subtypeLabel !== '') return subtypeLabel
+  if (subtype == null || subtype === '') return '—'
+  return subtype
+}

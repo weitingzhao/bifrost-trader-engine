@@ -7,6 +7,8 @@ export interface StrategyStructure {
   structure_type: string | null
   /** For covered_call: otm | atm | itm | deep_otm; null for other types. */
   structure_subtype?: string | null
+  /** Display label from Option Type Config (e.g. "OTM Covered Call"); present when list includes JOIN. */
+  structure_subtype_label?: string | null
   is_active: boolean
   version: string | number | null
   created_at: string | null

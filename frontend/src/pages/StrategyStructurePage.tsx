@@ -28,6 +28,9 @@ import {
   structureToPayload,
   formatHistoryTs,
   summarizeStateSummary,
+  summarizeLegs,
+  summarizeConstraints,
+  summarizeSubtype,
 } from './strategy/strategyFormUtils'
 
 export interface StrategyStructurePageProps {
@@ -63,6 +66,8 @@ export function StrategyStructurePage({
   const [defaultLegsFallbackMsg, setDefaultLegsFallbackMsg] = useState<string | null>(null)
   /** Filter structure list: 'all' | 'active' | 'inactive'. */
   const [structureActiveFilter, setStructureActiveFilter] = useState<'all' | 'active' | 'inactive'>('active')
+  /** Sheet tabs by Type (from Option Types). '' = All types. */
+  const [structureTypeTab, setStructureTypeTab] = useState<string>('')
   /** Wizard for New structure only: step 1=type, 2=subtype (when has_subtypes), 3=details. */
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
   /** Structure types from config API (for Step 1). Fallback to STRUCTURE_TYPES when empty. */
@@ -110,6 +115,14 @@ export function StrategyStructurePage({
     return row.is_active !== true
   })
 
+  /** Structures for current Type tab (filtered by structureTypeTab; Option Types define the tabs). */
+  const structuresForTypeTab = structureTypeTab === ''
+    ? filteredStructures
+    : filteredStructures.filter((row) => row.structure_type === structureTypeTab)
+
+  /** Option Types sorted by sort_order for Sheet tabs. */
+  const structureTypesSorted = [...structureTypes].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+
   /** Heuristic: backend validation error about legs/schema (for highlighting "Use subtype default legs"). */
   const isSchemaMismatchError = useCallback((msg: string): boolean => {
     const s = msg.toLowerCase()
@@ -128,6 +141,13 @@ export function StrategyStructurePage({
   useEffect(() => {
     loadStructures()
   }, [loadStructures])
+
+  /** Reset type tab if selected type no longer exists in Option Types. */
+  useEffect(() => {
+    if (structureTypeTab !== '' && !structureTypes.some((t) => t.structure_type === structureTypeTab)) {
+      setStructureTypeTab('')
+    }
+  }, [structureTypes, structureTypeTab])
 
   /** Load structure types from config API on mount (for Wizard type list). */
   useEffect(() => {
@@ -866,6 +886,35 @@ export function StrategyStructurePage({
             </button>
           </div>
         </div>
+        {!structuresLoading && !structuresError && structureTypesSorted.length > 0 && (
+          <div
+            className="system-tabs structure-sheet-type-tabs"
+            role="tablist"
+            aria-label="Structure type"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={structureTypeTab === ''}
+              className={`system-tab ${structureTypeTab === '' ? 'active' : ''}`}
+              onClick={() => setStructureTypeTab('')}
+            >
+              All
+            </button>
+            {structureTypesSorted.map((t) => (
+              <button
+                key={t.structure_type}
+                type="button"
+                role="tab"
+                aria-selected={structureTypeTab === t.structure_type}
+                className={`system-tab ${structureTypeTab === t.structure_type ? 'active' : ''}`}
+                onClick={() => setStructureTypeTab(t.structure_type)}
+              >
+                {t.display_label ?? t.structure_type}
+              </button>
+            ))}
+          </div>
+        )}
         {structuresLoading && <p className="section-hint">Loading…</p>}
         {structuresError && <p className="msg-error">{structuresError}</p>}
         {!structuresLoading && !structuresError && (
@@ -875,7 +924,9 @@ export function StrategyStructurePage({
                 <tr>
                   <th>Name</th>
                   <th>Type</th>
-                  <th>Version</th>
+                  <th>Sub type</th>
+                  <th>Legs</th>
+                  <th>Constraints</th>
                   <th>Available</th>
                   <th>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}>
@@ -887,14 +938,21 @@ export function StrategyStructurePage({
                 </tr>
               </thead>
               <tbody>
-                {filteredStructures.map((row) => {
+                {structuresForTypeTab.map((row) => {
                   const isCurrentActive = status?.active_strategy_structure_id === row.strategy_structure_id
                   const availabilityUpdating = availabilityInProgress === row.strategy_structure_id
                   return (
                     <tr key={row.strategy_structure_id}>
-                      <td>{row.name}</td>
+                      <td>
+                        {row.name}
+                        {row.version != null && row.version !== '' && (
+                          <span className="structure-sheet-version" aria-label={`Version ${row.version}`}> v{row.version}</span>
+                        )}
+                      </td>
                       <td>{getStructureTypeLabel(row.structure_type)}</td>
-                      <td>{row.version ?? '—'}</td>
+                      <td>{summarizeSubtype(row.structure_subtype, row.structure_subtype_label)}</td>
+                      <td className="structure-sheet-cell-summary" title={summarizeLegs(row.legs)}>{summarizeLegs(row.legs)}</td>
+                      <td className="structure-sheet-cell-summary" title={summarizeConstraints(row.constraints)}>{summarizeConstraints(row.constraints)}</td>
                       <td>
                         <label className="toggle-switch" style={{ cursor: availabilityUpdating ? 'not-allowed' : 'pointer' }}>
                           <input
@@ -958,7 +1016,7 @@ export function StrategyStructurePage({
       {formOpen !== null && (
         <section className="strategy-section gates-form-section" style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-4)', background: 'var(--color-surface-elevated)', borderRadius: '8px' }}>
           <h3 className="section-subtitle">
-            {formOpen === 'create' ? (formIsCopy ? 'New structure (copy)' : 'New structure') : `Edit structure ${formOpen}`}
+            {formOpen === 'create' ? (formIsCopy ? 'New structure (copy)' : 'New structure') : `Edit structure (ID: ${formOpen})`}
           </h3>
           {formLoading && !formPayload.name && <p className="section-hint">Loading…</p>}
           {formError && (
@@ -1164,145 +1222,169 @@ export function StrategyStructurePage({
                 </div>
               )}
 
-              {wizardStep === 3 && (
-                <div className="structure-wizard-step">
-                  <div className="gates-form-group">
-                    <h4 className="gates-form-group-title">Details</h4>
-                    <div className="gates-form-row">
-                      <label>Name</label>
-                      <div>
-                        <input
-                          type="text"
-                          value={formPayload.name}
-                          onChange={(e) => updateForm({ name: e.target.value })}
-                          placeholder="Structure name"
-                          style={{ width: '100%', maxWidth: '400px' }}
-                        />
-                        <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
-                          Auto-filled from structure type and subtype; you can edit.
-                        </p>
+              {wizardStep === 3 && (() => {
+                const hasSubtypeOptions = subtypesConfig && selectedSubtype && subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)?.meta_params?.some((p) => p.param_kind !== 'fixed')
+                return (
+                  <div className="structure-wizard-step structure-details-step">
+                    {/* Row 1: Metadata | Subtype options */}
+                    <div className={`structure-details-card${!hasSubtypeOptions ? ' structure-details-card--span-2' : ''}`}>
+                      <h4 className="structure-details-card-title">Metadata</h4>
+                      <div className="structure-details-meta-grid">
+                        <div className="structure-details-field structure-details-field--name">
+                          <label className="structure-details-label">
+                            Name <InfoTooltip text="Auto-filled from structure type and subtype; you can edit." />
+                          </label>
+                          <input
+                            type="text"
+                            value={formPayload.name}
+                            onChange={(e) => updateForm({ name: e.target.value })}
+                            placeholder="Structure name"
+                            className="structure-details-input"
+                            aria-label="Structure name"
+                          />
+                        </div>
+                        <div className="structure-details-field structure-details-field--version">
+                          <label className="structure-details-label">
+                            Version
+                            {typeof formOpen === 'number' && (
+                              <InfoTooltip text="Read-only when editing. New version is offered on Save when Type, SubType, or Meta change." />
+                            )}
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={formPayload.version ?? 1}
+                            onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
+                            disabled={typeof formOpen === 'number'}
+                            className="structure-details-input structure-details-input--narrow"
+                            aria-label="Version"
+                          />
+                        </div>
+                        <div className="structure-details-field structure-details-field--available">
+                          <label className="toggle-switch structure-details-toggle" style={{ cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={formPayload.is_active ?? true}
+                              onChange={(e) => updateForm({ is_active: e.target.checked })}
+                              aria-label="Available"
+                            />
+                            <span className="toggle-switch-caption">Available</span>
+                          </label>
+                        </div>
                       </div>
                     </div>
-                    <div className="gates-form-row">
-                      <label>Version</label>
-                      <div>
-                        <input
-                          type="number"
-                          min={1}
-                          value={formPayload.version ?? 1}
-                          onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
-                          disabled={typeof formOpen === 'number'}
-                          aria-label="Version"
-                        />
-                        {typeof formOpen === 'number' && (
-                          <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
-                            Read-only when editing. Use new version (Version + 1) is offered on Save when Type, SubType, or Meta change.
-                          </p>
-                        )}
+                    {hasSubtypeOptions && subtypesConfig && selectedSubtype && (
+                      <div className="structure-details-card">
+                        <h4 className="structure-details-card-title">Subtype options</h4>
+                        <div className="structure-details-params">
+                          {(subtypesConfig.subtypes
+                            .find((s) => s.subtype === selectedSubtype)
+                            ?.meta_params ?? [])
+                            .filter((p) => p.param_kind !== 'fixed')
+                            .map((p) => (
+                              <div key={p.meta_key} className="structure-details-param-row">
+                                <label className="structure-details-label">{p.display_label ?? p.meta_key}</label>
+                                <input
+                                  type="number"
+                                  min={p.param_kind === 'percent' ? 1 : 0}
+                                  max={p.param_kind === 'percent' ? 50 : undefined}
+                                  value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
+                                  onChange={(e) => {
+                                    const v = e.target.value === '' ? '' : (parseInt(e.target.value, 10) ?? e.target.value)
+                                    setWizardParamValues((prev) => ({ ...prev, [p.meta_key]: v as string | number }))
+                                  }}
+                                  className="structure-details-input structure-details-input--narrow"
+                                  aria-label={p.display_label ?? p.meta_key}
+                                />
+                                {p.default_value_text != null && (
+                                  <span className="structure-details-hint structure-details-param-default">Default {p.default_value_text}</span>
+                                )}
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Row 2: Legs | Constraints */}
+                    <div className="structure-details-card">
+                      <h4 className="structure-details-card-title">Legs</h4>
+                      <p className="structure-details-hint structure-details-card-desc">
+                        From Option Type Config. Not editable here.
+                      </p>
+                      {(subtypeDefaultLegsLoading && selectedSubtype) || (currentTypeHasSubtypes && !selectedSubtype) ? (
+                        <p className="structure-details-hint">Loading legs…</p>
+                      ) : (
+                        <div className="structure-details-table-wrap">
+                          <table className="structure-details-table" aria-label="Structure legs">
+                            <thead>
+                              <tr>
+                                <th>Role</th>
+                                <th>Direction</th>
+                                <th>Right</th>
+                                <th>Qty</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {formLegs.map((leg, i) => (
+                                <tr key={i}>
+                                  <td>{leg.role ?? '—'}</td>
+                                  <td>{leg.direction ?? '—'}</td>
+                                  <td>{leg.option_right ?? '—'}</td>
+                                  <td>{leg.quantity ?? 1}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                    <div className="structure-details-card">
+                      <h4 className="structure-details-card-title">Constraints</h4>
+                      <div className="structure-details-constraints">
+                        {formConstraints.map((c, i) => (
+                          <div key={i} className="structure-details-constraint-row">
+                            <input
+                              type="text"
+                              value={c.constraint_type ?? ''}
+                              onChange={(e) => updateConstraint(i, { constraint_type: e.target.value })}
+                              placeholder="Type"
+                              className="structure-details-input structure-details-constraint-type"
+                              aria-label="Constraint type"
+                            />
+                            <input
+                              type="text"
+                              value={c.constraint_value_text ?? ''}
+                              onChange={(e) => updateConstraint(i, { constraint_value_text: e.target.value })}
+                              placeholder="Value (text)"
+                              className="structure-details-input structure-details-constraint-value"
+                              aria-label="Value text"
+                            />
+                            <input
+                              type="number"
+                              value={c.constraint_value_int ?? ''}
+                              onChange={(e) => updateConstraint(i, { constraint_value_int: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
+                              placeholder="Int"
+                              className="structure-details-input structure-details-constraint-int"
+                              aria-label="Value int"
+                            />
+                            <button
+                              type="button"
+                              className="btn-secondary structure-details-constraint-remove"
+                              onClick={() => removeConstraint(i)}
+                              aria-label="Remove constraint"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                        <button type="button" className="btn-secondary structure-details-add-constraint" onClick={addConstraint}>
+                          Add constraint
+                        </button>
                       </div>
                     </div>
-                    <div className="gates-form-row">
-                      <label className="toggle-switch" style={{ cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={formPayload.is_active ?? true}
-                          onChange={(e) => updateForm({ is_active: e.target.checked })}
-                          aria-label="Available"
-                        />
-                        <span className="toggle-switch-caption">Available</span>
-                      </label>
-                    </div>
-                    {(subtypesConfig && selectedSubtype && subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)?.meta_params?.some((p) => p.param_kind !== 'fixed')) ? (
-                      <div className="gates-form-group" style={{ marginTop: 'var(--space-3)' }}>
-                        <h4 className="gates-form-group-title">Subtype options</h4>
-                        {subtypesConfig.subtypes
-                          .find((s) => s.subtype === selectedSubtype)
-                          ?.meta_params?.filter((p) => p.param_kind !== 'fixed')
-                          .map((p) => (
-                            <div key={p.meta_key} className="gates-form-row" style={{ alignItems: 'center' }}>
-                              <label style={{ minWidth: '100px' }}>{p.display_label ?? p.meta_key}</label>
-                              <input
-                                type="number"
-                                min={p.param_kind === 'percent' ? 1 : 0}
-                                max={p.param_kind === 'percent' ? 50 : undefined}
-                                value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
-                                onChange={(e) => {
-                                  const v = e.target.value === '' ? '' : (parseInt(e.target.value, 10) ?? e.target.value)
-                                  setWizardParamValues((prev) => ({ ...prev, [p.meta_key]: v as string | number }))
-                                }}
-                                aria-label={p.display_label ?? p.meta_key}
-                              />
-                              {p.default_value_text != null && (
-                                <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>Default {p.default_value_text}</span>
-                              )}
-                            </div>
-                          ))}
-                      </div>
-                    ) : null}
                   </div>
-                  <div className="gates-form-group">
-                    <h4 className="gates-form-group-title">Legs (from Option Type Config)</h4>
-                    <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                      Defined in Option Type Config. Not editable here.
-                    </p>
-                    {(subtypeDefaultLegsLoading && selectedSubtype) || (currentTypeHasSubtypes && !selectedSubtype) ? (
-                      <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading legs…</p>
-                    ) : null}
-                    <div className="table-wrap">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th>Role</th>
-                            <th>Direction</th>
-                            <th>Right</th>
-                            <th>Qty</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {formLegs.map((leg, i) => (
-                            <tr key={i}>
-                              <td>{leg.role ?? '—'}</td>
-                              <td>{leg.direction ?? '—'}</td>
-                              <td>{leg.option_right ?? '—'}</td>
-                              <td>{leg.quantity ?? 1}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                  <div className="gates-form-group">
-                    <h4 className="gates-form-group-title">Constraints</h4>
-                    {formConstraints.map((c, i) => (
-                      <div key={i} className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
-                        <input
-                          type="text"
-                          value={c.constraint_type ?? ''}
-                          onChange={(e) => updateConstraint(i, { constraint_type: e.target.value })}
-                          placeholder="constraint_type"
-                          style={{ width: '160px' }}
-                        />
-                        <input
-                          type="text"
-                          value={c.constraint_value_text ?? ''}
-                          onChange={(e) => updateConstraint(i, { constraint_value_text: e.target.value })}
-                          placeholder="value (text)"
-                          style={{ width: '120px' }}
-                        />
-                        <input
-                          type="number"
-                          value={c.constraint_value_int ?? ''}
-                          onChange={(e) => updateConstraint(i, { constraint_value_int: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
-                          placeholder="value (int)"
-                          style={{ width: '80px' }}
-                        />
-                        <button type="button" className="btn-secondary" onClick={() => removeConstraint(i)}>Remove</button>
-                      </div>
-                    ))}
-                    <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addConstraint}>Add constraint</button>
-                  </div>
-                </div>
-              )}
+                )
+              })()}
 
               <div className="gates-form-actions" style={{ marginTop: 'var(--space-4)' }}>
                 <button type="button" className="btn-secondary" onClick={closeForm}>Cancel</button>

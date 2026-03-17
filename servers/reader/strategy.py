@@ -84,29 +84,87 @@ def get_structure_by_id(conn: Any, strategy_structure_id: int) -> Optional[Dict[
 
 
 def list_structures(conn: Any, active_only: bool = True) -> List[Dict[str, Any]]:
-    """Return list of strategy_structure rows (scalar + notes only, no legs/constraints/metadata)."""
+    """Return list of strategy_structure rows with legs and constraints for sheet summarization."""
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if active_only:
                 cur.execute(
                     """
-                    SELECT strategy_structure_id, name, structure_type, structure_subtype, version, is_active,
-                           created_at, updated_at, notes
-                    FROM strategy_structure WHERE is_active = true
-                    ORDER BY name
+                    SELECT s.strategy_structure_id, s.name, s.structure_type, s.structure_subtype,
+                           st.display_label AS structure_subtype_label,
+                           s.version, s.is_active, s.created_at, s.updated_at, s.notes
+                    FROM strategy_structure s
+                    LEFT JOIN strategy_structure_subtype st
+                      ON st.structure_type = s.structure_type AND st.subtype = s.structure_subtype
+                    WHERE s.is_active = true
+                    ORDER BY s.name
                     """
                 )
             else:
                 cur.execute(
                     """
-                    SELECT strategy_structure_id, name, structure_type, structure_subtype, version, is_active,
-                           created_at, updated_at, notes
-                    FROM strategy_structure
-                    ORDER BY name
+                    SELECT s.strategy_structure_id, s.name, s.structure_type, s.structure_subtype,
+                           st.display_label AS structure_subtype_label,
+                           s.version, s.is_active, s.created_at, s.updated_at, s.notes
+                    FROM strategy_structure s
+                    LEFT JOIN strategy_structure_subtype st
+                      ON st.structure_type = s.structure_type AND st.subtype = s.structure_subtype
+                    ORDER BY s.name
                     """
                 )
             rows = cur.fetchall()
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        ids = [r["strategy_structure_id"] for r in out]
+        if not ids:
+            return out
+
+        legs_by_id: Dict[int, List[Dict[str, Any]]] = {i: [] for i in ids}
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT strategy_structure_id, role, direction, option_right, quantity, strike, expiration
+                FROM strategy_structure_leg
+                WHERE strategy_structure_id = ANY(%s) ORDER BY strategy_structure_id, sort_order
+                """,
+                (ids,),
+            )
+            for r in cur.fetchall():
+                sid = r["strategy_structure_id"]
+                legs_by_id.setdefault(sid, []).append(
+                    {
+                        "role": r.get("role"),
+                        "direction": r.get("direction"),
+                        "option_right": r.get("option_right"),
+                        "quantity": r.get("quantity"),
+                        "strike": r.get("strike"),
+                        "expiration": r.get("expiration"),
+                    }
+                )
+
+        constraints_by_id: Dict[int, List[Dict[str, Any]]] = {i: [] for i in ids}
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT strategy_structure_id, constraint_type, constraint_value_text, constraint_value_int
+                FROM strategy_structure_constraint
+                WHERE strategy_structure_id = ANY(%s)
+                """,
+                (ids,),
+            )
+            for r in cur.fetchall():
+                sid = r["strategy_structure_id"]
+                constraints_by_id.setdefault(sid, []).append(
+                    {
+                        "constraint_type": r.get("constraint_type"),
+                        "constraint_value_text": r.get("constraint_value_text"),
+                        "constraint_value_int": r.get("constraint_value_int"),
+                    }
+                )
+
+        for item in out:
+            item["legs"] = legs_by_id.get(item["strategy_structure_id"], [])
+            item["constraints"] = constraints_by_id.get(item["strategy_structure_id"], [])
+        return out
     except Exception:
         return []
 
