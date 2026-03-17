@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { OpenOrder, PositionCategory, RealtimeQuote, StatusResponse } from '../types'
+import type { OpenOrder, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
 import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, postReleaseTickerSubscriptions, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtSince, fmtTs, fmtUsd, fmtUsdRound0, parseOptionContractKey } from '../utils/format'
@@ -52,6 +52,65 @@ function getDailyRefTooltip(bench: DailyBenchmark | undefined, last: number | nu
   return lines.join('\n')
 }
 
+/** Watchlist Options: format expiry for display (YYYYMMDD → YYYY-MM-DD). */
+function formatExpiry(expiry: string | null | undefined): string {
+  if (expiry == null || expiry === '') return '—'
+  const s = String(expiry).trim()
+  if (s.length === 8) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+  if (s.length === 6) return `${s.slice(0, 4)}-${s.slice(4, 6)}`
+  return s
+}
+
+/** Watchlist Options: C → CALL, P → PUT. */
+function formatOptionRight(right: string | null | undefined): string {
+  if (right == null || right === '') return '—'
+  const r = String(right).trim().toUpperCase()
+  if (r === 'C') return 'CALL'
+  if (r === 'P') return 'PUT'
+  return right
+}
+
+/** Watchlist Options: strike as USD. */
+function formatStrike(strike: number | null | undefined): string {
+  if (strike == null) return '—'
+  const n = Number(strike)
+  if (!Number.isFinite(n)) return '—'
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 4 }).format(n)
+}
+
+/** Watchlist Options: Last + Bid/Ask spread vs Last (same as Watchlist page). */
+function renderLastBidAskOption(q: RealtimeQuote | undefined): ReactNode {
+  if (!q) return '—'
+  const last = q.last != null && Number.isFinite(q.last) ? q.last : null
+  const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
+  const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
+  const bidDiff = last != null && bid != null ? bid - last : null
+  const askDiff = last != null && ask != null ? ask - last : null
+  return (
+    <>
+      {last != null ? fmtUsd(last) : '—'}
+      {bidDiff != null && (
+        <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
+      )}
+      {askDiff != null && (
+        <span className={`realtime-quote-spread ${askDiff > 0 ? 'pnl-positive' : askDiff < 0 ? 'pnl-negative' : ''}`} title="Ask vs Last"> {Math.abs(askDiff).toFixed(2)}</span>
+      )}
+    </>
+  )
+}
+
+/** Watchlist Options: display label for one option item. */
+function watchlistOptionLabel(item: WatchlistItem): string {
+  if (item.display_label && String(item.display_label).trim()) return item.display_label.trim()
+  if (item.sec_type === 'OPT' && item.symbol) {
+    const exp = item.expiry || ''
+    const right = item.option_right || ''
+    const strike = item.strike != null ? String(item.strike) : ''
+    return `${item.symbol} ${exp} ${right} ${strike}`.trim() || item.contract_key
+  }
+  return (item.symbol || item.contract_key || '').trim() || item.contract_key
+}
+
 /** Format qty for Qty / Filled/Rem: integer part bold+yellow, whole numbers add muted ".0". */
 function fmtQtyWithMutedDecimal(v: number | string | null | undefined): ReactNode {
   if (v == null || (typeof v === 'string' && v.trim() === '')) return '—'
@@ -72,8 +131,10 @@ export interface LivePageProps {
 export function LivePage({ status }: LivePageProps) {
   const j = status
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
+  const [quotesByContractKey, setQuotesByContractKey] = useState<Record<string, RealtimeQuote>>({})
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const [watchlistSymbolSet, setWatchlistSymbolSet] = useState<Set<string>>(new Set())
+  const [watchlistOptionItems, setWatchlistOptionItems] = useState<WatchlistItem[]>([])
   const [, setFreshnessTick] = useState(0)
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
   /** Custom category order (names). Empty = use default from API + data. */
@@ -95,15 +156,18 @@ export function LivePage({ status }: LivePageProps) {
       .then((res) => {
         if (cancelled) return
         const set = new Set<string>()
-        for (const w of res.items ?? []) {
+        const items = res.items ?? []
+        for (const w of items) {
           const sym = (w.symbol ?? '').trim()
           const st = (w.sec_type ?? '').toString().toUpperCase()
           if (sym && (st === 'STK' || !st)) set.add(sym.toUpperCase())
         }
         setWatchlistSymbolSet(set)
+        setWatchlistOptionItems(items.filter((w) => (w.sec_type ?? '').toString().toUpperCase() === 'OPT'))
       })
       .catch(() => {
         if (!cancelled) setWatchlistSymbolSet(new Set())
+        if (!cancelled) setWatchlistOptionItems([])
       })
     return () => {
       cancelled = true
@@ -220,29 +284,43 @@ export function LivePage({ status }: LivePageProps) {
     }
   }, [benchmarkSymbols.join(',')])
 
+  const mergeQuotes = useCallback((quotes: RealtimeQuote[]) => {
+    const nextMap: Record<string, RealtimeQuote> = {}
+    const nextByCk: Record<string, RealtimeQuote> = {}
+    for (const q of quotes) {
+      if (q.contract_key) {
+        nextByCk[q.contract_key] = q
+      } else if (q.symbol) {
+        nextMap[q.symbol] = q
+      }
+    }
+    setQuotesMap((prev) => ({ ...prev, ...nextMap }))
+    setQuotesByContractKey((prev) => ({ ...prev, ...nextByCk }))
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     fetchQuotes()
       .then((res) => {
-        if (!cancelled && res.quotes?.length) {
-          setQuotesMap((prev) => {
-            const next = { ...prev }
-            res.quotes!.forEach((q) => {
-              next[q.symbol] = q
-            })
-            return next
-          })
-        }
+        if (!cancelled && res.quotes?.length) mergeQuotes(res.quotes)
       })
       .catch(() => {})
     const unsub = subscribeQuotes((q) => {
       setQuotesMap((prev) => ({ ...prev, [q.symbol]: q }))
     })
+    const pollId = setInterval(() => {
+      fetchQuotes()
+        .then((res) => {
+          if (!cancelled && res.quotes?.length) mergeQuotes(res.quotes)
+        })
+        .catch(() => {})
+    }, 8000)
     return () => {
       cancelled = true
       unsub()
+      clearInterval(pollId)
     }
-  }, [])
+  }, [mergeQuotes])
 
   const hb = j?.daemon_heartbeat
   const marketStreamsOk =
@@ -328,17 +406,18 @@ export function LivePage({ status }: LivePageProps) {
       quote?.last ?? null,
       qty ?? 0,
     )
+    const lastVal = quote?.last != null && Number.isFinite(quote.last) ? quote.last : null
     const pnlCost =
-      quote && avgCost != null && Number.isFinite(quote.last) && qty != null && Number.isFinite(qty) && qty !== 0
-        ? (quote.last - avgCost) * qty
+      lastVal != null && avgCost != null && qty != null && Number.isFinite(qty) && qty !== 0
+        ? (lastVal - avgCost) * qty
         : null
     const hostPnlCost =
-      quote && hostAvgCost != null && Number.isFinite(quote.last) && hostQty !== 0
-        ? (quote.last - hostAvgCost) * hostQty
+      lastVal != null && hostAvgCost != null && hostQty !== 0
+        ? (lastVal - hostAvgCost) * hostQty
         : null
     const secondaryPnlCost =
-      quote && secondaryAvgCost != null && Number.isFinite(quote.last) && secondaryQty !== 0
-        ? (quote.last - secondaryAvgCost) * secondaryQty
+      lastVal != null && secondaryAvgCost != null && secondaryQty !== 0
+        ? (lastVal - secondaryAvgCost) * secondaryQty
         : null
     const isInWatchlist = wishlistSet.has((symbol || '').trim().toUpperCase())
     return {
@@ -1010,6 +1089,45 @@ export function LivePage({ status }: LivePageProps) {
             )
           })()}
       </div>
+
+      {watchlistOptionItems.length > 0 && (
+        <div className="card card-operations watchlist-options-live-card" style={{ marginTop: 'var(--space-3)' }}>
+          <h2 className="daemon-card-title" style={{ marginBottom: '0.5rem' }}>
+            Watchlist Options
+            <InfoTooltip text="Option contracts from Watchlist; quotes from daemon (contract_quote_live). Updates every few seconds." />
+          </h2>
+          <div className="realtime-quotes-table-wrap">
+            <table className="table-operations realtime-quotes-table" aria-label="Watchlist option quotes">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th title="Last price; Bid and Ask shown as spread vs Last">Last (Bid / Ask)</th>
+                  <th>Expiry</th>
+                  <th>Right</th>
+                  <th>Strike</th>
+                  <th>Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                {watchlistOptionItems.map((item) => {
+                  const q = quotesByContractKey[item.contract_key]
+                  const categoryName = (item.category ?? '').trim() || 'Uncategorized'
+                  return (
+                    <tr key={item.contract_key}>
+                      <td title={item.contract_key} style={{ fontWeight: 'bold' }}>{watchlistOptionLabel(item)}</td>
+                      <td className="realtime-quote-num realtime-quote-last-bid-ask">{renderLastBidAskOption(q)}</td>
+                      <td>{formatExpiry(item.expiry)}</td>
+                      <td>{formatOptionRight(item.option_right)}</td>
+                      <td>{item.strike != null ? formatStrike(item.strike) : '—'}</td>
+                      <td>{categoryName}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="card card-operations open-orders-live-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>

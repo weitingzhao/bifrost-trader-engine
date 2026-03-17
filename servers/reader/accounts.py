@@ -71,7 +71,19 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                              OR (
                                upper(trim(COALESCE(ap.sec_type,''))) = 'OPT'
                                AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
-                               AND substring(e.contract_key from position('|' in e.contract_key) + 1) = substring(ap.contract_key from position('|' in ap.contract_key) + 1)
+                               AND position('|' in e.contract_key) > 0
+                               AND position('|' in ap.contract_key) > 0
+                               AND (
+                                 (CASE WHEN position(' ' in split_part(e.contract_key, '|', 1)) > 0
+                                       THEN substring(split_part(e.contract_key, '|', 1) from 1 for position(' ' in split_part(e.contract_key, '|', 1)) - 1)
+                                       ELSE split_part(e.contract_key, '|', 1)
+                                  END) || substring(e.contract_key from position('|' in e.contract_key))
+                                 ) = (
+                                 (CASE WHEN position(' ' in split_part(ap.contract_key, '|', 1)) > 0
+                                       THEN substring(split_part(ap.contract_key, '|', 1) from 1 for position(' ' in split_part(ap.contract_key, '|', 1)) - 1)
+                                       ELSE split_part(ap.contract_key, '|', 1)
+                                  END) || substring(ap.contract_key from position('|' in ap.contract_key))
+                                 )
                              )
                            )
                          ORDER BY e.exec_time DESC NULLS LAST
@@ -84,7 +96,19 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                              OR (
                                upper(trim(COALESCE(ap.sec_type,''))) = 'OPT'
                                AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
-                               AND substring(e.contract_key from position('|' in e.contract_key) + 1) = substring(ap.contract_key from position('|' in ap.contract_key) + 1)
+                               AND position('|' in e.contract_key) > 0
+                               AND position('|' in ap.contract_key) > 0
+                               AND (
+                                 (CASE WHEN position(' ' in split_part(e.contract_key, '|', 1)) > 0
+                                       THEN substring(split_part(e.contract_key, '|', 1) from 1 for position(' ' in split_part(e.contract_key, '|', 1)) - 1)
+                                       ELSE split_part(e.contract_key, '|', 1)
+                                  END) || substring(e.contract_key from position('|' in e.contract_key))
+                                 ) = (
+                                 (CASE WHEN position(' ' in split_part(ap.contract_key, '|', 1)) > 0
+                                       THEN substring(split_part(ap.contract_key, '|', 1) from 1 for position(' ' in split_part(ap.contract_key, '|', 1)) - 1)
+                                       ELSE split_part(ap.contract_key, '|', 1)
+                                  END) || substring(ap.contract_key from position('|' in ap.contract_key))
+                                 )
                              )
                            )
                          ORDER BY e.exec_time DESC NULLS LAST
