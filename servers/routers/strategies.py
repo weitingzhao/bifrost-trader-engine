@@ -147,16 +147,19 @@ def get_structure_subtype_default_legs(
 ) -> Dict[str, Any]:
     """Return default legs for the given (structure_type, subtype).
 
-    If subtype has its own legs (strategy_structure_subtype_leg), use those; otherwise fall back to type-level legs.
+    If subtype has its own legs (strategy_structure_subtype_leg), use those and set subtype_override=True;
+    otherwise fall back to type-level legs and set subtype_override=False (Option Type Config: inherit).
     """
     reader = request.app.state.reader
     conn = getattr(reader, "_conn", None)
     if conn is None:
-        # Fall back to reader-level helper if available; otherwise return type-level legs only.
         legs = reader.get_structure_type_default_legs(structure_type)
-        return {"legs": legs}
-    legs = structure_type_config_module.get_default_legs_for_subtype(conn, structure_type, subtype)
-    return {"legs": legs}
+        return {"legs": legs, "subtype_override": False}
+    subtype_legs = structure_type_config_module.get_subtype_legs_only(conn, structure_type, subtype)
+    if subtype_legs is not None:
+        return {"legs": subtype_legs, "subtype_override": True}
+    legs = structure_type_config_module.get_default_legs(conn, structure_type)
+    return {"legs": legs, "subtype_override": False}
 
 
 @router.put("/structure-types/{structure_type}/subtypes/{subtype}/default-legs")

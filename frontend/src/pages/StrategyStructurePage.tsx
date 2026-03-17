@@ -58,17 +58,11 @@ export function StrategyStructurePage({
   const [formLoading, setFormLoading] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [formIsCopy, setFormIsCopy] = useState(false)
-  /** When > 0, current type has fixed leg count from default-legs API; Add/Remove disabled and role/direction/right locked. */
-  const [fixedLegCount, setFixedLegCount] = useState(0)
   const [defaultLegsLoading, setDefaultLegsLoading] = useState(false)
   /** When set, default legs came from client fallback (API failed or unavailable). Shown so backend failures are not hidden. */
   const [defaultLegsFallbackMsg, setDefaultLegsFallbackMsg] = useState<string | null>(null)
   /** Filter structure list: 'all' | 'active' | 'inactive'. */
   const [structureActiveFilter, setStructureActiveFilter] = useState<'all' | 'active' | 'inactive'>('active')
-  /** Separate toggles: when true, allow editing the Qty / Strike / Expiration column per leg. Qty defaults off (show numbers read-only); Strike/Expiration off shows "resolved when used". */
-  const [allowQtyPreset, setAllowQtyPreset] = useState(false)
-  const [allowStrikePreset, setAllowStrikePreset] = useState(false)
-  const [allowExpirationPreset, setAllowExpirationPreset] = useState(false)
   /** Wizard for New structure only: step 1=type, 2=subtype (when has_subtypes), 3=details. */
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
   /** Structure types from config API (for Step 1). Fallback to STRUCTURE_TYPES when empty. */
@@ -104,8 +98,6 @@ export function StrategyStructurePage({
   const [pendingSubmitName, setPendingSubmitName] = useState<string | null>(null)
   /** When set, show dialog: Type/SubType/Meta changed — use new version? (Apple switch, default on). */
   const [versionConfirmDialog, setVersionConfirmDialog] = useState<{ useNewVersion: boolean } | null>(null)
-  /** Subtype default legs from API (null = not loaded / no subtype; [] = inherit type legs; non-empty = subtype-specific). */
-  const [subtypeDefaultLegs, setSubtypeDefaultLegs] = useState<StructureLeg[] | null>(null)
   const [subtypeDefaultLegsLoading, setSubtypeDefaultLegsLoading] = useState(false)
   /** When true, last save failed with legs/schema error so we highlight "Use subtype default legs" if applicable. */
   const [formErrorIsSchemaMismatch, setFormErrorIsSchemaMismatch] = useState(false)
@@ -122,22 +114,6 @@ export function StrategyStructurePage({
   const isSchemaMismatchError = useCallback((msg: string): boolean => {
     const s = msg.toLowerCase()
     return /leg\s*\d|requires exactly|must be/.test(s) || s.includes('schema')
-  }, [])
-
-  /** Compare legs by count and role/direction/option_right (for subtype default vs current). */
-  const legsMatch = useCallback((a: StructureLeg[], b: StructureLeg[]): boolean => {
-    if (a.length !== b.length) return false
-    return a.every((leg, i) => {
-      const o = b[i]
-      if (!o) return false
-      const r = (leg.role ?? '').toString().trim().toUpperCase()
-      const r2 = (o.role ?? '').toString().trim().toUpperCase()
-      const d = (leg.direction ?? '').toString().trim().toUpperCase()
-      const d2 = (o.direction ?? '').toString().trim().toUpperCase()
-      const opt = (leg.option_right ?? '').toString().trim().toUpperCase()
-      const opt2 = (o.option_right ?? '').toString().trim().toUpperCase()
-      return r === r2 && d === d2 && opt === opt2
-    })
   }, [])
 
   const loadStructures = useCallback(() => {
@@ -160,24 +136,21 @@ export function StrategyStructurePage({
       .catch(() => setStructureTypes([]))
   }, [])
 
-  /** When subtype is selected, fetch subtype default legs (for "Use subtype default legs" in step 3). */
+  /** When subtype is selected, fetch subtype default legs from Option Type Config and set form legs (read-only source of truth). */
   useEffect(() => {
     const typeVal = (formPayload.structure_type || '').trim()
     const subVal = selectedSubtype ?? null
-    if (!typeVal || !subVal || formOpen === null) {
-      setSubtypeDefaultLegs(null)
-      return
-    }
+    if (!typeVal || !subVal || formOpen === null) return
     let cancelled = false
     setSubtypeDefaultLegsLoading(true)
-    setSubtypeDefaultLegs(null)
     fetchStructureSubtypeDefaultLegs(typeVal, subVal)
       .then((res) => {
-        if (!cancelled) setSubtypeDefaultLegs(res.legs ?? [])
+        if (!cancelled) {
+          const legs = res.legs ?? []
+          setFormLegs(legs)
+        }
       })
-      .catch(() => {
-        if (!cancelled) setSubtypeDefaultLegs(null)
-      })
+      .catch(() => {})
       .finally(() => {
         if (!cancelled) setSubtypeDefaultLegsLoading(false)
       })
@@ -185,6 +158,29 @@ export function StrategyStructurePage({
       cancelled = true
     }
   }, [formPayload.structure_type, selectedSubtype, formOpen])
+
+  /** When editing a structure whose type has no subtypes, load type default legs from Option Type Config (legs are read-only). */
+  useEffect(() => {
+    const typeVal = (formPayload.structure_type || '').trim()
+    const isEdit = typeof formOpen === 'number'
+    const typeHasSubtypes = structureTypes.some((t) => t.structure_type === typeVal && t.has_subtypes)
+    if (!isEdit || !typeVal || typeHasSubtypes) return
+    let cancelled = false
+    setDefaultLegsLoading(true)
+    fetchStructureTypeDefaultLegs(typeVal)
+      .then((res) => {
+        if (!cancelled) setFormLegs(res.legs ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setFormLegs([])
+      })
+      .finally(() => {
+        if (!cancelled) setDefaultLegsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [formOpen, formPayload.structure_type, structureTypes])
 
   /** Whether current form structure_type has subtypes (from config API). */
   const currentTypeHasSubtypes =
@@ -274,15 +270,10 @@ export function StrategyStructurePage({
     setFormMeta([])
     setFormError(null)
     setFormErrorIsSchemaMismatch(false)
-    setFixedLegCount(0)
     setDefaultLegsLoading(false)
     setDefaultLegsFallbackMsg(null)
-    setAllowQtyPreset(false)
-    setAllowStrikePreset(false)
-    setAllowExpirationPreset(false)
     setWizardStep(1)
     setSelectedSubtype(null)
-    setSubtypeDefaultLegs(null)
     setSubtypesConfig(null)
     setWizardParamValues({})
     setFormOpen('create')
@@ -293,9 +284,7 @@ export function StrategyStructurePage({
     setFormLoading(true)
     setFormError(null)
     setFormErrorIsSchemaMismatch(false)
-    setSubtypeDefaultLegs(null)
     setOriginalEditName(null)
-    setFixedLegCount(0)
     setDefaultLegsLoading(false)
     setDefaultLegsFallbackMsg(null)
     setFormOpen(id)
@@ -313,11 +302,6 @@ export function StrategyStructurePage({
         setOriginalEditStructureType(row.structure_type ?? null)
         setOriginalEditStructureSubtype(row.structure_subtype ?? null)
         setOriginalEditMeta(p.meta != null ? [...p.meta] : null)
-        setFixedLegCount(p.legs ? p.legs.length : 0)
-        const legs = p.legs ?? []
-        setAllowQtyPreset(legs.some((leg: StructureLeg) => (leg.quantity ?? 1) !== 1))
-        setAllowStrikePreset(legs.some((leg: StructureLeg) => leg.strike != null))
-        setAllowExpirationPreset(legs.some((leg: StructureLeg) => leg.expiration != null && String(leg.expiration).trim() !== ''))
         setWizardStep(3)
         if (row.structure_type) {
           fetchStructureTypeSubtypes(row.structure_type)
@@ -371,8 +355,6 @@ export function StrategyStructurePage({
     setFormLoading(true)
     setFormError(null)
     setFormErrorIsSchemaMismatch(false)
-    setSubtypeDefaultLegs(null)
-    setFixedLegCount(0)
     setDefaultLegsLoading(false)
     setDefaultLegsFallbackMsg(null)
     setFormOpen('create')
@@ -385,11 +367,6 @@ export function StrategyStructurePage({
         setFormConstraints(p.constraints ?? [])
         setFormNotes(p.notes ?? '')
         setFormMeta(p.meta ?? [])
-        setFixedLegCount(p.legs ? p.legs.length : 0)
-        const legs = p.legs ?? []
-        setAllowQtyPreset(legs.some((leg: StructureLeg) => (leg.quantity ?? 1) !== 1))
-        setAllowStrikePreset(legs.some((leg: StructureLeg) => leg.strike != null))
-        setAllowExpirationPreset(legs.some((leg: StructureLeg) => leg.expiration != null && String(leg.expiration).trim() !== ''))
       })
       .catch((e) => setFormError(e instanceof Error ? e.message : String(e)))
       .finally(() => setFormLoading(false))
@@ -399,7 +376,6 @@ export function StrategyStructurePage({
     setFormOpen(null)
     setFormError(null)
     setFormErrorIsSchemaMismatch(false)
-    setSubtypeDefaultLegs(null)
     setOriginalEditName(null)
     setOriginalEditVersion(null)
     setOriginalEditStructureType(null)
@@ -598,12 +574,10 @@ export function StrategyStructurePage({
         .then((res) => {
           const legs = res.legs ?? []
           setFormLegs(legs)
-          setFixedLegCount(legs.length)
           setDefaultLegsFallbackMsg(legs.length === 0 ? 'No default legs configured for this structure type.' : null)
         })
         .catch(() => {
           setFormLegs([])
-          setFixedLegCount(0)
           setDefaultLegsFallbackMsg('Failed to load default legs for this structure type.')
         })
         .finally(() => setDefaultLegsLoading(false))
@@ -660,15 +634,6 @@ export function StrategyStructurePage({
     }
   }
 
-  const updateLeg = (index: number, patch: Partial<StructureLeg>) => {
-    setFormLegs((prev) => prev.map((leg, i) => (i === index ? { ...leg, ...patch } : leg)))
-  }
-  const addLeg = () => {
-    setFormLegs((prev) => [...prev, { role: '', direction: '', option_right: 'C', quantity: 1, strike: undefined, expiration: '' }])
-  }
-  const removeLeg = (index: number) => {
-    setFormLegs((prev) => prev.filter((_, i) => i !== index))
-  }
   const updateConstraint = (index: number, patch: Partial<StructureConstraint>) => {
     setFormConstraints((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)))
   }
@@ -703,7 +668,7 @@ export function StrategyStructurePage({
             <h3 id="availability-error-modal-title">Cannot change availability</h3>
             <p style={{ whiteSpace: 'pre-wrap', marginBottom: 'var(--space-3)' }}>{availabilityError}</p>
             <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
-              The structure was not changed. Fix the issue in Edit (e.g. leg role) and try again.
+              The structure was not changed. Fix the issue in Option Type Config or Edit (e.g. meta) and try again.
             </p>
             <div className="data-reset-modal-actions">
               <button
@@ -999,9 +964,9 @@ export function StrategyStructurePage({
           {formError && (
             <div className="msg-error" style={{ marginBottom: 'var(--space-2)' }}>
               <p>{formError}</p>
-              {formErrorIsSchemaMismatch && selectedSubtype && (
+              {formErrorIsSchemaMismatch && (
                 <p className="form-hint" style={{ marginTop: 'var(--space-1)' }}>
-                  Legs do not match the expected schema for subtype &quot;{selectedSubtype}&quot;. You can reset to subtype defaults from the legs section.
+                  Legs do not match the expected schema for this type/subtype. Update Option Type Config if needed.
                 </p>
               )}
             </div>
@@ -1276,42 +1241,13 @@ export function StrategyStructurePage({
                     ) : null}
                   </div>
                   <div className="gates-form-group">
-                    <h4 className="gates-form-group-title">Legs (read-only)</h4>
-                    {selectedSubtype && subtypeDefaultLegs !== null && subtypeDefaultLegs.length > 0 && !legsMatch(formLegs, subtypeDefaultLegs) && (
-                      <div
-                        className="form-hint"
-                        style={{
-                          marginBottom: 'var(--space-2)',
-                          padding: 'var(--space-2)',
-                          background: formErrorIsSchemaMismatch ? 'var(--color-error-subtle, #fef2f2)' : 'var(--color-surface-elevated)',
-                          borderRadius: '6px',
-                          border: formErrorIsSchemaMismatch ? '1px solid var(--color-error, #b91c1c)' : undefined,
-                        }}
-                        role="alert"
-                      >
-                        This subtype has its own default legs.
-                        {' '}
-                        <button
-                          type="button"
-                          className={formErrorIsSchemaMismatch ? 'btn-primary' : 'btn-secondary'}
-                          style={formErrorIsSchemaMismatch ? { fontWeight: 600 } : undefined}
-                          onClick={() => {
-                            setFormLegs([...subtypeDefaultLegs])
-                            setFixedLegCount(subtypeDefaultLegs.length)
-                            setFormError(null)
-                            setFormErrorIsSchemaMismatch(false)
-                          }}
-                        >
-                          Use subtype default legs
-                        </button>
-                      </div>
-                    )}
-                    {selectedSubtype && subtypeDefaultLegs !== null && subtypeDefaultLegs.length === 0 && (
-                      <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Using type-level default legs.</p>
-                    )}
-                    {subtypeDefaultLegsLoading && selectedSubtype && (
-                      <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading subtype default legs…</p>
-                    )}
+                    <h4 className="gates-form-group-title">Legs (from Option Type Config)</h4>
+                    <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                      Defined in Option Type Config. Not editable here.
+                    </p>
+                    {(subtypeDefaultLegsLoading && selectedSubtype) || (currentTypeHasSubtypes && !selectedSubtype) ? (
+                      <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading legs…</p>
+                    ) : null}
                     <div className="table-wrap">
                       <table className="data-table">
                         <thead>
@@ -1437,47 +1373,12 @@ export function StrategyStructurePage({
             </div>
 
             <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Legs</h4>
+              <h4 className="gates-form-group-title">Legs (from Option Type Config)</h4>
               <p className="form-hint structure-legs-caption" style={{ marginBottom: 'var(--space-2)' }}>
-                Define leg shape. Toggle each column on to edit; off shows &quot;resolved when used&quot;.
+                Defined in Option Type Config. Not editable here.
               </p>
-              {defaultLegsLoading && (
-                <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading default legs…</p>
-              )}
-              {selectedSubtype && subtypeDefaultLegs !== null && subtypeDefaultLegs.length > 0 && !legsMatch(formLegs, subtypeDefaultLegs) && (
-                <div
-                  className="form-hint"
-                  style={{
-                    marginBottom: 'var(--space-2)',
-                    padding: 'var(--space-2)',
-                    background: formErrorIsSchemaMismatch ? 'var(--color-error-subtle, #fef2f2)' : 'var(--color-surface-elevated)',
-                    borderRadius: '6px',
-                    border: formErrorIsSchemaMismatch ? '1px solid var(--color-error, #b91c1c)' : undefined,
-                  }}
-                  role="alert"
-                >
-                  This subtype has its own default legs.
-                  {' '}
-                  <button
-                    type="button"
-                    className={formErrorIsSchemaMismatch ? 'btn-primary' : 'btn-secondary'}
-                    style={formErrorIsSchemaMismatch ? { fontWeight: 600 } : undefined}
-                    onClick={() => {
-                      setFormLegs([...subtypeDefaultLegs])
-                      setFixedLegCount(subtypeDefaultLegs.length)
-                      setFormError(null)
-                      setFormErrorIsSchemaMismatch(false)
-                    }}
-                  >
-                    Use subtype default legs
-                  </button>
-                </div>
-              )}
-              {selectedSubtype && subtypeDefaultLegs !== null && subtypeDefaultLegs.length === 0 && (
-                <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Using type-level default legs.</p>
-              )}
-              {subtypeDefaultLegsLoading && selectedSubtype && (
-                <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading subtype default legs…</p>
+              {(defaultLegsLoading || (selectedSubtype && subtypeDefaultLegsLoading)) && (
+                <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading legs…</p>
               )}
               <div className="table-wrap">
                 <table className="data-table">
@@ -1486,146 +1387,21 @@ export function StrategyStructurePage({
                       <th>Role</th>
                       <th>Direction</th>
                       <th>Right</th>
-                      <th className="structure-leg-preset-th">
-                        <span className="structure-leg-th-label">Qty (per leg)</span>
-                        <InfoTooltip text="Number of contracts for this leg (e.g. 1 for straddle). Toggle on to set per leg." />
-                        <label className="toggle-switch structure-leg-th-toggle" style={{ cursor: 'pointer', marginLeft: 'var(--space-1)' }} title="Allow Qty preset">
-                          <input
-                            type="checkbox"
-                            checked={allowQtyPreset}
-                            onChange={(e) => setAllowQtyPreset(e.target.checked)}
-                            aria-label="Allow Qty preset"
-                          />
-                          <span className="toggle-switch-caption" aria-hidden>On</span>
-                        </label>
-                      </th>
-                      <th className="structure-leg-preset-th structure-leg-optional">
-                        <span className="structure-leg-th-label">Strike</span>
-                        <InfoTooltip text="Optional preset; leave blank to resolve when structure is applied (e.g. ATM)." />
-                        <label className="toggle-switch structure-leg-th-toggle" style={{ cursor: 'pointer', marginLeft: 'var(--space-1)' }} title="Allow Strike preset">
-                          <input
-                            type="checkbox"
-                            checked={allowStrikePreset}
-                            onChange={(e) => setAllowStrikePreset(e.target.checked)}
-                            aria-label="Allow Strike preset"
-                          />
-                          <span className="toggle-switch-caption" aria-hidden>On</span>
-                        </label>
-                      </th>
-                      <th className="structure-leg-preset-th structure-leg-optional">
-                        <span className="structure-leg-th-label">Expiration</span>
-                        <InfoTooltip text="Optional preset; leave blank to resolve from DTE or calendar when structure is applied." />
-                        <label className="toggle-switch structure-leg-th-toggle" style={{ cursor: 'pointer', marginLeft: 'var(--space-1)' }} title="Allow Expiration preset">
-                          <input
-                            type="checkbox"
-                            checked={allowExpirationPreset}
-                            onChange={(e) => setAllowExpirationPreset(e.target.checked)}
-                            aria-label="Allow Expiration preset"
-                          />
-                          <span className="toggle-switch-caption" aria-hidden>On</span>
-                        </label>
-                      </th>
-                      <th></th>
+                      <th>Qty</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {formLegs.map((leg, i) => {
-                      const locked = fixedLegCount > 0 && i < fixedLegCount
-                      return (
-                        <tr key={i}>
-                          <td>
-                            {locked ? (
-                              <span style={{ minWidth: '60px', display: 'inline-block' }}>{leg.role ?? '—'}</span>
-                            ) : (
-                              <input
-                                type="text"
-                                value={leg.role ?? ''}
-                                onChange={(e) => updateLeg(i, { role: e.target.value })}
-                                placeholder="role"
-                                style={{ width: '100%', minWidth: '60px' }}
-                              />
-                            )}
-                          </td>
-                          <td>
-                            {locked ? (
-                              <span style={{ minWidth: '60px', display: 'inline-block' }}>{leg.direction ?? '—'}</span>
-                            ) : (
-                              <input
-                                type="text"
-                                value={leg.direction ?? ''}
-                                onChange={(e) => updateLeg(i, { direction: e.target.value })}
-                                placeholder="long/short"
-                                style={{ width: '100%', minWidth: '60px' }}
-                              />
-                            )}
-                          </td>
-                          <td>
-                            {locked ? (
-                              <span>{leg.option_right ?? '—'}</span>
-                            ) : (
-                              <select
-                                value={leg.option_right ?? 'C'}
-                                onChange={(e) => updateLeg(i, { option_right: e.target.value })}
-                              >
-                                <option value="C">C</option>
-                                <option value="P">P</option>
-                              </select>
-                            )}
-                          </td>
-                          <td>
-                            {allowQtyPreset ? (
-                              <input
-                                type="number"
-                                value={leg.quantity ?? 1}
-                                onChange={(e) => updateLeg(i, { quantity: parseInt(e.target.value, 10) || 0 })}
-                                min={0}
-                                style={{ width: '4em' }}
-                              />
-                            ) : (
-                              <span className="structure-leg-qty-default" title="Default ratio per leg (toggle column on to edit)">{leg.quantity ?? 1}</span>
-                            )}
-                          </td>
-                          <td className="structure-leg-optional">
-                            {allowStrikePreset ? (
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={leg.strike ?? ''}
-                                onChange={(e) => updateLeg(i, { strike: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-                                placeholder="e.g. ATM or blank"
-                                style={{ width: '5em' }}
-                              />
-                            ) : (
-                              <span className="structure-leg-resolved" title="Resolved when structure is used">resolved when used</span>
-                            )}
-                          </td>
-                          <td className="structure-leg-optional">
-                            {allowExpirationPreset ? (
-                              <input
-                                type="text"
-                                value={leg.expiration ?? ''}
-                                onChange={(e) => updateLeg(i, { expiration: e.target.value })}
-                                placeholder="e.g. YYYYMMDD or blank"
-                                style={{ width: '100%', minWidth: '70px' }}
-                              />
-                            ) : (
-                              <span className="structure-leg-resolved" title="Resolved when structure is used">resolved when used</span>
-                            )}
-                          </td>
-                          <td>
-                            {fixedLegCount > 0 ? null : (
-                              <button type="button" className="btn-secondary" onClick={() => removeLeg(i)}>Remove</button>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
+                    {formLegs.map((leg, i) => (
+                      <tr key={i}>
+                        <td>{leg.role ?? '—'}</td>
+                        <td>{leg.direction ?? '—'}</td>
+                        <td>{leg.option_right ?? '—'}</td>
+                        <td>{leg.quantity ?? 1}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-              {fixedLegCount === 0 && !defaultLegsLoading && (
-                <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addLeg}>Add leg</button>
-              )}
             </div>
 
             <div className="gates-form-group">

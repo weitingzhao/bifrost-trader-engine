@@ -302,11 +302,12 @@ export async function fetchStructureTypeDefaultLegs(structureType: string): Prom
   return r.json()
 }
 
-/** Fetch default legs for a specific subtype (falls back to type-level legs when no subtype override). */
+/** Fetch default legs for a specific subtype (falls back to type-level legs when no subtype override).
+ * subtype_override: true when Option Type Config has "Override with subtype-specific legs" for this subtype. */
 export async function fetchStructureSubtypeDefaultLegs(
   structureType: string,
   subtype: string,
-): Promise<{ legs: StructureLeg[] }> {
+): Promise<{ legs: StructureLeg[]; subtype_override?: boolean }> {
   const r = await fetch(
     `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/default-legs`
   )

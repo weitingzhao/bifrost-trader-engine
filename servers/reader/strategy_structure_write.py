@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 
+from servers.reader import structure_type_config
 from servers.reader import structure_type_schema
 from src.sink.postgres_sink import _get_conn_params
 
@@ -171,6 +172,8 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
     schema = None
     if conn:
         schema = structure_type_schema.get_schema_from_db(conn, structure_type, structure_subtype)
+        # Legs are defined in Option Type Config only; ignore payload.legs and use config.
+        legs = structure_type_config.get_default_legs_for_subtype(conn, structure_type, structure_subtype)
     if schema is None:
         schema = structure_type_schema.get_schema(structure_type)
     legs = _normalize_legs(structure_type, legs, schema)
@@ -247,13 +250,13 @@ def update_structure(
     schema = None
     if conn:
         schema = structure_type_schema.get_schema_from_db(conn, structure_type, structure_subtype)
+        # Legs are defined in Option Type Config only; ignore payload.legs and use config.
+        legs = structure_type_config.get_default_legs_for_subtype(conn, structure_type, structure_subtype)
     if schema is None:
         schema = structure_type_schema.get_schema(structure_type)
     legs = _normalize_legs(structure_type, legs, schema)
     structure_type_schema.validate_legs(structure_type, legs, schema=schema)
 
-    if conn is None:
-        return False
     if conn is None:
         return False
     try:

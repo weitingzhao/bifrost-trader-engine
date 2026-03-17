@@ -2653,6 +2653,160 @@ button:disabled {
 .gates-form-section .section-subtitle {
   margin-bottom: var(--space-3);
 }
+
+/* Gates config page only: grid layout, card groups, sticky header */
+.gates-form-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--color-surface-elevated);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.gates-form-section--gates-page .gates-form {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: 1fr;
+}
+@media (min-width: 768px) {
+  .gates-form-section--gates-page .gates-form {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (min-width: 1200px) {
+  .gates-form-section--gates-page .gates-form {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.gates-form-section--gates-page .gates-form-group {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  align-content: start;
+}
+@media (min-width: 960px) {
+  .gates-form-section--gates-page .gates-form-group {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.gates-form-section--gates-page .gates-form-group-title {
+  grid-column: 1 / -1;
+  margin-bottom: var(--space-1);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Metadata: full-width first row, content in one horizontal line */
+.gates-form-section--gates-page .gates-form-group--metadata-root {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  background: transparent;
+  border: none;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0;
+  box-shadow: none;
+  padding: var(--space-3) 0 var(--space-4) var(--space-3);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-group-title {
+  font-weight: 700;
+  color: var(--color-accent);
+  margin: 0 var(--space-2) 0 0;
+  padding: 0;
+  border: none;
+  flex-shrink: 0;
+  align-self: center;
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-row {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  max-width: 20rem;
+  gap: var(--space-2);
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-row label {
+  flex-shrink: 0;
+  min-width: 5rem;
+  display: inline-block;
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-row--full {
+  grid-column: unset;
+  max-width: none;
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-row input[type="number"] {
+  width: 4.5rem;
+  flex: 0 0 4.5rem;
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-row input[type="text"] {
+  min-width: 8rem;
+  max-width: 12rem;
+  flex: 1 1 auto;
+}
+.gates-form-section--gates-page .gates-form-group--metadata-root .gates-form-row label.toggle-switch {
+  min-width: 0;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  margin-left: var(--space-1);
+}
+
+.gates-form-section--gates-page .gates-form-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+}
+.gates-form-section--gates-page .gates-form-row label {
+  min-width: 0;
+}
+.gates-form-section--gates-page .gates-form-row input[type="text"],
+.gates-form-section--gates-page .gates-form-row input[type="number"],
+.gates-form-section--gates-page .gates-form-row input[type="date"] {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.gates-form-section--gates-page .gates-form-row--inline {
+  flex-direction: row;
+  align-items: center;
+}
+.gates-form-section--gates-page .gates-form-row--inline input {
+  flex: 1;
+  min-width: 0;
+}
+.gates-form-section--gates-page .gates-form-row--full {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+}
+.gates-form-section--gates-page .gates-form-row--full label {
+  min-width: 10rem;
+}
+.gates-form-section--gates-page .gates-form-row--full label.toggle-switch {
+  min-width: 0;
+}
+.gates-form-section--gates-page .gates-form-actions {
+  grid-column: 1 / -1;
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
 .gates-form {
   display: flex;
   flex-direction: column;

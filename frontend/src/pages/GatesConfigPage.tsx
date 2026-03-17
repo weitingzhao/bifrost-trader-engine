@@ -327,15 +327,17 @@ export function GatesConfigPage({
       </section>
 
       {formOpen !== null && (
-        <section className="strategy-section gates-form-section" style={{ marginTop: 'var(--space-4)', padding: 'var(--space-4)', background: 'var(--color-surface-elevated)', borderRadius: '8px' }}>
-          <h3 className="section-subtitle">
-            {formOpen === 'create' ? 'New gate set' : `Edit gate set ${formOpen}`}
-          </h3>
-          {formLoading && !formPayload.name && <p className="section-hint">Loading…</p>}
-          {formError && <p className="msg-error">{formError}</p>}
+        <section className="strategy-section gates-form-section gates-form-section--gates-page" style={{ marginTop: 'var(--space-4)', padding: 'var(--space-4)', background: 'var(--color-surface-elevated)', borderRadius: '8px' }}>
+          <div className="gates-form-sticky-header">
+            <h3 className="section-subtitle" style={{ marginBottom: 0 }}>
+              {formOpen === 'create' ? 'New gate set' : `Edit gate set ${formOpen}`}
+            </h3>
+            {formLoading && !formPayload.name && <p className="section-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>Loading…</p>}
+            {formError && <p className="msg-error" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>{formError}</p>}
+          </div>
 
           <div className="gates-form">
-            <div className="gates-form-group">
+            <div className="gates-form-group gates-form-group--metadata-root">
               <h4 className="gates-form-group-title">Metadata</h4>
               <div className="gates-form-row">
                 <label>Name</label>
@@ -364,14 +366,15 @@ export function GatesConfigPage({
                   placeholder="e.g. straddle_strangle"
                 />
               </div>
-              <div className="gates-form-row">
-                <label>
+              <div className="gates-form-row gates-form-row--full">
+                <label className="toggle-switch" style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={formPayload.is_active ?? true}
                     onChange={(e) => updateForm({ is_active: e.target.checked })}
+                    aria-label="Active"
                   />
-                  {' '}Active
+                  <span className="toggle-switch-caption">Active</span>
                 </label>
               </div>
             </div>
@@ -398,10 +401,15 @@ export function GatesConfigPage({
                 <label>blackout_days_after</label>
                 <input type="number" value={earn.blackout_days_after ?? 1} onChange={(e) => updateGates('strategy.earnings.blackout_days_after', parseInt(e.target.value, 10) || 0)} />
               </div>
-              <div className="gates-form-row">
-                <label>
-                  <input type="checkbox" checked={strat.trading_hours_only ?? true} onChange={(e) => updateGates('strategy.trading_hours_only', e.target.checked)} />
-                  {' '}trading_hours_only
+              <div className="gates-form-row gates-form-row--full">
+                <label className="toggle-switch" style={{ cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={strat.trading_hours_only ?? true}
+                    onChange={(e) => updateGates('strategy.trading_hours_only', e.target.checked)}
+                    aria-label="Trading hours only"
+                  />
+                  <span className="toggle-switch-caption">trading_hours_only</span>
                 </label>
               </div>
             </div>
@@ -484,10 +492,15 @@ export function GatesConfigPage({
                 <label>max_spread_pct</label>
                 <input type="number" step="0.01" value={guardRisk.max_spread_pct ?? 0.05} onChange={(e) => updateGates('guard.risk.max_spread_pct', parseFloat(e.target.value) || 0)} />
               </div>
-              <div className="gates-form-row">
-                <label>
-                  <input type="checkbox" checked={guardRisk.paper_trade ?? true} onChange={(e) => updateGates('guard.risk.paper_trade', e.target.checked)} />
-                  {' '}paper_trade
+              <div className="gates-form-row gates-form-row--full">
+                <label className="toggle-switch" style={{ cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={guardRisk.paper_trade ?? true}
+                    onChange={(e) => updateGates('guard.risk.paper_trade', e.target.checked)}
+                    aria-label="Paper trade"
+                  />
+                  <span className="toggle-switch-caption">paper_trade</span>
                 </label>
               </div>
             </div>
@@ -495,7 +508,7 @@ export function GatesConfigPage({
             <div className="gates-form-group">
               <h4 className="gates-form-group-title">Earnings dates (blacklist YYYY-MM-DD)</h4>
               {earningsDates.map((d, i) => (
-                <div key={i} className="gates-form-row">
+                <div key={i} className="gates-form-row gates-form-row--inline">
                   <input
                     type="date"
                     value={d}
@@ -504,7 +517,9 @@ export function GatesConfigPage({
                   <button type="button" className="btn-secondary" onClick={() => removeEarningsDate(i)}>Remove</button>
                 </div>
               ))}
-              <button type="button" className="btn-secondary" onClick={addEarningsDate}>Add date</button>
+              <div className="gates-form-row gates-form-row--full">
+                <button type="button" className="btn-secondary" onClick={addEarningsDate}>Add date</button>
+              </div>
             </div>
 
             <div className="gates-form-actions">
