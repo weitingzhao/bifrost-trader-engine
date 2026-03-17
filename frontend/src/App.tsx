@@ -1156,7 +1156,10 @@ export default function App() {
       )}
 
       {activeTab === 'live' && (
-        <LivePage status={status} />
+        <LivePage
+          status={status}
+          onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+        />
       )}
 
       {activeTab === 'settings' && (

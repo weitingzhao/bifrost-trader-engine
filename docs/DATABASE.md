@@ -1016,7 +1016,8 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 | active_gate_safety_strategy_id | bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id) | 当前生效的安全边界集；NULL 表示用 config.gates |
 
 - **语义**：守护进程启动时若上述两列非空，则从对应表组装「结构」与「gates」；否则回退 config。写 snapshot 时可在 config_summary 中附带两 id 或 hash 便于追溯。
-- **后续重构预留**：Settings 表可能重构为仅承载系统级配置；active_strategy_structure_id / active_gate_safety_strategy_id 可迁至独立表（如 runtime_strategy_config 单行表）。迁出时仅需调整 reader 与 POST /config/active-strategy 的读写目标，API 路径与请求体可保持不变。
+- **Allocations 层扩展预留**：后续若需策略分配（Allocations）层「当前生效」，可在 settings 增加 **active_strategy_allocation_id**（bigint REFERENCES strategy_allocation）；用于多账户/多策略组合时指定当前监控或执行的分配集；实现与验收见需求与 [plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
+- **后续重构预留**：Settings 表可能重构为仅承载系统级配置；active_strategy_structure_id / active_gate_safety_strategy_id（及可选 active_strategy_allocation_id）可迁至独立表（如 runtime_strategy_config 单行表）。迁出时仅需调整 reader 与 POST /config/active-strategy 的读写目标，API 路径与请求体可保持不变。
 
 ---
 

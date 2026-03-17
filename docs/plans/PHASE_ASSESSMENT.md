@@ -2,7 +2,7 @@
 
 基于 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md) 与各阶段执行计划（phase1/phase2/phase3-execution-plan.md）的评估与建议。**每次阶段评估时更新本文档**的「评估结论」「当前项目进展」「项目里程碑时间线」及待办；项目需求、系统架构、分步推进计划在需求与硬件/架构不变时**不修改**，见 [项目工作流](PROJECT_WORKFLOW.md)。
 
-**评估/更新记录**：首次评估 2026-02-14；**最后更新** 2026-02-26。
+**评估/更新记录**：首次评估 2026-02-14；**最后更新** 2026-03-17。
 
 ---
 
@@ -10,9 +10,9 @@
 
 **当前项目进度**：阶段 1、2 **已验收完成**；阶段 3（数据获取）**已完成实现**（R-A1、R-M6、R-H2 已落地），待正式验收；阶段 4（策略与回测）、阶段 5（自动对冲与监控）**未开始**。R-C3（一键平敞口）已明确延后至阶段 5。**双 IB 账户（R-A4）** 已纳入需求与阶段 3 范围，实现与验收随阶段 3 一并完成（不单独设阶段）。
 
-**当前里程碑状态**：阶段 1/2 验收完成日 2026-02-26；阶段 3 部分实现 2026-02-14，项目**当前处于阶段 3 工作状态**；2026-02-26 需求/计划变更（R-M6 加入、阶段重组为 3=数据获取、4=策略与回测、5=自动对冲与监控）。详见下文「当前项目进展」与「项目里程碑时间线」表。
+**当前里程碑状态**：阶段 1/2 验收完成日 2026-02-26；阶段 3 部分实现 2026-02-14，项目**当前处于阶段 3 工作状态**；2026-02-26 需求/计划变更（R-M6 加入、阶段重组）；**2026-03-17** 计划与文档更新：明确下一步聚焦 Strategy 三层完善与机会监控，新增终极目标能力拆解与进度跟踪（木桶原理）。详见下文「当前项目进展」与「项目里程碑时间线」表。
 
-**建议下一步**：（1）完成 R-H2 后执行阶段 3 验收；（2）或进入阶段 4（策略与回测）。Test Case 覆盖与各阶段详情见下文对应章节。
+**建议下一步**：（1）完成阶段 3 正式验收（含 R-A4 双账户闭环）；（2）推进 **Strategy 三层策略的进一步完善**（含 Allocations 层「当前生效」扩展）；（3）推进**机会监控与提醒**（R-RM9「仅建议、不实盘」）作为自动交易前的过渡目标。各能力维度进度与分项跟踪见 [终极目标能力拆解与进度（木桶原理）](CAPABILITY_TRACKING.md)。
 
 ---
 
@@ -45,6 +45,8 @@
 | — | 阶段验收 | 阶段 3 正式验收通过（R-A1、**R-A4**、R-M6、R-H2 全部验收条通过） |
 | **2026-03-12** | 阶段实现/扩展 | **Option Discovery 第一步（R-OD1）**：Research 子菜单新增 Option Discovery；新页面（标的来自 Watchlist STK、到期占位、占位说明）；GET /research/option-expirations 占位 API。 |
 | **2026-03-14** | 阶段实现/扩展 | **Strategy 管理页（Research → Strategy）与 Status 面板增强**：Research 子菜单新增 Strategy；StrategyPage（当前生效、结构表、安全边界表、策略历史、Set active）；Status 面板展示 active 结构/边界名称及 Manage» 入口。 |
+| **2026-03-17** | 计划/文档 | **需求与阶段文档更新**：REQUIREMENTS 明确中间目标（监控机会并提醒、手动判断）、Allocations 层「当前生效」为后续扩展；ARCHITECTURE 预留 active_strategy_allocation_id；PLAN_NEXT_STEPS 下一步聚焦 Strategy 三层完善与机会监控；新增 [CAPABILITY_TRACKING.md](CAPABILITY_TRACKING.md) 终极目标能力拆解与进度（木桶原理）；PHASE_ASSESSMENT 待办与建议下一步同步更新。 |
+| **2026-03-17** | 阶段实现/扩展 | **Allocations 层「当前生效」**：settings 增加 active_strategy_allocation_id；Reader get_active_strategy_allocation_id、GET /status 返回 id/name；Writer 与 POST /config/active-strategy 支持 active_strategy_allocation_id；前端 StatusResponse、postActiveStrategy(structureId, gateId, allocationId)；Structure/Gates/Allocations 页 Current Active 展示三层、Allocations 页 Set active。 |
 
 **使用说明**：阶段实现完成或正式验收通过后，将上表对应行日期更新为实际完成日（YYYY-MM-DD），并同步更新「当前项目进展」表中的**实现完成时间**或**验收完成时间**。是否进入下一阶段或是否调整需求/架构，由负责人在评估后给出结论，见 [项目工作流](PROJECT_WORKFLOW.md)。
 
@@ -52,17 +54,19 @@
 
 ## 一、当前待办与下一步
 
-**阶段 1、2 已验收完成**（2026-02-26）。**当前项目处于阶段 3 工作状态**，已有 [phase3-execution-plan.md](phase3-execution-plan.md)，建议按下面优先级推进。
+**阶段 1、2 已验收完成**（2026-02-26）。**当前项目处于阶段 3 工作状态**，下一步聚焦 **Strategy 三层策略进一步完善** 与 **机会监控与提醒**（R-RM9）。建议按下面优先级推进；各能力维度与进度分项跟踪见 **[终极目标能力拆解与进度（木桶原理）](CAPABILITY_TRACKING.md)**。
 
 | 优先级 | 待办项 | 说明 |
 |--------|--------|------|
-| **必选** | **阶段 3 执行计划与验收** | 已有 [phase3-execution-plan.md](phase3-execution-plan.md)（阶段 3 数据获取）。按该执行计划或 PLAN_NEXT_STEPS 的 TC-3-* 逐条执行阶段 3 验收并记录（含 R-H2 实现后）；可选新增验收脚本做 GET /status 字段与账户/持仓/spot 的校验。 |
-| **Phase A 已完成** | **策略与安全边界落库（含 Phase A）** | SG.1–SG.4 已实现；Phase A：Reader 扩展（get_structure_by_id、list_structures、get_strategy_history、list_gate_safety_sets、get_gate_safety_name）、Daemon 加载 structure、PostgresSink 写入 strategy_history、GET /status 含 active 策略/边界 id 与 name、GET /strategies/structures、/structures/{id}、/history、/gate-safety。 |
-| 已完成 | **Strategy 管理页（方案 B）** | Research → Strategy 页面实现（结构策略列表、安全边界列表、策略历史、Set active）；Status 面板展示当前生效策略/边界名称及 Manage» 入口。 |
-| 已完成 | **Option Discovery 第一步（R-OD1）** | Research → Option Discovery 入口页与 GET /research/option-expirations 占位 API 已实现；见 PLAN_NEXT_STEPS「期权发现」步骤。 |
-| 可选 | phase2 自检脚本 | 可新增脚本：请求 GET /status、GET /operations，校验 status_lamp、self_check 等字段存在；可与已运行 daemon 配合测 POST /control/stop。 |
+| **必选** | **阶段 3 执行计划与验收** | 已有 [phase3-execution-plan.md](phase3-execution-plan.md)（阶段 3 数据获取）。按该执行计划或 PLAN_NEXT_STEPS 的 TC-3-* 逐条执行阶段 3 验收并记录（含 **R-A4 双账户**、R-H2）；可选新增验收脚本做 GET /status 字段与账户/持仓/spot 的校验。 |
+| 已完成 | **Strategy 三层进一步完善（Allocations 当前生效）** | **Allocations 层**「当前生效」已实现（2026-03-17）：settings.active_strategy_allocation_id、GET /status、Current Active 展示三层、Allocations 页 Set active；可选后续 Daemon 按当前 allocation 加载 opportunity 列表。 |
+| **下一步重点** | **机会监控与提醒（R-RM9）** | 中间目标：对市场行情机会的监控并提醒，手动判断是否下单。守护跑策略与风控但执行层截断，将「建议对冲」写入 daemon_auto_operations 或专用表；监控页展示「交易机会/建议」列表；与 REQUIREMENTS §5 中间目标、CAPABILITY_TRACKING 能力 15 对应。 |
+| Phase A 已完成 | **策略与安全边界落库（含 Phase A）** | SG.1–SG.4 已实现；Phase A：Reader 扩展、Daemon 加载 structure、strategy_history、GET /status 含 active 策略/边界、GET /strategies/*。 |
+| 已完成 | **Strategy 管理页（方案 B）** | Research → Strategy 页面（结构策略、安全边界、策略历史、Set active）；Status 面板展示当前生效策略/边界及 Manage» 入口。 |
+| 已完成 | **Option Discovery 第一步（R-OD1）** | Research → Option Discovery 入口页与 GET /research/option-expirations 占位 API 已实现。 |
+| 可选 | phase2 自检脚本 | 可新增脚本：请求 GET /status、GET /operations，校验 status_lamp、self_check 等；可与已运行 daemon 配合测 POST /control/stop。 |
 
-**结论**：阶段 3 已有 [phase3-execution-plan.md](phase3-execution-plan.md)，可按其验收清单与 PLAN_NEXT_STEPS 的 TC-3-* 执行正式验收（R-H2 实现后；无 phase3_0.py 时需人工执行并记录）。
+**结论**：阶段 3 验收与双账户闭环夯实数据基础后，优先推进 Strategy 三层完善（含 Allocations 当前生效）与机会监控与提醒（R-RM9）；能力拆解与进度见 [CAPABILITY_TRACKING.md](CAPABILITY_TRACKING.md)，可**分项跟踪**短板与进度。
 
 ---
 

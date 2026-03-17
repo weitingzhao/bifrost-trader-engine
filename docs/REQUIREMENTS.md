@@ -178,6 +178,7 @@
   - **结构策略**（strategy_structure）、**机会策略**（strategy_opportunity）、**策略分配**（strategy_allocation / Allocations）存于 DB；安全边界以 **gate_safety_strategy**（根表）及 **gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**、**gate_safety_strategy_earnings_dates** 存于 DB，**无 JSON 列**，仅标量列。
   - 当前生效的结构策略与安全边界由 **settings** 表字段 **active_strategy_structure_id**、**active_gate_safety_strategy_id** 指定；守护进程可**优先从 DB 加载 gates**，未配置时回退 config 文件。
 - **引用**：表结构与命名标准见 [docs/DATABASE.md](docs/DATABASE.md) §2.24 与 [.cursor/rules/database-design.mdc](.cursor/rules/database-design.mdc)。实现步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略与安全边界落库」步骤。**Phase A** 提供后台管理与监控：GET /status 返回当前生效策略与安全边界 id/name；GET /strategies/structures、/history、/gate-safety、/gate-safety/{id} 及 POST/PUT /gate-safety 供管理端与策略使用情况查询及 Gates CRUD；strategy_history 由守护进程在 append_history 时写入。**监控端提供 Research → Strategy 页面**，用于查看当前生效策略/边界、结构策略列表、安全边界列表、策略使用历史，并支持在页面上将某条结构或某条安全边界设为当前生效（POST /config/active-strategy）；**Research → Gates 页面**用于 Gates 参数配置管理：创建、编辑、复制边界集，以及将某条设为当前生效；守护进程在下次启动或重载时使用新生效 id。
+- **Allocations 层「当前生效」**：策略分配（Allocations）目前仅落库与 CRUD；**当前生效的 Allocations**（如 settings 增加 active_strategy_allocation_id）为**后续扩展**，用于多账户/多策略组合时指定当前监控或执行的分配集，并与机会监控、Daemon 按分配集加载 opportunity 列表等能力衔接。实现步骤与验收在后续阶段规划时细化；能力拆解与进度见 [plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ### 4.4 期权结构细化（R-OS1）
 
@@ -196,6 +197,9 @@
 ---
 
 ## 5. 策略应用（自动交易）（e）
+
+**终极目标**：自动交易（守护进程按策略与风控自动对冲）。  
+**中间目标（自动交易之前的过渡）**：对市场行情机会的**监控并提醒**出现交易机会，由操作者**手动判断是否下单**；对应需求 **R-RM9**（可选）「仅建议、不实盘」——守护完整跑策略与风控，执行层截断，将 hedge 建议写入 daemon_auto_operations（或专用表），由 Web UI 呈现，供人工决策。能力拆解与各维度进度见 [plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ### 5.1 一键平敞口（R-C3）
 

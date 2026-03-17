@@ -145,10 +145,14 @@ export interface StatusResponse {
   active_strategy_structure_id?: number | null
   /** Phase A: current active gate safety set id (settings); daemon uses on next start. */
   active_gate_safety_strategy_id?: number | null
+  /** Current active strategy allocation id (settings); for monitoring/execution scope. */
+  active_strategy_allocation_id?: number | null
   /** Phase A: name of active structure for display. */
   active_strategy_structure_name?: string | null
   /** Phase A: name of active gate safety set for display. */
   active_gate_safety_strategy_name?: string | null
+  /** Name of active strategy allocation for display. */
+  active_strategy_allocation_name?: string | null
 }
 
 /** R-A5: one row from daemon_open_orders (GET /status or GET /open-orders). */

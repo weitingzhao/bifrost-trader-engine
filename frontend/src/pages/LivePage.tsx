@@ -126,9 +126,11 @@ function fmtQtyWithMutedDecimal(v: number | string | null | undefined): ReactNod
 
 export interface LivePageProps {
   status: StatusResponse | null
+  /** Navigate to Strategy → Structure (Manage). */
+  onNavigateToStrategy?: () => void
 }
 
-export function LivePage({ status }: LivePageProps) {
+export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
   const j = status
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [quotesByContractKey, setQuotesByContractKey] = useState<Record<string, RealtimeQuote>>({})
@@ -611,6 +613,40 @@ export function LivePage({ status }: LivePageProps) {
 
   return (
     <div className="app-page-stack">
+      <div className="card card-operations strategy-active-live-card strategy-section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+          <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
+            Strategy Active
+            <InfoTooltip text="Current active structure, gate safety set, and allocation. Daemon uses these on next start. To change them, click Manage to open Strategy → Structure." />
+          </h2>
+          {onNavigateToStrategy && (
+            <button
+              type="button"
+              className="btn-secondary page-title-breadcrumb-link"
+              onClick={onNavigateToStrategy}
+              aria-label="Manage strategy"
+            >
+              Manage
+            </button>
+          )}
+        </div>
+        <div className="statusSummary">
+          <div>
+            <strong>Structure:</strong> {j?.active_strategy_structure_name ?? '—'}
+            {j?.active_strategy_structure_id != null && ` (${j.active_strategy_structure_id})`}
+          </div>
+          <div>
+            <strong>Gate safety:</strong> {j?.active_gate_safety_strategy_name ?? '—'}
+            {j?.active_gate_safety_strategy_id != null && ` (${j.active_gate_safety_strategy_id})`}
+          </div>
+          <div>
+            <strong>Allocation:</strong> {j?.active_strategy_allocation_name ?? '—'}
+            {j?.active_strategy_allocation_id != null && ` (${j.active_strategy_allocation_id})`}
+          </div>
+        </div>
+        <p className="section-hint">Daemon uses these on next start.</p>
+      </div>
+
       <div className="card card-operations realtime-quotes-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <h2 className="daemon-card-title page-title-with-tooltip">

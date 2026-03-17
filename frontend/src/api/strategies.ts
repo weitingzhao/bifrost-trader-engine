@@ -669,11 +669,13 @@ export async function updateGateSafety(id: number, payload: GateSafetyPayload): 
 
 export async function postActiveStrategy(
   structureId?: number | null,
-  gateSafetyId?: number | null
+  gateSafetyId?: number | null,
+  allocationId?: number | null
 ): Promise<
   ControlResponse & {
     active_strategy_structure_id?: number | null
     active_gate_safety_strategy_id?: number | null
+    active_strategy_allocation_id?: number | null
   }
 > {
   const r = await fetch(`${API}/config/active-strategy`, {
@@ -682,6 +684,7 @@ export async function postActiveStrategy(
     body: JSON.stringify({
       active_strategy_structure_id: structureId ?? null,
       active_gate_safety_strategy_id: gateSafetyId ?? null,
+      active_strategy_allocation_id: allocationId ?? null,
     }),
   })
   const j = await r.json().catch(() => ({}))
@@ -691,5 +694,6 @@ export async function postActiveStrategy(
     error: j.error || (r.ok ? undefined : r.statusText),
     active_strategy_structure_id: j.active_strategy_structure_id ?? structureId,
     active_gate_safety_strategy_id: j.active_gate_safety_strategy_id ?? gateSafetyId,
+    active_strategy_allocation_id: j.active_strategy_allocation_id ?? allocationId,
   }
 }

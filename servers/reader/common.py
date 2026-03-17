@@ -250,6 +250,12 @@ class StatusReader:
             return None
         return gate_safety_module.get_active_strategy_structure_id(self._conn)
 
+    def get_active_strategy_allocation_id(self) -> Optional[int]:
+        """Return settings.active_strategy_allocation_id for id=1, or None."""
+        if not self._connect():
+            return None
+        return gate_safety_module.get_active_strategy_allocation_id(self._conn)
+
     def get_gate_safety_name(self, gate_safety_strategy_id: int) -> Optional[str]:
         """Return name of gate_safety_strategy row, or None."""
         if not self._connect():

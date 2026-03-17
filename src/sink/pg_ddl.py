@@ -997,6 +997,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_structure_id bigint")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_gate_safety_strategy_id bigint")
+        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_allocation_id bigint")
         _log("watchlist, job_bars_backfill")
         _log_table("watchlist", "Watchlist items (STK/OPT)")
         cur.execute(

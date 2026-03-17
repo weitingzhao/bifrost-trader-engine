@@ -231,7 +231,7 @@ export function StrategyStructurePage({
   const handleSetActiveStructure = async (structureId: number) => {
     setSetActiveInProgress(true)
     try {
-      const res = await postActiveStrategy(structureId, status?.active_gate_safety_strategy_id ?? null)
+      const res = await postActiveStrategy(structureId, status?.active_gate_safety_strategy_id ?? null, status?.active_strategy_allocation_id ?? null)
       if (res.ok) {
         setSetActiveMsg({ text: 'Active structure updated. Daemon uses it on next start.', isErr: false })
         loadStatus()
@@ -247,7 +247,7 @@ export function StrategyStructurePage({
   const handleClearActiveStructure = async () => {
     setSetActiveInProgress(true)
     try {
-      const res = await postActiveStrategy(null, status?.active_gate_safety_strategy_id ?? null)
+      const res = await postActiveStrategy(null, status?.active_gate_safety_strategy_id ?? null, status?.active_strategy_allocation_id ?? null)
       if (res.ok) {
         setSetActiveMsg({ text: 'Active structure cleared.', isErr: false })
         loadStatus()
@@ -854,6 +854,10 @@ export function StrategyStructurePage({
           <div>
             <strong>Gate safety:</strong> {status?.active_gate_safety_strategy_name ?? '—'}
             {status?.active_gate_safety_strategy_id != null && ` (${status.active_gate_safety_strategy_id})`}
+          </div>
+          <div>
+            <strong>Allocation:</strong> {status?.active_strategy_allocation_name ?? '—'}
+            {status?.active_strategy_allocation_id != null && ` (${status.active_strategy_allocation_id})`}
           </div>
         </div>
         <p className="section-hint">Daemon uses these on next start.</p>

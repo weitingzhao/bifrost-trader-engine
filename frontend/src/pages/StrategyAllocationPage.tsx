@@ -7,6 +7,7 @@ import {
   createAllocation,
   updateAllocation,
   fetchGateSafetySets,
+  postActiveStrategy,
   type StrategyOpportunity,
   type StrategyAllocation,
   type GateSafetySet,
@@ -20,6 +21,7 @@ export interface StrategyAllocationPageProps {
 }
 
 export function StrategyAllocationPage({
+  status,
   loadStatus,
   breadcrumbLabel = 'Allocations',
 }: StrategyAllocationPageProps) {
@@ -32,6 +34,7 @@ export function StrategyAllocationPage({
   const [_opportunitiesError, setOpportunitiesError] = useState<string | null>(null)
   const [allocationsError, setAllocationsError] = useState<string | null>(null)
   const [_gateSafetyError, setGateSafetyError] = useState<string | null>(null)
+  const [setActiveMsg, setSetActiveMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const [allocationFormOpen, setAllocationFormOpen] = useState<'create' | number | null>(null)
   const [allocationFormName, setAllocationFormName] = useState('')
   const [allocationFormOpportunityIds, setAllocationFormOpportunityIds] = useState<number[]>([])
@@ -86,6 +89,21 @@ export function StrategyAllocationPage({
       cancelled = true
     }
   }, [])
+
+  const handleSetActiveAllocation = async (allocationId: number) => {
+    const res = await postActiveStrategy(
+      status?.active_strategy_structure_id ?? null,
+      status?.active_gate_safety_strategy_id ?? null,
+      allocationId
+    )
+    if (res.ok) {
+      setSetActiveMsg({ text: 'Active allocation updated. Daemon uses it on next start.', isErr: false })
+      loadStatus()
+    } else {
+      setSetActiveMsg({ text: res.error ?? 'Failed to set active allocation', isErr: true })
+    }
+    setTimeout(() => setSetActiveMsg({ text: '', isErr: false }), 5000)
+  }
 
   const openAllocationCreate = () => {
     setAllocationFormName('')
@@ -181,6 +199,23 @@ export function StrategyAllocationPage({
       </h2>
 
       <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
+        <h3 className="section-subtitle">Current active</h3>
+        <div className="statusSummary">
+          <div>
+            <strong>Allocation:</strong> {status?.active_strategy_allocation_name ?? '—'}
+            {status?.active_strategy_allocation_id != null && ` (${status.active_strategy_allocation_id})`}
+          </div>
+        </div>
+        <p className="section-hint">Daemon uses this on next start.</p>
+      </section>
+
+      {setActiveMsg.text && (
+        <p className={setActiveMsg.isErr ? 'msg-error' : 'msg-ok'} style={{ marginBottom: 'var(--space-2)' }}>
+          {setActiveMsg.text}
+        </p>
+      )}
+
+      <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
           <h3 className="section-subtitle" style={{ margin: 0 }}>Allocations</h3>
           <button type="button" className="btn-primary" onClick={openAllocationCreate}>
@@ -221,6 +256,14 @@ export function StrategyAllocationPage({
                         onClick={() => openAllocationEdit(row.strategy_allocation_id)}
                       >
                         Edit
+                      </button>
+                      {' '}
+                      <button
+                        type="button"
+                        className="btn-set-active"
+                        onClick={() => handleSetActiveAllocation(row.strategy_allocation_id)}
+                      >
+                        Set active
                       </button>
                     </td>
                   </tr>

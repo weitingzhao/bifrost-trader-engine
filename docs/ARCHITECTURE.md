@@ -366,7 +366,7 @@
 
 - **安全边界**：根表 **gate_safety_strategy**（边界集主键 + strategy 层标量列）；子表 **gate_safety_strategy_earnings_dates**、**gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**（均以 gate_safety_strategy_id 为 PK/FK），**无 JSON 列**。
 - **策略三层**：**strategy_structure**（结构策略）、**strategy_opportunity**（机会策略，引用 structure + 可选 default_gate_safety_strategy_id）、**strategy_allocation**（策略分配 Allocations，引用 gate_safety_strategy_id）。
-- **当前生效**：**settings** 表列 **active_strategy_structure_id**、**active_gate_safety_strategy_id**；守护进程启动时若两列非空，则从 DB 组装「结构」与「gates」，否则回退 config 文件。**后续重构预留**：Settings 表可能聚焦为仅承载系统级配置（IB、Flex、心跳等）；「当前生效」的 strategy/gate id 可迁至独立表（如 runtime_strategy_config 或与 daemon_run_status 合并）。迁出时仅需调整 reader 与 POST /config/active-strategy 的读写对象，API 与前端语义不变。
+- **当前生效**：**settings** 表列 **active_strategy_structure_id**、**active_gate_safety_strategy_id**；守护进程启动时若两列非空，则从 DB 组装「结构」与「gates」，否则回退 config 文件。**Allocations 层**：策略分配（strategy_allocation）当前无「当前生效」列；**后续可扩展** settings 增加 **active_strategy_allocation_id**，供多账户/多策略组合时指定当前监控或执行的分配集，并与机会监控、Daemon 按分配集加载 opportunity 列表衔接（需求与能力进度见 REQUIREMENTS.md §4.3、[plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)）。**后续重构预留**：Settings 表可能聚焦为仅承载系统级配置（IB、Flex、心跳等）；「当前生效」的 strategy/gate/allocation id 可迁至独立表（如 runtime_strategy_config 或与 daemon_run_status 合并）。迁出时仅需调整 reader 与 POST /config/active-strategy 的读写对象，API 与前端语义不变。
 
 **守护进程**：支持“从 DB 取当前生效的 gate_safety_strategy_id 对应的 gates”并注入 config；未配置或读不到时仍以**文件**为运行时来源。**Phase A**：若 active_strategy_structure_id 非空，则从 DB 加载 structure 并注入 config[\"active_strategy_structure\"]；PostgresSink 在 append_history 时写入 strategy_history。切换版本：更新 settings 的 active_gate_safety_strategy_id / active_strategy_structure_id 后重启或热重载（若实现）。
 

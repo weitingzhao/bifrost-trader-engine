@@ -375,8 +375,9 @@ def write_active_strategy_and_gates(
     status_config: dict,
     active_strategy_structure_id: Optional[int] = None,
     active_gate_safety_strategy_id: Optional[int] = None,
+    active_strategy_allocation_id: Optional[int] = None,
 ) -> bool:
-    """Update settings (id=1): active_strategy_structure_id, active_gate_safety_strategy_id. Returns True on success."""
+    """Update settings (id=1): active_strategy_structure_id, active_gate_safety_strategy_id, active_strategy_allocation_id. Returns True on success."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     try:
@@ -388,15 +389,16 @@ def write_active_strategy_and_gates(
                     """
                     UPDATE settings SET
                         active_strategy_structure_id = %s,
-                        active_gate_safety_strategy_id = %s
+                        active_gate_safety_strategy_id = %s,
+                        active_strategy_allocation_id = %s
                     WHERE id = 1
                     """,
-                    (active_strategy_structure_id, active_gate_safety_strategy_id),
+                    (active_strategy_structure_id, active_gate_safety_strategy_id, active_strategy_allocation_id),
                 )
             conn.commit()
             logger.info(
-                "write_active_strategy_and_gates: active_strategy_structure_id=%s active_gate_safety_strategy_id=%s",
-                active_strategy_structure_id, active_gate_safety_strategy_id,
+                "write_active_strategy_and_gates: active_strategy_structure_id=%s active_gate_safety_strategy_id=%s active_strategy_allocation_id=%s",
+                active_strategy_structure_id, active_gate_safety_strategy_id, active_strategy_allocation_id,
             )
             return True
         finally:

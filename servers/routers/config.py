@@ -63,9 +63,10 @@ class FlexConfigBody(BaseModel):
 
 
 class ActiveStrategyBody(BaseModel):
-    """POST /config/active-strategy body: active_strategy_structure_id, active_gate_safety_strategy_id (null to clear)."""
+    """POST /config/active-strategy body: active_strategy_structure_id, active_gate_safety_strategy_id, active_strategy_allocation_id (null to clear)."""
     active_strategy_structure_id: Optional[int] = None
     active_gate_safety_strategy_id: Optional[int] = None
+    active_strategy_allocation_id: Optional[int] = None
 
     class Config:
         extra = "ignore"
@@ -185,7 +186,7 @@ def post_config_flex(request: Request, body: FlexConfigBody = Body(...)) -> JSON
 
 @router.post("/config/active-strategy")
 def post_config_active_strategy(request: Request, body: ActiveStrategyBody = Body(...)) -> JSONResponse:
-    """Update settings: active_strategy_structure_id, active_gate_safety_strategy_id (null to clear). Daemon uses these on next start when loading gates from DB."""
+    """Update settings: active_strategy_structure_id, active_gate_safety_strategy_id, active_strategy_allocation_id (null to clear). Daemon uses these on next start when loading gates from DB."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
@@ -193,6 +194,7 @@ def post_config_active_strategy(request: Request, body: ActiveStrategyBody = Bod
         control_via_db,
         active_strategy_structure_id=body.active_strategy_structure_id,
         active_gate_safety_strategy_id=body.active_gate_safety_strategy_id,
+        active_strategy_allocation_id=body.active_strategy_allocation_id,
     ):
         return JSONResponse(
             status_code=200,
@@ -200,6 +202,7 @@ def post_config_active_strategy(request: Request, body: ActiveStrategyBody = Bod
                 "ok": True,
                 "active_strategy_structure_id": body.active_strategy_structure_id,
                 "active_gate_safety_strategy_id": body.active_gate_safety_strategy_id,
+                "active_strategy_allocation_id": body.active_strategy_allocation_id,
             },
         )
     return JSONResponse(status_code=500, content={"error": "failed to write active strategy and gates"})

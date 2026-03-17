@@ -152,6 +152,21 @@ def get_active_strategy_structure_id(conn: Any) -> Optional[int]:
         return None
 
 
+def get_active_strategy_allocation_id(conn: Any) -> Optional[int]:
+    """Return settings.active_strategy_allocation_id for id=1, or None if missing/not set."""
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT active_strategy_allocation_id FROM settings WHERE id = 1"
+            )
+            row = cur.fetchone()
+        if row is None or row.get("active_strategy_allocation_id") is None:
+            return None
+        return int(row["active_strategy_allocation_id"])
+    except Exception:
+        return None
+
+
 def get_gate_safety_name(conn: Any, gate_safety_strategy_id: int) -> Optional[str]:
     """Return name of the gate_safety_strategy row, or None if not found."""
     try:

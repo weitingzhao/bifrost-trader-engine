@@ -38,7 +38,35 @@ export const DEFAULT_STRUCTURE_PAYLOAD: StructurePayload = {
 }
 
 export const SCOPE_TYPES = ['', 'watchlist_stk', 'explicit_symbols'] as const
+
+/** Display labels for scope types (backend key -> human-readable). */
+export const SCOPE_TYPE_LABELS: Record<string, string> = {
+  '': '— None',
+  watchlist_stk: 'Watchlist (stocks)',
+  explicit_symbols: 'Explicit symbols',
+}
+
+export function getScopeTypeLabel(key: string | null | undefined): string {
+  if (key == null || key === '') return '— None'
+  return SCOPE_TYPE_LABELS[key] ?? key
+}
+
 export const CONDITION_TYPES = ['iv_min', 'iv_max', 'dte_min', 'dte_max', 'earnings_blackout_days', 'min_volume'] as const
+
+/** Display labels for entry condition types (backend key -> human-readable). */
+export const CONDITION_TYPE_LABELS: Record<string, string> = {
+  iv_min: 'IV min',
+  iv_max: 'IV max',
+  dte_min: 'DTE min',
+  dte_max: 'DTE max',
+  earnings_blackout_days: 'Earnings blackout (days)',
+  min_volume: 'Min volume',
+}
+
+export function getConditionTypeLabel(key: string | null | undefined): string {
+  if (key == null || key === '') return '—'
+  return CONDITION_TYPE_LABELS[key] ?? key
+}
 
 export const DEFAULT_OPPORTUNITY_PAYLOAD: OpportunityPayload = {
   name: '',

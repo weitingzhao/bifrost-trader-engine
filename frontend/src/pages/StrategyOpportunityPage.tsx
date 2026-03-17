@@ -18,6 +18,9 @@ import {
   SCOPE_TYPES,
   CONDITION_TYPES,
   DEFAULT_OPPORTUNITY_PAYLOAD,
+  getConditionTypeLabel,
+  getScopeTypeLabel,
+  getStructureTypeLabel,
   opportunityToPayload,
 } from './strategy/strategyFormUtils'
 
@@ -41,11 +44,16 @@ export function StrategyOpportunityPage({
   const [opportunitiesError, setOpportunitiesError] = useState<string | null>(null)
   const [_gateSafetyError, setGateSafetyError] = useState<string | null>(null)
   const [oppFormOpen, setOppFormOpen] = useState<'create' | number | null>(null)
+  const [oppFormIsCopy, setOppFormIsCopy] = useState(false)
   const [oppFormPayload, setOppFormPayload] = useState<OpportunityPayload>(DEFAULT_OPPORTUNITY_PAYLOAD)
   const [oppFormSymbols, setOppFormSymbols] = useState<string[]>([])
   const [oppFormEntryConditions, setOppFormEntryConditions] = useState<EntryConditionItem[]>([])
   const [oppFormLoading, setOppFormLoading] = useState(false)
   const [oppFormError, setOppFormError] = useState<string | null>(null)
+  /** Filter list: 'all' | 'active' | 'inactive'. */
+  const [opportunityActiveFilter, setOpportunityActiveFilter] = useState<'all' | 'active' | 'inactive'>('active')
+  const [availabilityInProgress, setAvailabilityInProgress] = useState<number | null>(null)
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null)
 
   const loadStructures = useCallback(() => {
     setStructuresLoading(true)
@@ -92,7 +100,31 @@ export function StrategyOpportunityPage({
     }
   }, [])
 
+  const filteredOpportunities = opportunities.filter((row) => {
+    if (opportunityActiveFilter === 'all') return true
+    if (opportunityActiveFilter === 'active') return row.is_active === true
+    return row.is_active !== true
+  })
+
+  const handleToggleOpportunityActive = async (row: StrategyOpportunity) => {
+    const id = row.strategy_opportunity_id
+    setAvailabilityInProgress(id)
+    setAvailabilityError(null)
+    try {
+      const full = await fetchOpportunity(id)
+      const payload = opportunityToPayload(full)
+      await updateOpportunity(id, { ...payload, is_active: !row.is_active })
+      loadOpportunities()
+      loadStatus()
+    } catch (e) {
+      setAvailabilityError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAvailabilityInProgress(null)
+    }
+  }
+
   const openOppCreate = () => {
+    setOppFormIsCopy(false)
     setOppFormPayload({
       ...DEFAULT_OPPORTUNITY_PAYLOAD,
       strategy_structure_id: structures[0]?.strategy_structure_id ?? 0,
@@ -103,7 +135,24 @@ export function StrategyOpportunityPage({
     setOppFormOpen('create')
   }
 
+  const openOppCopy = (id: number) => {
+    setOppFormIsCopy(true)
+    setOppFormLoading(true)
+    setOppFormError(null)
+    setOppFormOpen('create')
+    fetchOpportunity(id)
+      .then((row) => {
+        const payload = opportunityToPayload(row)
+        setOppFormPayload({ ...payload, name: `${row.name} (copy)` })
+        setOppFormSymbols(payload.symbols ?? [])
+        setOppFormEntryConditions(payload.entry_conditions ?? [])
+      })
+      .catch((e) => setOppFormError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setOppFormLoading(false))
+  }
+
   const openOppEdit = (id: number) => {
+    setOppFormIsCopy(false)
     setOppFormLoading(true)
     setOppFormError(null)
     fetchOpportunity(id)
@@ -120,6 +169,7 @@ export function StrategyOpportunityPage({
 
   const closeOppForm = () => {
     setOppFormOpen(null)
+    setOppFormIsCopy(false)
     setOppFormError(null)
   }
 
@@ -183,6 +233,30 @@ export function StrategyOpportunityPage({
 
   return (
     <div className="card process-section">
+      {availabilityError != null && (
+        <div
+          className="data-reset-modal-overlay"
+          onClick={() => setAvailabilityError(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="opportunity-availability-error-modal-title"
+        >
+          <div className="data-reset-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 id="opportunity-availability-error-modal-title">Cannot change availability</h3>
+            <p style={{ whiteSpace: 'pre-wrap', marginBottom: 'var(--space-3)' }}>{availabilityError}</p>
+            <div className="data-reset-modal-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setAvailabilityError(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <h2 id="strategy-opportunity-head" className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
         Strategy / {breadcrumbLabel}
         <InfoTooltip text="Define opportunity strategies linked to a structure; scope and entry conditions." />
@@ -191,9 +265,23 @@ export function StrategyOpportunityPage({
       <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
           <h3 className="section-subtitle" style={{ margin: 0 }}>Opportunity strategies</h3>
-          <button type="button" className="btn-primary" onClick={openOppCreate}>
-            Create opportunity
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <div className="structure-active-filter-pills" role="group" aria-label="Filter by availability">
+              {(['all', 'active', 'inactive'] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`structure-active-filter-pill ${opportunityActiveFilter === value ? 'active' : ''}`}
+                  onClick={() => setOpportunityActiveFilter(value)}
+                >
+                  {value === 'all' ? 'All' : value === 'active' ? 'Available' : 'Unavailable'}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn-primary" onClick={openOppCreate}>
+              Create opportunity
+            </button>
+          </div>
         </div>
         {opportunitiesLoading && <p className="section-hint">Loading…</p>}
         {opportunitiesError && <p className="msg-error">{opportunitiesError}</p>}
@@ -206,29 +294,50 @@ export function StrategyOpportunityPage({
                   <th>Structure</th>
                   <th>Scope</th>
                   <th>Default gate safety</th>
-                  <th>Active</th>
+                  <th>Available</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {opportunities.map((row) => (
-                  <tr key={row.strategy_opportunity_id}>
-                    <td>{row.name}</td>
-                    <td>{row.structure_name ?? row.strategy_structure_id}</td>
-                    <td>{row.scope_type ?? '—'}</td>
-                    <td>{row.gate_safety_name ?? row.default_gate_safety_strategy_id ?? '—'}</td>
-                    <td>{row.is_active ? 'Yes' : 'No'}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn-manage"
-                        onClick={() => openOppEdit(row.strategy_opportunity_id)}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {filteredOpportunities.map((row) => {
+                  const availabilityUpdating = availabilityInProgress === row.strategy_opportunity_id
+                  return (
+                    <tr key={row.strategy_opportunity_id}>
+                      <td>{row.name}</td>
+                      <td>{row.structure_name ?? row.strategy_structure_id}</td>
+                      <td>{getScopeTypeLabel(row.scope_type)}</td>
+                      <td>{row.gate_safety_name ?? row.default_gate_safety_strategy_id ?? '—'}</td>
+                      <td>
+                        <label className="toggle-switch" style={{ cursor: availabilityUpdating ? 'not-allowed' : 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={row.is_active}
+                            disabled={!!availabilityInProgress}
+                            onChange={() => void handleToggleOpportunityActive(row)}
+                            aria-label={`Mark "${row.name}" as ${row.is_active ? 'unavailable' : 'available'}`}
+                          />
+                        </label>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-manage"
+                          onClick={() => openOppEdit(row.strategy_opportunity_id)}
+                        >
+                          Edit
+                        </button>
+                        {' '}
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => openOppCopy(row.strategy_opportunity_id)}
+                        >
+                          Copy
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -236,15 +345,22 @@ export function StrategyOpportunityPage({
         {!opportunitiesLoading && !opportunitiesError && opportunities.length === 0 && (
           <p className="section-hint">No opportunity strategies in database.</p>
         )}
+        {!opportunitiesLoading && !opportunitiesError && opportunities.length > 0 && filteredOpportunities.length === 0 && (
+          <p className="section-hint">No opportunities match the current filter.</p>
+        )}
       </section>
 
       {oppFormOpen !== null && (
         <section className="strategy-section gates-form-section" style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-4)', background: 'var(--color-surface-elevated)', borderRadius: '8px' }}>
           <h3 className="section-subtitle">
-            {oppFormOpen === 'create' ? 'New opportunity' : `Edit opportunity ${oppFormOpen}`}
+            {oppFormOpen === 'create' ? (oppFormIsCopy ? 'New opportunity (copy)' : 'New opportunity') : `Edit opportunity (ID: ${oppFormOpen})`}
           </h3>
           {oppFormLoading && !oppFormPayload.name && <p className="section-hint">Loading…</p>}
-          {oppFormError && <p className="msg-error">{oppFormError}</p>}
+          {oppFormError && (
+            <div className="msg-error" style={{ marginBottom: 'var(--space-2)' }}>
+              <p>{oppFormError}</p>
+            </div>
+          )}
 
           <div className="gates-form">
             <div className="gates-form-group">
@@ -258,47 +374,94 @@ export function StrategyOpportunityPage({
                   placeholder="Opportunity name"
                 />
               </div>
-              <div className="gates-form-row">
-                <label>Structure</label>
-                <select
-                  value={oppFormPayload.strategy_structure_id || ''}
-                  onChange={(e) => setOppFormPayload((p) => ({ ...p, strategy_structure_id: Number(e.target.value) }))}
+              <div className="gates-form-row opp-structure-row">
+                <span className="gates-form-row-label">Structure</span>
+                <div
+                  className="opp-structure-cards"
+                  role="radiogroup"
+                  aria-label="Structure (required)"
+                  aria-required
                 >
-                  <option value="">Select structure</option>
-                  {structures.map((s) => (
-                    <option key={s.strategy_structure_id} value={s.strategy_structure_id}>
-                      {s.name} ({s.strategy_structure_id})
-                    </option>
-                  ))}
-                </select>
+                  {structures.length === 0 ? (
+                    <p className="form-hint" style={{ margin: 0 }}>No structures. Create one in Structure first.</p>
+                  ) : (
+                    structures.map((s) => {
+                      const selected = oppFormPayload.strategy_structure_id === s.strategy_structure_id
+                      return (
+                        <label
+                          key={s.strategy_structure_id}
+                          className={`opp-structure-card ${selected ? 'opp-structure-card--selected' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="opp_structure"
+                            value={s.strategy_structure_id}
+                            checked={selected}
+                            onChange={() => setOppFormPayload((p) => ({ ...p, strategy_structure_id: s.strategy_structure_id }))}
+                            aria-label={`Structure: ${s.name}`}
+                          />
+                          <span className="opp-structure-card-title">{s.name}</span>
+                          {(s.version != null && s.version !== '') || (s.structure_type != null && s.structure_type !== '') ? (
+                            <span className="opp-structure-card-meta">
+                              {s.version != null && s.version !== '' ? `v${s.version}` : ''}
+                              {s.version != null && s.version !== '' && s.structure_type ? ' · ' : ''}
+                              {s.structure_type ? getStructureTypeLabel(s.structure_type) : ''}
+                            </span>
+                          ) : null}
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
               </div>
-              <div className="gates-form-row">
-                <label>Default gate safety</label>
-                <select
-                  value={oppFormPayload.default_gate_safety_strategy_id ?? ''}
-                  onChange={(e) =>
-                    setOppFormPayload((p) => ({
-                      ...p,
-                      default_gate_safety_strategy_id: e.target.value === '' ? null : Number(e.target.value),
-                    }))
-                  }
-                >
-                  <option value="">— None</option>
+              <div className="gates-form-row gates-form-row--structure-type">
+                <span className="gates-form-row-label">Default gate safety</span>
+                <div className="structure-type-picker" role="radiogroup" aria-label="Default gate safety">
+                  <label
+                    className={`structure-type-option ${(oppFormPayload.default_gate_safety_strategy_id ?? null) === null ? 'structure-type-option--selected' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="opp_gate_safety"
+                      value=""
+                      checked={(oppFormPayload.default_gate_safety_strategy_id ?? null) === null}
+                      onChange={() => setOppFormPayload((p) => ({ ...p, default_gate_safety_strategy_id: null }))}
+                      aria-label="None"
+                    />
+                    <span>— None</span>
+                  </label>
                   {gateSafetySets.map((g) => (
-                    <option key={g.gate_safety_strategy_id} value={g.gate_safety_strategy_id}>
-                      {g.name} ({g.gate_safety_strategy_id})
-                    </option>
+                    <label
+                      key={g.gate_safety_strategy_id}
+                      className={`structure-type-option ${oppFormPayload.default_gate_safety_strategy_id === g.gate_safety_strategy_id ? 'structure-type-option--selected' : ''}`}
+                    >
+                      <input
+                        type="radio"
+                        name="opp_gate_safety"
+                        value={g.gate_safety_strategy_id}
+                        checked={oppFormPayload.default_gate_safety_strategy_id === g.gate_safety_strategy_id}
+                        onChange={() =>
+                          setOppFormPayload((p) => ({ ...p, default_gate_safety_strategy_id: g.gate_safety_strategy_id }))
+                        }
+                        aria-label={g.name}
+                      />
+                      <span>{g.name}</span>
+                      {g.version != null && g.version !== '' && (
+                        <span className="structure-sheet-version" aria-hidden> v{g.version}</span>
+                      )}
+                    </label>
                   ))}
-                </select>
+                </div>
               </div>
               <div className="gates-form-row">
-                <label>
+                <label className="toggle-switch" style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={oppFormPayload.is_active ?? true}
                     onChange={(e) => setOppFormPayload((p) => ({ ...p, is_active: e.target.checked }))}
+                    aria-label="Available"
                   />
-                  {' '}Active
+                  <span className="toggle-switch-caption">Available</span>
                 </label>
               </div>
             </div>
@@ -313,7 +476,7 @@ export function StrategyOpportunityPage({
                 >
                   {SCOPE_TYPES.map((t) => (
                     <option key={t || '_none'} value={t}>
-                      {t || '— None'}
+                      {getScopeTypeLabel(t)}
                     </option>
                   ))}
                 </select>
@@ -342,7 +505,7 @@ export function StrategyOpportunityPage({
                 </>
               )}
               {oppFormPayload.scope_type === 'watchlist_stk' && (
-                <p className="section-hint">Symbols from Watchlist STK.</p>
+                <p className="form-hint">Symbols from Watchlist STK.</p>
               )}
             </div>
 
@@ -368,7 +531,7 @@ export function StrategyOpportunityPage({
                           >
                             {CONDITION_TYPES.map((t) => (
                               <option key={t} value={t}>
-                                {t}
+                                {getConditionTypeLabel(t)}
                               </option>
                             ))}
                           </select>
@@ -411,7 +574,7 @@ export function StrategyOpportunityPage({
               </button>
             </div>
 
-            <div className="gates-form-actions">
+            <div className="gates-form-actions" style={{ marginTop: 'var(--space-4)' }}>
               <button type="button" className="btn-primary" onClick={submitOppForm} disabled={oppFormLoading}>
                 {oppFormOpen === 'create' ? 'Create' : 'Save'}
               </button>
