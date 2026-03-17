@@ -121,7 +121,11 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ip.last AS price_last,
                         ip.updated_at AS price_updated_at,
                         pct.category_id AS position_category_id,
-                        pc.name AS position_category_name
+                        pc.name AS position_category_name,
+                        ap.strategy_opportunity_id,
+                        ap.strategy_instance_id,
+                        so.name AS strategy_opportunity_name,
+                        si.label AS strategy_instance_label
                     FROM account_positions ap
                     LEFT JOIN contract_quote_live ip
                         ON ap.contract_key = ip.contract_key
@@ -129,6 +133,10 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ON ap.account_id = pct.account_id AND ap.contract_key = pct.contract_key
                     LEFT JOIN preference_position_categories pc
                         ON pct.category_id = pc.id
+                    LEFT JOIN strategy_opportunity so
+                        ON ap.strategy_opportunity_id = so.strategy_opportunity_id
+                    LEFT JOIN strategy_instance si
+                        ON ap.strategy_instance_id = si.strategy_instance_id
                     WHERE ap.account_id = %s
                     ORDER BY ap.contract_key
                     """,
@@ -163,6 +171,21 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                 cat_name = p.get("position_category_name")
                 if cat_name is not None and str(cat_name).strip():
                     pos_dict["category"] = str(cat_name).strip()
+
+                if p.get("strategy_opportunity_id") is not None:
+                    try:
+                        pos_dict["strategy_opportunity_id"] = int(p["strategy_opportunity_id"])
+                    except (TypeError, ValueError):
+                        pass
+                if p.get("strategy_instance_id") is not None:
+                    try:
+                        pos_dict["strategy_instance_id"] = int(p["strategy_instance_id"])
+                    except (TypeError, ValueError):
+                        pass
+                if p.get("strategy_opportunity_name") is not None and str(p.get("strategy_opportunity_name")).strip():
+                    pos_dict["strategy_opportunity_name"] = str(p["strategy_opportunity_name"]).strip()
+                if p.get("strategy_instance_label") is not None and str(p.get("strategy_instance_label")).strip():
+                    pos_dict["strategy_instance_label"] = str(p["strategy_instance_label"]).strip()
 
                 raw_pos_updated = p.get("position_updated_at")
                 if raw_pos_updated is not None:
@@ -745,15 +768,27 @@ def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[
     raw_extra = body.get("raw_extra")
     if raw_extra is not None and not isinstance(raw_extra, str):
         raw_extra = json.dumps(raw_extra) if raw_extra else None
+    strategy_opportunity_id = body.get("strategy_opportunity_id")
+    strategy_instance_id = body.get("strategy_instance_id")
+    if strategy_opportunity_id is not None:
+        try:
+            strategy_opportunity_id = int(strategy_opportunity_id)
+        except (TypeError, ValueError):
+            strategy_opportunity_id = None
+    if strategy_instance_id is not None:
+        try:
+            strategy_instance_id = int(strategy_instance_id)
+        except (TypeError, ValueError):
+            strategy_instance_id = None
     exec_dt = _exec_time_to_dt(exec_time)
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra"
-                placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
-                vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra)
+                cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra, strategy_opportunity_id, strategy_instance_id"
+                placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+                vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra, strategy_opportunity_id, strategy_instance_id)
                 cur.execute(
                     f"INSERT INTO account_executions ({cols}) VALUES ({placeholders}) RETURNING account_executions_id",
                     vals,
@@ -918,7 +953,7 @@ def update_one_execution(status_config: dict, account_executions_id: int, body: 
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
     # 可更新列（account_executions）
-    exec_cols = ("exec_time", "symbol", "sec_type", "side", "quantity", "price", "account_id", "source", "expiry", "strike", "option_right", "exchange", "order_id", "cum_qty", "contract_key")
+    exec_cols = ("exec_time", "symbol", "sec_type", "side", "quantity", "price", "account_id", "source", "expiry", "strike", "option_right", "exchange", "order_id", "cum_qty", "contract_key", "strategy_opportunity_id", "strategy_instance_id")
     commission_keys = ("commission", "realized_pnl", "currency")
     updates: List[str] = []
     values: List[Any] = []
@@ -933,6 +968,11 @@ def update_one_execution(status_config: dict, account_executions_id: int, body: 
             continue
         else:
             v = body[k]
+        if k in ("strategy_opportunity_id", "strategy_instance_id") and v is not None:
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                v = None
         if k == "raw_extra" and v is not None and not isinstance(v, str):
             v = json.dumps(v) if v else None
         updates.append(f'"{k}" = %s')

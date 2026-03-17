@@ -37,6 +37,7 @@
 | **阶段 5**（自动对冲与监控） | **R-C2**、**R-C3** | 基于成熟策略的自动交易对冲与监控（暂停/恢复、一键平敞口等） |
 | **实时行情与联动**（R-RM*，可选/阶段 3 之后） | **R-RM1**、**R-RM2**、**R-RM3** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端；步骤与验收见下文「实时行情与联动」 |
 | **期权发现**（R-OD1，阶段 3 扩展） | **R-OD1** | Research 下 Option Discovery 入口；第一步 UI 与占位 API，后续接入 IB 到期/询价；步骤与验收见下文「期权发现（Option Discovery）」 |
+| **策略实例与交易归属**（阶段 3 扩展） | （无新 R-*） | 交易结果归属到 opportunity/strategy_instance；Performance 与复盘支持按策略/实例；步骤与验收见下文「策略实例与交易归属」。 |
 | **期权结构细化**（R-OS1，后续） | **R-OS1** | 结构类型对应明确腿模式与可选盈亏模型；Structure 页校验/引导；阶段与验收在立项时定。 |
 
 **需求编号 → 产品需求文档与验收/Test Case 链接**（便于从需求编号反查描述与验证位置）：
@@ -410,6 +411,25 @@
 | **OD.3（后续）** | 期权快照任务（选定标的+到期+有限 strike，pacing）与发现逻辑；可选「加入 Watchlist」。 | 按到期询价与机会发现 | R-OD1 扩展 |
 
 **第一步验收**：按上文「需求与阶段一一对应及详细验收标准」表中 R-OD1 验收条 ①～④ 执行。**第一步通过条件**：全部通过。
+
+---
+
+### 策略实例与交易归属（Strategy Instance & Trade Attribution；阶段 3 扩展）
+
+**本步骤**：无新 R-* 编号；作为 R-M7/R-H2 与 Performance 的扩展，在计划中以独立步骤验收。
+
+**目标**：① 持仓与成交可归属到 strategy_opportunity 与可选 strategy_instance；② 复盘/Executions 支持按策略、按实例筛选；③ Performance 与历史统计支持按策略、按策略实例的 Realized/Unrealized 聚合与 calendar 视图；④ 为后续「按策略盈亏比」提供数据基础。
+
+| 步骤 | 内容 | 可交付物 |
+|------|------|----------|
+| **SI.1** | 数据库：表 strategy_instance；account_positions、account_executions 新增 strategy_opportunity_id、strategy_instance_id；pg_ddl/迁移。 | 表存在且 FK 正确；旧数据列为 NULL。 |
+| **SI.2** | Reader/API：GET /status 的 positions 返回 strategy_opportunity_id、strategy_instance_id（及可选 opportunity/instance 名称）；GET /executions 支持按 strategy_opportunity_id、strategy_instance_id 筛选并返回两字段；GET /strategies/instances 或等效（列表/详情，按 account + opportunity 可选）；POST 创建 strategy_instance 的 API（开仓时由前端或 daemon 创建实例）。 | API 文档与验收用例通过。 |
+| **SI.3** | 写入路径：① 前端 Add Trade / 从 Opportunity 下单：可传 strategy_opportunity_id、strategy_instance_id（新建实例时先 POST instance 再写 execution/position）；② IB 拉取 account_positions/account_executions：默认 NULL，可选后处理或人工 tagging；③ Daemon 对冲：若支持「当前 opportunity」，写入 execution 时带 strategy_opportunity_id（及可选 strategy_instance_id）。 | 至少一种路径能写入归属；手动补录可带 opportunity/instance。 |
+| **SI.4** | Performance 与统计：GET /performance 或统计模块支持按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）、Unrealized（positions + quote）；按日/周/月汇总；Performance 页或复盘页支持「按策略」「按实例」筛选与展示。 | 按策略/实例的 PnL 与 calendar 可查可展示。 |
+
+**验收标准**（精简）：① 表与 FK 存在且可读写。② GET /status 的 positions、GET /executions 含归属字段并可筛选。③ 至少一种写入路径（如前端 Add Trade + 选 Opportunity/创建 Instance）能落库。④ GET /performance 或等价接口支持按 strategy_opportunity_id 聚合并展示。
+
+**依赖**：阶段 3 的 account_positions、account_executions、GET /performance 与三层策略（strategy_opportunity）已存在。数据库设计见 [DATABASE.md](docs/DATABASE.md) §2.24.11。
 
 ---
 

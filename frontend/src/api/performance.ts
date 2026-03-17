@@ -12,12 +12,16 @@ export async function fetchPerformance(params?: {
   until_ts?: number
   account_id?: string
   granularity?: 'day' | 'week' | 'month'
+  strategy_opportunity_id?: number
+  strategy_instance_id?: number
 }): Promise<PerformanceResponse> {
   const search = new URLSearchParams()
   if (params?.since_ts != null) search.set('since_ts', String(params.since_ts))
   if (params?.until_ts != null) search.set('until_ts', String(params.until_ts))
   if (params?.account_id) search.set('account_id', params.account_id)
   if (params?.granularity) search.set('granularity', params.granularity)
+  if (params?.strategy_opportunity_id != null) search.set('strategy_opportunity_id', String(params.strategy_opportunity_id))
+  if (params?.strategy_instance_id != null) search.set('strategy_instance_id', String(params.strategy_instance_id))
   const r = await fetch(`${API}/performance?${search}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()

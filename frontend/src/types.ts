@@ -80,6 +80,14 @@ export interface IbPositionRow {
   category_id?: number | null
   /** 持仓分类名称（STK），如 Dividend、Short-term */
   category?: string | null
+  /** Strategy opportunity ID (trade attribution, SI.2). */
+  strategy_opportunity_id?: number | null
+  /** Strategy instance ID (trade attribution, SI.2). */
+  strategy_instance_id?: number | null
+  /** Strategy opportunity name (from JOIN). */
+  strategy_opportunity_name?: string | null
+  /** Strategy instance label (from JOIN). */
+  strategy_instance_label?: string | null
 }
 
 /** One account in GET /status accounts (R-A1 multi-account) */
@@ -288,6 +296,14 @@ export interface Execution {
   trade_date?: string | null
   /** Row created_at (Unix seconds); use for Time column when exec_time is updated over time. */
   created_at?: number | null
+  /** Strategy opportunity ID (trade attribution, SI.2). */
+  strategy_opportunity_id?: number | null
+  /** Strategy instance ID (trade attribution, SI.2). */
+  strategy_instance_id?: number | null
+  /** Strategy opportunity name (from backend JOIN). */
+  strategy_opportunity_name?: string | null
+  /** Strategy instance label (from backend JOIN). */
+  strategy_instance_label?: string | null
 }
 
 /** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */
@@ -367,6 +383,20 @@ export interface BackendOptPair {
   net_pnl: number
 }
 
+/** Strategy instance (one open per opportunity/account). SI.2. */
+export interface StrategyInstance {
+  strategy_instance_id: number
+  strategy_opportunity_id: number
+  account_id: string
+  opened_at: string
+  opened_at_epoch?: number
+  label?: string | null
+  notes?: string | null
+  created_at?: string
+  updated_at?: string
+  strategy_opportunity_name?: string | null
+}
+
 /** One row from account_transactions (Flex cash transactions). GET /transactions, GET /performance.transactions */
 export interface AccountTransaction {
   account_transactions_id?: number
@@ -442,6 +472,8 @@ export interface PerformanceResponse {
   cumulative_curve?: { ts: number; cumulative_net_pnl: number }[]
   realized_by_account?: { account_id: string; total_pnl: number; commission: number; net_pnl: number; trade_count: number; return_pct?: number }[]
   realized_by_sec_type?: { sec_type: string; total_pnl: number; commission: number; net_pnl: number; trade_count: number; return_pct?: number }[]
+  realized_by_strategy_opportunity?: { strategy_opportunity_id: number; total_pnl: number; commission: number; net_pnl: number; trade_count: number; return_pct?: number }[]
+  realized_by_strategy_instance?: { strategy_instance_id: number; total_pnl: number; commission: number; net_pnl: number; trade_count: number; return_pct?: number }[]
   unrealized?: { total_pnl: number; return_pct?: number | null; current_equity?: number | null }
   unrealized_by_account?: { account_id: string; total_pnl: number }[]
   unrealized_by_sec_type?: { sec_type: string; total_pnl: number }[]

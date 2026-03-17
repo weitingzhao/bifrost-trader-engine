@@ -30,15 +30,29 @@ def get_executions(
     account_id: Optional[str] = Query(None, description="Filter by account ID"),
     limit: int = Query(200, ge=0, le=10000, description="Max rows to return; 0 = no limit"),
     include_opt_pairs: bool = Query(False, description="Include C↔P pairing"),
+    strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
+    strategy_instance_id: Optional[int] = Query(None, description="Filter by strategy instance ID"),
 ) -> Dict[str, Any]:
     """Account-level executions/trades (R-A2). If include_opt_pairs=true: returns paired_execution_ids and opt_pairs."""
     reader = request.app.state.reader
     effective_limit: Optional[int] = limit if limit > 0 else None
     if include_opt_pairs:
         return reader.get_executions_with_opt_pairs(
-            since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=effective_limit or 5000
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            limit=effective_limit or 5000,
+            strategy_opportunity_id=strategy_opportunity_id,
+            strategy_instance_id=strategy_instance_id,
         )
-    items = reader.get_executions(since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=effective_limit)
+    items = reader.get_executions(
+        since_ts=since_ts,
+        until_ts=until_ts,
+        account_id=account_id,
+        limit=effective_limit,
+        strategy_opportunity_id=strategy_opportunity_id,
+        strategy_instance_id=strategy_instance_id,
+    )
     return {"executions": items}
 
 
@@ -57,11 +71,18 @@ def get_performance(
     until_ts: Optional[float] = Query(None),
     account_id: Optional[str] = Query(None),
     granularity: str = Query("day", description="day | week | month"),
+    strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
+    strategy_instance_id: Optional[int] = Query(None, description="Filter by strategy instance ID"),
 ) -> Dict[str, Any]:
     """Performance stats and calendar PnL from account_executions."""
     reader = request.app.state.reader
     return reader.get_performance_stats(
-        since_ts=since_ts, until_ts=until_ts, account_id=account_id, granularity=granularity
+        since_ts=since_ts,
+        until_ts=until_ts,
+        account_id=account_id,
+        granularity=granularity,
+        strategy_opportunity_id=strategy_opportunity_id,
+        strategy_instance_id=strategy_instance_id,
     )
 
 

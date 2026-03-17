@@ -4,17 +4,29 @@ import { fetchExecutions } from '../../api'
 
 export const OFF_TRACK_ACCOUNT_ID = 'Off-Track'
 
-export function useExecutions(status: StatusResponse | null) {
+export interface ExecutionStrategyFilters {
+  strategy_opportunity_id?: number | null
+  strategy_instance_id?: number | null
+}
+
+export function useExecutions(status: StatusResponse | null, filters?: ExecutionStrategyFilters) {
   const [executions, setExecutions] = useState<Execution[]>([])
 
   const loadReplayData = useCallback(async () => {
     try {
-      const res = await fetchExecutions(undefined, undefined, 0)
+      const res = await fetchExecutions(
+        undefined,
+        undefined,
+        0,
+        false,
+        filters?.strategy_opportunity_id ?? undefined,
+        filters?.strategy_instance_id ?? undefined,
+      )
       setExecutions(res.executions ?? [])
     } catch {
       setExecutions([])
     }
-  }, [])
+  }, [filters?.strategy_opportunity_id, filters?.strategy_instance_id])
 
   const executionAccountOptions = useMemo(() => {
     const fromStatus = ((status?.accounts as { account_id?: string }[] | undefined) ?? [])

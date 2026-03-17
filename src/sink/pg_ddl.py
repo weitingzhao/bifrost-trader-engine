@@ -934,6 +934,27 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_opportunity_entry_condition_opportunity_id ON strategy_opportunity_entry_condition (strategy_opportunity_id)"
         )
+        _log_table("strategy_instance", "Strategy instance (one open per opportunity/account)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_instance (
+                strategy_instance_id bigserial PRIMARY KEY,
+                strategy_opportunity_id bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE RESTRICT,
+                account_id text NOT NULL,
+                opened_at timestamptz NOT NULL,
+                label text,
+                notes text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_instance_opportunity_id ON strategy_instance (strategy_opportunity_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_instance_account_opened ON strategy_instance (account_id, opened_at)"
+        )
         _log_table("strategy_allocation", "Strategy allocation")
         cur.execute(
             """
@@ -998,6 +1019,35 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_structure_id bigint")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_gate_safety_strategy_id bigint")
         cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_allocation_id bigint")
+        _log("account_positions / account_executions strategy attribution columns")
+        cur.execute(
+            "ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS strategy_opportunity_id bigint "
+            "REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE SET NULL"
+        )
+        cur.execute(
+            "ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS strategy_instance_id bigint "
+            "REFERENCES strategy_instance(strategy_instance_id) ON DELETE SET NULL"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_positions_strategy_opportunity_id ON account_positions (strategy_opportunity_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_positions_strategy_instance_id ON account_positions (strategy_instance_id)"
+        )
+        cur.execute(
+            "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS strategy_opportunity_id bigint "
+            "REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE SET NULL"
+        )
+        cur.execute(
+            "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS strategy_instance_id bigint "
+            "REFERENCES strategy_instance(strategy_instance_id) ON DELETE SET NULL"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_executions_strategy_opportunity_id ON account_executions (strategy_opportunity_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_executions_strategy_instance_id ON account_executions (strategy_instance_id)"
+        )
         _log("watchlist, job_bars_backfill")
         _log_table("watchlist", "Watchlist items (STK/OPT)")
         cur.execute(

@@ -49,6 +49,8 @@ def get_executions(
     until_ts: Optional[float] = None,
     account_id: Optional[str] = None,
     limit: Optional[int] = 200,
+    strategy_opportunity_id: Optional[int] = None,
+    strategy_instance_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     if conn is None:
         return []
@@ -62,8 +64,14 @@ def get_executions(
             conditions.append("e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
             values.append(until_ts)
         if account_id is not None and account_id.strip():
-            conditions.append("account_id = %s")
+            conditions.append("e.account_id = %s")
             values.append(account_id.strip())
+        if strategy_opportunity_id is not None:
+            conditions.append("e.strategy_opportunity_id = %s")
+            values.append(strategy_opportunity_id)
+        if strategy_instance_id is not None:
+            conditions.append("e.strategy_instance_id = %s")
+            values.append(strategy_instance_id)
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         use_limit = limit is not None and limit > 0
         if use_limit:
@@ -78,9 +86,13 @@ def get_executions(
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
-                           e.trade_date, e.raw_extra, {_CREATED_AT_E}
+                           e.trade_date, e.raw_extra, {_CREATED_AT_E},
+                           e.strategy_opportunity_id, e.strategy_instance_id,
+                           so.name AS strategy_opportunity_name, si.label AS strategy_instance_label
                     FROM account_executions e
                     LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
+                    LEFT JOIN strategy_opportunity so ON e.strategy_opportunity_id = so.strategy_opportunity_id
+                    LEFT JOIN strategy_instance si ON e.strategy_instance_id = si.strategy_instance_id
                     {where}
                     ORDER BY e.trade_date DESC NULLS LAST, e.exec_time DESC NULLS LAST{limit_clause}
                     """,
@@ -260,14 +272,30 @@ def get_executions_with_opt_pairs(
     until_ts: Optional[float] = None,
     account_id: Optional[str] = None,
     limit: int = 200,
+    strategy_opportunity_id: Optional[int] = None,
+    strategy_instance_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    day_executions = get_executions(conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+    day_executions = get_executions(
+        conn,
+        since_ts=since_ts,
+        until_ts=until_ts,
+        account_id=account_id,
+        limit=limit,
+        strategy_opportunity_id=strategy_opportunity_id,
+        strategy_instance_id=strategy_instance_id,
+    )
     if since_ts is None or until_ts is None:
         for e in day_executions:
             e["paired_execution_ids"] = []
         return {"executions": day_executions, "opt_pairs": []}
     all_legs = get_executions_with_opt_pairs_single_query(
-        conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=5000,
+        conn,
+        since_ts=since_ts,
+        until_ts=until_ts,
+        account_id=account_id,
+        limit=5000,
+        strategy_opportunity_id=strategy_opportunity_id,
+        strategy_instance_id=strategy_instance_id,
     )
     pair_map, opt_pairs = _compute_opt_pair_map_and_pairs(all_legs)
     try:
@@ -340,6 +368,8 @@ def get_executions_with_opt_pairs_single_query(
     until_ts: Optional[float] = None,
     account_id: Optional[str] = None,
     limit: int = 5000,
+    strategy_opportunity_id: Optional[int] = None,
+    strategy_instance_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     if since_ts is None or until_ts is None or conn is None:
         return []
@@ -348,9 +378,20 @@ def get_executions_with_opt_pairs_single_query(
     if account_id and account_id.strip():
         acc_cond = " AND e.account_id = %s"
         values.append(account_id.strip())
+    strat_cond = ""
+    if strategy_opportunity_id is not None:
+        strat_cond += " AND e.strategy_opportunity_id = %s"
+        values.append(strategy_opportunity_id)
+    if strategy_instance_id is not None:
+        strat_cond += " AND e.strategy_instance_id = %s"
+        values.append(strategy_instance_id)
     values2: List[Any] = [since_ts, until_ts, since_ts, until_ts]
     if account_id and account_id.strip():
         values2.append(account_id.strip())
+    if strategy_opportunity_id is not None:
+        values2.append(strategy_opportunity_id)
+    if strategy_instance_id is not None:
+        values2.append(strategy_instance_id)
     values2.append(limit)
     sql = f"""
 WITH day_keys AS (
@@ -360,6 +401,7 @@ WITH day_keys AS (
     AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
     {acc_cond}
+    {strat_cond}
 ),
 all_legs AS (
   SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
@@ -379,6 +421,7 @@ all_legs AS (
     AND e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     {acc_cond}
+    {strat_cond}
 ),
 numbered AS (
   SELECT all_legs.*,
@@ -394,6 +437,13 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                 cur.execute(sql, values + values2)
             except Exception as col_err:
                 if "does not exist" in str(col_err).lower() or "42703" in str(getattr(col_err, "pgcode", "")):
+                    values_fb: List[Any] = [since_ts, until_ts]
+                    if account_id and account_id.strip():
+                        values_fb.append(account_id.strip())
+                    values2_fb: List[Any] = [since_ts, until_ts, since_ts, until_ts]
+                    if account_id and account_id.strip():
+                        values2_fb.append(account_id.strip())
+                    values2_fb.append(limit)
                     sql_fallback = f"""
 WITH day_keys AS (
   SELECT DISTINCT e.symbol, e.expiry, COALESCE(e.strike::text,'') AS strike_s, e.account_id
@@ -417,6 +467,7 @@ all_legs AS (
   FROM account_executions e
   INNER JOIN day_keys k ON e.symbol = k.symbol AND e.expiry = k.expiry
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
+  LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
     AND e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
@@ -430,7 +481,7 @@ numbered AS (
 )
 SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
 """
-                    cur.execute(sql_fallback, values + values2)
+                    cur.execute(sql_fallback, values_fb + values2_fb)
                 else:
                     raise
             rows = cur.fetchall()
@@ -513,6 +564,8 @@ def get_performance_stats(
     until_ts: Optional[float] = None,
     account_id: Optional[str] = None,
     granularity: str = "day",
+    strategy_opportunity_id: Optional[int] = None,
+    strategy_instance_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     from servers.reader.accounts import get_accounts_from_tables
 
@@ -523,7 +576,15 @@ def get_performance_stats(
     if capital_base is not None and capital_base <= 0:
         capital_base = None
 
-    executions = get_executions(conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=5000)
+    executions = get_executions(
+        conn,
+        since_ts=since_ts,
+        until_ts=until_ts,
+        account_id=account_id,
+        limit=5000,
+        strategy_opportunity_id=strategy_opportunity_id,
+        strategy_instance_id=strategy_instance_id,
+    )
     executions_sorted = sorted([e for e in executions if e.get("time") is not None], key=lambda e: float(e["time"]))
 
     total_realized_pnl = 0.0
@@ -631,6 +692,47 @@ def get_performance_stats(
     realized_by_account_and_sec_type = [{"account_id": k[0], "sec_type": k[1], "total_pnl": round(v["total_pnl"], 2), "commission": round(v["commission"], 2), "net_pnl": round(v["net_pnl"], 2), "trade_count": v["trade_count"]} for k, v in sorted(by_acc_sec.items())]
     if capital_base and capital_base > 0:
         for row in realized_by_account_and_sec_type:
+            row["return_pct"] = round(100.0 * row["net_pnl"] / capital_base, 4)
+
+    by_opp: Dict[int, Dict[str, Any]] = {}
+    by_inst: Dict[int, Dict[str, Any]] = {}
+    for e in executions_sorted:
+        so_id = e.get("strategy_opportunity_id")
+        si_id = e.get("strategy_instance_id")
+        if so_id is not None:
+            so_id = int(so_id)
+            if so_id not in by_opp:
+                by_opp[so_id] = {"strategy_opportunity_id": so_id, "total_pnl": 0.0, "commission": 0.0, "net_pnl": 0.0, "trade_count": 0}
+            rp_val = float(e["realized_pnl"]) if e.get("realized_pnl") is not None else 0.0
+            comm_val = float(e["commission"]) if e.get("commission") is not None else 0.0
+            if not math.isfinite(rp_val):
+                rp_val = 0.0
+            if not math.isfinite(comm_val):
+                comm_val = 0.0
+            by_opp[so_id]["total_pnl"] += rp_val
+            by_opp[so_id]["commission"] += comm_val
+            by_opp[so_id]["net_pnl"] += rp_val - comm_val
+            by_opp[so_id]["trade_count"] += 1
+        if si_id is not None:
+            si_id = int(si_id)
+            if si_id not in by_inst:
+                by_inst[si_id] = {"strategy_instance_id": si_id, "total_pnl": 0.0, "commission": 0.0, "net_pnl": 0.0, "trade_count": 0}
+            rp_val = float(e["realized_pnl"]) if e.get("realized_pnl") is not None else 0.0
+            comm_val = float(e["commission"]) if e.get("commission") is not None else 0.0
+            if not math.isfinite(rp_val):
+                rp_val = 0.0
+            if not math.isfinite(comm_val):
+                comm_val = 0.0
+            by_inst[si_id]["total_pnl"] += rp_val
+            by_inst[si_id]["commission"] += comm_val
+            by_inst[si_id]["net_pnl"] += rp_val - comm_val
+            by_inst[si_id]["trade_count"] += 1
+    realized_by_strategy_opportunity = [{"strategy_opportunity_id": k, "total_pnl": round(v["total_pnl"], 2), "commission": round(v["commission"], 2), "net_pnl": round(v["net_pnl"], 2), "trade_count": v["trade_count"]} for k, v in sorted(by_opp.items())]
+    realized_by_strategy_instance = [{"strategy_instance_id": k, "total_pnl": round(v["total_pnl"], 2), "commission": round(v["commission"], 2), "net_pnl": round(v["net_pnl"], 2), "trade_count": v["trade_count"]} for k, v in sorted(by_inst.items())]
+    if capital_base and capital_base > 0:
+        for row in realized_by_strategy_opportunity:
+            row["return_pct"] = round(100.0 * row["net_pnl"] / capital_base, 4)
+        for row in realized_by_strategy_instance:
             row["return_pct"] = round(100.0 * row["net_pnl"] / capital_base, 4)
 
     def _period_key(ts: float, gran: str) -> Tuple[float, str]:
@@ -775,6 +877,8 @@ def get_performance_stats(
         "realized_by_account": realized_by_account,
         "realized_by_sec_type": realized_by_sec_type,
         "realized_by_account_and_sec_type": realized_by_account_and_sec_type,
+        "realized_by_strategy_opportunity": realized_by_strategy_opportunity,
+        "realized_by_strategy_instance": realized_by_strategy_instance,
         "calendar": calendar,
         "calendar_by_sec_type": calendar_by_sec_type,
         "cumulative_curve": cumulative_curve,

@@ -67,12 +67,16 @@ export async function fetchExecutions(
   until_ts?: number,
   limit = 200,
   include_opt_pairs = false,
+  strategy_opportunity_id?: number,
+  strategy_instance_id?: number,
 ): Promise<ExecutionsResponse | ExecutionsResponseWithPairs> {
   const params = new URLSearchParams()
   if (since_ts != null) params.set('since_ts', String(since_ts))
   if (until_ts != null) params.set('until_ts', String(until_ts))
   params.set('limit', String(limit))
   if (include_opt_pairs) params.set('include_opt_pairs', 'true')
+  if (strategy_opportunity_id != null) params.set('strategy_opportunity_id', String(strategy_opportunity_id))
+  if (strategy_instance_id != null) params.set('strategy_instance_id', String(strategy_instance_id))
   const r = await fetch(`${API}/executions?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()

@@ -482,6 +482,94 @@ def update_opportunity_endpoint(request: Request, opportunity_id: int, body: Opp
     return {"ok": True}
 
 
+class StrategyInstanceCreateBody(BaseModel):
+    """Request body for create strategy instance (SI.2)."""
+
+    strategy_opportunity_id: int = Field(..., description="Parent opportunity ID")
+    account_id: str = Field(..., min_length=1, description="Account ID")
+    opened_at: str = Field(..., description="Opened at (ISO 8601 or Unix timestamp string)")
+    label: Optional[str] = Field(None, description="Optional label")
+    notes: Optional[str] = Field(None, description="Optional notes")
+
+
+class StrategyInstanceUpdateBody(BaseModel):
+    """Request body for PATCH strategy instance; label and notes optional."""
+
+    label: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.get("/instances")
+def list_strategy_instances(
+    request: Request,
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
+) -> Dict[str, Any]:
+    """Return list of strategy_instance rows (SI.2). Optional filters: account_id, strategy_opportunity_id."""
+    reader = request.app.state.reader
+    items: List[Dict[str, Any]] = reader.list_strategy_instances(
+        account_id=account_id, strategy_opportunity_id=strategy_opportunity_id
+    )
+    return {"items": items}
+
+
+@router.get("/instances/{strategy_instance_id}")
+def get_strategy_instance(request: Request, strategy_instance_id: int) -> Dict[str, Any]:
+    """Return one strategy_instance by id. 404 if not found."""
+    reader = request.app.state.reader
+    row = reader.get_strategy_instance_by_id(strategy_instance_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Strategy instance not found")
+    return row
+
+
+@router.post("/instances")
+def create_strategy_instance_endpoint(request: Request, body: StrategyInstanceCreateBody) -> Dict[str, Any]:
+    """Create a new strategy instance. Body: strategy_opportunity_id, account_id, opened_at (required), label?, notes?. opened_at: ISO 8601 or Unix seconds."""
+    reader = request.app.state.reader
+    control_via_db = getattr(request.app.state, "control_via_db", None)
+    if not control_via_db:
+        raise HTTPException(status_code=503, detail="Database control not configured")
+    opened_at_val: Any = body.opened_at
+    try:
+        if isinstance(opened_at_val, str) and opened_at_val.strip().replace(".", "").replace("-", "").replace(":", "", 1).isdigit():
+            opened_at_val = float(opened_at_val.strip())
+        elif isinstance(opened_at_val, str):
+            from datetime import datetime
+            opened_at_val = datetime.fromisoformat(opened_at_val.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="opened_at must be ISO 8601 or Unix timestamp") from exc
+    sid = reader.create_strategy_instance(
+        strategy_opportunity_id=body.strategy_opportunity_id,
+        account_id=body.account_id.strip(),
+        opened_at=opened_at_val,
+        label=body.label.strip() if body.label else None,
+        notes=body.notes.strip() if body.notes else None,
+    )
+    if sid is None:
+        raise HTTPException(status_code=500, detail="Failed to create strategy instance")
+    return {"strategy_instance_id": sid}
+
+
+@router.patch("/instances/{strategy_instance_id}")
+def update_strategy_instance_endpoint(
+    request: Request, strategy_instance_id: int, body: StrategyInstanceUpdateBody
+) -> Dict[str, Any]:
+    """Update strategy instance label/notes. Partial update supported."""
+    reader = request.app.state.reader
+    payload = body.model_dump(exclude_unset=True)
+    if not payload:
+        return {"ok": True}
+    ok = reader.update_strategy_instance(
+        strategy_instance_id,
+        label=payload.get("label"),
+        notes=payload.get("notes"),
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Strategy instance not found or update failed")
+    return {"ok": True}
+
+
 @router.get("/allocations")
 def list_allocations(
     request: Request,

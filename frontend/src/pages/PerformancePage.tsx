@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState, Fragment } from 'react'
 import type { Execution, PerformanceResponse, StatusResponse } from '../types'
 import type { BackendOptPair } from '../types'
-import { fetchExecutions, fetchPerformance } from '../api'
+import type { StrategyOpportunity } from '../api'
+import type { StrategyInstance } from '../types'
+import { fetchExecutions, fetchPerformance, fetchOpportunities, fetchStrategyInstances } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
 import {
@@ -52,6 +54,25 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   } | null>(null)
   const [byDayRangeLoading, setByDayRangeLoading] = useState(false)
   const [selectedDayComputedPnL, setSelectedDayComputedPnL] = useState<{ realized: number; unrealized: number } | null>(null)
+  const [strategyOpportunityId, setStrategyOpportunityId] = useState<number | null>(null)
+  const [strategyInstanceId, setStrategyInstanceId] = useState<number | null>(null)
+  const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
+  const [instances, setInstances] = useState<StrategyInstance[]>([])
+
+  useEffect(() => {
+    fetchOpportunities(true)
+      .then(r => setOpportunities(r.items ?? []))
+      .catch(() => setOpportunities([]))
+  }, [])
+  useEffect(() => {
+    if (strategyOpportunityId == null || !Number.isFinite(strategyOpportunityId)) {
+      setInstances([])
+      return
+    }
+    fetchStrategyInstances({ strategy_opportunity_id: strategyOpportunityId })
+      .then(r => setInstances(r.items ?? []))
+      .catch(() => setInstances([]))
+  }, [strategyOpportunityId])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -65,6 +86,8 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         until_ts,
         account_id: undefined,
         granularity: 'day',
+        strategy_opportunity_id: strategyOpportunityId ?? undefined,
+        strategy_instance_id: strategyInstanceId ?? undefined,
       })
       setData(res)
     } catch (e) {
@@ -73,7 +96,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     } finally {
       setLoading(false)
     }
-  }, [timeRange, calendarMonth])
+  }, [timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId])
 
   useEffect(() => {
     load()
@@ -101,7 +124,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       const lastDateStr = `${monthKey}-${String(lastDay).padStart(2, '0')}`
       const { since_ts } = getChicagoDayRange(firstDateStr)
       const { until_ts } = getChicagoDayRange(lastDateStr)
-      return fetchExecutions(since_ts, until_ts, 5000, true)
+      return fetchExecutions(since_ts, until_ts, 5000, true, strategyOpportunityId ?? undefined, strategyInstanceId ?? undefined)
         .then((res) => {
           const execs = res.executions ?? []
           const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
@@ -156,7 +179,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         setByDayRangeData({ opt: fallbackOpt, stock: fallbackStock })
       })
       .finally(() => setByDayRangeLoading(false))
-  }, [timeRange, calendarMonth])
+  }, [timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId])
 
   useEffect(() => {
     setSelectedDay(null)
@@ -186,7 +209,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     const { until_ts } = getChicagoDayRange(lastDateStr)
     setCalendarDayPnLLoading(true)
     setCalendarDayPnL(null)
-    fetchExecutions(since_ts, until_ts, 5000, true)
+    fetchExecutions(since_ts, until_ts, 5000, true, strategyOpportunityId ?? undefined, strategyInstanceId ?? undefined)
       .then((res) => {
         const execs = res.executions ?? []
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
@@ -217,7 +240,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       })
       .catch(() => setCalendarDayPnL({}))
       .finally(() => setCalendarDayPnLLoading(false))
-  }, [calendarMonth])
+  }, [calendarMonth, strategyOpportunityId, strategyInstanceId])
 
   // Calendar PnL owns its own performance query for the displayed month (so Time Range does not trigger refetch)
   useEffect(() => {
@@ -238,11 +261,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       until_ts,
       account_id: undefined,
       granularity: 'day',
+      strategy_opportunity_id: strategyOpportunityId ?? undefined,
+      strategy_instance_id: strategyInstanceId ?? undefined,
     })
       .then(setCalendarMonthPerformance)
       .catch(() => setCalendarMonthPerformance(null))
       .finally(() => setCalendarMonthPerformanceLoading(false))
-  }, [calendarMonth])
+  }, [calendarMonth, strategyOpportunityId, strategyInstanceId])
 
   // When a day is selected, fetch executions from (selectedDay - LOOK_BACK_DAYS) through end of selected day
   // so backend can pair opens from before the month with closes on the selected day; then filter display to selected day only.
@@ -258,7 +283,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     const { since_ts: monthStartTs } = getChicagoDayRange(lookBackStart)
     const { until_ts: dayEndTs } = getChicagoDayRange(selectedDay)
     setSelectedDayExecutionsLoading(true)
-    fetchExecutions(monthStartTs, dayEndTs, 5000, true)
+    fetchExecutions(monthStartTs, dayEndTs, 5000, true, strategyOpportunityId ?? undefined, strategyInstanceId ?? undefined)
       .then((res) => {
         setSelectedDayExecutions(res.executions ?? [])
         setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
@@ -297,7 +322,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         setSelectedDayComputedPnL(null)
       })
       .finally(() => setSelectedDayExecutionsLoading(false))
-  }, [selectedDay])
+  }, [selectedDay, strategyOpportunityId, strategyInstanceId])
 
   const summary = data?.summary
 
@@ -358,6 +383,46 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                   <span className="performance-time-range-pill-label">3 Years</span>
                 </label>
               </div>
+            </fieldset>
+            <fieldset className="performance-filter performance-filter-strategy" aria-label="Strategy filter">
+              <span className="performance-filter-legend-inline">Strategy</span>
+              <select
+                value={strategyOpportunityId ?? ''}
+                onChange={e => {
+                  const v = e.target.value
+                  setStrategyOpportunityId(v === '' ? null : Number(v))
+                  setStrategyInstanceId(null)
+                }}
+                className="performance-filter-select"
+                aria-label="Strategy (opportunity)"
+              >
+                <option value="">All</option>
+                {opportunities.map(o => (
+                  <option key={o.strategy_opportunity_id} value={String(o.strategy_opportunity_id)}>
+                    {o.name ?? `#${o.strategy_opportunity_id}`}
+                  </option>
+                ))}
+              </select>
+            </fieldset>
+            <fieldset className="performance-filter performance-filter-instance" aria-label="Instance filter">
+              <span className="performance-filter-legend-inline">Instance</span>
+              <select
+                value={strategyInstanceId ?? ''}
+                onChange={e => {
+                  const v = e.target.value
+                  setStrategyInstanceId(v === '' ? null : Number(v))
+                }}
+                className="performance-filter-select"
+                aria-label="Instance"
+                disabled={strategyOpportunityId == null}
+              >
+                <option value="">All</option>
+                {instances.map(si => (
+                  <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
+                    {si.label?.trim() || `#${si.strategy_instance_id}`}
+                  </option>
+                ))}
+              </select>
             </fieldset>
             {(() => {
               const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)

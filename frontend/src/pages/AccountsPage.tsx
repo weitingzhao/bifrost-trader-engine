@@ -1010,12 +1010,14 @@ export function AccountsPage({
                     <th>CHANGE %</th>
                     <th>CHANGE $</th>
                     <th>Upd</th>
+                    <th>Strategy</th>
+                    <th>Instance</th>
                   </tr>
                 </thead>
                 {categoryOrder.map((catLabel) => (
                   <tbody key={catLabel}>
                     <tr className="ib-stock-group-header">
-                      <td colSpan={11}>
+                      <td colSpan={13}>
                         <button
                           type="button"
                           className="ib-stock-group-header-btn"
@@ -1125,6 +1127,8 @@ export function AccountsPage({
                         <td>
                           {priceInfo.updatedAtSec != null ? formatLastUpdate(priceInfo.updatedAtSec) : '—'}
                         </td>
+                        <td>{(pos as { strategy_opportunity_name?: string | null }).strategy_opportunity_name?.trim() ?? '—'}</td>
+                        <td>{(pos as { strategy_instance_label?: string | null }).strategy_instance_label?.trim() ?? '—'}</td>
                       </tr>
                     )
                   })}
@@ -1203,6 +1207,8 @@ export function AccountsPage({
                             </span>
                           ) : '—'}
                         </td>
+                        <td></td>
+                        <td></td>
                         <td></td>
                       </tr>
                     )
@@ -1349,6 +1355,8 @@ export function AccountsPage({
                     <th>Premium</th>
                     <th>Intrinsic</th>
                     <th>Moneyness</th>
+                    <th>Strategy</th>
+                    <th>Instance</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1375,6 +1383,8 @@ export function AccountsPage({
                         <td>{premium != null ? fmtUsd(premium) : '—'}</td>
                         <td>{intrinsic != null ? fmtUsd(intrinsic) : '—'}</td>
                         <td>{moneyness}</td>
+                        <td>{(pos as { strategy_opportunity_name?: string | null }).strategy_opportunity_name?.trim() ?? '—'}</td>
+                        <td>{(pos as { strategy_instance_label?: string | null }).strategy_instance_label?.trim() ?? '—'}</td>
                       </tr>
                     )
                   })}

@@ -13,6 +13,7 @@ from servers.reader import executions as executions_module
 from servers.reader import gate_safety as gate_safety_module
 from servers.reader import market as market_module
 from servers.reader import strategy as strategy_module
+from servers.reader import strategy_instance as strategy_instance_module
 from servers.reader import structure_type_config as structure_type_config_module
 from servers.reader import position_categories as position_categories_module
 from servers.reader import settings as settings_module
@@ -346,6 +347,57 @@ class StatusReader:
             limit=limit,
         )
 
+    def list_strategy_instances(
+        self,
+        account_id: Optional[str] = None,
+        strategy_opportunity_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return strategy_instance rows, optionally filtered by account_id and/or strategy_opportunity_id."""
+        if not self._connect():
+            return []
+        return strategy_instance_module.list_instances(
+            self._conn, account_id=account_id, strategy_opportunity_id=strategy_opportunity_id
+        )
+
+    def get_strategy_instance_by_id(self, strategy_instance_id: int) -> Optional[Dict[str, Any]]:
+        """Return one strategy_instance by id. None if not found."""
+        if not self._connect():
+            return None
+        return strategy_instance_module.get_instance_by_id(self._conn, strategy_instance_id)
+
+    def create_strategy_instance(
+        self,
+        strategy_opportunity_id: int,
+        account_id: str,
+        opened_at: Any,
+        label: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Optional[int]:
+        """Insert one strategy_instance. Returns strategy_instance_id or None."""
+        if not self._connect():
+            return None
+        return strategy_instance_module.create_instance(
+            self._conn,
+            strategy_opportunity_id=strategy_opportunity_id,
+            account_id=account_id,
+            opened_at=opened_at,
+            label=label,
+            notes=notes,
+        )
+
+    def update_strategy_instance(
+        self,
+        strategy_instance_id: int,
+        label: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> bool:
+        """Update label/notes of a strategy instance. Returns True if updated."""
+        if not self._connect():
+            return False
+        return strategy_instance_module.update_instance(
+            self._conn, strategy_instance_id, label=label, notes=notes
+        )
+
     # --- Risk (delegate to status module) ---
     def get_risk_summary(self) -> Dict[str, Any]:
         if not self._connect():
@@ -370,10 +422,20 @@ class StatusReader:
         until_ts: Optional[float] = None,
         account_id: Optional[str] = None,
         limit: Optional[int] = 200,
+        strategy_opportunity_id: Optional[int] = None,
+        strategy_instance_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return executions_module.get_executions(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        return executions_module.get_executions(
+            self._conn,
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            limit=limit,
+            strategy_opportunity_id=strategy_opportunity_id,
+            strategy_instance_id=strategy_instance_id,
+        )
 
     def get_executions_freshness(self) -> List[Dict[str, Any]]:
         if not self._connect():
@@ -396,10 +458,20 @@ class StatusReader:
         until_ts: Optional[float] = None,
         account_id: Optional[str] = None,
         limit: int = 200,
+        strategy_opportunity_id: Optional[int] = None,
+        strategy_instance_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         if not self._connect():
             return {"executions": [], "opt_pairs": []}
-        return executions_module.get_executions_with_opt_pairs(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        return executions_module.get_executions_with_opt_pairs(
+            self._conn,
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            limit=limit,
+            strategy_opportunity_id=strategy_opportunity_id,
+            strategy_instance_id=strategy_instance_id,
+        )
 
     def get_executions_with_opt_pairs_single_query(
         self,
@@ -439,10 +511,20 @@ class StatusReader:
         until_ts: Optional[float] = None,
         account_id: Optional[str] = None,
         granularity: str = "day",
+        strategy_opportunity_id: Optional[int] = None,
+        strategy_instance_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         if not self._connect():
             return {}
-        return executions_module.get_performance_stats(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, granularity=granularity)
+        return executions_module.get_performance_stats(
+            self._conn,
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            granularity=granularity,
+            strategy_opportunity_id=strategy_opportunity_id,
+            strategy_instance_id=strategy_instance_id,
+        )
 
     # --- Position categories (delegate to position_categories module) ---
     def get_position_categories(self) -> List[Dict[str, Any]]:

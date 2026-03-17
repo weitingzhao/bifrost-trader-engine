@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { Execution } from '../../types'
-import { createExecution, updateExecution } from '../../api'
+import type { StrategyOpportunity } from '../../api'
+import type { StrategyInstance } from '../../types'
+import { createExecution, updateExecution, fetchOpportunities, fetchStrategyInstances } from '../../api'
 import { unixToDatetimeLocal } from '../../utils/format'
 
 export interface ExecutionFormState {
@@ -17,6 +19,8 @@ export interface ExecutionFormState {
   commission: string
   realized_pnl: string
   currency: string
+  strategy_opportunity_id: string
+  strategy_instance_id: string
 }
 
 const defaultForm: ExecutionFormState = {
@@ -33,6 +37,8 @@ const defaultForm: ExecutionFormState = {
   commission: '',
   realized_pnl: '',
   currency: 'USD',
+  strategy_opportunity_id: '',
+  strategy_instance_id: '',
 }
 
 function datetimeLocalToUnix(value: string): number {
@@ -57,6 +63,27 @@ export function ExecutionFormModal({
 }: ExecutionFormModalProps) {
   const [execForm, setExecForm] = useState<ExecutionFormState>(defaultForm)
   const [execFormError, setExecFormError] = useState<string | null>(null)
+  const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
+  const [instances, setInstances] = useState<StrategyInstance[]>([])
+
+  useEffect(() => {
+    if (open) {
+      fetchOpportunities(true)
+        .then(r => setOpportunities(r.items ?? []))
+        .catch(() => setOpportunities([]))
+    }
+  }, [open])
+
+  const oppIdForm = execForm.strategy_opportunity_id.trim() ? Number(execForm.strategy_opportunity_id) : null
+  useEffect(() => {
+    if (!open || oppIdForm == null || !Number.isFinite(oppIdForm)) {
+      setInstances([])
+      return
+    }
+    fetchStrategyInstances({ strategy_opportunity_id: oppIdForm })
+      .then(r => setInstances(r.items ?? []))
+      .catch(() => setInstances([]))
+  }, [open, oppIdForm])
 
   useEffect(() => {
     if (open && accountOptions.length > 0 && !editExec) {
@@ -84,6 +111,8 @@ export function ExecutionFormModal({
         commission: String(editExec.commission ?? ''),
         realized_pnl: String(editExec.realized_pnl ?? ''),
         currency: editExec.currency ?? 'USD',
+        strategy_opportunity_id: editExec.strategy_opportunity_id != null ? String(editExec.strategy_opportunity_id) : '',
+        strategy_instance_id: editExec.strategy_instance_id != null ? String(editExec.strategy_instance_id) : '',
       })
     }
   }, [editExec])
@@ -151,6 +180,8 @@ export function ExecutionFormModal({
                 commission: execForm.commission ? Number(execForm.commission) : undefined,
                 realized_pnl: execForm.realized_pnl ? Number(execForm.realized_pnl) : undefined,
                 currency: execForm.currency.trim() || undefined,
+                strategy_opportunity_id: execForm.strategy_opportunity_id && Number.isFinite(Number(execForm.strategy_opportunity_id)) ? Number(execForm.strategy_opportunity_id) : undefined,
+                strategy_instance_id: execForm.strategy_instance_id && Number.isFinite(Number(execForm.strategy_instance_id)) ? Number(execForm.strategy_instance_id) : undefined,
               }
               const expiryTrimmed = execForm.expiry.trim()
               if (isOpt && expiryTrimmed && /^\d{6,8}$/.test(expiryTrimmed)) {
@@ -180,6 +211,8 @@ export function ExecutionFormModal({
                 commission: execForm.commission ? Number(execForm.commission) : undefined,
                 realized_pnl: execForm.realized_pnl ? Number(execForm.realized_pnl) : undefined,
                 currency: execForm.currency.trim() || undefined,
+                strategy_opportunity_id: execForm.strategy_opportunity_id && Number.isFinite(Number(execForm.strategy_opportunity_id)) ? Number(execForm.strategy_opportunity_id) : undefined,
+                strategy_instance_id: execForm.strategy_instance_id && Number.isFinite(Number(execForm.strategy_instance_id)) ? Number(execForm.strategy_instance_id) : undefined,
               }
               const res = await createExecution(body)
               if (res.ok) {
@@ -201,6 +234,35 @@ export function ExecutionFormModal({
               {accountOptions.map(accId => (
                 <option key={accId} value={accId}>
                   {accId}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Strategy (optional)</label>
+            <select
+              value={execForm.strategy_opportunity_id}
+              onChange={e => setExecForm(f => ({ ...f, strategy_opportunity_id: e.target.value, strategy_instance_id: '' }))}
+            >
+              <option value="">—</option>
+              {opportunities.map(o => (
+                <option key={o.strategy_opportunity_id} value={String(o.strategy_opportunity_id)}>
+                  {o.name ?? `#${o.strategy_opportunity_id}`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="replay-exec-form-row">
+            <label>Instance (optional)</label>
+            <select
+              value={execForm.strategy_instance_id}
+              onChange={e => setExecForm(f => ({ ...f, strategy_instance_id: e.target.value }))}
+              disabled={!execForm.strategy_opportunity_id}
+            >
+              <option value="">—</option>
+              {instances.map(si => (
+                <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
+                  {si.label?.trim() || `#${si.strategy_instance_id} ${si.opened_at}`}
                 </option>
               ))}
             </select>

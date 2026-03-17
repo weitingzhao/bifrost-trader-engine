@@ -468,18 +468,31 @@ export function StrategyOpportunityPage({
 
             <div className="gates-form-group">
               <h4 className="gates-form-group-title">Symbol scope</h4>
-              <div className="gates-form-row">
-                <label>Scope type</label>
-                <select
-                  value={oppFormPayload.scope_type ?? ''}
-                  onChange={(e) => setOppFormPayload((p) => ({ ...p, scope_type: e.target.value || null }))}
-                >
-                  {SCOPE_TYPES.map((t) => (
-                    <option key={t || '_none'} value={t}>
-                      {getScopeTypeLabel(t)}
-                    </option>
-                  ))}
-                </select>
+              <div className="gates-form-row scope-type-switches-row">
+                <span className="gates-form-row-label">Scope type</span>
+                <div className="scope-type-switches" role="radiogroup" aria-label="Scope type">
+                  {SCOPE_TYPES.map((t) => {
+                    const value = t || ''
+                    const checked = (oppFormPayload.scope_type ?? '') === value
+                    return (
+                      <label
+                        key={t || '_none'}
+                        className="toggle-switch scope-type-switch-option"
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <input
+                          type="radio"
+                          name="opp_scope_type"
+                          value={value}
+                          checked={checked}
+                          onChange={() => setOppFormPayload((p) => ({ ...p, scope_type: value || null }))}
+                          aria-label={getScopeTypeLabel(t)}
+                        />
+                        <span className="toggle-switch-caption">{getScopeTypeLabel(t)}</span>
+                      </label>
+                    )
+                  })}
+                </div>
               </div>
               {oppFormPayload.scope_type === 'explicit_symbols' && (
                 <>

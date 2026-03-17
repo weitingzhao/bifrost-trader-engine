@@ -100,6 +100,13 @@ export {
   updateGateSafety,
   postActiveStrategy,
 } from './strategies'
+export {
+  fetchStrategyInstances,
+  fetchStrategyInstance,
+  createStrategyInstance,
+  updateStrategyInstance,
+} from './strategyInstances'
+export type { StrategyInstancesParams, CreateStrategyInstancePayload } from './strategyInstances'
 export type {
   StrategyStructure,
   StructureLeg,

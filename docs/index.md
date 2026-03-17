@@ -39,7 +39,7 @@ Cursor 规则 **.cursor/rules/project-workflow.mdc** 引用上述工作流；Age
 
 | 文档 | 说明 |
 |------|------|
-| **[数据库设计（PostgreSQL）](DATABASE.md)** | 与 PostgreSQL 交互的唯一设计说明：连接配置、表结构（daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations、daemon_control 等）、写入策略、阶段预留与变更记录 |
+| **[数据库设计（PostgreSQL）](DATABASE.md)** | 与 PostgreSQL 交互的唯一设计说明：连接配置、表结构（daemon_auto_status_current、daemon_auto_status_history、daemon_auto_operations、daemon_control 等）、写入策略、阶段预留与变更记录。**策略实例与交易归属**：表结构见 §2.24.11；步骤与验收见 [PLAN_NEXT_STEPS](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。 |
 | **[FSM 状态流转](fsm/linkage.md)** | Daemon、Trading、Hedge 三状态机图示与串联说明 |
 | **[状态空间](research/STATE_SPACE_MAPPING.md)** | O、D、M、L、E、S 与代码/配置的对应关系 |
 | **[配置安全分类（风险模型）](research/CONFIG_SAFETY_TAXONOMY.md)** | 配置中的安全边界分类与风险维度 |

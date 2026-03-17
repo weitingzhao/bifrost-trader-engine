@@ -100,4 +100,12 @@
 
 ---
 
+## 六、交易归属与策略实例（Strategy Instance & Trade Attribution）
+
+**状态**：待实现（SI.1–SI.4）。  
+**设计**：[DATABASE.md](../DATABASE.md) §2.24.11（表 strategy_instance；account_positions、account_executions 增加 strategy_opportunity_id、strategy_instance_id）。  
+**步骤与验收**：[PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+
+---
+
 *文档基于当前代码与 docs 整理，日期：2026-03-14。*

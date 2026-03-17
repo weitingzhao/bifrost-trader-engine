@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Execution, OptExecutionGroup, StatusResponse } from '../../types'
-import { deleteExecution } from '../../api'
+import type { StrategyOpportunity } from '../../api'
+import type { StrategyInstance } from '../../types'
+import { deleteExecution, fetchOpportunities, fetchStrategyInstances } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
   fmtExpiry,
@@ -26,7 +28,35 @@ function getOptGroupKey(g: OptExecutionGroup): string {
 }
 
 export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewProps) {
-  const { executions, loadReplayData, executionAccountOptions } = useExecutions(status)
+  const [ledgerFilterStrategyOpportunityId, setLedgerFilterStrategyOpportunityId] = useState<number | ''>('')
+  const [ledgerFilterStrategyInstanceId, setLedgerFilterStrategyInstanceId] = useState<number | ''>('')
+  const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
+  const [instances, setInstances] = useState<StrategyInstance[]>([])
+
+  const strategyFilters = useMemo(
+    () => ({
+      strategy_opportunity_id: ledgerFilterStrategyOpportunityId === '' ? undefined : ledgerFilterStrategyOpportunityId,
+      strategy_instance_id: ledgerFilterStrategyInstanceId === '' ? undefined : ledgerFilterStrategyInstanceId,
+    }),
+    [ledgerFilterStrategyOpportunityId, ledgerFilterStrategyInstanceId],
+  )
+  const { executions, loadReplayData, executionAccountOptions } = useExecutions(status, strategyFilters)
+
+  useEffect(() => {
+    fetchOpportunities(true)
+      .then(r => setOpportunities(r.items ?? []))
+      .catch(() => setOpportunities([]))
+  }, [])
+  const oppIdNum = ledgerFilterStrategyOpportunityId === '' ? null : Number(ledgerFilterStrategyOpportunityId)
+  useEffect(() => {
+    if (oppIdNum == null || !Number.isFinite(oppIdNum)) {
+      setInstances([])
+      return
+    }
+    fetchStrategyInstances({ strategy_opportunity_id: oppIdNum })
+      .then(r => setInstances(r.items ?? []))
+      .catch(() => setInstances([]))
+  }, [oppIdNum])
 
   const [ledgerFilterSymbol, setLedgerFilterSymbol] = useState('')
   const [ledgerFilterExpiryStart, setLedgerFilterExpiryStart] = useState('')
@@ -372,6 +402,46 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
               </button>
             ))}
           </div>
+          <label className="replay-filter-label-strategy" title="Strategy (opportunity)">
+            <span className="replay-filter-label">Strategy</span>
+            <select
+              value={ledgerFilterStrategyOpportunityId === '' ? '' : String(ledgerFilterStrategyOpportunityId)}
+              onChange={e => {
+                const v = e.target.value
+                setLedgerFilterStrategyOpportunityId(v === '' ? '' : Number(v))
+                setLedgerFilterStrategyInstanceId('')
+              }}
+              className="replay-filter-input replay-filter-select"
+              aria-label="Strategy filter"
+            >
+              <option value="">All</option>
+              {opportunities.map(o => (
+                <option key={o.strategy_opportunity_id} value={String(o.strategy_opportunity_id)}>
+                  {o.name ?? `#${o.strategy_opportunity_id}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="replay-filter-label-instance" title="Instance">
+            <span className="replay-filter-label">Instance</span>
+            <select
+              value={ledgerFilterStrategyInstanceId === '' ? '' : String(ledgerFilterStrategyInstanceId)}
+              onChange={e => {
+                const v = e.target.value
+                setLedgerFilterStrategyInstanceId(v === '' ? '' : Number(v))
+              }}
+              className="replay-filter-input replay-filter-select"
+              aria-label="Instance filter"
+              disabled={ledgerFilterStrategyOpportunityId === ''}
+            >
+              <option value="">All</option>
+              {instances.map(si => (
+                <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
+                  {si.label?.trim() || `#${si.strategy_instance_id}`}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <div className="replay-portfolio-block">
           <div className="replay-portfolio-header">
@@ -491,7 +561,9 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
               No execution data. Use Overview to fetch from IB (Refresh), or Positions to add manual
               history (Add Trade).
               {[ledgerFilterSymbol, ledgerFilterExpiryStart].some(Boolean) ||
-              (ledgerFilterAccount && ledgerFilterAccount !== 'All')
+              (ledgerFilterAccount && ledgerFilterAccount !== 'All') ||
+              ledgerFilterStrategyOpportunityId !== '' ||
+              ledgerFilterStrategyInstanceId !== ''
                 ? ' Filters applied.'
                 : ''}
             </p>

@@ -1019,6 +1019,52 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 - **Allocations 层扩展预留**：后续若需策略分配（Allocations）层「当前生效」，可在 settings 增加 **active_strategy_allocation_id**（bigint REFERENCES strategy_allocation）；用于多账户/多策略组合时指定当前监控或执行的分配集；实现与验收见需求与 [plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 - **后续重构预留**：Settings 表可能重构为仅承载系统级配置；active_strategy_structure_id / active_gate_safety_strategy_id（及可选 active_strategy_allocation_id）可迁至独立表（如 runtime_strategy_config 单行表）。迁出时仅需调整 reader 与 POST /config/active-strategy 的读写目标，API 路径与请求体可保持不变。
 
+#### 2.24.11 策略实例与交易归属（Strategy Instance & Trade Attribution）
+
+- **用途**：将持仓与成交归属到**机会策略**（strategy_opportunity）与可选**策略实例**（strategy_instance），便于按策略、按单笔开仓做 PnL 与 Performance calendar；为「按策略盈亏比」提供数据基础。
+- **策略实例**：代表某条机会策略在某账户下的一次开仓；同一实例的多腿（多 contract_key）共享同一 `strategy_instance_id`。
+
+##### 2.24.11a 表 `strategy_instance`（策略实例）
+
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_instance_id | bigserial PRIMARY KEY | 主键 |
+| strategy_opportunity_id | bigint NOT NULL REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE RESTRICT | 所属机会策略 |
+| account_id | text NOT NULL | 账户标识（与 account_positions 一致） |
+| opened_at | timestamptz NOT NULL | 开仓时间（代表该实例的创建/开仓时刻） |
+| label | text | 可选标签（如 "Straddle 2025-03"） |
+| notes | text | 备注 |
+| created_at | timestamptz NOT NULL DEFAULT now() | 创建时间 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | 更新时间 |
+
+- **索引**：`(strategy_opportunity_id)`、`(account_id, opened_at)`，便于按机会、按账户查询。
+
+##### 2.24.11b `account_positions` 扩展（交易归属）
+
+- **新增列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_opportunity_id | bigint REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE SET NULL | 归属机会策略；NULL 表示未归属 |
+| strategy_instance_id | bigint REFERENCES strategy_instance(strategy_instance_id) ON DELETE SET NULL | 归属策略实例（同笔开仓多腿填同一 id）；NULL 表示未归属或仅按 opportunity 统计 |
+
+- **索引**：`(strategy_opportunity_id)`、`(strategy_instance_id)`，便于按策略/实例筛选与聚合。
+
+##### 2.24.11c `account_executions` 扩展（交易归属）
+
+- **新增列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| strategy_opportunity_id | bigint REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE SET NULL | 归属机会策略；NULL 表示未归属（历史/手动/未知） |
+| strategy_instance_id | bigint REFERENCES strategy_instance(strategy_instance_id) ON DELETE SET NULL | 归属策略实例；NULL 表示未归属或仅按 opportunity 统计 |
+
+- **索引**：`(strategy_opportunity_id)`、`(strategy_instance_id)`，便于按策略/实例筛选与 Realized PnL 聚合。
+
+- **读取**：GET /status 的 positions、GET /executions 可带出上述 id 及可选 opportunity/instance 名称；GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+
 ---
 
 ## 3. 阶段 1 写入策略
@@ -1179,6 +1225,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 策略分配（strategy_allocation）| 表 strategy_allocation、strategy_allocation_opportunity；主键 strategy_allocation_id；无 jsonb，机会列表通过关联表与 sort_order；API 请求/响应使用 allocation_limits（max_positions、max_bp_pct）。§2.24.3、§2.24.3a。 | — |
 | strategy_structure.structure_subtype | §2.24.1 表 strategy_structure 增加列 structure_subtype (text NULL)；covered_call 时存 otm/atm/itm/deep_otm，供 Edit Wizard 还原 Step 2 状态。 | — |
 | 结构类型配置表（方案 A） | 新增 6 张表：strategy_structure_type、strategy_structure_type_leg、strategy_structure_subtype、strategy_structure_subtype_characteristic、strategy_structure_subtype_meta_param、strategy_structure_subtype_rule。由 _ensure_tables 创建；初始数据由 scripts/db_init/seed_structure_type_config.py 写入。§2.24.0、§2.24.0a–f。 | — |
+| 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_positions、account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b、§2.24.11c）。步骤与验收见 PLAN_NEXT_STEPS「策略实例与交易归属」。 | 阶段 3 扩展 |
 
 ---
 
