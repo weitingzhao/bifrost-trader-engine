@@ -24,6 +24,8 @@ import {
   getDefaultFlexRows,
   IB_CONNECTION_SUBSECTIONS,
   SETTINGS_SECTIONS,
+  STATUS_SECTIONS,
+  CONFIG_SECTIONS,
 } from './settings/settingsConstants'
 import { SettingsSectionIcon } from './settings/SettingsSectionIcon'
 import { HeartbeatSection } from './settings/HeartbeatSection'
@@ -256,52 +258,68 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
   return (
     <div className="settings-page">
       <nav className="settings-sidebar" aria-label="Settings sections">
-        {SETTINGS_SECTIONS.map(({ id, label, icon }) => {
-          if (id !== 'settings-ib-connection') {
-            return (
-              <a
-                key={id}
-                href={`#${id}`}
-                className={`settings-sidebar-link ${activeSectionId === id ? 'active' : ''}`}
-              >
-                <SettingsSectionIcon name={icon} />
-                {label}
-              </a>
-            )
-          }
-          return (
-            <div key={id} className="settings-sidebar-group">
-              <div className={`settings-sidebar-parent ${activeSectionId === id ? 'active' : ''}`}>
-                <a href={`#${id}`} className="settings-sidebar-parent-label">
+        <div className="settings-sidebar-group-block" role="group" aria-label="Status">
+          <div className="settings-sidebar-group-label">Status</div>
+          {STATUS_SECTIONS.map(({ id, label, icon }) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className={`settings-sidebar-link ${activeSectionId === id ? 'active' : ''}`}
+            >
+              <SettingsSectionIcon name={icon} />
+              {label}
+            </a>
+          ))}
+        </div>
+        <div className="settings-sidebar-group-block" role="group" aria-label="Configuration">
+          <div className="settings-sidebar-group-label">Configuration</div>
+          {CONFIG_SECTIONS.map(({ id, label, icon }) => {
+            if (id !== 'settings-ib-connection') {
+              return (
+                <a
+                  key={id}
+                  href={`#${id}`}
+                  className={`settings-sidebar-link ${activeSectionId === id ? 'active' : ''}`}
+                >
                   <SettingsSectionIcon name={icon} />
                   {label}
                 </a>
-                <button
-                  type="button"
-                  className={`settings-sidebar-chevron ${ibConnectionExpanded ? 'expanded' : ''}`}
-                  onClick={() => setIbConnectionExpanded((e) => !e)}
-                  aria-expanded={ibConnectionExpanded}
-                  aria-controls="settings-ib-connection-subs"
-                  aria-label={ibConnectionExpanded ? 'Collapse IB Configure' : 'Expand IB Configure'}
-                >
-                  ▼
-                </button>
-              </div>
-              <div id="settings-ib-connection-subs" className="settings-sidebar-subs" hidden={!ibConnectionExpanded}>
-                {IB_CONNECTION_SUBSECTIONS.map((sub) => (
-                  <a
-                    key={sub.id}
-                    href={`#${sub.id}`}
-                    className={`settings-sidebar-link settings-sidebar-link-sub ${activeSubId === sub.id ? 'active' : ''}`}
-                  >
-                    <SettingsSectionIcon name={sub.icon} />
-                    {sub.label}
+              )
+            }
+            return (
+              <div key={id} className="settings-sidebar-group">
+                <div className={`settings-sidebar-parent ${activeSectionId === id ? 'active' : ''}`}>
+                  <a href={`#${id}`} className="settings-sidebar-parent-label">
+                    <SettingsSectionIcon name={icon} />
+                    {label}
                   </a>
-                ))}
+                  <button
+                    type="button"
+                    className={`settings-sidebar-chevron ${ibConnectionExpanded ? 'expanded' : ''}`}
+                    onClick={() => setIbConnectionExpanded((e) => !e)}
+                    aria-expanded={ibConnectionExpanded}
+                    aria-controls="settings-ib-connection-subs"
+                    aria-label={ibConnectionExpanded ? 'Collapse IB Configure' : 'Expand IB Configure'}
+                  >
+                    ▼
+                  </button>
+                </div>
+                <div id="settings-ib-connection-subs" className="settings-sidebar-subs" hidden={!ibConnectionExpanded}>
+                  {IB_CONNECTION_SUBSECTIONS.map((sub) => (
+                    <a
+                      key={sub.id}
+                      href={`#${sub.id}`}
+                      className={`settings-sidebar-link settings-sidebar-link-sub ${activeSubId === sub.id ? 'active' : ''}`}
+                    >
+                      <SettingsSectionIcon name={sub.icon} />
+                      {sub.label}
+                    </a>
+                  ))}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </nav>
       <div className="settings-main">
         {isSystemSection ? (

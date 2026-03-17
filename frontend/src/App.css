@@ -210,6 +210,94 @@ body::before {
   flex-shrink: 0;
 }
 
+/* Daemon / Management: same pill as Queue — lamp (hover shows name link) + Stop wrapped together */
+.app-header-lamp-stop-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+  font-size: var(--text-caption);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.app-header-lamp-stop-group:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+.app-header-lamp-stop-lamp-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: default;
+}
+.app-header-lamp-stop-group .lamp {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.app-header-lamp-stop-group .lamp-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-lamp-none);
+}
+.app-header-lamp-stop-group .lamp-icon.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 5px var(--color-lamp-green));
+}
+.app-header-lamp-stop-group .lamp-icon.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow));
+}
+.app-header-lamp-stop-group .lamp-icon.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 5px var(--color-lamp-red));
+}
+.app-header-lamp-stop-group .lamp-icon svg {
+  stroke: currentColor;
+  fill: currentColor;
+}
+.app-header-lamp-stop-group .lamp-icon svg[fill="none"] {
+  fill: none;
+}
+.app-header-lamp-stop-group .app-header-lamp-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.app-header-lamp-stop-group .app-header-lamp-switch:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+.app-header-lamp-stop-group .app-header-lamp-switch:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.app-header-lamp-stop-group .app-header-queue-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--color-text-main);
+  min-width: 1.25rem;
+  text-align: right;
+}
+
 /* Celery in header: reuse Dashboard Queue pill style (dashboard-worker-counts) */
 .app-header-system-lamps-wrap .dashboard-worker-counts {
   margin: 0;
@@ -291,20 +379,34 @@ body::before {
   color: var(--color-danger);
 }
 
+/* System Status row: same padding as .app-header-menu-item so "System Status" and "Settings" text align */
 .app-header-menu-row-system {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-3);
-  margin-bottom: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  margin: 0;
+  border-radius: 6px;
+  min-height: 0;
+  transition: background var(--transition-fast);
+}
+.app-header-menu-row-system:hover .app-header-menu-item-system {
+  color: var(--color-accent);
+}
+.app-header-menu-row-system.active {
+  font-weight: 600;
+  background: var(--color-accent-soft);
+}
+.app-header-menu-row-system.active .app-header-menu-item-system {
+  color: var(--color-accent);
 }
 .app-header-menu-item-system {
   flex: 1;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) 0;
+  padding: 0;
   border: none;
   background: transparent;
   font-family: var(--font-sans);
@@ -312,6 +414,8 @@ body::before {
   color: var(--color-text-main);
   cursor: pointer;
   text-align: left;
+  border-radius: 6px;
+  transition: color var(--transition-fast);
 }
 .app-header-menu-item-system:hover {
   color: var(--color-accent);
@@ -321,8 +425,35 @@ body::before {
   height: 10px;
   flex-shrink: 0;
 }
+/* Match Settings icon size (18px) so label text aligns with "Settings" */
+.app-header-menu-item-system .app-header-menu-system-lamp {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-header-menu-item-system .app-header-menu-system-lamp svg {
+  width: 14px;
+  height: 14px;
+}
 .app-header-menu-shutdown {
   flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.app-header-menu-shutdown:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+.app-header-menu-shutdown:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .app-header-system-dropdown {
@@ -568,6 +699,40 @@ body::before {
   flex-shrink: 0;
 }
 
+/* Live / Strategy tab: same lamp-icon effect as header (icon + color + glow) */
+.app-tab .app-tab-lamp-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-lamp-none);
+}
+.app-tab .app-tab-lamp-icon.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 5px var(--color-lamp-green));
+}
+.app-tab .app-tab-lamp-icon.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow));
+}
+.app-tab .app-tab-lamp-icon.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 5px var(--color-lamp-red));
+}
+.app-tab .app-tab-lamp-icon.none {
+  color: var(--color-lamp-none);
+  filter: none;
+}
+.app-tab .app-tab-lamp-icon svg {
+  stroke: currentColor;
+  fill: currentColor;
+}
+.app-tab .app-tab-lamp-icon svg[fill="none"] {
+  fill: none;
+}
+
 .app-tab-icon {
   flex-shrink: 0;
   margin-right: var(--space-1);
@@ -769,7 +934,9 @@ body::before {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  flex: 1;
+}
+.event-subscribe-status-cell .title-inline-lamp {
+  flex-shrink: 0;
 }
 
 .event-subscribe-ticker-marquee {
@@ -1131,7 +1298,14 @@ body::before {
   color: var(--color-text-main);
   border-bottom-color: var(--color-accent);
 }
-.system-tab .lamp {
+.system-tab .lamp,
+.system-tab .title-inline-lamp {
+  flex-shrink: 0;
+}
+.daemon-group-header .title-inline-lamp {
+  flex-shrink: 0;
+}
+.strategy-compact-header .title-inline-lamp {
   flex-shrink: 0;
 }
 .system-tab-panel {
@@ -1402,6 +1576,47 @@ body::before {
 .dashboard-streams-inline .lamp-sm {
   margin-right: 0;
   flex-shrink: 0;
+}
+
+/* Dashboard strip: same lamp-icon effect (icon + color + glow) as header/tabs */
+.dashboard-open-orders-btn .lamp-icon,
+.dashboard-streams-inline .lamp-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-lamp-none);
+}
+.dashboard-open-orders-btn .lamp-icon.green,
+.dashboard-streams-inline .lamp-icon.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 5px var(--color-lamp-green));
+}
+.dashboard-open-orders-btn .lamp-icon.yellow,
+.dashboard-streams-inline .lamp-icon.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow));
+}
+.dashboard-open-orders-btn .lamp-icon.red,
+.dashboard-streams-inline .lamp-icon.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 5px var(--color-lamp-red));
+}
+.dashboard-open-orders-btn .lamp-icon.none,
+.dashboard-streams-inline .lamp-icon.none {
+  color: var(--color-lamp-none);
+  filter: none;
+}
+.dashboard-open-orders-btn .lamp-icon svg,
+.dashboard-streams-inline .lamp-icon svg {
+  stroke: currentColor;
+  fill: currentColor;
+}
+.dashboard-open-orders-btn .lamp-icon svg[fill="none"],
+.dashboard-streams-inline .lamp-icon svg[fill="none"] {
+  fill: none;
 }
 
 .dashboard-streams-marquee {
@@ -1881,22 +2096,29 @@ body::before {
   min-width: 0;
 }
 
-/* Lamp left of title + status so it spans two rows */
+/* Lamp left of title + status: top-align icon with label */
 .daemon-header-with-lamp {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   gap: var(--space-2);
+}
+/* Group section label + status icon (icon after label); center-align */
+.section-header-lamp-label-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 .daemon-header-main.daemon-header-with-lamp {
   flex: 1;
   min-width: 0;
 }
 .lamp-wrap-span {
-  width: 12px;
+  width: 14px;
   flex-shrink: 0;
-  align-self: stretch;
   display: flex;
   justify-content: center;
+  align-items: center;
 }
 .lamp-wrap-span .lamp {
   width: 100%;
@@ -1904,11 +2126,136 @@ body::before {
   min-height: 12px;
   border-radius: 999px;
 }
+/* Live page section headers: same lamp-icon effect (icon + color + glow) */
+.lamp-wrap-span .lamp-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-lamp-none);
+}
+.lamp-wrap-span .lamp-icon.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 5px var(--color-lamp-green));
+}
+.lamp-wrap-span .lamp-icon.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow));
+}
+.lamp-wrap-span .lamp-icon.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 5px var(--color-lamp-red));
+}
+.lamp-wrap-span .lamp-icon.none {
+  color: var(--color-lamp-none);
+  filter: none;
+}
+.lamp-wrap-span .lamp-icon svg {
+  stroke: currentColor;
+  fill: currentColor;
+}
+.lamp-wrap-span .lamp-icon svg[fill="none"] {
+  fill: none;
+}
 .daemon-card-title {
   margin: 0 0 0.25rem 0;
   font-size: 1.25rem;
   font-weight: 600;
   line-height: 1.3;
+}
+
+/* Small icon button for section headers (e.g. Refresh next to Market Streams) */
+.section-header-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.section-header-icon-btn:hover {
+  background: var(--color-surface-hover, rgba(128, 128, 128, 0.08));
+  border-color: var(--color-border-strong);
+}
+.section-header-icon-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.section-header-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Danger variant (Stop, Shutdown) — same shape as section-header-icon-btn */
+.section-header-icon-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-danger);
+  border-radius: 8px;
+  background: var(--color-danger);
+  color: #fff;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+.section-header-icon-btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+.section-header-icon-btn-danger:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.section-header-icon-btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Transparent button, red icon (e.g. Daemon Stop) */
+.section-header-icon-btn.section-header-icon-btn-danger-outline {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-border);
+  color: var(--color-danger);
+}
+.section-header-icon-btn.section-header-icon-btn-danger-outline:hover:not(:disabled) {
+  background: var(--color-surface-hover, rgba(128, 128, 128, 0.08));
+  border-color: var(--color-border-strong);
+  color: var(--color-danger);
+}
+.section-header-icon-btn.section-header-icon-btn-danger-outline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Trading Strategy: Manage / Resume / Suspend — same shape, colored icon */
+.section-header-icon-btn.strategy-btn-manage {
+  color: var(--color-accent);
+}
+.section-header-icon-btn.strategy-btn-manage:hover:not(:disabled) {
+  color: var(--color-accent);
+}
+.section-header-icon-btn.strategy-btn-resume {
+  color: var(--color-lamp-green);
+}
+.section-header-icon-btn.strategy-btn-resume:hover:not(:disabled) {
+  color: var(--color-lamp-green);
+}
+.section-header-icon-btn.strategy-btn-suspend {
+  color: var(--color-warning);
+}
+.section-header-icon-btn.strategy-btn-suspend:hover:not(:disabled) {
+  color: var(--color-warning);
 }
 
 .daemon-header-meta {
@@ -2617,6 +2964,21 @@ button:disabled {
   background: #dc2626;
 }
 
+/* System Status: icon-only buttons (Stop, Shutdown, Release, Reset) */
+.btn-stop.btn-icon-only,
+.btn-shutdown-all.btn-icon-only,
+.btn-retry-ib.btn-icon-only,
+.btn-resume.btn-icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  min-width: 28px;
+  min-height: 28px;
+}
+
 /* Data page: Reset button (red, destructive) */
 .btn-reset {
   background: var(--color-danger);
@@ -3186,6 +3548,24 @@ button:disabled {
   align-self: flex-start;
 }
 
+.settings-sidebar-group-block {
+  margin-bottom: var(--space-4);
+}
+.settings-sidebar-group-block:last-child {
+  margin-bottom: 0;
+}
+
+.settings-sidebar-group-label {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-2);
+  display: block;
+}
+
 .settings-sidebar-link {
   display: flex;
   align-items: center;
@@ -3418,6 +3798,42 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Status lamp inline in title (same row as "?" help icon) */
+.title-inline-lamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  color: var(--color-lamp-none);
+}
+.title-inline-lamp.green {
+  color: var(--color-lamp-green);
+  filter: drop-shadow(0 0 4px var(--color-lamp-green));
+}
+.title-inline-lamp.yellow {
+  color: var(--color-lamp-yellow);
+  filter: drop-shadow(0 0 4px var(--color-lamp-yellow));
+}
+.title-inline-lamp.red {
+  color: var(--color-lamp-red);
+  filter: drop-shadow(0 0 4px var(--color-lamp-red));
+}
+.title-inline-lamp.none {
+  color: var(--color-lamp-none);
+  filter: none;
+}
+.title-inline-lamp svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  fill: currentColor;
+}
+.title-inline-lamp svg[fill="none"] {
+  fill: none;
 }
 
 .page-title-breadcrumb-link {

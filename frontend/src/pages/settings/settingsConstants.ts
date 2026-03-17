@@ -9,12 +9,20 @@ export const DEFAULT_BARS_FETCH = 101
 export const DEFAULT_WORKER = 500
 export const DEFAULT_HEARTBEAT_SEC = 10
 
-export const SETTINGS_SECTIONS = [
-  { id: 'settings-system', label: 'System', icon: 'system' },
-  { id: 'settings-heartbeat', label: 'Daemon App', icon: 'heartbeat' },
-  { id: 'settings-ib-connection', label: 'IB Configure', icon: 'plug' },
-  { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' },
+/** Status / read-only view (sidebar group: Status). */
+export const STATUS_SECTIONS = [
+  { id: 'settings-system', label: 'System Status', icon: 'system' as const },
 ] as const
+
+/** Editable app config (sidebar group: Configuration). */
+export const CONFIG_SECTIONS = [
+  { id: 'settings-heartbeat', label: 'Daemon App', icon: 'heartbeat' as const },
+  { id: 'settings-ib-connection', label: 'IB Configure', icon: 'plug' as const },
+  { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' as const },
+] as const
+
+/** All sections in sidebar order (Status first, then Configuration). Used for hash fallback etc. */
+export const SETTINGS_SECTIONS = [...STATUS_SECTIONS, ...CONFIG_SECTIONS] as const
 
 /** Sub-anchors for IB Configure: table groups + Flex Preference (under IB Preference section). */
 export const IB_CONNECTION_SUBSECTIONS = [

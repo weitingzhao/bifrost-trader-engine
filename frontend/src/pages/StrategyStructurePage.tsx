@@ -1271,6 +1271,36 @@ export function StrategyStructurePage({
                       </table>
                     </div>
                   </div>
+                  <div className="gates-form-group">
+                    <h4 className="gates-form-group-title">Constraints</h4>
+                    {formConstraints.map((c, i) => (
+                      <div key={i} className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          value={c.constraint_type ?? ''}
+                          onChange={(e) => updateConstraint(i, { constraint_type: e.target.value })}
+                          placeholder="constraint_type"
+                          style={{ width: '160px' }}
+                        />
+                        <input
+                          type="text"
+                          value={c.constraint_value_text ?? ''}
+                          onChange={(e) => updateConstraint(i, { constraint_value_text: e.target.value })}
+                          placeholder="value (text)"
+                          style={{ width: '120px' }}
+                        />
+                        <input
+                          type="number"
+                          value={c.constraint_value_int ?? ''}
+                          onChange={(e) => updateConstraint(i, { constraint_value_int: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
+                          placeholder="value (int)"
+                          style={{ width: '80px' }}
+                        />
+                        <button type="button" className="btn-secondary" onClick={() => removeConstraint(i)}>Remove</button>
+                      </div>
+                    ))}
+                    <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addConstraint}>Add constraint</button>
+                  </div>
                 </div>
               )}
 

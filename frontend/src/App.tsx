@@ -81,7 +81,13 @@ function DashboardStrip({
             aria-label="Open orders"
             title="View open orders on Live page"
           >
-            {openOrdersLamp != null && <span className={`lamp lamp-sm ${openOrdersLamp}`} aria-hidden title={openOrdersLamp === 'green' ? 'Daemon alive; open orders data available' : 'Daemon down or no data'} />}
+            {openOrdersLamp != null && (
+              <span className={`lamp-icon ${openOrdersLamp}`} aria-hidden title={openOrdersLamp === 'green' ? 'Daemon alive; open orders data available' : 'Daemon down or no data'}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                </svg>
+              </span>
+            )}
             <span className="dashboard-open-orders-label">Open orders</span>
             <span className="dashboard-open-orders-value">{openOrderCount}</span>
           </button>
@@ -94,7 +100,11 @@ function DashboardStrip({
             aria-label="Go to Live page"
             title="Go to Live page"
           >
-            <span className={`lamp lamp-sm ${streamLamp}`} aria-hidden />
+            <span className={`lamp-icon ${streamLamp}`} aria-hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+              </svg>
+            </span>
             <div className="dashboard-streams-marquee">
               <div className="dashboard-streams-track">
                 {tickerItems.map((item, index) => (
@@ -157,6 +167,25 @@ export default function App() {
   const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
+
+  /** When on Settings tab: which section is shown (system vs config). Drives header menu highlight. */
+  const hashToSettingsViewSection = useCallback((hash: string): 'system' | 'config' => {
+    const h = (hash.startsWith('#') ? hash.slice(1) : hash).trim()
+    if (!h) return 'system'
+    return h.startsWith('settings-system') ? 'system' : 'config'
+  }, [])
+  const [settingsViewSection, setSettingsViewSection] = useState<'system' | 'config' | null>(null)
+
+  useEffect(() => {
+    if (activeTab !== 'settings') {
+      setSettingsViewSection(null)
+      return
+    }
+    setSettingsViewSection(hashToSettingsViewSection(window.location.hash))
+    const onHashChange = () => setSettingsViewSection(hashToSettingsViewSection(window.location.hash))
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [activeTab, hashToSettingsViewSection])
 
   useEffect(() => {
     if (!headerMenuOpen) return
@@ -523,6 +552,12 @@ export default function App() {
     window.location.hash = '#settings-system'
   }
 
+  /** Open Settings → first Configuration section (Daemon App). Used by header menu "Settings". */
+  const openSettingsToConfiguration = () => {
+    setActiveTab('settings')
+    window.location.hash = '#settings-heartbeat'
+  }
+
   /** Open Settings → System and scroll to a specific section (daemon / monitor / celery). */
   const openSystemInSettingsToSection = (section: 'daemon' | 'monitor' | 'celery') => {
     setActiveTab('settings')
@@ -574,8 +609,15 @@ export default function App() {
       onClick={() => setActiveTab(id)}
       aria-current={activeTab === id ? 'page' : undefined}
     >
-      <MainTabIcon id={id} />
-      {lamp != null && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
+      {id !== 'live' && <MainTabIcon id={id} />}
+      {lamp != null && id === 'live' && (
+        <span className={`app-tab-lamp-icon lamp-icon ${lamp}`} aria-hidden>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
+            <path d="M8 5v14l11-7L8 5z" />
+          </svg>
+        </span>
+      )}
+      {lamp != null && id !== 'live' && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
       <span>{label}</span>
     </button>
   )
@@ -694,8 +736,14 @@ export default function App() {
                       aria-current={activeTab === id ? 'page' : undefined}
                       aria-haspopup="menu"
                     >
-                      <MainTabIcon id={id} />
-                      {lamp != null && <span className={`lamp lamp-sm ${lamp}`} aria-hidden />}
+                      {lamp != null && (
+                        <span className={`app-tab-lamp-icon lamp-icon ${lamp}`} aria-hidden>
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                            <path d="M2 17l10 5 10-5" />
+                          </svg>
+                        </span>
+                      )}
                       <span>{label}</span>
                       <span className="app-tab-caret" aria-hidden>▾</span>
                     </button>
@@ -727,107 +775,132 @@ export default function App() {
         </div>
         <div className="app-header-right" ref={headerMenuRef}>
           <div className="app-header-system-lamps-wrap" ref={systemLampRef}>
-            <div
-              className="app-header-lamp-cell"
-              onMouseEnter={() => openLampPopover('daemon')}
-              onMouseLeave={closeLampPopover}
-              aria-label="Daemon status"
-            >
-              <span className={`lamp lamp-sm ${(status?.daemon_lamp as LampId) ?? 'red'}`} aria-hidden />
-              {lampHoverPopover === 'daemon' && (
-                <div className="app-header-lamp-popover" role="tooltip">
-                  <button
-                    type="button"
-                    className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                    onClick={() => { openSystemInSettingsToSection('daemon'); setLampHoverPopover(null) }}
-                    title="Go to System → Daemon"
-                  >
-                    Daemon
-                  </button>
-                  <button
-                    type="button"
-                    className="app-header-lamp-switch"
-                    onClick={() => { runQuickStop(postStop, 'Stop Daemon'); setLampHoverPopover(null) }}
-                    title="Stop Daemon"
-                  >
-                    Stop
-                  </button>
-                </div>
-              )}
-            </div>
-            <div
-              className="app-header-lamp-cell"
-              onMouseEnter={() => openLampPopover('monitor')}
-              onMouseLeave={closeLampPopover}
-              aria-label="Management status"
-            >
-              <span className={`lamp lamp-sm ${(status?.monitor_lamp as LampId) ?? 'red'}`} aria-hidden />
-              {lampHoverPopover === 'monitor' && (
-                <div className="app-header-lamp-popover" role="tooltip">
-                  <button
-                    type="button"
-                    className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                    onClick={() => { openSystemInSettingsToSection('monitor'); setLampHoverPopover(null) }}
-                    title="Go to System → Management"
-                  >
-                    Management
-                  </button>
-                  <button
-                    type="button"
-                    className="app-header-lamp-switch"
-                    onClick={() => { runQuickStop(postMonitorStop, 'Stop Management'); setLampHoverPopover(null) }}
-                    title="Stop Management"
-                  >
-                    Stop
-                  </button>
-                </div>
-              )}
-            </div>
-            <div
-              className="app-header-lamp-cell"
-              onMouseEnter={() => openLampPopover('celery')}
-              onMouseLeave={closeLampPopover}
-              aria-label="Celery status"
-            >
-              <div className="dashboard-worker-counts">
-                <button
-                  type="button"
-                  className="dashboard-worker-item dashboard-worker-item-btn"
-                  onClick={openSystemInSettings}
-                  aria-label="Open System and Celery"
-                  title="Celery: same as System status (red = broker down, yellow = no workers, green = OK)"
+            <div className="app-header-lamp-stop-group" aria-label="Daemon status">
+              <div
+                className="app-header-lamp-stop-lamp-wrap"
+                onMouseEnter={() => openLampPopover('daemon')}
+                onMouseLeave={closeLampPopover}
+              >
+                <span
+                  className={`lamp-icon ${(status?.daemon_lamp as LampId) ?? 'red'}`}
+                  aria-hidden
+                  title="Daemon status"
                 >
-                  <span
-                    className={`lamp lamp-sm ${celeryLamp}`}
-                    title="Celery: red = broker not connected, yellow = no workers, green = broker + workers OK"
-                    aria-hidden
-                  />
-                  <span className="dashboard-worker-label">Queue</span>
-                  <span className="dashboard-worker-value">
-                    {workerJobPending != null ? (workerJobPending > 99 ? '99+' : String(workerJobPending)) : '—'}
-                  </span>
-                </button>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
+                    <path d="M8 5v14l11-7L8 5z" />
+                  </svg>
+                </span>
+                {lampHoverPopover === 'daemon' && (
+                  <div className="app-header-lamp-popover" role="tooltip">
+                    <button
+                      type="button"
+                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
+                      onClick={() => { openSystemInSettingsToSection('daemon'); setLampHoverPopover(null) }}
+                      title="Go to System → Daemon"
+                    >
+                      Daemon
+                    </button>
+                  </div>
+                )}
               </div>
-              {lampHoverPopover === 'celery' && (
-                <div className="app-header-lamp-popover" role="tooltip">
-                  <button
-                    type="button"
-                    className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                    onClick={() => { openSystemInSettingsToSection('celery'); setLampHoverPopover(null) }}
-                    title="Go to System → Celery"
-                  >
-                    Celery
-                  </button>
-                  <button
-                    type="button"
-                    className="app-header-lamp-switch"
-                    onClick={() => { runQuickStop(postCeleryStop, 'Stop Celery'); setLampHoverPopover(null) }}
-                    title="Stop Celery"
-                  >
-                    Stop
-                  </button>
-                </div>
-              )}
+              <button
+                type="button"
+                className="app-header-lamp-switch"
+                onClick={() => runQuickStop(postStop, 'Stop Daemon')}
+                title="Stop Daemon"
+                aria-label="Stop Daemon"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="app-header-lamp-stop-group" aria-label="Management status">
+              <div
+                className="app-header-lamp-stop-lamp-wrap"
+                onMouseEnter={() => openLampPopover('monitor')}
+                onMouseLeave={closeLampPopover}
+              >
+                <span
+                  className={`lamp-icon ${(status?.monitor_lamp as LampId) ?? 'red'}`}
+                  aria-hidden
+                  title="Management status"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                </span>
+                {lampHoverPopover === 'monitor' && (
+                  <div className="app-header-lamp-popover" role="tooltip">
+                    <button
+                      type="button"
+                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
+                      onClick={() => { openSystemInSettingsToSection('monitor'); setLampHoverPopover(null) }}
+                      title="Go to System → Management"
+                    >
+                      Management
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="app-header-lamp-switch"
+                onClick={() => runQuickStop(postMonitorStop, 'Stop Management')}
+                title="Stop Management"
+                aria-label="Stop Management"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="app-header-lamp-stop-group" aria-label="Celery status">
+              <div
+                className="app-header-lamp-stop-lamp-wrap"
+                onMouseEnter={() => openLampPopover('celery')}
+                onMouseLeave={closeLampPopover}
+              >
+                <span
+                  className={`lamp-icon ${celeryLamp}`}
+                  title="Celery: red = broker not connected, yellow = no workers, green = broker + workers OK"
+                  aria-hidden
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                  </svg>
+                </span>
+                {lampHoverPopover === 'celery' && (
+                  <div className="app-header-lamp-popover" role="tooltip">
+                    <button
+                      type="button"
+                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
+                      onClick={() => { openSystemInSettingsToSection('celery'); setLampHoverPopover(null) }}
+                      title="Go to System → Celery"
+                    >
+                      Celery
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="app-header-lamp-switch"
+                onClick={() => runQuickStop(postCeleryStop, 'Stop Celery')}
+                title="Stop Celery"
+                aria-label="Stop Celery"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+              <span
+                className="app-header-queue-value"
+                title="Pending jobs (hover lamp for Celery)"
+              >
+                {workerJobPending != null ? (workerJobPending > 99 ? '99+' : String(workerJobPending)) : '—'}
+              </span>
             </div>
           </div>
           {quickCtrlMsg.text ? (
@@ -850,15 +923,23 @@ export default function App() {
           </button>
           {headerMenuOpen && (
             <div className="app-header-menu" role="menu" aria-label="App menu">
-              <div className="app-header-menu-row-system" role="presentation">
+              <div
+                className={`app-header-menu-row-system ${activeTab === 'settings' && settingsViewSection === 'system' ? 'active' : ''}`}
+                role="presentation"
+              >
                 <button
                   type="button"
                   role="menuitem"
                   className="app-header-menu-item app-header-menu-item-system"
                   onClick={() => { openSystemInSettings(); setHeaderMenuOpen(false) }}
                 >
-                  <span className={`lamp lamp-sm ${systemLamp}`} aria-hidden />
-                  System
+                  <span className={`app-header-menu-system-lamp title-inline-lamp ${systemLamp}`} aria-hidden>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                  </span>
+                  System Status
                 </button>
                 <button
                   type="button"
@@ -866,19 +947,30 @@ export default function App() {
                   onClick={() => { setShutdownConfirmOpen(true); setHeaderMenuOpen(false) }}
                   disabled={shutdownAllLoading}
                   title="Shutdown entire system"
+                  aria-label="Shutdown entire system"
                 >
-                  Shutdown
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                    <line x1="12" y1="2" x2="12" y2="12" />
+                  </svg>
                 </button>
               </div>
               <button
                 type="button"
                 role="menuitem"
-                className={`app-header-menu-item ${activeTab === 'settings' ? 'active' : ''}`}
-                onClick={() => { setActiveTab('settings'); setHeaderMenuOpen(false) }}
+                className={`app-header-menu-item ${activeTab === 'settings' && settingsViewSection === 'config' ? 'active' : ''}`}
+                onClick={() => { openSettingsToConfiguration(); setHeaderMenuOpen(false) }}
               >
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden style={{ flexShrink: 0 }}>
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+                  <line x1="4" y1="21" x2="4" y2="14" />
+                  <line x1="4" y1="10" x2="4" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12" y2="3" />
+                  <line x1="20" y1="21" x2="20" y2="16" />
+                  <line x1="20" y1="12" x2="20" y2="3" />
+                  <line x1="1" y1="14" x2="7" y2="14" />
+                  <line x1="9" y1="8" x2="15" y2="8" />
+                  <line x1="17" y1="16" x2="23" y2="16" />
                 </svg>
                 Settings
               </button>
@@ -890,6 +982,9 @@ export default function App() {
                 className={`app-header-menu-item ${theme === 'dark' ? 'active' : ''}`}
                 onClick={() => { setTheme('dark'); setHeaderMenuOpen(false) }}
               >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
                 Dark
               </button>
               <button
@@ -899,6 +994,17 @@ export default function App() {
                 className={`app-header-menu-item ${theme === 'light' ? 'active' : ''}`}
                 onClick={() => { setTheme('light'); setHeaderMenuOpen(false) }}
               >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+                  <circle cx="12" cy="12" r="5" />
+                  <line x1="12" y1="1" x2="12" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="23" />
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                  <line x1="1" y1="12" x2="3" y2="12" />
+                  <line x1="21" y1="12" x2="23" y2="12" />
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                </svg>
                 Light
               </button>
               <div className="app-header-menu-divider" role="separator" />
@@ -910,6 +1016,12 @@ export default function App() {
                 role="menuitem"
                 onClick={() => setHeaderMenuOpen(false)}
               >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  <path d="M8 7h8" />
+                  <path d="M8 11h8" />
+                </svg>
                 Docs
               </a>
             </div>

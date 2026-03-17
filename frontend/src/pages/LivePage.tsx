@@ -613,25 +613,29 @@ export function LivePage({ status }: LivePageProps) {
     <div className="app-page-stack">
       <div className="card card-operations realtime-quotes-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-          <div className="lamp-wrap-span">
-            <div className={`lamp lamp-sm ${marketStreamsOk ? 'green' : 'red'}`} title="Market streams: green when daemon alive, subscribed to ticker, and monitor reads Redis" aria-hidden />
-          </div>
-          <div>
-            <h2 className="daemon-card-title page-title-with-tooltip">
-              Market Streams
-              <InfoTooltip
-                text={
-                  marketStreamsOk
-                    ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions (Settings → Account). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
-                    : 'Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
-                }
-              />
-            </h2>
-          </div>
+          <h2 className="daemon-card-title page-title-with-tooltip">
+            <span
+              className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
+              title="Market streams: green when daemon alive, subscribed to ticker, and monitor reads Redis"
+              aria-hidden
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M22 12h-4l-3 9L9 3 6 12H2" />
+              </svg>
+            </span>
+            Market Streams
+            <InfoTooltip
+              text={
+                marketStreamsOk
+                  ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions (Settings → Account). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
+                  : 'Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
+              }
+            />
+          </h2>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <button
               type="button"
-              className="btn btn-small btn-size-default"
+              className="section-header-icon-btn"
               onClick={async () => {
                 setStreamSyncFeedback('Releasing…')
                 try {
@@ -643,8 +647,14 @@ export function LivePage({ status }: LivePageProps) {
                 setTimeout(() => setStreamSyncFeedback(null), 4000)
               }}
               title="Release all Real-time ticker subscriptions (same as Status → Event Subscribe → Release). Daemon will restore subscriptions on next heartbeat."
+              aria-label="Refresh / Release ticker subscriptions"
             >
-              Refresh
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                <path d="M16 21h5v-5" />
+              </svg>
             </button>
             {streamSyncFeedback != null && (
               <span className="section-hint" aria-live="polite">{streamSyncFeedback}</span>
@@ -1131,19 +1141,19 @@ export function LivePage({ status }: LivePageProps) {
 
       <div className="card card-operations open-orders-live-card">
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-          <div className="lamp-wrap-span">
-            <div
-              className={`lamp lamp-sm ${(j?.daemon_heartbeat?.daemon_alive && j?.daemon_heartbeat?.ib_connected) ? 'green' : 'red'}`}
+          <h2 className="daemon-card-title page-title-with-tooltip">
+            <span
+              className={`title-inline-lamp lamp-icon ${(j?.daemon_heartbeat?.daemon_alive && j?.daemon_heartbeat?.ib_connected) ? 'green' : 'red'}`}
               title="Open orders: green when daemon is connected to IB (event-driven write to DB); data polled from DB."
               aria-hidden
-            />
-          </div>
-          <div>
-            <h2 className="daemon-card-title page-title-with-tooltip">
-              Open Orders
-              <InfoTooltip text="Unfilled orders from daemon (event-driven). Daemon writes to DB on orderStatus/openOrder events; this page polls GET /open-orders and also receives open_orders via GET /status. Data source: PostgreSQL table daemon_open_orders. Account ID is the IB account that placed each order. Updates every few seconds." />
-            </h2>
-          </div>
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+              </svg>
+            </span>
+            Open Orders
+            <InfoTooltip text="Unfilled orders from daemon (event-driven). Daemon writes to DB on orderStatus/openOrder events; this page polls GET /open-orders and also receives open_orders via GET /status. Data source: PostgreSQL table daemon_open_orders. Account ID is the IB account that placed each order. Updates every few seconds." />
+          </h2>
           {openOrdersUpdatedAt != null && (
             <span className="section-hint" style={{ marginLeft: 'auto' }}>Last updated: {fmtTs(openOrdersUpdatedAt)}</span>
           )}

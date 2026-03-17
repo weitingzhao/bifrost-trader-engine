@@ -314,6 +314,17 @@ export function StatusPage({
     return 'red'
   })()
 
+  /** System status (for "System Status" heading): same logic as header — red if any red; yellow if any yellow; green only when all green. */
+  const systemLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
+    const asRyg = (v: string): 'green' | 'yellow' | 'red' => (v === 'none' ? 'red' : v as 'green' | 'yellow' | 'red')
+    const d = asRyg(daemonLamp)
+    const m = asRyg(monitorLamp)
+    const c = asRyg(celeryLamp)
+    if (d === 'red' || m === 'red' || c === 'red') return 'red'
+    if (d === 'yellow' || m === 'yellow' || c === 'yellow') return 'yellow'
+    return d === 'green' && m === 'green' && c === 'green' ? 'green' : 'red'
+  })()
+
   const s = j?.status ?? {}
   const statusSummaryItems = STATUS_FIELDS.map(([k, label]) => {
     let v: string | number | undefined = (s as Record<string, unknown>)[k] as string | number | undefined
@@ -380,8 +391,11 @@ export function StatusPage({
               <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
                 Cancel
               </button>
-              <button type="button" className="btn-shutdown-all" onClick={doShutdownAll}>
-                Shutdown
+              <button type="button" className="section-header-icon-btn" onClick={doShutdownAll} aria-label="Confirm shutdown">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                  <line x1="12" y1="2" x2="12" y2="12" />
+                </svg>
               </button>
             </div>
           </div>
@@ -392,16 +406,28 @@ export function StatusPage({
       {showSystemSection && (
       <div className="card process-section system-tabs-wrapper">
         <div className="status-section-heading-row">
-          <h2 className="status-section-heading">System Status</h2>
+          <h2 className="status-section-heading page-title-with-tooltip">
+            <span className={`title-inline-lamp lamp-icon ${systemLamp}`} title="System status" aria-hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </span>
+            System Status
+          </h2>
           <div className="status-section-actions">
             <button
               type="button"
-              className="btn-shutdown-all"
+              className="section-header-icon-btn"
               title="Stop Celery, then Daemon, then Management (in order)"
+              aria-label="Shutdown entire system"
               disabled={shutdownAllLoading}
               onClick={onShutdownAllClick}
             >
-              {shutdownAllLoading ? 'Shutting down…' : 'Shutdown'}
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                <line x1="12" y1="2" x2="12" y2="12" />
+              </svg>
             </button>
             {shutdownAllMsg.text ? (
               <span className={`status-page-msg ${shutdownAllMsg.isErr ? 'err' : 'ok'}`}>{shutdownAllMsg.text}</span>
@@ -419,7 +445,9 @@ export function StatusPage({
             className={`system-tab ${systemTab === 'daemon' ? 'active' : ''}`}
             onClick={() => setSystemTabSelected('daemon')}
           >
-            <span className={`lamp lamp-sm ${daemonLamp}`} title="Daemon status" aria-hidden />
+            <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon status" aria-hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
+            </span>
             <span>Daemon</span>
           </button>
           <button
@@ -431,10 +459,14 @@ export function StatusPage({
             className={`system-tab ${systemTab === 'monitor' || systemTab === 'celery' ? 'active' : ''}`}
             onClick={() => setSystemTabSelected('monitor')}
           >
-            <span className={`lamp lamp-sm ${monitorLamp}`} title="Management status" aria-hidden />
+            <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Management status" aria-hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            </span>
             <span>Management</span>
             <span className="status-tab-sep" aria-hidden>/</span>
-            <span className={`lamp lamp-sm ${celeryLamp}`} title="Celery (bars worker) status" aria-hidden />
+            <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery (bars worker) status" aria-hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+            </span>
             <span>Celery</span>
           </button>
         </div>
@@ -548,20 +580,19 @@ export function StatusPage({
           </div>
           <div className="status-panel-section status-management-celery-half stream-event-subscribe-rest card-event-subscribe event-subscribe-section">
             <div className="event-subscribe-header-row">
-              <div className="daemon-header-with-lamp" style={{ marginBottom: 0 }}>
-                <div className="lamp-wrap-span">
-                  <div className={`lamp lamp-sm ${eventSubscribeLamp}`} title="Event Subscribe: green = all subscribed, yellow = some not, red = none or daemon down" aria-hidden />
-                </div>
-                <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
-                  Event Subscribe
-                  <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Watchlist STK + strategy symbol)." />
-                </h2>
-              </div>
+              <h2 className="daemon-card-title page-title-with-tooltip" style={{ margin: 0 }}>
+                <span className={`title-inline-lamp lamp-icon ${eventSubscribeLamp}`} title="Event Subscribe: green = all subscribed, yellow = some not, red = none or daemon down" aria-hidden>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                </span>
+                Event Subscribe
+                <InfoTooltip text="Daemon IB event subscription status and subscribed tickers (Watchlist STK + strategy symbol)." />
+              </h2>
               <div className="event-subscribe-buttons">
                 <button
                   type="button"
-                  className="btn-resume"
+                  className="section-header-icon-btn"
                   title="Release all Real-time ticker subscriptions; daemon will restore on next heartbeat"
+                  aria-label="Release ticker subscriptions"
                   disabled={releaseTickerLoading || !hb?.daemon_alive}
                   onClick={async () => {
                     setReleaseTickerLoading(true)
@@ -578,7 +609,11 @@ export function StatusPage({
                     }
                   }}
                 >
-                  {releaseTickerLoading ? 'Releasing…' : 'Release'}
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M18.84 12.25l1.72-1.71h-.02a3 3 0 0 0-.12-4.26 3 3 0 0 0-4.24-.12l-1.72 1.71" />
+                    <path d="M5.17 11.75l-1.71 1.71a3 3 0 0 0 .12 4.26 3 3 0 0 0 4.24.12l1.71-1.71" />
+                    <path d="M8 2v4M2 8h4M16 20v-4M20 16h-4" />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -599,7 +634,9 @@ export function StatusPage({
                   <td className="event-subscribe-col-subscription">Real-time ticker (Host only)</td>
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker (Host only)" aria-hidden />
+                      <span className={`title-inline-lamp lamp-icon ${hb?.daemon_alive && hb?.event_subscribe_ticker ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Real-time ticker (Host only)" aria-hidden>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                      </span>
                       <span
                         className="event-subscribe-status-text"
                         title={hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.subscribed_tickers?.length ?? 0) > 0
@@ -629,11 +666,13 @@ export function StatusPage({
                   <td className="event-subscribe-col-subscription">Open orders</td>
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <div
-                        className={`lamp lamp-sm ${!hb?.daemon_alive ? 'red' : hostOpenOrderCount > 0 ? 'green' : 'none'}`}
+                      <span
+                        className={`title-inline-lamp lamp-icon ${!hb?.daemon_alive ? 'red' : hostOpenOrderCount > 0 ? 'green' : 'none'}`}
                         title={hb?.daemon_alive ? (hostOpenOrderCount > 0 ? 'Open orders (Host)' : 'No open orders (Host)') : 'Daemon down'}
                         aria-hidden
-                      />
+                      >
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+                      </span>
                       <span className="event-subscribe-status-text">
                         {hb?.daemon_alive
                           ? (
@@ -649,11 +688,13 @@ export function StatusPage({
                   {hasSecondary && (
                     <td>
                       <div className="event-subscribe-status-cell">
-                        <div
-                          className={`lamp lamp-sm ${!hb?.daemon_alive ? 'red' : secondaryOpenOrderCount > 0 ? 'green' : 'none'}`}
+                        <span
+                          className={`title-inline-lamp lamp-icon ${!hb?.daemon_alive ? 'red' : secondaryOpenOrderCount > 0 ? 'green' : 'none'}`}
                           title={hb?.daemon_alive ? (secondaryOpenOrderCount > 0 ? 'Open orders (Secondary)' : 'No open orders (Secondary)') : 'Daemon down'}
                           aria-hidden
-                        />
+                        >
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+                        </span>
                         <span className="event-subscribe-status-text">
                           {hb?.daemon_alive
                             ? (
@@ -672,7 +713,9 @@ export function StatusPage({
                   <td className="event-subscribe-col-subscription">Position updates</td>
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host position updates" aria-hidden />
+                      <span className={`title-inline-lamp lamp-icon ${hb?.daemon_alive && hb?.event_subscribe_positions ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host position updates" aria-hidden>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                      </span>
                       <span className="event-subscribe-status-text">
                         {hb?.daemon_alive && hb?.event_subscribe_positions ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
                       </span>
@@ -681,7 +724,9 @@ export function StatusPage({
                   {hasSecondary && (
                     <td>
                       <div className="event-subscribe-status-cell">
-                        <div className={`lamp lamp-sm ${hb?.listener_2_connected && hb?.event_subscribe_positions_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary position updates" aria-hidden />
+                        <span className={`title-inline-lamp lamp-icon ${hb?.listener_2_connected && hb?.event_subscribe_positions_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary position updates" aria-hidden>
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                        </span>
                         <span className="event-subscribe-status-text">
                           {hb?.listener_2_connected && hb?.event_subscribe_positions_ib2 ? 'Subscribed' : hb?.listener_2_connected ? 'Not subscribed' : '—'}
                         </span>
@@ -693,7 +738,9 @@ export function StatusPage({
                   <td className="event-subscribe-col-subscription">Fill / execution report</td>
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host fill / execution" aria-hidden />
+                      <span className={`title-inline-lamp lamp-icon ${hb?.daemon_alive && hb?.event_subscribe_fills ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host fill / execution" aria-hidden>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                      </span>
                       <span className="event-subscribe-status-text">
                         {hb?.daemon_alive && hb?.event_subscribe_fills ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
                       </span>
@@ -702,7 +749,9 @@ export function StatusPage({
                   {hasSecondary && (
                     <td>
                       <div className="event-subscribe-status-cell">
-                        <div className={`lamp lamp-sm ${hb?.listener_2_connected && hb?.event_subscribe_fills_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary fill / execution" aria-hidden />
+                        <span className={`title-inline-lamp lamp-icon ${hb?.listener_2_connected && hb?.event_subscribe_fills_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary fill / execution" aria-hidden>
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                        </span>
                         <span className="event-subscribe-status-text">
                           {hb?.listener_2_connected && hb?.event_subscribe_fills_ib2 ? 'Subscribed' : hb?.listener_2_connected ? 'Not subscribed' : '—'}
                         </span>
@@ -714,7 +763,9 @@ export function StatusPage({
                   <td className="event-subscribe-col-subscription">Commission report</td>
                   <td>
                     <div className="event-subscribe-status-cell">
-                      <div className={`lamp lamp-sm ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host commission" aria-hidden />
+                      <span className={`title-inline-lamp lamp-icon ${hb?.daemon_alive && hb?.event_subscribe_commission ? 'green' : hb?.daemon_alive ? 'red' : 'none'}`} title="Host commission" aria-hidden>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                      </span>
                       <span className="event-subscribe-status-text">
                         {hb?.daemon_alive && hb?.event_subscribe_commission ? 'Subscribed' : hb?.daemon_alive ? 'Not subscribed' : '—'}
                       </span>
@@ -723,7 +774,9 @@ export function StatusPage({
                   {hasSecondary && (
                     <td>
                       <div className="event-subscribe-status-cell">
-                        <div className={`lamp lamp-sm ${hb?.listener_2_connected && hb?.event_subscribe_commission_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary commission" aria-hidden />
+                        <span className={`title-inline-lamp lamp-icon ${hb?.listener_2_connected && hb?.event_subscribe_commission_ib2 ? 'green' : hb?.listener_2_connected ? 'red' : 'none'}`} title="Secondary commission" aria-hidden>
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
+                        </span>
                         <span className="event-subscribe-status-text">
                           {hb?.listener_2_connected && hb?.event_subscribe_commission_ib2 ? 'Subscribed' : hb?.listener_2_connected ? 'Not subscribed' : '—'}
                         </span>

@@ -53,7 +53,9 @@ export function StatusStrategyPanel({
     return (
       <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
         <div className="strategy-compact-header">
-          <div className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status" aria-hidden />
+          <span className={`title-inline-lamp lamp-icon ${hedgeLamp}`} title="Trading strategy status" aria-hidden>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /></svg>
+          </span>
           <span className="strategy-compact-title">Trading Strategy</span>
         </div>
         <div className="strategy-compact-status">
@@ -78,29 +80,40 @@ export function StatusStrategyPanel({
         </div>
         <div className="controls strategy-compact-controls">
           {onManage && (
-            <button type="button" className="btn-manage" title="Open Strategy management" onClick={onManage}>
-              Manage»
+            <button
+              type="button"
+              className="section-header-icon-btn strategy-btn-manage"
+              title="Open Strategy management"
+              aria-label="Manage strategy"
+              onClick={onManage}
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
             </button>
           )}
           {onSuspend != null && onResume != null && (
             <>
               <button
                 type="button"
-                className="btn-resume"
+                className="section-header-icon-btn strategy-btn-resume"
                 disabled={!suspended}
                 title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
+                aria-label="Resume"
                 onClick={onResume}
               >
-                Resume
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
               </button>
               <button
                 type="button"
-                className="btn-suspend"
+                className="section-header-icon-btn strategy-btn-suspend"
                 disabled={suspended}
                 title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
+                aria-label="Suspend"
                 onClick={onSuspend}
               >
-                Suspend
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
               </button>
             </>
           )}
@@ -125,11 +138,11 @@ export function StatusStrategyPanel({
   return (
     <div id="system-panel-strategy" role="tabpanel" aria-labelledby="tab-strategy" className={panelClass}>
       <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
-        <div className="lamp-wrap-span">
-          <div className={`lamp lamp-sm ${hedgeLamp}`} title="Trading strategy status lamp" />
-        </div>
         <div>
           <h2 className="daemon-card-title page-title-with-tooltip">
+            <span className={`title-inline-lamp lamp-icon ${hedgeLamp}`} title="Trading strategy status lamp" aria-hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /></svg>
+            </span>
             Trading Strategy
             <InfoTooltip text="Depends on daemon; business logic; may support multiple strategies later." />
           </h2>
@@ -156,29 +169,40 @@ export function StatusStrategyPanel({
       </div>
       <div className="controls" style={{ marginTop: '0.5rem' }}>
         {onManage && (
-          <button type="button" className="btn-manage" title="Open Strategy management" onClick={onManage}>
-            Manage»
+          <button
+            type="button"
+            className="section-header-icon-btn strategy-btn-manage"
+            title="Open Strategy management"
+            aria-label="Manage strategy"
+            onClick={onManage}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
           </button>
         )}
         {onSuspend != null && onResume != null && (
           <>
             <button
               type="button"
-              className="btn-resume"
+              className="section-header-icon-btn strategy-btn-resume"
               disabled={!suspended}
               title={!suspended ? 'Already running' : 'Set from monitor; daemon resumes hedging on next heartbeat'}
+              aria-label="Resume"
               onClick={onResume}
             >
-              Resume
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M8 5v14l11-7L8 5z" /></svg>
             </button>
             <button
               type="button"
-              className="btn-suspend"
+              className="section-header-icon-btn strategy-btn-suspend"
               disabled={suspended}
               title={suspended ? 'Already suspended' : 'Set from monitor; daemon pauses new hedges on next heartbeat'}
+              aria-label="Suspend"
               onClick={onSuspend}
             >
-              Suspend
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
             </button>
           </>
         )}
