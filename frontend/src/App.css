@@ -8841,6 +8841,74 @@ th {
   margin-bottom: var(--space-4, 1rem);
   padding: var(--space-2) 0;
 }
+/* Option underlying + backing pools side-by-side when both exist */
+.coverage-pools-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  gap: 0.65rem 1rem;
+  align-items: start;
+}
+.coverage-pool-panel {
+  min-width: 0;
+  padding: 0.35rem 0.5rem 0.5rem;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--color-border, #2a2f38);
+  background: var(--color-surface-raised, rgba(0, 0, 0, 0.12));
+}
+.coverage-pool-panel .coverage-summary-table {
+  max-width: none;
+  width: 100%;
+}
+.coverage-pool-account-group-row td {
+  font-weight: 700;
+  font-size: 0.84rem;
+  padding: 0.35rem 0.45rem 0.3rem;
+  border-top: 1px solid var(--color-border, #2a2f38);
+  background: var(--color-surface-raised, rgba(0, 0, 0, 0.2));
+}
+.coverage-summary-table tbody > tr.coverage-pool-account-group-row:first-child td {
+  border-top: none;
+}
+.coverage-cost-avg-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  line-height: 1.25;
+  min-width: 4.5rem;
+}
+.coverage-cost-avg-basis {
+  font-weight: 600;
+}
+.coverage-cost-avg-per-share {
+  font-size: 0.82em;
+  font-weight: 500;
+  color: var(--color-text-muted, #7a8492);
+  margin-top: 0.06rem;
+}
+.coverage-mkt-value-price-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  line-height: 1.25;
+  min-width: 5rem;
+}
+.coverage-mkt-value-total {
+  font-weight: 600;
+}
+.coverage-mkt-value-per-share {
+  font-size: 0.82em;
+  font-weight: 500;
+  color: var(--color-text-muted, #7a8492);
+  margin-top: 0.06rem;
+}
+.coverage-pools-row:has(> .coverage-pool-panel:only-child) .coverage-pool-panel {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+.coverage-pools-row:has(> .coverage-pool-panel:only-child) .coverage-pool-panel .coverage-summary-table {
+  max-width: 48rem;
+}
 .coverage-summary-table {
   max-width: 48rem;
 }
@@ -8848,6 +8916,43 @@ th {
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+}
+.coverage-pool-sort-th:has(.coverage-pool-th-backed-amt),
+.coverage-pool-sort-th:has(.coverage-pool-th-held-amt) {
+  white-space: normal;
+}
+.coverage-pool-th-held-amt {
+  display: inline-block;
+  line-height: 1.15;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: normal;
+  vertical-align: middle;
+}
+th:has(> .coverage-pool-th-held-amt) {
+  text-align: center;
+}
+.coverage-held-amt-underlying-narrow {
+  min-width: 0 !important;
+  max-width: 2.75rem;
+  width: 2.65rem;
+  padding-left: 0.12rem !important;
+  padding-right: 0.12rem !important;
+  box-sizing: border-box;
+}
+.coverage-held-amt-underlying-contracts {
+  font-size: 1.02rem !important;
+  letter-spacing: 0;
+}
+.coverage-pool-th-backed-amt {
+  display: inline-block;
+  line-height: 1.15;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: normal;
+  vertical-align: middle;
 }
 .coverage-held-shares-cell {
   font-variant-numeric: tabular-nums;
@@ -8919,6 +9024,12 @@ th {
 }
 .option-underlying-pool-total-sep {
   color: var(--color-text-muted, #5c6570);
+}
+.option-underlying-pool-cash-bp {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
+  font-weight: 600;
+  color: var(--color-text-secondary, #c4cad4);
 }
 .instance-sheet-stock-section {
   margin-top: var(--space-4, 1rem);

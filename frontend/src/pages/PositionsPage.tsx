@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Execution, RealtimeQuote, StatusResponse } from '../types'
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { Execution, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
 import { deleteExecution, fetchQuotes, subscribeQuotes } from '../api'
 import { fetchOpportunities, fetchStructures } from '../api/strategies'
 import type { StrategyOpportunity, StrategyStructure } from '../api/strategies'
@@ -48,16 +48,33 @@ function fmtSignedPct(value: number | null | undefined): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 
+/** Account table total_cash / buying_power via status.accounts[].summary (TotalCashValue, BuyingPower). */
+function accountTotalCashBuyingPower(acc: IbAccountSnapshot | undefined): {
+  cash: number | null
+  bp: number | null
+} {
+  const s = acc?.summary
+  if (!s || typeof s !== 'object') return { cash: null, bp: null }
+  const rec = s as Record<string, unknown>
+  const num = (k: string): number | null => {
+    const v = rec[k]
+    if (v == null || v === '') return null
+    const n = Number(String(v).replace(/,/g, '').replace(/\s/g, ''))
+    return Number.isFinite(n) ? n : null
+  }
+  return { cash: num('TotalCashValue'), bp: num('BuyingPower') }
+}
+
 /** Surplus / gap in shares: 3 decimal places. */
 function fmtSurplusShares(n: number): string {
   if (!Number.isFinite(n)) return '—'
   return n >= 0 ? `+${n.toFixed(3)}` : n.toFixed(3)
 }
 
-/** Held shares: 3 decimal places (Option underlying Pool). */
-function fmtHeldShares3(n: number): string {
+/** Held shares: whole shares (Option underlying Pool display). */
+function fmtHeldSharesWhole(n: number): string {
   if (!Number.isFinite(n)) return '—'
-  return n.toFixed(3)
+  return String(Math.round(n))
 }
 
 /** Sortable columns for Option underlying / backing Pool tables. */
@@ -66,6 +83,8 @@ type CoveragePoolSortCol =
   | 'account'
   | 'held'
   | 'held_amt'
+  /** Backing pool: contracts ≈ min(held, watchlist required) ÷ 100. */
+  | 'backed_amt'
   | 'required'
   | 'cost_basis'
   | 'market_price'
@@ -86,6 +105,15 @@ function sortStockCoverageItemsByColumn(
       const cb = Math.floor(Math.max(0, b.held_shares) / 100)
       return m * (ca - cb)
     }
+    if (col === 'backed_amt') {
+      const ca = Math.floor(
+        Math.max(0, Math.min(a.held_shares || 0, a.required_shares || 0)) / 100,
+      )
+      const cb = Math.floor(
+        Math.max(0, Math.min(b.held_shares || 0, b.required_shares || 0)) / 100,
+      )
+      return m * (ca - cb)
+    }
     if (col === 'required') {
       return m * ((a.required_shares || 0) - (b.required_shares || 0))
     }
@@ -100,18 +128,58 @@ function sortStockCoverageItemsByColumn(
       return m * (va - vb)
     }
     if (col === 'market_price') {
-      const pa = a.live_last_price
-      const pb = b.live_last_price
-      const fa = pa != null && Number.isFinite(pa)
-      const fb = pb != null && Number.isFinite(pb)
+      const va = coverageRowMarketValueTotal(a)
+      const vb = coverageRowMarketValueTotal(b)
+      const fa = va != null && Number.isFinite(va)
+      const fb = vb != null && Number.isFinite(vb)
       if (!fa && !fb) return 0
       if (!fa) return 1
       if (!fb) return -1
-      return m * (pa - pb)
+      return m * (va - vb)
     }
-    return 0
+    return a.symbol.localeCompare(b.symbol)
   })
   return out
+}
+
+/** held_shares × live_last_price; null if not computable. */
+function coverageRowMarketValueTotal(ci: StockCoverageItem): number | null {
+  const h = ci.held_shares
+  const p = ci.live_last_price
+  if (h == null || !Number.isFinite(h) || h <= 0) return null
+  if (p == null || !Number.isFinite(p)) return null
+  return h * p
+}
+
+function groupCoverageByAccount(
+  rows: StockCoverageItem[],
+  sortCol: CoveragePoolSortCol,
+  sortDir: 'asc' | 'desc',
+  streamHostAccountId: string,
+  streamSecondaryAccountId: string,
+): { accountId: string; items: StockCoverageItem[] }[] {
+  const by = new Map<string, StockCoverageItem[]>()
+  for (const r of rows) {
+    const k = (r.account_id ?? '').trim() || '—'
+    if (!by.has(k)) by.set(k, [])
+    by.get(k)!.push(r)
+  }
+  const rank = (id: string) => {
+    const t = (id ?? '').trim()
+    if (streamHostAccountId && t === streamHostAccountId) return 0
+    if (streamSecondaryAccountId && t === streamSecondaryAccountId) return 1
+    return 2
+  }
+  const keys = [...by.keys()].sort((a, b) => {
+    const ra = rank(a)
+    const rb = rank(b)
+    if (ra !== rb) return ra - rb
+    return a.localeCompare(b)
+  })
+  return keys.map(accountId => ({
+    accountId,
+    items: sortStockCoverageItemsByColumn(by.get(accountId)!, sortCol, sortDir),
+  }))
 }
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
 import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
@@ -979,10 +1047,6 @@ export function PositionsPage({
     return out
   }, [stockCoverageItems])
 
-  const optionUnderlyingPoolCostTotal = useMemo(
-    () => optionUnderlyingPoolItems.reduce((s, ci) => s + (ci.cost_basis_total ?? 0), 0),
-    [optionUnderlyingPoolItems],
-  )
   const optionUnderlyingPoolMarketTotal = useMemo(
     () =>
       optionUnderlyingPoolItems.reduce((s, ci) => {
@@ -996,6 +1060,16 @@ export function PositionsPage({
 
   const streamHostAccountId = (status?.ib_config?.stream_host_account_id ?? '').toString().trim()
   const streamSecondaryAccountId = (status?.ib_config?.stream_secondary_account_id ?? '').toString().trim()
+
+  const hostSecondaryAccountCashBp = useMemo(() => {
+    const list = status?.accounts ?? []
+    const snap = (id: string) =>
+      id ? list.find(a => (a.account_id ?? '').trim() === id) : undefined
+    return {
+      host: accountTotalCashBuyingPower(snap(streamHostAccountId)),
+      secondary: accountTotalCashBuyingPower(snap(streamSecondaryAccountId)),
+    }
+  }, [status?.accounts, streamHostAccountId, streamSecondaryAccountId])
 
   const [underlyingPoolSort, setUnderlyingPoolSort] = useState<{
     col: CoveragePoolSortCol
@@ -1029,14 +1103,6 @@ export function PositionsPage({
       prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' },
     )
   }, [])
-
-  const unassignedOptStocks = useMemo(
-    () => liveStockPositions.filter(s => {
-      const opt = s.optionable
-      return opt === true
-    }),
-    [liveStockPositions],
-  )
 
   const independentStocks = useMemo(
     () => liveStockPositions.filter(s => {
@@ -1204,7 +1270,20 @@ export function PositionsPage({
       return 'coverage-account-id coverage-account-other'
     }
     const poolSortOn = !!(poolSort && (slim || backingLayout))
-    const sortTh = (label: string, col: CoveragePoolSortCol, title?: string) => {
+    const poolGroupByAccount = slim || backingLayout
+    const accountGroupColSpan = poolGroupByAccount ? 7 : 0
+    const sortCol = poolSort?.column ?? 'market_price'
+    const sortDir = poolSort?.dir ?? 'desc'
+    const accountGroups = poolGroupByAccount
+      ? groupCoverageByAccount(
+          rows,
+          sortCol,
+          sortDir,
+          streamHostAccountId,
+          streamSecondaryAccountId,
+        )
+      : null
+    const sortTh = (label: ReactNode, col: CoveragePoolSortCol, title?: string) => {
       if (!poolSortOn) return <th title={title}>{label}</th>
       const active = poolSort.column === col
       return (
@@ -1227,6 +1306,142 @@ export function PositionsPage({
         </th>
       )
     }
+    const renderCoverageDataRow = (ci: StockCoverageItem, rowKey: string) => {
+      const statusLabel =
+        ci.held_shares >= ci.required_shares
+          ? 'Covered'
+          : ci.held_shares > 0
+            ? 'Partial'
+            : 'Naked'
+      const statusClass =
+        ci.held_shares >= ci.required_shares
+          ? 'coverage-status-covered'
+          : ci.held_shares > 0
+            ? 'coverage-status-partial'
+            : 'coverage-status-naked'
+      const optionSupportLabel =
+        ci.optionable_supported === true
+          ? 'Optionable'
+          : ci.optionable_supported === false
+            ? 'Not optionable'
+            : 'Mixed / Unknown'
+      const backedOpps = ci.backing_opportunities ?? []
+      const availContracts = showAvail ? Math.floor(Math.max(0, ci.held_shares) / 100) : 0
+      const acc = ci.account_id || '—'
+      return (
+        <tr key={rowKey}>
+          <td>
+            <strong>{ci.symbol}</strong>
+          </td>
+          {!poolGroupByAccount && <td className="replay-muted">{acc}</td>}
+          {!hideBacked && (
+            <td title={backedOpps.join(', ') || undefined}>
+              {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
+            </td>
+          )}
+          {showHeldColumn && (
+            <td className={slim ? 'coverage-held-shares-cell' : undefined}>
+              {slim ? fmtHeldSharesWhole(ci.held_shares) : ci.held_shares}
+            </td>
+          )}
+          {showHeldAmtColumn &&
+            (slim || backingLayout ? (
+              <td
+                className={`coverage-available-held-amt-cell coverage-available-held-amt-slim${slim && !backingLayout ? ' coverage-held-amt-underlying-narrow' : ''}`}
+              >
+                <span
+                  className={`coverage-available-contracts-only${slim && !backingLayout ? ' coverage-held-amt-underlying-contracts' : ''}`}
+                  title={
+                    backingLayout
+                      ? `${Math.floor(Math.max(0, Math.min(ci.held_shares, ci.required_shares)) / 100)} contracts — min(${ci.held_shares} held, ${ci.required_shares} required) sh ÷ 100`
+                      : `${ci.held_shares} sh ÷ 100`
+                  }
+                >
+                  {backingLayout
+                    ? Math.floor(
+                        Math.max(0, Math.min(ci.held_shares || 0, ci.required_shares || 0)) / 100,
+                      )
+                    : Math.floor(Math.max(0, ci.held_shares) / 100)}
+                </span>
+                {backingLayout && ci.instances_needing > 1 && (
+                  <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>
+                )}
+              </td>
+            ) : (
+              <td className="coverage-available-held-amt-cell">
+                <div className="coverage-available-contracts" title={`${ci.held_shares} sh ÷ 100`}>
+                  {availContracts}
+                </div>
+                <div className="coverage-available-contracts-label">contracts</div>
+                <div className="coverage-available-shares-line" title="Share qty (100 sh per contract)">
+                  {ci.held_shares} sh
+                </div>
+              </td>
+            ))}
+          {!slim && !backingLayout && (
+            <td>
+              {ci.required_shares}
+              {ci.instances_needing > 1 && (
+                <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>
+              )}
+            </td>
+          )}
+          {!slim && !backingSlim && (
+            <td>
+              <span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>
+                {fmtSurplusShares(ci.surplus_or_gap)}
+              </span>
+            </td>
+          )}
+          {!slim && !backingSlim && <td>{optionSupportLabel}</td>}
+          {slim || backingLayout ? (
+            <td className="coverage-cost-avg-cell" title="Cost basis (total) / avg cost per share">
+              <div className="coverage-cost-avg-basis">{fmtUsd(ci.cost_basis_total)}</div>
+              <div className="coverage-cost-avg-per-share">{fmtUsd(ci.avg_cost_per_share)}</div>
+            </td>
+          ) : (
+            <>
+              <td>{fmtUsd(ci.cost_basis_total)}</td>
+              <td>{fmtUsd(ci.avg_cost_per_share)}</td>
+            </>
+          )}
+          {slim || backingLayout ? (
+            <td
+              className="coverage-mkt-value-price-cell"
+              title="Position market value (held × last) / price per share"
+            >
+              <div className="coverage-mkt-value-total">{fmtUsd(coverageRowMarketValueTotal(ci))}</div>
+              <div className="coverage-mkt-value-per-share">{fmtUsd(ci.live_last_price)}</div>
+            </td>
+          ) : (
+            <td>{fmtUsd(ci.live_last_price)}</td>
+          )}
+          <td>
+            <span className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+              {fmtUsd(ci.daily_pnl)}
+            </span>
+            {' / '}
+            <span className={((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+              {fmtSignedPct(ci.daily_pct)}
+            </span>
+          </td>
+          <td>
+            <span className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+              {fmtUsd(ci.total_pnl)}
+            </span>
+            {' / '}
+            <span className={((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+              {fmtSignedPct(ci.total_pct)}
+            </span>
+          </td>
+          {!slim && !backingSlim && (
+            <td>
+              <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
+            </td>
+          )}
+        </tr>
+      )
+    }
     return (
     <div className="replay-portfolio-table-wrap">
       <table
@@ -1235,35 +1450,65 @@ export function PositionsPage({
         <thead>
           <tr>
             {slim || backingLayout ? sortTh('Symbol', 'symbol') : <th>Symbol</th>}
-            {slim || backingLayout ? (
-              sortTh(
-                'Account',
-                'account',
-                'Host vs Secondary use Settings → Stream host / secondary account IDs.',
-              )
-            ) : (
-              <th>Account</th>
-            )}
+            {!poolGroupByAccount && <th>Account</th>}
             {!hideBacked && <th>Backed opportunities</th>}
             {showHeldColumn &&
-              (slim ? sortTh('Held', 'held', 'Share qty (3 dp).') : <th>Held</th>)}
+              (slim ? sortTh('Held', 'held', 'Long share qty (whole shares).') : <th>Held</th>)}
             {showHeldAmtColumn &&
               (backingLayout ? (
-                sortTh('Held Amt', 'held_amt', 'Option contracts ≈ max(0, long shares) ÷ 100.')
+                sortTh(
+                  <span className="coverage-pool-th-backed-amt">
+                    Backed
+                    <br />
+                    Amt
+                  </span>,
+                  'backed_amt',
+                  'Contracts backing watchlist hedge: min(held, required) ÷ 100.',
+                )
               ) : slim && poolSortOn ? (
-                sortTh('Held Amt', 'held_amt', 'Option contracts ≈ max(0, long shares) ÷ 100.')
+                sortTh(
+                  <span className="coverage-pool-th-held-amt">
+                    Held
+                    <br />
+                    Amt
+                  </span>,
+                  'held_amt',
+                  'Contracts ≈ max(0, long shares) ÷ 100.',
+                )
               ) : slim ? (
-                <th title="Option contracts ≈ max(0, long shares) ÷ 100.">Held Amt</th>
+                <th title="Contracts ≈ max(0, long shares) ÷ 100.">
+                  <span className="coverage-pool-th-held-amt">Held<br />Amt</span>
+                </th>
               ) : (
                 <th title="Option contracts ≈ max(0, long shares) ÷ 100.">Available Held Amt</th>
               ))}
-            {!slim && (backingLayout ? sortTh('Required', 'required', 'Hedge shares required (watchlist scope).') : <th>Required</th>)}
+            {!slim && !backingLayout && <th>Required</th>}
             {!slim && !backingSlim && <th>Surplus / Gap</th>}
             {!slim && !backingSlim && <th>Option support</th>}
-            {slim || backingLayout ? sortTh('Cost basis', 'cost_basis') : <th>Cost basis</th>}
-            <th>Avg cost</th>
             {slim || backingLayout ? (
-              sortTh('Market Price', 'market_price', 'Last price per share (live last).')
+              sortTh(
+                'Basis / Avg',
+                'cost_basis',
+                'Total cost basis (top) and average cost per share (bottom).',
+              )
+            ) : (
+              <>
+                <th>Cost basis</th>
+                <th>Avg cost</th>
+              </>
+            )}
+            {backingLayout ? (
+              sortTh(
+                'Mkt / Price',
+                'market_price',
+                'Market value (held × last) / share price. Sort by value.',
+              )
+            ) : slim ? (
+              sortTh(
+                'Mkt value / Price',
+                'market_price',
+                'Total market value (held × last) and price per share. Sort by total value.',
+              )
             ) : (
               <th>Live last</th>
             )}
@@ -1273,84 +1518,26 @@ export function PositionsPage({
           </tr>
         </thead>
         <tbody>
-          {rows.map((ci) => {
-            const statusLabel = ci.held_shares >= ci.required_shares
-              ? 'Covered' : ci.held_shares > 0 ? 'Partial' : 'Naked'
-            const statusClass = ci.held_shares >= ci.required_shares
-              ? 'coverage-status-covered' : ci.held_shares > 0 ? 'coverage-status-partial' : 'coverage-status-naked'
-            const optionSupportLabel = ci.optionable_supported === true
-              ? 'Optionable'
-              : ci.optionable_supported === false
-                ? 'Not optionable'
-                : 'Mixed / Unknown'
-            const backedOpps = ci.backing_opportunities ?? []
-            const availContracts =
-              showAvail ? Math.floor(Math.max(0, ci.held_shares) / 100) : 0
-            const acc = ci.account_id || '—'
-            return (
-              <tr key={`${keyPrefix}-${ci.symbol}-${ci.account_id || '—'}`}>
-                <td><strong>{ci.symbol}</strong></td>
-                <td className={slim || backingLayout ? accountCellClass(acc) : 'replay-muted'}>{acc}</td>
-                {!hideBacked && (
-                  <td title={backedOpps.join(', ') || undefined}>
-                    {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
-                  </td>
-                )}
-                {showHeldColumn && (
-                  <td className={slim ? 'coverage-held-shares-cell' : undefined}>
-                    {slim ? fmtHeldShares3(ci.held_shares) : ci.held_shares}
-                  </td>
-                )}
-                {showHeldAmtColumn &&
-                  (slim || backingLayout ? (
-                    <td className="coverage-available-held-amt-cell coverage-available-held-amt-slim">
-                      <span className="coverage-available-contracts-only" title={`${ci.held_shares} sh ÷ 100`}>
-                        {Math.floor(Math.max(0, ci.held_shares) / 100)}
-                      </span>
+          {accountGroups
+            ? accountGroups.map(({ accountId, items }) => (
+                <Fragment key={`${keyPrefix}-acc-${accountId}`}>
+                  <tr className="coverage-pool-account-group-row">
+                    <td
+                      colSpan={accountGroupColSpan}
+                      className={accountCellClass(accountId)}
+                      title="Host vs Secondary use Settings → Stream host / secondary account IDs."
+                    >
+                      {accountId}
                     </td>
-                  ) : (
-                    <td className="coverage-available-held-amt-cell">
-                      <div className="coverage-available-contracts" title={`${ci.held_shares} sh ÷ 100`}>
-                        {availContracts}
-                      </div>
-                      <div className="coverage-available-contracts-label">contracts</div>
-                      <div className="coverage-available-shares-line" title="Share qty (100 sh per contract)">
-                        {ci.held_shares} sh
-                      </div>
-                    </td>
-                  ))}
-                {!slim && (
-                  <td>{ci.required_shares}{ci.instances_needing > 1 && <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>}</td>
-                )}
-                {!slim && !backingSlim && (
-                  <td><span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{fmtSurplusShares(ci.surplus_or_gap)}</span></td>
-                )}
-                {!slim && !backingSlim && <td>{optionSupportLabel}</td>}
-                <td>{fmtUsd(ci.cost_basis_total)}</td>
-                <td>{fmtUsd(ci.avg_cost_per_share)}</td>
-                <td>{fmtUsd(ci.live_last_price)}</td>
-                <td>
-                  <span className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                    {fmtUsd(ci.daily_pnl)}
-                  </span>
-                  {' / '}
-                  <span className={((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                    {fmtSignedPct(ci.daily_pct)}
-                  </span>
-                </td>
-                <td>
-                  <span className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                    {fmtUsd(ci.total_pnl)}
-                  </span>
-                  {' / '}
-                  <span className={((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
-                    {fmtSignedPct(ci.total_pct)}
-                  </span>
-                </td>
-                {!slim && !backingSlim && <td><span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span></td>}
-              </tr>
-            )
-          })}
+                  </tr>
+                  {items.map(ci =>
+                    renderCoverageDataRow(ci, `${keyPrefix}-${accountId}-${ci.symbol}`),
+                  )}
+                </Fragment>
+              ))
+            : rows.map(ci =>
+                renderCoverageDataRow(ci, `${keyPrefix}-${ci.symbol}-${ci.account_id || '—'}`),
+              )}
         </tbody>
       </table>
     </div>
@@ -1949,94 +2136,93 @@ export function PositionsPage({
                         Stock Coverage Summary
                         <InfoTooltip text="Optionable symbols only. Positions without tradeable options (Independent Holdings below) are not listed here. Underlying pool = stock left after all current opportunity hedges." />
                       </h6>
-                      {optionUnderlyingPoolItems.length > 0 && (
-                        <div style={{ marginBottom: '0.75rem' }}>
-                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
-                            Option underlying Pool
-                          </p>
-                          <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
-                            Long shares not needed for existing opportunity hedges (all scopes); can back additional options.
-                          </p>
-                          <p className="option-underlying-pool-totals" style={{ margin: '0.15rem 0 0.5rem' }}>
-                            <span className="option-underlying-pool-total-item">
-                              <span className="option-underlying-pool-total-label">Cost Total</span>{' '}
-                              <strong>{fmtUsd(optionUnderlyingPoolCostTotal)}</strong>
-                            </span>
-                            <span className="option-underlying-pool-total-sep" aria-hidden>
-                              {' · '}
-                            </span>
-                            <span className="option-underlying-pool-total-item">
-                              <span className="option-underlying-pool-total-label">Market Total</span>{' '}
-                              <strong>{fmtUsd(optionUnderlyingPoolMarketTotal)}</strong>
-                            </span>
-                          </p>
-                          {renderStockCoverageSummaryTable(sortedOptionUnderlyingPoolItems, 'underlying-pool', {
-                            underlyingPoolSlim: true,
-                            underlyingPoolSort: {
-                              column: underlyingPoolSort.col,
-                              dir: underlyingPoolSort.dir,
-                              onColumnClick: onUnderlyingPoolSortClick,
-                            },
-                          })}
-                        </div>
-                      )}
-                      {watchlistOptionableCoverageItems.length > 0 && (
-                        <div>
-                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
-                            Option backing Pool
-                          </p>
-                          <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
-                            Watchlist-scoped opportunities: Required = hedge from those strategies only.
-                          </p>
-                          {renderStockCoverageSummaryTable(sortedWatchlistOptionableCoverageItems, 'watchlist-optionable', {
-                            backingPoolSlim: true,
-                            underlyingPoolSort: {
-                              column: backingPoolSort.col,
-                              dir: backingPoolSort.dir,
-                              onColumnClick: onBackingPoolSortClick,
-                            },
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {unassignedOptStocks.length > 0 && (
-                    <div className="instance-sheet-stock-section">
-                      <h5 className="replay-sub instance-sheet-section-heading">Unassigned — Optionable Stocks</h5>
-                      <p className="section-hint">These stocks have tradeable options but no active option strategy instance.</p>
-                      <div className="replay-portfolio-table-wrap">
-                        <table className="table-operations instance-sheet-sub-table">
-                          <thead>
-                            <tr>
-                              <th>Account</th>
-                              <th>Symbol</th>
-                              <th>Side</th>
-                              <th>Qty</th>
-                              <th>Avg Cost</th>
-                              <th>Mark</th>
-                              <th>UN PNL</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {unassignedOptStocks.map(position => {
-                              const accId = (position.account_id ?? '').trim() || '—'
-                              const qty = Number(position.position)
-                              const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
-                                ? Number(position.unrealized_pnl) : null
-                              return (
-                                <tr key={`unassigned-opt-${accId}-${position.symbol ?? ''}`}>
-                                  <td>{accId}</td>
-                                  <td><strong>{position.symbol ?? '—'}</strong></td>
-                                  <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
-                                  <td>{Number.isFinite(qty) ? qty : '—'}</td>
-                                  <td>{fmtUsd(position.avgCost)}</td>
-                                  <td>{fmtUsd(position.price)}</td>
-                                  <td><span className={pnl != null ? 'replay-pnl-unrealized' : ''}>{fmtUsd(pnl ?? 0)}</span></td>
-                                </tr>
-                              )
+                      <div className="coverage-pools-row">
+                        {optionUnderlyingPoolItems.length > 0 && (
+                          <div className="coverage-pool-panel">
+                            <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
+                              Option underlying Pool
+                            </p>
+                            <p className="section-hint" style={{ margin: '0 0 0.4rem', fontSize: '0.82em' }}>
+                              Long shares not needed for existing opportunity hedges (all scopes); can back additional options.
+                            </p>
+                            <p className="option-underlying-pool-totals" style={{ margin: '0 0 0.45rem' }}>
+                              <span className="option-underlying-pool-total-item">
+                                <span className="option-underlying-pool-total-label">Market Total</span>{' '}
+                                <strong>{fmtUsd(optionUnderlyingPoolMarketTotal)}</strong>
+                              </span>
+                              <span className="option-underlying-pool-total-sep" aria-hidden>
+                                {' · '}
+                              </span>
+                              <span className="option-underlying-pool-total-item">
+                                {streamHostAccountId ? (
+                                  <>
+                                    <strong className="coverage-account-id coverage-account-host">
+                                      {streamHostAccountId}
+                                    </strong>{' '}
+                                    <span
+                                      className="option-underlying-pool-cash-bp"
+                                      title="Total cash / buying power (account table)"
+                                    >
+                                      {fmtUsd(hostSecondaryAccountCashBp.host.cash)}
+                                      {' / '}
+                                      {fmtUsd(hostSecondaryAccountCashBp.host.bp)}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <strong className="replay-muted">—</strong>
+                                )}
+                              </span>
+                              <span className="option-underlying-pool-total-sep" aria-hidden>
+                                {' · '}
+                              </span>
+                              <span className="option-underlying-pool-total-item">
+                                {streamSecondaryAccountId ? (
+                                  <>
+                                    <strong className="coverage-account-id coverage-account-secondary">
+                                      {streamSecondaryAccountId}
+                                    </strong>{' '}
+                                    <span
+                                      className="option-underlying-pool-cash-bp"
+                                      title="Total cash / buying power (account table)"
+                                    >
+                                      {fmtUsd(hostSecondaryAccountCashBp.secondary.cash)}
+                                      {' / '}
+                                      {fmtUsd(hostSecondaryAccountCashBp.secondary.bp)}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <strong className="replay-muted">—</strong>
+                                )}
+                              </span>
+                            </p>
+                            {renderStockCoverageSummaryTable(sortedOptionUnderlyingPoolItems, 'underlying-pool', {
+                              underlyingPoolSlim: true,
+                              underlyingPoolSort: {
+                                column: underlyingPoolSort.col,
+                                dir: underlyingPoolSort.dir,
+                                onColumnClick: onUnderlyingPoolSortClick,
+                              },
                             })}
-                          </tbody>
-                        </table>
+                          </div>
+                        )}
+                        {watchlistOptionableCoverageItems.length > 0 && (
+                          <div className="coverage-pool-panel">
+                            <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
+                              Option backing Pool
+                            </p>
+                            <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
+                              Watchlist-scoped opportunities: Required = hedge from those strategies only.
+                            </p>
+                            {renderStockCoverageSummaryTable(sortedWatchlistOptionableCoverageItems, 'watchlist-optionable', {
+                              backingPoolSlim: true,
+                              underlyingPoolSort: {
+                                column: backingPoolSort.col,
+                                dir: backingPoolSort.dir,
+                                onColumnClick: onBackingPoolSortClick,
+                              },
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2053,16 +2239,56 @@ export function PositionsPage({
                               <th>Side</th>
                               <th>Qty</th>
                               <th>Avg Cost</th>
-                              <th>Mark</th>
-                              <th>UN PNL</th>
+                              <th>Last</th>
+                              <th>Daily ($ / %)</th>
+                              <th>Total ($ / %)</th>
                             </tr>
                           </thead>
                           <tbody>
                             {independentStocks.map(position => {
                               const accId = (position.account_id ?? '').trim() || '—'
                               const qty = Number(position.position)
-                              const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
-                                ? Number(position.unrealized_pnl) : null
+                              const lastPrice =
+                                position.price != null && Number.isFinite(Number(position.price))
+                                  ? Number(position.price)
+                                  : null
+                              const dailyPrev =
+                                position.daily_prev_close != null &&
+                                Number.isFinite(Number(position.daily_prev_close))
+                                  ? Number(position.daily_prev_close)
+                                  : null
+                              let dailyPnl: number | null = null
+                              let dailyPct: number | null = null
+                              if (
+                                lastPrice != null &&
+                                dailyPrev != null &&
+                                Number.isFinite(qty) &&
+                                qty !== 0
+                              ) {
+                                dailyPnl = (lastPrice - dailyPrev) * qty
+                                const dBase = Math.abs(dailyPrev * qty)
+                                dailyPct = dBase > 0 ? (dailyPnl / dBase) * 100 : null
+                              }
+                              const totalPnl =
+                                position.unrealized_pnl != null &&
+                                Number.isFinite(Number(position.unrealized_pnl))
+                                  ? Number(position.unrealized_pnl)
+                                  : null
+                              const avgCost =
+                                position.avgCost != null && Number.isFinite(Number(position.avgCost))
+                                  ? Number(position.avgCost)
+                                  : null
+                              const costBasis =
+                                avgCost != null && Number.isFinite(qty) && qty !== 0
+                                  ? Math.abs(qty) * avgCost
+                                  : null
+                              const totalPct =
+                                costBasis != null &&
+                                costBasis > 0 &&
+                                totalPnl != null &&
+                                Number.isFinite(totalPnl)
+                                  ? (totalPnl / costBasis) * 100
+                                  : null
                               return (
                                 <tr key={`independent-${accId}-${position.symbol ?? ''}`}>
                                   <td>{accId}</td>
@@ -2070,8 +2296,25 @@ export function PositionsPage({
                                   <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
                                   <td>{Number.isFinite(qty) ? qty : '—'}</td>
                                   <td>{fmtUsd(position.avgCost)}</td>
-                                  <td>{fmtUsd(position.price)}</td>
-                                  <td><span className={pnl != null ? 'replay-pnl-unrealized' : ''}>{fmtUsd(pnl ?? 0)}</span></td>
+                                  <td>{fmtUsd(lastPrice)}</td>
+                                  <td>
+                                    <span className={((dailyPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                      {fmtUsd(dailyPnl)}
+                                    </span>
+                                    {' / '}
+                                    <span className={((dailyPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                      {fmtSignedPct(dailyPct)}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span className={((totalPnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                      {fmtUsd(totalPnl)}
+                                    </span>
+                                    {' / '}
+                                    <span className={((totalPct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                      {fmtSignedPct(totalPct)}
+                                    </span>
+                                  </td>
                                 </tr>
                               )
                             })}
