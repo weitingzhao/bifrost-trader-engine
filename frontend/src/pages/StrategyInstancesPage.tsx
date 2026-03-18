@@ -106,7 +106,7 @@ export function StrategyInstancesPage({
   const openCreateModal = () => {
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
-    setCreateOpenedAt(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`)
+    setCreateOpenedAt(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`)
     setCreateOpportunityId('')
     const hostId = (status?.ib_config?.stream_host_account_id ?? '').toString().trim()
     setCreateAccountId(hostId)
@@ -125,11 +125,12 @@ export function StrategyInstancesPage({
       setCreateError('Opportunity and Account are required.')
       return
     }
-    if (!createOpenedAt.trim()) {
-      setCreateError('Opened at is required.')
+    const dateStr = createOpenedAt.trim()
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      setCreateError('Opened at (date) is required.')
       return
     }
-    const openedAtIso = createOpenedAt.length <= 16 ? `${createOpenedAt}:00` : createOpenedAt
+    const openedAtIso = `${dateStr}T12:00:00.000Z`
     setCreateLoading(true)
     try {
       const res = await createStrategyInstance({
@@ -336,7 +337,7 @@ export function StrategyInstancesPage({
                 <div className="replay-exec-form-row">
                   <label>Opened at</label>
                   <input
-                    type="datetime-local"
+                    type="date"
                     value={createOpenedAt}
                     onChange={e => setCreateOpenedAt(e.target.value)}
                     required

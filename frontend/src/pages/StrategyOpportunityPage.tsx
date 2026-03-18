@@ -279,6 +279,11 @@ export function StrategyOpportunityPage({
   const removeOppCondition = (index: number) =>
     setOppFormEntryConditions((prev) => prev.filter((_, i) => i !== index))
 
+  const isFormCreate = oppFormOpen === 'create'
+  const formTitle = isFormCreate
+    ? (oppFormIsCopy ? 'New opportunity (copy)' : 'New opportunity')
+    : `Edit opportunity #${oppFormOpen}`
+
   return (
     <div className="card process-section">
       {availabilityError != null && (
@@ -293,11 +298,7 @@ export function StrategyOpportunityPage({
             <h3 id="opportunity-availability-error-modal-title">Cannot change availability</h3>
             <p style={{ whiteSpace: 'pre-wrap', marginBottom: 'var(--space-3)' }}>{availabilityError}</p>
             <div className="data-reset-modal-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setAvailabilityError(null)}
-              >
+              <button type="button" className="btn btn-primary" onClick={() => setAvailabilityError(null)}>
                 Close
               </button>
             </div>
@@ -310,10 +311,11 @@ export function StrategyOpportunityPage({
         <InfoTooltip text="Define opportunity strategies linked to a structure; scope and entry conditions." />
       </h2>
 
-      <section className="strategy-section" style={{ marginBottom: 'var(--space-4)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-          <h3 className="section-subtitle" style={{ margin: 0 }}>Opportunity strategies</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+      {/* ── List section ── */}
+      <section className="opp-list-section">
+        <div className="opp-list-toolbar">
+          <h3 className="opp-list-title">Opportunity strategies</h3>
+          <div className="opp-list-actions">
             <div className="structure-active-filter-pills" role="group" aria-label="Filter by availability">
               {(['all', 'active', 'inactive'] as const).map((value) => (
                 <button
@@ -326,24 +328,25 @@ export function StrategyOpportunityPage({
                 </button>
               ))}
             </div>
-            <button type="button" className="btn-primary" onClick={openOppCreate}>
-              Create opportunity
+            <button type="button" className="btn-primary opp-create-btn" onClick={openOppCreate}>
+              + Create opportunity
             </button>
           </div>
         </div>
+
         {opportunitiesLoading && <p className="section-hint">Loading…</p>}
         {opportunitiesError && <p className="msg-error">{opportunitiesError}</p>}
         {!opportunitiesLoading && !opportunitiesError && (
-          <div className="table-wrap">
-            <table className="data-table">
+          <div className="opp-table-wrap">
+            <table className="table-operations opp-table">
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Structure</th>
                   <th>Scope</th>
-                  <th>Gate</th>
-                  <th>Available</th>
-                  <th></th>
+                  <th>Gate safety</th>
+                  <th style={{ width: '5.5rem', textAlign: 'center' }}>Available</th>
+                  <th style={{ width: '9rem' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -352,15 +355,15 @@ export function StrategyOpportunityPage({
                   const scopeDisplay = getScopeDisplay(row.scope_type, row.symbols)
                   return (
                     <tr key={row.strategy_opportunity_id}>
-                      <td>{row.name}</td>
+                      <td className="opp-table-name-cell">{row.name}</td>
                       <td>{row.structure_name ?? row.strategy_structure_id}</td>
                       <td className="opp-table-scope-cell">
                         <span className="opp-table-scope-text" title={scopeDisplay.title || undefined}>
                           {scopeDisplay.text}
                         </span>
                       </td>
-                      <td>{row.gate_safety_name ?? '—'}</td>
-                      <td>
+                      <td>{row.gate_safety_name ?? <span className="opp-table-none">—</span>}</td>
+                      <td style={{ textAlign: 'center' }}>
                         <label className="toggle-switch" style={{ cursor: availabilityUpdating ? 'not-allowed' : 'pointer' }}>
                           <input
                             type="checkbox"
@@ -372,21 +375,14 @@ export function StrategyOpportunityPage({
                         </label>
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn-manage"
-                          onClick={() => openOppEdit(row.strategy_opportunity_id)}
-                        >
-                          Edit
-                        </button>
-                        {' '}
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          onClick={() => openOppCopy(row.strategy_opportunity_id)}
-                        >
-                          Copy
-                        </button>
+                        <span className="opp-table-row-actions">
+                          <button type="button" className="opp-row-btn opp-row-btn--edit" onClick={() => openOppEdit(row.strategy_opportunity_id)}>
+                            Edit
+                          </button>
+                          <button type="button" className="opp-row-btn opp-row-btn--copy" onClick={() => openOppCopy(row.strategy_opportunity_id)}>
+                            Copy
+                          </button>
+                        </span>
                       </td>
                     </tr>
                   )
@@ -403,116 +399,37 @@ export function StrategyOpportunityPage({
         )}
       </section>
 
+      {/* ── Create / Edit form panel ── */}
       {oppFormOpen !== null && (
-        <section className="strategy-section gates-form-section" style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-4)', background: 'var(--color-surface-elevated)', borderRadius: '8px' }}>
-          <h3 className="section-subtitle">
-            {oppFormOpen === 'create' ? (oppFormIsCopy ? 'New opportunity (copy)' : 'New opportunity') : `Edit opportunity (ID: ${oppFormOpen})`}
-          </h3>
-          {oppFormLoading && !oppFormPayload.name && <p className="section-hint">Loading…</p>}
+        <section className="opp-form-panel">
+          <div className="opp-form-header">
+            <h3 className="opp-form-title">{formTitle}</h3>
+            <button type="button" className="opp-form-close" onClick={closeOppForm} aria-label="Close form">×</button>
+          </div>
+
+          {oppFormLoading && !oppFormPayload.name && <div className="opp-form-loading">Loading…</div>}
           {oppFormError && (
-            <div className="msg-error" style={{ marginBottom: 'var(--space-2)' }}>
-              <p>{oppFormError}</p>
+            <div className="opp-form-error">
+              <span className="opp-form-error-icon">!</span>
+              {oppFormError}
             </div>
           )}
 
-          <div className="gates-form">
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Metadata</h4>
-              <div className="gates-form-row gates-form-row--name">
-                <label>Name</label>
+          <div className="opp-form-body">
+            {/* ── Row 1: Name + Availability ── */}
+            <div className="opp-field-row opp-field-row--identity">
+              <div className="opp-field opp-field--name">
+                <label className="opp-field-label" htmlFor="opp-name">Name</label>
                 <input
+                  id="opp-name"
                   type="text"
-                  className="opp-form-name-input"
+                  className="opp-input"
                   value={oppFormPayload.name}
                   onChange={(e) => setOppFormPayload((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="Opportunity name"
+                  placeholder="e.g. AAPL Premium Harvest"
                 />
               </div>
-              <div className="gates-form-row opp-structure-row">
-                <span className="gates-form-row-label">Structure</span>
-                <div
-                  className="opp-structure-cards"
-                  role="radiogroup"
-                  aria-label="Structure (required)"
-                  aria-required
-                >
-                  {structures.length === 0 ? (
-                    <p className="form-hint" style={{ margin: 0 }}>No structures. Create one in Structure first.</p>
-                  ) : (
-                    structures.map((s) => {
-                      const selected = oppFormPayload.strategy_structure_id === s.strategy_structure_id
-                      return (
-                        <label
-                          key={s.strategy_structure_id}
-                          className={`opp-structure-card ${selected ? 'opp-structure-card--selected' : ''}`}
-                        >
-                          <input
-                            type="radio"
-                            name="opp_structure"
-                            value={s.strategy_structure_id}
-                            checked={selected}
-                            onChange={() => setOppFormPayload((p) => ({ ...p, strategy_structure_id: s.strategy_structure_id }))}
-                            aria-label={`Structure: ${s.name}`}
-                          />
-                          <span className="opp-structure-card-title">{s.name}</span>
-                          {(s.version != null && s.version !== '') ||
-                          (s.template_display_name != null && s.template_display_name !== '') ||
-                          (s.structure_type != null && s.structure_type !== '') ? (
-                            <span className="opp-structure-card-meta">
-                              {s.version != null && s.version !== '' ? `v${s.version}` : ''}
-                              {(s.version != null && s.version !== '') &&
-                              (s.template_display_name || s.structure_type)
-                                ? ' · '
-                                : ''}
-                              {getStructureDisplayLabel(s)}
-                            </span>
-                          ) : null}
-                        </label>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-              <div className="gates-form-row gates-form-row--structure-type">
-                <span className="gates-form-row-label">Default gate safety</span>
-                <div className="structure-type-picker" role="radiogroup" aria-label="Default gate safety">
-                  <label
-                    className={`structure-type-option ${(oppFormPayload.default_gate_safety_strategy_id ?? null) === null ? 'structure-type-option--selected' : ''}`}
-                  >
-                    <input
-                      type="radio"
-                      name="opp_gate_safety"
-                      value=""
-                      checked={(oppFormPayload.default_gate_safety_strategy_id ?? null) === null}
-                      onChange={() => setOppFormPayload((p) => ({ ...p, default_gate_safety_strategy_id: null }))}
-                      aria-label="None"
-                    />
-                    <span>— None</span>
-                  </label>
-                  {activeGateSafetySets.map((g) => (
-                    <label
-                      key={g.gate_safety_strategy_id}
-                      className={`structure-type-option ${oppFormPayload.default_gate_safety_strategy_id === g.gate_safety_strategy_id ? 'structure-type-option--selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name="opp_gate_safety"
-                        value={g.gate_safety_strategy_id}
-                        checked={oppFormPayload.default_gate_safety_strategy_id === g.gate_safety_strategy_id}
-                        onChange={() =>
-                          setOppFormPayload((p) => ({ ...p, default_gate_safety_strategy_id: g.gate_safety_strategy_id }))
-                        }
-                        aria-label={g.name}
-                      />
-                      <span>{g.name}</span>
-                      {g.version != null && g.version !== '' && (
-                        <span className="structure-sheet-version" aria-hidden> v{g.version}</span>
-                      )}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="gates-form-row">
+              <div className="opp-field opp-field--toggle">
                 <label className="toggle-switch" style={{ cursor: 'pointer' }}>
                   <input
                     type="checkbox"
@@ -525,188 +442,235 @@ export function StrategyOpportunityPage({
               </div>
             </div>
 
-            <div className="opp-form-scope-conditions-cols">
-            <div className="gates-form-group opp-form-scope-col">
-              <h4 className="gates-form-group-title">Symbol scope</h4>
-              <div className="gates-form-row scope-type-switches-row">
-                <span className="gates-form-row-label">Scope type</span>
-                <div className="structure-active-filter-pills" role="radiogroup" aria-label="Scope type">
-                  {SCOPE_TYPES.map((t) => {
-                    const value = t || ''
-                    const isActive = (oppFormPayload.scope_type ?? '') === value
+            {/* ── Structure picker ── */}
+            <div className="opp-field">
+              <span className="opp-field-label">Structure</span>
+              <div className="opp-structure-cards" role="radiogroup" aria-label="Structure (required)" aria-required>
+                {structures.length === 0 ? (
+                  <p className="opp-field-hint">No structures. Create one in Structure first.</p>
+                ) : (
+                  structures.map((s) => {
+                    const selected = oppFormPayload.strategy_structure_id === s.strategy_structure_id
                     return (
-                      <button
-                        key={t || '_none'}
-                        type="button"
-                        role="radio"
-                        aria-checked={isActive}
-                        aria-label={getScopeTypeLabel(t)}
-                        className={`structure-active-filter-pill ${isActive ? 'active' : ''}`}
-                        onClick={() => setOppFormPayload((p) => ({ ...p, scope_type: value || null }))}
-                      >
-                        {getScopeTypeLabel(t)}
-                      </button>
+                      <label key={s.strategy_structure_id} className={`opp-structure-card ${selected ? 'opp-structure-card--selected' : ''}`}>
+                        <input
+                          type="radio"
+                          name="opp_structure"
+                          value={s.strategy_structure_id}
+                          checked={selected}
+                          onChange={() => setOppFormPayload((p) => ({ ...p, strategy_structure_id: s.strategy_structure_id }))}
+                          aria-label={`Structure: ${s.name}`}
+                        />
+                        <span className="opp-structure-card-title">{s.name}</span>
+                        {(s.version != null && s.version !== '') ||
+                        (s.template_display_name != null && s.template_display_name !== '') ||
+                        (s.structure_type != null && s.structure_type !== '') ? (
+                          <span className="opp-structure-card-meta">
+                            {s.version != null && s.version !== '' ? `v${s.version}` : ''}
+                            {(s.version != null && s.version !== '') && (s.template_display_name || s.structure_type) ? ' · ' : ''}
+                            {getStructureDisplayLabel(s)}
+                          </span>
+                        ) : null}
+                      </label>
                     )
-                  })}
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* ── Gate safety picker ── */}
+            <div className="opp-field">
+              <span className="opp-field-label">Default gate safety</span>
+              <div className="opp-gate-pills" role="radiogroup" aria-label="Default gate safety">
+                <label className={`opp-gate-pill ${(oppFormPayload.default_gate_safety_strategy_id ?? null) === null ? 'opp-gate-pill--selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="opp_gate_safety"
+                    value=""
+                    checked={(oppFormPayload.default_gate_safety_strategy_id ?? null) === null}
+                    onChange={() => setOppFormPayload((p) => ({ ...p, default_gate_safety_strategy_id: null }))}
+                    aria-label="None"
+                  />
+                  <span>None</span>
+                </label>
+                {activeGateSafetySets.map((g) => (
+                  <label
+                    key={g.gate_safety_strategy_id}
+                    className={`opp-gate-pill ${oppFormPayload.default_gate_safety_strategy_id === g.gate_safety_strategy_id ? 'opp-gate-pill--selected' : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="opp_gate_safety"
+                      value={g.gate_safety_strategy_id}
+                      checked={oppFormPayload.default_gate_safety_strategy_id === g.gate_safety_strategy_id}
+                      onChange={() => setOppFormPayload((p) => ({ ...p, default_gate_safety_strategy_id: g.gate_safety_strategy_id }))}
+                      aria-label={g.name}
+                    />
+                    <span>{g.name}</span>
+                    {g.version != null && g.version !== '' && (
+                      <span className="opp-gate-pill-version">v{g.version}</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Two-column: Scope + Conditions ── */}
+            <div className="opp-form-columns">
+              {/* Scope column */}
+              <div className="opp-form-col">
+                <div className="opp-col-header">
+                  <h4 className="opp-col-title">Symbol scope</h4>
+                </div>
+                <div className="opp-col-body">
+                  <div className="opp-scope-type-row">
+                    <div className="structure-active-filter-pills" role="radiogroup" aria-label="Scope type">
+                      {SCOPE_TYPES.map((t) => {
+                        const value = t || ''
+                        const isActive = (oppFormPayload.scope_type ?? '') === value
+                        return (
+                          <button
+                            key={t || '_none'}
+                            type="button"
+                            role="radio"
+                            aria-checked={isActive}
+                            aria-label={getScopeTypeLabel(t)}
+                            className={`structure-active-filter-pill ${isActive ? 'active' : ''}`}
+                            onClick={() => setOppFormPayload((p) => ({ ...p, scope_type: value || null }))}
+                          >
+                            {getScopeTypeLabel(t)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {oppFormPayload.scope_type === 'explicit_symbols' && (
+                    <div className="opp-symbols-explicit">
+                      <div className="opp-symbol-tags">
+                        {oppFormSymbols.map((sym, i) => (
+                          <span key={i} className="opp-symbol-tag">
+                            <input
+                              type="text"
+                              className="opp-symbol-tag-input"
+                              value={sym}
+                              onChange={(e) => updateOppSymbol(i, e.target.value.toUpperCase())}
+                              placeholder="SYM"
+                            />
+                            <button type="button" className="opp-symbol-tag-remove" onClick={() => removeOppSymbol(i)} aria-label={`Remove ${sym || 'symbol'}`}>×</button>
+                          </span>
+                        ))}
+                      </div>
+                      <button type="button" className="opp-add-btn" onClick={addOppSymbol}>
+                        + Add symbol
+                      </button>
+                    </div>
+                  )}
+
+                  {oppFormPayload.scope_type === 'watchlist_stk' && (
+                    <div className="opp-watchlist-stk-list">
+                      {watchlistLoading ? (
+                        <p className="opp-field-hint">Loading watchlist…</p>
+                      ) : watchlistStkSymbols.length === 0 ? (
+                        <p className="opp-field-hint">No stocks in watchlist. Add stocks in Watchlist first.</p>
+                      ) : (
+                        <>
+                          <div className="opp-watchlist-stk-actions">
+                            <button type="button" className="opp-add-btn" onClick={() => setOppFormSymbols([...watchlistStkSymbols])}>
+                              Select all
+                            </button>
+                            <button type="button" className="opp-add-btn" onClick={() => setOppFormSymbols([])}>
+                              Clear
+                            </button>
+                            <span className="opp-field-hint" style={{ marginLeft: 'auto' }}>
+                              {oppFormSymbols.length === 0 ? 'All symbols (empty = all)' : `${oppFormSymbols.length} selected`}
+                            </span>
+                          </div>
+                          <ul className="opp-watchlist-stk-symbols" role="group" aria-label="Select symbols from Watchlist STK">
+                            {watchlistStkSymbols.map((sym) => {
+                              const checked = oppFormSymbols.includes(sym)
+                              return (
+                                <li key={sym}>
+                                  <label className="opp-watchlist-stk-check">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        setOppFormSymbols((prev) =>
+                                          checked ? prev.filter((s) => s !== sym) : [...prev, sym].sort((a, b) => a.localeCompare(b))
+                                        )
+                                      }}
+                                      aria-label={`Include ${sym}`}
+                                    />
+                                    <span>{sym}</span>
+                                  </label>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-              {oppFormPayload.scope_type === 'explicit_symbols' && (
-                <>
-                  <div className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
-                    {oppFormSymbols.map((sym, i) => (
-                      <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+
+              {/* Conditions column */}
+              <div className="opp-form-col">
+                <div className="opp-col-header">
+                  <h4 className="opp-col-title">Entry conditions</h4>
+                </div>
+                <div className="opp-col-body">
+                  {oppFormEntryConditions.length === 0 && (
+                    <p className="opp-field-hint">No entry conditions yet.</p>
+                  )}
+                  <div className="opp-conditions-list">
+                    {oppFormEntryConditions.map((c, i) => (
+                      <div key={i} className="opp-condition-row">
+                        <select
+                          className="opp-condition-select"
+                          value={c.condition_type}
+                          onChange={(e) => updateOppCondition(i, { condition_type: e.target.value })}
+                        >
+                          {CONDITION_TYPES.map((t) => (
+                            <option key={t} value={t}>{getConditionTypeLabel(t)}</option>
+                          ))}
+                        </select>
                         <input
                           type="text"
-                          value={sym}
-                          onChange={(e) => updateOppSymbol(i, e.target.value)}
-                          placeholder="Symbol"
-                          style={{ width: '100px' }}
+                          className="opp-condition-input"
+                          value={c.value_text ?? ''}
+                          onChange={(e) => updateOppCondition(i, { value_text: e.target.value || null })}
+                          placeholder="text"
                         />
-                        <button type="button" className="btn-secondary" onClick={() => removeOppSymbol(i)}>
-                          Remove
-                        </button>
-                      </span>
+                        <input
+                          type="number"
+                          step="any"
+                          className="opp-condition-input opp-condition-input--num"
+                          value={c.value_numeric ?? ''}
+                          onChange={(e) =>
+                            updateOppCondition(i, { value_numeric: e.target.value === '' ? null : parseFloat(e.target.value) })
+                          }
+                          placeholder="numeric"
+                        />
+                        <button type="button" className="opp-condition-remove" onClick={() => removeOppCondition(i)} aria-label="Remove condition">×</button>
+                      </div>
                     ))}
                   </div>
-                  <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addOppSymbol}>
-                    Add symbol
+                  <button type="button" className="opp-add-btn" onClick={addOppCondition}>
+                    + Add condition
                   </button>
-                </>
-              )}
-              {oppFormPayload.scope_type === 'watchlist_stk' && (
-                <div className="gates-form-row opp-watchlist-stk-row">
-                  <span className="gates-form-row-label">Watchlist STK</span>
-                  <div className="opp-watchlist-stk-list">
-                    {watchlistLoading ? (
-                      <p className="form-hint">Loading watchlist…</p>
-                    ) : watchlistStkSymbols.length === 0 ? (
-                      <p className="form-hint">No stocks in watchlist. Add stocks in Watchlist first.</p>
-                    ) : (
-                      <>
-                        <div className="opp-watchlist-stk-actions">
-                          <button
-                            type="button"
-                            className="btn-secondary opp-watchlist-stk-btn"
-                            onClick={() => setOppFormSymbols([...watchlistStkSymbols])}
-                          >
-                            Select all
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-secondary opp-watchlist-stk-btn"
-                            onClick={() => setOppFormSymbols([])}
-                          >
-                            Clear
-                          </button>
-                          <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>
-                            {oppFormSymbols.length === 0
-                              ? 'All symbols (empty = all)'
-                              : `${oppFormSymbols.length} selected`}
-                          </span>
-                        </div>
-                        <ul className="opp-watchlist-stk-symbols" role="group" aria-label="Select symbols from Watchlist STK">
-                          {watchlistStkSymbols.map((sym) => {
-                            const checked = oppFormSymbols.includes(sym)
-                            return (
-                              <li key={sym}>
-                                <label className="opp-watchlist-stk-check">
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => {
-                                      setOppFormSymbols((prev) =>
-                                        checked ? prev.filter((s) => s !== sym) : [...prev, sym].sort((a, b) => a.localeCompare(b))
-                                      )
-                                    }}
-                                    aria-label={`Include ${sym}`}
-                                  />
-                                  <span>{sym}</span>
-                                </label>
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      </>
-                    )}
-                  </div>
                 </div>
-              )}
-            </div>
-
-            <div className="gates-form-group opp-form-conditions-col">
-              <h4 className="gates-form-group-title">Entry conditions</h4>
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Type</th>
-                      <th>Value (text)</th>
-                      <th>Value (numeric)</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {oppFormEntryConditions.map((c, i) => (
-                      <tr key={i}>
-                        <td>
-                          <select
-                            value={c.condition_type}
-                            onChange={(e) => updateOppCondition(i, { condition_type: e.target.value })}
-                          >
-                            {CONDITION_TYPES.map((t) => (
-                              <option key={t} value={t}>
-                                {getConditionTypeLabel(t)}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input
-                            type="text"
-                            value={c.value_text ?? ''}
-                            onChange={(e) => updateOppCondition(i, { value_text: e.target.value || null })}
-                            placeholder="—"
-                            style={{ width: '120px' }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            step="any"
-                            value={c.value_numeric ?? ''}
-                            onChange={(e) =>
-                              updateOppCondition(i, {
-                                value_numeric: e.target.value === '' ? null : parseFloat(e.target.value),
-                              })
-                            }
-                            placeholder="—"
-                            style={{ width: '100px' }}
-                          />
-                        </td>
-                        <td>
-                          <button type="button" className="btn-secondary" onClick={() => removeOppCondition(i)}>
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
-              <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addOppCondition}>
-                Add condition
-              </button>
             </div>
-            </div>
+          </div>
 
-            <div className="gates-form-actions" style={{ marginTop: 'var(--space-4)' }}>
-              <button type="button" className="btn-primary" onClick={submitOppForm} disabled={oppFormLoading}>
-                {oppFormOpen === 'create' ? 'Create' : 'Save'}
-              </button>
-              <button type="button" className="btn-secondary" onClick={closeOppForm}>
-                Cancel
-              </button>
-            </div>
+          {/* ── Form footer ── */}
+          <div className="opp-form-footer">
+            <button type="button" className="btn-secondary" onClick={closeOppForm}>Cancel</button>
+            <button type="button" className="btn-primary" onClick={submitOppForm} disabled={oppFormLoading}>
+              {isFormCreate ? 'Create' : 'Save changes'}
+            </button>
           </div>
         </section>
       )}
