@@ -1049,6 +1049,43 @@ def delete_one_execution(status_config: dict, account_executions_id: int) -> boo
         return False
 
 
+def update_position_strategy(
+    conn: Any,
+    account_id: str,
+    contract_key: str,
+    strategy_opportunity_id: Optional[int],
+    strategy_instance_id: Optional[int],
+) -> bool:
+    """Update strategy_opportunity_id and strategy_instance_id for a position (account_positions).
+    Used for linking stock positions (e.g. Covered Call underlying) to strategy instance."""
+    if not conn or not (account_id or "").strip() or not (contract_key or "").strip():
+        return False
+    acc = str(account_id).strip()
+    ck = str(contract_key).strip()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE account_positions
+                SET strategy_opportunity_id = %s, strategy_instance_id = %s, updated_at = now()
+                WHERE account_id = %s AND contract_key = %s
+                """,
+                (strategy_opportunity_id, strategy_instance_id, acc, ck),
+            )
+            if cur.rowcount == 0:
+                conn.rollback()
+                return False
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.warning("update_position_strategy failed: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+
+
 __all__ = [
     "sync_accounts_snapshot_to_db",
     "write_account_executions_to_db",
@@ -1057,4 +1094,5 @@ __all__ = [
     "upsert_account_transactions",
     "update_one_execution",
     "delete_one_execution",
+    "update_position_strategy",
 ]

@@ -53,6 +53,7 @@ class PostgreSQLSink(StatusSink):
                 # Avoid blocking forever if another session holds a lock on daemon_heartbeat/daemon_auto_status_current
                 with self._conn.cursor() as cur:
                     cur.execute("SET lock_timeout = '5s'")
+                    cur.execute("SET idle_in_transaction_session_timeout = '60s'")
                 self._conn.commit()
                 _ensure_tables(self._conn)
                 logger.info(
@@ -942,6 +943,7 @@ class PostgreSQLSink(StatusSink):
             with self._conn.cursor() as cur:
                 cur.execute("SELECT ib_client_id FROM daemon_heartbeat WHERE id = 1")
                 row = cur.fetchone()
+            self._conn.rollback()
             if row is None or row[0] is None:
                 return None
             return int(row[0])
@@ -994,6 +996,7 @@ class PostgreSQLSink(StatusSink):
                         out["ib2_client_id_listener"] = int(r2[3]) if len(r2) > 3 and r2[3] is not None else 3
             except Exception:
                 pass
+            self._conn.rollback()
             return out
         except Exception as e:
             self._conn.rollback()
@@ -1016,6 +1019,7 @@ class PostgreSQLSink(StatusSink):
                     """
                 )
                 rows = cur.fetchall()
+            self._conn.rollback()
             return [str(r[0]) for r in rows if r and r[0]]
         except Exception as e:
             logger.debug("get_watchlist_stk_symbols failed: %s", e)
@@ -1038,6 +1042,7 @@ class PostgreSQLSink(StatusSink):
                     """
                 )
                 rows = cur.fetchall()
+            self._conn.rollback()
             return [
                 {
                     "contract_key": str(r[0]),
@@ -1074,6 +1079,7 @@ class PostgreSQLSink(StatusSink):
                     tuple(keys),
                 )
                 rows = cur.fetchall()
+            self._conn.rollback()
             return [
                 {
                     "contract_key": r[0],
@@ -1129,6 +1135,7 @@ class PostgreSQLSink(StatusSink):
                     tuple(account_ids),
                 )
                 rows = cur.fetchall()
+            self._conn.rollback()
             return [str(r[0]) for r in rows if r and r[0]]
         except Exception as e:
             logger.debug("get_stream_position_stk_symbols failed: %s", e)
@@ -1174,6 +1181,7 @@ class PostgreSQLSink(StatusSink):
                     "SELECT suspended, heartbeat_interval_sec FROM daemon_run_status WHERE id = 1"
                 )
                 row = cur.fetchone()
+            self._conn.rollback()
             if row is None:
                 logger.debug("poll_run_status: no row for id=1 → suspended=True, interval=None (default)")
                 return True, None

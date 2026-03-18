@@ -6,6 +6,31 @@ export type LivePositionRow = IbPositionRow & {
   account_id: string
 }
 
+export type OpenOptionPosition = {
+  kind: 'live' | 'offtrack'
+  contract_key: string
+  strike: number
+  expiry: string
+  qty: number
+  avg_cost: number | null
+  mark_price: number | null
+  unrealized_pnl: number
+  pool_label: 'On' | 'Off'
+  account_id: string
+  position?: LivePositionRow
+  trades?: Execution[]
+}
+
+export type InstancePositionGroup = {
+  strategy_instance_id: number | null
+  strategy_instance_label: string | null
+  strategy_opportunity_name: string | null
+  strategy_instance_opened_at_epoch: number | null
+  positions: OpenOptionPosition[]
+  total_unrealized_pnl: number
+}
+
+/** @deprecated kept for transition; use InstancePositionGroup */
 export type OpenOptionGroup = {
   kind: 'live' | 'offtrack'
   contract_key: string

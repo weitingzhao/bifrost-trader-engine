@@ -216,6 +216,11 @@ def create_template(status_config: Optional[dict], payload: Dict[str, Any]) -> i
         conn.close()
 
 
+def _normalize_template_code(raw: Any) -> str:
+    s = (raw or "").strip().lower().replace(" ", "_")
+    return s
+
+
 def update_template(status_config: Optional[dict], strategy_template_id: int, payload: Dict[str, Any]) -> bool:
     conn = _conn_from_config(status_config)
     if conn is None:
@@ -224,13 +229,22 @@ def update_template(status_config: Optional[dict], strategy_template_id: int, pa
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM strategy_template WHERE strategy_template_id = %s",
+                "SELECT template_code FROM strategy_template WHERE strategy_template_id = %s",
                 (strategy_template_id,),
             )
-            if not cur.fetchone():
+            row = cur.fetchone()
+            if not row:
                 return False
+            current_code = row[0]
             fields = []
             vals: List[Any] = []
+            if "template_code" in payload:
+                tc = _normalize_template_code(payload.get("template_code"))
+                if not tc or not re.match(r"^[a-z][a-z0-9_]*$", tc):
+                    raise ValueError("template_code must be lowercase snake_case")
+                if tc != current_code:
+                    fields.append("template_code = %s")
+                    vals.append(tc)
             for key in (
                 "display_name",
                 "dim_direction",
@@ -265,6 +279,9 @@ def update_template(status_config: Optional[dict], strategy_template_id: int, pa
     except ValueError:
         conn.rollback()
         raise
+    except psycopg2.IntegrityError as e:
+        conn.rollback()
+        raise ValueError("template_code already exists") from e
     except Exception as e:
         conn.rollback()
         raise ValueError(str(e)) from e

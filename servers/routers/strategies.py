@@ -493,6 +493,22 @@ def _parse_optional_ts(value: Any, field_name: str) -> Any:
     raise HTTPException(status_code=400, detail=f"{field_name} must be ISO 8601 or Unix timestamp")
 
 
+@router.delete("/instances/{strategy_instance_id}")
+def delete_strategy_instance_endpoint(request: Request, strategy_instance_id: int) -> Dict[str, Any]:
+    """Delete a strategy instance by id. Fails with 409 if the instance has linked executions."""
+    reader = request.app.state.reader
+    control_via_db = getattr(request.app.state, "control_via_db", None)
+    if not control_via_db:
+        raise HTTPException(status_code=503, detail="Database control not configured")
+    row = reader.get_strategy_instance_by_id(strategy_instance_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Strategy instance not found")
+    ok = reader.delete_strategy_instance(strategy_instance_id)
+    if not ok:
+        raise HTTPException(status_code=409, detail="Cannot delete: instance has linked executions or delete failed")
+    return {"ok": True}
+
+
 @router.patch("/instances/{strategy_instance_id}")
 def update_strategy_instance_endpoint(
     request: Request, strategy_instance_id: int, body: StrategyInstanceUpdateBody

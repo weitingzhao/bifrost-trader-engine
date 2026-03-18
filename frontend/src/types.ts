@@ -314,6 +314,8 @@ export interface Execution {
   strategy_opportunity_name?: string | null
   /** Strategy instance label (from backend JOIN). */
   strategy_instance_label?: string | null
+  /** Strategy instance opened_at (Unix seconds, from backend JOIN). */
+  strategy_instance_opened_at_epoch?: number | null
 }
 
 /** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */
@@ -408,6 +410,9 @@ export interface StrategyInstance {
   strategy_opportunity_name?: string | null
   /** Number of executions attributed to this instance (from list API). */
   executions_count?: number
+  /** Strategy structure used by the opportunity (from detail/list API). */
+  strategy_structure_id?: number | null
+  strategy_structure_name?: string | null
 }
 
 /** One row from account_transactions (Flex cash transactions). GET /transactions, GET /performance.transactions */

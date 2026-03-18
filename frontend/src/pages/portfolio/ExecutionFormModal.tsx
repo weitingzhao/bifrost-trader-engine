@@ -147,7 +147,7 @@ export function ExecutionFormModal({
       aria-labelledby="exec-modal-title"
     >
       <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
-        <h3 id="exec-modal-title">{editExec ? 'Edit execution' : initialDraft?.sec_type === 'OPT' ? 'Link execution record' : 'Add history'}</h3>
+        <h3 id="exec-modal-title">{editExec ? 'Edit execution' : 'Add history'}</h3>
         {execFormError && <p className="section-hint replay-form-error">{execFormError}</p>}
         <form
           className="replay-exec-form"

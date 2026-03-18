@@ -96,6 +96,45 @@ export function getConditionTypeLabel(key: string | null | undefined): string {
   return CONDITION_TYPE_LABELS[key] ?? key
 }
 
+/**
+ * Suggested opportunity name: symbol(s) + structure display name + entry summary.
+ * Used on create; user may edit the name afterward.
+ */
+export function buildSuggestedOpportunityName(params: {
+  structureName: string
+  scopeType: string | null | undefined
+  symbols: string[]
+  entryConditions: EntryConditionItem[]
+}): string {
+  const { structureName, scopeType, symbols, entryConditions } = params
+  const symList = symbols.map((s) => String(s).trim().toUpperCase()).filter(Boolean)
+
+  let symbolPart = ''
+  if (scopeType === 'explicit_symbols') {
+    symbolPart = symList.join(', ')
+  } else if (scopeType === 'watchlist_stk') {
+    symbolPart = symList.length > 0 ? symList.join(', ') : 'Watchlist STK'
+  }
+
+  const structPart = (structureName || '').trim()
+
+  const entryParts = entryConditions
+    .filter((c) => (c.condition_type ?? '').trim())
+    .map((c) => {
+      const label = getConditionTypeLabel(c.condition_type)
+      const vt = (c.value_text ?? '').trim()
+      const vn = c.value_numeric
+      const numStr =
+        vn != null && typeof vn === 'number' && Number.isFinite(vn) ? String(vn) : ''
+      const tail = [vt, numStr].filter(Boolean).join(' ')
+      const base = tail ? `${label} ${tail}` : label
+      return base.replace(/\s+/g, ' ').trim()
+    })
+  const entryPart = entryParts.join(' · ')
+
+  return [symbolPart, structPart, entryPart].filter(Boolean).join(' ')
+}
+
 export const DEFAULT_OPPORTUNITY_PAYLOAD: OpportunityPayload = {
   name: '',
   strategy_structure_id: 0,

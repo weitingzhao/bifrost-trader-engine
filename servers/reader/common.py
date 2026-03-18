@@ -47,11 +47,20 @@ class StatusReader:
             self._conn = psycopg2.connect(**params)
             with self._conn.cursor() as cur:
                 cur.execute("SET lock_timeout = '5s'")
+                cur.execute("SET idle_in_transaction_session_timeout = '30s'")
             self._conn.commit()
             return True
         except Exception as e:
             logger.warning("StatusReader connect failed: %s", e)
             return False
+
+    def _end_read_txn(self) -> None:
+        """End any implicit read transaction to avoid idle-in-transaction between requests."""
+        if self._conn is not None:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
 
     def close(self) -> None:
         if self._conn:
@@ -65,17 +74,23 @@ class StatusReader:
     def get_status_current(self) -> Optional[Dict[str, Any]]:
         if not self._connect():
             return None
-        return status_module.get_status_current(self._conn)
+        result = status_module.get_status_current(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_run_status(self) -> Optional[bool]:
         if not self._connect():
             return None
-        return status_module.get_run_status(self._conn)
+        result = status_module.get_run_status(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_daemon_heartbeat(self) -> Optional[Dict[str, Any]]:
         if not self._connect():
             return None
-        return status_module.get_daemon_heartbeat(self._conn)
+        result = status_module.get_daemon_heartbeat(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_operations(
         self,
@@ -86,20 +101,26 @@ class StatusReader:
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return status_module.get_operations(
+        result = status_module.get_operations(
             self._conn, since_ts=since_ts, until_ts=until_ts, type_filter=type_filter, limit=limit
         )
+        self._end_read_txn()
+        return result
 
     def get_open_orders(self) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return status_module.get_open_orders(self._conn)
+        result = status_module.get_open_orders(self._conn)
+        self._end_read_txn()
+        return result
 
     # --- Watchlist domain (delegate to watchlist module) ---
     def get_watchlist(self) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return watchlist_module.get_watchlist(self._conn)
+        result = watchlist_module.get_watchlist(self._conn)
+        self._end_read_txn()
+        return result
 
     def add_watchlist(
         self,
@@ -129,18 +150,24 @@ class StatusReader:
     def get_is_us_trading_day(self, date_str: str) -> bool:
         if not self._connect():
             return True
-        return market_module.get_is_us_trading_day_conn(self._conn, date_str)
+        result = market_module.get_is_us_trading_day_conn(self._conn, date_str)
+        self._end_read_txn()
+        return result
 
     def get_market_holidays(self, exchange: str = "NYSE", year: Optional[int] = None) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return market_module.get_market_holidays_conn(self._conn, exchange=exchange, year=year)
+        result = market_module.get_market_holidays_conn(self._conn, exchange=exchange, year=year)
+        self._end_read_txn()
+        return result
 
     def get_contract_quotes(self, contract_keys: List[str]) -> List[Dict[str, Any]]:
         """Return bid/ask/last/mid from contract_quote_live for given contract_keys. Used by GET /quotes for OPT rows."""
         if not self._connect():
             return []
-        return market_module.get_contract_quotes_conn(self._conn, contract_keys)
+        result = market_module.get_contract_quotes_conn(self._conn, contract_keys)
+        self._end_read_txn()
+        return result
 
     def add_market_holiday(
         self, date_str: str, label: Optional[str] = None, exchange: str = "NYSE"
@@ -162,12 +189,16 @@ class StatusReader:
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return market_module.get_bars(self._conn, symbol=symbol, period=period, limit=limit)
+        result = market_module.get_bars(self._conn, symbol=symbol, period=period, limit=limit)
+        self._end_read_txn()
+        return result
 
     def get_bars_latest(self, symbol: Optional[str] = None, period: str = "1 D") -> Optional[float]:
         if not self._connect():
             return None
-        return market_module.get_bars_latest(self._conn, symbol=symbol, period=period)
+        result = market_module.get_bars_latest(self._conn, symbol=symbol, period=period)
+        self._end_read_txn()
+        return result
 
     def get_bar_times_in_range(
         self,
@@ -178,9 +209,11 @@ class StatusReader:
     ) -> List[float]:
         if not self._connect():
             return []
-        return market_module.get_bar_times_in_range(
+        result = market_module.get_bar_times_in_range(
             self._conn, symbol=symbol, period=period, start_ts=start_ts, end_ts=end_ts
         )
+        self._end_read_txn()
+        return result
 
     def get_bars_benchmark(
         self,
@@ -189,147 +222,199 @@ class StatusReader:
     ) -> Dict[str, Dict[str, Any]]:
         if not self._connect():
             return {}
-        return market_module.get_bars_benchmark(self._conn, symbols=symbols, on_or_before=on_or_before)
+        result = market_module.get_bars_benchmark(self._conn, symbols=symbols, on_or_before=on_or_before)
+        self._end_read_txn()
+        return result
 
     def get_stock_day_fallback_price(self, symbol: str) -> Optional[Tuple[float, float, Optional[float]]]:
         if not self._connect():
             return None
-        return market_module.get_stock_day_fallback_price(self._conn, symbol)
+        result = market_module.get_stock_day_fallback_price(self._conn, symbol)
+        self._end_read_txn()
+        return result
 
     def get_bars_stats(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         if not self._connect():
             return {"stock_day": 0, "stock_min": {}}
-        return market_module.get_bars_stats(self._conn, symbol=symbol)
+        result = market_module.get_bars_stats(self._conn, symbol=symbol)
+        self._end_read_txn()
+        return result
 
     def get_bars_coverage(self, symbols: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return market_module.get_bars_coverage(self._conn, symbols=symbols)
+        result = market_module.get_bars_coverage(self._conn, symbols=symbols)
+        self._end_read_txn()
+        return result
 
     # --- Settings domain (delegate to settings module) ---
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
         if not self._connect():
             return None
-        return settings_module.get_ib_config(self._conn)
+        result = settings_module.get_ib_config(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_flex_config(self, purpose: Optional[str] = None) -> Any:
         if not self._connect():
             return [] if purpose is not None else {"host_token": None, "secondary_token": None, "rows": []}
-        return settings_module.get_flex_config(self._conn, purpose=purpose)
+        result = settings_module.get_flex_config(self._conn, purpose=purpose)
+        self._end_read_txn()
+        return result
 
     def get_flex_default_range_dates(self) -> Tuple[str, str]:
         if not self._connect():
             return ("", "")
-        return settings_module.get_flex_default_range_dates(self._conn)
+        result = settings_module.get_flex_default_range_dates(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_flex_executions_stats(self) -> Dict[str, Any]:
         if not self._connect():
             return {"count": 0, "accounts": 0, "min_date": None, "max_date": None}
-        return settings_module.get_flex_executions_stats(self._conn)
+        result = settings_module.get_flex_executions_stats(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_flex_init_range_dates(self) -> Tuple[str, str]:
         if not self._connect():
             return ("", "")
-        return settings_module.get_flex_init_range_dates(self._conn)
+        result = settings_module.get_flex_init_range_dates(self._conn)
+        self._end_read_txn()
+        return result
 
     # --- Gate safety (strategy & safety boundary from DB) ---
     def get_gates_by_id(self, gate_safety_strategy_id: int) -> Optional[Dict[str, Any]]:
         """Return gates dict (shape of config['gates']) for the given boundary set id. None if missing."""
         if not self._connect():
             return None
-        return gate_safety_module.get_gates_by_id(self._conn, gate_safety_strategy_id)
+        result = gate_safety_module.get_gates_by_id(self._conn, gate_safety_strategy_id)
+        self._end_read_txn()
+        return result
 
     def get_active_gate_safety_strategy_id(self) -> Optional[int]:
         """Return settings.active_gate_safety_strategy_id for id=1, or None."""
         if not self._connect():
             return None
-        return gate_safety_module.get_active_gate_safety_strategy_id(self._conn)
+        result = gate_safety_module.get_active_gate_safety_strategy_id(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_active_strategy_structure_id(self) -> Optional[int]:
         """Return settings.active_strategy_structure_id for id=1, or None."""
         if not self._connect():
             return None
-        return gate_safety_module.get_active_strategy_structure_id(self._conn)
+        result = gate_safety_module.get_active_strategy_structure_id(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_active_strategy_allocation_id(self) -> Optional[int]:
         """Return settings.active_strategy_allocation_id for id=1, or None."""
         if not self._connect():
             return None
-        return gate_safety_module.get_active_strategy_allocation_id(self._conn)
+        result = gate_safety_module.get_active_strategy_allocation_id(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_gate_safety_name(self, gate_safety_strategy_id: int) -> Optional[str]:
         """Return name of gate_safety_strategy row, or None."""
         if not self._connect():
             return None
-        return gate_safety_module.get_gate_safety_name(self._conn, gate_safety_strategy_id)
+        result = gate_safety_module.get_gate_safety_name(self._conn, gate_safety_strategy_id)
+        self._end_read_txn()
+        return result
 
     def list_gate_safety_sets(self) -> List[Dict[str, Any]]:
         """Return list of gate_safety_strategy rows for management dropdown."""
         if not self._connect():
             return []
-        return gate_safety_module.list_gate_safety_sets(self._conn)
+        result = gate_safety_module.list_gate_safety_sets(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_gate_safety_full_by_id(self, gate_safety_strategy_id: int) -> Optional[Dict[str, Any]]:
         """Return full gate set for UI edit: metadata + gates + earnings_dates. None if not found."""
         if not self._connect():
             return None
-        return gate_safety_module.get_gate_safety_full_by_id(self._conn, gate_safety_strategy_id)
+        result = gate_safety_module.get_gate_safety_full_by_id(self._conn, gate_safety_strategy_id)
+        self._end_read_txn()
+        return result
 
     def get_structure_by_id(self, strategy_structure_id: int) -> Optional[Dict[str, Any]]:
         """Return one strategy_structure row as dict, or None."""
         if not self._connect():
             return None
-        return strategy_module.get_structure_by_id(self._conn, strategy_structure_id)
+        result = strategy_module.get_structure_by_id(self._conn, strategy_structure_id)
+        self._end_read_txn()
+        return result
 
     def list_structures(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Return list of strategy_structure rows."""
         if not self._connect():
             return []
-        return strategy_module.list_structures(self._conn, active_only=active_only)
+        result = strategy_module.list_structures(self._conn, active_only=active_only)
+        self._end_read_txn()
+        return result
 
     def list_dims_grouped(self) -> Dict[str, List[Dict[str, Any]]]:
         if not self._connect():
             return {}
-        return template_config_module.list_dims_grouped(self._conn)
+        result = template_config_module.list_dims_grouped(self._conn)
+        self._end_read_txn()
+        return result
 
     def list_dims_for_type(self, dim_type: str) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return template_config_module.list_dims_by_type(self._conn, dim_type)
+        result = template_config_module.list_dims_by_type(self._conn, dim_type)
+        self._end_read_txn()
+        return result
 
     def list_templates(self, active_only: bool = True) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return template_config_module.list_templates(self._conn, active_only=active_only)
+        result = template_config_module.list_templates(self._conn, active_only=active_only)
+        self._end_read_txn()
+        return result
 
     def get_template_detail(self, strategy_template_id: int) -> Optional[Dict[str, Any]]:
         if not self._connect():
             return None
-        return template_config_module.get_template_detail(self._conn, strategy_template_id)
+        result = template_config_module.get_template_detail(self._conn, strategy_template_id)
+        self._end_read_txn()
+        return result
 
     def list_opportunities(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Return list of strategy_opportunity rows (with structure_name from JOIN)."""
         if not self._connect():
             return []
-        return strategy_module.list_opportunities(self._conn, active_only=active_only)
+        result = strategy_module.list_opportunities(self._conn, active_only=active_only)
+        self._end_read_txn()
+        return result
 
     def get_opportunity_by_id(self, strategy_opportunity_id: int) -> Optional[Dict[str, Any]]:
         """Return one strategy_opportunity row by id. None if not found."""
         if not self._connect():
             return None
-        return strategy_module.get_opportunity_by_id(self._conn, strategy_opportunity_id)
+        result = strategy_module.get_opportunity_by_id(self._conn, strategy_opportunity_id)
+        self._end_read_txn()
+        return result
 
     def list_allocations(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Return list of strategy_allocation rows (with gate_safety_name from JOIN)."""
         if not self._connect():
             return []
-        return strategy_module.list_allocations(self._conn, active_only=active_only)
+        result = strategy_module.list_allocations(self._conn, active_only=active_only)
+        self._end_read_txn()
+        return result
 
     def get_allocation_by_id(self, strategy_allocation_id: int) -> Optional[Dict[str, Any]]:
         """Return one strategy_allocation row by id. None if not found."""
         if not self._connect():
             return None
-        return strategy_module.get_allocation_by_id(self._conn, strategy_allocation_id)
+        result = strategy_module.get_allocation_by_id(self._conn, strategy_allocation_id)
+        self._end_read_txn()
+        return result
 
     def get_strategy_history(
         self,
@@ -341,13 +426,15 @@ class StatusReader:
         """Return strategy_history rows with optional filters."""
         if not self._connect():
             return []
-        return strategy_module.get_strategy_history(
+        result = strategy_module.get_strategy_history(
             self._conn,
             from_ts=from_ts,
             to_ts=to_ts,
             strategy_structure_id=strategy_structure_id,
             limit=limit,
         )
+        self._end_read_txn()
+        return result
 
     def list_strategy_instances(
         self,
@@ -359,19 +446,23 @@ class StatusReader:
         """Return strategy_instance rows, optionally filtered by account_id, strategy_opportunity_id, opened_at range (Unix seconds)."""
         if not self._connect():
             return []
-        return strategy_instance_module.list_instances(
+        result = strategy_instance_module.list_instances(
             self._conn,
             account_id=account_id,
             strategy_opportunity_id=strategy_opportunity_id,
             opened_at_from=opened_at_from,
             opened_at_until=opened_at_until,
         )
+        self._end_read_txn()
+        return result
 
     def get_strategy_instance_by_id(self, strategy_instance_id: int) -> Optional[Dict[str, Any]]:
         """Return one strategy_instance by id. None if not found."""
         if not self._connect():
             return None
-        return strategy_instance_module.get_instance_by_id(self._conn, strategy_instance_id)
+        result = strategy_instance_module.get_instance_by_id(self._conn, strategy_instance_id)
+        self._end_read_txn()
+        return result
 
     def create_strategy_instance(
         self,
@@ -408,22 +499,34 @@ class StatusReader:
             self._conn, strategy_instance_id, label=label, notes=notes, created_at=created_at, opened_at=opened_at
         )
 
+    def delete_strategy_instance(self, strategy_instance_id: int) -> bool:
+        """Delete a strategy_instance by id. Returns True if deleted."""
+        if not self._connect():
+            return False
+        return strategy_instance_module.delete_instance(self._conn, strategy_instance_id)
+
     # --- Risk (delegate to status module) ---
     def get_risk_summary(self) -> Dict[str, Any]:
         if not self._connect():
             return {"daily_hedge_count": None, "daily_pnl": None, "spot": None, "symbol": None, "operations_count_24h": 0, "block_reasons": [], "ts": None}
-        return status_module.get_risk_summary(self._conn)
+        result = status_module.get_risk_summary(self._conn)
+        self._end_read_txn()
+        return result
 
     # --- Accounts domain (delegate to accounts module) ---
     def get_accounts_from_tables(self) -> Optional[List[Dict[str, Any]]]:
         if not self._connect():
             return None
-        return accounts_module.get_accounts_from_tables(self._conn)
+        result = accounts_module.get_accounts_from_tables(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_accounts_fetched_at(self) -> Optional[float]:
         if not self._connect():
             return None
-        return accounts_module.get_accounts_fetched_at(self._conn)
+        result = accounts_module.get_accounts_fetched_at(self._conn)
+        self._end_read_txn()
+        return result
 
     # --- Executions / transactions / performance (delegate to executions module) ---
     def get_executions(
@@ -437,7 +540,7 @@ class StatusReader:
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return executions_module.get_executions(
+        result = executions_module.get_executions(
             self._conn,
             since_ts=since_ts,
             until_ts=until_ts,
@@ -446,11 +549,15 @@ class StatusReader:
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
         )
+        self._end_read_txn()
+        return result
 
     def get_executions_freshness(self) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return executions_module.get_executions_freshness(self._conn)
+        result = executions_module.get_executions_freshness(self._conn)
+        self._end_read_txn()
+        return result
 
     def get_executions_by_contract_keys(
         self,
@@ -460,7 +567,34 @@ class StatusReader:
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return executions_module.get_executions_by_contract_keys(self._conn, contract_keys=contract_keys, account_id=account_id, limit=limit)
+        result = executions_module.get_executions_by_contract_keys(self._conn, contract_keys=contract_keys, account_id=account_id, limit=limit)
+        self._end_read_txn()
+        return result
+
+    def get_executions_for_strategy_link(
+        self,
+        account_id: str,
+        contract_key: Optional[str] = None,
+        symbol: Optional[str] = None,
+        expiry: Optional[str] = None,
+        strike: Optional[Any] = None,
+        option_right: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        result = executions_module.get_executions_for_strategy_link(
+            self._conn,
+            account_id=account_id,
+            contract_key=contract_key,
+            symbol=symbol,
+            expiry=expiry,
+            strike=strike,
+            option_right=option_right,
+            limit=limit,
+        )
+        self._end_read_txn()
+        return result
 
     def get_executions_with_opt_pairs(
         self,
@@ -473,7 +607,7 @@ class StatusReader:
     ) -> Dict[str, Any]:
         if not self._connect():
             return {"executions": [], "opt_pairs": []}
-        return executions_module.get_executions_with_opt_pairs(
+        result = executions_module.get_executions_with_opt_pairs(
             self._conn,
             since_ts=since_ts,
             until_ts=until_ts,
@@ -482,6 +616,8 @@ class StatusReader:
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
         )
+        self._end_read_txn()
+        return result
 
     def get_executions_with_opt_pairs_single_query(
         self,
@@ -492,7 +628,9 @@ class StatusReader:
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return executions_module.get_executions_with_opt_pairs_single_query(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        result = executions_module.get_executions_with_opt_pairs_single_query(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        self._end_read_txn()
+        return result
 
     def get_net_cash_flow(
         self,
@@ -502,7 +640,9 @@ class StatusReader:
     ) -> float:
         if not self._connect():
             return 0.0
-        return executions_module.get_net_cash_flow(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id)
+        result = executions_module.get_net_cash_flow(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id)
+        self._end_read_txn()
+        return result
 
     def get_transactions(
         self,
@@ -513,7 +653,9 @@ class StatusReader:
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return executions_module.get_transactions(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        result = executions_module.get_transactions(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        self._end_read_txn()
+        return result
 
     def get_performance_stats(
         self,
@@ -526,7 +668,7 @@ class StatusReader:
     ) -> Dict[str, Any]:
         if not self._connect():
             return {}
-        return executions_module.get_performance_stats(
+        result = executions_module.get_performance_stats(
             self._conn,
             since_ts=since_ts,
             until_ts=until_ts,
@@ -535,12 +677,16 @@ class StatusReader:
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
         )
+        self._end_read_txn()
+        return result
 
     # --- Position categories (delegate to position_categories module) ---
     def get_position_categories(self) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return position_categories_module.get_position_categories(self._conn)
+        result = position_categories_module.get_position_categories(self._conn)
+        self._end_read_txn()
+        return result
 
     def create_position_category(
         self,
@@ -578,10 +724,30 @@ class StatusReader:
             return False
         return position_categories_module.set_position_category_tag(self._conn, account_id=account_id, contract_key=contract_key, category_id=category_id)
 
+    def update_position_strategy(
+        self,
+        account_id: str,
+        contract_key: str,
+        strategy_opportunity_id: Optional[int],
+        strategy_instance_id: Optional[int],
+    ) -> bool:
+        """Update strategy attribution for a position (account_positions). Used for linking stock positions to strategy instance."""
+        if not self._connect():
+            return False
+        return accounts_module.update_position_strategy(
+            self._conn,
+            account_id=account_id,
+            contract_key=contract_key,
+            strategy_opportunity_id=strategy_opportunity_id,
+            strategy_instance_id=strategy_instance_id,
+        )
+
     def get_market_streams_symbol_order(self) -> Dict[str, Any]:
         if not self._connect():
             return {}
-        return position_categories_module.get_market_streams_symbol_order(self._conn)
+        result = position_categories_module.get_market_streams_symbol_order(self._conn)
+        self._end_read_txn()
+        return result
 
     def set_market_streams_symbol_order(self, category_name: str, symbols: List[str]) -> bool:
         if not self._connect():

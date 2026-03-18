@@ -12,6 +12,20 @@ import {
   parseOptionContractKey,
 } from '../utils/format'
 
+/** Align position vs execution contract_key: OCC local differs in segment 1; OPT|expiry|strike|right match. */
+function optExecutionMatchKey(accountId: string, contractKey: string): string {
+  const acc = (accountId ?? '').trim()
+  const parts = (contractKey ?? '').split('|')
+  if (parts.length >= 5 && (parts[1] ?? '').toUpperCase().trim() === 'OPT') {
+    const exp = (parts[2] ?? '').trim()
+    const sn = parseFloat(String(parts[3] ?? '').trim())
+    const strikeKey = Number.isFinite(sn) ? String(sn) : (parts[3] ?? '').trim()
+    const right = (parts[4] ?? '').trim().toUpperCase().slice(0, 1)
+    return `${acc}|OPT|${exp}|${strikeKey}|${right}`
+  }
+  return `${acc}|${(contractKey ?? '').trim()}`
+}
+
 /** Option Last-column (Last − Strike) / Last %: color by right and side. Call+Sell: +% red, −% green; Call+Buy: opposite; Put+Sell: +% green, −% red; Put+Buy: opposite. */
 function optionLastStrikePctClass(right: string, side: 'Buy' | 'Sell', pct: number): string {
   if (pct === 0 || (right !== 'C' && right !== 'P')) return ''
@@ -24,82 +38,43 @@ function optionLastStrikePctClass(right: string, side: 'Buy' | 'Sell', pct: numb
   return positive ? 'pnl-negative' : 'pnl-positive'
 }
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
-import { ExecutionFormModal, type ExecutionFormState } from './portfolio/ExecutionFormModal'
+import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
+import type { LinkExecutionContext } from './portfolio/LinkExecutionRecordModal'
+import { LinkExecutionRecordModal } from './portfolio/LinkExecutionRecordModal'
+import type { LinkPositionContext } from './portfolio/LinkPositionModal'
+import { LinkPositionModal } from './portfolio/LinkPositionModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
-import type { LivePositionRow, OpenOptionGroup, PortfolioView } from './portfolio/types'
+import type { InstancePositionGroup, LivePositionRow, OpenOptionPosition, PortfolioView } from './portfolio/types'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
 
-function buildLinkExecutionDraftFromLivePosition(group: OpenOptionGroup, position: LivePositionRow): Partial<ExecutionFormState> {
-  const sym = getContractLabelParts(group.contract_key).symbol ?? ''
-  const exp = String(position.lastTradeDateOrContractMonth ?? position.expiry ?? group.expiry ?? '')
-    .replace(/-/g, '')
-    .trim()
-  const strikeNum = position.strike ?? group.strike
-  const strikeStr = strikeNum != null && Number.isFinite(Number(strikeNum)) ? String(strikeNum) : ''
-  const right = parseOptionContractKey(group.contract_key).right || 'C'
-  const qty = Number(position.position)
-  const absQty = Math.abs(qty)
-  const pricePerShare =
-    position.avgCost != null && Number.isFinite(Number(position.avgCost))
-      ? Number(position.avgCost) >= 10
-        ? Number(position.avgCost) / 100
-        : Number(position.avgCost)
-      : 0
-  return {
-    account_id: (position.account_id ?? '').trim(),
-    sec_type: 'OPT',
-    symbol: sym,
-    expiry: exp.length >= 8 ? exp.slice(0, 8) : exp.length === 6 ? exp : exp,
-    strike: strikeStr,
-    option_right: right,
-    side: qty >= 0 ? 'BUY' : 'SELL',
-    quantity: absQty > 0 ? String(absQty) : '1',
-    price: pricePerShare > 0 ? String(Number(pricePerShare.toFixed(4))) : '',
-    commission: '0',
-    currency: 'USD',
-  }
-}
-
 function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
-  if (!ex) {
-    return (
-      <>
-        <td>—</td>
-        <td>—</td>
-      </>
-    )
-  }
+  if (!ex) return <td className="replay-strategy-opp-cell">—</td>
   const oppName = ex.strategy_opportunity_name?.trim()
   const instanceId = ex.strategy_instance_id
   const instanceLabel = ex.strategy_instance_label?.trim()
   const instanceTitle = instanceLabel ? `Instance: ${instanceLabel}` : instanceId != null ? `View instance #${instanceId}` : ''
   return (
-    <>
-      <td className="replay-strategy-opp-cell" title={oppName || undefined}>
-        <span className="replay-strategy-opp-text">{oppName || '—'}</span>
-      </td>
-      <td>
+    <td className="replay-strategy-opp-cell" title={[instanceTitle, oppName].filter(Boolean).join(' · ') || undefined}>
+      <span className="replay-strategy-opp-cell-inner">
         {instanceId != null ? (
-          <a
-            href={`#/strategies/instances/${instanceId}`}
-            className="ledger-instance-icon-link"
-            target="_blank"
-            rel="noopener noreferrer"
-            title={instanceTitle}
-            aria-label={instanceTitle || 'View strategy instance'}
-          >
-            <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="5" y="5" width="14" height="14" rx="1" />
-            </svg>
-            {instanceLabel ? (
-              <span className="replay-instance-label-inline">{instanceLabel.length > 14 ? `${instanceLabel.slice(0, 14)}…` : instanceLabel}</span>
-            ) : null}
+          <a href={`#/strategies/instances/${instanceId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy instance'} onClick={e => e.stopPropagation()}>
+            <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="5" width="14" height="14" rx="1" /></svg>
           </a>
-        ) : (
-          '—'
-        )}
-      </td>
-    </>
+        ) : null}
+        <span className="replay-strategy-opp-text">{oppName || '—'}</span>
+      </span>
+    </td>
+  )
+}
+
+function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); onClick() }} title={title} aria-label={title}>
+      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+    </button>
   )
 }
 
@@ -119,7 +94,10 @@ export function PositionsPage({
   const { executions, loadReplayData, executionAccountOptions } = useExecutions(status)
   const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
-  const [execInitialDraft, setExecInitialDraft] = useState<Partial<ExecutionFormState> | null>(null)
+  const [linkModalOpen, setLinkModalOpen] = useState(false)
+  const [linkContext, setLinkContext] = useState<LinkExecutionContext | null>(null)
+  const [linkPositionModalOpen, setLinkPositionModalOpen] = useState(false)
+  const [linkPositionContext, setLinkPositionContext] = useState<LinkPositionContext | null>(null)
   const [deleteConfirmState, setDeleteConfirmState] = useState<{
     open: boolean
     title: string
@@ -137,16 +115,24 @@ export function PositionsPage({
   const [openFilterPool, setOpenFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
   const [openTab, setOpenTab] = useState<'options' | 'stocks'>('options')
-  const getOpenOptGroupKey = (g: OpenOptionGroup) => `${g.contract_key}-${g.strike}-${g.expiry}-${g.pool_label}`
-  const [expandedOpenDetailKeys, setExpandedOpenDetailKeys] = useState<string[]>([])
+  const getPositionKey = (p: OpenOptionPosition, instId: number | null) =>
+    `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}`
+  const [expandedPositionKeys, setExpandedPositionKeys] = useState<string[]>([])
+  const togglePositionExpand = (posKey: string) => {
+    setExpandedPositionKeys(prev => {
+      const isOpen = prev.includes(posKey)
+      if (openAccordionMode) return isOpen ? [] : [posKey]
+      return isOpen ? prev.filter(k => k !== posKey) : [...prev, posKey]
+    })
+  }
   type OpenOptSortCol =
     | 'contract'
     | 'expiry'
     | 'strike'
     | 'last'
-    | 'sell_size'
-    | 'sell_at'
-    | 'sell_premium'
+    | 'qty'
+    | 'avg_cost'
+    | 'value'
     | 'time'
     | 'un_pnl'
   const [openOptSort, setOpenOptSort] = useState<{ column: OpenOptSortCol; dir: 'asc' | 'desc' }>({
@@ -154,7 +140,7 @@ export function PositionsPage({
     dir: 'desc',
   })
 
-  const [openAccordionMode, setOpenAccordionMode] = useState<boolean>(false)
+  const [openAccordionMode, setOpenAccordionMode] = useState<boolean>(true)
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
 
   useEffect(() => {
@@ -170,16 +156,6 @@ export function PositionsPage({
       unsub()
     }
   }, [])
-
-  const toggleOpenDetailExpand = (key: string) => {
-    setExpandedOpenDetailKeys(prev => {
-      const isOpen = prev.includes(key)
-      if (openAccordionMode) {
-        return isOpen ? [] : [key]
-      }
-      return isOpen ? prev.filter(k => k !== key) : [...prev, key]
-    })
-  }
 
   const openOffTrackBaseExecutions = useMemo(() => {
     let list = [...(executions || [])]
@@ -244,246 +220,196 @@ export function PositionsPage({
     [livePositions],
   )
 
-  const openOptionGroups = useMemo((): OpenOptionGroup[] => {
-    const result: OpenOptionGroup[] = []
+  const livePositionExecutionsMap = useMemo(() => {
+    const map = new Map<string, Execution[]>()
+    const opt = (executions || []).filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
+    for (const ex of opt) {
+      if (ex.account_executions_id == null) continue
+      const key = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
+      const arr = map.get(key)
+      if (arr) arr.push(ex)
+      else map.set(key, [ex])
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
+    }
+    return map
+  }, [executions])
+
+  const instanceGroups = useMemo((): InstancePositionGroup[] => {
+    const allPositions: OpenOptionPosition[] = []
 
     if (openFilterPool !== 'Off') {
-      const groups = new Map<string, LivePositionRow[]>()
-      for (const position of liveOptionPositions) {
-        const expiry = position.lastTradeDateOrContractMonth ?? position.expiry ?? ''
-        const strike = Number(position.strike) || 0
-        const right = (position.right ?? '').toUpperCase().slice(0, 1)
-        const contractKey = position.contract_key ?? `${position.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`
-        const key = `${contractKey}|${strike}`
-        if (!groups.has(key)) groups.set(key, [])
-        groups.get(key)!.push(position)
-      }
-
-      for (const [, positions] of groups) {
-        if (positions.length === 0) continue
-        const first = positions[0]
-        const expiry = first.lastTradeDateOrContractMonth ?? first.expiry ?? ''
-        const strike = Number(first.strike) || 0
-        const contract_key = first.contract_key ?? `${first.symbol ?? ''}|OPT|${expiry}|${strike}|${(first.right ?? '').toUpperCase().slice(0, 1)}`
-        let grossQty = 0
-        let netQty = 0
-        let costWeightedSum = 0
-        let markWeightedSum = 0
-        let unrealizedPnl = 0
-        let buyVolume = 0
-        let sellVolume = 0
-        let buyCost = 0
-        let sellPremium = 0
-        let buyValueRaw = 0
-        let sellValueRaw = 0
-        for (const position of positions) {
-          const qty = Number(position.position) || 0
-          const absQty = Math.abs(qty)
-          const avgCost = position.avgCost != null && Number.isFinite(Number(position.avgCost))
-            ? Number(position.avgCost)
-            : null
-          const markPrice = position.price != null && Number.isFinite(Number(position.price))
-            ? Number(position.price)
-            : null
-          netQty += qty
-          grossQty += absQty
-          if (avgCost != null) costWeightedSum += avgCost * absQty
-          if (markPrice != null) markWeightedSum += markPrice * absQty
-          unrealizedPnl += Number(position.unrealized_pnl) || 0
-          if (qty > 0) {
-            buyVolume += qty
-            if (avgCost != null) {
-              buyCost += avgCost * qty * 100
-              buyValueRaw += avgCost * qty
-            }
-          } else if (qty < 0) {
-            sellVolume += absQty
-            if (avgCost != null) {
-              sellPremium += avgCost * absQty * 100
-              sellValueRaw += avgCost * absQty
-            }
-          }
-        }
-        // Option @ is per-share (e.g. 2.50); API may give avgCost per-share or per-contract. Ledger uses per-share.
-        // If displayed @ is 100x too large, avgCost is per-contract (250); store per-share for @: divide by 100.
-        const buyAvgPerShare = buyVolume > 0 ? buyValueRaw / buyVolume / 100 : null
-        const sellAvgPerShare = sellVolume > 0 ? sellValueRaw / sellVolume / 100 : null
-        // When avgCost is per-contract (e.g. 250), total $ = avgCost * qty (no *100). When per-share (2.5), total $ = avgCost * qty * 100.
-        const rawBuyAvg = buyVolume > 0 ? buyValueRaw / buyVolume : 0
-        const rawSellAvg = sellVolume > 0 ? sellValueRaw / sellVolume : 0
-        const isPerContract = rawBuyAvg >= 10 || rawSellAvg >= 10
-        const buyCostDollars = isPerContract ? buyVolume * rawBuyAvg : buyCost
-        const sellPremiumDollars = isPerContract ? sellVolume * rawSellAvg : sellPremium
-        const markPerShare = grossQty > 0 ? markWeightedSum / grossQty : null
-        // Unrealized PnL: long PnL (mark*buy_vol*100 - buy_cost) + short PnL (sell_premium - mark*sell_vol*100) = mark*net_qty*100 - buy_cost + sell_premium
-        const computedUnrealizedPnl =
-          markPerShare != null && Number.isFinite(markPerShare)
-            ? markPerShare * netQty * 100 - buyCostDollars + sellPremiumDollars
-            : unrealizedPnl
-        result.push({
+      for (const pos of liveOptionPositions) {
+        const expiry = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
+        const strike = Number(pos.strike) || 0
+        const right = (pos.right ?? '').toUpperCase().slice(0, 1)
+        const contractKey = pos.contract_key ?? `${pos.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`
+        const qty = Number(pos.position) || 0
+        const rawAvgCost = pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) ? Number(pos.avgCost) : null
+        const avgCostPerShare = rawAvgCost != null ? (rawAvgCost >= 10 ? rawAvgCost / 100 : rawAvgCost) : null
+        const markPrice = pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null
+        const pnl = markPrice != null && avgCostPerShare != null
+          ? (markPrice - avgCostPerShare) * qty * 100
+          : Number(pos.unrealized_pnl) || 0
+        allPositions.push({
           kind: 'live',
-          contract_key,
+          contract_key: contractKey,
           strike,
           expiry,
-          net_qty: netQty,
-          avg_cost: grossQty > 0 ? costWeightedSum / grossQty : null,
-          mark_price: grossQty > 0 ? markWeightedSum / grossQty : null,
-          unrealized_pnl: computedUnrealizedPnl,
-          account_count: new Set(positions.map(position => position.account_id || '—')).size,
+          qty,
+          avg_cost: avgCostPerShare,
+          mark_price: markPrice,
+          unrealized_pnl: pnl,
           pool_label: 'On',
-          buy_volume: buyVolume,
-          sell_volume: sellVolume,
-          buy_avg_price: buyAvgPerShare,
-          sell_avg_price: sellAvgPerShare,
-          buy_cost: buyCostDollars,
-          sell_premium: sellPremiumDollars,
-          positions: positions.slice().sort((a, b) => (b.account_id ?? '').localeCompare(a.account_id ?? '')),
+          account_id: (pos.account_id ?? '').trim(),
+          position: pos,
         })
       }
     }
 
     if (openFilterPool !== 'ON') {
-      const openOffTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions).filter(group => group.status === 'unrealized')
-      for (const group of openOffTrackGroups) {
-        // Unrealized PnL = sum of Details PnL column (per trade: Buy = -(q*p*100-c), Sell = +(q*p*100-c)) => sell_premium - buy_cost
-        const unrealizedPnlOff = group.sell_premium - group.buy_cost
-        result.push({
+      const offTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions)
+        .filter(g => g.status === 'unrealized')
+      for (const group of offTrackGroups) {
+        const pnl = group.sell_premium - group.buy_cost
+        const avgPrice = group.net_qty > 0
+          ? (group.buy_avg_price ?? 0)
+          : (group.sell_avg_price ?? 0)
+        allPositions.push({
           kind: 'offtrack',
           contract_key: group.contract_key,
           strike: group.strike,
           expiry: group.expiry,
-          net_qty: group.net_qty,
-          avg_cost: group.buy_avg_price,
+          qty: group.net_qty,
+          avg_cost: avgPrice,
           mark_price: null,
-          unrealized_pnl: unrealizedPnlOff,
-          account_count: new Set(group.trades.map(trade => (trade.account_id ?? '').trim() || '—')).size,
+          unrealized_pnl: pnl,
           pool_label: 'Off',
-          buy_volume: group.buy_volume,
-          sell_volume: group.sell_volume,
-          buy_avg_price: group.buy_avg_price,
-          sell_avg_price: group.sell_avg_price,
-          buy_cost: group.buy_cost,
-          sell_premium: group.sell_premium,
+          account_id: (group.trades[0]?.account_id ?? '').trim(),
           trades: group.trades,
         })
       }
     }
 
+    const byInstance = new Map<string, { id: number | null; label: string | null; oppName: string | null; openedAt: number | null; positions: OpenOptionPosition[] }>()
+    for (const p of allPositions) {
+      const matchedExecs = p.kind === 'live'
+        ? (livePositionExecutionsMap.get(optExecutionMatchKey(p.account_id, p.contract_key)) ?? [])
+        : (p.trades ?? [])
+      const execWithInstance = matchedExecs.find(e => e.strategy_instance_id != null && Number.isFinite(Number(e.strategy_instance_id)))
+      const instId = execWithInstance?.strategy_instance_id ?? null
+      const instLabel = execWithInstance?.strategy_instance_label ?? null
+      const oppName = execWithInstance?.strategy_opportunity_name ?? null
+      const openedAt = execWithInstance?.strategy_instance_opened_at_epoch ?? null
+      const key = instId != null ? String(instId) : '__unassigned__'
+      if (!byInstance.has(key)) byInstance.set(key, { id: instId, label: instLabel, oppName, openedAt, positions: [] })
+      byInstance.get(key)!.positions.push(p)
+    }
+
+    const result: InstancePositionGroup[] = []
+    for (const [, group] of byInstance) {
+      group.positions.sort((a, b) => {
+        const aSym = getContractLabelParts(a.contract_key).symbol
+        const bSym = getContractLabelParts(b.contract_key).symbol
+        if (aSym !== bSym) return aSym.localeCompare(bSym)
+        if (a.expiry !== b.expiry) return a.expiry.localeCompare(b.expiry)
+        return a.strike - b.strike
+      })
+      const totalPnl = group.positions.reduce((sum, p) => sum + p.unrealized_pnl, 0)
+      result.push({
+        strategy_instance_id: group.id,
+        strategy_instance_label: group.label,
+        strategy_opportunity_name: group.oppName,
+        strategy_instance_opened_at_epoch: group.openedAt,
+        positions: group.positions,
+        total_unrealized_pnl: totalPnl,
+      })
+    }
     result.sort((a, b) => {
-      const aSymbol = getContractLabelParts(a.contract_key).symbol
-      const bSymbol = getContractLabelParts(b.contract_key).symbol
-      if (aSymbol !== bSymbol) return aSymbol.localeCompare(bSymbol)
-      if (a.expiry !== b.expiry) return a.expiry.localeCompare(b.expiry)
-      return a.pool_label.localeCompare(b.pool_label)
+      if (a.strategy_instance_id == null && b.strategy_instance_id != null) return 1
+      if (a.strategy_instance_id != null && b.strategy_instance_id == null) return -1
+      return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
     })
     return result
-  }, [openFilterPool, liveOptionPositions, openOffTrackBaseExecutions])
+  }, [openFilterPool, liveOptionPositions, openOffTrackBaseExecutions, livePositionExecutionsMap])
 
-  /** Latest time (unix ts) for sorting; null if none. */
-  const getOpenOptGroupTime = (g: OpenOptionGroup): number | null => {
-    if (g.kind === 'live') {
-      const times = (g.positions ?? [])
-        .map(p => (p.exec_time != null ? Number(p.exec_time) : null))
-        .filter((t): t is number => t != null && Number.isFinite(t))
-      return times.length > 0 ? Math.max(...times) : null
+  const getPositionTime = (p: OpenOptionPosition): number | null => {
+    if (p.kind === 'live' && p.position) {
+      const ts = p.position.exec_time != null ? Number(p.position.exec_time) : null
+      return ts != null && Number.isFinite(ts) ? ts : null
     }
-    if (g.kind === 'offtrack') {
-      const times = (g.trades ?? [])
-        .map(ex => (ex.time != null ? Number(ex.time) : ex.created_at != null ? Number(ex.created_at) : null))
-        .filter((t): t is number => t != null && Number.isFinite(t))
-      return times.length > 0 ? Math.max(...times) : null
+    if (p.kind === 'offtrack' && p.trades?.length) {
+      const ex = p.trades[0]
+      const ts = ex.time != null ? Number(ex.time) : ex.created_at != null ? Number(ex.created_at) : null
+      return ts != null && Number.isFinite(ts) ? ts : null
     }
     return null
   }
 
-  /** Underlying last price for sorting; null if no quote. */
-  const getOpenOptGroupLast = (
-    g: OpenOptionGroup,
-    quotes: Record<string, RealtimeQuote>,
-  ): number | null => {
-    const symbol = getContractLabelParts(g.contract_key).symbol
+  const getPositionLast = (p: OpenOptionPosition): number | null => {
+    const symbol = getContractLabelParts(p.contract_key).symbol
     if (!symbol) return null
-    const q = quotes[symbol]
-    const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
-    return last
+    const q = quotesMap[symbol]
+    return q?.last != null && Number.isFinite(q.last) ? q.last : null
   }
 
-  const sortedOpenOptionGroups = useMemo((): OpenOptionGroup[] => {
-    const list = [...openOptionGroups]
+  const allFlatPositions = useMemo(() => instanceGroups.flatMap(g => g.positions), [instanceGroups])
+
+  const sortedInstanceGroups = useMemo((): InstancePositionGroup[] => {
     const { column, dir } = openOptSort
     const mult = dir === 'asc' ? 1 : -1
-    list.sort((a, b) => {
-      if (column === 'contract') {
-        const aParts = getContractLabelParts(a.contract_key)
-        const bParts = getContractLabelParts(b.contract_key)
-        const cmpSymbol = (aParts.symbol ?? '').localeCompare(bParts.symbol ?? '')
-        if (cmpSymbol !== 0) return mult * cmpSymbol
-        const cmpExp = (a.expiry ?? '').localeCompare(b.expiry ?? '')
-        if (cmpExp !== 0) return mult * cmpExp
-        const cmpStrike = (a.strike ?? 0) - (b.strike ?? 0)
-        return mult * (cmpStrike !== 0 ? cmpStrike : (a.contract_key ?? '').localeCompare(b.contract_key ?? ''))
-      }
-      if (column === 'expiry') {
-        const cmp = (a.expiry ?? '').localeCompare(b.expiry ?? '')
-        if (cmp !== 0) return mult * cmp
-        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-        return mult * aSym.localeCompare(bSym)
-      }
-      if (column === 'strike') {
-        const cmp = (a.strike ?? 0) - (b.strike ?? 0)
-        if (cmp !== 0) return mult * cmp
-        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-        return mult * aSym.localeCompare(bSym)
-      }
-      if (column === 'last') {
-        const aLast = getOpenOptGroupLast(a, quotesMap) ?? -Infinity
-        const bLast = getOpenOptGroupLast(b, quotesMap) ?? -Infinity
-        if (aLast !== bLast) return mult * (aLast - bLast)
-        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-        return mult * aSym.localeCompare(bSym)
-      }
-      if (column === 'sell_size') {
-        const cmp = (a.sell_volume ?? 0) - (b.sell_volume ?? 0)
-        if (cmp !== 0) return mult * cmp
-        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-        return mult * aSym.localeCompare(bSym)
-      }
-      if (column === 'sell_at') {
-        const aVal = a.sell_avg_price != null && Number.isFinite(a.sell_avg_price) ? a.sell_avg_price : -Infinity
-        const bVal = b.sell_avg_price != null && Number.isFinite(b.sell_avg_price) ? b.sell_avg_price : -Infinity
-        if (aVal !== bVal) return mult * (aVal - bVal)
-        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-        return mult * aSym.localeCompare(bSym)
-      }
-      if (column === 'sell_premium') {
-        const cmp = (a.sell_premium ?? 0) - (b.sell_premium ?? 0)
-        if (cmp !== 0) return mult * cmp
-        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-        return mult * aSym.localeCompare(bSym)
-      }
-      if (column === 'time') {
-        const aTs = getOpenOptGroupTime(a) ?? 0
-        const bTs = getOpenOptGroupTime(b) ?? 0
-        if (aTs !== bTs) return mult * (aTs - bTs)
-        const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-        const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-        return mult * aSym.localeCompare(bSym)
-      }
-      // column === 'un_pnl'
-      const cmp = (a.unrealized_pnl ?? 0) - (b.unrealized_pnl ?? 0)
-      if (cmp !== 0) return mult * cmp
-      const aSym = getContractLabelParts(a.contract_key).symbol ?? ''
-      const bSym = getContractLabelParts(b.contract_key).symbol ?? ''
-      return mult * aSym.localeCompare(bSym)
-    })
-    return list
-  }, [openOptionGroups, openOptSort, quotesMap])
+    const sortPositions = (positions: OpenOptionPosition[]) => {
+      const list = [...positions]
+      list.sort((a, b) => {
+        if (column === 'contract') {
+          const aParts = getContractLabelParts(a.contract_key)
+          const bParts = getContractLabelParts(b.contract_key)
+          const cmp = (aParts.symbol ?? '').localeCompare(bParts.symbol ?? '')
+          if (cmp !== 0) return mult * cmp
+          const cmpExp = a.expiry.localeCompare(b.expiry)
+          if (cmpExp !== 0) return mult * cmpExp
+          return mult * (a.strike - b.strike)
+        }
+        if (column === 'expiry') {
+          const cmp = a.expiry.localeCompare(b.expiry)
+          if (cmp !== 0) return mult * cmp
+          return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
+        }
+        if (column === 'strike') {
+          const cmp = a.strike - b.strike
+          if (cmp !== 0) return mult * cmp
+          return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
+        }
+        if (column === 'last') {
+          const aLast = getPositionLast(a) ?? -Infinity
+          const bLast = getPositionLast(b) ?? -Infinity
+          if (aLast !== bLast) return mult * (aLast - bLast)
+          return 0
+        }
+        if (column === 'qty') {
+          return mult * (Math.abs(a.qty) - Math.abs(b.qty))
+        }
+        if (column === 'avg_cost') {
+          return mult * ((a.avg_cost ?? -Infinity) - (b.avg_cost ?? -Infinity))
+        }
+        if (column === 'value') {
+          const aVal = (a.avg_cost ?? 0) * Math.abs(a.qty) * 100
+          const bVal = (b.avg_cost ?? 0) * Math.abs(b.qty) * 100
+          return mult * (aVal - bVal)
+        }
+        if (column === 'time') {
+          return mult * ((getPositionTime(a) ?? 0) - (getPositionTime(b) ?? 0))
+        }
+        return mult * (a.unrealized_pnl - b.unrealized_pnl)
+      })
+      return list
+    }
+    return instanceGroups.map(g => ({
+      ...g,
+      positions: sortPositions(g.positions),
+    }))
+  }, [instanceGroups, openOptSort, quotesMap])
 
   const liveStockPositions = useMemo(
     () => livePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT'),
@@ -497,22 +423,7 @@ export function PositionsPage({
     return unique
   }, [status?.accounts])
 
-  /** Pool=On Details: match account_executions by (account_id, contract_key); keep latest by exec_time. Used for row Actions (Edit/Delete). TIME column uses backend position_exec_time. */
-  const livePositionExecutionMap = useMemo(() => {
-    const map = new Map<string, Execution>()
-    const opt = (executions || []).filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
-    for (const ex of opt) {
-      if (ex.account_executions_id == null) continue
-      const ck = (ex.contract_key ?? '').trim()
-      const acc = (ex.account_id ?? '').trim()
-      const key = `${acc}|${ck}`
-      const existing = map.get(key)
-      if (!existing || (ex.time ?? 0) > (existing.time ?? 0)) map.set(key, ex)
-    }
-    return map
-  }, [executions])
-
-  const hasOpenOptions = openOptionGroups.length > 0
+  const hasOpenOptions = allFlatPositions.length > 0
   const hasOpenStocks = liveStockPositions.length > 0
   useEffect(() => {
     if (openTab === 'options' && !hasOpenOptions && hasOpenStocks) {
@@ -546,7 +457,6 @@ export function PositionsPage({
           type="button"
           className="btn btn-secondary"
           onClick={() => {
-            setExecInitialDraft(null)
             setAddExecOpen(true)
             setPageError(null)
           }}
@@ -623,7 +533,7 @@ export function PositionsPage({
               </label>
             </div>
           </div>
-          {openOptionGroups.length === 0 && liveStockPositions.length === 0 ? (
+          {allFlatPositions.length === 0 && liveStockPositions.length === 0 ? (
             <p className="section-hint">No open positions under the current filters. Position data comes from account snapshots in `Accounts`, while Off-Track options are inferred from execution history.</p>
           ) : (
             <div className="replay-portfolio-block">
@@ -658,7 +568,7 @@ export function PositionsPage({
                   <p className="section-hint replay-portfolio-tab-hint">
                     {openTab === 'options'
                       ? 'Open option positions by contract; expand a row to see Details and Add/Edit/Close trades.'
-                      : 'Open stock positions from account snapshots (Live only).'}
+                      : 'Open stock positions from account snapshots (Live only). Link stock to strategy instance (e.g. Covered Call underlying).'}
                   </p>
                 </div>
               </div>
@@ -670,774 +580,227 @@ export function PositionsPage({
                   className="system-tab-panel"
                 >
                   <h5 className="replay-sub">Option positions</h5>
-                  {openOptionGroups.length === 0 ? (
+                  {allFlatPositions.length === 0 ? (
                     <p className="section-hint">No open option positions under the current filters.</p>
                   ) : (
-                <>
-                  <div className="replay-portfolio-table-wrap">
-                    <table className="table-operations replay-opt-groups">
-                      <thead>
-                        <tr>
-                          <th rowSpan={2} className="replay-opt-expand-col"></th>
-                          <th
-                            rowSpan={2}
-                            className="replay-th-sortable"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'contract'
-                                  ? { column: 'contract', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'contract', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'contract'
-                                    ? { column: 'contract', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'contract', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            title="Sort by Contract"
-                            aria-sort={openOptSort.column === 'contract' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            Contract{' '}
-                            {openOptSort.column === 'contract' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
-                          </th>
-                          <th
-                            rowSpan={2}
-                            className="replay-th-sortable"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'expiry'
-                                  ? { column: 'expiry', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'expiry', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'expiry'
-                                    ? { column: 'expiry', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'expiry', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            title="Sort by Expiry"
-                            aria-sort={openOptSort.column === 'expiry' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            Expiry{' '}
-                            {openOptSort.column === 'expiry' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
-                          </th>
-                          <th
-                            rowSpan={2}
-                            className="replay-th-sortable"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'strike'
-                                  ? { column: 'strike', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'strike', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'strike'
-                                    ? { column: 'strike', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'strike', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            title="Sort by Strike"
-                            aria-sort={openOptSort.column === 'strike' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            STRIKE{' '}
-                            {openOptSort.column === 'strike' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
-                          </th>
-                          <th
-                            rowSpan={2}
-                            className="replay-th-sortable"
-                            title="Underlying last price (same as Watchlist Last); (Last − Strike) / Last %"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'last'
-                                  ? { column: 'last', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'last', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'last'
-                                    ? { column: 'last', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'last', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            aria-sort={openOptSort.column === 'last' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            Last{' '}
-                            {openOptSort.column === 'last' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
-                          </th>
-                          <th colSpan={3}>BUY</th>
-                          <th colSpan={3}>SELL</th>
-                          <th
-                            rowSpan={2}
-                            className="replay-th-sortable"
-                            title="Same as Detail Time (position_exec_time or trade time); latest if multiple."
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'time'
-                                  ? { column: 'time', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'time', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'time'
-                                    ? { column: 'time', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'time', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            aria-sort={openOptSort.column === 'time' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            Time{' '}
-                            {openOptSort.column === 'time' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
-                          </th>
-                          <th
-                            rowSpan={2}
-                            className="replay-th-sortable"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'un_pnl'
-                                  ? { column: 'un_pnl', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'un_pnl', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'un_pnl'
-                                    ? { column: 'un_pnl', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'un_pnl', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            title="Sort by Unrealized PnL"
-                            aria-sort={openOptSort.column === 'un_pnl' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            UN PNL{' '}
-                            {openOptSort.column === 'un_pnl' ? (openOptSort.dir === 'asc' ? '▲' : '▼') : ''}
-                          </th>
-                          <th rowSpan={2}>Account</th>
-                        </tr>
-                        <tr>
-                          <th className="replay-th-sub">Size</th>
-                          <th className="replay-th-sub">@</th>
-                          <th className="replay-th-sub">Cost</th>
-                          <th
-                            className="replay-th-sub replay-th-sortable"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'sell_size'
-                                  ? { column: 'sell_size', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'sell_size', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'sell_size'
-                                    ? { column: 'sell_size', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'sell_size', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            title="Sort by Sell size"
-                            aria-sort={openOptSort.column === 'sell_size' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            Size{openOptSort.column === 'sell_size' ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                          </th>
-                          <th
-                            className="replay-th-sub replay-th-sortable"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'sell_at'
-                                  ? { column: 'sell_at', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'sell_at', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'sell_at'
-                                    ? { column: 'sell_at', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'sell_at', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            title="Sort by Sell @"
-                            aria-sort={openOptSort.column === 'sell_at' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            @{openOptSort.column === 'sell_at' ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                          </th>
-                          <th
-                            className="replay-th-sub replay-th-sortable"
-                            onClick={e => {
-                              e.stopPropagation()
-                              setOpenOptSort(prev =>
-                                prev.column === 'sell_premium'
-                                  ? { column: 'sell_premium', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                  : { column: 'sell_premium', dir: 'desc' },
-                              )
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault()
-                                setOpenOptSort(prev =>
-                                  prev.column === 'sell_premium'
-                                    ? { column: 'sell_premium', dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-                                    : { column: 'sell_premium', dir: 'desc' },
-                                )
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            title="Sort by Sell premium"
-                            aria-sort={openOptSort.column === 'sell_premium' ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                          >
-                            Premium{openOptSort.column === 'sell_premium' ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedOpenOptionGroups.map(group => {
-                          const groupKey = getOpenOptGroupKey(group)
-                          const isExpanded = expandedOpenDetailKeys.includes(groupKey)
-                          return (
-                            <tr
-                              key={groupKey}
-                              className="replay-opt-group-row"
-                              onClick={() => toggleOpenDetailExpand(groupKey)}
+                <div className="replay-portfolio-table-wrap">
+                  <table className="table-operations replay-opt-groups">
+                    <thead>
+                      <tr>
+                        <th className="replay-opt-expand-col" />
+                        {(() => {
+                          const cols: { col: OpenOptSortCol; label: string; title?: string }[] = [
+                            { col: 'contract', label: 'Contract' },
+                            { col: 'expiry', label: 'Expiry' },
+                            { col: 'strike', label: 'Strike' },
+                            { col: 'last', label: 'Last', title: 'Underlying last price; (Last − Strike) / Last %' },
+                            { col: 'qty', label: 'Qty' },
+                            { col: 'avg_cost', label: '@' },
+                            { col: 'value', label: 'Value' },
+                            { col: 'time', label: 'Time' },
+                            { col: 'un_pnl', label: 'UN PNL' },
+                          ]
+                          return cols.map(c => (
+                            <th
+                              key={c.col}
+                              className="replay-th-sortable"
+                              title={c.title ?? `Sort by ${c.label}`}
+                              onClick={() => setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' })}
                               role="button"
                               tabIndex={0}
-                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOpenDetailExpand(groupKey) } }}
-                              aria-expanded={isExpanded}
-                              aria-label={isExpanded ? 'Collapse open position details' : 'Expand open position details'}
+                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' }) } }}
+                              aria-sort={openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
                             >
-                              <td className="replay-opt-expand-col">
-                                <span className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`} aria-hidden>
-                                  {isExpanded ? '▼' : '▶'}
+                              {c.label}{openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                            </th>
+                          ))
+                        })()}
+                        <th>Pool</th>
+                        <th>Account</th>
+                        <th>Opportunity</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedInstanceGroups.map(instGroup => {
+                        const instKey = instGroup.strategy_instance_id != null ? String(instGroup.strategy_instance_id) : '__unassigned__'
+                        const instLabel = instGroup.strategy_instance_label ?? (instGroup.strategy_instance_id != null ? `Instance #${instGroup.strategy_instance_id}` : 'Unassigned')
+                        const oppName = instGroup.strategy_opportunity_name?.trim() || null
+                        const openedAt = instGroup.strategy_instance_opened_at_epoch
+                        const colCount = 14
+                        return [
+                          <tr key={`inst-header-${instKey}`} className="replay-portfolio-group-header replay-opt-group-row">
+                            <td colSpan={colCount - 1}>
+                              <span className="replay-instance-header-content">
+                                {instGroup.strategy_instance_id != null ? (
+                                  <a
+                                    href={`#/strategies/instances/${instGroup.strategy_instance_id}`}
+                                    className="ledger-instance-icon-link"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={`View instance: ${instLabel}`}
+                                  >
+                                    <strong>{instLabel}</strong>
+                                  </a>
+                                ) : (
+                                  <strong>{instLabel}</strong>
+                                )}
+                                {oppName && <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>Opportunity Strategy: {oppName}</span>}
+                                {openedAt != null && Number.isFinite(openedAt) && (
+                                  <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
+                                    Instance Opened at: {fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? ` (${fmtDaysAgo(openedAt)})` : ''}
+                                  </span>
+                                )}
+                                <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
+                                  {instGroup.positions.length} position{instGroup.positions.length !== 1 ? 's' : ''}
                                 </span>
-                              </td>
-                              <td className="replay-opt-contract">
-                                {(() => {
-                                  const p = getContractLabelParts(group.contract_key)
-                                  const strikeStr = group.strike != null ? ` ${group.strike}` : ''
-                                  return p.symbol ? (
-                                    <>
-                                      <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
-                                    </>
-                                  ) : (
-                                    group.contract_key
-                                  )
-                                })()}
-                              </td>
-                              <td>
-                                {fmtExpiry(group.expiry)}
-                                {(() => {
-                                  const days = daysUntilExpiry(group.expiry)
-                                  if (days == null) return null
-                                  const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
-                                  return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
-                                })()}
-                              </td>
-                              <td><strong>{fmtUsd(group.strike)}</strong></td>
-                              <td>
-                                {(() => {
-                                  const underlying = getContractLabelParts(group.contract_key).symbol
-                                  const q = underlying ? quotesMap[underlying] : undefined
-                                  const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
-                                  const strike = group.strike != null && Number.isFinite(group.strike) ? group.strike : null
-                                  const pct = last != null && strike != null && last !== 0
-                                    ? ((last - strike) / last) * 100
-                                    : null
-                                  const right = parseOptionContractKey(group.contract_key).right
-                                  const side: 'Buy' | 'Sell' = (group.net_qty ?? 0) > 0 ? 'Buy' : 'Sell'
-                                  const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
-                                  return (
-                                    <>
-                                      {last != null ? fmtUsd(last) : '—'}
-                                      {pct != null && (
-                                        <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}>
-                                          {' '}{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                                        </span>
-                                      )}
-                                    </>
-                                  )
-                                })()}
-                              </td>
-                              <td>{group.buy_volume}</td>
-                              <td>{fmtUsd(group.buy_avg_price)}</td>
-                              <td><span className="replay-cost">{fmtUsd(group.buy_cost)}</span></td>
-                              <td>{group.sell_volume}</td>
-                              <td>{fmtUsd(group.sell_avg_price)}</td>
-                              <td><span className="replay-premium">{fmtUsd(group.sell_premium)}</span></td>
-                              <td>
-                                {(() => {
-                                  // Time: date only + (xd ago) in yellow; same source as Detail
-                                  let ts: number | null = null
-                                  if (group.kind === 'live') {
-                                    const times = (group.positions ?? [])
-                                      .map(p => p.exec_time != null ? Number(p.exec_time) : null)
-                                      .filter((t): t is number => t != null && Number.isFinite(t))
-                                    ts = times.length > 0 ? Math.max(...times) : null
-                                  } else if (group.kind === 'offtrack') {
-                                    const times = (group.trades ?? [])
-                                      .map(ex => ex.time != null ? Number(ex.time) : (ex.created_at != null ? Number(ex.created_at) : null))
-                                      .filter((t): t is number => t != null && Number.isFinite(t))
-                                    ts = times.length > 0 ? Math.max(...times) : null
-                                  }
-                                  if (ts == null) return '—'
-                                  const ago = fmtDaysAgo(ts)
-                                  return (
-                                    <>
-                                      {fmtDate(ts)}
-                                      {ago ? <span className="replay-time-ago"> {ago}</span> : null}
-                                    </>
-                                  )
-                                })()}
-                              </td>
-                              <td>
-                                <span className="replay-pnl-unrealized">
-                                  {fmtUsd(group.unrealized_pnl ?? 0)}
-                                </span>
-                              </td>
-                              <td>
-                                {(() => {
-                                  if (group.kind === 'live') {
-                                    const accounts = Array.from(
-                                      new Set(
-                                        (group.positions ?? []).map(p => (p.account_id ?? '').trim()).filter(Boolean),
-                                      ),
-                                    )
-                                    if (accounts.length === 0) return '—'
-                                    if (accounts.length === 1) return accounts[0]
-                                    return 'Multi'
-                                  }
-                                  if (group.kind === 'offtrack') {
-                                    const accounts = Array.from(
-                                      new Set(
-                                        (group.trades ?? []).map(t => (t.account_id ?? '').trim()).filter(Boolean),
-                                      ),
-                                    )
-                                    if (accounts.length === 0) return '—'
-                                    if (accounts.length === 1) return accounts[0]
-                                    return 'Multi'
-                                  }
-                                  return '—'
-                                })()}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                      <tfoot>
-                        <tr className="replay-opt-tfoot-total">
-                          <td colSpan={12} className="replay-opt-tfoot-label">Total</td>
-                          <td>
-                            <span className="replay-pnl-unrealized">
-                              {fmtUsd(openOptionGroups.reduce((acc, g) => acc + (g.unrealized_pnl ?? 0), 0))}
-                            </span>
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-
-                  {expandedOpenDetailKeys.length > 0 && (() => {
-                      const expandedGroups = sortedOpenOptionGroups.filter(g => expandedOpenDetailKeys.includes(getOpenOptGroupKey(g)))
-                      let detailsTotalPnl = 0
-                      for (const group of expandedGroups) {
-                        if (group.kind === 'live') {
-                          for (const position of group.positions ?? []) {
-                            const qty = Number(position.position)
-                            const absQty = Math.abs(qty)
-                            const pricePerShare = position.avgCost != null && Number.isFinite(Number(position.avgCost))
-                              ? (Number(position.avgCost) >= 10 ? Number(position.avgCost) / 100 : Number(position.avgCost))
-                              : null
-                            const value = (pricePerShare ?? 0) * absQty * 100 - 0
-                            detailsTotalPnl += qty > 0 ? -value : value
-                          }
-                        } else {
-                          for (const ex of group.trades ?? []) {
-                            const s = (ex.side ?? '').toUpperCase()
-                            const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
-                            const q = Number(ex.quantity) || 0
-                            const p = Number(ex.price) || 0
-                            const c = Number(ex.commission) || 0
-                            const value = q * p * 100 - c
-                            detailsTotalPnl += isBuy ? -value : value
-                          }
-                        }
-                      }
-                      return (
-                    <>
-                      <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
-                        Details (per trade)
-                        <InfoTooltip text="Click a grouped option row above to inspect live account snapshots or Off-Track open trades for that contract." />
-                      </h5>
-                      <table className="table-operations">
-                        <thead>
-                          <tr>
-                            <th>Contract</th>
-                            <th>Expiry</th>
-                            <th>STRIKE</th>
-                            <th title="Underlying last; (Last − Strike) / Last %">Last</th>
-                            <th title="Latest execution time (position_exec_time); local timezone.">Time</th>
-                            <th>Side</th>
-                            <th>Qty</th>
-                            <th>Price</th>
-                            <th>Comm.</th>
-                            <th>PnL</th>
-                            <th>Opportunity</th>
-                            <th>Instance</th>
-                            <th>Account</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sortedOpenOptionGroups
-                            .filter(group => expandedOpenDetailKeys.includes(getOpenOptGroupKey(group)))
-                            .flatMap(group =>
-                              group.kind === 'live'
-                                ? (group.positions ?? []).map((position, index) => {
-                                  const qty = Number(position.position)
-                                  const absQty = Math.abs(qty)
-                                  const pricePerShare = position.avgCost != null && Number.isFinite(Number(position.avgCost))
-                                    ? (Number(position.avgCost) >= 10 ? Number(position.avgCost) / 100 : Number(position.avgCost))
-                                    : null
-                                  const commission = 0
-                                  const value = (pricePerShare ?? 0) * absQty * 100 - commission
-                                  const rowPnl = qty > 0 ? -value : value
-                                  const pnlClass = 'replay-pnl-unrealized'
-                                  const execForRow = livePositionExecutionMap.get(`${(position.account_id ?? '').trim()}|${group.contract_key}`)
-                                  return (
-                                    <tr key={`${getOpenOptGroupKey(group)}-live-${position.account_id}-${index}`}>
-                                      <td className="replay-opt-contract">
-                                        {(() => {
-                                          const p = getContractLabelParts(group.contract_key)
-                                          const strikeStr = group.strike != null ? ` ${group.strike}` : ''
-                                          return p.symbol ? (
-                                            <>
-                                              <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
-                                            </>
-                                          ) : (
-                                            group.contract_key
-                                          )
-                                        })()}
-                                      </td>
-                                      <td>
-                                        {(() => {
-                                          const exp = position.lastTradeDateOrContractMonth ?? position.expiry ?? group.expiry
-                                          const days = daysUntilExpiry(exp)
-                                          return (
-                                            <>
-                                              {fmtExpiry(exp)}
-                                              {days != null && (
-                                                <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>
-                                                  {' '}{days >= 0 ? `${days}d` : `-${-days}d`}
-                                                </span>
-                                              )}
-                                            </>
-                                          )
-                                        })()}
-                                      </td>
-                                      <td><strong>{position.strike != null ? fmtUsd(position.strike) : fmtUsd(group.strike)}</strong></td>
-                                      <td>
-                                        {(() => {
-                                          const underlying = getContractLabelParts(group.contract_key).symbol
-                                          const q = underlying ? quotesMap[underlying] : undefined
-                                          const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
-                                          const strike = position.strike ?? group.strike
-                                          const strikeNum = strike != null && Number.isFinite(strike) ? strike : null
-                                          const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
-                                          const right = parseOptionContractKey(group.contract_key).right
-                                          const side: 'Buy' | 'Sell' = qty > 0 ? 'Buy' : 'Sell'
-                                          const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
-                                          return (
-                                            <>
-                                              {last != null ? fmtUsd(last) : '—'}
-                                              {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
-                                            </>
-                                          )
-                                        })()}
-                                      </td>
-                                      <td>{(() => {
-                                        const ts = position.exec_time != null ? Number(position.exec_time) : null
-                                        if (ts == null || !Number.isFinite(ts)) return '—'
-                                        const ago = fmtDaysAgo(ts)
-                                        return (
-                                          <>
-                                            {fmtDate(ts)}
-                                            {ago ? <span className="replay-time-ago"> {ago}</span> : null}
-                                          </>
-                                        )
-                                      })()}</td>
-                                      <td>{qty > 0 ? 'Buy' : qty < 0 ? 'Sell' : '—'}</td>
-                                      <td>{Number.isFinite(qty) ? Math.abs(qty) : '—'}</td>
-                                      <td>{fmtUsd(pricePerShare)}</td>
-                                      <td>{fmtUsd(0)}</td>
-                                      <td><span className={pnlClass}>{fmtUsd(rowPnl)}</span></td>
-                                      <StrategyAttributionCells ex={execForRow ?? null} />
-                                      <td>{position.account_id ?? '—'}</td>
-                                      <td>
-                                        {execForRow?.account_executions_id != null ? (
-                                          <span className="replay-exec-row-actions">
-                                            <button
-                                              type="button"
-                                              className="btn btn-icon-small"
-                                              onClick={() => {
-                                                setEditExec(execForRow)
-                                                setPageError(null)
-                                              }}
-                                              title="Edit"
-                                              aria-label="Edit execution"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                              </svg>
-                                            </button>
-                                            <button
-                                              type="button"
-                                              className="btn btn-icon-small btn-icon-danger"
-                                              onClick={() => {
-                                                setPageError(null)
-                                                setDeleteConfirmState({
-                                                  open: true,
-                                                  title: 'Delete execution',
-                                                  message:
-                                                    'This will permanently remove this execution from trade history. This cannot be undone.',
-                                                  confirming: false,
-                                                  exec: execForRow,
-                                                })
-                                              }}
-                                              title="Delete"
-                                              aria-label="Delete execution"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <polyline points="3 6 5 6 21 6" />
-                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                                <line x1="10" y1="11" x2="10" y2="17" />
-                                                <line x1="14" y1="11" x2="14" y2="17" />
-                                              </svg>
-                                            </button>
-                                          </span>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            className="btn btn-small"
-                                            onClick={() => {
-                                              setExecInitialDraft(buildLinkExecutionDraftFromLivePosition(group, position))
-                                              setAddExecOpen(true)
-                                              setPageError(null)
-                                            }}
-                                          >
-                                            Link record
-                                          </button>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  )
-                                })
-                                : (group.trades ?? []).map((ex, ti) => {
-                                  const s = (ex.side ?? '').toUpperCase()
-                                  const sideLabel =
-                                    s === 'BUY' || s === 'BOT' || s === 'B'
-                                      ? 'Buy'
-                                      : s === 'SELL' || s === 'SLD' || s === 'S'
-                                        ? 'Sell'
-                                        : (ex.side ?? '—')
-                                  const q = Number(ex.quantity) || 0
-                                  const p = Number(ex.price) || 0
-                                  const c = Number(ex.commission) || 0
-                                  const value = q * p * 100 - c
-                                  const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
-                                  const pnl = isBuy ? -value : value
-                                  // Sell = premium received → show as positive (profit)
-                                  const displayPnl = !isBuy ? Math.abs(pnl) : pnl
-                                  const pnlClass = displayPnl < 0 ? 'replay-pnl-detail-negative' : displayPnl > 0 ? 'replay-pnl-detail-positive' : ''
-                                  return (
-                                    <tr key={`${getOpenOptGroupKey(group)}-${ti}-${ex.time ?? ti}`}>
-                                      <td className="replay-opt-contract">
-                                        {(() => {
-                                          const p_ = getContractLabelParts(group.contract_key)
-                                          const strikeStr = group.strike != null ? ` ${group.strike}` : ''
-                                          return p_.symbol ? (
-                                            <>
-                                              <strong>{p_.symbol}</strong> {p_.rightLabel}{strikeStr}
-                                            </>
-                                          ) : (
-                                            group.contract_key
-                                          )
-                                        })()}
-                                      </td>
-                                      <td>
-                                        {(() => {
-                                          const exp = ex.expiry ?? group.expiry
-                                          const days = daysUntilExpiry(exp)
-                                          return (
-                                            <>
-                                              {fmtExpiry(exp)}
-                                              {days != null && (
-                                                <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>
-                                                  {' '}{days >= 0 ? `${days}d` : `-${-days}d`}
-                                                </span>
-                                              )}
-                                            </>
-                                          )
-                                        })()}
-                                      </td>
-                                      <td><strong>{fmtUsd(ex.strike ?? group.strike)}</strong></td>
-                                      <td>
-                                        {(() => {
-                                          const underlying = getContractLabelParts(group.contract_key).symbol
-                                          const q = underlying ? quotesMap[underlying] : undefined
-                                          const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
-                                          const strike = ex.strike ?? group.strike
-                                          const strikeNum = strike != null && Number.isFinite(strike) ? strike : null
-                                          const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
-                                          const right = parseOptionContractKey(group.contract_key).right
-                                          const side: 'Buy' | 'Sell' = isBuy ? 'Buy' : 'Sell'
-                                          const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
-                                          return (
-                                            <>
-                                              {last != null ? fmtUsd(last) : '—'}
-                                              {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
-                                            </>
-                                          )
-                                        })()}
-                                      </td>
-                                      <td>{(() => {
-                                        const t = ex.time != null ? Number(ex.time) : (ex.created_at != null ? Number(ex.created_at) : null)
-                                        if (t == null || !Number.isFinite(t)) return '—'
-                                        const ago = fmtDaysAgo(t)
-                                        return (
-                                          <>
-                                            {fmtDate(t)}
-                                            {ago ? <span className="replay-time-ago"> {ago}</span> : null}
-                                          </>
-                                        )
-                                      })()}</td>
-                                      <td>{sideLabel}</td>
-                                      <td>{ex.quantity != null ? Number(ex.quantity) : '—'}</td>
-                                      <td>{fmtUsd(ex.price)}</td>
-                                      <td>{fmtUsd(ex.commission ?? 0)}</td>
-                                      <td>
-                                        <span className={pnlClass}>{fmtUsd(displayPnl)}</span>
-                                      </td>
-                                      <StrategyAttributionCells ex={ex} />
-                                      <td>{ex.account_id ?? '—'}</td>
-                                      <td>
-                                        {ex.account_executions_id != null ? (
-                                          <span className="replay-exec-row-actions">
-                                            <button
-                                              type="button"
-                                              className="btn btn-icon-small"
-                                              onClick={() => {
-                                                setEditExec(ex)
-                                                setPageError(null)
-                                              }}
-                                              title="Edit"
-                                              aria-label="Edit execution"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                              </svg>
-                                            </button>
-                                            <button type="button" className="btn btn-small" onClick={() => { setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
-                                            <button
-                                              type="button"
-                                              className="btn btn-icon-small btn-icon-danger"
-                                              onClick={() => {
-                                                setPageError(null)
-                                                setDeleteConfirmState({
-                                                  open: true,
-                                                  title: 'Delete execution',
-                                                  message:
-                                                    'This will permanently remove this execution from trade history. This cannot be undone.',
-                                                  confirming: false,
-                                                  exec: ex,
-                                                })
-                                              }}
-                                              title="Delete"
-                                              aria-label="Delete execution"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <polyline points="3 6 5 6 21 6" />
-                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                                <line x1="10" y1="11" x2="10" y2="17" />
-                                                <line x1="14" y1="11" x2="14" y2="17" />
-                                              </svg>
-                                            </button>
-                                          </span>
-                                        ) : '—'}
-                                      </td>
-                                    </tr>
-                                  )
-                                }),
-                            )}
-                        </tbody>
-                        <tfoot>
-                          <tr>
-                            <td colSpan={9} className="replay-detail-total-label">Total PNL</td>
-                            <td className="replay-pnl-unrealized">
-                              <strong>{fmtUsd(detailsTotalPnl)}</strong>
+                              </span>
                             </td>
-                            <td colSpan={4} />
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </>
-                  );
-                  })()}
-                </>
+                            <td>
+                              <span className="replay-pnl-unrealized">{fmtUsd(instGroup.total_unrealized_pnl)}</span>
+                            </td>
+                          </tr>,
+                          ...instGroup.positions.flatMap((pos) => {
+                            const posKey = getPositionKey(pos, instGroup.strategy_instance_id)
+                            const absQty = Math.abs(pos.qty)
+                            const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
+                            const value = (pos.avg_cost ?? 0) * absQty * 100
+                            const ts = getPositionTime(pos)
+                            const matchedExecs = pos.kind === 'live' && pos.position
+                              ? (livePositionExecutionsMap.get(optExecutionMatchKey(pos.account_id, pos.contract_key)) ?? [])
+                              : (pos.kind === 'offtrack' ? pos.trades ?? [] : [])
+                            const hasExecutions = matchedExecs.length > 0
+                            const isPosExpanded = expandedPositionKeys.includes(posKey)
+                            const posRow = (
+                              <tr
+                                key={posKey}
+                                className="detail-position-row"
+                                onClick={hasExecutions ? () => togglePositionExpand(posKey) : undefined}
+                                role={hasExecutions ? 'button' : undefined}
+                                tabIndex={hasExecutions ? 0 : undefined}
+                                onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePositionExpand(posKey) } } : undefined}
+                                aria-expanded={hasExecutions ? isPosExpanded : undefined}
+                              >
+                                <td className="replay-opt-expand-col">
+                                  {hasExecutions ? (
+                                    <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
+                                      {isPosExpanded ? '▼' : '▶'}
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td className="replay-opt-contract">
+                                  {(() => {
+                                    const p = getContractLabelParts(pos.contract_key)
+                                    const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
+                                    return p.symbol ? (<><strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}</>) : pos.contract_key
+                                  })()}
+                                </td>
+                                <td>
+                                  {fmtExpiry(pos.expiry)}
+                                  {(() => {
+                                    const days = daysUntilExpiry(pos.expiry)
+                                    if (days == null) return null
+                                    const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
+                                    return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                  })()}
+                                </td>
+                                <td><strong>{fmtUsd(pos.strike)}</strong></td>
+                                <td>
+                                  {(() => {
+                                    const underlying = getContractLabelParts(pos.contract_key).symbol
+                                    const q = underlying ? quotesMap[underlying] : undefined
+                                    const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
+                                    const strikeNum = pos.strike != null && Number.isFinite(pos.strike) ? pos.strike : null
+                                    const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
+                                    const right = parseOptionContractKey(pos.contract_key).right
+                                    const side: 'Buy' | 'Sell' = pos.qty > 0 ? 'Buy' : 'Sell'
+                                    const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
+                                    return (
+                                      <>
+                                        {last != null ? fmtUsd(last) : '—'}
+                                        {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
+                                      </>
+                                    )
+                                  })()}
+                                </td>
+                                <td>{sideLabel} {absQty}</td>
+                                <td>{fmtUsd(pos.avg_cost)}</td>
+                                <td>{fmtUsd(value)}</td>
+                                <td>
+                                  {ts != null ? (
+                                    <>{fmtDate(ts)}{fmtDaysAgo(ts) ? <span className="replay-time-ago"> {fmtDaysAgo(ts)}</span> : null}</>
+                                  ) : '—'}
+                                </td>
+                                <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
+                                <td className="replay-muted">{pos.pool_label}</td>
+                                <td>{pos.account_id || '—'}</td>
+                                <td className="replay-strategy-opp-cell">
+                                  {matchedExecs.length === 0 ? '—' : (
+                                    <span className="replay-muted">{matchedExecs.length} execution{matchedExecs.length > 1 ? 's' : ''} ↓</span>
+                                  )}
+                                </td>
+                                <td>—</td>
+                              </tr>
+                            )
+                            const execRows = isPosExpanded ? matchedExecs.map((ex, ei) => {
+                              const es = (ex.side ?? '').toUpperCase()
+                              const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
+                              const eQty = Math.abs(Number(ex.quantity) || 0)
+                              const ePrice = Number(ex.price) || 0
+                              const eComm = Number(ex.commission) || 0
+                              const eTs = ex.time != null ? Number(ex.time) : null
+                              const isOffTrack = pos.kind === 'offtrack'
+                              return (
+                                <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
+                                  <td className="replay-opt-expand-col" />
+                                  <td className="detail-exec-indent replay-muted">↳ exec #{ex.account_executions_id ?? '?'}</td>
+                                  <td className="replay-muted">{ex.source ?? '—'}</td>
+                                  <td />
+                                  <td />
+                                  <td>{eSideLabel} {eQty || '—'}</td>
+                                  <td>{fmtUsd(ePrice)}</td>
+                                  <td />
+                                  <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
+                                  <td>{eComm ? fmtUsd(eComm) : '—'}</td>
+                                  <td className="replay-muted" />
+                                  <td className="replay-muted">{ex.account_id ?? '—'}</td>
+                                  <StrategyAttributionCells ex={ex} />
+                                  <td>
+                                    <span className="replay-exec-row-actions">
+                                      <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); setEditExec(ex); setPageError(null) }} title="Edit" aria-label="Edit execution">
+                                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                                      </button>
+                                      {ex.account_executions_id != null ? (
+                                        <LinkStrategyIconButton title="Assign strategy opportunity and instance" onClick={() => { setLinkContext({ account_executions_id: ex.account_executions_id!, execution: ex }); setLinkModalOpen(true); setPageError(null) }} />
+                                      ) : null}
+                                      {isOffTrack ? (
+                                        <button type="button" className="btn btn-small" onClick={e => { e.stopPropagation(); setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
+                                      ) : null}
+                                      <button type="button" className="btn btn-icon-small btn-icon-danger" onClick={e => { e.stopPropagation(); setPageError(null); setDeleteConfirmState({ open: true, title: 'Delete execution', message: 'This will permanently remove this execution from trade history. This cannot be undone.', confirming: false, exec: ex }) }} title="Delete" aria-label="Delete execution">
+                                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                                      </button>
+                                    </span>
+                                  </td>
+                                </tr>
+                              )
+                            }) : []
+                            return [posRow, ...execRows]
+                          }),
+                        ]
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="replay-opt-tfoot-total">
+                        <td colSpan={13} className="replay-opt-tfoot-label">Total</td>
+                        <td>
+                          <span className="replay-pnl-unrealized">
+                            {fmtUsd(instanceGroups.reduce((acc, g) => acc + g.total_unrealized_pnl, 0))}
+                          </span>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               )}
                 </div>
               ) : (
@@ -1462,6 +825,8 @@ export function PositionsPage({
                             <th>Avg Cost</th>
                             <th>Mark</th>
                             <th>UN PNL</th>
+                            <th>Opportunity</th>
+                            <th>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1477,7 +842,7 @@ export function PositionsPage({
                             for (const accId of accountIds) {
                               rows.push(
                                 <tr key={`open-stk-header-${accId}`} className="replay-portfolio-group-header">
-                                  <td colSpan={7}>
+                                  <td colSpan={9}>
                                     <strong>{accId}</strong>
                                   </td>
                                 </tr>,
@@ -1488,8 +853,13 @@ export function PositionsPage({
                                   ? Number(position.unrealized_pnl)
                                   : null
                                 const pnlClass = pnl == null ? '' : 'replay-pnl-unrealized'
+                                const instId = position.strategy_instance_id
+                                const instLabel = position.strategy_instance_label?.trim()
+                                const oppName = position.strategy_opportunity_name?.trim()
+                                const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
+                                const instanceTitle = instLabel ? `Instance: ${instLabel}` : instId != null ? `View instance #${instId}` : ''
                                 rows.push(
-                                  <tr key={`open-stk-${accId}-${position.symbol ?? ''}-${position.contract_key ?? ''}`}>
+                                  <tr key={`open-stk-${accId}-${position.symbol ?? ''}-${contractKey}`}>
                                     <td>{accId}</td>
                                     <td><strong>{position.symbol ?? '—'}</strong></td>
                                     <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
@@ -1497,6 +867,19 @@ export function PositionsPage({
                                     <td>{fmtUsd(position.avgCost)}</td>
                                     <td>{fmtUsd(position.price)}</td>
                                     <td><span className={pnlClass}>{fmtUsd(pnl ?? 0)}</span></td>
+                                    <td className="replay-strategy-opp-cell" title={[instanceTitle, oppName].filter(Boolean).join(' · ') || undefined}>
+                                      <span className="replay-strategy-opp-cell-inner">
+                                        {instId != null ? (
+                                          <a href={`#/strategies/instances/${instId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy instance'} onClick={e => e.stopPropagation()}>
+                                            <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="5" width="14" height="14" rx="1" /></svg>
+                                          </a>
+                                        ) : null}
+                                        <span className="replay-strategy-opp-text">{oppName || '—'}</span>
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <LinkStrategyIconButton title="Link to strategy instance (e.g. Covered Call underlying)" onClick={() => { setLinkPositionContext({ account_id: (position.account_id ?? accId).trim() || accId, contract_key: contractKey, symbol: position.symbol ?? undefined, strategy_opportunity_id: position.strategy_opportunity_id ?? null, strategy_instance_id: position.strategy_instance_id ?? null, position: qty, avgCost: position.avgCost, price: position.price }); setLinkPositionModalOpen(true); setPageError(null) }} />
+                                    </td>
                                   </tr>,
                                 )
                               }
@@ -1521,17 +904,39 @@ export function PositionsPage({
         open={addExecOpen || !!editExec}
         editExec={editExec}
         accountOptions={executionAccountOptions}
-        initialDraft={editExec ? null : execInitialDraft}
+        initialDraft={null}
         onClose={() => {
           setAddExecOpen(false)
           setEditExec(null)
-          setExecInitialDraft(null)
           setPageError(null)
         }}
         onSuccess={() => {
           setPageError(null)
-          setExecInitialDraft(null)
           loadReplayData()
+        }}
+      />
+      <LinkExecutionRecordModal
+        open={linkModalOpen}
+        context={linkContext}
+        onClose={() => {
+          setLinkModalOpen(false)
+          setLinkContext(null)
+        }}
+        onSuccess={() => {
+          setPageError(null)
+          loadReplayData()
+        }}
+      />
+      <LinkPositionModal
+        open={linkPositionModalOpen}
+        context={linkPositionContext}
+        onClose={() => {
+          setLinkPositionModalOpen(false)
+          setLinkPositionContext(null)
+        }}
+        onSuccess={async () => {
+          setPageError(null)
+          await loadReplayData()
         }}
       />
       {deleteConfirmState.open && (

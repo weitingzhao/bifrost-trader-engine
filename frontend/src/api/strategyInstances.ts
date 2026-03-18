@@ -62,3 +62,13 @@ export async function updateStrategyInstance(
   })
   if (!r.ok) throw new Error(r.statusText)
 }
+
+export async function deleteStrategyInstance(strategy_instance_id: number): Promise<void> {
+  const r = await fetch(`${API}/strategies/instances/${strategy_instance_id}`, {
+    method: 'DELETE',
+  })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}))
+    throw new Error((j as { detail?: string }).detail || r.statusText)
+  }
+}

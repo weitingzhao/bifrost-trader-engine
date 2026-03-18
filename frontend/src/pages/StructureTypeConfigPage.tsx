@@ -25,6 +25,7 @@ import {
   type MetaParamItem,
   type StructureTypeConfigOption,
 } from '../api'
+import { InfoTooltip } from '../components/InfoTooltip'
 
 const DIM_TYPES = [
   'direction',
@@ -57,8 +58,10 @@ export interface StructureTypeConfigPageProps {
   breadcrumbLabel?: string
 }
 
+const PAGE_TITLE_SUFFIX = 'Option Type Config'
+
 export function StructureTypeConfigPage({
-  breadcrumbLabel = 'Option Type Config',
+  breadcrumbLabel = PAGE_TITLE_SUFFIX,
 }: StructureTypeConfigPageProps) {
   const [templates, setTemplates] = useState<StrategyTemplateRow[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -114,6 +117,14 @@ export function StructureTypeConfigPage({
     return result
   }, [templates, searchText, dimFilters, activeDimFilterCount])
 
+  const sidebarTemplates = useMemo(() => {
+    return [...filteredTemplates].sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+    )
+  }, [filteredTemplates])
+
+  const [dragTemplateId, setDragTemplateId] = useState<number | null>(null)
+
   const clearAllFilters = () => { setDimFilters({}); setSearchText('') }
 
   const showFeedback = (section: string, ok: boolean) => {
@@ -125,6 +136,37 @@ export function StructureTypeConfigPage({
     const { items } = await fetchTemplates(false)
     setTemplates(items)
   }, [])
+
+  const applyTemplateReorder = async (draggedId: number, targetId: number) => {
+    if (draggedId === targetId) return
+    const order = [...templates].sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+    )
+    const ids = order.map((t) => t.strategy_template_id)
+    const from = ids.indexOf(draggedId)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0) return
+    const next = [...ids]
+    next.splice(from, 1)
+    next.splice(to, 0, draggedId)
+    const updates: Promise<unknown>[] = []
+    for (let i = 0; i < next.length; i++) {
+      const tid = next[i]
+      const row = templates.find((t) => t.strategy_template_id === tid)
+      const newOrder = (i + 1) * 10
+      if (row && row.sort_order !== newOrder) {
+        updates.push(updateTemplate(tid, { sort_order: newOrder }))
+      }
+    }
+    if (updates.length === 0) return
+    try {
+      await Promise.all(updates)
+      await loadTemplates()
+      showFeedback('reorder', true)
+    } catch {
+      showFeedback('reorder', false)
+    }
+  }
 
   const loadDims = useCallback(async () => {
     const { by_type } = await fetchDimsGrouped()
@@ -185,7 +227,13 @@ export function StructureTypeConfigPage({
   const saveTemplateInfo = async () => {
     if (!detail) return
     try {
+      const code = detail.template_code.trim().toLowerCase().replace(/\s+/g, '_')
+      if (!code || !/^[a-z][a-z0-9_]*$/.test(code)) {
+        showFeedback('info', false)
+        return
+      }
       await updateTemplate(detail.strategy_template_id, {
+        template_code: code,
         display_name: detail.display_name,
         dim_direction: detail.dim_direction,
         dim_structure: detail.dim_structure,
@@ -201,6 +249,8 @@ export function StructureTypeConfigPage({
         is_active: detail.is_active,
       })
       await loadTemplates()
+      const d = await fetchTemplateDetail(detail.strategy_template_id)
+      setDetail(d)
       showFeedback('info', true)
     } catch {
       showFeedback('info', false)
@@ -303,7 +353,10 @@ export function StructureTypeConfigPage({
     return (
       <div className="otc-page">
         <header className="otc-page-header">
-          <h1 className="otc-page-title">{breadcrumbLabel}</h1>
+          <h1 className="otc-page-title">
+            <span className="otc-page-title-prefix">Strategy / </span>
+            {breadcrumbLabel}
+          </h1>
         </header>
         <div className="otc-loading">Loading…</div>
       </div>
@@ -314,7 +367,10 @@ export function StructureTypeConfigPage({
     return (
       <div className="otc-page">
         <header className="otc-page-header">
-          <h1 className="otc-page-title">{breadcrumbLabel}</h1>
+          <h1 className="otc-page-title">
+            <span className="otc-page-title-prefix">Strategy / </span>
+            {breadcrumbLabel}
+          </h1>
         </header>
         <div className="otc-error">{err}</div>
       </div>
@@ -324,7 +380,10 @@ export function StructureTypeConfigPage({
   return (
     <div className="otc-page">
       <header className="otc-page-header">
-        <h1 className="otc-page-title">{breadcrumbLabel}</h1>
+        <h1 className="otc-page-title">
+          <span className="otc-page-title-prefix">Strategy / </span>
+          {breadcrumbLabel}
+        </h1>
         <div className="otc-page-actions">
           <button type="button" className="otc-btn otc-btn-ghost" onClick={() => setDimsOpen(true)}>
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -342,6 +401,11 @@ export function StructureTypeConfigPage({
         <aside className="otc-sidebar">
           <div className="otc-sidebar-header">
             <span className="otc-sidebar-count">
+              {saveFeedback?.section === 'reorder' && (
+                <span className={`otc-sidebar-reorder-feedback ${saveFeedback.ok ? 'ok' : 'err'}`}>
+                  {saveFeedback.ok ? 'Order saved' : 'Reorder failed'}
+                </span>
+              )}
               {hasAnyFilter
                 ? `${filteredTemplates.length} / ${templates.length}`
                 : `${templates.length}`}{' '}
@@ -411,9 +475,71 @@ export function StructureTypeConfigPage({
               )}
             </div>
           )}
+          {hasAnyFilter && (
+            <p className="otc-sidebar-reorder-hint">
+              Clear filters to reorder templates by dragging.
+            </p>
+          )}
           <ul className="otc-sidebar-list">
-            {filteredTemplates.map((t) => (
-              <li key={t.strategy_template_id}>
+            {sidebarTemplates.map((t) => (
+              <li
+                key={t.strategy_template_id}
+                className={`otc-sidebar-list-row ${dragTemplateId === t.strategy_template_id ? 'otc-sidebar-list-row--drag' : ''}`}
+                onDragOver={
+                  hasAnyFilter
+                    ? undefined
+                    : (e) => {
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                      }
+                }
+                onDrop={
+                  hasAnyFilter
+                    ? undefined
+                    : (e) => {
+                        e.preventDefault()
+                        const id = parseInt(
+                          e.dataTransfer.getData('application/x-strategy-template-id'),
+                          10
+                        )
+                        if (!Number.isNaN(id)) {
+                          void applyTemplateReorder(id, t.strategy_template_id)
+                        }
+                        setDragTemplateId(null)
+                      }
+                }
+              >
+                {!hasAnyFilter && (
+                  <span
+                    className="otc-sidebar-drag-handle"
+                    draggable
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Drag to reorder"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') e.preventDefault()
+                    }}
+                    onDragStart={(e) => {
+                      e.stopPropagation()
+                      setDragTemplateId(t.strategy_template_id)
+                      e.dataTransfer.setData(
+                        'application/x-strategy-template-id',
+                        String(t.strategy_template_id)
+                      )
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragEnd={() => setDragTemplateId(null)}
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
+                      <circle cx="9" cy="6" r="1.5" />
+                      <circle cx="15" cy="6" r="1.5" />
+                      <circle cx="9" cy="12" r="1.5" />
+                      <circle cx="15" cy="12" r="1.5" />
+                      <circle cx="9" cy="18" r="1.5" />
+                      <circle cx="15" cy="18" r="1.5" />
+                    </svg>
+                  </span>
+                )}
                 <button
                   type="button"
                   className={`otc-sidebar-item ${selectedId === t.strategy_template_id ? 'otc-sidebar-item--active' : ''}`}
@@ -463,6 +589,21 @@ export function StructureTypeConfigPage({
                   </div>
                 </div>
                 <div className="otc-form-row">
+                  <label className="otc-field otc-field--template-code">
+                    <span className="otc-field-label-row">
+                      <span className="otc-field-label">Template code</span>
+                      <InfoTooltip text="Lowercase snake_case. Save applies; must be unique." />
+                    </span>
+                    <input
+                      className="otc-input otc-input--mono"
+                      value={detail.template_code}
+                      onChange={(e) =>
+                        setDetail({ ...detail, template_code: e.target.value })
+                      }
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </label>
                   <label className="otc-field">
                     <span className="otc-field-label">Display name</span>
                     <input

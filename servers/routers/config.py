@@ -269,6 +269,38 @@ def delete_position_category(request: Request, category_id: int) -> Dict[str, An
     return {"ok": False, "error": "Failed to delete category."}
 
 
+@router.put("/positions/strategy")
+def put_position_strategy(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Assign strategy opportunity and instance to a position (e.g. stock for Covered Call underlying).
+    body: account_id, contract_key, strategy_opportunity_id, strategy_instance_id (optional)."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "Postgres required."}
+    reader = request.app.state.reader
+    b = body or {}
+    account_id = (b.get("account_id") or "").strip()
+    contract_key = (b.get("contract_key") or "").strip()
+    if not account_id:
+        return {"ok": False, "error": "account_id is required."}
+    if not contract_key:
+        return {"ok": False, "error": "contract_key is required."}
+    so_id = b.get("strategy_opportunity_id")
+    si_id = b.get("strategy_instance_id")
+    if so_id is not None:
+        try:
+            so_id = int(so_id)
+        except (TypeError, ValueError):
+            so_id = None
+    if si_id is not None:
+        try:
+            si_id = int(si_id)
+        except (TypeError, ValueError):
+            si_id = None
+    if reader.update_position_strategy(account_id, contract_key, so_id, si_id):
+        return {"ok": True}
+    return {"ok": False, "error": "Position not found or update failed."}
+
+
 @router.put("/position-categories/tag")
 def put_position_category_tag(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Tag a position with a category (STK). Pass category_id null to clear tag. body: account_id, contract_key, category_id."""

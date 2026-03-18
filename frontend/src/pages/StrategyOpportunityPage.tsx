@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusResponse } from '../types'
 import {
   fetchStructures,
@@ -23,6 +23,7 @@ import {
   getScopeDisplay,
   getScopeTypeLabel,
   getStructureDisplayLabel,
+  buildSuggestedOpportunityName,
   opportunityToPayload,
 } from './strategy/strategyFormUtils'
 
@@ -58,6 +59,8 @@ export function StrategyOpportunityPage({
   const [availabilityError, setAvailabilityError] = useState<string | null>(null)
   const [watchlistItems, setWatchlistItems] = useState<Awaited<ReturnType<typeof fetchWatchlist>>['items']>([])
   const [watchlistLoading, setWatchlistLoading] = useState(false)
+  /** After user edits Name on create form, stop auto-overwriting. */
+  const oppCreateNameUserEdited = useRef(false)
 
   const loadStructures = useCallback(() => {
     setStructuresLoading(true)
@@ -129,6 +132,7 @@ export function StrategyOpportunityPage({
     const out: string[] = []
     for (const w of watchlistItems) {
       if ((w.sec_type || 'STK').toUpperCase() === 'OPT') continue
+      if (w.optionable !== true) continue
       const sym = (w.symbol || w.contract_key || '').trim()
       if (sym && !seen.has(sym)) {
         seen.add(sym)
@@ -168,6 +172,7 @@ export function StrategyOpportunityPage({
 
   const openOppCreate = () => {
     setOppFormIsCopy(false)
+    oppCreateNameUserEdited.current = false
     setOppFormPayload({
       ...DEFAULT_OPPORTUNITY_PAYLOAD,
       strategy_structure_id: structures[0]?.strategy_structure_id ?? 0,
@@ -278,6 +283,28 @@ export function StrategyOpportunityPage({
     setOppFormEntryConditions((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)))
   const removeOppCondition = (index: number) =>
     setOppFormEntryConditions((prev) => prev.filter((_, i) => i !== index))
+
+  const suggestedOppCreateName = useMemo(() => {
+    const st = structures.find((s) => s.strategy_structure_id === oppFormPayload.strategy_structure_id)
+    const structureName = st?.name ?? ''
+    return buildSuggestedOpportunityName({
+      structureName,
+      scopeType: oppFormPayload.scope_type,
+      symbols: oppFormSymbols,
+      entryConditions: oppFormEntryConditions,
+    })
+  }, [
+    structures,
+    oppFormPayload.strategy_structure_id,
+    oppFormPayload.scope_type,
+    oppFormSymbols,
+    oppFormEntryConditions,
+  ])
+
+  useEffect(() => {
+    if (oppFormOpen !== 'create' || oppFormIsCopy || oppCreateNameUserEdited.current) return
+    setOppFormPayload((p) => ({ ...p, name: suggestedOppCreateName }))
+  }, [suggestedOppCreateName, oppFormOpen, oppFormIsCopy])
 
   const isFormCreate = oppFormOpen === 'create'
   const formTitle = isFormCreate
@@ -425,9 +452,18 @@ export function StrategyOpportunityPage({
                   type="text"
                   className="opp-input"
                   value={oppFormPayload.name}
-                  onChange={(e) => setOppFormPayload((p) => ({ ...p, name: e.target.value }))}
+                  onChange={(e) => {
+                    if (isFormCreate && !oppFormIsCopy) oppCreateNameUserEdited.current = true
+                    setOppFormPayload((p) => ({ ...p, name: e.target.value }))
+                  }}
                   placeholder="e.g. AAPL Premium Harvest"
+                  aria-describedby={isFormCreate && !oppFormIsCopy ? 'opp-name-hint' : undefined}
                 />
+                {isFormCreate && !oppFormIsCopy && (
+                  <p id="opp-name-hint" className="opp-field-hint" style={{ marginTop: 'var(--space-1)' }}>
+                    Name fills from symbol scope, structure, and entry conditions; you can edit it anytime.
+                  </p>
+                )}
               </div>
               <div className="opp-field opp-field--toggle">
                 <label className="toggle-switch" style={{ cursor: 'pointer' }}>
@@ -572,7 +608,9 @@ export function StrategyOpportunityPage({
                       {watchlistLoading ? (
                         <p className="opp-field-hint">Loading watchlist…</p>
                       ) : watchlistStkSymbols.length === 0 ? (
-                        <p className="opp-field-hint">No stocks in watchlist. Add stocks in Watchlist first.</p>
+                        <p className="opp-field-hint">
+                          No watchlist stocks with Option? on. Turn Option? on in Watchlist, or use Explicit symbols.
+                        </p>
                       ) : (
                         <>
                           <div className="opp-watchlist-stk-actions">

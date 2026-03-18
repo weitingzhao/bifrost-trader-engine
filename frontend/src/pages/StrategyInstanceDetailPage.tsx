@@ -9,6 +9,8 @@ export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
   onBackToList: () => void
   onNavigateToStrategy?: () => void
+  /** Navigate to Strategy Structure tab (optionally to view a specific structure). */
+  onNavigateToStructure?: (structureId?: number) => void
   breadcrumbLabel?: string
 }
 

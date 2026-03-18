@@ -274,7 +274,22 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     })
   }, [positions, watchlistContractKeys])
 
-  const watchlistStocks = useMemo(() => watchlistItems.filter(w => (w.sec_type || 'STK').toUpperCase() !== 'OPT'), [watchlistItems])
+  /** STK rows with Option? on (same universe as Opportunity watchlist / Option Discovery). */
+  const watchlistStocks = useMemo(
+    () =>
+      watchlistItems.filter(
+        (w) => (w.sec_type || 'STK').toUpperCase() !== 'OPT' && w.optionable === true,
+      ),
+    [watchlistItems],
+  )
+  /** STK rows with Option? off — still manageable; not shown in main Stocks table. */
+  const watchlistStocksOptionOff = useMemo(
+    () =>
+      watchlistItems.filter(
+        (w) => (w.sec_type || 'STK').toUpperCase() !== 'OPT' && w.optionable !== true,
+      ),
+    [watchlistItems],
+  )
   const watchlistOptions = useMemo(() => watchlistItems.filter(w => (w.sec_type || '').toUpperCase() === 'OPT'), [watchlistItems])
 
   /** Group stocks/options by category label (same order as Accounts: Uncategorized first, then alphabetical). */
@@ -287,6 +302,15 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
     return map
   }, [watchlistStocks])
+  const stockByCategoryOptionOff = useMemo(() => {
+    const map: Record<string, WatchlistItem[]> = {}
+    for (const item of watchlistStocksOptionOff) {
+      const k = (item.category && String(item.category).trim()) || 'Uncategorized'
+      if (!map[k]) map[k] = []
+      map[k].push(item)
+    }
+    return map
+  }, [watchlistStocksOptionOff])
   const optionByCategory = useMemo(() => {
     const map: Record<string, WatchlistItem[]> = {}
     for (const item of watchlistOptions) {
@@ -306,6 +330,15 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     })
     return arr
   }, [stockByCategory, optionByCategory])
+  const watchlistCategoryOrderStocksOptionOff = useMemo(() => {
+    const arr = Object.keys(stockByCategoryOptionOff)
+    arr.sort((a, b) => {
+      if (a === 'Uncategorized') return -1
+      if (b === 'Uncategorized') return 1
+      return a.localeCompare(b)
+    })
+    return arr
+  }, [stockByCategoryOptionOff])
 
   function openAddOptionModal(item: WatchlistItem) {
     const symbol = (item.symbol || (item.contract_key || '').split('|')[0] || '').trim()
@@ -415,8 +448,13 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
     }
   }
 
-  function renderStockTableGrouped(emptyText: string) {
-    if (watchlistStocks.length === 0) return <p className="replay-placeholder">{emptyText}</p>
+  function renderStockTableGrouped(
+    emptyText: string,
+    stocks: WatchlistItem[],
+    byCategory: Record<string, WatchlistItem[]>,
+    categoryOrder: string[],
+  ) {
+    if (stocks.length === 0) return <p className="replay-placeholder">{emptyText}</p>
     return (
       <table className="table-operations ib-positions-table realtime-quotes-table">
         <thead>
@@ -429,8 +467,8 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
             <th>Actions</th>
           </tr>
         </thead>
-        {watchlistCategoryOrder.map((catLabel) => {
-          const items = stockByCategory[catLabel] ?? []
+        {categoryOrder.map((catLabel) => {
+          const items = byCategory[catLabel] ?? []
           if (items.length === 0) return null
           return (
             <tbody key={catLabel}>
@@ -664,8 +702,29 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
           <div className="replay-placeholder">No items. Enter Symbol to add or add from positions.</div>
         ) : (
           <>
-            <h4 className="watchlist-subhead">Stocks</h4>
-            {renderStockTableGrouped('No stocks in watchlist.')}
+            <h4 className="watchlist-subhead">Stocks (Option on)</h4>
+            {renderStockTableGrouped(
+              watchlistStocksOptionOff.length > 0
+                ? 'No stocks with Option? on. Turn Option? on below or add symbols.'
+                : 'No stocks in watchlist.',
+              watchlistStocks,
+              stockByCategory,
+              watchlistCategoryOrder,
+            )}
+            {watchlistStocksOptionOff.length > 0 && (
+              <>
+                <h4 className="watchlist-subhead" style={{ marginTop: '1rem' }}>Stocks (Option off)</h4>
+                <p className="section-hint" style={{ marginBottom: '0.5rem' }}>
+                  Not included in Opportunity watchlist scope or Option Discovery until Option? is on.
+                </p>
+                {renderStockTableGrouped(
+                  'No rows.',
+                  watchlistStocksOptionOff,
+                  stockByCategoryOptionOff,
+                  watchlistCategoryOrderStocksOptionOff,
+                )}
+              </>
+            )}
             <h4 className="watchlist-subhead" style={{ marginTop: '1rem' }}>Options</h4>
             {renderOptionsTableGrouped('No options in watchlist.')}
           </>

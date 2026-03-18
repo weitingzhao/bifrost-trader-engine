@@ -6,6 +6,7 @@ import {
   fetchStrategyInstances,
   fetchOpportunities,
   createStrategyInstance,
+  deleteStrategyInstance,
 } from '../api'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
 import { fmtTsShort, fmtDate } from '../utils/format'
@@ -41,6 +42,9 @@ export function StrategyInstancesPage({
   const [createNotes, setCreateNotes] = useState('')
   const [createLoading, setCreateLoading] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; instanceId: number | null; label: string; deleting: boolean; error: string | null }>({
+    open: false, instanceId: null, label: '', deleting: false, error: null,
+  })
 
   /** Detail view is shown when URL has an instance id or user picked one in-page (e.g. after create). */
   const effectiveDetailId = urlStrategyInstanceId ?? selectedInstanceId
@@ -114,6 +118,23 @@ export function StrategyInstancesPage({
     setCreateNotes('')
     setCreateError(null)
     setCreateModalOpen(true)
+  }
+
+  const openDeleteConfirm = (row: StrategyInstance) => {
+    const displayLabel = row.label ?? row.strategy_opportunity_name ?? `#${row.strategy_instance_id}`
+    setConfirmDelete({ open: true, instanceId: row.strategy_instance_id, label: displayLabel, deleting: false, error: null })
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (confirmDelete.instanceId == null) return
+    setConfirmDelete((s) => ({ ...s, deleting: true, error: null }))
+    try {
+      await deleteStrategyInstance(confirmDelete.instanceId)
+      setConfirmDelete({ open: false, instanceId: null, label: '', deleting: false, error: null })
+      loadInstances()
+    } catch (err) {
+      setConfirmDelete((s) => ({ ...s, deleting: false, error: err instanceof Error ? err.message : String(err) }))
+    }
   }
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -254,7 +275,7 @@ export function StrategyInstancesPage({
                     </td>
                     <td>{row.executions_count != null ? row.executions_count : '—'}</td>
                     <td>{row.label ?? '—'}</td>
-                    <td>
+                    <td style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
                       <a
                         href={`#/strategies/instances/${row.strategy_instance_id}`}
                         target="_blank"
@@ -268,12 +289,65 @@ export function StrategyInstancesPage({
                           <circle cx="12" cy="12" r="3" />
                         </svg>
                       </a>
+                      <button
+                        type="button"
+                        className="btn btn-icon-small btn-icon-danger"
+                        title="Delete instance"
+                        aria-label="Delete instance"
+                        onClick={() => openDeleteConfirm(row)}
+                      >
+                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                          <path d="M10 11v6M14 11v6" />
+                          <path d="M9 6V4h6v2" />
+                        </svg>
+                      </button>
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {confirmDelete.open && (
+        <div
+          className="modal-overlay"
+          onClick={() => { if (!confirmDelete.deleting) setConfirmDelete((s) => ({ ...s, open: false })) }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-instance-modal-title"
+        >
+          <div className="modal-panel" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <h3 id="delete-instance-modal-title" style={{ marginTop: 0 }}>Delete instance</h3>
+            <p style={{ margin: '0.5rem 0 1rem' }}>
+              Delete instance <strong>{confirmDelete.label}</strong>? This cannot be undone.
+              It will fail if any executions are linked to this instance.
+            </p>
+            {confirmDelete.error != null && (
+              <p className="section-hint replay-form-error" style={{ marginBottom: '0.75rem' }}>{confirmDelete.error}</p>
+            )}
+            <div className="replay-exec-form-actions" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setConfirmDelete((s) => ({ ...s, open: false }))}
+                disabled={confirmDelete.deleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleDeleteConfirm}
+                disabled={confirmDelete.deleting}
+              >
+                {confirmDelete.deleting ? 'Deleting…' : 'Confirm delete'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

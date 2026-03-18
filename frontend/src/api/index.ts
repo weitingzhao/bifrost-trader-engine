@@ -21,6 +21,7 @@ export {
   createExecution,
   updateExecution,
   deleteExecution,
+  fetchExecutionLinkCandidates,
 } from './executions'
 export {
   postBarsFetch,
@@ -103,6 +104,7 @@ export {
   fetchStrategyInstance,
   createStrategyInstance,
   updateStrategyInstance,
+  deleteStrategyInstance,
 } from './strategyInstances'
 export type { StrategyInstancesParams, CreateStrategyInstancePayload } from './strategyInstances'
 export type {
@@ -143,6 +145,7 @@ export {
   postPositionCategory,
   patchPositionCategory,
   deletePositionCategory,
+  putPositionStrategy,
   putPositionCategoryTag,
   fetchMarketStreamsSymbolOrder,
   putMarketStreamsSymbolOrder,

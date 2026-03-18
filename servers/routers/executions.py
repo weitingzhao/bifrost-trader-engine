@@ -56,6 +56,38 @@ def get_executions(
     return {"executions": items}
 
 
+@router.get("/executions/link-candidates")
+def get_executions_link_candidates(
+    request: Request,
+    account_id: str = Query(..., description="IB account id"),
+    contract_key: Optional[str] = Query(None, description="Exact contract_key match (preferred)"),
+    symbol: Optional[str] = Query(None),
+    expiry: Optional[str] = Query(None, description="Option expiry (any format; used if contract_key yields no rows)"),
+    strike: Optional[float] = Query(None),
+    option_right: Optional[str] = Query(None, description="C or P"),
+    limit: int = Query(200, ge=1, le=500),
+) -> Dict[str, Any]:
+    """Existing account_executions rows to link strategy attribution (no insert)."""
+    reader = request.app.state.reader
+    if not (contract_key and contract_key.strip()) and (
+        not (symbol and symbol.strip()) or strike is None or expiry is None or str(expiry).strip() == ""
+    ):
+        return {
+            "executions": [],
+            "error": "Provide contract_key, or symbol+expiry+strike for fallback matching.",
+        }
+    items = reader.get_executions_for_strategy_link(
+        account_id=account_id.strip(),
+        contract_key=(contract_key or "").strip() or None,
+        symbol=(symbol or "").strip() or None,
+        expiry=expiry,
+        strike=strike,
+        option_right=(option_right or "").strip() or None,
+        limit=limit,
+    )
+    return {"executions": items}
+
+
 @router.get("/executions/freshness")
 def get_executions_freshness(request: Request) -> Dict[str, Any]:
     """Execution data freshness per (account_id, source). Latest exec_time and days_since_latest."""

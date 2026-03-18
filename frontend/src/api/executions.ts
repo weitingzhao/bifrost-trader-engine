@@ -1,4 +1,11 @@
-import type { ControlResponse, ExecutionsResponse, ExecutionsResponseWithPairs, ExecutionsFreshnessResponse, ExecutionsFlexUploadResponse } from '../types'
+import type {
+  ControlResponse,
+  Execution,
+  ExecutionsResponse,
+  ExecutionsResponseWithPairs,
+  ExecutionsFreshnessResponse,
+  ExecutionsFlexUploadResponse,
+} from '../types'
 import { API } from './constants'
 
 /** R-A2: API fetches executions from IB and writes to DB; no daemon. days: 1=today, 3=3d, 7=7d */
@@ -60,6 +67,32 @@ export async function postExecutionsFetchFlex(
     by_account_counts: j.by_account_counts,
     per_query: j.per_query,
   }
+}
+
+/** GET /executions/link-candidates: existing rows to attach strategy (no insert). */
+export async function fetchExecutionLinkCandidates(params: {
+  account_id: string
+  contract_key?: string
+  symbol?: string
+  expiry?: string
+  strike?: number
+  option_right?: string
+  limit?: number
+}): Promise<{ executions: Execution[]; error?: string }> {
+  const q = new URLSearchParams()
+  q.set('account_id', params.account_id.trim())
+  if (params.contract_key?.trim()) q.set('contract_key', params.contract_key.trim())
+  if (params.symbol?.trim()) q.set('symbol', params.symbol.trim())
+  if (params.expiry != null && String(params.expiry).trim() !== '') q.set('expiry', String(params.expiry).trim())
+  if (params.strike != null && Number.isFinite(params.strike)) q.set('strike', String(params.strike))
+  if (params.option_right?.trim()) q.set('option_right', params.option_right.trim().slice(0, 1))
+  if (params.limit != null) q.set('limit', String(params.limit))
+  const r = await fetch(`${API}/executions/link-candidates?${q}`)
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return { executions: [], error: (j as { error?: string }).error || r.statusText }
+  }
+  return { executions: (j as { executions?: Execution[] }).executions ?? [], error: (j as { error?: string }).error }
 }
 
 export async function fetchExecutions(

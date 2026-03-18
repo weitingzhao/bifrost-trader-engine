@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Force-release PostgreSQL locks on daemon_heartbeat (and related Phase 2 tables).
+"""Diagnose and release PostgreSQL locks / idle-in-transaction backends.
 
-Use when daemon_heartbeat (or daemon_auto_status_current, daemon_control) appears locked and
-normal operation is blocked. Finds backends holding or waiting for locks on these
-tables and terminates them (pg_terminate_backend). Run from project root.
+Modes:
+  (default)   Show backends holding locks on Phase 2 / settings / stock tables.
+  --all       Show ALL backends in 'idle in transaction' state (full DB diagnostic).
+  --dry-run   Only list, do not terminate.
+  --yes       Skip confirmation and terminate all listed backends.
 
 Usage:
-  python scripts/db_release_dblock.py [--config PATH] [--yes]
-  --config   Config file (default: config/config.yaml)
-  --yes      Skip confirmation and terminate all listed backends
-  --dry-run  Only list locking backends, do not terminate
+  python scripts/db_release_dblock.py [--config PATH] [--all] [--yes] [--dry-run]
 """
 
 from __future__ import annotations
@@ -25,7 +24,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.chdir(_PROJECT_ROOT)
 
 
-# Tables we care about (Phase 2 + settings; stock_day/stock_min often locked by API/bars_worker during CREATE INDEX)
 _TABLES = (
     "daemon_heartbeat",
     "daemon_auto_status_current",
@@ -50,13 +48,80 @@ def _conn_params(pg: dict) -> dict:
     return _get_conn_params({"postgres": pg})
 
 
+def _print_backend_row(r: tuple, *, show_relation: bool = True) -> None:
+    if show_relation:
+        pid, mode, granted, usename, app, state, query_start, *_ = r
+        relname = r[10]
+        granted_str = "holder" if granted else "waiter"
+        print(f"  pid={pid}  {granted_str}  mode={mode}  relation={relname}")
+    else:
+        pid, usename, app, state, query_start, *_ = r
+        age_sec = r[8]
+        age_str = f"{int(age_sec)}s" if age_sec is not None else "?"
+        print(f"  pid={pid}  state={state}  idle_for={age_str}")
+    print(f"    user={usename}  app={app or '(none)'}  state={state}")
+    if query_start:
+        print(f"    query_start={query_start}")
+    if show_relation:
+        we_type_val, we_event_val = r[7], r[8]
+    else:
+        we_type_val, we_event_val = r[5], r[6]
+    if we_type_val and we_event_val:
+        print(f"    wait_event={we_type_val}.{we_event_val}")
+    query_val = r[9] if show_relation else r[7]
+    if query_val:
+        print(f"    query: {query_val.strip()[:120]}")
+    print()
+
+
+def _query_table_locks(conn, my_pid: int) -> list:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT l.pid, l.mode, l.granted,
+                   a.usename, a.application_name, a.state,
+                   a.query_start, a.wait_event_type, a.wait_event,
+                   left(a.query, 120) AS query,
+                   c.relname AS relation
+            FROM pg_locks l
+            JOIN pg_stat_activity a ON l.pid = a.pid
+            JOIN pg_class c ON l.relation = c.oid
+            WHERE c.relname = ANY(%s)
+              AND l.pid != %s
+            ORDER BY l.granted DESC, l.pid
+            """,
+            (list(_TABLES), my_pid),
+        )
+        return cur.fetchall()
+
+
+def _query_all_idle_in_transaction(conn, my_pid: int) -> list:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT a.pid,
+                   a.usename, a.application_name, a.state,
+                   a.query_start, a.wait_event_type, a.wait_event,
+                   left(a.query, 120) AS query,
+                   extract(epoch from (now() - a.state_change)) AS age_sec
+            FROM pg_stat_activity a
+            WHERE a.state = 'idle in transaction'
+              AND a.pid != %s
+            ORDER BY a.state_change ASC
+            """,
+            (my_pid,),
+        )
+        return cur.fetchall()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Release PostgreSQL locks on daemon_heartbeat and related tables."
+        description="Diagnose and release PostgreSQL locks / idle-in-transaction backends."
     )
     parser.add_argument("--config", default="config/config.yaml", help="Config path")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation, terminate all listed backends")
     parser.add_argument("--dry-run", action="store_true", help="Only list backends, do not terminate")
+    parser.add_argument("--all", action="store_true", help="Show ALL idle-in-transaction backends (full diagnostic)")
     args = parser.parse_args()
 
     config_path = args.config
@@ -89,51 +154,35 @@ def main() -> int:
     my_pid = conn.get_backend_pid()
 
     try:
-        with conn.cursor() as cur:
-            # Backends that have a lock on any of our tables (granted or waiting)
-            cur.execute(
-                """
-                SELECT DISTINCT l.pid, l.mode, l.granted,
-                       a.usename, a.application_name, a.state,
-                       a.query_start, a.wait_event_type, a.wait_event,
-                       left(a.query, 80) AS query,
-                       c.relname AS relation
-                FROM pg_locks l
-                JOIN pg_stat_activity a ON l.pid = a.pid
-                JOIN pg_class c ON l.relation = c.oid
-                WHERE c.relname = ANY(%s)
-                  AND l.pid != %s
-                ORDER BY l.granted DESC, l.pid
-                """,
-                (list(_TABLES), my_pid),
-            )
-            rows = cur.fetchall()
+        if args.all:
+            rows = _query_all_idle_in_transaction(conn, my_pid)
+        else:
+            rows = _query_table_locks(conn, my_pid)
     except Exception as e:
         print(f"Query failed: {e}", file=sys.stderr)
         conn.close()
         return 1
 
+    show_relation = not args.all
+
     if not rows:
-        print("No other backends holding or waiting for locks on Phase 2 tables / settings / stock_day / stock_min.")
+        if args.all:
+            print("No backends in 'idle in transaction' state.")
+        else:
+            print("No other backends holding or waiting for locks on Phase 2 tables / settings / stock_day / stock_min.")
         conn.close()
         return 0
 
-    print("Backends with locks on Phase 2 tables + settings + stock_day/stock_min (excluding this script):")
+    if args.all:
+        print(f"All idle-in-transaction backends ({len(rows)}):")
+    else:
+        print("Backends with locks on Phase 2 tables + settings + stock_day/stock_min (excluding this script):")
     print("-" * 100)
     pids_to_terminate = []
     for r in rows:
-        pid, mode, granted, usename, app, state, query_start, we_type, we_event, query, relname = r
+        pid = r[0]
         pids_to_terminate.append(pid)
-        granted_str = "holder" if granted else "waiter"
-        print(f"  pid={pid}  {granted_str}  mode={mode}  relation={relname}")
-        print(f"    user={usename}  app={app or '(none)'}  state={state}")
-        if query_start:
-            print(f"    query_start={query_start}")
-        if we_type and we_event:
-            print(f"    wait_event={we_type}.{we_event}")
-        if query:
-            print(f"    query: {query.strip()[:100]}...")
-        print()
+        _print_backend_row(r, show_relation=show_relation)
     print("-" * 100)
 
     if args.dry_run:

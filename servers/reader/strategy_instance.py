@@ -41,9 +41,11 @@ def list_instances(
                 SELECT si.strategy_instance_id, si.strategy_opportunity_id, si.account_id,
                        si.opened_at, si.label, si.notes, si.created_at, si.updated_at,
                        so.name AS strategy_opportunity_name,
+                       ss.strategy_structure_id, ss.name AS strategy_structure_name,
                        (SELECT COUNT(*) FROM account_executions e WHERE e.strategy_instance_id = si.strategy_instance_id) AS executions_count
                 FROM strategy_instance si
                 LEFT JOIN strategy_opportunity so ON si.strategy_opportunity_id = so.strategy_opportunity_id
+                LEFT JOIN strategy_structure ss ON so.strategy_structure_id = ss.strategy_structure_id
                 {where}
                 ORDER BY si.opened_at DESC
                 """,
@@ -76,9 +78,11 @@ def get_instance_by_id(conn: Any, strategy_instance_id: int) -> Optional[Dict[st
                 """
                 SELECT si.strategy_instance_id, si.strategy_opportunity_id, si.account_id,
                        si.opened_at, si.label, si.notes, si.created_at, si.updated_at,
-                       so.name AS strategy_opportunity_name
+                       so.name AS strategy_opportunity_name,
+                       ss.strategy_structure_id, ss.name AS strategy_structure_name
                 FROM strategy_instance si
                 LEFT JOIN strategy_opportunity so ON si.strategy_opportunity_id = so.strategy_opportunity_id
+                LEFT JOIN strategy_structure ss ON so.strategy_structure_id = ss.strategy_structure_id
                 WHERE si.strategy_instance_id = %s
                 """,
                 (strategy_instance_id,),
@@ -141,6 +145,29 @@ def create_instance(
             except Exception:
                 pass
         return None
+
+
+def delete_instance(conn: Any, strategy_instance_id: int) -> bool:
+    """Delete a strategy_instance by id. Returns True if deleted, False if not found or has linked executions."""
+    if conn is None:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM strategy_instance WHERE strategy_instance_id = %s",
+                (strategy_instance_id,),
+            )
+            deleted = cur.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception as e:
+        logger.warning("delete_instance failed: %s", e)
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
 
 
 def update_instance(

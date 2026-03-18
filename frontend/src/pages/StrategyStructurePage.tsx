@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse } from '../types'
 import {
   fetchStructures,
@@ -29,6 +29,29 @@ import {
   summarizeLegs,
   summarizeConstraints,
 } from './strategy/strategyFormUtils'
+
+const TEMPLATE_DIM_TYPES = [
+  'direction',
+  'structure',
+  'coverage',
+  'risk',
+  'volatility',
+  'time',
+] as const
+
+const TEMPLATE_DIM_LABELS: Record<(typeof TEMPLATE_DIM_TYPES)[number], string> = {
+  direction: 'Direction',
+  structure: 'Structure',
+  coverage: 'Coverage',
+  risk: 'Risk',
+  volatility: 'Volatility',
+  time: 'Time',
+}
+
+function templateDimAt(t: StrategyTemplateRow, dt: (typeof TEMPLATE_DIM_TYPES)[number]): string | null {
+  const v = t[`dim_${dt}` as keyof StrategyTemplateRow]
+  return typeof v === 'string' && v.trim() !== '' ? v : null
+}
 
 export interface StrategyStructurePageProps {
   status: StatusResponse | null
@@ -68,6 +91,9 @@ export function StrategyStructurePage({
   /** Wizard: 1=template, 2=meta params, 3=details. */
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
   const [templates, setTemplates] = useState<StrategyTemplateRow[]>([])
+  const [tplFilterSearch, setTplFilterSearch] = useState('')
+  const [tplDimFilters, setTplDimFilters] = useState<Record<string, string>>({})
+  const [tplFiltersExpanded, setTplFiltersExpanded] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null)
   const [wizardTemplateDetail, setWizardTemplateDetail] = useState<StrategyTemplateDetail | null>(null)
   /** True after user leaves step 2 (so step 3 does not duplicate parameter fields). */
@@ -146,6 +172,70 @@ export function StrategyStructurePage({
       .then((res) => setTemplates(res.items ?? []))
       .catch(() => setTemplates([]))
   }, [])
+
+  useEffect(() => {
+    if (formOpen === null) {
+      setTplFilterSearch('')
+      setTplDimFilters({})
+      setTplFiltersExpanded(false)
+    }
+  }, [formOpen])
+
+  const tplDimOptions = useMemo(() => {
+    const by: Record<string, Set<string>> = {}
+    for (const dt of TEMPLATE_DIM_TYPES) by[dt] = new Set()
+    for (const t of templates) {
+      for (const dt of TEMPLATE_DIM_TYPES) {
+        const v = templateDimAt(t, dt)
+        if (v) by[dt].add(v)
+      }
+    }
+    const out: Record<string, string[]> = {}
+    for (const dt of TEMPLATE_DIM_TYPES) {
+      out[dt] = Array.from(by[dt]).sort((a, b) => a.localeCompare(b))
+    }
+    return out
+  }, [templates])
+
+  const filteredTemplatesForPicker = useMemo(() => {
+    let result = templates
+    const q = tplFilterSearch.trim().toLowerCase()
+    if (q) {
+      result = result.filter(
+        (t) =>
+          t.display_name.toLowerCase().includes(q) ||
+          t.template_code.toLowerCase().includes(q) ||
+          (t.typical_use && t.typical_use.toLowerCase().includes(q)) ||
+          (t.explanation && t.explanation.toLowerCase().includes(q))
+      )
+    }
+    for (const dt of TEMPLATE_DIM_TYPES) {
+      const fv = tplDimFilters[dt]
+      if (fv) result = result.filter((t) => templateDimAt(t, dt) === fv)
+    }
+    return result
+  }, [templates, tplFilterSearch, tplDimFilters])
+
+  const activeTplFilterCount =
+    Object.values(tplDimFilters).filter(Boolean).length + (tplFilterSearch.trim() ? 1 : 0)
+
+  const wizardTemplatesToShow = useMemo(() => {
+    const f = filteredTemplatesForPicker
+    const sel = selectedTemplateId
+    if (!sel) return f
+    if (f.some((t) => t.strategy_template_id === sel)) return f
+    const cur = templates.find((t) => t.strategy_template_id === sel)
+    return cur ? [cur, ...f] : f
+  }, [filteredTemplatesForPicker, selectedTemplateId, templates])
+
+  const copyTemplateSelectOptions = useMemo(() => {
+    const tid = formPayload.strategy_template_id
+    const f = filteredTemplatesForPicker
+    if (!tid) return f
+    if (f.some((t) => t.strategy_template_id === tid)) return f
+    const cur = templates.find((t) => t.strategy_template_id === tid)
+    return cur ? [cur, ...f] : f
+  }, [filteredTemplatesForPicker, formPayload.strategy_template_id, templates])
 
   useEffect(() => {
     const tid = formPayload.strategy_template_id
@@ -1068,32 +1158,110 @@ export function StrategyStructurePage({
               {wizardStep === 1 && (
                 <div className="structure-wizard-step">
                   <h4 className="gates-form-group-title">Choose template</h4>
-                  <div className="structure-template-grid" role="radiogroup" aria-label="Template">
-                    {templates.map((tpl) => (
-                      <label
-                        key={tpl.strategy_template_id}
-                        className={`structure-template-card ${selectedTemplateId === tpl.strategy_template_id ? 'structure-template-card--selected' : ''}`}
+                  <div className="structure-template-filters" aria-label="Template filters">
+                    <div className="structure-template-filters-search-row">
+                      <input
+                        type="search"
+                        className="structure-template-filters-search structure-details-input"
+                        placeholder="Filter by name or code…"
+                        value={tplFilterSearch}
+                        onChange={(e) => setTplFilterSearch(e.target.value)}
+                        aria-label="Filter templates by name or code"
+                      />
+                      <button
+                        type="button"
+                        className="btn-secondary structure-template-filters-toggle"
+                        onClick={() => setTplFiltersExpanded((v) => !v)}
+                        aria-expanded={tplFiltersExpanded}
                       >
-                        <input
-                          type="radio"
-                          name="structure_template_wizard"
-                          value={tpl.strategy_template_id}
-                          checked={selectedTemplateId === tpl.strategy_template_id}
-                          onChange={() => handleTemplateSelect(tpl.strategy_template_id)}
-                        />
-                        <span className="structure-template-card__name">{tpl.display_name}</span>
-                        {(tpl.typical_use || tpl.explanation) && (
-                          <span className="structure-template-card__desc">{tpl.typical_use || tpl.explanation}</span>
-                        )}
-                        {(tpl.dim_direction || tpl.dim_structure || tpl.dim_volatility) && (
+                        {tplFiltersExpanded ? 'Hide dimensions' : 'Filter by dimensions'}
+                        {Object.values(tplDimFilters).filter(Boolean).length > 0
+                          ? ` (${Object.values(tplDimFilters).filter(Boolean).length})`
+                          : ''}
+                      </button>
+                      {activeTplFilterCount > 0 && (
+                        <button
+                          type="button"
+                          className="btn-secondary structure-template-filters-clear"
+                          onClick={() => {
+                            setTplFilterSearch('')
+                            setTplDimFilters({})
+                          }}
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+                    {tplFiltersExpanded && (
+                      <div className="structure-template-filters-dims">
+                        {TEMPLATE_DIM_TYPES.map((dt) => (
+                          <label key={dt} className="structure-template-filter-dim">
+                            <span className="structure-template-filter-dim-label">{TEMPLATE_DIM_LABELS[dt]}</span>
+                            <select
+                              className="structure-details-input structure-template-filter-select"
+                              value={tplDimFilters[dt] ?? ''}
+                              onChange={(e) =>
+                                setTplDimFilters((prev) => ({
+                                  ...prev,
+                                  [dt]: e.target.value,
+                                }))
+                              }
+                              aria-label={`Filter by ${TEMPLATE_DIM_LABELS[dt]}`}
+                            >
+                              <option value="">Any</option>
+                              {tplDimOptions[dt].map((code) => (
+                                <option key={code} value={code}>
+                                  {code}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="structure-template-filters-meta">
+                      Showing {wizardTemplatesToShow.length} of {templates.length} templates
+                      {activeTplFilterCount > 0 && wizardTemplatesToShow.length === 0 ? (
+                        <span className="structure-template-filters-empty-hint"> — No match. Adjust filters.</span>
+                      ) : null}
+                    </p>
+                  </div>
+                  <div className="structure-template-grid" role="radiogroup" aria-label="Template">
+                    {wizardTemplatesToShow.length === 0 ? (
+                      <p className="structure-template-grid-empty">
+                        No templates match the current filters. Clear filters or change criteria.
+                      </p>
+                    ) : (
+                      wizardTemplatesToShow.map((tpl) => (
+                        <label
+                          key={tpl.strategy_template_id}
+                          className={`structure-template-card ${selectedTemplateId === tpl.strategy_template_id ? 'structure-template-card--selected' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="structure_template_wizard"
+                            value={tpl.strategy_template_id}
+                            checked={selectedTemplateId === tpl.strategy_template_id}
+                            onChange={() => handleTemplateSelect(tpl.strategy_template_id)}
+                          />
+                          <span className="structure-template-card__name">{tpl.display_name}</span>
+                          <span className="structure-template-card__code">{tpl.template_code}</span>
+                          {(tpl.typical_use || tpl.explanation) && (
+                            <span className="structure-template-card__desc">{tpl.typical_use || tpl.explanation}</span>
+                          )}
                           <div className="structure-template-card__tags">
-                            {tpl.dim_direction && <span className="structure-template-card__tag">{tpl.dim_direction}</span>}
-                            {tpl.dim_structure && <span className="structure-template-card__tag">{tpl.dim_structure}</span>}
-                            {tpl.dim_volatility && <span className="structure-template-card__tag">{tpl.dim_volatility}</span>}
+                            {TEMPLATE_DIM_TYPES.map((dt) => {
+                              const v = templateDimAt(tpl, dt)
+                              return v ? (
+                                <span key={dt} className="structure-template-card__tag" title={TEMPLATE_DIM_LABELS[dt]}>
+                                  {v}
+                                </span>
+                              ) : null
+                            })}
                           </div>
-                        )}
-                      </label>
-                    ))}
+                        </label>
+                      ))
+                    )}
                   </div>
                   {defaultLegsLoading && <p className="form-hint">Loading template…</p>}
                 </div>
@@ -1338,8 +1506,73 @@ export function StrategyStructurePage({
                     </label>
                   </div>
                 </div>
-                <div className="gates-form-row" style={{ marginTop: 'var(--space-2)' }}>
+                <div className="structure-copy-template-block" style={{ marginTop: 'var(--space-2)' }}>
                   <label className="structure-details-label">Template</label>
+                  <div className="structure-template-filters structure-template-filters--compact" aria-label="Template filters">
+                    <div className="structure-template-filters-search-row">
+                      <input
+                        type="search"
+                        className="structure-template-filters-search structure-details-input"
+                        placeholder="Filter by name or code…"
+                        value={tplFilterSearch}
+                        onChange={(e) => setTplFilterSearch(e.target.value)}
+                        aria-label="Filter templates by name or code"
+                      />
+                      <button
+                        type="button"
+                        className="btn-secondary structure-template-filters-toggle"
+                        onClick={() => setTplFiltersExpanded((v) => !v)}
+                        aria-expanded={tplFiltersExpanded}
+                      >
+                        {tplFiltersExpanded ? 'Hide dimensions' : 'Dimensions'}
+                        {Object.values(tplDimFilters).filter(Boolean).length > 0
+                          ? ` (${Object.values(tplDimFilters).filter(Boolean).length})`
+                          : ''}
+                      </button>
+                      {activeTplFilterCount > 0 && (
+                        <button
+                          type="button"
+                          className="btn-secondary structure-template-filters-clear"
+                          onClick={() => {
+                            setTplFilterSearch('')
+                            setTplDimFilters({})
+                          }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    {tplFiltersExpanded && (
+                      <div className="structure-template-filters-dims">
+                        {TEMPLATE_DIM_TYPES.map((dt) => (
+                          <label key={dt} className="structure-template-filter-dim">
+                            <span className="structure-template-filter-dim-label">{TEMPLATE_DIM_LABELS[dt]}</span>
+                            <select
+                              className="structure-details-input structure-template-filter-select"
+                              value={tplDimFilters[dt] ?? ''}
+                              onChange={(e) =>
+                                setTplDimFilters((prev) => ({
+                                  ...prev,
+                                  [dt]: e.target.value,
+                                }))
+                              }
+                              aria-label={`Filter by ${TEMPLATE_DIM_LABELS[dt]}`}
+                            >
+                              <option value="">Any</option>
+                              {tplDimOptions[dt].map((code) => (
+                                <option key={code} value={code}>
+                                  {code}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="structure-template-filters-meta">
+                      {copyTemplateSelectOptions.length} template(s) in list
+                    </p>
+                  </div>
                   <select
                     value={formPayload.strategy_template_id ?? ''}
                     onChange={(e) => {
@@ -1347,16 +1580,18 @@ export function StrategyStructurePage({
                       if (v) handleTemplateSelect(v)
                     }}
                     aria-label="Template"
-                    className="structure-details-input"
-                    style={{ maxWidth: '20rem' }}
+                    className="structure-details-input structure-copy-template-select"
                   >
                     <option value="">— Select —</option>
-                    {templates.map((tpl) => (
+                    {copyTemplateSelectOptions.map((tpl) => (
                       <option key={tpl.strategy_template_id} value={tpl.strategy_template_id}>
-                        {tpl.display_name}
+                        {tpl.display_name} ({tpl.template_code})
                       </option>
                     ))}
                   </select>
+                  {copyTemplateSelectOptions.length === 0 && (
+                    <p className="form-hint">No templates match filters. Clear filters to see all.</p>
+                  )}
                 </div>
               </div>
 
