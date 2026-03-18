@@ -1,6 +1,7 @@
 """Connection and StatusReader facade. Delegates to domain modules (status, watchlist, market, settings, accounts, executions, position_categories)."""
 
 import logging
+import threading
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -29,7 +30,16 @@ class StatusReader:
 
     def __init__(self, status_config: dict) -> None:
         self._config = status_config
-        self._conn: Any = None
+        # Each uvicorn worker thread gets its own DB connection via thread-local.
+        self._local = threading.local()
+
+    @property
+    def _conn(self) -> Any:
+        return getattr(self._local, "conn", None)
+
+    @_conn.setter
+    def _conn(self, value: Any) -> None:
+        self._local.conn = value
 
     def _ensure_conn(self) -> bool:
         """Compat helper mirroring PostgreSQLSink._ensure_conn()."""
@@ -679,6 +689,31 @@ class StatusReader:
         )
         self._end_read_txn()
         return result
+
+    def get_performance_instance_summary(
+        self,
+        strategy_instance_id: int,
+        since_ts: Optional[float] = None,
+        until_ts: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        if not self._connect():
+            return executions_module._performance_response_summary_only(
+                trade_count=0,
+                total_realized_pnl=0.0,
+                total_commission=0.0,
+                net_pnl=0.0,
+                win_count=0,
+                loss_count=0,
+            )
+        try:
+            return executions_module.get_performance_instance_summary_only(
+                self._conn,
+                strategy_instance_id=strategy_instance_id,
+                since_ts=since_ts,
+                until_ts=until_ts,
+            )
+        finally:
+            self._end_read_txn()
 
     # --- Position categories (delegate to position_categories module) ---
     def get_position_categories(self) -> List[Dict[str, Any]]:

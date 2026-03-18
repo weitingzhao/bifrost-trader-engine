@@ -8675,6 +8675,215 @@ th {
   color: var(--color-text-muted, #888);
 }
 
+/* ── Instance Sheet (Positions > Instance tab) ── */
+.instance-sheet-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.replay-filter-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--color-surface, #13171d);
+  color: var(--color-text-main, #e4e9ef);
+  border: 1px solid var(--color-border, #2a313c);
+  border-radius: 6px;
+  padding: 0.35rem 2rem 0.35rem 0.6rem;
+  font-size: var(--text-small, 0.875rem);
+  font-family: inherit;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a8492' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  transition: border-color var(--transition-fast, 0.15s);
+}
+.replay-filter-select:hover,
+.replay-filter-select:focus {
+  border-color: var(--color-border-strong, #3d4754);
+  outline: none;
+}
+.instance-sheet-table {
+  width: 100%;
+}
+.instance-sheet-row {
+  cursor: pointer;
+  transition: background var(--transition-fast, 0.15s);
+}
+.instance-sheet-row:hover {
+  background: var(--color-surface-elevated, #1a1f26);
+}
+.instance-sheet-row-expanded {
+  background: var(--color-surface-elevated, #1a1f26);
+  border-bottom: none;
+}
+.instance-sheet-row td {
+  white-space: nowrap;
+}
+.instance-sheet-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  /* default fallback */
+  background: rgba(148,163,184,0.12);
+  color: #94a3b8;
+}
+/* Contract type colour tokens */
+.instance-sheet-badge-covered-call    { background: rgba(163,230,53,0.13);  color: #a3e635; }
+.instance-sheet-badge-cash-secured-put{ background: rgba(34,211,238,0.13);  color: #22d3ee; }
+.instance-sheet-badge-iron-condor     { background: rgba(251,146,60,0.14);  color: #fb923c; }
+.instance-sheet-badge-straddle-strangle{ background: rgba(192,132,252,0.14); color: #c084fc; }
+.instance-sheet-badge-leaps           { background: rgba(251,191,36,0.14);  color: #fbbf24; }
+.instance-sheet-badge-calendar-spread { background: rgba(52,211,153,0.14);  color: #34d399; }
+.instance-sheet-badge-custom          { background: rgba(148,163,184,0.12); color: #94a3b8; }
+/* Scope badge */
+.instance-sheet-badge-scope {
+  background: rgba(125,211,252,0.1);
+  color: var(--color-link, #7dd3fc);
+}
+.instance-sheet-detail-row {
+  background: var(--color-surface, #13171d);
+}
+.instance-sheet-detail-cell {
+  padding: var(--space-2) var(--space-3) var(--space-3) !important;
+  border-top: none !important;
+}
+.instance-sheet-sub-section {
+  margin-bottom: var(--space-3);
+}
+.instance-sheet-sub-section:last-child {
+  margin-bottom: 0;
+}
+.instance-sheet-sub-heading {
+  margin-top: 0;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-small, 0.875rem);
+  color: var(--color-text-muted, #7a8492);
+}
+.instance-sheet-sub-table {
+  font-size: 0.92em;
+}
+.instance-sheet-sub-table thead th {
+  font-weight: 500;
+  color: var(--color-text-muted, #7a8492);
+  font-size: 0.88em;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+.instance-sheet-opp-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.instance-sheet-inst-link {
+  color: var(--color-link, #7dd3fc);
+  font-weight: 600;
+  text-decoration: none;
+  transition: color var(--transition-fast, 0.15s);
+}
+.instance-sheet-inst-link:hover {
+  color: var(--color-link-hover, #bae6fd);
+  text-decoration: underline;
+}
+.instance-sheet-inst-sublabel {
+  font-size: 0.8em;
+  display: block;
+}
+.instance-sheet-symbols {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.82em;
+  color: var(--color-text-main, #e4e9ef);
+  letter-spacing: 0.02em;
+}
+
+/* ── Stock Coverage (Positions > Instance tab) ── */
+.coverage-status-badge {
+  display: inline-block;
+  padding: 0.1em 0.55em;
+  border-radius: 4px;
+  font-size: 0.82em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.coverage-status-covered {
+  background: rgba(74, 222, 128, 0.14);
+  color: #4ade80;
+}
+.coverage-status-partial {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+}
+.coverage-status-naked {
+  background: rgba(248, 113, 113, 0.14);
+  color: #f87171;
+}
+.coverage-shared-hint {
+  font-size: 0.82em;
+  color: var(--color-text-muted, #7a8492);
+  margin-left: 0.25em;
+}
+.coverage-summary-section {
+  margin-bottom: var(--space-4, 1rem);
+  padding: var(--space-2) 0;
+}
+.coverage-summary-table {
+  max-width: 48rem;
+}
+.instance-sheet-stock-section {
+  margin-top: var(--space-4, 1rem);
+  padding-top: var(--space-3, 0.75rem);
+  border-top: 1px solid var(--color-border, #2a2f38);
+}
+.instance-sheet-section-heading {
+  margin-top: 0;
+  margin-bottom: var(--space-1);
+}
+
+/* ── Risk Profile (Instance) ── */
+.risk-badge-defined {
+  background: rgba(74, 222, 128, 0.14);
+  color: #4ade80;
+}
+.risk-badge-unlimited {
+  background: rgba(248, 113, 113, 0.14);
+  color: #f87171;
+}
+.risk-value-gain {
+  color: #4ade80;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.risk-value-loss {
+  color: #f87171;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.risk-value-unlimited {
+  letter-spacing: 0.02em;
+}
+.risk-profile-section .risk-profile-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 1rem;
+  margin: 0;
+  font-size: var(--text-small, 0.875rem);
+}
+.risk-profile-dl dt {
+  color: var(--color-text-muted, #7a8492);
+  white-space: nowrap;
+}
+.risk-unlimited-warning {
+  color: #f87171;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  margin: 0;
+}
+
 /* Opportunity strategies table: Scope column shows symbols, truncate when long */
 .opp-table-scope-cell {
   max-width: 14rem;

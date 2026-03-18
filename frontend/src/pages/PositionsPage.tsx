@@ -1,7 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Execution, RealtimeQuote, StatusResponse } from '../types'
 import { deleteExecution, fetchQuotes, subscribeQuotes } from '../api'
+import { fetchOpportunities, fetchStructures } from '../api/strategies'
+import type { StrategyOpportunity, StrategyStructure } from '../api/strategies'
 import { InfoTooltip } from '../components/InfoTooltip'
+import {
+  computeRiskProfile,
+  formatApproxUsd,
+  formatRiskHedgedBreakdown,
+  formatRiskLabel,
+} from '../utils/riskProfile'
+import type { RiskPosition } from '../utils/riskProfile'
 import {
   daysUntilExpiry,
   fmtDate,
@@ -37,6 +46,11 @@ function optionLastStrikePctClass(right: string, side: 'Buy' | 'Sell', pct: numb
   if (side === 'Sell') return positive ? 'pnl-positive' : 'pnl-negative'
   return positive ? 'pnl-negative' : 'pnl-positive'
 }
+
+function fmtSignedPct(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+}
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
 import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
 import type { LinkExecutionContext } from './portfolio/LinkExecutionRecordModal'
@@ -44,7 +58,7 @@ import { LinkExecutionRecordModal } from './portfolio/LinkExecutionRecordModal'
 import type { LinkPositionContext } from './portfolio/LinkPositionModal'
 import { LinkPositionModal } from './portfolio/LinkPositionModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
-import type { InstanceAllGroup, InstancePositionGroup, LivePositionRow, OpenOptionPosition, PortfolioView } from './portfolio/types'
+import type { InstanceAllGroup, InstancePositionGroup, InstanceStockCoverage, LivePositionRow, OpenOptionPosition, PortfolioView, StockCoverageItem } from './portfolio/types'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
 
 function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
@@ -110,11 +124,42 @@ export function PositionsPage({
   /** Inline error for e.g. delete execution failure (not modal form errors). */
   const [pageError, setPageError] = useState<string | null>(null)
 
+  const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
+  const [structures, setStructures] = useState<StrategyStructure[]>([])
+
+  const loadStrategyMeta = useCallback(async () => {
+    try {
+      const [oppRes, strRes] = await Promise.all([
+        fetchOpportunities(false),
+        fetchStructures(false),
+      ])
+      setOpportunities(oppRes.items ?? [])
+      setStructures(strRes.items ?? [])
+    } catch { /* non-critical */ }
+  }, [])
+
+  useEffect(() => { loadStrategyMeta() }, [loadStrategyMeta])
+
+  const oppMap = useMemo(() => {
+    const m = new Map<number, StrategyOpportunity>()
+    for (const o of opportunities) m.set(o.strategy_opportunity_id, o)
+    return m
+  }, [opportunities])
+
+  const structureMap = useMemo(() => {
+    const m = new Map<number, StrategyStructure>()
+    for (const s of structures) m.set(s.strategy_structure_id, s)
+    return m
+  }, [structures])
+
   const [openFilterSymbol, setOpenFilterSymbol] = useState('')
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
   const [openFilterPool, setOpenFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
   const [openTab, setOpenTab] = useState<'instance' | 'options' | 'stocks'>('instance')
+  const [instanceFilterStructureType, setInstanceFilterStructureType] = useState<string>('all')
+  const [instanceFilterScopeType, setInstanceFilterScopeType] = useState<string>('all')
+  const [instanceFilterOppName, setInstanceFilterOppName] = useState<string>('all')
   const getPositionKey = (p: OpenOptionPosition, instId: number | null) =>
     `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}`
   const [expandedPositionKeys, setExpandedPositionKeys] = useState<string[]>([])
@@ -421,14 +466,15 @@ export function PositionsPage({
       id: number | null
       label: string | null
       oppName: string | null
+      oppId: number | null
       openedAt: number | null
       options: OpenOptionPosition[]
-      stocks: LivePositionRow[]
     }
     const map = new Map<string, Bucket>()
-    const mergeMeta = (bucket: Bucket, patch: { label?: string | null; oppName?: string | null; openedAt?: number | null }) => {
+    const mergeMeta = (bucket: Bucket, patch: { label?: string | null; oppName?: string | null; oppId?: number | null; openedAt?: number | null }) => {
       if (patch.label != null && patch.label !== '' && !bucket.label) bucket.label = patch.label
       if (patch.oppName != null && patch.oppName !== '' && !bucket.oppName) bucket.oppName = patch.oppName
+      if (patch.oppId != null && bucket.oppId == null) bucket.oppId = patch.oppId
       if (patch.openedAt != null && Number.isFinite(patch.openedAt) && bucket.openedAt == null) bucket.openedAt = patch.openedAt
     }
     for (const g of instanceGroups) {
@@ -446,53 +492,122 @@ export function PositionsPage({
           id: g.strategy_instance_id,
           label: g.strategy_instance_label,
           oppName: g.strategy_opportunity_name,
+          oppId: null,
           openedAt: g.strategy_instance_opened_at_epoch,
           options: [...g.positions],
-          stocks: [],
         })
       }
     }
-    for (const s of liveStockPositions) {
-      const instIdRaw = s.strategy_instance_id
-      const instId = instIdRaw != null && Number.isFinite(Number(instIdRaw)) ? Number(instIdRaw) : null
-      const key = instId != null ? String(instId) : '__unassigned__'
-      let bucket = map.get(key)
-      if (!bucket) {
-        bucket = {
-          id: instId,
-          label: s.strategy_instance_label?.trim() ?? null,
-          oppName: s.strategy_opportunity_name?.trim() ?? null,
-          openedAt: null,
-          options: [],
-          stocks: [],
+
+    const resolveOppId = (bucket: Bucket): number | null => {
+      if (bucket.oppId != null) return bucket.oppId
+      for (const p of bucket.options) {
+        const execs = p.kind === 'live' && p.position
+          ? (livePositionExecutionsMap.get(optExecutionMatchKey(p.account_id, p.contract_key)) ?? [])
+          : (p.trades ?? [])
+        for (const e of execs) {
+          if (e.strategy_opportunity_id != null) return e.strategy_opportunity_id
         }
-        map.set(key, bucket)
       }
-      bucket.stocks.push(s)
-      if (instId != null) bucket.id = instId
-      mergeMeta(bucket, {
-        label: s.strategy_instance_label?.trim() ?? null,
-        oppName: s.strategy_opportunity_name?.trim() ?? null,
-      })
+      return null
     }
-    for (const b of map.values()) {
-      b.stocks.sort((a, x) => (a.symbol ?? '').localeCompare(x.symbol ?? ''))
+
+    const execPremiumPnl = (execs: Execution[]): number => {
+      let sellPremium = 0
+      let buyCost = 0
+      for (const e of execs) {
+        const side = (e.side ?? '').toUpperCase()
+        const q = Math.abs(Number(e.quantity) || 0)
+        const p = Number(e.price) || 0
+        const c = Number(e.commission) || 0
+        if (side === 'SELL' || side === 'SLD' || side === 'S') {
+          sellPremium += p * q * 100 - c
+        } else if (side === 'BUY' || side === 'BOT' || side === 'B') {
+          buyCost += p * q * 100 + c
+        }
+      }
+      return sellPremium - buyCost
     }
+
+    const computeStockCoverage = (options: OpenOptionPosition[], str: StrategyStructure | undefined): InstanceStockCoverage[] => {
+      if (!str?.legs?.length) return []
+      const underlyingLeg = str.legs.find(l => (l.role ?? '').toLowerCase() === 'underlying')
+      if (!underlyingLeg) return []
+      const legDir = (underlyingLeg.direction ?? 'long').toLowerCase() as 'long' | 'short'
+      const legQty = underlyingLeg.quantity ?? 1
+      const bySymbol = new Map<string, number>()
+      for (const p of options) {
+        const sym = getContractLabelParts(p.contract_key).symbol
+        if (!sym) continue
+        bySymbol.set(sym, (bySymbol.get(sym) ?? 0) + Math.abs(p.qty))
+      }
+      const result: InstanceStockCoverage[] = []
+      for (const [sym, optQty] of bySymbol) {
+        result.push({
+          symbol: sym,
+          required_shares: optQty * 100 * legQty,
+          direction: legDir,
+        })
+      }
+      result.sort((a, b) => a.symbol.localeCompare(b.symbol))
+      return result
+    }
+
     const result: InstanceAllGroup[] = []
     for (const [, b] of map) {
-      const optPnl = b.options.reduce((sum, p) => sum + p.unrealized_pnl, 0)
-      const stkPnl = b.stocks.reduce((sum, p) => {
-        const v = p.unrealized_pnl
-        return sum + (v != null && Number.isFinite(Number(v)) ? Number(v) : 0)
-      }, 0)
+      let optPnl = 0
+      for (const p of b.options) {
+        const matchedExecs = p.kind === 'live' && p.position
+          ? (livePositionExecutionsMap.get(optExecutionMatchKey(p.account_id, p.contract_key)) ?? [])
+          : (p.trades ?? [])
+        if (matchedExecs.length > 0) {
+          optPnl += execPremiumPnl(matchedExecs)
+        } else {
+          optPnl += p.unrealized_pnl
+        }
+      }
+      const oppId = resolveOppId(b)
+      const opp = oppId != null ? oppMap.get(oppId) : undefined
+      const str = opp ? structureMap.get(opp.strategy_structure_id) : undefined
+      const coverage = computeStockCoverage(b.options, str)
+
+      let riskProfile = null as import('../utils/riskProfile').RiskProfile | null
+      if (b.options.length > 0) {
+        const riskPositions: RiskPosition[] = []
+        for (const p of b.options) {
+          const parsed = parseOptionContractKey(p.contract_key)
+          const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
+          if (r && p.avg_cost != null) {
+            riskPositions.push({ strike: p.strike, right: r, qty: p.qty, avg_cost: p.avg_cost })
+          }
+        }
+        if (riskPositions.length > 0) {
+          let covShares = 0
+          let covAvgCost: number | null = null
+          if (coverage.length > 0) {
+            const sym = coverage[0].symbol
+            const heldPos = liveStockPositions.find(s => (s.symbol ?? '').toUpperCase() === sym)
+            const held = heldPos ? Math.abs(Number(heldPos.position) || 0) : 0
+            covShares = Math.min(held, coverage[0].required_shares)
+            covAvgCost = heldPos?.avgCost != null ? Number(heldPos.avgCost) : null
+          }
+          riskProfile = computeRiskProfile(riskPositions, covShares, covAvgCost)
+        }
+      }
+
       result.push({
         strategy_instance_id: b.id,
         strategy_instance_label: b.label,
-        strategy_opportunity_name: b.oppName,
+        strategy_opportunity_name: b.oppName ?? opp?.name ?? null,
+        strategy_opportunity_id: oppId,
         strategy_instance_opened_at_epoch: b.openedAt,
         options: b.options,
-        stocks: b.stocks,
-        total_unrealized_pnl: optPnl + stkPnl,
+        stock_coverage: coverage,
+        options_unrealized_pnl: optPnl,
+        total_unrealized_pnl: optPnl,
+        structure_type: str?.structure_type ?? null,
+        scope_type: opp?.scope_type ?? null,
+        risk_profile: riskProfile,
       })
     }
     result.sort((a, b) => {
@@ -501,7 +616,198 @@ export function PositionsPage({
       return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
     })
     return result
-  }, [instanceGroups, liveStockPositions])
+  }, [instanceGroups, oppMap, structureMap, livePositionExecutionsMap, liveStockPositions])
+
+  const stockCoverageItems = useMemo((): StockCoverageItem[] => {
+    type DemandMeta = {
+      required: number
+      instances: number
+      oppNames: Set<string>
+      watchlistScopeInstances: number
+    }
+    const demandMap = new Map<string, DemandMeta>()
+    for (const g of instanceAllGroups) {
+      const oppName = (g.strategy_opportunity_name ?? '').trim()
+      for (const sc of g.stock_coverage) {
+        const sym = (sc.symbol ?? '').toUpperCase().trim()
+        if (!sym) continue
+        const prev = demandMap.get(sym) ?? {
+          required: 0,
+          instances: 0,
+          oppNames: new Set<string>(),
+          watchlistScopeInstances: 0,
+        }
+        prev.required += sc.required_shares
+        prev.instances += 1
+        if (oppName) prev.oppNames.add(oppName)
+        if ((g.scope_type ?? '').trim() === 'watchlist_stk') prev.watchlistScopeInstances += 1
+        demandMap.set(sym, prev)
+      }
+    }
+
+    type HeldMeta = {
+      held: number
+      heldAbs: number
+      costBasisAbs: number
+      lastWeightedSum: number
+      lastWeight: number
+      dailyPnl: number
+      dailyBaseAbs: number
+      totalPnl: number
+      optionableTrue: number
+      optionableFalse: number
+      optionableUnknown: number
+    }
+    const heldMap = new Map<string, HeldMeta>()
+    for (const s of liveStockPositions) {
+      const sym = (s.symbol ?? '').toUpperCase().trim()
+      if (!sym) continue
+      const qty = Number(s.position)
+      if (!Number.isFinite(qty) || qty === 0) continue
+      const absQty = Math.abs(qty)
+      const avgCost = s.avgCost != null && Number.isFinite(Number(s.avgCost)) ? Number(s.avgCost) : null
+      const lastPrice = s.price != null && Number.isFinite(Number(s.price)) ? Number(s.price) : null
+      const dailyPrevClose = s.daily_prev_close != null && Number.isFinite(Number(s.daily_prev_close))
+        ? Number(s.daily_prev_close)
+        : null
+      const unrealizedPnl = s.unrealized_pnl != null && Number.isFinite(Number(s.unrealized_pnl))
+        ? Number(s.unrealized_pnl)
+        : (lastPrice != null && avgCost != null ? (lastPrice - avgCost) * qty : 0)
+
+      const prev = heldMap.get(sym) ?? {
+        held: 0,
+        heldAbs: 0,
+        costBasisAbs: 0,
+        lastWeightedSum: 0,
+        lastWeight: 0,
+        dailyPnl: 0,
+        dailyBaseAbs: 0,
+        totalPnl: 0,
+        optionableTrue: 0,
+        optionableFalse: 0,
+        optionableUnknown: 0,
+      }
+      prev.held += qty
+      prev.heldAbs += absQty
+      if (avgCost != null) prev.costBasisAbs += absQty * avgCost
+      if (lastPrice != null) {
+        prev.lastWeightedSum += absQty * lastPrice
+        prev.lastWeight += absQty
+      }
+      if (dailyPrevClose != null && lastPrice != null) {
+        prev.dailyPnl += (lastPrice - dailyPrevClose) * qty
+        prev.dailyBaseAbs += Math.abs(dailyPrevClose * qty)
+      }
+      prev.totalPnl += unrealizedPnl
+      if (s.optionable === true) prev.optionableTrue += 1
+      else if (s.optionable === false) prev.optionableFalse += 1
+      else prev.optionableUnknown += 1
+      heldMap.set(sym, prev)
+    }
+
+    const allSymbols = new Set([...demandMap.keys(), ...heldMap.keys()])
+    const result: StockCoverageItem[] = []
+    for (const sym of allSymbols) {
+      const demand = demandMap.get(sym)
+      const heldMeta = heldMap.get(sym)
+      const required = demand?.required ?? 0
+      const held = heldMeta?.held ?? 0
+      if (required === 0 && held === 0) continue
+      const costBasis = heldMeta != null && heldMeta.costBasisAbs > 0 ? heldMeta.costBasisAbs : null
+      const totalPnl = heldMeta != null && Number.isFinite(heldMeta.totalPnl) ? heldMeta.totalPnl : null
+      const totalPct = costBasis != null && costBasis > 0 && totalPnl != null ? (totalPnl / costBasis) * 100 : null
+      const dailyPct = heldMeta != null && heldMeta.dailyBaseAbs > 0 ? (heldMeta.dailyPnl / heldMeta.dailyBaseAbs) * 100 : null
+
+      let optionableSupported: boolean | null = null
+      if (heldMeta != null) {
+        if (heldMeta.optionableTrue > 0 && heldMeta.optionableFalse === 0) optionableSupported = true
+        else if (heldMeta.optionableFalse > 0 && heldMeta.optionableTrue === 0) optionableSupported = false
+      }
+
+      result.push({
+        symbol: sym,
+        required_shares: required,
+        held_shares: held,
+        surplus_or_gap: held - required,
+        instances_needing: demand?.instances ?? 0,
+        backing_opportunities: demand != null ? Array.from(demand.oppNames).sort() : [],
+        watchlist_scope_instances: demand?.watchlistScopeInstances ?? 0,
+        optionable_supported: optionableSupported,
+        avg_cost_per_share: heldMeta != null && heldMeta.heldAbs > 0 ? heldMeta.costBasisAbs / heldMeta.heldAbs : null,
+        live_last_price: heldMeta != null && heldMeta.lastWeight > 0 ? heldMeta.lastWeightedSum / heldMeta.lastWeight : null,
+        cost_basis_total: costBasis,
+        daily_pnl: heldMeta != null ? heldMeta.dailyPnl : null,
+        daily_pct: dailyPct,
+        total_pnl: totalPnl,
+        total_pct: totalPct,
+      })
+    }
+    result.sort((a, b) => a.symbol.localeCompare(b.symbol))
+    return result
+  }, [instanceAllGroups, liveStockPositions])
+
+  const watchlistOptionableCoverageItems = useMemo(
+    () => stockCoverageItems.filter((ci) => (ci.watchlist_scope_instances ?? 0) > 0 && ci.optionable_supported !== false),
+    [stockCoverageItems],
+  )
+  const watchlistNonOptionableCoverageItems = useMemo(
+    () => stockCoverageItems.filter((ci) => (ci.watchlist_scope_instances ?? 0) > 0 && ci.optionable_supported === false),
+    [stockCoverageItems],
+  )
+  const nonWatchlistCoverageItems = useMemo(
+    () => stockCoverageItems.filter((ci) => (ci.watchlist_scope_instances ?? 0) === 0),
+    [stockCoverageItems],
+  )
+
+  const unassignedOptStocks = useMemo(
+    () => liveStockPositions.filter(s => {
+      const opt = s.optionable
+      return opt === true
+    }),
+    [liveStockPositions],
+  )
+
+  const independentStocks = useMemo(
+    () => liveStockPositions.filter(s => {
+      const opt = s.optionable
+      return opt !== true
+    }),
+    [liveStockPositions],
+  )
+
+  const filteredInstanceAllGroups = useMemo((): InstanceAllGroup[] => {
+    let list = instanceAllGroups
+    if (instanceFilterStructureType !== 'all') {
+      list = list.filter(g => (g.structure_type ?? '') === instanceFilterStructureType)
+    }
+    if (instanceFilterScopeType !== 'all') {
+      if (instanceFilterScopeType === '__none__') {
+        list = list.filter(g => !g.scope_type)
+      } else {
+        list = list.filter(g => g.scope_type === instanceFilterScopeType)
+      }
+    }
+    if (instanceFilterOppName !== 'all') {
+      list = list.filter(g => (g.strategy_opportunity_name ?? '') === instanceFilterOppName)
+    }
+    return list
+  }, [instanceAllGroups, instanceFilterStructureType, instanceFilterScopeType, instanceFilterOppName])
+
+  const instanceFilterOptions = useMemo(() => {
+    const stSet = new Set<string>()
+    const scSet = new Set<string>()
+    const oppSet = new Set<string>()
+    for (const g of instanceAllGroups) {
+      if (g.structure_type) stSet.add(g.structure_type)
+      scSet.add(g.scope_type ?? '')
+      if (g.strategy_opportunity_name) oppSet.add(g.strategy_opportunity_name)
+    }
+    return {
+      structureTypes: Array.from(stSet).sort(),
+      scopeTypes: Array.from(scSet).sort(),
+      oppNames: Array.from(oppSet).sort(),
+    }
+  }, [instanceAllGroups])
 
   const sortedInstanceAllGroups = useMemo((): InstanceAllGroup[] => {
     const { column, dir } = openOptSort
@@ -552,11 +858,18 @@ export function PositionsPage({
       })
       return list
     }
-    return instanceAllGroups.map(g => ({
+    return filteredInstanceAllGroups.map(g => ({
       ...g,
       options: sortPositions(g.options),
     }))
-  }, [instanceAllGroups, openOptSort, quotesMap])
+  }, [filteredInstanceAllGroups, openOptSort, quotesMap])
+
+  const [expandedInstanceKeys, setExpandedInstanceKeys] = useState<string[]>([])
+  const toggleInstanceExpand = (key: string) => {
+    setExpandedInstanceKeys(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    )
+  }
 
   const openFilterAccountOptions = useMemo(() => {
     const accounts = (status?.accounts ?? []).map(a => (a.account_id ?? '').trim()).filter(Boolean)
@@ -588,6 +901,77 @@ export function PositionsPage({
   useEffect(() => {
     loadReplayData()
   }, [loadReplayData])
+
+  const renderStockCoverageSummaryTable = (rows: StockCoverageItem[], keyPrefix: string) => (
+    <div className="replay-portfolio-table-wrap">
+      <table className="table-operations instance-sheet-sub-table coverage-summary-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Backed opportunities</th>
+            <th>Held</th>
+            <th>Required</th>
+            <th>Surplus / Gap</th>
+            <th>Option support</th>
+            <th>Cost basis</th>
+            <th>Avg cost</th>
+            <th>Live last</th>
+            <th>Daily ($ / %)</th>
+            <th>Total ($ / %)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((ci) => {
+            const statusLabel = ci.held_shares >= ci.required_shares
+              ? 'Covered' : ci.held_shares > 0 ? 'Partial' : 'Naked'
+            const statusClass = ci.held_shares >= ci.required_shares
+              ? 'coverage-status-covered' : ci.held_shares > 0 ? 'coverage-status-partial' : 'coverage-status-naked'
+            const optionSupportLabel = ci.optionable_supported === true
+              ? 'Optionable'
+              : ci.optionable_supported === false
+                ? 'Not optionable'
+                : 'Mixed / Unknown'
+            const backedOpps = ci.backing_opportunities ?? []
+            return (
+              <tr key={`${keyPrefix}-${ci.symbol}`}>
+                <td><strong>{ci.symbol}</strong></td>
+                <td title={backedOpps.join(', ') || undefined}>
+                  {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
+                </td>
+                <td>{ci.held_shares}</td>
+                <td>{ci.required_shares}{ci.instances_needing > 1 && <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>}</td>
+                <td><span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{ci.surplus_or_gap >= 0 ? '+' : ''}{ci.surplus_or_gap}</span></td>
+                <td>{optionSupportLabel}</td>
+                <td>{fmtUsd(ci.cost_basis_total)}</td>
+                <td>{fmtUsd(ci.avg_cost_per_share)}</td>
+                <td>{fmtUsd(ci.live_last_price)}</td>
+                <td>
+                  <span className={((ci.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                    {fmtUsd(ci.daily_pnl)}
+                  </span>
+                  {' / '}
+                  <span className={((ci.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                    {fmtSignedPct(ci.daily_pct)}
+                  </span>
+                </td>
+                <td>
+                  <span className={((ci.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                    {fmtUsd(ci.total_pnl)}
+                  </span>
+                  {' / '}
+                  <span className={((ci.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                    {fmtSignedPct(ci.total_pct)}
+                  </span>
+                </td>
+                <td><span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span></td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
 
   return (
     <div className="card process-section replay-page">
@@ -743,287 +1127,503 @@ export function PositionsPage({
                   aria-labelledby="open-tab-instance"
                   className="system-tab-panel"
                 >
-                  <h5 className="replay-sub">By strategy instance</h5>
-                  {!hasInstances ? (
-                    <p className="section-hint">No positions under the current filters.</p>
+                  <div className="instance-sheet-filters">
+                    <select
+                      className="replay-filter-select"
+                      value={instanceFilterStructureType}
+                      onChange={e => setInstanceFilterStructureType(e.target.value)}
+                      aria-label="Filter by contract type"
+                    >
+                      <option value="all">All Contract Types</option>
+                      {instanceFilterOptions.structureTypes.map(st => (
+                        <option key={st} value={st}>{st.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                      ))}
+                    </select>
+                    <select
+                      className="replay-filter-select"
+                      value={instanceFilterOppName}
+                      onChange={e => setInstanceFilterOppName(e.target.value)}
+                      aria-label="Filter by opportunity"
+                    >
+                      <option value="all">All Opportunities</option>
+                      {instanceFilterOptions.oppNames.map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                    <select
+                      className="replay-filter-select"
+                      value={instanceFilterScopeType}
+                      onChange={e => setInstanceFilterScopeType(e.target.value)}
+                      aria-label="Filter by symbol scope"
+                    >
+                      <option value="all">All Symbol Scopes</option>
+                      <option value="__none__">— None</option>
+                      {instanceFilterOptions.scopeTypes.filter(s => s !== '').map(s => (
+                        <option key={s} value={s}>{s === 'watchlist_stk' ? 'Watchlist (stocks)' : s === 'explicit_symbols' ? 'Explicit symbols' : s}</option>
+                      ))}
+                    </select>
+                    {(instanceFilterStructureType !== 'all' || instanceFilterScopeType !== 'all' || instanceFilterOppName !== 'all') && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-small"
+                        onClick={() => { setInstanceFilterStructureType('all'); setInstanceFilterScopeType('all'); setInstanceFilterOppName('all') }}
+                      >
+                        Clear Filters
+                      </button>
+                    )}
+                  </div>
+                  {sortedInstanceAllGroups.length === 0 ? (
+                    <p className="section-hint">No instances match the current filters.</p>
                   ) : (
-                    <div className="replay-instance-all-groups">
-                      {sortedInstanceAllGroups.map(allGroup => {
-                        const instKey = allGroup.strategy_instance_id != null ? String(allGroup.strategy_instance_id) : '__unassigned__'
-                        const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Instance #${allGroup.strategy_instance_id}` : 'Unassigned')
-                        const oppName = allGroup.strategy_opportunity_name?.trim() || null
-                        const openedAt = allGroup.strategy_instance_opened_at_epoch
-                        const optN = allGroup.options.length
-                        const stkN = allGroup.stocks.length
-                        const optSortHead = (
-                          <thead>
-                            <tr>
-                              <th className="replay-opt-expand-col" />
-                              {(() => {
-                                const cols: { col: OpenOptSortCol; label: string; title?: string }[] = [
-                                  { col: 'contract', label: 'Contract' },
-                                  { col: 'expiry', label: 'Expiry' },
-                                  { col: 'strike', label: 'Strike' },
-                                  { col: 'last', label: 'Last', title: 'Underlying last price; (Last − Strike) / Last %' },
-                                  { col: 'qty', label: 'Qty' },
-                                  { col: 'avg_cost', label: '@' },
-                                  { col: 'value', label: 'Value' },
-                                  { col: 'time', label: 'Time' },
-                                  { col: 'un_pnl', label: 'UN PNL' },
-                                ]
-                                return cols.map(c => (
-                                  <th
-                                    key={c.col}
-                                    className="replay-th-sortable"
-                                    title={c.title ?? `Sort by ${c.label}`}
-                                    onClick={() => setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' })}
-                                    role="button"
-                                    tabIndex={0}
-                                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' }) } }}
-                                    aria-sort={openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                                  >
-                                    {c.label}{openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                                  </th>
-                                ))
-                              })()}
-                              <th>Pool</th>
-                              <th>Account</th>
-                              <th>Opportunity</th>
-                              <th>Actions</th>
-                            </tr>
-                          </thead>
-                        )
-                        const optionBodyRows = allGroup.options.flatMap((pos) => {
-                          const posKey = `ia-${instKey}-${getPositionKey(pos, allGroup.strategy_instance_id)}`
-                          const absQty = Math.abs(pos.qty)
-                          const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
-                          const value = (pos.avg_cost ?? 0) * absQty * 100
-                          const ts = getPositionTime(pos)
-                          const matchedExecs = pos.kind === 'live' && pos.position
-                            ? (livePositionExecutionsMap.get(optExecutionMatchKey(pos.account_id, pos.contract_key)) ?? [])
-                            : (pos.kind === 'offtrack' ? pos.trades ?? [] : [])
-                          const hasExecutions = matchedExecs.length > 0
-                          const isPosExpanded = expandedPositionKeys.includes(posKey)
-                          const posRow = (
-                            <tr
-                              key={posKey}
-                              className="detail-position-row"
-                              onClick={hasExecutions ? () => togglePositionExpand(posKey) : undefined}
-                              role={hasExecutions ? 'button' : undefined}
-                              tabIndex={hasExecutions ? 0 : undefined}
-                              onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePositionExpand(posKey) } } : undefined}
-                              aria-expanded={hasExecutions ? isPosExpanded : undefined}
-                            >
-                              <td className="replay-opt-expand-col">
-                                {hasExecutions ? (
-                                  <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
-                                    {isPosExpanded ? '▼' : '▶'}
-                                  </span>
-                                ) : null}
-                              </td>
-                              <td className="replay-opt-contract">
-                                {(() => {
-                                  const p = getContractLabelParts(pos.contract_key)
-                                  const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
-                                  return p.symbol ? (<><strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}</>) : pos.contract_key
-                                })()}
-                              </td>
-                              <td>
-                                {fmtExpiry(pos.expiry)}
-                                {(() => {
-                                  const days = daysUntilExpiry(pos.expiry)
-                                  if (days == null) return null
-                                  const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
-                                  return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
-                                })()}
-                              </td>
-                              <td><strong>{fmtUsd(pos.strike)}</strong></td>
-                              <td>
-                                {(() => {
-                                  const underlying = getContractLabelParts(pos.contract_key).symbol
-                                  const q = underlying ? quotesMap[underlying] : undefined
-                                  const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
-                                  const strikeNum = pos.strike != null && Number.isFinite(pos.strike) ? pos.strike : null
-                                  const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
-                                  const right = parseOptionContractKey(pos.contract_key).right
-                                  const side: 'Buy' | 'Sell' = pos.qty > 0 ? 'Buy' : 'Sell'
-                                  const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
-                                  return (
-                                    <>
-                                      {last != null ? fmtUsd(last) : '—'}
-                                      {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
-                                    </>
-                                  )
-                                })()}
-                              </td>
-                              <td>{sideLabel} {absQty}</td>
-                              <td>{fmtUsd(pos.avg_cost)}</td>
-                              <td>{fmtUsd(value)}</td>
-                              <td>
-                                {ts != null ? (
-                                  <>{fmtDate(ts)}{fmtDaysAgo(ts) ? <span className="replay-time-ago"> {fmtDaysAgo(ts)}</span> : null}</>
-                                ) : '—'}
-                              </td>
-                              <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
-                              <td className="replay-muted">{pos.pool_label}</td>
-                              <td>{pos.account_id || '—'}</td>
-                              <td className="replay-strategy-opp-cell">
-                                {matchedExecs.length === 0 ? '—' : (
-                                  <span className="replay-muted">{matchedExecs.length} execution{matchedExecs.length > 1 ? 's' : ''} ↓</span>
-                                )}
-                              </td>
-                              <td>—</td>
-                            </tr>
-                          )
-                          const execRows = isPosExpanded ? matchedExecs.map((ex, ei) => {
-                            const es = (ex.side ?? '').toUpperCase()
-                            const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
-                            const eQty = Math.abs(Number(ex.quantity) || 0)
-                            const ePrice = Number(ex.price) || 0
-                            const eComm = Number(ex.commission) || 0
-                            const eTs = ex.time != null ? Number(ex.time) : null
-                            const isOffTrack = pos.kind === 'offtrack'
-                            return (
-                              <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
-                                <td className="replay-opt-expand-col" />
-                                <td className="detail-exec-indent replay-muted">↳ exec #{ex.account_executions_id ?? '?'}</td>
-                                <td className="replay-muted">{ex.source ?? '—'}</td>
-                                <td />
-                                <td />
-                                <td>{eSideLabel} {eQty || '—'}</td>
-                                <td>{fmtUsd(ePrice)}</td>
-                                <td />
-                                <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
-                                <td>{eComm ? fmtUsd(eComm) : '—'}</td>
-                                <td className="replay-muted" />
-                                <td className="replay-muted">{ex.account_id ?? '—'}</td>
-                                <StrategyAttributionCells ex={ex} />
-                                <td>
-                                  <span className="replay-exec-row-actions">
-                                    <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); setEditExec(ex); setPageError(null) }} title="Edit" aria-label="Edit execution">
-                                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                                    </button>
-                                    {ex.account_executions_id != null ? (
-                                      <LinkStrategyIconButton title="Assign strategy opportunity and instance" onClick={() => { setLinkContext({ account_executions_id: ex.account_executions_id!, execution: ex }); setLinkModalOpen(true); setPageError(null) }} />
-                                    ) : null}
-                                    {isOffTrack ? (
-                                      <button type="button" className="btn btn-small" onClick={e => { e.stopPropagation(); setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
-                                    ) : null}
-                                    <button type="button" className="btn btn-icon-small btn-icon-danger" onClick={e => { e.stopPropagation(); setPageError(null); setDeleteConfirmState({ open: true, title: 'Delete execution', message: 'This will permanently remove this execution from trade history. This cannot be undone.', confirming: false, exec: ex }) }} title="Delete" aria-label="Delete execution">
-                                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
-                                    </button>
+                    <div className="replay-portfolio-table-wrap">
+                      <table className="table-operations instance-sheet-table">
+                        <thead>
+                          <tr>
+                            <th className="replay-opt-expand-col" />
+                            <th>Opportunity</th>
+                            <th>Contract Type</th>
+                            <th>Symbols</th>
+                            <th>Opened</th>
+                            <th>Opt</th>
+                            <th>Underlying</th>
+                            <th>Opt PNL</th>
+                            <th>Max Gain</th>
+                            <th>Max Loss</th>
+                            <th>Risk</th>
+                            <th>Total PNL</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedInstanceAllGroups.map(allGroup => {
+                            const instKey = allGroup.strategy_instance_id != null ? String(allGroup.strategy_instance_id) : '__unassigned__'
+                            const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Instance #${allGroup.strategy_instance_id}` : 'Unassigned')
+                            const oppName = allGroup.strategy_opportunity_name?.trim() || null
+                            const openedAt = allGroup.strategy_instance_opened_at_epoch
+                            const optN = allGroup.options.length
+                            const covN = allGroup.stock_coverage.length
+                            const isExpanded = expandedInstanceKeys.includes(instKey)
+                            const structLabel = allGroup.structure_type
+                              ? allGroup.structure_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                              : '—'
+                            const structBadgeClass = allGroup.structure_type
+                              ? `instance-sheet-badge instance-sheet-badge-${allGroup.structure_type.replace(/_/g, '-')}`
+                              : 'instance-sheet-badge'
+                            const opp = allGroup.strategy_opportunity_id != null ? oppMap.get(allGroup.strategy_opportunity_id) : undefined
+                            const scopeSymbols = opp?.symbols ?? []
+                            const scopeType = allGroup.scope_type
+                            const symbolsCell = scopeType === 'watchlist_stk'
+                              ? <span className="instance-sheet-badge instance-sheet-badge-scope">Watchlist</span>
+                              : scopeSymbols.length > 0
+                                ? <span className="instance-sheet-symbols">{scopeSymbols.join(', ')}</span>
+                                : <span className="replay-muted">—</span>
+                            return [
+                              <tr
+                                key={`inst-row-${instKey}`}
+                                className={`instance-sheet-row ${isExpanded ? 'instance-sheet-row-expanded' : ''}`}
+                                onClick={() => toggleInstanceExpand(instKey)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleInstanceExpand(instKey) } }}
+                                aria-expanded={isExpanded}
+                              >
+                                <td className="replay-opt-expand-col">
+                                  <span className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`} aria-hidden>
+                                    {isExpanded ? '▼' : '▶'}
                                   </span>
                                 </td>
-                              </tr>
-                            )
-                          }) : []
-                          return [posRow, ...execRows]
-                        })
-                        return (
-                          <div key={`ia-group-${instKey}`} className="replay-instance-all-group" style={{ marginBottom: '1.5rem' }}>
-                            <div className="replay-portfolio-group-header replay-opt-group-row" style={{ padding: '0.5rem 0', marginBottom: '0.25rem' }}>
-                              <span className="replay-instance-header-content">
-                                {allGroup.strategy_instance_id != null ? (
-                                  <a
-                                    href={`#/strategies/instances/${allGroup.strategy_instance_id}`}
-                                    className="ledger-instance-icon-link"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={`View instance: ${instLabel}`}
-                                  >
-                                    <strong>{instLabel}</strong>
-                                  </a>
-                                ) : (
-                                  <strong>{instLabel}</strong>
-                                )}
-                                {oppName && <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>Opportunity Strategy: {oppName}</span>}
-                                {openedAt != null && Number.isFinite(openedAt) && (
-                                  <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
-                                    Instance Opened at: {fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? ` (${fmtDaysAgo(openedAt)})` : ''}
-                                  </span>
-                                )}
-                                <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
-                                  {optN} option{optN !== 1 ? 's' : ''}, {stkN} stock{stkN !== 1 ? 's' : ''}
-                                </span>
-                                <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>Total UN PNL:</span>{' '}
-                                <span className="replay-pnl-unrealized">{fmtUsd(allGroup.total_unrealized_pnl)}</span>
+                                <td className="instance-sheet-opp-cell">
+                                  {allGroup.strategy_instance_id != null ? (
+                                    <a
+                                      href={`#/strategies/instances/${allGroup.strategy_instance_id}`}
+                                      className="instance-sheet-inst-link"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={`View instance: ${instLabel}`}
+                                      onClick={e => e.stopPropagation()}
+                                    >
+                                      {oppName || instLabel}
+                                    </a>
+                                  ) : (
+                                    <span>{oppName || instLabel}</span>
+                                  )}
+                                  {instLabel && oppName && (
+                                    <span className="instance-sheet-inst-sublabel replay-muted">{instLabel}</span>
+                                  )}
+                                </td>
+                                <td><span className={structBadgeClass}>{structLabel}</span></td>
+                                <td>{symbolsCell}</td>
+                                <td>
+                                  {openedAt != null && Number.isFinite(openedAt) ? (
+                                    <>{fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? <span className="replay-time-ago"> {fmtDaysAgo(openedAt)}</span> : null}</>
+                                  ) : '—'}
+                                </td>
+                                <td>{optN}</td>
+                                <td>
+                                  {covN > 0 ? (() => {
+                                    const covSymbols = allGroup.stock_coverage.map(sc => {
+                                      const ci = stockCoverageItems.find(c => c.symbol === sc.symbol)
+                                      const held = ci?.held_shares ?? 0
+                                      if (held >= sc.required_shares) return { status: 'covered' as const, sym: sc.symbol }
+                                      if (held > 0) return { status: 'partial' as const, sym: sc.symbol }
+                                      return { status: 'naked' as const, sym: sc.symbol }
+                                    })
+                                    const allCovered = covSymbols.every(c => c.status === 'covered')
+                                    const anyNaked = covSymbols.some(c => c.status === 'naked')
+                                    const statusClass = allCovered ? 'coverage-status-covered' : anyNaked ? 'coverage-status-naked' : 'coverage-status-partial'
+                                    const statusLabel = allCovered ? 'Covered' : anyNaked ? 'Naked' : 'Partial'
+                                    return <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
+                                  })() : <span className="replay-muted">—</span>}
+                                </td>
+                                <td>{optN > 0 ? <span className="replay-pnl-unrealized">{fmtUsd(allGroup.options_unrealized_pnl)}</span> : <span className="replay-muted">—</span>}</td>
+                                {(() => {
+                                  if (!allGroup.risk_profile) return <><td className="replay-muted">—</td><td className="replay-muted">—</td><td className="replay-muted">—</td></>
+                                  const rl = formatRiskLabel(allGroup.risk_profile)
+                                  return <>
+                                    <td><span className="risk-value-gain">{rl.gainLabel}</span></td>
+                                    <td><span className={allGroup.risk_profile.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{rl.lossLabel}</span></td>
+                                    <td><span className={`coverage-status-badge ${allGroup.risk_profile.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
+                                  </>
+                                })()}
+                                <td><strong><span className="replay-pnl-unrealized">{fmtUsd(allGroup.total_unrealized_pnl)}</span></strong></td>
+                              </tr>,
+                              ...(isExpanded ? [
+                                <tr key={`inst-detail-${instKey}`} className="instance-sheet-detail-row">
+                                  <td colSpan={12} className="instance-sheet-detail-cell">
+                                    {optN > 0 && (
+                                      <div className="instance-sheet-sub-section">
+                                        <h6 className="replay-sub instance-sheet-sub-heading">Options ({optN})</h6>
+                                        <div className="replay-portfolio-table-wrap">
+                                          <table className="table-operations replay-opt-groups instance-sheet-sub-table">
+                                            <thead>
+                                              <tr>
+                                                <th className="replay-opt-expand-col" />
+                                                <th>Contract</th>
+                                                <th>Expiry</th>
+                                                <th>Strike</th>
+                                                <th>Last</th>
+                                                <th>Qty</th>
+                                                <th>@</th>
+                                                <th>Value</th>
+                                                <th>Time</th>
+                                                <th>UN PNL</th>
+                                                <th>Pool</th>
+                                                <th>Account</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {allGroup.options.map((pos) => {
+                                                const posKey = `ia-${instKey}-${getPositionKey(pos, allGroup.strategy_instance_id)}`
+                                                const absQty = Math.abs(pos.qty)
+                                                const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
+                                                const value = (pos.avg_cost ?? 0) * absQty * 100
+                                                const ts = getPositionTime(pos)
+                                                const matchedExecs = pos.kind === 'live' && pos.position
+                                                  ? (livePositionExecutionsMap.get(optExecutionMatchKey(pos.account_id, pos.contract_key)) ?? [])
+                                                  : (pos.kind === 'offtrack' ? pos.trades ?? [] : [])
+                                                const hasExecutions = matchedExecs.length > 0
+                                                const isPosExpanded = expandedPositionKeys.includes(posKey)
+                                                return [
+                                                  <tr
+                                                    key={posKey}
+                                                    className="detail-position-row"
+                                                    onClick={hasExecutions ? (e) => { e.stopPropagation(); togglePositionExpand(posKey) } : undefined}
+                                                    role={hasExecutions ? 'button' : undefined}
+                                                    tabIndex={hasExecutions ? 0 : undefined}
+                                                    onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); togglePositionExpand(posKey) } } : undefined}
+                                                    aria-expanded={hasExecutions ? isPosExpanded : undefined}
+                                                  >
+                                                    <td className="replay-opt-expand-col">
+                                                      {hasExecutions ? (
+                                                        <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
+                                                          {isPosExpanded ? '▼' : '▶'}
+                                                        </span>
+                                                      ) : null}
+                                                    </td>
+                                                    <td className="replay-opt-contract">
+                                                      {(() => {
+                                                        const p = getContractLabelParts(pos.contract_key)
+                                                        const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
+                                                        return p.symbol ? (<><strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}</>) : pos.contract_key
+                                                      })()}
+                                                    </td>
+                                                    <td>
+                                                      {fmtExpiry(pos.expiry)}
+                                                      {(() => {
+                                                        const days = daysUntilExpiry(pos.expiry)
+                                                        if (days == null) return null
+                                                        const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
+                                                        return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                                      })()}
+                                                    </td>
+                                                    <td><strong>{fmtUsd(pos.strike)}</strong></td>
+                                                    <td>
+                                                      {(() => {
+                                                        const underlying = getContractLabelParts(pos.contract_key).symbol
+                                                        const q = underlying ? quotesMap[underlying] : undefined
+                                                        const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
+                                                        const strikeNum = pos.strike != null && Number.isFinite(pos.strike) ? pos.strike : null
+                                                        const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
+                                                        const right = parseOptionContractKey(pos.contract_key).right
+                                                        const side: 'Buy' | 'Sell' = pos.qty > 0 ? 'Buy' : 'Sell'
+                                                        const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
+                                                        return (
+                                                          <>
+                                                            {last != null ? fmtUsd(last) : '—'}
+                                                            {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
+                                                          </>
+                                                        )
+                                                      })()}
+                                                    </td>
+                                                    <td>{sideLabel} {absQty}</td>
+                                                    <td>{fmtUsd(pos.avg_cost)}</td>
+                                                    <td>{fmtUsd(value)}</td>
+                                                    <td>
+                                                      {ts != null ? (
+                                                        <>{fmtDate(ts)}{fmtDaysAgo(ts) ? <span className="replay-time-ago"> {fmtDaysAgo(ts)}</span> : null}</>
+                                                      ) : '—'}
+                                                    </td>
+                                                    <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
+                                                    <td className="replay-muted">{pos.pool_label}</td>
+                                                    <td>{pos.account_id || '—'}</td>
+                                                  </tr>,
+                                                  ...(isPosExpanded ? matchedExecs.map((ex, ei) => {
+                                                    const es = (ex.side ?? '').toUpperCase()
+                                                    const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
+                                                    const eQty = Math.abs(Number(ex.quantity) || 0)
+                                                    const ePrice = Number(ex.price) || 0
+                                                    const eComm = Number(ex.commission) || 0
+                                                    const eTs = ex.time != null ? Number(ex.time) : null
+                                                    return (
+                                                      <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
+                                                        <td className="replay-opt-expand-col" />
+                                                        <td className="detail-exec-indent replay-muted" colSpan={2}>↳ exec #{ex.account_executions_id ?? '?'} ({ex.source ?? '—'})</td>
+                                                        <td />
+                                                        <td />
+                                                        <td>{eSideLabel} {eQty || '—'}</td>
+                                                        <td>{fmtUsd(ePrice)}</td>
+                                                        <td />
+                                                        <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
+                                                        <td>{eComm ? fmtUsd(eComm) : '—'}</td>
+                                                        <td />
+                                                        <td className="replay-muted">{ex.account_id ?? '—'}</td>
+                                                      </tr>
+                                                    )
+                                                  }) : []),
+                                                ]
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {covN > 0 && (
+                                      <div className="instance-sheet-sub-section">
+                                        <h6 className="replay-sub instance-sheet-sub-heading">Underlying Coverage</h6>
+                                        <div className="replay-portfolio-table-wrap">
+                                          <table className="table-operations instance-sheet-sub-table">
+                                            <thead>
+                                              <tr>
+                                                <th>Symbol</th>
+                                                <th>Direction</th>
+                                                <th>Required</th>
+                                                <th>Held (Account)</th>
+                                                <th>Status</th>
+                                                <th>Surplus / Gap</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {allGroup.stock_coverage.map(sc => {
+                                                const ci = stockCoverageItems.find(c => c.symbol === sc.symbol)
+                                                const held = ci?.held_shares ?? 0
+                                                const gap = held - sc.required_shares
+                                                const statusLabel = held >= sc.required_shares ? 'Fully Covered' : held > 0 ? `Partial (${held}/${sc.required_shares})` : 'Naked'
+                                                const statusClass = held >= sc.required_shares ? 'coverage-status-covered' : held > 0 ? 'coverage-status-partial' : 'coverage-status-naked'
+                                                const sharedCount = ci?.instances_needing ?? 0
+                                                return (
+                                                  <tr key={`ia-cov-${instKey}-${sc.symbol}`}>
+                                                    <td><strong>{sc.symbol}</strong></td>
+                                                    <td>{sc.direction === 'long' ? 'Long' : 'Short'}</td>
+                                                    <td>{sc.required_shares}</td>
+                                                    <td>{held}</td>
+                                                    <td>
+                                                      <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
+                                                      {sharedCount > 1 && <span className="coverage-shared-hint" title={`Shared across ${sharedCount} instances`}> ({sharedCount} inst.)</span>}
+                                                    </td>
+                                                    <td><span className={gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{gap >= 0 ? '+' : ''}{gap}</span></td>
+                                                  </tr>
+                                                )
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {allGroup.risk_profile && (
+                                      <div className="instance-sheet-sub-section risk-profile-section">
+                                        <h6 className="replay-sub instance-sheet-sub-heading">Risk Profile</h6>
+                                        <dl className="risk-profile-dl">
+                                          <dt>Risk Type</dt>
+                                          <dd><span className={`coverage-status-badge ${allGroup.risk_profile.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{allGroup.risk_profile.risk_type === 'defined' ? 'Defined' : 'Unlimited'}</span></dd>
+                                          <dt>Max Gain</dt>
+                                          <dd><span className="risk-value-gain">{formatRiskLabel(allGroup.risk_profile).gainLabel}</span></dd>
+                                          {allGroup.risk_profile.naked_short_call_contracts > 0 && allGroup.risk_profile.hedged_max_loss != null && (
+                                            <>
+                                              <dt>Hedged book max loss</dt>
+                                              <dd><span className="risk-value-loss">{formatApproxUsd(allGroup.risk_profile.hedged_max_loss)}</span></dd>
+                                              <dt>Naked short calls</dt>
+                                              <dd>{allGroup.risk_profile.naked_short_call_contracts} contract{allGroup.risk_profile.naked_short_call_contracts !== 1 ? 's' : ''}</dd>
+                                            </>
+                                          )}
+                                          <dt>Max Loss</dt>
+                                          <dd><span className={allGroup.risk_profile.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{formatRiskLabel(allGroup.risk_profile).lossLabel}</span></dd>
+                                          <dt>Net Premium</dt>
+                                          <dd>{fmtUsd(allGroup.risk_profile.net_premium)}</dd>
+                                          {allGroup.risk_profile.breakeven_prices.length > 0 && (
+                                            <><dt>Breakeven</dt><dd>{allGroup.risk_profile.breakeven_prices.map(p => fmtUsd(p)).join(', ')}</dd></>
+                                          )}
+                                        </dl>
+                                        {allGroup.risk_profile.naked_short_call_contracts > 0 && (
+                                          <ul className="risk-hedged-breakdown" style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
+                                            {formatRiskHedgedBreakdown(allGroup.risk_profile).map((line, i) => (
+                                              <li key={i} className="risk-unlimited-warning">{line}</li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>,
+                              ] : []),
+                            ]
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="replay-opt-tfoot-total">
+                            <td colSpan={10} className="replay-opt-tfoot-label">Total ({sortedInstanceAllGroups.length} instance{sortedInstanceAllGroups.length !== 1 ? 's' : ''})</td>
+                            <td>
+                              <span className="replay-pnl-unrealized">
+                                {fmtUsd(sortedInstanceAllGroups.reduce((acc, g) => acc + g.options_unrealized_pnl, 0))}
                               </span>
-                            </div>
-                            {optN > 0 ? (
-                              <>
-                                <h6 className="replay-sub" style={{ marginTop: '0.5rem', marginBottom: '0.35rem' }}>Options</h6>
-                                <div className="replay-portfolio-table-wrap">
-                                  <table className="table-operations replay-opt-groups">
-                                    {optSortHead}
-                                    <tbody>{optionBodyRows}</tbody>
-                                  </table>
-                                </div>
-                              </>
-                            ) : null}
-                            {stkN > 0 ? (
-                              <>
-                                <h6 className="replay-sub" style={{ marginTop: '0.75rem', marginBottom: '0.35rem' }}>Stocks</h6>
-                                <div className="replay-portfolio-table-wrap">
-                                  <table className="table-operations">
-                                    <thead>
-                                      <tr>
-                                        <th>Account</th>
-                                        <th>Symbol</th>
-                                        <th>Side</th>
-                                        <th>Qty</th>
-                                        <th>Avg Cost</th>
-                                        <th>Mark</th>
-                                        <th>UN PNL</th>
-                                        <th>Opportunity</th>
-                                        <th>Actions</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {allGroup.stocks.map(position => {
-                                        const accId = (position.account_id ?? '').trim() || '—'
-                                        const qty = Number(position.position)
-                                        const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
-                                          ? Number(position.unrealized_pnl)
-                                          : null
-                                        const pnlClass = pnl == null ? '' : 'replay-pnl-unrealized'
-                                        const instId = position.strategy_instance_id
-                                        const instLabelStk = position.strategy_instance_label?.trim()
-                                        const oppNameStk = position.strategy_opportunity_name?.trim()
-                                        const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
-                                        const instanceTitle = instLabelStk ? `Instance: ${instLabelStk}` : instId != null ? `View instance #${instId}` : ''
-                                        return (
-                                          <tr key={`ia-stk-${instKey}-${accId}-${position.symbol ?? ''}-${contractKey}`}>
-                                            <td>{accId}</td>
-                                            <td><strong>{position.symbol ?? '—'}</strong></td>
-                                            <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
-                                            <td>{Number.isFinite(qty) ? qty : '—'}</td>
-                                            <td>{fmtUsd(position.avgCost)}</td>
-                                            <td>{fmtUsd(position.price)}</td>
-                                            <td><span className={pnlClass}>{fmtUsd(pnl ?? 0)}</span></td>
-                                            <td className="replay-strategy-opp-cell" title={[instanceTitle, oppNameStk].filter(Boolean).join(' · ') || undefined}>
-                                              <span className="replay-strategy-opp-cell-inner">
-                                                {instId != null ? (
-                                                  <a href={`#/strategies/instances/${instId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy instance'} onClick={e => e.stopPropagation()}>
-                                                    <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="5" width="14" height="14" rx="1" /></svg>
-                                                  </a>
-                                                ) : null}
-                                                <span className="replay-strategy-opp-text">{oppNameStk || '—'}</span>
-                                              </span>
-                                            </td>
-                                            <td>
-                                              <LinkStrategyIconButton title="Link to strategy instance (e.g. Covered Call underlying)" onClick={() => { setLinkPositionContext({ account_id: (position.account_id ?? accId).trim() || accId, contract_key: contractKey, symbol: position.symbol ?? undefined, strategy_opportunity_id: position.strategy_opportunity_id ?? null, strategy_instance_id: position.strategy_instance_id ?? null, position: qty, avgCost: position.avgCost, price: position.price }); setLinkPositionModalOpen(true); setPageError(null) }} />
-                                            </td>
-                                          </tr>
-                                        )
-                                      })}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </>
-                            ) : null}
-                          </div>
-                        )
-                      })}
+                            </td>
+                            <td>
+                              <strong>
+                                <span className="replay-pnl-unrealized">
+                                  {fmtUsd(sortedInstanceAllGroups.reduce((acc, g) => acc + g.total_unrealized_pnl, 0))}
+                                </span>
+                              </strong>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                  {stockCoverageItems.length > 0 && (
+                    <div className="coverage-summary-section">
+                      <h6 className="replay-sub instance-sheet-sub-heading">Stock Coverage Summary</h6>
+                      {watchlistOptionableCoverageItems.length > 0 && (
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
+                            Watchlist scope symbols (optionable) currently backing opportunities.
+                          </p>
+                          {renderStockCoverageSummaryTable(watchlistOptionableCoverageItems, 'watchlist-optionable')}
+                        </div>
+                      )}
+                      {watchlistNonOptionableCoverageItems.length > 0 && (
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
+                            Watchlist scope symbols that are not optionable (fixed-income-like / independent); separated because they cannot cover option strategies.
+                          </p>
+                          {renderStockCoverageSummaryTable(watchlistNonOptionableCoverageItems, 'watchlist-non-optionable')}
+                        </div>
+                      )}
+                      {nonWatchlistCoverageItems.length > 0 && (
+                        <div>
+                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
+                            Symbols backing opportunities from non-watchlist scope.
+                          </p>
+                          {renderStockCoverageSummaryTable(nonWatchlistCoverageItems, 'non-watchlist')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {unassignedOptStocks.length > 0 && (
+                    <div className="instance-sheet-stock-section">
+                      <h5 className="replay-sub instance-sheet-section-heading">Unassigned — Optionable Stocks</h5>
+                      <p className="section-hint">These stocks have tradeable options but no active option strategy instance.</p>
+                      <div className="replay-portfolio-table-wrap">
+                        <table className="table-operations instance-sheet-sub-table">
+                          <thead>
+                            <tr>
+                              <th>Account</th>
+                              <th>Symbol</th>
+                              <th>Side</th>
+                              <th>Qty</th>
+                              <th>Avg Cost</th>
+                              <th>Mark</th>
+                              <th>UN PNL</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {unassignedOptStocks.map(position => {
+                              const accId = (position.account_id ?? '').trim() || '—'
+                              const qty = Number(position.position)
+                              const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+                                ? Number(position.unrealized_pnl) : null
+                              return (
+                                <tr key={`unassigned-opt-${accId}-${position.symbol ?? ''}`}>
+                                  <td>{accId}</td>
+                                  <td><strong>{position.symbol ?? '—'}</strong></td>
+                                  <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+                                  <td>{Number.isFinite(qty) ? qty : '—'}</td>
+                                  <td>{fmtUsd(position.avgCost)}</td>
+                                  <td>{fmtUsd(position.price)}</td>
+                                  <td><span className={pnl != null ? 'replay-pnl-unrealized' : ''}>{fmtUsd(pnl ?? 0)}</span></td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  {independentStocks.length > 0 && (
+                    <div className="instance-sheet-stock-section">
+                      <h5 className="replay-sub instance-sheet-section-heading">Independent Holdings</h5>
+                      <p className="section-hint">Positions without tradeable options (Index, ETF, etc.); not part of any option strategy.</p>
+                      <div className="replay-portfolio-table-wrap">
+                        <table className="table-operations instance-sheet-sub-table">
+                          <thead>
+                            <tr>
+                              <th>Account</th>
+                              <th>Symbol</th>
+                              <th>Side</th>
+                              <th>Qty</th>
+                              <th>Avg Cost</th>
+                              <th>Mark</th>
+                              <th>UN PNL</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {independentStocks.map(position => {
+                              const accId = (position.account_id ?? '').trim() || '—'
+                              const qty = Number(position.position)
+                              const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+                                ? Number(position.unrealized_pnl) : null
+                              return (
+                                <tr key={`independent-${accId}-${position.symbol ?? ''}`}>
+                                  <td>{accId}</td>
+                                  <td><strong>{position.symbol ?? '—'}</strong></td>
+                                  <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+                                  <td>{Number.isFinite(qty) ? qty : '—'}</td>
+                                  <td>{fmtUsd(position.avgCost)}</td>
+                                  <td>{fmtUsd(position.price)}</td>
+                                  <td><span className={pnl != null ? 'replay-pnl-unrealized' : ''}>{fmtUsd(pnl ?? 0)}</span></td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -1,13 +1,10 @@
 """Executions and transactions: CRUD, Flex fetch, IB fetch, performance."""
 
 import logging
-import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from servers.debug_ndjson import agent_log
-
-from fastapi import APIRouter, Body, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from servers.flex_client import fetch_cash_transactions, fetch_trades, parse_trades_xml
 from servers.ib_clients import AccountIbClient
@@ -37,14 +34,6 @@ def get_executions(
     strategy_instance_id: Optional[int] = Query(None, description="Filter by strategy instance ID"),
 ) -> Dict[str, Any]:
     """Account-level executions/trades (R-A2). If include_opt_pairs=true: returns paired_execution_ids and opt_pairs."""
-    # #region agent log
-    _t0 = time.time()
-    agent_log(
-        "executions_api_start",
-        {"strategy_instance_id": strategy_instance_id, "limit": limit},
-        "B",
-    )
-    # #endregion
     reader = request.app.state.reader
     effective_limit: Optional[int] = limit if limit > 0 else None
     if include_opt_pairs:
@@ -64,17 +53,6 @@ def get_executions(
         strategy_opportunity_id=strategy_opportunity_id,
         strategy_instance_id=strategy_instance_id,
     )
-    # #region agent log
-    agent_log(
-        "executions_api_end",
-        {
-            "ms": round((time.time() - _t0) * 1000),
-            "row_count": len(items) if items else 0,
-            "strategy_instance_id": strategy_instance_id,
-        },
-        "A",
-    )
-    # #endregion
     return {"executions": items}
 
 
@@ -127,17 +105,27 @@ def get_performance(
     granularity: str = Query("day", description="day | week | month"),
     strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
     strategy_instance_id: Optional[int] = Query(None, description="Filter by strategy instance ID"),
+    summary_only: bool = Query(
+        False,
+        description="With strategy_instance_id only: return summary via one SQL aggregate (fast)",
+    ),
 ) -> Dict[str, Any]:
     """Performance stats and calendar PnL from account_executions."""
-    # #region agent log
-    _t0 = time.time()
-    agent_log(
-        "performance_api_start",
-        {"strategy_instance_id": strategy_instance_id, "since_ts": since_ts, "until_ts": until_ts},
-        "B",
-    )
-    # #endregion
     reader = request.app.state.reader
+    if summary_only:
+        if strategy_instance_id is None:
+            raise HTTPException(status_code=400, detail="summary_only requires strategy_instance_id")
+        if (account_id is not None and str(account_id).strip()) or strategy_opportunity_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="summary_only allows only strategy_instance_id (no account_id / opportunity filter)",
+            )
+        out = reader.get_performance_instance_summary(
+            strategy_instance_id=strategy_instance_id,
+            since_ts=since_ts,
+            until_ts=until_ts,
+        )
+        return out
     out = reader.get_performance_stats(
         since_ts=since_ts,
         until_ts=until_ts,
@@ -146,13 +134,6 @@ def get_performance(
         strategy_opportunity_id=strategy_opportunity_id,
         strategy_instance_id=strategy_instance_id,
     )
-    # #region agent log
-    agent_log(
-        "performance_api_end",
-        {"ms": round((time.time() - _t0) * 1000), "strategy_instance_id": strategy_instance_id},
-        "A",
-    )
-    # #endregion
     return out
 
 

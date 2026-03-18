@@ -1,10 +1,7 @@
 """Phase A: Strategy structures and strategy_history API for management and monitoring."""
 
 import logging
-import time
 from typing import Any, Dict, List, Optional
-
-from servers.debug_ndjson import agent_log
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -436,32 +433,10 @@ def list_strategy_instances(
 @router.get("/instances/{strategy_instance_id}")
 def get_strategy_instance(request: Request, strategy_instance_id: int) -> Dict[str, Any]:
     """Return one strategy_instance by id. 404 if not found."""
-    # #region agent log
-    _t0 = time.time()
-    agent_log(
-        "instance_detail_api_start",
-        {"route": "GET /strategies/instances/{id}", "strategy_instance_id": strategy_instance_id},
-        "B",
-    )
-    # #endregion
     reader = request.app.state.reader
     row = reader.get_strategy_instance_by_id(strategy_instance_id)
     if row is None:
-        # #region agent log
-        agent_log(
-            "instance_detail_api_end",
-            {"ms": round((time.time() - _t0) * 1000), "status": 404},
-            "B",
-        )
-        # #endregion
         raise HTTPException(status_code=404, detail="Strategy instance not found")
-    # #region agent log
-    agent_log(
-        "instance_detail_api_end",
-        {"ms": round((time.time() - _t0) * 1000), "status": 200},
-        "A",
-    )
-    # #endregion
     return row
 
 

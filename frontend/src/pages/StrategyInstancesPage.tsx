@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse } from '../types'
 import type { StrategyInstance } from '../types'
-import type { StrategyOpportunity } from '../api'
+import type { StrategyOpportunity, StrategyStructure } from '../api'
 import {
   fetchStrategyInstances,
   fetchOpportunities,
+  fetchStructures,
   createStrategyInstance,
   deleteStrategyInstance,
 } from '../api'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
-import { fmtTsShort, fmtDate } from '../utils/format'
+import { fmtTsShort, fmtDate, parseOptionContractKey } from '../utils/format'
+import { computeRiskProfile, formatRiskLabel } from '../utils/riskProfile'
+import type { RiskProfile, RiskPosition } from '../utils/riskProfile'
 
 export interface StrategyInstancesPageProps {
   status: StatusResponse | null
@@ -63,6 +66,8 @@ export function StrategyInstancesPage({
     return list
   })()
 
+  const [structures, setStructures] = useState<StrategyStructure[]>([])
+
   const loadOpportunities = useCallback(() => {
     fetchOpportunities(false)
       .then((r) => setOpportunities(r.items ?? []))
@@ -71,6 +76,7 @@ export function StrategyInstancesPage({
 
   useEffect(() => {
     loadOpportunities()
+    fetchStructures(false).then(r => setStructures(r.items ?? [])).catch(() => {})
   }, [loadOpportunities])
 
   const loadInstances = useCallback(() => {
@@ -98,6 +104,66 @@ export function StrategyInstancesPage({
     }
     return m
   }, [opportunities])
+
+  const structuresById = useMemo(() => {
+    const m = new Map<number, StrategyStructure>()
+    for (const s of structures) m.set(s.strategy_structure_id, s)
+    return m
+  }, [structures])
+
+  const instanceRiskMap = useMemo(() => {
+    const map = new Map<number, RiskProfile>()
+    const allPositions = (status?.accounts ?? []).flatMap(a =>
+      (a.positions ?? []).filter(p => (p.secType ?? '').toUpperCase() === 'OPT' && p.strategy_instance_id != null)
+    )
+    const byInstance = new Map<number, typeof allPositions>()
+    for (const pos of allPositions) {
+      const instId = Number(pos.strategy_instance_id)
+      if (!Number.isFinite(instId)) continue
+      const arr = byInstance.get(instId)
+      if (arr) arr.push(pos)
+      else byInstance.set(instId, [pos])
+    }
+    const stkPositions = (status?.accounts ?? []).flatMap(a =>
+      (a.positions ?? []).filter(p => (p.secType ?? '').toUpperCase() !== 'OPT')
+    )
+    for (const [instId, opts] of byInstance) {
+      const inst = items.find(i => i.strategy_instance_id === instId)
+      if (!inst) continue
+      const opp = opportunitiesById.get(inst.strategy_opportunity_id)
+      const str = opp ? structuresById.get(opp.strategy_structure_id) : undefined
+      const riskPos: RiskPosition[] = []
+      for (const p of opts) {
+        const parsed = parseOptionContractKey(p.contract_key)
+        const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
+        const strike = Number(p.strike) || 0
+        const avgRaw = p.avgCost != null ? Number(p.avgCost) : null
+        const avgCost = avgRaw != null && avgRaw >= 10 ? avgRaw / 100 : avgRaw
+        const qty = Number(p.position) || 0
+        if (r && avgCost != null && strike > 0 && qty !== 0) {
+          riskPos.push({ strike, right: r, qty, avg_cost: avgCost })
+        }
+      }
+      if (riskPos.length === 0) continue
+      let covShares = 0
+      let covAvgCost: number | null = null
+      const hasUnderlying = str?.legs?.some(l => (l.role ?? '').toLowerCase() === 'underlying')
+      if (hasUnderlying) {
+        const sym = parseOptionContractKey(opts[0]?.contract_key).expiry !== '—'
+          ? (opts[0]?.symbol ?? '').toUpperCase()
+          : ''
+        if (sym) {
+          const held = stkPositions.find(s => (s.symbol ?? '').toUpperCase() === sym)
+          if (held) {
+            covShares = Math.abs(Number(held.position) || 0)
+            covAvgCost = held.avgCost != null ? Number(held.avgCost) : null
+          }
+        }
+      }
+      map.set(instId, computeRiskProfile(riskPos, covShares, covAvgCost))
+    }
+    return map
+  }, [status?.accounts, items, opportunitiesById, structuresById])
 
   const groupedItems = useMemo(() => {
     const groups: Array<{ key: string; label: string; rows: StrategyInstance[] }> = []
@@ -130,6 +196,7 @@ export function StrategyInstancesPage({
     return (
       <StrategyInstanceDetailPage
         strategyInstanceId={effectiveDetailId}
+        status={status}
       />
     )
   }
@@ -273,6 +340,9 @@ export function StrategyInstancesPage({
                 <th>Opened at</th>
                 <th>Created at</th>
                 <th>Executions count</th>
+                <th>Max Gain</th>
+                <th>Max Loss</th>
+                <th>Risk</th>
                 <th>Label</th>
                 <th>Actions</th>
               </tr>
@@ -280,13 +350,13 @@ export function StrategyInstancesPage({
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>No strategy instances found.</td>
+                  <td colSpan={11}>No strategy instances found.</td>
                 </tr>
               ) : (
                 groupedItems.flatMap((group) => [
                   (
                     <tr key={`group-${group.key}`}>
-                      <td colSpan={8} style={{ fontWeight: 600, background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}>
+                      <td colSpan={11} style={{ fontWeight: 600, background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}>
                         Symbol group: {group.label}
                       </td>
                     </tr>
@@ -309,6 +379,16 @@ export function StrategyInstancesPage({
                           : row.created_at ?? '—'}
                       </td>
                       <td>{row.executions_count != null ? row.executions_count : '—'}</td>
+                      {(() => {
+                        const rp = instanceRiskMap.get(row.strategy_instance_id)
+                        if (!rp) return <><td className="replay-muted">—</td><td className="replay-muted">—</td><td className="replay-muted">—</td></>
+                        const rl = formatRiskLabel(rp)
+                        return <>
+                          <td><span className="risk-value-gain">{rl.gainLabel}</span></td>
+                          <td><span className={rp.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{rl.lossLabel}</span></td>
+                          <td><span className={`coverage-status-badge ${rp.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
+                        </>
+                      })()}
                       <td>{row.label ?? '—'}</td>
                       <td style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
                         <a

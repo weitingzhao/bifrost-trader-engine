@@ -263,18 +263,24 @@ export default function App() {
     }
   }, [])
 
+  const isDetailMode =
+    activeTab === 'strategy' && strategyView === 'instances' && urlStrategyInstanceId != null
+
   useEffect(() => {
     loadStatus()
-    loadOperations()
-    const t1 = setInterval(loadStatus, 5000)
-    const t2 = setInterval(loadOperations, 10000)
+    if (!isDetailMode) loadOperations()
+    const statusInterval = isDetailMode ? 30000 : 5000
+    const opsInterval = isDetailMode ? 60000 : 10000
+    const t1 = setInterval(loadStatus, statusInterval)
+    const t2 = setInterval(loadOperations, opsInterval)
     return () => {
       clearInterval(t1)
       clearInterval(t2)
     }
-  }, [loadStatus, loadOperations])
+  }, [loadStatus, loadOperations, isDetailMode])
 
   useEffect(() => {
+    if (isDetailMode) return
     const pollWorkerJobs = () => {
       Promise.all([
         fetchBarsJobs(1, 0, 'pending'),
@@ -292,9 +298,10 @@ export default function App() {
     pollWorkerJobs()
     const t = setInterval(pollWorkerJobs, 3000)
     return () => clearInterval(t)
-  }, [])
+  }, [isDetailMode])
 
   useEffect(() => {
+    if (isDetailMode) return
     let cancelled = false
     fetchQuotes()
       .then((res) => {
@@ -310,7 +317,7 @@ export default function App() {
       cancelled = true
       unsub()
     }
-  }, [])
+  }, [isDetailMode])
 
   useEffect(() => {
     if (status?.accounts != null && accountsDisplay === null)
@@ -575,8 +582,7 @@ export default function App() {
     { id: 'ledger', label: 'Trade History' },
     { id: 'transfer', label: 'Transfer & Pay' },
   ]
-  const isStrategyInstanceDetailMode =
-    activeTab === 'strategy' && strategyView === 'instances' && urlStrategyInstanceId != null
+  const isStrategyInstanceDetailMode = isDetailMode
 
   const openSystemInSettings = () => {
     setActiveTab('settings')

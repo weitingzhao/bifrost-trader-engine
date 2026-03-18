@@ -125,7 +125,8 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ap.strategy_opportunity_id,
                         ap.strategy_instance_id,
                         so.name AS strategy_opportunity_name,
-                        si.label AS strategy_instance_label
+                        si.label AS strategy_instance_label,
+                        w.optionable AS watchlist_optionable
                     FROM account_positions ap
                     LEFT JOIN contract_quote_live ip
                         ON ap.contract_key = ip.contract_key
@@ -137,6 +138,8 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ON ap.strategy_opportunity_id = so.strategy_opportunity_id
                     LEFT JOIN strategy_instance si
                         ON ap.strategy_instance_id = si.strategy_instance_id
+                    LEFT JOIN watchlist w
+                        ON w.contract_key = ap.contract_key
                     WHERE ap.account_id = %s
                     ORDER BY ap.contract_key
                     """,
@@ -186,6 +189,10 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                     pos_dict["strategy_opportunity_name"] = str(p["strategy_opportunity_name"]).strip()
                 if p.get("strategy_instance_label") is not None and str(p.get("strategy_instance_label")).strip():
                     pos_dict["strategy_instance_label"] = str(p["strategy_instance_label"]).strip()
+
+                wl_opt = p.get("watchlist_optionable")
+                if wl_opt is not None:
+                    pos_dict["optionable"] = bool(wl_opt)
 
                 raw_pos_updated = p.get("position_updated_at")
                 if raw_pos_updated is not None:

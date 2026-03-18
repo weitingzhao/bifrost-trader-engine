@@ -769,6 +769,128 @@ def get_transactions(
         return []
 
 
+def _performance_response_summary_only(
+    *,
+    trade_count: int,
+    total_realized_pnl: float,
+    total_commission: float,
+    net_pnl: float,
+    win_count: int,
+    loss_count: int,
+) -> Dict[str, Any]:
+    win_rate = (win_count / trade_count) if trade_count else None
+    return {
+        "transaction": {"net_cash_flow": 0.0, "start_equity": None, "capital_base": None},
+        "transactions": [],
+        "summary": {
+            "total_pnl": round(net_pnl, 2),
+            "total_realized_pnl": round(total_realized_pnl, 2),
+            "total_commission": round(total_commission, 2),
+            "net_pnl": round(net_pnl, 2),
+            "trade_count": trade_count,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "win_rate": round(win_rate, 4) if win_rate is not None else None,
+            "profit_factor": None,
+            "avg_win": None,
+            "avg_loss": None,
+            "max_win": None,
+            "max_loss": None,
+            "max_drawdown": None,
+            "return_pct": None,
+            "total_unrealized_pnl": 0.0,
+        },
+        "realized_by_account": [],
+        "realized_by_sec_type": [],
+        "realized_by_account_and_sec_type": [],
+        "realized_by_strategy_opportunity": [],
+        "realized_by_strategy_instance": [],
+        "calendar": [],
+        "calendar_by_sec_type": [],
+        "cumulative_curve": [],
+        "unrealized": {"total_pnl": 0.0, "return_pct": None, "current_equity": None},
+        "unrealized_by_account": [],
+        "unrealized_by_sec_type": [],
+        "unrealized_by_account_and_sec_type": [],
+    }
+
+
+def get_performance_instance_summary_only(
+    conn: Any,
+    strategy_instance_id: int,
+    since_ts: Optional[float] = None,
+    until_ts: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Single aggregate query for Instance Detail PnL block (avoids loading thousands of rows)."""
+    if conn is None:
+        return _performance_response_summary_only(
+            trade_count=0,
+            total_realized_pnl=0.0,
+            total_commission=0.0,
+            net_pnl=0.0,
+            win_count=0,
+            loss_count=0,
+        )
+    conditions = ["e.strategy_instance_id = %s"]
+    values: List[Any] = [strategy_instance_id]
+    if since_ts is not None:
+        conditions.append("e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
+        values.append(since_ts)
+    if until_ts is not None:
+        conditions.append("e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
+        values.append(until_ts)
+    where_sql = " AND ".join(conditions)
+    comm_sql = (
+        "COALESCE(CASE WHEN lower(trim(COALESCE(e.source, ''))) = 'tws_client' THEN c.commission "
+        "WHEN c.commission IS NOT NULL THEN -c.commission ELSE NULL END, 0)::double precision"
+    )
+    rp_sql = "COALESCE(c.realized_pnl, 0)::double precision"
+    q = f"""
+        SELECT
+            COUNT(*)::int AS trade_count,
+            COALESCE(SUM({rp_sql}), 0)::double precision AS total_realized_pnl,
+            COALESCE(SUM({comm_sql}), 0)::double precision AS total_commission,
+            COALESCE(SUM({rp_sql} - {comm_sql}), 0)::double precision AS net_pnl,
+            COALESCE(SUM(CASE WHEN {rp_sql} > 0 THEN 1 ELSE 0 END), 0)::int AS win_count,
+            COALESCE(SUM(CASE WHEN {rp_sql} < 0 THEN 1 ELSE 0 END), 0)::int AS loss_count
+        FROM account_executions e
+        LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
+        WHERE {where_sql}
+    """
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(q, values)
+            row = cur.fetchone()
+        if not row:
+            return _performance_response_summary_only(
+                trade_count=0,
+                total_realized_pnl=0.0,
+                total_commission=0.0,
+                net_pnl=0.0,
+                win_count=0,
+                loss_count=0,
+            )
+        d = dict(row)
+        return _performance_response_summary_only(
+            trade_count=int(d.get("trade_count") or 0),
+            total_realized_pnl=float(d.get("total_realized_pnl") or 0),
+            total_commission=float(d.get("total_commission") or 0),
+            net_pnl=float(d.get("net_pnl") or 0),
+            win_count=int(d.get("win_count") or 0),
+            loss_count=int(d.get("loss_count") or 0),
+        )
+    except Exception as e:
+        logger.debug("get_performance_instance_summary_only failed: %s", e)
+        return _performance_response_summary_only(
+            trade_count=0,
+            total_realized_pnl=0.0,
+            total_commission=0.0,
+            net_pnl=0.0,
+            win_count=0,
+            loss_count=0,
+        )
+
+
 def get_performance_stats(
     conn: Any,
     since_ts: Optional[float] = None,

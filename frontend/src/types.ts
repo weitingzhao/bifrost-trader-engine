@@ -88,6 +88,8 @@ export interface IbPositionRow {
   strategy_opportunity_name?: string | null
   /** Strategy instance label (from JOIN). */
   strategy_instance_label?: string | null
+  /** Whether this symbol has tradeable options (from watchlist.optionable). */
+  optionable?: boolean | null
 }
 
 /** One account in GET /status accounts (R-A1 multi-account) */

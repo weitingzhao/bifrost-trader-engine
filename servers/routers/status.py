@@ -1,6 +1,7 @@
 """Status endpoints: run status, operations, risk summary."""
 
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -13,10 +14,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["status"])
 
+_status_cache_lock = threading.Lock()
+_status_cache: Dict[str, Any] = {}
+_status_cache_ts: float = 0.0
+_STATUS_CACHE_TTL = 2.0
+
 
 @router.get("/status")
 def get_status(request: Request) -> Dict[str, Any]:
     """Return current run status plus self_check, status_lamp, trading_suspended (R-M1b, R-M2, R-M3). Never returns 5xx: on read error returns 200 with blocked/red."""
+    global _status_cache, _status_cache_ts
+    now = time.monotonic()
+    with _status_cache_lock:
+        if _status_cache and (now - _status_cache_ts) < _STATUS_CACHE_TTL:
+            return _status_cache
     app = request.app
     reader = app.state.reader
     control_via_db = app.state.control_via_db
@@ -227,6 +238,9 @@ def get_status(request: Request) -> Dict[str, Any]:
             payload["system_lamp"] = "yellow"
         else:
             payload["system_lamp"] = "green"
+        with _status_cache_lock:
+            _status_cache = payload
+            _status_cache_ts = time.monotonic()
         return payload
     except Exception as e:
         logger.warning("get_status failed: %s", e)
