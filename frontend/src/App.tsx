@@ -575,6 +575,8 @@ export default function App() {
     { id: 'ledger', label: 'Trade History' },
     { id: 'transfer', label: 'Transfer & Pay' },
   ]
+  const isStrategyInstanceDetailMode =
+    activeTab === 'strategy' && strategyView === 'instances' && urlStrategyInstanceId != null
 
   const openSystemInSettings = () => {
     setActiveTab('settings')
@@ -680,6 +682,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {!isStrategyInstanceDetailMode && (
       <header className="app-header">
         <div className="app-header-left">
           <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
@@ -1057,8 +1060,9 @@ export default function App() {
           )}
         </div>
       </header>
+      )}
 
-      {(activeTab === 'live' || activeTab === 'strategy' || activeTab === 'replay' || activeTab === 'research') && (
+      {!isStrategyInstanceDetailMode && (activeTab === 'live' || activeTab === 'strategy' || activeTab === 'replay' || activeTab === 'research') && (
         <DashboardStrip
           streamLamp={liveLamp}
           streamItems={streamSummaryItems}

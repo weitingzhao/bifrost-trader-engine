@@ -2,23 +2,17 @@ import { useCallback, useEffect, useState } from 'react'
 import type { StrategyInstance } from '../types'
 import type { Execution } from '../types'
 import type { PerformanceResponse } from '../types'
-import { fetchStrategyInstance, fetchPerformance, fetchExecutions, updateStrategyInstance } from '../api'
+import type { StrategyStructure } from '../api'
+import { fetchStrategyInstance, fetchPerformance, fetchExecutions, updateStrategyInstance, fetchStructure } from '../api'
 import { fmtTs, fmtTsShort, fmtUsd, unixToDatetimeLocal } from '../utils/format'
+import { summarizeLegs, summarizeConstraints, getStructureTypeLabel } from './strategy/strategyFormUtils'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
-  onBackToList: () => void
-  onNavigateToStrategy?: () => void
-  /** Navigate to Strategy Structure tab (optionally to view a specific structure). */
-  onNavigateToStructure?: (structureId?: number) => void
-  breadcrumbLabel?: string
 }
 
 export function StrategyInstanceDetailPage({
   strategyInstanceId,
-  onBackToList,
-  onNavigateToStrategy,
-  breadcrumbLabel = 'Instances',
 }: StrategyInstanceDetailPageProps) {
   const [instance, setInstance] = useState<StrategyInstance | null>(null)
   const [instanceLoading, setInstanceLoading] = useState(true)
@@ -30,6 +24,9 @@ export function StrategyInstanceDetailPage({
   const [openedAtEdit, setOpenedAtEdit] = useState<string>('')
   const [openedAtSaving, setOpenedAtSaving] = useState(false)
   const [openedAtError, setOpenedAtError] = useState<string | null>(null)
+  const [structure, setStructure] = useState<StrategyStructure | null>(null)
+  const [structureLoading, setStructureLoading] = useState(false)
+  const [structureError, setStructureError] = useState<string | null>(null)
 
   const loadInstance = useCallback(() => {
     setInstanceLoading(true)
@@ -63,6 +60,15 @@ export function StrategyInstanceDetailPage({
       .finally(() => setExecutionsLoading(false))
   }, [strategyInstanceId])
 
+  const loadStructure = useCallback((strategy_structure_id: number) => {
+    setStructureLoading(true)
+    setStructureError(null)
+    fetchStructure(strategy_structure_id)
+      .then(setStructure)
+      .catch((e) => setStructureError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setStructureLoading(false))
+  }, [])
+
   useEffect(() => {
     loadInstance()
   }, [loadInstance])
@@ -74,6 +80,17 @@ export function StrategyInstanceDetailPage({
   useEffect(() => {
     loadExecutions()
   }, [loadExecutions])
+
+  useEffect(() => {
+    const sid = instance?.strategy_structure_id
+    if (sid != null && Number.isFinite(sid)) {
+      loadStructure(sid)
+    } else {
+      setStructure(null)
+      setStructureLoading(false)
+      setStructureError(null)
+    }
+  }, [instance?.strategy_structure_id, loadStructure])
 
   useEffect(() => {
     if (instance?.opened_at_epoch != null) {
@@ -133,22 +150,9 @@ export function StrategyInstanceDetailPage({
 
   return (
     <div className="card process-section">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
-          <button type="button" className="page-title-breadcrumb-link" onClick={onNavigateToStrategy}>
-            Strategy
-          </button>
-          {' / '}
-          <button type="button" className="page-title-breadcrumb-link" onClick={onBackToList}>
-            {breadcrumbLabel}
-          </button>
-          {' / Instance '}
-          {strategyInstanceId}
-        </h2>
-        <button type="button" className="btn btn-secondary" onClick={onBackToList}>
-          Back to list
-        </button>
-      </div>
+      <h2 className="page-title-with-tooltip" style={{ margin: 0 }}>
+        Instance {strategyInstanceId}
+      </h2>
 
       {instanceError != null && (
         <p className="error-message" style={{ marginTop: '0.5rem' }}>{instanceError}</p>
@@ -166,6 +170,17 @@ export function StrategyInstanceDetailPage({
             <dl className="info-dl" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 1rem', margin: 0 }}>
               <dt>Opportunity</dt>
               <dd>{instance.strategy_opportunity_name ?? instance.strategy_opportunity_id ?? '—'}</dd>
+              <dt>Structure</dt>
+              <dd>
+                {instance.strategy_structure_name != null || instance.strategy_structure_id != null ? (
+                  <span>{instance.strategy_structure_name ?? `Structure ${instance.strategy_structure_id}`}</span>
+                ) : (
+                  '—'
+                )}
+                {instance.strategy_structure_id != null && instance.strategy_structure_name != null && (
+                  <span className="muted" style={{ marginLeft: '0.25rem' }}>({instance.strategy_structure_id})</span>
+                )}
+              </dd>
               <dt>Account</dt>
               <dd>{instance.account_id}</dd>
               <dt>Opened at</dt>
@@ -219,6 +234,48 @@ export function StrategyInstanceDetailPage({
               )}
             </dl>
           </section>
+
+          {/* 1b. Strategy Structure block (from opportunity → strategy_structure_id) */}
+          {instance.strategy_structure_id != null && (
+            <section className="detail-block" style={{ marginTop: '1.5rem' }}>
+              <h3 style={{ marginBottom: '0.5rem' }}>Strategy Structure</h3>
+              {structureLoading ? (
+                <p>Loading structure…</p>
+              ) : structureError != null ? (
+                <p className="error-message">{structureError}</p>
+              ) : structure != null ? (
+                <>
+                  <dl className="info-dl" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 1rem', margin: 0 }}>
+                    <dt>Name</dt>
+                    <dd>
+                      {structure.name}
+                      <span className="muted" style={{ marginLeft: '0.25rem' }}>({structure.strategy_structure_id})</span>
+                    </dd>
+                    <dt>Type</dt>
+                    <dd>{getStructureTypeLabel(structure.structure_type)}</dd>
+                    {structure.structure_subtype != null && structure.structure_subtype !== '' && (
+                      <>
+                        <dt>Subtype</dt>
+                        <dd>{structure.structure_subtype_label ?? structure.structure_subtype}</dd>
+                      </>
+                    )}
+                    {structure.template_display_name != null && structure.template_display_name !== '' && (
+                      <>
+                        <dt>Template</dt>
+                        <dd>{structure.template_display_name}</dd>
+                      </>
+                    )}
+                    <dt>Legs</dt>
+                    <dd title={summarizeLegs(structure.legs)}>{summarizeLegs(structure.legs)}</dd>
+                    <dt>Constraints</dt>
+                    <dd title={summarizeConstraints(structure.constraints)}>{summarizeConstraints(structure.constraints)}</dd>
+                  </dl>
+                </>
+              ) : (
+                <p className="muted">Structure not found.</p>
+              )}
+            </section>
+          )}
 
           {/* 2. PnL block */}
           <section className="detail-block" style={{ marginTop: '1.5rem' }}>

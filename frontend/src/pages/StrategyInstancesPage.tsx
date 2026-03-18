@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse } from '../types'
 import type { StrategyInstance } from '../types'
 import type { StrategyOpportunity } from '../api'
@@ -91,18 +91,45 @@ export function StrategyInstancesPage({
     loadInstances()
   }, [loadInstances])
 
-  const goBackToList = useCallback(() => {
-    setSelectedInstanceId(null)
-    window.location.hash = '#/strategies/instances'
-  }, [])
+  const opportunitiesById = useMemo(() => {
+    const m = new Map<number, StrategyOpportunity>()
+    for (const o of opportunities) {
+      m.set(o.strategy_opportunity_id, o)
+    }
+    return m
+  }, [opportunities])
+
+  const groupedItems = useMemo(() => {
+    const groups: Array<{ key: string; label: string; rows: StrategyInstance[] }> = []
+    const groupIndexByKey = new Map<string, number>()
+    const getScopeSymbol = (row: StrategyInstance): string => {
+      const opp = opportunitiesById.get(row.strategy_opportunity_id)
+      if (opp == null) return '—'
+      const scopeType = (opp.scope_type ?? '').trim()
+      if (scopeType !== 'explicit_symbols' && scopeType !== 'watchlist_stk') return '—'
+      const symbols = (opp.symbols ?? [])
+        .map((s) => String(s ?? '').trim().toUpperCase())
+        .filter((s) => s.length > 0)
+      if (symbols.length === 0) return '—'
+      return symbols[0]
+    }
+    for (const row of items) {
+      const symbolKey = getScopeSymbol(row)
+      const idx = groupIndexByKey.get(symbolKey)
+      if (idx == null) {
+        groupIndexByKey.set(symbolKey, groups.length)
+        groups.push({ key: symbolKey, label: symbolKey, rows: [row] })
+      } else {
+        groups[idx].rows.push(row)
+      }
+    }
+    return groups
+  }, [items, opportunitiesById])
 
   if (effectiveDetailId != null) {
     return (
       <StrategyInstanceDetailPage
         strategyInstanceId={effectiveDetailId}
-        onBackToList={goBackToList}
-        onNavigateToStrategy={onNavigateToStrategy}
-        breadcrumbLabel={breadcrumbLabel}
       />
     )
   }
@@ -256,56 +283,65 @@ export function StrategyInstancesPage({
                   <td colSpan={8}>No strategy instances found.</td>
                 </tr>
               ) : (
-                items.map((row) => (
-                  <tr key={row.strategy_instance_id}>
-                    <td>{row.strategy_instance_id}</td>
-                    <td>{row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}</td>
-                    <td>{row.account_id}</td>
-                    <td>
-                      {row.opened_at_epoch != null
-                        ? fmtDate(row.opened_at_epoch)
-                        : row.opened_at && row.opened_at.length >= 10
-                          ? row.opened_at.slice(0, 10)
-                          : row.opened_at ?? '—'}
-                    </td>
-                    <td>
-                      {row.created_at_epoch != null
-                        ? fmtTsShort(row.created_at_epoch)
-                        : row.created_at ?? '—'}
-                    </td>
-                    <td>{row.executions_count != null ? row.executions_count : '—'}</td>
-                    <td>{row.label ?? '—'}</td>
-                    <td style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                      <a
-                        href={`#/strategies/instances/${row.strategy_instance_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="btn btn-icon-small"
-                        title="View instance"
-                        aria-label="View instance"
-                      >
-                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      </a>
-                      <button
-                        type="button"
-                        className="btn btn-icon-small btn-icon-danger"
-                        title="Delete instance"
-                        aria-label="Delete instance"
-                        onClick={() => openDeleteConfirm(row)}
-                      >
-                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6l-1 14H6L5 6" />
-                          <path d="M10 11v6M14 11v6" />
-                          <path d="M9 6V4h6v2" />
-                        </svg>
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                groupedItems.flatMap((group) => [
+                  (
+                    <tr key={`group-${group.key}`}>
+                      <td colSpan={8} style={{ fontWeight: 600, background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}>
+                        Symbol group: {group.label}
+                      </td>
+                    </tr>
+                  ),
+                  ...group.rows.map((row) => (
+                    <tr key={row.strategy_instance_id}>
+                      <td>{row.strategy_instance_id}</td>
+                      <td>{row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}</td>
+                      <td>{row.account_id}</td>
+                      <td>
+                        {row.opened_at_epoch != null
+                          ? fmtDate(row.opened_at_epoch)
+                          : row.opened_at && row.opened_at.length >= 10
+                            ? row.opened_at.slice(0, 10)
+                            : row.opened_at ?? '—'}
+                      </td>
+                      <td>
+                        {row.created_at_epoch != null
+                          ? fmtTsShort(row.created_at_epoch)
+                          : row.created_at ?? '—'}
+                      </td>
+                      <td>{row.executions_count != null ? row.executions_count : '—'}</td>
+                      <td>{row.label ?? '—'}</td>
+                      <td style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                        <a
+                          href={`#/strategies/instances/${row.strategy_instance_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-icon-small"
+                          title="View instance"
+                          aria-label="View instance"
+                        >
+                          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        </a>
+                        <button
+                          type="button"
+                          className="btn btn-icon-small btn-icon-danger"
+                          title="Delete instance"
+                          aria-label="Delete instance"
+                          onClick={() => openDeleteConfirm(row)}
+                        >
+                          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14H6L5 6" />
+                            <path d="M10 11v6M14 11v6" />
+                            <path d="M9 6V4h6v2" />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  )),
+                ])
               )}
             </tbody>
           </table>

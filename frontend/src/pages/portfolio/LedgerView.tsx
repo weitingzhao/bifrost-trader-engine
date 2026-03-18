@@ -15,6 +15,8 @@ import {
 import { buildOptExecutionGroups, isOptionExpired } from './buildOptExecutionGroups'
 import { ExecutionFormModal } from './ExecutionFormModal'
 import { ExpiredCloseModal } from './ExpiredCloseModal'
+import type { LinkExecutionContext } from './LinkExecutionRecordModal'
+import { LinkExecutionRecordModal } from './LinkExecutionRecordModal'
 import type { PortfolioView } from './types'
 import { useExecutions } from './useExecutions'
 
@@ -25,6 +27,61 @@ export interface LedgerViewProps {
 
 function getOptGroupKey(g: OptExecutionGroup): string {
   return `${g.contract_key}-${g.strike}-${g.expiry}`
+}
+
+type InstanceConsistencyState = 'same' | 'mixed' | 'different' | 'none'
+
+function getInstanceConsistencyState(trades: Execution[]): InstanceConsistencyState {
+  if (trades.length === 0) return 'none'
+  const instanceIds = trades
+    .map(t => t.strategy_instance_id)
+    .filter((id): id is number => id != null && Number.isFinite(id))
+  const hasAnyInstance = instanceIds.length > 0
+  const allHaveInstance = trades.every(
+    t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id),
+  )
+  if (!hasAnyInstance) return 'none'
+  if (!allHaveInstance) return 'mixed'
+  return new Set(instanceIds).size === 1 ? 'same' : 'different'
+}
+
+function getAggregatedInstanceConsistencyState(trades: Execution[]): InstanceConsistencyState {
+  if (trades.length === 0) return 'none'
+  const byAccount = new Map<string, Execution[]>()
+  for (const t of trades) {
+    const accountId = (t.account_id ?? '').trim() || '__NO_ACCOUNT__'
+    if (!byAccount.has(accountId)) byAccount.set(accountId, [])
+    byAccount.get(accountId)!.push(t)
+  }
+  const states = Array.from(byAccount.values(), accountTrades =>
+    getInstanceConsistencyState(accountTrades),
+  )
+  if (states.every(s => s === 'none')) return 'none'
+  if (states.some(s => s === 'different')) return 'different'
+  if (states.some(s => s === 'mixed')) return 'mixed'
+  if (states.some(s => s === 'none')) return 'mixed'
+  if (states.every(s => s === 'same')) return 'same'
+  return 'none'
+}
+
+function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <button
+      type="button"
+      className="btn btn-icon-small"
+      onClick={e => {
+        e.stopPropagation()
+        onClick()
+      }}
+      title={title}
+      aria-label={title}
+    >
+      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+    </button>
+  )
 }
 
 export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewProps) {
@@ -76,6 +133,8 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
   const [expandedDetailKeys, setExpandedDetailKeys] = useState<string[]>([])
   const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
+  const [linkModalOpen, setLinkModalOpen] = useState(false)
+  const [linkContext, setLinkContext] = useState<LinkExecutionContext | null>(null)
   const [expiredCloseKey, setExpiredCloseKey] = useState<string | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
   const [deleteConfirmState, setDeleteConfirmState] = useState<{
@@ -809,30 +868,36 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                                                     <td className="replay-opt-contract">
                                     {(() => {
                                       const trades = g.trades ?? []
-                                      const instanceIds = trades
-                                        .map(t => t.strategy_instance_id)
-                                        .filter((id): id is number => id != null && Number.isFinite(id))
-                                      const hasAnyInstance = instanceIds.length > 0
-                                      const allHaveInstance =
-                                        trades.length > 0 &&
-                                        trades.every(
-                                          t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id),
-                                        )
-                                      const allSameInstance =
-                                        allHaveInstance && instanceIds.length > 0 && new Set(instanceIds).size === 1
-                                      const singleInstanceId = allSameInstance ? instanceIds[0]! : null
+                                      const singleAccountState = getInstanceConsistencyState(trades)
+                                      const aggregatedAccountState =
+                                        getAggregatedInstanceConsistencyState(trades)
+                                      const resolvedState =
+                                        new Set(
+                                          trades
+                                            .map(t => (t.account_id ?? '').trim())
+                                            .filter(Boolean),
+                                        ).size <= 1
+                                          ? singleAccountState
+                                          : aggregatedAccountState
+                                      const isSameState = resolvedState === 'same'
+                                      const isDifferentState = resolvedState === 'different'
+                                      const allSameInstance = singleAccountState === 'same'
+                                      const singleInstanceId = allSameInstance
+                                        ? trades.find(t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id))
+                                            ?.strategy_instance_id ?? null
+                                        : null
                                       const p = getContractLabelParts(g.contract_key)
                                       const strikeStr =
                                         g.strike != null ? ` ${g.strike}` : ''
                                       const instanceIcon =
-                                        hasAnyInstance ? (
-                                          allSameInstance && singleInstanceId != null ? (
+                                        resolvedState !== 'none' ? (
+                                          isSameState && singleInstanceId != null ? (
                                             <a
                                               href={`#/strategies/instances/${singleInstanceId}`}
                                               className="ledger-instance-icon-link ledger-instance-icon-link--same"
                                               target="_blank"
                                               rel="noopener noreferrer"
-                                              title="All trades share this instance (click to open)"
+                                              title="Instance consistency is green across accounts (click to open when there is a single shared instance)"
                                               aria-label="View strategy instance"
                                               onClick={e => e.stopPropagation()}
                                             >
@@ -840,11 +905,23 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                                 <rect x="5" y="5" width="14" height="14" rx="1" />
                                               </svg>
                                             </a>
-                                          ) : allHaveInstance ? (
+                                          ) : isSameState ? (
+                                            <span
+                                              className="ledger-instance-icon-link ledger-instance-icon-link--same"
+                                              title="All accounts are consistent on instance assignment (green)"
+                                              aria-label="Instance status is green"
+                                              onClick={e => e.stopPropagation()}
+                                              role="img"
+                                            >
+                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <rect x="5" y="5" width="14" height="14" rx="1" />
+                                              </svg>
+                                            </span>
+                                          ) : isDifferentState ? (
                                             <span
                                               className="ledger-instance-icon-link ledger-instance-icon-link--different"
-                                              title="Detail records have different instance IDs"
-                                              aria-label="Different instances"
+                                              title="At least one account has different instance IDs in details"
+                                              aria-label="Instance status is red"
                                               onClick={e => e.stopPropagation()}
                                               role="img"
                                             >
@@ -855,8 +932,8 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                           ) : (
                                             <span
                                               className="ledger-instance-icon-link ledger-instance-icon-link--mixed"
-                                              title="Some detail records have no instance"
-                                              aria-label="Mixed instances"
+                                              title="At least one account has mixed or missing instance links in details"
+                                              aria-label="Instance status is yellow"
                                               onClick={e => e.stopPropagation()}
                                               role="img"
                                             >
@@ -1213,6 +1290,18 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                               </svg>
                                             </button>
+                                            <LinkStrategyIconButton
+                                              title="Assign strategy opportunity and instance"
+                                              onClick={() => {
+                                                setLinkContext({
+                                                  account_executions_id:
+                                                    ex.account_executions_id!,
+                                                  execution: ex,
+                                                })
+                                                setLinkModalOpen(true)
+                                                setPageError(null)
+                                              }}
+                                            />
                                             <button
                                               type="button"
                                               className="btn btn-icon-small btn-icon-danger"
@@ -1374,6 +1463,18 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                             </svg>
                                           </button>
+                                          <LinkStrategyIconButton
+                                            title="Assign strategy opportunity and instance"
+                                            onClick={() => {
+                                              setLinkContext({
+                                                account_executions_id:
+                                                  ex.account_executions_id!,
+                                                execution: ex,
+                                              })
+                                              setLinkModalOpen(true)
+                                              setPageError(null)
+                                            }}
+                                          />
                                           <button
                                             type="button"
                                             className="btn btn-icon-small btn-icon-danger"
@@ -1501,6 +1602,18 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                             </svg>
                                           </button>
+                                          <LinkStrategyIconButton
+                                            title="Assign strategy opportunity and instance"
+                                            onClick={() => {
+                                              setLinkContext({
+                                                account_executions_id:
+                                                  ex.account_executions_id!,
+                                                execution: ex,
+                                              })
+                                              setLinkModalOpen(true)
+                                              setPageError(null)
+                                            }}
+                                          />
                                           <button
                                             type="button"
                                             className="btn btn-icon-small btn-icon-danger"
@@ -1568,6 +1681,18 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
           setAddExecOpen(false)
           setEditExec(null)
           setPageError(null)
+        }}
+        onSuccess={() => {
+          setPageError(null)
+          loadReplayData()
+        }}
+      />
+      <LinkExecutionRecordModal
+        open={linkModalOpen}
+        context={linkContext}
+        onClose={() => {
+          setLinkModalOpen(false)
+          setLinkContext(null)
         }}
         onSuccess={() => {
           setPageError(null)
