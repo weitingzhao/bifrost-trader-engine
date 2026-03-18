@@ -406,6 +406,8 @@ export interface StrategyInstance {
   created_at_epoch?: number
   updated_at?: string
   strategy_opportunity_name?: string | null
+  /** Number of executions attributed to this instance (from list API). */
+  executions_count?: number
 }
 
 /** One row from account_transactions (Flex cash transactions). GET /transactions, GET /performance.transactions */

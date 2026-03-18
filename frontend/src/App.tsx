@@ -167,7 +167,7 @@ export default function App() {
   >({})
   /** Celery bars worker queue counts (polled every 3s for dashboard) */
   const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
-  const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
+  const [, setWorkerJobRunning] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
 
@@ -443,13 +443,21 @@ export default function App() {
       const bench = benchmarks[symbol]
       let changePct: number | null = null
       let pnlVsBench: number | null = null
-      if (bench && quote && Number.isFinite(quote.last) && Number.isFinite(bench.close) && bench.close > 0) {
-        changePct = ((quote.last - bench.close) / bench.close) * 100
-        pnlVsBench = Number.isFinite(qty) ? (quote.last - bench.close) * qty : null
+      const qLast = quote?.last
+      if (
+        bench &&
+        quote &&
+        qLast != null &&
+        Number.isFinite(qLast) &&
+        Number.isFinite(bench.close) &&
+        bench.close > 0
+      ) {
+        changePct = ((qLast - bench.close) / bench.close) * 100
+        pnlVsBench = Number.isFinite(qty) ? (qLast - bench.close) * qty : null
       }
       const pnlCost =
-        quote && avgCost != null && Number.isFinite(quote.last) && Number.isFinite(qty) && qty !== 0
-          ? (quote.last - avgCost) * qty
+        quote && avgCost != null && qLast != null && Number.isFinite(qLast) && Number.isFinite(qty) && qty !== 0
+          ? (qLast - avgCost) * qty
           : null
       return { qty, avgCost, pnlCost, pnlVsBench, changePct }
     })

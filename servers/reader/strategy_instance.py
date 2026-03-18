@@ -40,7 +40,8 @@ def list_instances(
                 f"""
                 SELECT si.strategy_instance_id, si.strategy_opportunity_id, si.account_id,
                        si.opened_at, si.label, si.notes, si.created_at, si.updated_at,
-                       so.name AS strategy_opportunity_name
+                       so.name AS strategy_opportunity_name,
+                       (SELECT COUNT(*) FROM account_executions e WHERE e.strategy_instance_id = si.strategy_instance_id) AS executions_count
                 FROM strategy_instance si
                 LEFT JOIN strategy_opportunity so ON si.strategy_opportunity_id = so.strategy_opportunity_id
                 {where}
@@ -56,6 +57,8 @@ def list_instances(
                 d["opened_at_epoch"] = d["opened_at"].timestamp()
             if d.get("created_at") is not None and hasattr(d["created_at"], "timestamp"):
                 d["created_at_epoch"] = d["created_at"].timestamp()
+            if d.get("executions_count") is not None:
+                d["executions_count"] = int(d["executions_count"])
             out.append(d)
         return out
     except Exception as e:

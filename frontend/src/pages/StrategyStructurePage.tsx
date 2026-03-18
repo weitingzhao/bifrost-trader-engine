@@ -3,10 +3,8 @@ import type { StatusResponse } from '../types'
 import {
   fetchStructures,
   fetchStructure,
-  fetchStructureTypes,
-  fetchStructureTypeDefaultLegs,
-  fetchStructureSubtypeDefaultLegs,
-  fetchStructureTypeSubtypes,
+  fetchTemplates,
+  fetchTemplateDetail,
   fetchStrategyHistory,
   postActiveStrategy,
   createStructure,
@@ -17,20 +15,19 @@ import {
   type StructureConstraint,
   type StructureMetaEntry,
   type StrategyHistoryRow,
-  type StructureTypeItem,
-  type SubtypeItem,
-  type InferRuleItem,
+  type StrategyTemplateRow,
+  type StrategyTemplateDetail,
+  type MetaParamItem,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   DEFAULT_STRUCTURE_PAYLOAD,
-  getStructureTypeLabel,
+  getStructureDisplayLabel,
   structureToPayload,
   formatHistoryTs,
   summarizeStateSummary,
   summarizeLegs,
   summarizeConstraints,
-  summarizeSubtype,
 } from './strategy/strategyFormUtils'
 
 export interface StrategyStructurePageProps {
@@ -66,19 +63,15 @@ export function StrategyStructurePage({
   const [defaultLegsFallbackMsg, setDefaultLegsFallbackMsg] = useState<string | null>(null)
   /** Filter structure list: 'all' | 'active' | 'inactive'. */
   const [structureActiveFilter, setStructureActiveFilter] = useState<'all' | 'active' | 'inactive'>('active')
-  /** Sheet tabs by Type (from Option Types). '' = All types. */
+  /** Sheet tabs by dim_structure. '' = All. */
   const [structureTypeTab, setStructureTypeTab] = useState<string>('')
-  /** Wizard for New structure only: step 1=type, 2=subtype (when has_subtypes), 3=details. */
+  /** Wizard: 1=template, 2=meta params, 3=details. */
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
-  /** Structure types from config API (for Step 1). Fallback to STRUCTURE_TYPES when empty. */
-  const [structureTypes, setStructureTypes] = useState<StructureTypeItem[]>([])
-  /** Subtypes + infer_rules for current structure_type when has_subtypes (for Step 2 / Edit). */
-  const [subtypesConfig, setSubtypesConfig] = useState<{
-    subtypes: SubtypeItem[]
-    infer_rules: InferRuleItem[]
-  } | null>(null)
-  /** Selected subtype code (e.g. otm, atm). Replaces covered_call-specific state. */
-  const [selectedSubtype, setSelectedSubtype] = useState<string | null>(null)
+  const [templates, setTemplates] = useState<StrategyTemplateRow[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null)
+  const [wizardTemplateDetail, setWizardTemplateDetail] = useState<StrategyTemplateDetail | null>(null)
+  /** True after user leaves step 2 (so step 3 does not duplicate parameter fields). */
+  const [wizardVisitedMetaStep, setWizardVisitedMetaStep] = useState(false)
   /** Configurable meta param values (e.g. otm_pct, itm_pct) for current subtype. */
   const [wizardParamValues, setWizardParamValues] = useState<Record<string, string | number>>({})
   const [setActiveInProgress, setSetActiveInProgress] = useState(false)
@@ -96,14 +89,12 @@ export function StrategyStructurePage({
   } | null>(null)
   /** When editing, snapshot at open for version dialog: version, type, subtype, meta. */
   const [originalEditVersion, setOriginalEditVersion] = useState<number | null>(null)
-  const [originalEditStructureType, setOriginalEditStructureType] = useState<string | null>(null)
-  const [originalEditStructureSubtype, setOriginalEditStructureSubtype] = useState<string | null>(null)
+  const [originalEditTemplateId, setOriginalEditTemplateId] = useState<number | null>(null)
   const [originalEditMeta, setOriginalEditMeta] = useState<StructureMetaEntry[] | null>(null)
   /** After name is resolved, if version dialog is shown this is the name to use on Save. */
   const [pendingSubmitName, setPendingSubmitName] = useState<string | null>(null)
   /** When set, show dialog: Type/SubType/Meta changed — use new version? (Apple switch, default on). */
   const [versionConfirmDialog, setVersionConfirmDialog] = useState<{ useNewVersion: boolean } | null>(null)
-  const [subtypeDefaultLegsLoading, setSubtypeDefaultLegsLoading] = useState(false)
   /** When true, last save failed with legs/schema error so we highlight "Use subtype default legs" if applicable. */
   const [formErrorIsSchemaMismatch, setFormErrorIsSchemaMismatch] = useState(false)
 
@@ -116,12 +107,14 @@ export function StrategyStructurePage({
   })
 
   /** Structures for current Type tab (filtered by structureTypeTab; Option Types define the tabs). */
-  const structuresForTypeTab = structureTypeTab === ''
-    ? filteredStructures
-    : filteredStructures.filter((row) => row.structure_type === structureTypeTab)
+  const structuresForTypeTab =
+    structureTypeTab === ''
+      ? filteredStructures
+      : filteredStructures.filter((row) => (row.dim_structure || 'other') === structureTypeTab)
 
-  /** Option Types sorted by sort_order for Sheet tabs. */
-  const structureTypesSorted = [...structureTypes].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  const dimStructureTabs = Array.from(
+    new Set(structures.map((s) => s.dim_structure || 'other').filter(Boolean))
+  ).sort()
 
   /** Heuristic: backend validation error about legs/schema (for highlighting "Use subtype default legs"). */
   const isSchemaMismatchError = useCallback((msg: string): boolean => {
@@ -142,54 +135,26 @@ export function StrategyStructurePage({
     loadStructures()
   }, [loadStructures])
 
-  /** Reset type tab if selected type no longer exists in Option Types. */
   useEffect(() => {
-    if (structureTypeTab !== '' && !structureTypes.some((t) => t.structure_type === structureTypeTab)) {
+    if (structureTypeTab !== '' && !dimStructureTabs.includes(structureTypeTab)) {
       setStructureTypeTab('')
     }
-  }, [structureTypes, structureTypeTab])
+  }, [dimStructureTabs, structureTypeTab])
 
-  /** Load structure types from config API on mount (for Wizard type list). */
   useEffect(() => {
-    fetchStructureTypes()
-      .then((res) => setStructureTypes(res.items ?? []))
-      .catch(() => setStructureTypes([]))
+    fetchTemplates(true)
+      .then((res) => setTemplates(res.items ?? []))
+      .catch(() => setTemplates([]))
   }, [])
 
-  /** When subtype is selected, fetch subtype default legs from Option Type Config and set form legs (read-only source of truth). */
   useEffect(() => {
-    const typeVal = (formPayload.structure_type || '').trim()
-    const subVal = selectedSubtype ?? null
-    if (!typeVal || !subVal || formOpen === null) return
-    let cancelled = false
-    setSubtypeDefaultLegsLoading(true)
-    fetchStructureSubtypeDefaultLegs(typeVal, subVal)
-      .then((res) => {
-        if (!cancelled) {
-          const legs = res.legs ?? []
-          setFormLegs(legs)
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setSubtypeDefaultLegsLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [formPayload.structure_type, selectedSubtype, formOpen])
-
-  /** When editing a structure whose type has no subtypes, load type default legs from Option Type Config (legs are read-only). */
-  useEffect(() => {
-    const typeVal = (formPayload.structure_type || '').trim()
-    const isEdit = typeof formOpen === 'number'
-    const typeHasSubtypes = structureTypes.some((t) => t.structure_type === typeVal && t.has_subtypes)
-    if (!isEdit || !typeVal || typeHasSubtypes) return
+    const tid = formPayload.strategy_template_id
+    if (!tid || formOpen === null) return
     let cancelled = false
     setDefaultLegsLoading(true)
-    fetchStructureTypeDefaultLegs(typeVal)
-      .then((res) => {
-        if (!cancelled) setFormLegs(res.legs ?? [])
+    fetchTemplateDetail(tid)
+      .then((d) => {
+        if (!cancelled) setFormLegs(d.legs ?? [])
       })
       .catch(() => {
         if (!cancelled) setFormLegs([])
@@ -200,11 +165,7 @@ export function StrategyStructurePage({
     return () => {
       cancelled = true
     }
-  }, [formOpen, formPayload.structure_type, structureTypes])
-
-  /** Whether current form structure_type has subtypes (from config API). */
-  const currentTypeHasSubtypes =
-    structureTypes.some((t) => t.structure_type === formPayload.structure_type && t.has_subtypes)
+  }, [formPayload.strategy_template_id, formOpen])
 
   useEffect(() => {
     let cancelled = false
@@ -293,8 +254,9 @@ export function StrategyStructurePage({
     setDefaultLegsLoading(false)
     setDefaultLegsFallbackMsg(null)
     setWizardStep(1)
-    setSelectedSubtype(null)
-    setSubtypesConfig(null)
+    setSelectedTemplateId(null)
+    setWizardTemplateDetail(null)
+    setWizardVisitedMetaStep(false)
     setWizardParamValues({})
     setFormOpen('create')
   }
@@ -319,50 +281,30 @@ export function StrategyStructurePage({
         setOriginalEditName(row.name ?? null)
         const v = typeof row.version === 'number' ? row.version : typeof row.version === 'string' ? parseInt(String(row.version), 10) || 1 : 1
         setOriginalEditVersion(v)
-        setOriginalEditStructureType(row.structure_type ?? null)
-        setOriginalEditStructureSubtype(row.structure_subtype ?? null)
+        setOriginalEditTemplateId(row.strategy_template_id ?? null)
         setOriginalEditMeta(p.meta != null ? [...p.meta] : null)
         setWizardStep(3)
-        if (row.structure_type) {
-          fetchStructureTypeSubtypes(row.structure_type)
-            .then((data) => {
-              setSubtypesConfig({ subtypes: data.subtypes ?? [], infer_rules: data.infer_rules ?? [] })
+        setSelectedTemplateId(row.strategy_template_id ?? null)
+        if (row.strategy_template_id) {
+          fetchTemplateDetail(row.strategy_template_id)
+            .then((d) => {
+              setWizardTemplateDetail(d)
               const meta = row.metadata as Record<string, unknown> | null | undefined
-              let inferred: string | null = null
-              if (row.structure_subtype && (data.subtypes ?? []).some((s) => s.subtype === row.structure_subtype)) {
-                inferred = row.structure_subtype
-              } else if (data.infer_rules?.length && meta && typeof meta === 'object') {
-                for (const rule of data.infer_rules) {
-                  const v = meta[rule.meta_key]
-                  const match = v != null && String(v) === rule.meta_value_text
-                  if (match) {
-                    inferred = rule.subtype
-                    break
-                  }
-                }
-              }
-              if (inferred) {
-                setSelectedSubtype(inferred)
-              } else {
-                setSelectedSubtype(null)
-              }
               const paramValues: Record<string, string | number> = {}
               if (meta && typeof meta === 'object') {
-                data.subtypes?.find((s) => s.subtype === inferred)?.meta_params?.forEach((mp) => {
+                d.meta_params?.forEach((mp) => {
                   if (mp.param_kind !== 'fixed' && meta[mp.meta_key] != null) {
                     const val = meta[mp.meta_key]
-                    paramValues[mp.meta_key] = typeof val === 'number' ? val : Number(val) || String(val)
+                    paramValues[mp.meta_key] =
+                      typeof val === 'number' ? val : Number(val) || String(val)
                   }
                 })
               }
               setWizardParamValues(paramValues)
             })
-            .catch(() => {
-              setSelectedSubtype(null)
-            })
+            .catch(() => setWizardTemplateDetail(null))
         } else {
-          setSelectedSubtype(null)
-          setSubtypesConfig(null)
+          setWizardTemplateDetail(null)
           setWizardParamValues({})
         }
       })
@@ -387,6 +329,9 @@ export function StrategyStructurePage({
         setFormConstraints(p.constraints ?? [])
         setFormNotes(p.notes ?? '')
         setFormMeta(p.meta ?? [])
+        if (row.strategy_template_id) {
+          handleTemplateSelect(row.strategy_template_id)
+        }
       })
       .catch((e) => setFormError(e instanceof Error ? e.message : String(e)))
       .finally(() => setFormLoading(false))
@@ -398,72 +343,65 @@ export function StrategyStructurePage({
     setFormErrorIsSchemaMismatch(false)
     setOriginalEditName(null)
     setOriginalEditVersion(null)
-    setOriginalEditStructureType(null)
-    setOriginalEditStructureSubtype(null)
+    setOriginalEditTemplateId(null)
     setOriginalEditMeta(null)
     setPendingSubmitName(null)
     setNameConfirmDialog(null)
     setVersionConfirmDialog(null)
     setWizardStep(1)
-    setSelectedSubtype(null)
-    setSubtypesConfig(null)
+    setSelectedTemplateId(null)
+    setWizardTemplateDetail(null)
+    setWizardVisitedMetaStep(false)
     setWizardParamValues({})
   }
 
-  /** Build default structure name from type + subtype + params (used when entering step 3). */
   const buildWizardDefaultName = (): string => {
-    const typeLabel =
-      structureTypes.find((t) => t.structure_type === formPayload.structure_type)?.display_label ??
-      getStructureTypeLabel(formPayload.structure_type)
-    const sub = selectedSubtype
-    const subLabel =
-      subtypesConfig?.subtypes?.find((s) => s.subtype === sub)?.display_label ?? null
-    if (sub && subLabel) {
+    const t = wizardTemplateDetail
+    if (t) {
       const pct = wizardParamValues['otm_pct']
       const itmPct = wizardParamValues['itm_pct']
-      if ((sub === 'otm' || sub === 'deep_otm') && pct != null) return `${typeLabel} - ${subLabel} (${pct}%)`
-      if (sub === 'itm' && itmPct !== '' && itmPct != null) return `${typeLabel} - ${subLabel} (${itmPct}%)`
-      return `${typeLabel} - ${subLabel}`
+      if (pct != null && String(pct) !== '') return `${t.display_name} (${pct}% OTM)`
+      if (itmPct != null && String(itmPct) !== '') return `${t.display_name} (${itmPct}% ITM)`
+      return t.display_name
     }
-    return typeLabel
+    const tpl = templates.find((x) => x.strategy_template_id === selectedTemplateId)
+    return tpl?.display_name ?? 'Structure'
   }
 
   const goWizardNext = () => {
     if (wizardStep === 1) {
-      const hasSubtypesToShow =
-        currentTypeHasSubtypes && (subtypesConfig?.subtypes?.length ?? 0) > 0
-      if (hasSubtypesToShow) setWizardStep(2)
-      else {
+      if (!selectedTemplateId) {
+        setFormError('Select a template')
+        return
+      }
+      const hasEditableMeta =
+        wizardTemplateDetail?.meta_params?.some((p: MetaParamItem) => p.param_kind !== 'fixed') ?? false
+      if (hasEditableMeta) {
+        setWizardStep(2)
+      } else {
+        setWizardVisitedMetaStep(false)
         setWizardStep(3)
         updateForm({ name: buildWizardDefaultName() })
       }
     } else if (wizardStep === 2) {
+      setWizardVisitedMetaStep(true)
       setWizardStep(3)
       updateForm({ name: buildWizardDefaultName() })
     }
   }
 
-  /** Current meta as would be in payload (from infer_rules + wizardParamValues or fallback covered_call). */
   const getCurrentBuiltMeta = (): StructureMetaEntry[] => {
-    if (subtypesConfig && selectedSubtype) {
-      const subtypeMetaKeys = new Set(
-        [
-          ...subtypesConfig.infer_rules.map((r) => r.meta_key),
-          ...(subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)?.meta_params.map((p) => p.meta_key) ?? []),
-        ]
-      )
-      let meta: StructureMetaEntry[] = (formMeta ?? []).filter((m) => m.meta_key && !subtypeMetaKeys.has(m.meta_key))
-      subtypesConfig.infer_rules
-        .filter((r) => r.subtype === selectedSubtype)
-        .forEach((r) => meta.push({ meta_key: r.meta_key, meta_value_text: r.meta_value_text }))
-      subtypesConfig.subtypes
-        .find((s) => s.subtype === selectedSubtype)
-        ?.meta_params?.forEach((p) => {
-          if (p.param_kind !== 'fixed') {
-            const v = wizardParamValues[p.meta_key]
-            if (v !== undefined && v !== '') meta.push({ meta_key: p.meta_key, meta_value_text: String(v) })
-          }
-        })
+    if (wizardTemplateDetail?.meta_params?.length) {
+      const meta: StructureMetaEntry[] = []
+      wizardTemplateDetail.meta_params.forEach((p: MetaParamItem) => {
+        if (p.param_kind === 'fixed') {
+          if (p.default_value_text != null && p.default_value_text !== '')
+            meta.push({ meta_key: p.meta_key, meta_value_text: p.default_value_text })
+        } else {
+          const v = wizardParamValues[p.meta_key]
+          if (v !== undefined && v !== '') meta.push({ meta_key: p.meta_key, meta_value_text: String(v) })
+        }
+      })
       return meta
     }
     return [...(formMeta ?? [])]
@@ -480,25 +418,20 @@ export function StrategyStructurePage({
   }
 
   const haveTypeSubtypeOrMetaChanged = (): boolean => {
-    if (originalEditStructureType == null) return false
-    const currentType = (formPayload.structure_type || '').trim()
-    if (currentType !== originalEditStructureType) return true
-    const currentSubtype = selectedSubtype
-    const origSubtype = originalEditStructureSubtype ?? null
-    if (currentSubtype !== origSubtype) return true
+    const curTid = formPayload.strategy_template_id ?? null
+    if (curTid !== originalEditTemplateId) return true
     if (originalEditMeta == null) return getCurrentBuiltMeta().length > 0
     return !metaEntriesEqual(getCurrentBuiltMeta(), originalEditMeta)
   }
 
-  /** Build wizard payload with a given name and optional version override. */
   const buildWizardPayload = (name: string, versionOverride?: number): StructurePayload => {
-    const structure_type = (formPayload.structure_type || '').trim()
     const meta = getCurrentBuiltMeta()
-    const sub = selectedSubtype
+    const tpl = wizardTemplateDetail
     return {
       name: name.trim(),
-      structure_type,
-      structure_subtype: currentTypeHasSubtypes && sub ? sub : null,
+      strategy_template_id: formPayload.strategy_template_id,
+      structure_type: tpl?.template_code ?? formPayload.structure_type,
+      structure_subtype: null,
       legs: formLegs,
       constraints: formConstraints.length ? formConstraints : undefined,
       version: versionOverride !== undefined ? versionOverride : (formPayload.version ?? 1),
@@ -556,9 +489,8 @@ export function StrategyStructurePage({
       setFormError('Name is required')
       return
     }
-    const structure_type = (formPayload.structure_type || '').trim()
-    if (!structure_type) {
-      setFormError('Structure type is required')
+    if (!formPayload.strategy_template_id) {
+      setFormError('Template is required')
       return
     }
     const suggestedName = buildWizardDefaultName()
@@ -578,37 +510,41 @@ export function StrategyStructurePage({
     setFormPayload((prev) => ({ ...prev, ...patch }))
   }
 
-  /** When user selects a structure type: load default legs and, if has_subtypes, load subtypes. */
-  const handleStructureTypeChange = useCallback(
-    (structure_type: string) => {
-      updateForm({ structure_type })
+  const handleTemplateSelect = useCallback(
+    (strategy_template_id: number) => {
+      setSelectedTemplateId(strategy_template_id)
+      updateForm({ strategy_template_id, structure_subtype: null })
       setDefaultLegsLoading(true)
       setDefaultLegsFallbackMsg(null)
-      setSubtypesConfig(null)
-      setSelectedSubtype(null)
       setWizardParamValues({})
-      const typeHasSubtypes =
-        structureTypes.some((t) => t.structure_type === structure_type && t.has_subtypes)
-
-      fetchStructureTypeDefaultLegs(structure_type)
-        .then((res) => {
-          const legs = res.legs ?? []
-          setFormLegs(legs)
-          setDefaultLegsFallbackMsg(legs.length === 0 ? 'No default legs configured for this structure type.' : null)
+      fetchTemplateDetail(strategy_template_id)
+        .then((d) => {
+          setWizardTemplateDetail(d)
+          updateForm({
+            strategy_template_id,
+            structure_type: d.template_code,
+          })
+          setFormLegs(d.legs ?? [])
+          setDefaultLegsFallbackMsg(
+            (d.legs ?? []).length === 0 && d.template_code !== 'custom'
+              ? 'No legs on template.'
+              : null
+          )
+          const pv: Record<string, string | number> = {}
+          d.meta_params?.forEach((p: MetaParamItem) => {
+            if (p.param_kind !== 'fixed' && p.default_value_text)
+              pv[p.meta_key] = p.default_value_text
+          })
+          setWizardParamValues(pv)
         })
         .catch(() => {
+          setWizardTemplateDetail(null)
           setFormLegs([])
-          setDefaultLegsFallbackMsg('Failed to load default legs for this structure type.')
+          setDefaultLegsFallbackMsg('Failed to load template.')
         })
         .finally(() => setDefaultLegsLoading(false))
-
-      if (typeHasSubtypes) {
-        fetchStructureTypeSubtypes(structure_type)
-          .then((data) => setSubtypesConfig({ subtypes: data.subtypes ?? [], infer_rules: data.infer_rules ?? [] }))
-          .catch(() => setSubtypesConfig(null))
-      }
     },
-    [structureTypes, updateForm]
+    [updateForm]
   )
 
   const submitForm = async () => {
@@ -617,18 +553,18 @@ export function StrategyStructurePage({
       setFormError('Name is required')
       return
     }
-    const structure_type = (formPayload.structure_type || '').trim()
-    if (!structure_type) {
-      setFormError('Structure type is required')
+    const tid = formPayload.strategy_template_id
+    if (!tid) {
+      setFormError('Template is required')
       return
     }
     setFormError(null)
     setFormLoading(true)
-    const sub = selectedSubtype ?? formPayload.structure_subtype ?? null
     const payload: StructurePayload = {
       name,
-      structure_type,
-      structure_subtype: sub,
+      strategy_template_id: tid,
+      structure_type: formPayload.structure_type,
+      structure_subtype: null,
       legs: formLegs,
       constraints: formConstraints.length ? formConstraints : undefined,
       version: formPayload.version ?? 1,
@@ -890,11 +826,11 @@ export function StrategyStructurePage({
             </button>
           </div>
         </div>
-        {!structuresLoading && !structuresError && structureTypesSorted.length > 0 && (
+        {!structuresLoading && !structuresError && dimStructureTabs.length > 0 && (
           <div
             className="system-tabs structure-sheet-type-tabs"
             role="tablist"
-            aria-label="Structure type"
+            aria-label="Structure dimension"
           >
             <button
               type="button"
@@ -905,16 +841,16 @@ export function StrategyStructurePage({
             >
               All
             </button>
-            {structureTypesSorted.map((t) => (
+            {dimStructureTabs.map((tab) => (
               <button
-                key={t.structure_type}
+                key={tab}
                 type="button"
                 role="tab"
-                aria-selected={structureTypeTab === t.structure_type}
-                className={`system-tab ${structureTypeTab === t.structure_type ? 'active' : ''}`}
-                onClick={() => setStructureTypeTab(t.structure_type)}
+                aria-selected={structureTypeTab === tab}
+                className={`system-tab ${structureTypeTab === tab ? 'active' : ''}`}
+                onClick={() => setStructureTypeTab(tab)}
               >
-                {t.display_label ?? t.structure_type}
+                {tab.replace(/_/g, ' ')}
               </button>
             ))}
           </div>
@@ -927,8 +863,8 @@ export function StrategyStructurePage({
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Type</th>
-                  <th>Sub type</th>
+                  <th>Template</th>
+                  <th>Dimensions</th>
                   <th>Legs</th>
                   <th>Constraints</th>
                   <th>Available</th>
@@ -953,8 +889,12 @@ export function StrategyStructurePage({
                           <span className="structure-sheet-version" aria-label={`Version ${row.version}`}> v{row.version}</span>
                         )}
                       </td>
-                      <td>{getStructureTypeLabel(row.structure_type)}</td>
-                      <td>{summarizeSubtype(row.structure_subtype, row.structure_subtype_label)}</td>
+                      <td>{getStructureDisplayLabel(row)}</td>
+                      <td className="structure-sheet-cell-summary">
+                        {[row.dim_direction, row.dim_structure, row.dim_volatility]
+                          .filter(Boolean)
+                          .join(' · ') || '—'}
+                      </td>
                       <td className="structure-sheet-cell-summary" title={summarizeLegs(row.legs)}>{summarizeLegs(row.legs)}</td>
                       <td className="structure-sheet-cell-summary" title={summarizeConstraints(row.constraints)}>{summarizeConstraints(row.constraints)}</td>
                       <td>
@@ -1059,14 +999,38 @@ export function StrategyStructurePage({
                     </div>
                     <div className="structure-wizard-step-connector" aria-hidden />
                   </div>
-                  <span className="structure-wizard-step-label">Structure type</span>
+                  <span className="structure-wizard-step-label">Template</span>
                 </div>
                 <div
-                  className={`structure-wizard-step-item ${wizardStep > 2 ? 'structure-wizard-step-done' : wizardStep === 2 ? 'structure-wizard-step-active' : formPayload.structure_type !== 'covered_call' ? 'structure-wizard-step-skip' : ''}`}
+                  className={`structure-wizard-step-item ${
+                    wizardStep > 2
+                      ? 'structure-wizard-step-done'
+                      : wizardStep === 2
+                        ? 'structure-wizard-step-active'
+                        : !(
+                            selectedTemplateId &&
+                            (wizardTemplateDetail?.meta_params ?? []).some(
+                              (p: MetaParamItem) => p.param_kind !== 'fixed'
+                            )
+                          )
+                          ? 'structure-wizard-step-skip'
+                          : ''
+                  }`}
                   role="listitem"
                   aria-current={wizardStep === 2 ? 'step' : undefined}
-                  onClick={wizardStep > 2 ? () => setWizardStep(2) : undefined}
-                  style={wizardStep > 2 ? { cursor: 'pointer' } : undefined}
+                  onClick={
+                    wizardStep > 2 &&
+                    selectedTemplateId &&
+                    (wizardTemplateDetail?.meta_params ?? []).some((p: MetaParamItem) => p.param_kind !== 'fixed')
+                      ? () => setWizardStep(2)
+                      : undefined
+                  }
+                  style={
+                    wizardStep > 2 &&
+                    (wizardTemplateDetail?.meta_params ?? []).some((p: MetaParamItem) => p.param_kind !== 'fixed')
+                      ? { cursor: 'pointer' }
+                      : undefined
+                  }
                 >
                   <div className="structure-wizard-step-head">
                     <div className="structure-wizard-step-circle">
@@ -1078,7 +1042,7 @@ export function StrategyStructurePage({
                     </div>
                     <div className="structure-wizard-step-connector" aria-hidden />
                   </div>
-                  <span className="structure-wizard-step-label">Subtype</span>
+                  <span className="structure-wizard-step-label">Parameters</span>
                 </div>
                 <div
                   className={`structure-wizard-step-item structure-wizard-step-item-last ${wizardStep === 3 ? 'structure-wizard-step-active' : ''}`}
@@ -1096,142 +1060,69 @@ export function StrategyStructurePage({
 
               {wizardStep === 1 && (
                 <div className="structure-wizard-step">
-                  <h4 className="gates-form-group-title">Choose structure type</h4>
+                  <h4 className="gates-form-group-title">Choose template</h4>
                   <div className="gates-form-row gates-form-row--structure-type">
-                    <div className="structure-type-picker" role="radiogroup" aria-label="Structure type">
-                      {structureTypes.map((typeItem) => (
+                    <div className="structure-type-picker" role="radiogroup" aria-label="Template">
+                      {templates.map((tpl) => (
                         <label
-                          key={typeItem.structure_type}
-                          className={`structure-type-option ${formPayload.structure_type === typeItem.structure_type ? 'structure-type-option--selected' : ''}`}
+                          key={tpl.strategy_template_id}
+                          className={`structure-type-option ${selectedTemplateId === tpl.strategy_template_id ? 'structure-type-option--selected' : ''}`}
                         >
                           <input
                             type="radio"
-                            name="structure_type_wizard"
-                            value={typeItem.structure_type}
-                            checked={formPayload.structure_type === typeItem.structure_type}
-                            onChange={() => handleStructureTypeChange(typeItem.structure_type)}
+                            name="structure_template_wizard"
+                            value={tpl.strategy_template_id}
+                            checked={selectedTemplateId === tpl.strategy_template_id}
+                            onChange={() => handleTemplateSelect(tpl.strategy_template_id)}
                           />
-                          <span>{typeItem.display_label}</span>
+                          <span>{tpl.display_name}</span>
                         </label>
                       ))}
                     </div>
                   </div>
-                  {defaultLegsLoading && <p className="form-hint">Loading default legs…</p>}
+                  {defaultLegsLoading && <p className="form-hint">Loading template…</p>}
                 </div>
               )}
 
-              {wizardStep === 2 && currentTypeHasSubtypes && (
+              {wizardStep === 2 && wizardTemplateDetail && (
                 <div className="structure-wizard-step">
-                  {subtypesConfig?.subtypes?.length ? (
-                    <>
-                      <h4 className="gates-form-group-title">Choose subtype</h4>
-                      <div className="structure-wizard-subtype-picker" role="radiogroup" aria-label="Subtype">
-                        {subtypesConfig.subtypes.map((subItem) => (
-                          <label
-                            key={subItem.subtype}
-                            className={`covered-call-subtype-option ${selectedSubtype === subItem.subtype ? 'covered-call-subtype-option--selected' : ''}`}
-                          >
-                            <input
-                              type="radio"
-                              name="structure_subtype"
-                              value={subItem.subtype}
-                              checked={selectedSubtype === subItem.subtype}
-                              onChange={() => {
-                                setSelectedSubtype(subItem.subtype)
-                                const initial: Record<string, string | number> = {}
-                                subItem.meta_params.forEach((p) => {
-                                  if (p.param_kind !== 'fixed' && p.default_value_text != null && p.default_value_text !== '') {
-                                    const num = Number(p.default_value_text)
-                                    initial[p.meta_key] = Number.isFinite(num) ? num : p.default_value_text
-                                  }
-                                })
-                                setWizardParamValues(initial)
-                              }}
-                            />
-                            <span>{subItem.display_label}</span>
-                          </label>
-                        ))}
-                      </div>
-
-                      {selectedSubtype && (() => {
-                        const subItem = subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)
-                        if (!subItem) return null
-                        return (
-                          <div className="covered-call-subtype-description" style={{ marginTop: 'var(--space-4)' }}>
-                            <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>{subItem.display_label}</h5>
-                            {subItem.example != null && (
-                              <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                                <strong>Example:</strong> {subItem.example}
-                              </p>
-                            )}
-                            {subItem.characteristics?.length > 0 && (
-                              <>
-                                <p className="form-hint" style={{ marginBottom: 'var(--space-1)' }}><strong>Characteristics:</strong></p>
-                                <ul className="covered-call-subtype-list" style={{ marginBottom: 'var(--space-2)', paddingLeft: '1.25rem' }}>
-                                  {subItem.characteristics.map((c, i) => (
-                                    <li key={i} className="form-hint" style={{ marginBottom: 'var(--space-1)' }}>{c}</li>
-                                  ))}
-                                </ul>
-                              </>
-                            )}
-                            {subItem.nature != null && subItem.nature !== '' && (
-                              <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
-                                <strong>Nature:</strong> {subItem.nature}
-                              </p>
-                            )}
-                            {subItem.typical_use != null && (
-                              <p className="form-hint" style={{ marginBottom: 'var(--space-3)' }}>
-                                <strong>Typical use:</strong> {subItem.typical_use}
-                              </p>
-                            )}
-                            {(subItem.subtype_explanation != null || subItem.meta_params?.some((p) => p.param_kind !== 'fixed')) && (
-                              <div className="gates-form-group" style={{ marginTop: 'var(--space-3)' }}>
-                                <h5 className="gates-form-group-title" style={{ marginBottom: 'var(--space-2)' }}>Configurable parameters (strategy_structure_meta)</h5>
-                                {subItem.subtype_explanation != null && subItem.subtype_explanation !== '' && (
-                                  <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>{subItem.subtype_explanation}</p>
-                                )}
-                                {subItem.meta_params
-                                  ?.filter((p) => p.param_kind !== 'fixed')
-                                  .map((p) => (
-                                    <div key={p.meta_key} className="gates-form-row" style={{ alignItems: 'center', marginBottom: 'var(--space-2)' }}>
-                                      <label style={{ minWidth: '120px' }}>{p.display_label ?? p.meta_key}</label>
-                                      <input
-                                        type="number"
-                                        min={p.param_kind === 'percent' ? 1 : 0}
-                                        max={p.param_kind === 'percent' ? 50 : undefined}
-                                        value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
-                                        onChange={(e) => {
-                                          const v = e.target.value === '' ? '' : (parseInt(e.target.value, 10) ?? e.target.value)
-                                          setWizardParamValues((prev) => ({ ...prev, [p.meta_key]: v as string | number }))
-                                        }}
-                                        aria-label={p.display_label ?? p.meta_key}
-                                      />
-                                      {p.default_value_text != null && (
-                                        <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>Default {p.default_value_text}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                {subItem.meta_params?.some((p) => p.param_kind === 'fixed') && subItem.meta_params?.filter((p) => p.param_kind === 'fixed').length === subItem.meta_params?.length && (
-                                  <p className="form-hint">No extra parameters (strike rule from subtype).</p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })()}
-                    </>
+                  <h4 className="gates-form-group-title">Parameters</h4>
+                  {wizardTemplateDetail.example && (
+                    <p className="form-hint"><strong>Example:</strong> {wizardTemplateDetail.example}</p>
+                  )}
+                  {(wizardTemplateDetail.meta_params ?? []).filter((p: MetaParamItem) => p.param_kind !== 'fixed').length === 0 ? (
+                    <p className="form-hint">No editable parameters. Click Next.</p>
                   ) : (
-                    <p className="form-hint">No subtype for this structure type. Click Next to continue.</p>
+                    (wizardTemplateDetail.meta_params ?? [])
+                      .filter((p: MetaParamItem) => p.param_kind !== 'fixed')
+                      .map((p: MetaParamItem) => (
+                        <div key={p.meta_key} className="gates-form-row" style={{ alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                          <label style={{ minWidth: '120px' }}>{p.display_label ?? p.meta_key}</label>
+                          <input
+                            type="number"
+                            min={p.param_kind === 'percent' ? 1 : 0}
+                            max={p.param_kind === 'percent' ? 50 : undefined}
+                            value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
+                            onChange={(e) => {
+                              const v = e.target.value === '' ? '' : (parseInt(e.target.value, 10) ?? e.target.value)
+                              setWizardParamValues((prev) => ({ ...prev, [p.meta_key]: v as string | number }))
+                            }}
+                            aria-label={p.display_label ?? p.meta_key}
+                          />
+                        </div>
+                      ))
                   )}
                 </div>
               )}
 
               {wizardStep === 3 && (() => {
-                const hasSubtypeOptions = subtypesConfig && selectedSubtype && subtypesConfig.subtypes.find((s) => s.subtype === selectedSubtype)?.meta_params?.some((p) => p.param_kind !== 'fixed')
+                const metaNF = (wizardTemplateDetail?.meta_params ?? []).filter(
+                  (p: MetaParamItem) => p.param_kind !== 'fixed'
+                )
+                const showStep3Meta = metaNF.length > 0 && !wizardVisitedMetaStep
                 return (
                   <div className="structure-wizard-step structure-details-step">
-                    {/* Row 1: Metadata | Subtype options */}
-                    <div className={`structure-details-card${!hasSubtypeOptions ? ' structure-details-card--span-2' : ''}`}>
+                    <div className={`structure-details-card${!showStep3Meta ? ' structure-details-card--span-2' : ''}`}>
                       <h4 className="structure-details-card-title">Metadata</h4>
                       <div className="structure-details-meta-grid">
                         <div className="structure-details-field structure-details-field--name">
@@ -1277,34 +1168,33 @@ export function StrategyStructurePage({
                         </div>
                       </div>
                     </div>
-                    {hasSubtypeOptions && subtypesConfig && selectedSubtype && (
+                    {showStep3Meta && wizardTemplateDetail && (
                       <div className="structure-details-card">
-                        <h4 className="structure-details-card-title">Subtype options</h4>
+                        <h4 className="structure-details-card-title">Parameters</h4>
                         <div className="structure-details-params">
-                          {(subtypesConfig.subtypes
-                            .find((s) => s.subtype === selectedSubtype)
-                            ?.meta_params ?? [])
-                            .filter((p) => p.param_kind !== 'fixed')
-                            .map((p) => (
-                              <div key={p.meta_key} className="structure-details-param-row">
-                                <label className="structure-details-label">{p.display_label ?? p.meta_key}</label>
-                                <input
-                                  type="number"
-                                  min={p.param_kind === 'percent' ? 1 : 0}
-                                  max={p.param_kind === 'percent' ? 50 : undefined}
-                                  value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
-                                  onChange={(e) => {
-                                    const v = e.target.value === '' ? '' : (parseInt(e.target.value, 10) ?? e.target.value)
-                                    setWizardParamValues((prev) => ({ ...prev, [p.meta_key]: v as string | number }))
-                                  }}
-                                  className="structure-details-input structure-details-input--narrow"
-                                  aria-label={p.display_label ?? p.meta_key}
-                                />
-                                {p.default_value_text != null && (
-                                  <span className="structure-details-hint structure-details-param-default">Default {p.default_value_text}</span>
-                                )}
-                              </div>
-                            ))}
+                          {metaNF.map((p: MetaParamItem) => (
+                            <div key={p.meta_key} className="structure-details-param-row">
+                              <label className="structure-details-label">{p.display_label ?? p.meta_key}</label>
+                              <input
+                                type="number"
+                                min={p.param_kind === 'percent' ? 1 : 0}
+                                max={p.param_kind === 'percent' ? 50 : undefined}
+                                value={wizardParamValues[p.meta_key] ?? p.default_value_text ?? ''}
+                                onChange={(e) => {
+                                  const v =
+                                    e.target.value === ''
+                                      ? ''
+                                      : parseInt(e.target.value, 10) ?? e.target.value
+                                  setWizardParamValues((prev) => ({
+                                    ...prev,
+                                    [p.meta_key]: v as string | number,
+                                  }))
+                                }}
+                                className="structure-details-input structure-details-input--narrow"
+                                aria-label={p.display_label ?? p.meta_key}
+                              />
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -1313,9 +1203,9 @@ export function StrategyStructurePage({
                     <div className="structure-details-card">
                       <h4 className="structure-details-card-title">Legs</h4>
                       <p className="structure-details-hint structure-details-card-desc">
-                        From Option Type Config. Not editable here.
+                        From template. Not editable here.
                       </p>
-                      {(subtypeDefaultLegsLoading && selectedSubtype) || (currentTypeHasSubtypes && !selectedSubtype) ? (
+                      {defaultLegsLoading ? (
                         <p className="structure-details-hint">Loading legs…</p>
                       ) : (
                         <div className="structure-details-table-wrap">
@@ -1397,11 +1287,7 @@ export function StrategyStructurePage({
                     type="button"
                     className="btn-primary"
                     onClick={goWizardNext}
-                    disabled={
-                        wizardStep === 2 &&
-                        currentTypeHasSubtypes &&
-                        (subtypesConfig?.subtypes?.length ? !selectedSubtype : false)
-                      }
+                    disabled={wizardStep === 1 && !selectedTemplateId}
                   >
                     Next
                   </button>
@@ -1425,37 +1311,23 @@ export function StrategyStructurePage({
                   placeholder="Structure name"
                 />
               </div>
-              <div className="gates-form-row gates-form-row--structure-type">
-                <span className="gates-form-row-label">Structure type</span>
-                <div className="structure-type-picker" role="radiogroup" aria-label="Structure type">
-                  {structureTypes.map((typeItem) => (
-                    <label
-                      key={typeItem.structure_type}
-                      className={`structure-type-option ${formPayload.structure_type === typeItem.structure_type ? 'structure-type-option--selected' : ''}`}
-                    >
-                      <input
-                        type="radio"
-                        name="structure_type"
-                        value={typeItem.structure_type}
-                        checked={formPayload.structure_type === typeItem.structure_type}
-                        onChange={() => handleStructureTypeChange(typeItem.structure_type)}
-                      />
-                      <span>{typeItem.display_label}</span>
-                    </label>
+              <div className="gates-form-row">
+                <label>Template</label>
+                <select
+                  value={formPayload.strategy_template_id ?? ''}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10)
+                    if (v) handleTemplateSelect(v)
+                  }}
+                  aria-label="Template"
+                >
+                  <option value="">— Select —</option>
+                  {templates.map((tpl) => (
+                    <option key={tpl.strategy_template_id} value={tpl.strategy_template_id}>
+                      {tpl.display_name}
+                    </option>
                   ))}
-                  {formPayload.structure_type === 'custom' && (structureTypes.length === 0 || !structureTypes.some((t) => t.structure_type === 'custom')) && (
-                    <label className="structure-type-option structure-type-option--legacy structure-type-option--selected">
-                      <input
-                        type="radio"
-                        name="structure_type"
-                        value="custom"
-                        checked={formPayload.structure_type === 'custom'}
-                        onChange={() => {}}
-                      />
-                      <span>{getStructureTypeLabel('custom')} (legacy)</span>
-                    </label>
-                  )}
-                </div>
+                </select>
               </div>
               <div className="gates-form-row">
                 <label>Version</label>
@@ -1489,11 +1361,11 @@ export function StrategyStructurePage({
             </div>
 
             <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Legs (from Option Type Config)</h4>
+              <h4 className="gates-form-group-title">Legs (from template)</h4>
               <p className="form-hint structure-legs-caption" style={{ marginBottom: 'var(--space-2)' }}>
-                Defined in Option Type Config. Not editable here.
+                Defined in Option Template Config. Not editable here.
               </p>
-              {(defaultLegsLoading || (selectedSubtype && subtypeDefaultLegsLoading)) && (
+              {defaultLegsLoading && (
                 <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading legs…</p>
               )}
               <div className="table-wrap">

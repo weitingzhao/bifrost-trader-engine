@@ -11,9 +11,17 @@ def get_structure_by_id(conn: Any, strategy_structure_id: int) -> Optional[Dict[
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT strategy_structure_id, name, structure_type, structure_subtype, version, is_active,
-                       created_at, updated_at, notes
-                FROM strategy_structure WHERE strategy_structure_id = %s
+                SELECT s.strategy_structure_id, s.name,
+                       t.template_code AS structure_type,
+                       CAST(NULL AS text) AS structure_subtype,
+                       s.strategy_template_id,
+                       t.dim_direction, t.dim_structure, t.dim_coverage,
+                       t.dim_risk, t.dim_volatility, t.dim_time,
+                       t.template_code AS template_code, t.display_name AS template_display_name,
+                       s.version, s.is_active, s.created_at, s.updated_at, s.notes
+                FROM strategy_structure s
+                LEFT JOIN strategy_template t ON t.strategy_template_id = s.strategy_template_id
+                WHERE s.strategy_structure_id = %s
                 """,
                 (strategy_structure_id,),
             )
@@ -90,12 +98,17 @@ def list_structures(conn: Any, active_only: bool = True) -> List[Dict[str, Any]]
             if active_only:
                 cur.execute(
                     """
-                    SELECT s.strategy_structure_id, s.name, s.structure_type, s.structure_subtype,
-                           st.display_label AS structure_subtype_label,
+                    SELECT s.strategy_structure_id, s.name,
+                           t.template_code AS structure_type,
+                           CAST(NULL AS text) AS structure_subtype,
+                           t.display_name AS structure_subtype_label,
+                           s.strategy_template_id,
+                           t.dim_direction, t.dim_structure, t.dim_coverage,
+                           t.dim_risk, t.dim_volatility, t.dim_time,
+                           t.template_code AS template_code, t.display_name AS template_display_name,
                            s.version, s.is_active, s.created_at, s.updated_at, s.notes
                     FROM strategy_structure s
-                    LEFT JOIN strategy_structure_subtype st
-                      ON st.structure_type = s.structure_type AND st.subtype = s.structure_subtype
+                    LEFT JOIN strategy_template t ON t.strategy_template_id = s.strategy_template_id
                     WHERE s.is_active = true
                     ORDER BY s.name
                     """
@@ -103,12 +116,17 @@ def list_structures(conn: Any, active_only: bool = True) -> List[Dict[str, Any]]
             else:
                 cur.execute(
                     """
-                    SELECT s.strategy_structure_id, s.name, s.structure_type, s.structure_subtype,
-                           st.display_label AS structure_subtype_label,
+                    SELECT s.strategy_structure_id, s.name,
+                           t.template_code AS structure_type,
+                           CAST(NULL AS text) AS structure_subtype,
+                           t.display_name AS structure_subtype_label,
+                           s.strategy_template_id,
+                           t.dim_direction, t.dim_structure, t.dim_coverage,
+                           t.dim_risk, t.dim_volatility, t.dim_time,
+                           t.template_code AS template_code, t.display_name AS template_display_name,
                            s.version, s.is_active, s.created_at, s.updated_at, s.notes
                     FROM strategy_structure s
-                    LEFT JOIN strategy_structure_subtype st
-                      ON st.structure_type = s.structure_type AND st.subtype = s.structure_subtype
+                    LEFT JOIN strategy_template t ON t.strategy_template_id = s.strategy_template_id
                     ORDER BY s.name
                     """
                 )
@@ -170,7 +188,7 @@ def list_structures(conn: Any, active_only: bool = True) -> List[Dict[str, Any]]
 
 
 def list_opportunities(conn: Any, active_only: bool = True) -> List[Dict[str, Any]]:
-    """Return list of strategy_opportunity rows with scope_type and structure name from JOIN (no symbols/conditions in list)."""
+    """Return list of strategy_opportunity rows with structure_name, gate_safety_name, scope_type, and symbols for list UI."""
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if active_only:
@@ -179,9 +197,14 @@ def list_opportunities(conn: Any, active_only: bool = True) -> List[Dict[str, An
                     SELECT o.strategy_opportunity_id, o.name, o.strategy_structure_id,
                            o.default_gate_safety_strategy_id, o.scope_type,
                            o.is_active, o.created_at, o.updated_at,
-                           s.name AS structure_name
+                           s.name AS structure_name,
+                           g.name AS gate_safety_name,
+                           (SELECT array_agg(symbol ORDER BY sort_order)
+                            FROM strategy_opportunity_symbol
+                            WHERE strategy_opportunity_id = o.strategy_opportunity_id) AS symbols
                     FROM strategy_opportunity o
                     LEFT JOIN strategy_structure s ON s.strategy_structure_id = o.strategy_structure_id
+                    LEFT JOIN gate_safety_strategy g ON g.gate_safety_strategy_id = o.default_gate_safety_strategy_id
                     WHERE o.is_active = true
                     ORDER BY o.name
                     """
@@ -192,9 +215,14 @@ def list_opportunities(conn: Any, active_only: bool = True) -> List[Dict[str, An
                     SELECT o.strategy_opportunity_id, o.name, o.strategy_structure_id,
                            o.default_gate_safety_strategy_id, o.scope_type,
                            o.is_active, o.created_at, o.updated_at,
-                           s.name AS structure_name
+                           s.name AS structure_name,
+                           g.name AS gate_safety_name,
+                           (SELECT array_agg(symbol ORDER BY sort_order)
+                            FROM strategy_opportunity_symbol
+                            WHERE strategy_opportunity_id = o.strategy_opportunity_id) AS symbols
                     FROM strategy_opportunity o
                     LEFT JOIN strategy_structure s ON s.strategy_structure_id = o.strategy_structure_id
+                    LEFT JOIN gate_safety_strategy g ON g.gate_safety_strategy_id = o.default_gate_safety_strategy_id
                     ORDER BY o.name
                     """
                 )

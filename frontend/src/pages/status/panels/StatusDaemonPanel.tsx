@@ -1,5 +1,4 @@
 import type { DaemonHeartbeat, IbConfig, StatusResponse } from '../../../types'
-import { InfoTooltip } from '../../../components/InfoTooltip'
 import { fmtTs } from '../../../utils/format'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
@@ -40,7 +39,7 @@ export function StatusDaemonPanel({
   strategyGroupLamp,
   secondsUntilNextHeartbeat,
   runStatusLabel,
-  suspended,
+  suspended: _suspended,
   ibConnected,
   daemonIbLine,
   ibConfig,

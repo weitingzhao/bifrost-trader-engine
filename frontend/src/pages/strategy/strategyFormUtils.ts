@@ -26,8 +26,15 @@ export function getStructureTypeLabel(structureType: string | null | undefined):
   return STRUCTURE_TYPE_LABELS[structureType] ?? structureType
 }
 
+export function getStructureDisplayLabel(row: StrategyStructure): string {
+  if (row.template_display_name) return row.template_display_name
+  if (row.structure_subtype_label) return row.structure_subtype_label
+  return getStructureTypeLabel(row.structure_type)
+}
+
 export const DEFAULT_STRUCTURE_PAYLOAD: StructurePayload = {
   name: '',
+  strategy_template_id: undefined,
   structure_type: '',
   legs: [],
   constraints: [],
@@ -49,6 +56,27 @@ export const SCOPE_TYPE_LABELS: Record<string, string> = {
 export function getScopeTypeLabel(key: string | null | undefined): string {
   if (key == null || key === '') return '— None'
   return SCOPE_TYPE_LABELS[key] ?? key
+}
+
+/** Scope cell: show symbol list (or scope label), title = full symbols on hover. */
+export function getScopeDisplay(
+  scopeType: string | null | undefined,
+  symbols: string[] | null | undefined
+): { text: string; title: string } {
+  const list = symbols?.filter((s) => s != null && String(s).trim()) ?? []
+  const symbolsLabel = list.length > 0 ? list.join(', ') : ''
+  if (scopeType == null || scopeType === '') {
+    return { text: '— None', title: '' }
+  }
+  if (scopeType === 'explicit_symbols') {
+    const text = list.length > 0 ? symbolsLabel : 'Explicit symbols'
+    return { text, title: symbolsLabel }
+  }
+  if (scopeType === 'watchlist_stk') {
+    const text = list.length > 0 ? symbolsLabel : 'Watchlist (stocks)'
+    return { text, title: list.length > 0 ? symbolsLabel : 'All watchlist STK' }
+  }
+  return { text: getScopeTypeLabel(scopeType), title: symbolsLabel }
 }
 
 export const CONDITION_TYPES = ['iv_min', 'iv_max', 'dte_min', 'dte_max', 'earnings_blackout_days', 'min_volume'] as const
@@ -102,13 +130,14 @@ export function structureToPayload(row: StrategyStructure): StructurePayload {
           meta_value_text: meta_value_text as string | null,
         }))
       : []
-  const structure_type = row.structure_type ?? 'straddle_strangle'
+  const structure_type = row.structure_type ?? 'custom'
   const structure_subtype =
     structure_type === 'covered_call' && row.structure_subtype != null && row.structure_subtype !== ''
       ? row.structure_subtype
       : undefined
   return {
     name: row.name,
+    strategy_template_id: row.strategy_template_id ?? undefined,
     structure_type,
     structure_subtype: structure_subtype ?? null,
     legs,

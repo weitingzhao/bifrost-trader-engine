@@ -3,6 +3,7 @@ import type { StatusResponse } from '../types'
 import {
   fetchGateSafetySets,
   fetchGateSafetyFull,
+  fetchDimsGrouped,
   createGateSafety,
   updateGateSafety,
   postActiveStrategy,
@@ -10,6 +11,7 @@ import {
   type GateSafetyFull,
   type GateSafetyPayload,
   type GateSafetyGates,
+  type StrategyDimRow,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 
@@ -52,15 +54,43 @@ const DEFAULT_GATES: GateSafetyGates = {
   },
 }
 
+const GATE_DIM_FIELDS = [
+  { payloadKey: 'dim_direction' as const, dimType: 'direction', label: 'Direction' },
+  { payloadKey: 'dim_structure' as const, dimType: 'structure', label: 'Structure' },
+  { payloadKey: 'dim_coverage' as const, dimType: 'coverage', label: 'Coverage' },
+  { payloadKey: 'dim_risk' as const, dimType: 'risk', label: 'Risk' },
+  { payloadKey: 'dim_volatility' as const, dimType: 'volatility', label: 'Volatility' },
+  { payloadKey: 'dim_time' as const, dimType: 'time', label: 'Time horizon' },
+]
+
 function fullToPayload(full: GateSafetyFull): GateSafetyPayload {
   return {
     name: full.name,
     version: full.version,
     structure_type: full.structure_type ?? null,
+    dim_direction: full.dim_direction ?? null,
+    dim_structure: full.dim_structure ?? null,
+    dim_coverage: full.dim_coverage ?? null,
+    dim_risk: full.dim_risk ?? null,
+    dim_volatility: full.dim_volatility ?? null,
+    dim_time: full.dim_time ?? null,
     is_active: full.is_active,
     gates: full.gates ?? DEFAULT_GATES,
     earnings_dates: full.earnings_dates ?? [],
   }
+}
+
+function gateSetDimsSummary(row: GateSafetySet): string {
+  const parts = [
+    row.dim_direction,
+    row.dim_structure,
+    row.dim_coverage,
+    row.dim_risk,
+    row.dim_volatility,
+    row.dim_time,
+  ].filter(Boolean) as string[]
+  if (parts.length) return parts.join(' · ')
+  return row.structure_type ?? '—'
 }
 
 export function GatesConfigPage({
@@ -74,10 +104,17 @@ export function GatesConfigPage({
   const [error, setError] = useState<string | null>(null)
   const [setActiveMsg, setSetActiveMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const [formOpen, setFormOpen] = useState<'create' | number | null>(null)
+  const [dimsByType, setDimsByType] = useState<Record<string, StrategyDimRow[]>>({})
   const [formPayload, setFormPayload] = useState<GateSafetyPayload>({
     name: '',
     version: 1,
     structure_type: null,
+    dim_direction: null,
+    dim_structure: null,
+    dim_coverage: null,
+    dim_risk: null,
+    dim_volatility: null,
+    dim_time: null,
     is_active: true,
     gates: DEFAULT_GATES,
     earnings_dates: [],
@@ -98,6 +135,12 @@ export function GatesConfigPage({
     loadSets()
   }, [loadSets])
 
+  useEffect(() => {
+    fetchDimsGrouped()
+      .then((r) => setDimsByType(r.by_type ?? {}))
+      .catch(() => setDimsByType({}))
+  }, [])
+
   const handleSetActive = async (gateSafetyId: number) => {
     const res = await postActiveStrategy(status?.active_strategy_structure_id ?? null, gateSafetyId, status?.active_strategy_allocation_id ?? null)
     if (res.ok) {
@@ -114,6 +157,12 @@ export function GatesConfigPage({
       name: 'New gate set',
       version: 1,
       structure_type: null,
+      dim_direction: null,
+      dim_structure: null,
+      dim_coverage: null,
+      dim_risk: null,
+      dim_volatility: null,
+      dim_time: null,
       is_active: true,
       gates: JSON.parse(JSON.stringify(DEFAULT_GATES)),
       earnings_dates: [],
@@ -296,7 +345,7 @@ export function GatesConfigPage({
                 <tr>
                   <th>Name</th>
                   <th>Version</th>
-                  <th>Type</th>
+                  <th>Dimensions</th>
                   <th>Active</th>
                   <th></th>
                 </tr>
@@ -306,7 +355,7 @@ export function GatesConfigPage({
                   <tr key={row.gate_safety_strategy_id}>
                     <td>{row.name}</td>
                     <td>{row.version ?? '—'}</td>
-                    <td>{row.structure_type ?? '—'}</td>
+                    <td title={gateSetDimsSummary(row)}>{gateSetDimsSummary(row)}</td>
                     <td>{row.is_active ? 'Yes' : 'No'}</td>
                     <td>
                       <button type="button" className="btn-manage" onClick={() => openEdit(row.gate_safety_strategy_id)}>
@@ -363,15 +412,28 @@ export function GatesConfigPage({
                   onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
                 />
               </div>
-              <div className="gates-form-row">
-                <label>Structure type</label>
-                <input
-                  type="text"
-                  value={formPayload.structure_type ?? ''}
-                  onChange={(e) => updateForm({ structure_type: e.target.value.trim() || null })}
-                  placeholder="e.g. straddle_strangle"
-                />
-              </div>
+              <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>
+                Optional filters by strategy dimensions. Leave blank to apply broadly.
+              </p>
+              {GATE_DIM_FIELDS.map(({ payloadKey, dimType, label }) => (
+                <div key={payloadKey} className="gates-form-row">
+                  <label>{label}</label>
+                  <select
+                    value={formPayload[payloadKey] ?? ''}
+                    onChange={(e) =>
+                      updateForm({ [payloadKey]: e.target.value.trim() || null } as Partial<GateSafetyPayload>)
+                    }
+                    aria-label={label}
+                  >
+                    <option value="">— Any</option>
+                    {(dimsByType[dimType] ?? []).map((d) => (
+                      <option key={d.strategy_dim_id} value={d.code}>
+                        {d.display_label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
               <div className="gates-form-row gates-form-row--full">
                 <label className="toggle-switch" style={{ cursor: 'pointer' }}>
                   <input

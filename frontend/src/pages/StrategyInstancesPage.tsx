@@ -8,7 +8,7 @@ import {
   createStrategyInstance,
 } from '../api'
 import { StrategyInstanceDetailPage } from './StrategyInstanceDetailPage'
-import { fmtTsShort } from '../utils/format'
+import { fmtTsShort, fmtDate } from '../utils/format'
 
 export interface StrategyInstancesPageProps {
   status: StatusResponse | null
@@ -223,6 +223,7 @@ export function StrategyInstancesPage({
                 <th>Account</th>
                 <th>Opened at</th>
                 <th>Created at</th>
+                <th>Executions count</th>
                 <th>Label</th>
                 <th>Actions</th>
               </tr>
@@ -230,7 +231,7 @@ export function StrategyInstancesPage({
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>No strategy instances found.</td>
+                  <td colSpan={8}>No strategy instances found.</td>
                 </tr>
               ) : (
                 items.map((row) => (
@@ -240,14 +241,17 @@ export function StrategyInstancesPage({
                     <td>{row.account_id}</td>
                     <td>
                       {row.opened_at_epoch != null
-                        ? fmtTsShort(row.opened_at_epoch)
-                        : row.opened_at ?? '—'}
+                        ? fmtDate(row.opened_at_epoch)
+                        : row.opened_at && row.opened_at.length >= 10
+                          ? row.opened_at.slice(0, 10)
+                          : row.opened_at ?? '—'}
                     </td>
                     <td>
                       {row.created_at_epoch != null
                         ? fmtTsShort(row.created_at_epoch)
                         : row.created_at ?? '—'}
                     </td>
+                    <td>{row.executions_count != null ? row.executions_count : '—'}</td>
                     <td>{row.label ?? '—'}</td>
                     <td>
                       <a

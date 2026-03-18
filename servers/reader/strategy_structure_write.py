@@ -5,16 +5,12 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 
-from servers.reader import structure_type_config
 from servers.reader import structure_type_schema
+from servers.reader import template_config
 from src.sink.postgres_sink import _get_conn_params
 
 logger = logging.getLogger(__name__)
 
-COVERED_CALL_SUBTYPES = ("otm", "atm", "itm", "deep_otm")
-
-# Legacy/alias -> canonical for role (and optionally direction/option_right) per structure_type and leg index.
-# Used so existing strategies with old values (e.g. role "stock" for covered_call leg 0) still pass validation.
 _LEG_ROLE_ALIASES: Dict[str, Dict[int, Dict[str, str]]] = {
     "covered_call": {
         0: {"stock": "underlying", "equity": "underlying"},
@@ -22,23 +18,28 @@ _LEG_ROLE_ALIASES: Dict[str, Dict[int, Dict[str, str]]] = {
 }
 
 
+def _normalize_key_for_aliases(template_code: str) -> str:
+    tc = (template_code or "").strip().lower()
+    if tc.startswith("covered_call"):
+        return "covered_call"
+    return tc
+
+
 def _normalize_legs(
-    structure_type: str, legs: List[Any], schema: Optional[Dict[str, Any]] = None
+    template_code: str, legs: List[Any], schema: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
-    """Return a copy of legs with role/direction/option_right normalized to canonical values. Used before validate_legs."""
-    key = (structure_type or "").strip().lower()
+    key = _normalize_key_for_aliases(template_code)
     if schema is not None:
         expected_legs = schema.get("legs", [])
     else:
-        s = structure_type_schema.get_schema(structure_type)
-        expected_legs = (s.get("legs", []) if s else [])
+        expected_legs = []
     aliases_by_index = _LEG_ROLE_ALIASES.get(key, {})
     if not isinstance(legs, list):
         return []
     out = []
     for i, leg in enumerate(legs):
         if not isinstance(leg, dict):
-            out.append(leg if isinstance(leg, dict) else {})
+            out.append({})
             continue
         leg_copy = dict(leg)
         role_aliases = aliases_by_index.get(i, {})
@@ -48,14 +49,12 @@ def _normalize_legs(
                 r_str = str(r).strip().lower()
                 if r_str in role_aliases:
                     leg_copy["role"] = role_aliases[r_str]
-        # Option leg: client may send role "option"; normalize to schema role (call/put) so validation passes
         if i < len(expected_legs):
             exp_role = expected_legs[i].get("role")
             if exp_role in ("call", "put"):
                 got_role = (leg_copy.get("role") or "").strip().lower()
                 if got_role == "option":
                     leg_copy["role"] = exp_role
-        # Stock leg: schema says option_right must be empty; normalize so validation passes
         if i < len(expected_legs) and expected_legs[i].get("option_right") is None:
             leg_copy["option_right"] = None
         out.append(leg_copy)
@@ -63,7 +62,6 @@ def _normalize_legs(
 
 
 def _conn_from_config(status_config: Optional[dict]) -> Any:
-    """Open a connection from status_config (postgres). Returns None if config invalid."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None
     try:
@@ -139,14 +137,51 @@ def _insert_meta(cur: Any, strategy_structure_id: int, meta: List[Dict[str, Any]
         )
 
 
+def _resolve_template_id(
+    conn: Any, payload: Dict[str, Any], existing_structure_id: Optional[int] = None
+) -> tuple:
+    """Return (strategy_template_id, template_row dict) or raise ValueError."""
+    tid = payload.get("strategy_template_id")
+    if tid is not None and str(tid).strip() != "":
+        tid_int = int(tid)
+        row = template_config.get_template_row(conn, tid_int)
+        if not row:
+            raise ValueError("strategy_template_id not found")
+        return tid_int, row
+    st = (payload.get("structure_type") or "").strip()
+    if not st and existing_structure_id is not None:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT strategy_template_id FROM strategy_structure WHERE strategy_structure_id = %s",
+                    (existing_structure_id,),
+                )
+                r = cur.fetchone()
+                if r and r[0]:
+                    row = template_config.get_template_row(conn, int(r[0]))
+                    if row:
+                        return int(r[0]), row
+        except Exception:
+            pass
+    if not st:
+        raise ValueError("strategy_template_id or structure_type is required")
+    sub = (payload.get("structure_subtype") or "").strip().lower() or None
+    if st == "covered_call" and sub in ("otm", "atm", "itm", "deep_otm"):
+        code = f"covered_call_{sub}"
+    elif st == "covered_call":
+        code = "covered_call_otm"
+    else:
+        code = st
+    row = template_config.get_template_by_code(conn, code)
+    if not row:
+        raise ValueError(f"Unknown template for structure_type={st!r}")
+    return int(row["strategy_template_id"]), row
+
+
 def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> Optional[int]:
-    """Insert strategy_structure (scalars + notes) and child rows. Returns strategy_structure_id or None."""
     name = (payload.get("name") or "").strip()
     if not name:
         raise ValueError("name is required")
-    structure_type = (payload.get("structure_type") or "").strip()
-    if not structure_type:
-        raise ValueError("structure_type is required")
     legs = payload.get("legs")
     if legs is None:
         raise ValueError("legs is required")
@@ -162,35 +197,29 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
     if meta is not None and not isinstance(meta, list):
         raise ValueError("meta must be an array")
 
-    structure_subtype = None
-    if structure_type == "covered_call":
-        raw = (payload.get("structure_subtype") or "").strip().lower()
-        if raw in COVERED_CALL_SUBTYPES:
-            structure_subtype = raw
-
     conn = _conn_from_config(status_config)
-    schema = None
-    if conn:
-        schema = structure_type_schema.get_schema_from_db(conn, structure_type, structure_subtype)
-        # Legs are defined in Option Type Config only; ignore payload.legs and use config.
-        legs = structure_type_config.get_default_legs_for_subtype(conn, structure_type, structure_subtype)
-    if schema is None:
-        schema = structure_type_schema.get_schema(structure_type)
-    legs = _normalize_legs(structure_type, legs, schema)
-    structure_type_schema.validate_legs(structure_type, legs, schema=schema)
-
     if conn is None:
         return None
     try:
+        tid, trow = _resolve_template_id(conn, payload, None)
+        template_code = trow["template_code"]
+        legs = template_config.get_template_legs(conn, tid)
+        schema = structure_type_schema.build_schema_from_legs(legs)
+        if schema and (schema.get("legs") or []):
+            structure_type_schema.validate_legs(template_code, legs, schema=schema)
+        legs = _normalize_legs(template_code, legs, schema)
+        if schema and (schema.get("legs") or []):
+            structure_type_schema.validate_legs(template_code, legs, schema=schema)
+
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO strategy_structure (
-                    name, structure_type, structure_subtype, version, is_active, notes
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                    name, strategy_template_id, version, is_active, notes
+                ) VALUES (%s,%s,%s,%s,%s)
                 RETURNING strategy_structure_id
                 """,
-                (name, structure_type, structure_subtype, version, is_active, notes),
+                (name, tid, version, is_active, notes),
             )
             row = cur.fetchone()
             if not row:
@@ -218,17 +247,13 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
 def update_structure(
     status_config: Optional[dict], strategy_structure_id: int, payload: Dict[str, Any]
 ) -> bool:
-    """Update strategy_structure (scalars + notes) and replace child rows. Returns True on success."""
     name = (payload.get("name") or "").strip()
     if not name:
         raise ValueError("name is required")
-    structure_type = (payload.get("structure_type") or "").strip()
-    if not structure_type:
-        raise ValueError("structure_type is required")
-    legs = payload.get("legs")
-    if legs is None:
+    legs_in = payload.get("legs")
+    if legs_in is None:
         raise ValueError("legs is required")
-    if not isinstance(legs, list):
+    if not isinstance(legs_in, list):
         raise ValueError("legs must be an array")
     version = int(payload["version"]) if payload.get("version") is not None else 1
     is_active = bool(payload["is_active"]) if payload.get("is_active") is not None else True
@@ -240,40 +265,45 @@ def update_structure(
     if meta is not None and not isinstance(meta, list):
         raise ValueError("meta must be an array")
 
-    structure_subtype = None
-    if structure_type == "covered_call":
-        raw = (payload.get("structure_subtype") or "").strip().lower()
-        if raw in COVERED_CALL_SUBTYPES:
-            structure_subtype = raw
-
     conn = _conn_from_config(status_config)
-    schema = None
-    if conn:
-        schema = structure_type_schema.get_schema_from_db(conn, structure_type, structure_subtype)
-        # Legs are defined in Option Type Config only; ignore payload.legs and use config.
-        legs = structure_type_config.get_default_legs_for_subtype(conn, structure_type, structure_subtype)
-    if schema is None:
-        schema = structure_type_schema.get_schema(structure_type)
-    legs = _normalize_legs(structure_type, legs, schema)
-    structure_type_schema.validate_legs(structure_type, legs, schema=schema)
-
     if conn is None:
         return False
     try:
+        tid, trow = _resolve_template_id(conn, payload)
+        template_code = trow["template_code"]
+        legs = template_config.get_template_legs(conn, tid)
+        schema = structure_type_schema.build_schema_from_legs(legs)
+        if schema and (schema.get("legs") or []):
+            structure_type_schema.validate_legs(template_code, legs, schema=schema)
+        legs = _normalize_legs(template_code, legs, schema)
+        if schema and (schema.get("legs") or []):
+            structure_type_schema.validate_legs(template_code, legs, schema=schema)
+
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE strategy_structure SET
-                    name = %s, structure_type = %s, structure_subtype = %s, version = %s, is_active = %s, notes = %s, updated_at = now()
+                    name = %s, strategy_template_id = %s,
+                    version = %s, is_active = %s, notes = %s, updated_at = now()
                 WHERE strategy_structure_id = %s
                 """,
-                (name, structure_type, structure_subtype, version, is_active, notes, strategy_structure_id),
+                (
+                    name,
+                    tid,
+                    version,
+                    is_active,
+                    notes,
+                    strategy_structure_id,
+                ),
             )
             if cur.rowcount == 0:
                 conn.rollback()
                 return False
             cur.execute("DELETE FROM strategy_structure_leg WHERE strategy_structure_id = %s", (strategy_structure_id,))
-            cur.execute("DELETE FROM strategy_structure_constraint WHERE strategy_structure_id = %s", (strategy_structure_id,))
+            cur.execute(
+                "DELETE FROM strategy_structure_constraint WHERE strategy_structure_id = %s",
+                (strategy_structure_id,),
+            )
             cur.execute("DELETE FROM strategy_structure_meta WHERE strategy_structure_id = %s", (strategy_structure_id,))
             _insert_legs(cur, strategy_structure_id, legs)
             _insert_constraints(cur, strategy_structure_id, constraints or [])
@@ -295,7 +325,6 @@ def update_structure(
 
 
 def deactivate_structure(status_config: Optional[dict], strategy_structure_id: int) -> bool:
-    """Soft-delete: set strategy_structure.is_active = false; clear settings.active_strategy_structure_id if it pointed here. Returns False if structure not found or no config."""
     conn = _conn_from_config(status_config)
     if conn is None:
         return False

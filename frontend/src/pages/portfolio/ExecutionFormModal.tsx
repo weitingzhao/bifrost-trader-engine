@@ -50,6 +50,8 @@ interface ExecutionFormModalProps {
   open: boolean
   editExec: Execution | null
   accountOptions: string[]
+  /** When opening Add (no editExec), merge into form after defaults. Cleared when modal closes. */
+  initialDraft?: Partial<ExecutionFormState> | null
   onClose: () => void
   onSuccess: () => void | Promise<void>
 }
@@ -58,6 +60,7 @@ export function ExecutionFormModal({
   open,
   editExec,
   accountOptions,
+  initialDraft = null,
   onClose,
   onSuccess,
 }: ExecutionFormModalProps) {
@@ -89,14 +92,24 @@ export function ExecutionFormModal({
   }, [open, oppIdForm])
 
   useEffect(() => {
-    if (open && accountOptions.length > 0 && !editExec) {
-      setExecForm({
+    if (open && !editExec) {
+      const defaultAcc = accountOptions.length > 0 ? accountOptions[0] ?? '' : ''
+      const base: ExecutionFormState = {
         ...defaultForm,
-        account_id: accountOptions[0] ?? '',
+        account_id: defaultAcc,
         time: unixToDatetimeLocal(Date.now() / 1000),
-      })
+      }
+      if (initialDraft && Object.keys(initialDraft).length > 0) {
+        setExecForm({
+          ...base,
+          ...initialDraft,
+          account_id: (initialDraft.account_id ?? '').trim() || base.account_id,
+        })
+      } else {
+        setExecForm(base)
+      }
     }
-  }, [open, accountOptions, editExec])
+  }, [open, accountOptions, editExec, initialDraft])
 
   useEffect(() => {
     if (editExec) {
@@ -134,7 +147,7 @@ export function ExecutionFormModal({
       aria-labelledby="exec-modal-title"
     >
       <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
-        <h3 id="exec-modal-title">{editExec ? 'Edit execution' : 'Add history'}</h3>
+        <h3 id="exec-modal-title">{editExec ? 'Edit execution' : initialDraft?.sec_type === 'OPT' ? 'Link execution record' : 'Add history'}</h3>
         {execFormError && <p className="section-hint replay-form-error">{execFormError}</p>}
         <form
           className="replay-exec-form"
@@ -274,7 +287,8 @@ export function ExecutionFormModal({
               <option value="">—</option>
               {instances.map(si => (
                 <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
-                  {si.label?.trim() || `#${si.strategy_instance_id} ${si.opened_at}`}
+                  {si.label?.trim() ||
+                    `#${si.strategy_instance_id} ${si.opened_at && si.opened_at.length >= 10 ? si.opened_at.slice(0, 10) : si.opened_at ?? ''}`}
                 </option>
               ))}
             </select>

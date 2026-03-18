@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse } from '../types'
 import {
   fetchStructures,
@@ -7,6 +7,7 @@ import {
   createOpportunity,
   updateOpportunity,
   fetchGateSafetySets,
+  fetchWatchlist,
   type StrategyStructure,
   type StrategyOpportunity,
   type OpportunityPayload,
@@ -19,8 +20,9 @@ import {
   CONDITION_TYPES,
   DEFAULT_OPPORTUNITY_PAYLOAD,
   getConditionTypeLabel,
+  getScopeDisplay,
   getScopeTypeLabel,
-  getStructureTypeLabel,
+  getStructureDisplayLabel,
   opportunityToPayload,
 } from './strategy/strategyFormUtils'
 
@@ -54,6 +56,8 @@ export function StrategyOpportunityPage({
   const [opportunityActiveFilter, setOpportunityActiveFilter] = useState<'all' | 'active' | 'inactive'>('active')
   const [availabilityInProgress, setAvailabilityInProgress] = useState<number | null>(null)
   const [availabilityError, setAvailabilityError] = useState<string | null>(null)
+  const [watchlistItems, setWatchlistItems] = useState<Awaited<ReturnType<typeof fetchWatchlist>>['items']>([])
+  const [watchlistLoading, setWatchlistLoading] = useState(false)
 
   const loadStructures = useCallback(() => {
     setStructuresLoading(true)
@@ -99,6 +103,45 @@ export function StrategyOpportunityPage({
       cancelled = true
     }
   }, [])
+
+  const needWatchlist = Boolean(oppFormOpen && oppFormPayload.scope_type === 'watchlist_stk')
+  useEffect(() => {
+    if (!needWatchlist) return
+    let cancelled = false
+    setWatchlistLoading(true)
+    fetchWatchlist()
+      .then((res) => {
+        if (!cancelled) setWatchlistItems(res.items ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setWatchlistItems([])
+      })
+      .finally(() => {
+        if (!cancelled) setWatchlistLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [needWatchlist])
+
+  const watchlistStkSymbols = useMemo(() => {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const w of watchlistItems) {
+      if ((w.sec_type || 'STK').toUpperCase() === 'OPT') continue
+      const sym = (w.symbol || w.contract_key || '').trim()
+      if (sym && !seen.has(sym)) {
+        seen.add(sym)
+        out.push(sym)
+      }
+    }
+    return out.sort((a, b) => a.localeCompare(b))
+  }, [watchlistItems])
+
+  const activeGateSafetySets = useMemo(
+    () => gateSafetySets.filter((g) => g.is_active === true),
+    [gateSafetySets]
+  )
 
   const filteredOpportunities = opportunities.filter((row) => {
     if (opportunityActiveFilter === 'all') return true
@@ -186,7 +229,12 @@ export function StrategyOpportunityPage({
     setOppFormError(null)
     setOppFormLoading(true)
     const scopeType = (oppFormPayload.scope_type || '').trim() || null
-    const symbols = scopeType === 'explicit_symbols' ? oppFormSymbols.filter((s) => s.trim()) : []
+    const symbols =
+      scopeType === 'explicit_symbols'
+        ? oppFormSymbols.filter((s) => s.trim())
+        : scopeType === 'watchlist_stk'
+          ? oppFormSymbols
+          : []
     const entryConditions = oppFormEntryConditions
       .filter((c) => c.condition_type?.trim())
       .map((c) => ({
@@ -293,7 +341,7 @@ export function StrategyOpportunityPage({
                   <th>Name</th>
                   <th>Structure</th>
                   <th>Scope</th>
-                  <th>Default gate safety</th>
+                  <th>Gate</th>
                   <th>Available</th>
                   <th></th>
                 </tr>
@@ -301,12 +349,17 @@ export function StrategyOpportunityPage({
               <tbody>
                 {filteredOpportunities.map((row) => {
                   const availabilityUpdating = availabilityInProgress === row.strategy_opportunity_id
+                  const scopeDisplay = getScopeDisplay(row.scope_type, row.symbols)
                   return (
                     <tr key={row.strategy_opportunity_id}>
                       <td>{row.name}</td>
                       <td>{row.structure_name ?? row.strategy_structure_id}</td>
-                      <td>{getScopeTypeLabel(row.scope_type)}</td>
-                      <td>{row.gate_safety_name ?? row.default_gate_safety_strategy_id ?? '—'}</td>
+                      <td className="opp-table-scope-cell">
+                        <span className="opp-table-scope-text" title={scopeDisplay.title || undefined}>
+                          {scopeDisplay.text}
+                        </span>
+                      </td>
+                      <td>{row.gate_safety_name ?? '—'}</td>
                       <td>
                         <label className="toggle-switch" style={{ cursor: availabilityUpdating ? 'not-allowed' : 'pointer' }}>
                           <input
@@ -365,10 +418,11 @@ export function StrategyOpportunityPage({
           <div className="gates-form">
             <div className="gates-form-group">
               <h4 className="gates-form-group-title">Metadata</h4>
-              <div className="gates-form-row">
+              <div className="gates-form-row gates-form-row--name">
                 <label>Name</label>
                 <input
                   type="text"
+                  className="opp-form-name-input"
                   value={oppFormPayload.name}
                   onChange={(e) => setOppFormPayload((p) => ({ ...p, name: e.target.value }))}
                   placeholder="Opportunity name"
@@ -401,11 +455,16 @@ export function StrategyOpportunityPage({
                             aria-label={`Structure: ${s.name}`}
                           />
                           <span className="opp-structure-card-title">{s.name}</span>
-                          {(s.version != null && s.version !== '') || (s.structure_type != null && s.structure_type !== '') ? (
+                          {(s.version != null && s.version !== '') ||
+                          (s.template_display_name != null && s.template_display_name !== '') ||
+                          (s.structure_type != null && s.structure_type !== '') ? (
                             <span className="opp-structure-card-meta">
                               {s.version != null && s.version !== '' ? `v${s.version}` : ''}
-                              {s.version != null && s.version !== '' && s.structure_type ? ' · ' : ''}
-                              {s.structure_type ? getStructureTypeLabel(s.structure_type) : ''}
+                              {(s.version != null && s.version !== '') &&
+                              (s.template_display_name || s.structure_type)
+                                ? ' · '
+                                : ''}
+                              {getStructureDisplayLabel(s)}
                             </span>
                           ) : null}
                         </label>
@@ -430,7 +489,7 @@ export function StrategyOpportunityPage({
                     />
                     <span>— None</span>
                   </label>
-                  {gateSafetySets.map((g) => (
+                  {activeGateSafetySets.map((g) => (
                     <label
                       key={g.gate_safety_strategy_id}
                       className={`structure-type-option ${oppFormPayload.default_gate_safety_strategy_id === g.gate_safety_strategy_id ? 'structure-type-option--selected' : ''}`}
@@ -466,30 +525,27 @@ export function StrategyOpportunityPage({
               </div>
             </div>
 
-            <div className="gates-form-group">
+            <div className="opp-form-scope-conditions-cols">
+            <div className="gates-form-group opp-form-scope-col">
               <h4 className="gates-form-group-title">Symbol scope</h4>
               <div className="gates-form-row scope-type-switches-row">
                 <span className="gates-form-row-label">Scope type</span>
-                <div className="scope-type-switches" role="radiogroup" aria-label="Scope type">
+                <div className="structure-active-filter-pills" role="radiogroup" aria-label="Scope type">
                   {SCOPE_TYPES.map((t) => {
                     const value = t || ''
-                    const checked = (oppFormPayload.scope_type ?? '') === value
+                    const isActive = (oppFormPayload.scope_type ?? '') === value
                     return (
-                      <label
+                      <button
                         key={t || '_none'}
-                        className="toggle-switch scope-type-switch-option"
-                        style={{ cursor: 'pointer' }}
+                        type="button"
+                        role="radio"
+                        aria-checked={isActive}
+                        aria-label={getScopeTypeLabel(t)}
+                        className={`structure-active-filter-pill ${isActive ? 'active' : ''}`}
+                        onClick={() => setOppFormPayload((p) => ({ ...p, scope_type: value || null }))}
                       >
-                        <input
-                          type="radio"
-                          name="opp_scope_type"
-                          value={value}
-                          checked={checked}
-                          onChange={() => setOppFormPayload((p) => ({ ...p, scope_type: value || null }))}
-                          aria-label={getScopeTypeLabel(t)}
-                        />
-                        <span className="toggle-switch-caption">{getScopeTypeLabel(t)}</span>
-                      </label>
+                        {getScopeTypeLabel(t)}
+                      </button>
                     )
                   })}
                 </div>
@@ -518,11 +574,66 @@ export function StrategyOpportunityPage({
                 </>
               )}
               {oppFormPayload.scope_type === 'watchlist_stk' && (
-                <p className="form-hint">Symbols from Watchlist STK.</p>
+                <div className="gates-form-row opp-watchlist-stk-row">
+                  <span className="gates-form-row-label">Watchlist STK</span>
+                  <div className="opp-watchlist-stk-list">
+                    {watchlistLoading ? (
+                      <p className="form-hint">Loading watchlist…</p>
+                    ) : watchlistStkSymbols.length === 0 ? (
+                      <p className="form-hint">No stocks in watchlist. Add stocks in Watchlist first.</p>
+                    ) : (
+                      <>
+                        <div className="opp-watchlist-stk-actions">
+                          <button
+                            type="button"
+                            className="btn-secondary opp-watchlist-stk-btn"
+                            onClick={() => setOppFormSymbols([...watchlistStkSymbols])}
+                          >
+                            Select all
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary opp-watchlist-stk-btn"
+                            onClick={() => setOppFormSymbols([])}
+                          >
+                            Clear
+                          </button>
+                          <span className="form-hint" style={{ marginLeft: 'var(--space-2)' }}>
+                            {oppFormSymbols.length === 0
+                              ? 'All symbols (empty = all)'
+                              : `${oppFormSymbols.length} selected`}
+                          </span>
+                        </div>
+                        <ul className="opp-watchlist-stk-symbols" role="group" aria-label="Select symbols from Watchlist STK">
+                          {watchlistStkSymbols.map((sym) => {
+                            const checked = oppFormSymbols.includes(sym)
+                            return (
+                              <li key={sym}>
+                                <label className="opp-watchlist-stk-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      setOppFormSymbols((prev) =>
+                                        checked ? prev.filter((s) => s !== sym) : [...prev, sym].sort((a, b) => a.localeCompare(b))
+                                      )
+                                    }}
+                                    aria-label={`Include ${sym}`}
+                                  />
+                                  <span>{sym}</span>
+                                </label>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
 
-            <div className="gates-form-group">
+            <div className="gates-form-group opp-form-conditions-col">
               <h4 className="gates-form-group-title">Entry conditions</h4>
               <div className="table-wrap">
                 <table className="data-table">
@@ -585,6 +696,7 @@ export function StrategyOpportunityPage({
               <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addOppCondition}>
                 Add condition
               </button>
+            </div>
             </div>
 
             <div className="gates-form-actions" style={{ marginTop: 'var(--space-4)' }}>

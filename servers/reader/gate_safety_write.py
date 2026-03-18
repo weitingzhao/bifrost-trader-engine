@@ -43,10 +43,21 @@ def _payload_to_root_and_children(payload: Dict[str, Any]) -> tuple[Dict[str, An
         earnings_dates = earnings.get("dates") or []
     earnings_dates = [str(d).strip()[:10] for d in earnings_dates if d]
 
+    def _dim(k: str) -> Optional[str]:
+        v = payload.get(k)
+        if v is None or str(v).strip() == "":
+            return None
+        return str(v).strip()
+
     root = {
         "name": (payload.get("name") or "").strip() or "Unnamed",
         "version": int(payload["version"]) if payload.get("version") is not None else 1,
-        "structure_type": (payload.get("structure_type") or "").strip() or None,
+        "dim_direction": _dim("dim_direction"),
+        "dim_structure": _dim("dim_structure"),
+        "dim_coverage": _dim("dim_coverage"),
+        "dim_risk": _dim("dim_risk"),
+        "dim_volatility": _dim("dim_volatility"),
+        "dim_time": _dim("dim_time"),
         "is_active": bool(payload["is_active"]) if payload.get("is_active") is not None else True,
         "min_dte": int(structure.get("min_dte", 21)),
         "max_dte": int(structure.get("max_dte", 35)),
@@ -97,15 +108,28 @@ def create_gate_safety(status_config: Optional[dict], payload: Dict[str, Any]) -
             cur.execute(
                 """
                 INSERT INTO gate_safety_strategy (
-                    name, version, structure_type, is_active,
+                    name, version, dim_direction, dim_structure, dim_coverage,
+                    dim_risk, dim_volatility, dim_time, is_active,
                     min_dte, max_dte, atm_band_pct, blackout_days_before, blackout_days_after, trading_hours_only
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING gate_safety_strategy_id
                 """,
                 (
-                    root["name"], root["version"], root["structure_type"], root["is_active"],
-                    root["min_dte"], root["max_dte"], root["atm_band_pct"],
-                    root["blackout_days_before"], root["blackout_days_after"], root["trading_hours_only"],
+                    root["name"],
+                    root["version"],
+                    root["dim_direction"],
+                    root["dim_structure"],
+                    root["dim_coverage"],
+                    root["dim_risk"],
+                    root["dim_volatility"],
+                    root["dim_time"],
+                    root["is_active"],
+                    root["min_dte"],
+                    root["max_dte"],
+                    root["atm_band_pct"],
+                    root["blackout_days_before"],
+                    root["blackout_days_after"],
+                    root["trading_hours_only"],
                 ),
             )
             row = cur.fetchone()
@@ -173,16 +197,31 @@ def update_gate_safety(status_config: Optional[dict], gate_safety_strategy_id: i
             cur.execute(
                 """
                 UPDATE gate_safety_strategy SET
-                    name = %s, version = %s, structure_type = %s, is_active = %s,
+                    name = %s, version = %s,
+                    dim_direction = %s, dim_structure = %s, dim_coverage = %s,
+                    dim_risk = %s, dim_volatility = %s, dim_time = %s,
+                    is_active = %s,
                     min_dte = %s, max_dte = %s, atm_band_pct = %s,
                     blackout_days_before = %s, blackout_days_after = %s, trading_hours_only = %s,
                     updated_at = now()
                 WHERE gate_safety_strategy_id = %s
                 """,
                 (
-                    root["name"], root["version"], root["structure_type"], root["is_active"],
-                    root["min_dte"], root["max_dte"], root["atm_band_pct"],
-                    root["blackout_days_before"], root["blackout_days_after"], root["trading_hours_only"],
+                    root["name"],
+                    root["version"],
+                    root["dim_direction"],
+                    root["dim_structure"],
+                    root["dim_coverage"],
+                    root["dim_risk"],
+                    root["dim_volatility"],
+                    root["dim_time"],
+                    root["is_active"],
+                    root["min_dte"],
+                    root["max_dte"],
+                    root["atm_band_pct"],
+                    root["blackout_days_before"],
+                    root["blackout_days_after"],
+                    root["trading_hours_only"],
                     gate_safety_strategy_id,
                 ),
             )

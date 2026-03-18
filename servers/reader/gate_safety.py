@@ -14,7 +14,9 @@ def get_gates_by_id(conn: Any, gate_safety_strategy_id: int) -> Optional[Dict[st
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT gate_safety_strategy_id, name, version, structure_type, is_active,
+                SELECT gate_safety_strategy_id, name, version,
+                       dim_direction, dim_structure, dim_coverage, dim_risk, dim_volatility, dim_time,
+                       is_active,
                        min_dte, max_dte, atm_band_pct, blackout_days_before, blackout_days_after,
                        trading_hours_only
                 FROM gate_safety_strategy WHERE gate_safety_strategy_id = %s
@@ -194,7 +196,9 @@ def get_gate_safety_full_by_id(conn: Any, gate_safety_strategy_id: int) -> Optio
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT gate_safety_strategy_id, name, version, structure_type, is_active
+                SELECT gate_safety_strategy_id, name, version,
+                       dim_direction, dim_structure, dim_coverage, dim_risk, dim_volatility, dim_time,
+                       is_active
                 FROM gate_safety_strategy WHERE gate_safety_strategy_id = %s
                 """,
                 (gate_safety_strategy_id,),
@@ -209,7 +213,13 @@ def get_gate_safety_full_by_id(conn: Any, gate_safety_strategy_id: int) -> Optio
             "gate_safety_strategy_id": int(root["gate_safety_strategy_id"]),
             "name": str(root["name"]) if root.get("name") is not None else "",
             "version": int(root["version"]) if root.get("version") is not None else 1,
-            "structure_type": str(root["structure_type"]) if root.get("structure_type") is not None else None,
+            "structure_type": None,
+            "dim_direction": root.get("dim_direction"),
+            "dim_structure": root.get("dim_structure"),
+            "dim_coverage": root.get("dim_coverage"),
+            "dim_risk": root.get("dim_risk"),
+            "dim_volatility": root.get("dim_volatility"),
+            "dim_time": root.get("dim_time"),
             "is_active": bool(root["is_active"]) if root.get("is_active") is not None else True,
             "gates": gates,
             "earnings_dates": [str(d) for d in earnings_dates],
@@ -219,17 +229,19 @@ def get_gate_safety_full_by_id(conn: Any, gate_safety_strategy_id: int) -> Optio
 
 
 def list_gate_safety_sets(conn: Any) -> List[Dict[str, Any]]:
-    """Return list of gate_safety_strategy rows (id, name, version, structure_type, is_active)."""
+    """Return list of gate_safety_strategy rows (metadata + six dims)."""
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT gate_safety_strategy_id, name, version, structure_type, is_active
+                SELECT gate_safety_strategy_id, name, version,
+                       dim_direction, dim_structure, dim_coverage, dim_risk, dim_volatility, dim_time,
+                       is_active
                 FROM gate_safety_strategy
                 ORDER BY name
                 """
             )
             rows = cur.fetchall()
-        return [dict(r) for r in rows]
+        return [{**dict(r), "structure_type": None} for r in rows]
     except Exception:
         return []

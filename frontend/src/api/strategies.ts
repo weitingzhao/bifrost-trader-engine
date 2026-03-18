@@ -4,10 +4,17 @@ import { API } from './constants'
 export interface StrategyStructure {
   strategy_structure_id: number
   name: string
-  structure_type: string | null
-  /** For covered_call: otm | atm | itm | deep_otm; null for other types. */
+  strategy_template_id?: number | null
+  template_code?: string | null
+  template_display_name?: string | null
+  dim_direction?: string | null
+  dim_structure?: string | null
+  dim_coverage?: string | null
+  dim_risk?: string | null
+  dim_volatility?: string | null
+  dim_time?: string | null
+  structure_type?: string | null
   structure_subtype?: string | null
-  /** Display label from Option Type Config (e.g. "OTM Covered Call"); present when list includes JOIN. */
   structure_subtype_label?: string | null
   is_active: boolean
   version: string | number | null
@@ -40,11 +47,12 @@ export interface StructureMetaEntry {
   meta_value_text?: string | null
 }
 
-/** Payload for create/update strategy structure. */
+/** Payload for create/update strategy structure. Dimensions come from the linked template. */
 export interface StructurePayload {
   name: string
-  structure_type: string
-  /** For covered_call: otm | atm | itm | deep_otm; omit or null for other types. */
+  strategy_template_id?: number
+  /** Legacy: resolved to template when strategy_template_id omitted. */
+  structure_type?: string
   structure_subtype?: string | null
   legs: StructureLeg[]
   constraints?: StructureConstraint[]
@@ -154,6 +162,12 @@ export interface GateSafetySet {
   name: string
   version: string | null
   structure_type: string | null
+  dim_direction?: string | null
+  dim_structure?: string | null
+  dim_coverage?: string | null
+  dim_risk?: string | null
+  dim_volatility?: string | null
+  dim_time?: string | null
   is_active: boolean
 }
 
@@ -163,6 +177,12 @@ export interface GateSafetyFull {
   name: string
   version: number
   structure_type: string | null
+  dim_direction?: string | null
+  dim_structure?: string | null
+  dim_coverage?: string | null
+  dim_risk?: string | null
+  dim_volatility?: string | null
+  dim_time?: string | null
   is_active: boolean
   gates: GateSafetyGates
   earnings_dates: string[]
@@ -206,6 +226,12 @@ export interface GateSafetyPayload {
   name: string
   version?: number
   structure_type?: string | null
+  dim_direction?: string | null
+  dim_structure?: string | null
+  dim_coverage?: string | null
+  dim_risk?: string | null
+  dim_volatility?: string | null
+  dim_time?: string | null
   is_active?: boolean
   gates: GateSafetyGates
   earnings_dates?: string[]
@@ -290,40 +316,59 @@ export async function fetchStructure(id: number): Promise<StrategyStructure> {
   return r.json()
 }
 
-/** Fetch structure types from config (for Wizard Step 1). */
-export async function fetchStructureTypes(): Promise<{ items: StructureTypeItem[] }> {
-  const r = await fetch(`${API}/strategies/structure-types`)
+export interface StrategyTemplateRow {
+  strategy_template_id: number
+  template_code: string
+  display_name: string
+  dim_direction?: string | null
+  dim_structure?: string | null
+  dim_coverage?: string | null
+  dim_risk?: string | null
+  dim_volatility?: string | null
+  dim_time?: string | null
+  explanation?: string | null
+  typical_use?: string | null
+  example?: string | null
+  nature?: string | null
+  sort_order: number
+  is_active: boolean
+}
+
+export interface StrategyTemplateDetail extends StrategyTemplateRow {
+  legs: StructureLeg[]
+  meta_params: MetaParamItem[]
+  characteristics: string[]
+}
+
+export interface StrategyDimRow {
+  strategy_dim_id: number
+  dim_type: string
+  code: string
+  display_label: string
+  sort_order: number
+}
+
+export async function fetchTemplates(activeOnly = true): Promise<{ items: StrategyTemplateRow[] }> {
+  const params = new URLSearchParams({ active_only: String(activeOnly) })
+  const r = await fetch(`${API}/strategies/templates?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
-/** Fetch default legs for a structure type (industry-aligned defaults API). Returns empty legs for custom/unknown. */
-export async function fetchStructureTypeDefaultLegs(structureType: string): Promise<{ legs: StructureLeg[] }> {
-  const r = await fetch(`${API}/strategies/structure-types/${encodeURIComponent(structureType)}/default-legs`)
+export async function fetchTemplateDetail(templateId: number): Promise<StrategyTemplateDetail> {
+  const r = await fetch(`${API}/strategies/templates/${templateId}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
-/** Fetch default legs for a specific subtype (falls back to type-level legs when no subtype override).
- * subtype_override: true when Option Type Config has "Override with subtype-specific legs" for this subtype. */
-export async function fetchStructureSubtypeDefaultLegs(
-  structureType: string,
-  subtype: string,
-): Promise<{ legs: StructureLeg[]; subtype_override?: boolean }> {
-  const r = await fetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/default-legs`
-  )
+export async function fetchDimsGrouped(): Promise<{ by_type: Record<string, StrategyDimRow[]> }> {
+  const r = await fetch(`${API}/strategies/dims`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
-/** Fetch subtypes with characteristics and meta_params, plus infer_rules (for Wizard Step 2 / Edit). */
-export async function fetchStructureTypeSubtypes(
-  structureType: string
-): Promise<{ subtypes: SubtypeItem[]; infer_rules: InferRuleItem[] }> {
-  const r = await fetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes`
-  )
+export async function fetchDimsForType(dimType: string): Promise<{ items: StrategyDimRow[] }> {
+  const r = await fetch(`${API}/strategies/dims/${encodeURIComponent(dimType)}/items`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -335,58 +380,7 @@ export interface StructureTypeConfigOption {
 }
 
 /** Allowed param_kind values with display labels (single source of truth from backend). */
-export async function fetchParamKindOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/structure-types/param-kind-options`)
-  if (!r.ok) throw new Error(r.statusText)
-  return r.json()
-}
-
-/** Allowed leg role values with display labels for Type Config Default legs. */
-export async function fetchLegRoleOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/structure-types/leg-role-options`)
-  if (!r.ok) throw new Error(r.statusText)
-  return r.json()
-}
-
-/** Allowed leg direction values with display labels for Type Config Default legs. */
-export async function fetchLegDirectionOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/structure-types/leg-direction-options`)
-  if (!r.ok) throw new Error(r.statusText)
-  return r.json()
-}
-
-/** Allowed leg option_right values (empty = stock) with display labels for Type Config Default legs. */
-export async function fetchLegOptionRightOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/structure-types/leg-option-right-options`)
-  if (!r.ok) throw new Error(r.statusText)
-  return r.json()
-}
-
-/** Allowed meta_key values with display labels for a structure type (Type Config). */
-export async function fetchMetaKeyOptions(
-  structureType: string
-): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/meta-key-options`
-  )
-  if (!r.ok) throw new Error(r.statusText)
-  return r.json()
-}
-
-/** Allowed meta_value_text with display labels for (structure_type, meta_key). Empty if no enum. */
-export async function fetchMetaValueOptions(
-  structureType: string,
-  metaKey: string
-): Promise<{ options: StructureTypeConfigOption[] }> {
-  const params = new URLSearchParams({ meta_key: metaKey })
-  const r = await fetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/meta-value-options?${params}`
-  )
-  if (!r.ok) throw new Error(r.statusText)
-  return r.json()
-}
-
-async function structureTypeConfigFetch(
+async function templateConfigFetch(
   url: string,
   options: { method: string; body?: string }
 ): Promise<unknown> {
@@ -400,114 +394,122 @@ async function structureTypeConfigFetch(
   return j
 }
 
-export async function createStructureType(
-  payload: StructureTypePayload
-): Promise<{ structure_type: string }> {
-  return structureTypeConfigFetch(`${API}/strategies/structure-types`, {
+export async function fetchParamKindOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/templates/options/param-kind`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchLegRoleOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/templates/options/leg-role`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchLegDirectionOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/templates/options/leg-direction`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchLegOptionRightOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/templates/options/leg-option-right`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchMetaKeyOptions(
+  _structureType?: string
+): Promise<{ options: StructureTypeConfigOption[] }> {
+  const r = await fetch(`${API}/strategies/templates/options/meta-keys`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function fetchMetaValueOptions(
+  _structureType: string,
+  metaKey: string
+): Promise<{ options: StructureTypeConfigOption[] }> {
+  const params = new URLSearchParams({ meta_key: metaKey })
+  const r = await fetch(`${API}/strategies/templates/options/meta-values?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
+export async function createTemplate(payload: Record<string, unknown>): Promise<{ strategy_template_id: number }> {
+  return templateConfigFetch(`${API}/strategies/templates`, {
     method: 'POST',
     body: JSON.stringify(payload),
-  }) as Promise<{ structure_type: string }>
+  }) as Promise<{ strategy_template_id: number }>
 }
 
-export async function updateStructureType(
-  structureType: string,
-  payload: StructureTypeUpdatePayload
+export async function updateTemplate(
+  templateId: number,
+  payload: Record<string, unknown>
 ): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}`,
-    { method: 'PUT', body: JSON.stringify(payload) }
-  ) as Promise<{ ok: boolean }>
+  return templateConfigFetch(`${API}/strategies/templates/${templateId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }) as Promise<{ ok: boolean }>
 }
 
-export async function deleteStructureType(structureType: string): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}`,
-    { method: 'DELETE' }
-  ) as Promise<{ ok: boolean }>
+export async function deleteTemplate(templateId: number): Promise<{ ok: boolean }> {
+  return templateConfigFetch(`${API}/strategies/templates/${templateId}`, {
+    method: 'DELETE',
+  }) as Promise<{ ok: boolean }>
 }
 
-export async function replaceStructureTypeLegs(
-  structureType: string,
+export async function replaceTemplateLegs(
+  templateId: number,
   legs: StructureTypeLegPayload[]
 ): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/default-legs`,
-    { method: 'PUT', body: JSON.stringify({ legs }) }
-  ) as Promise<{ ok: boolean }>
+  return templateConfigFetch(`${API}/strategies/templates/${templateId}/legs`, {
+    method: 'PUT',
+    body: JSON.stringify({ legs }),
+  }) as Promise<{ ok: boolean }>
 }
 
-export async function replaceStructureSubtypeLegs(
-  structureType: string,
-  subtype: string,
-  legs: StructureTypeLegPayload[]
-): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/default-legs`,
-    { method: 'PUT', body: JSON.stringify({ legs }) }
-  ) as Promise<{ ok: boolean }>
-}
-
-export async function createSubtype(
-  structureType: string,
-  payload: SubtypePayload
-): Promise<{ subtype: string }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes`,
-    { method: 'POST', body: JSON.stringify(payload) }
-  ) as Promise<{ subtype: string }>
-}
-
-export async function updateSubtype(
-  structureType: string,
-  subtype: string,
-  payload: SubtypeUpdatePayload
-): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}`,
-    { method: 'PUT', body: JSON.stringify(payload) }
-  ) as Promise<{ ok: boolean }>
-}
-
-export async function deleteSubtype(
-  structureType: string,
-  subtype: string
-): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}`,
-    { method: 'DELETE' }
-  ) as Promise<{ ok: boolean }>
-}
-
-export async function replaceSubtypeCharacteristics(
-  structureType: string,
-  subtype: string,
-  items: string[]
-): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/characteristics`,
-    { method: 'PUT', body: JSON.stringify({ items }) }
-  ) as Promise<{ ok: boolean }>
-}
-
-export async function replaceSubtypeMetaParams(
-  structureType: string,
-  subtype: string,
+export async function replaceTemplateParams(
+  templateId: number,
   items: MetaParamPayload[]
 ): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/subtypes/${encodeURIComponent(subtype)}/meta-params`,
-    { method: 'PUT', body: JSON.stringify({ items }) }
-  ) as Promise<{ ok: boolean }>
+  return templateConfigFetch(`${API}/strategies/templates/${templateId}/params`, {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  }) as Promise<{ ok: boolean }>
 }
 
-export async function replaceInferRules(
-  structureType: string,
-  items: InferRuleItem[]
+export async function replaceTemplateCharacteristics(
+  templateId: number,
+  items: string[]
 ): Promise<{ ok: boolean }> {
-  return structureTypeConfigFetch(
-    `${API}/strategies/structure-types/${encodeURIComponent(structureType)}/infer-rules`,
-    { method: 'PUT', body: JSON.stringify({ items }) }
-  ) as Promise<{ ok: boolean }>
+  return templateConfigFetch(`${API}/strategies/templates/${templateId}/characteristics`, {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  }) as Promise<{ ok: boolean }>
+}
+
+export async function createDim(dimType: string, body: Record<string, unknown>): Promise<{ ok: boolean }> {
+  return templateConfigFetch(`${API}/strategies/dims/${encodeURIComponent(dimType)}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }) as Promise<{ ok: boolean }>
+}
+
+export async function updateDim(
+  strategyDimId: number,
+  body: Record<string, unknown>
+): Promise<{ ok: boolean }> {
+  return templateConfigFetch(`${API}/strategies/dims/by-id/${strategyDimId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }) as Promise<{ ok: boolean }>
+}
+
+export async function deleteDim(strategyDimId: number): Promise<{ ok: boolean }> {
+  return templateConfigFetch(`${API}/strategies/dims/by-id/${strategyDimId}`, {
+    method: 'DELETE',
+  }) as Promise<{ ok: boolean }>
 }
 
 export async function createStructure(payload: StructurePayload): Promise<{ strategy_structure_id: number }> {

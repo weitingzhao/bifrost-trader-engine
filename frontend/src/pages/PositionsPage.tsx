@@ -24,10 +24,84 @@ function optionLastStrikePctClass(right: string, side: 'Buy' | 'Sell', pct: numb
   return positive ? 'pnl-negative' : 'pnl-positive'
 }
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
-import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
+import { ExecutionFormModal, type ExecutionFormState } from './portfolio/ExecutionFormModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
 import type { LivePositionRow, OpenOptionGroup, PortfolioView } from './portfolio/types'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
+
+function buildLinkExecutionDraftFromLivePosition(group: OpenOptionGroup, position: LivePositionRow): Partial<ExecutionFormState> {
+  const sym = getContractLabelParts(group.contract_key).symbol ?? ''
+  const exp = String(position.lastTradeDateOrContractMonth ?? position.expiry ?? group.expiry ?? '')
+    .replace(/-/g, '')
+    .trim()
+  const strikeNum = position.strike ?? group.strike
+  const strikeStr = strikeNum != null && Number.isFinite(Number(strikeNum)) ? String(strikeNum) : ''
+  const right = parseOptionContractKey(group.contract_key).right || 'C'
+  const qty = Number(position.position)
+  const absQty = Math.abs(qty)
+  const pricePerShare =
+    position.avgCost != null && Number.isFinite(Number(position.avgCost))
+      ? Number(position.avgCost) >= 10
+        ? Number(position.avgCost) / 100
+        : Number(position.avgCost)
+      : 0
+  return {
+    account_id: (position.account_id ?? '').trim(),
+    sec_type: 'OPT',
+    symbol: sym,
+    expiry: exp.length >= 8 ? exp.slice(0, 8) : exp.length === 6 ? exp : exp,
+    strike: strikeStr,
+    option_right: right,
+    side: qty >= 0 ? 'BUY' : 'SELL',
+    quantity: absQty > 0 ? String(absQty) : '1',
+    price: pricePerShare > 0 ? String(Number(pricePerShare.toFixed(4))) : '',
+    commission: '0',
+    currency: 'USD',
+  }
+}
+
+function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
+  if (!ex) {
+    return (
+      <>
+        <td>—</td>
+        <td>—</td>
+      </>
+    )
+  }
+  const oppName = ex.strategy_opportunity_name?.trim()
+  const instanceId = ex.strategy_instance_id
+  const instanceLabel = ex.strategy_instance_label?.trim()
+  const instanceTitle = instanceLabel ? `Instance: ${instanceLabel}` : instanceId != null ? `View instance #${instanceId}` : ''
+  return (
+    <>
+      <td className="replay-strategy-opp-cell" title={oppName || undefined}>
+        <span className="replay-strategy-opp-text">{oppName || '—'}</span>
+      </td>
+      <td>
+        {instanceId != null ? (
+          <a
+            href={`#/strategies/instances/${instanceId}`}
+            className="ledger-instance-icon-link"
+            target="_blank"
+            rel="noopener noreferrer"
+            title={instanceTitle}
+            aria-label={instanceTitle || 'View strategy instance'}
+          >
+            <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="5" y="5" width="14" height="14" rx="1" />
+            </svg>
+            {instanceLabel ? (
+              <span className="replay-instance-label-inline">{instanceLabel.length > 14 ? `${instanceLabel.slice(0, 14)}…` : instanceLabel}</span>
+            ) : null}
+          </a>
+        ) : (
+          '—'
+        )}
+      </td>
+    </>
+  )
+}
 
 interface PositionsPageProps {
   status: StatusResponse | null
@@ -45,6 +119,14 @@ export function PositionsPage({
   const { executions, loadReplayData, executionAccountOptions } = useExecutions(status)
   const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
+  const [execInitialDraft, setExecInitialDraft] = useState<Partial<ExecutionFormState> | null>(null)
+  const [deleteConfirmState, setDeleteConfirmState] = useState<{
+    open: boolean
+    title: string
+    message: string
+    confirming: boolean
+    exec: Execution | null
+  }>({ open: false, title: '', message: '', confirming: false, exec: null })
   /** Pool=Off only: execution to close against; when set, show Quick Trade (Close) modal */
   const [closeAgainstExec, setCloseAgainstExec] = useState<Execution | null>(null)
   /** Inline error for e.g. delete execution failure (not modal form errors). */
@@ -463,7 +545,11 @@ export function PositionsPage({
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={() => { setAddExecOpen(true); setPageError(null) }}
+          onClick={() => {
+            setExecInitialDraft(null)
+            setAddExecOpen(true)
+            setPageError(null)
+          }}
           aria-label="Add execution record manually (historical)"
         >
           Add Trade
@@ -1048,6 +1134,8 @@ export function PositionsPage({
                             <th>Price</th>
                             <th>Comm.</th>
                             <th>PnL</th>
+                            <th>Opportunity</th>
+                            <th>Instance</th>
                             <th>Account</th>
                             <th>Actions</th>
                           </tr>
@@ -1135,30 +1223,64 @@ export function PositionsPage({
                                       <td>{fmtUsd(pricePerShare)}</td>
                                       <td>{fmtUsd(0)}</td>
                                       <td><span className={pnlClass}>{fmtUsd(rowPnl)}</span></td>
+                                      <StrategyAttributionCells ex={execForRow ?? null} />
                                       <td>{position.account_id ?? '—'}</td>
                                       <td>
                                         {execForRow?.account_executions_id != null ? (
                                           <span className="replay-exec-row-actions">
-                                            <button type="button" className="btn btn-small" onClick={() => { setEditExec(execForRow); setPageError(null) }}>Edit</button>
                                             <button
                                               type="button"
-                                              className="btn btn-small btn-x"
-                                              onClick={async () => {
-                                                if (!window.confirm('Delete this execution?')) return
-                                                const res = await deleteExecution(execForRow.account_executions_id!)
-                                                if (res.ok) {
-                                                  if (editExec?.account_executions_id === execForRow.account_executions_id) setEditExec(null)
-                                                  await loadReplayData()
-                                                } else {
-                                                  setPageError(res.error ?? 'Delete failed')
-                                                }
+                                              className="btn btn-icon-small"
+                                              onClick={() => {
+                                                setEditExec(execForRow)
+                                                setPageError(null)
+                                              }}
+                                              title="Edit"
+                                              aria-label="Edit execution"
+                                            >
+                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                              </svg>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="btn btn-icon-small btn-icon-danger"
+                                              onClick={() => {
+                                                setPageError(null)
+                                                setDeleteConfirmState({
+                                                  open: true,
+                                                  title: 'Delete execution',
+                                                  message:
+                                                    'This will permanently remove this execution from trade history. This cannot be undone.',
+                                                  confirming: false,
+                                                  exec: execForRow,
+                                                })
                                               }}
                                               title="Delete"
+                                              aria-label="Delete execution"
                                             >
-                                              X
+                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <polyline points="3 6 5 6 21 6" />
+                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                                <line x1="10" y1="11" x2="10" y2="17" />
+                                                <line x1="14" y1="11" x2="14" y2="17" />
+                                              </svg>
                                             </button>
                                           </span>
-                                        ) : '—'}
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            className="btn btn-small"
+                                            onClick={() => {
+                                              setExecInitialDraft(buildLinkExecutionDraftFromLivePosition(group, position))
+                                              setAddExecOpen(true)
+                                              setPageError(null)
+                                            }}
+                                          >
+                                            Link record
+                                          </button>
+                                        )}
                                       </td>
                                     </tr>
                                   )
@@ -1249,28 +1371,50 @@ export function PositionsPage({
                                       <td>
                                         <span className={pnlClass}>{fmtUsd(displayPnl)}</span>
                                       </td>
+                                      <StrategyAttributionCells ex={ex} />
                                       <td>{ex.account_id ?? '—'}</td>
                                       <td>
                                         {ex.account_executions_id != null ? (
                                           <span className="replay-exec-row-actions">
-                                            <button type="button" className="btn btn-small" onClick={() => { setEditExec(ex); setPageError(null) }}>Edit</button>
+                                            <button
+                                              type="button"
+                                              className="btn btn-icon-small"
+                                              onClick={() => {
+                                                setEditExec(ex)
+                                                setPageError(null)
+                                              }}
+                                              title="Edit"
+                                              aria-label="Edit execution"
+                                            >
+                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                              </svg>
+                                            </button>
                                             <button type="button" className="btn btn-small" onClick={() => { setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
                                             <button
                                               type="button"
-                                              className="btn btn-small btn-x"
-                                              onClick={async () => {
-                                                if (!window.confirm('Delete this execution?')) return
-                                                const res = await deleteExecution(ex.account_executions_id!)
-                                                if (res.ok) {
-                                                  if (editExec?.account_executions_id === ex.account_executions_id) setEditExec(null)
-                                                  await loadReplayData()
-                                                } else {
-                                                  setPageError(res.error ?? 'Delete failed')
-                                                }
+                                              className="btn btn-icon-small btn-icon-danger"
+                                              onClick={() => {
+                                                setPageError(null)
+                                                setDeleteConfirmState({
+                                                  open: true,
+                                                  title: 'Delete execution',
+                                                  message:
+                                                    'This will permanently remove this execution from trade history. This cannot be undone.',
+                                                  confirming: false,
+                                                  exec: ex,
+                                                })
                                               }}
                                               title="Delete"
+                                              aria-label="Delete execution"
                                             >
-                                              X
+                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <polyline points="3 6 5 6 21 6" />
+                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                                <line x1="10" y1="11" x2="10" y2="17" />
+                                                <line x1="14" y1="11" x2="14" y2="17" />
+                                              </svg>
                                             </button>
                                           </span>
                                         ) : '—'}
@@ -1286,7 +1430,7 @@ export function PositionsPage({
                             <td className="replay-pnl-unrealized">
                               <strong>{fmtUsd(detailsTotalPnl)}</strong>
                             </td>
-                            <td colSpan={2} />
+                            <td colSpan={4} />
                           </tr>
                         </tfoot>
                       </table>
@@ -1377,9 +1521,78 @@ export function PositionsPage({
         open={addExecOpen || !!editExec}
         editExec={editExec}
         accountOptions={executionAccountOptions}
-        onClose={() => { setAddExecOpen(false); setEditExec(null); setPageError(null) }}
-        onSuccess={() => { setPageError(null); loadReplayData() }}
+        initialDraft={editExec ? null : execInitialDraft}
+        onClose={() => {
+          setAddExecOpen(false)
+          setEditExec(null)
+          setExecInitialDraft(null)
+          setPageError(null)
+        }}
+        onSuccess={() => {
+          setPageError(null)
+          setExecInitialDraft(null)
+          loadReplayData()
+        }}
       />
+      {deleteConfirmState.open && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="positions-delete-exec-title"
+          onClick={() => {
+            if (!deleteConfirmState.confirming) {
+              setDeleteConfirmState(prev => ({ ...prev, open: false, exec: null }))
+            }
+          }}
+        >
+          <div
+            className="modal-panel replay-exec-modal"
+            style={{ maxWidth: 400 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="positions-delete-exec-title" className="section-subtitle" style={{ marginTop: 0 }}>
+              {deleteConfirmState.title}
+            </h3>
+            <p className="section-hint" style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
+              {deleteConfirmState.message}
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDeleteConfirmState(prev => ({ ...prev, open: false, exec: null }))}
+                disabled={deleteConfirmState.confirming}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={async () => {
+                  const exec = deleteConfirmState.exec
+                  if (!exec?.account_executions_id) {
+                    setDeleteConfirmState(prev => ({ ...prev, open: false, exec: null }))
+                    return
+                  }
+                  setDeleteConfirmState(prev => ({ ...prev, confirming: true }))
+                  const res = await deleteExecution(exec.account_executions_id)
+                  if (res.ok) {
+                    if (editExec?.account_executions_id === exec.account_executions_id) setEditExec(null)
+                    await loadReplayData()
+                  } else {
+                    setPageError(res.error ?? 'Delete failed')
+                  }
+                  setDeleteConfirmState({ open: false, title: '', message: '', confirming: false, exec: null })
+                }}
+                disabled={deleteConfirmState.confirming}
+              >
+                {deleteConfirmState.confirming ? 'Deleting…' : 'Confirm delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <QuickCloseModal
         exec={closeAgainstExec}
         onClose={() => setCloseAgainstExec(null)}

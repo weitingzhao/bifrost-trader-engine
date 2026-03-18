@@ -14,7 +14,7 @@ from servers.reader import gate_safety as gate_safety_module
 from servers.reader import market as market_module
 from servers.reader import strategy as strategy_module
 from servers.reader import strategy_instance as strategy_instance_module
-from servers.reader import structure_type_config as structure_type_config_module
+from servers.reader import template_config as template_config_module
 from servers.reader import position_categories as position_categories_module
 from servers.reader import settings as settings_module
 from servers.reader import status as status_module
@@ -287,23 +287,25 @@ class StatusReader:
             return []
         return strategy_module.list_structures(self._conn, active_only=active_only)
 
-    def list_structure_types(self) -> List[Dict[str, Any]]:
-        """Return structure types from config table (for Wizard Step 1)."""
+    def list_dims_grouped(self) -> Dict[str, List[Dict[str, Any]]]:
+        if not self._connect():
+            return {}
+        return template_config_module.list_dims_grouped(self._conn)
+
+    def list_dims_for_type(self, dim_type: str) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return structure_type_config_module.list_structure_types(self._conn)
+        return template_config_module.list_dims_by_type(self._conn, dim_type)
 
-    def get_structure_type_default_legs(self, structure_type: str) -> List[Dict[str, Any]]:
-        """Return default legs for a structure type from config table."""
+    def list_templates(self, active_only: bool = True) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        return structure_type_config_module.get_default_legs(self._conn, structure_type)
+        return template_config_module.list_templates(self._conn, active_only=active_only)
 
-    def get_structure_type_subtypes(self, structure_type: str) -> Dict[str, Any]:
-        """Return subtypes with characteristics and meta_params, plus infer_rules (for Wizard Step 2)."""
+    def get_template_detail(self, strategy_template_id: int) -> Optional[Dict[str, Any]]:
         if not self._connect():
-            return {"subtypes": [], "infer_rules": []}
-        return structure_type_config_module.get_subtypes_with_detail(self._conn, structure_type)
+            return None
+        return template_config_module.get_template_detail(self._conn, strategy_template_id)
 
     def list_opportunities(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Return list of strategy_opportunity rows (with structure_name from JOIN)."""

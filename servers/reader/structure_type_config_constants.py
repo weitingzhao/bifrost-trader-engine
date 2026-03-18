@@ -9,6 +9,25 @@ if missing, the value is shown as-is.
 
 from typing import Any, Dict, List, Tuple
 
+# Six orthogonal dimensions for strategy_template and strategy_structure.
+DIM_TYPE_ALLOWED: Tuple[str, ...] = (
+    "direction",
+    "structure",
+    "coverage",
+    "risk",
+    "volatility",
+    "time",
+)
+
+DIM_TYPE_LABELS: Dict[str, str] = {
+    "direction": "Direction",
+    "structure": "Structure",
+    "coverage": "Underlying coverage",
+    "risk": "Risk profile",
+    "volatility": "Volatility exposure",
+    "time": "Time horizon",
+}
+
 # param_kind: Wizard uses "fixed" (no editable input) and "percent" (number 1-50). Optional future: "integer".
 PARAM_KIND_ALLOWED: Tuple[str, ...] = ("fixed", "percent")
 

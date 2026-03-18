@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Refresh PostgreSQL schema (aligned with PostgreSQLSink._ensure_tables, see docs/DATABASE.md).
+"""Refresh PostgreSQL schema (PostgreSQLSink._ensure_tables). DDL is CREATE IF NOT EXISTS only.
 
-Tables are applied in batches by category. Run from project root.
+**New or empty database recommended.** An older database whose tables already exist but lack
+columns will not be patched; use a fresh DB or drop tables before refresh.
+
+Strategy templates: ``python scripts/db_init/seed_structure_type_config.py`` after refresh.
 
 Usage:
   python scripts/db_refresh_schema.py [--config PATH]
@@ -37,7 +40,7 @@ CATEGORY_ORDER = [
     "watchlist",
 ]
 
-# Expected 38 tables by category (canonical list). Used to report counts and missing tables.
+# Expected tables by category (canonical list). Used to report counts and missing tables.
 EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     "account": [
         "account",
@@ -76,6 +79,7 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     "strategy": [
         "strategy_allocation",
         "strategy_allocation_opportunity",
+        "strategy_dim",
         "strategy_history",
         "strategy_instance",
         "strategy_opportunity",
@@ -85,12 +89,10 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
         "strategy_structure_constraint",
         "strategy_structure_leg",
         "strategy_structure_meta",
-        "strategy_structure_type",
-        "strategy_structure_type_leg",
-        "strategy_structure_subtype",
-        "strategy_structure_subtype_characteristic",
-        "strategy_structure_subtype_meta_param",
-        "strategy_structure_subtype_rule",
+        "strategy_template",
+        "strategy_template_characteristic",
+        "strategy_template_leg",
+        "strategy_template_param",
     ],
     "watchlist": ["watchlist"],
 }

@@ -1,9 +1,10 @@
-"""Schema and migrations for PostgreSQL sink. Implements docs/DATABASE.md; single entry point _ensure_tables(conn, log=None)."""
+"""PostgreSQL DDL: current schema only (CREATE TABLE IF NOT EXISTS + indexes).
 
-import psycopg2
+Use an empty database or drop/recreate; existing tables are not altered to add missing columns.
+"""
 
 def _ensure_tables(conn, log=None, log_table=None) -> None:
-    """Create daemon_auto_status_current, daemon_auto_status_history, daemon_auto_operations if not exist (per DATABASE.md §2).
+    """Apply full DDL (per DATABASE.md). CREATE IF NOT EXISTS only — no incremental ALTER for old databases.
     If log is callable, it is called with a short step name before each DDL section (for progress/debug).
     If log_table is callable, it is called as log_table(table_name, purpose) before each table is created/updated.
     """
@@ -95,7 +96,8 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             CREATE TABLE IF NOT EXISTS daemon_run_status (
                 id integer PRIMARY KEY DEFAULT 1,
                 suspended boolean NOT NULL DEFAULT true,
-                updated_at timestamptz DEFAULT now()
+                updated_at timestamptz DEFAULT now(),
+                heartbeat_interval_sec smallint
             )
         """
         )
@@ -111,7 +113,28 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             CREATE TABLE IF NOT EXISTS daemon_heartbeat (
                 id integer PRIMARY KEY DEFAULT 1,
                 last_ts timestamptz NOT NULL DEFAULT now(),
-                hedge_running boolean NOT NULL DEFAULT false
+                hedge_running boolean NOT NULL DEFAULT false,
+                ib_connected boolean DEFAULT false,
+                ib_client_id integer,
+                next_retry_ts timestamptz,
+                seconds_until_retry smallint,
+                graceful_shutdown_at timestamptz,
+                heartbeat_interval_sec smallint,
+                redis_quotes_connected boolean DEFAULT false,
+                event_subscribe_ticker boolean DEFAULT false,
+                event_subscribe_positions boolean DEFAULT false,
+                event_subscribe_fills boolean DEFAULT false,
+                event_subscribe_commission boolean DEFAULT false,
+                listener_connected boolean DEFAULT false,
+                listener_client_id integer,
+                listener_2_connected boolean DEFAULT false,
+                listener_2_client_id integer,
+                event_subscribe_positions_ib2 boolean DEFAULT false,
+                event_subscribe_fills_ib2 boolean DEFAULT false,
+                event_subscribe_commission_ib2 boolean DEFAULT false,
+                last_control_message text,
+                subscribed_tickers text[],
+                mock_hedging boolean DEFAULT true
             )
         """
         )
@@ -149,7 +172,26 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             CREATE TABLE IF NOT EXISTS settings (
                 id integer PRIMARY KEY DEFAULT 1,
                 ib_host text NOT NULL DEFAULT '127.0.0.1',
-                ib_port_type text NOT NULL DEFAULT 'tws_paper'
+                ib_port_type text NOT NULL DEFAULT 'tws_paper',
+                ib_client_id_daemon integer NOT NULL DEFAULT 1,
+                ib_client_id_listener integer NOT NULL DEFAULT 2,
+                ib_client_id_account integer NOT NULL DEFAULT 100,
+                ib_client_id_markets integer NOT NULL DEFAULT 101,
+                ib_client_id_worker_market integer NOT NULL DEFAULT 500,
+                ib_host_account_id text,
+                stream_host_account_id text,
+                stream_secondary_account_id text,
+                ib2_host text,
+                ib2_port_type text DEFAULT 'tws_paper',
+                ib2_client_id_listener integer NOT NULL DEFAULT 3,
+                ib2_client_id_account integer NOT NULL DEFAULT 102,
+                ib_flex_host_token text,
+                ib_flex_secondary_token text,
+                flex_default_range_days integer NOT NULL DEFAULT 30,
+                flex_init_range_days integer NOT NULL DEFAULT 360,
+                active_strategy_structure_id bigint,
+                active_gate_safety_strategy_id bigint,
+                active_strategy_allocation_id bigint
             )
         """
         )
@@ -159,41 +201,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             ON CONFLICT (id) DO NOTHING
         """
         )
-        for col, default in (
-            ("ib_client_id_daemon", 1),
-            ("ib_client_id_listener", 2),
-            ("ib_client_id_account", 100),
-            ("ib_client_id_markets", 101),
-            ("ib_client_id_worker_market", 500),
-        ):
-            cur.execute(
-                f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
-            )
-        cur.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_host_account_id text"
-        )
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_host_account_id text")
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS stream_secondary_account_id text")
-        cur.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib2_host text"
-        )
-        cur.execute(
-            "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib2_port_type text DEFAULT 'tws_paper'"
-        )
-        for col, default in (
-            ("ib2_client_id_listener", 3),
-            ("ib2_client_id_account", 102),
-        ):
-            cur.execute(
-                f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} integer DEFAULT {default}"
-            )
-        # Second IB has no market data subscription; remove column if present (see DATABASE.md §2.9)
-        cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS ib2_client_id_markets")
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_host_token text")
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS ib_flex_secondary_token text")
-        cur.execute("ALTER TABLE settings DROP COLUMN IF EXISTS flex_default_range_preset")
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_default_range_days integer DEFAULT 30")
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS flex_init_range_days integer DEFAULT 360")
         _log("account, account_positions, contract_quote_live")
         _log_table("account", "Account summaries")
         cur.execute(
@@ -225,24 +232,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 strike double precision,
                 option_right text,
                 updated_at timestamptz DEFAULT now(),
+                strategy_opportunity_id bigint,
+                strategy_instance_id bigint,
                 PRIMARY KEY (account_id, contract_key)
             )
-        """
-        )
-        for col_def in (
-            "expiry text",
-            "strike double precision",
-            "option_right text",
-            "contract_key text",
-        ):
-            name, typ = col_def.split(None, 1)
-            cur.execute(
-                f"ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS {name} {typ}"
-            )
-        cur.execute(
-            """
-            UPDATE account_positions SET contract_key = symbol || '|' || COALESCE(sec_type,'') || '|' || COALESCE(expiry,'') || '|' || COALESCE(strike::text,'') || '|' || COALESCE(option_right,'')
-            WHERE contract_key IS NULL OR contract_key = ''
         """
         )
         cur.execute(
@@ -291,7 +284,54 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 price double precision,
                 source text,
                 raw_extra jsonb,
-                created_at timestamptz DEFAULT now()
+                created_at timestamptz DEFAULT now(),
+                expiry text,
+                strike double precision,
+                option_right text,
+                exchange text,
+                order_id bigint,
+                cum_qty double precision,
+                contract_key text,
+                currency text,
+                asset_category text,
+                sub_category text,
+                description text,
+                conid bigint,
+                security_id text,
+                security_id_type text,
+                cusip text,
+                isin text,
+                figi text,
+                listing_exchange text,
+                underlying_conid bigint,
+                underlying_symbol text,
+                underlying_security_id text,
+                underlying_listing_exchange text,
+                issuer text,
+                issuer_country_code text,
+                trade_id text,
+                related_trade_id text,
+                report_date date,
+                trade_date date,
+                settle_date_target date,
+                transaction_type text,
+                multiplier double precision,
+                principal_adjust_factor text,
+                proceeds double precision,
+                taxes double precision,
+                net_cash double precision,
+                close_price double precision,
+                open_close_indicator text,
+                notes text,
+                cost double precision,
+                fifo_pnl_realized double precision,
+                mtm_pnl double precision,
+                trade_money double precision,
+                fx_rate_to_base double precision,
+                acct_alias text,
+                model text,
+                strategy_opportunity_id bigint,
+                strategy_instance_id bigint
             )
         """
         )
@@ -348,27 +388,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        # Backwards-compatible schema evolution: add new columns if table already existed without them.
-        for col_def in (
-            "flex_transaction_id text",
-            "flex_type text",
-            "flex_code text",
-            "asset_category text",
-            "asset_subcategory text",
-            "symbol text",
-            "conid bigint",
-            "security_id text",
-            "security_id_type text",
-            "listing_exchange text",
-            "report_date date",
-            "available_for_trading_date date",
-            "fx_rate_to_base double precision",
-            "raw_extra jsonb",
-        ):
-            col_name = col_def.split()[0]
-            cur.execute(
-                f"ALTER TABLE account_transactions ADD COLUMN IF NOT EXISTS {col_def}"
-            )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS account_transactions_account_ts ON account_transactions (account_id, ts DESC)"
         )
@@ -492,15 +511,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        for col_def in (
-            "contract_key text",
-            "symbol text",
-            "expiry text",
-            "strike double precision",
-            "option_right text",
-            "created_at timestamptz DEFAULT now()",
-        ):
-            cur.execute(f"ALTER TABLE option_contracts ADD COLUMN IF NOT EXISTS {col_def}")
         cur.execute("CREATE INDEX IF NOT EXISTS option_contracts_contract_key ON option_contracts (contract_key)")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_contracts_symbol_expiry_strike_right ON option_contracts (symbol, expiry, strike, option_right)"
@@ -520,16 +530,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        for col_def in (
-            "contract_key text",
-            "snapshot_ts timestamptz",
-            "last double precision",
-            "bid double precision",
-            "ask double precision",
-            "mid double precision",
-            "created_at timestamptz DEFAULT now()",
-        ):
-            cur.execute(f"ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS {col_def}")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_snapshots_contract_key_ts ON option_snapshots (contract_key, snapshot_ts DESC)"
         )
@@ -613,7 +613,12 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 gate_safety_strategy_id bigserial PRIMARY KEY,
                 name text NOT NULL,
                 version integer NOT NULL DEFAULT 1,
-                structure_type text,
+                dim_direction text,
+                dim_structure text,
+                dim_coverage text,
+                dim_risk text,
+                dim_volatility text,
+                dim_time text,
                 is_active boolean NOT NULL DEFAULT true,
                 min_dte integer NOT NULL,
                 max_dte integer NOT NULL,
@@ -678,13 +683,110 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
+        _log_table("strategy_dim", "Option strategy dimension enum (dim_type + code)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_dim (
+                strategy_dim_id bigserial PRIMARY KEY,
+                dim_type text NOT NULL,
+                code text NOT NULL,
+                display_label text NOT NULL,
+                sort_order integer NOT NULL DEFAULT 0,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (dim_type, code)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_dim_dim_type ON strategy_dim (dim_type)"
+        )
+        _log_table("strategy_template", "Flat option structure template (six dims + legs)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_template (
+                strategy_template_id bigserial PRIMARY KEY,
+                template_code text NOT NULL UNIQUE,
+                display_name text NOT NULL,
+                dim_direction text,
+                dim_structure text,
+                dim_coverage text,
+                dim_risk text,
+                dim_volatility text,
+                dim_time text,
+                explanation text,
+                typical_use text,
+                example text,
+                nature text,
+                sort_order integer NOT NULL DEFAULT 0,
+                is_active boolean NOT NULL DEFAULT true,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_template_sort ON strategy_template (sort_order)"
+        )
+        _log_table("strategy_template_leg", "Template default legs (one row per leg)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_template_leg (
+                strategy_template_leg_id bigserial PRIMARY KEY,
+                strategy_template_id bigint NOT NULL REFERENCES strategy_template(strategy_template_id) ON DELETE CASCADE,
+                sort_order integer NOT NULL DEFAULT 0,
+                role text,
+                direction text,
+                option_right text,
+                quantity_default integer NOT NULL DEFAULT 1,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (strategy_template_id, sort_order)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_template_leg_template_id ON strategy_template_leg (strategy_template_id)"
+        )
+        _log_table("strategy_template_param", "Template meta param definition")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_template_param (
+                strategy_template_param_id bigserial PRIMARY KEY,
+                strategy_template_id bigint NOT NULL REFERENCES strategy_template(strategy_template_id) ON DELETE CASCADE,
+                meta_key text NOT NULL,
+                display_label text,
+                default_value_text text,
+                param_kind text,
+                sort_order integer NOT NULL DEFAULT 0,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (strategy_template_id, meta_key)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_template_param_template_id ON strategy_template_param (strategy_template_id)"
+        )
+        _log_table("strategy_template_characteristic", "Template characteristic lines")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_template_characteristic (
+                strategy_template_characteristic_id bigserial PRIMARY KEY,
+                strategy_template_id bigint NOT NULL REFERENCES strategy_template(strategy_template_id) ON DELETE CASCADE,
+                sort_order integer NOT NULL DEFAULT 0,
+                characteristic_text text NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS strategy_template_char_template_id ON strategy_template_characteristic (strategy_template_id)"
+        )
         _log_table("strategy_structure", "Structure strategy")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS strategy_structure (
                 strategy_structure_id bigserial PRIMARY KEY,
                 name text NOT NULL,
-                structure_type text NOT NULL,
+                strategy_template_id bigint REFERENCES strategy_template(strategy_template_id),
                 version integer NOT NULL DEFAULT 1,
                 is_active boolean NOT NULL DEFAULT true,
                 created_at timestamptz NOT NULL DEFAULT now(),
@@ -693,11 +795,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        cur.execute("ALTER TABLE strategy_structure ADD COLUMN IF NOT EXISTS notes text")
-        cur.execute("ALTER TABLE strategy_structure ADD COLUMN IF NOT EXISTS structure_subtype text")
-        cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS legs")
-        cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS constraints")
-        cur.execute("ALTER TABLE strategy_structure DROP COLUMN IF EXISTS metadata")
         _log_table("strategy_structure_leg", "Structure strategy leg (one row per leg)")
         cur.execute(
             """
@@ -750,142 +847,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_structure_meta_structure_id ON strategy_structure_meta (strategy_structure_id)"
         )
-        _log_table("strategy_structure_type", "Structure type template (config)")
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strategy_structure_type (
-                structure_type text PRIMARY KEY,
-                display_label text NOT NULL,
-                sort_order integer NOT NULL DEFAULT 0,
-                has_subtypes boolean NOT NULL DEFAULT false,
-                type_explanation text,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                updated_at timestamptz NOT NULL DEFAULT now()
-            )
-            """
-        )
-        _log_table("strategy_structure_type_leg", "Structure type default legs (one row per leg)")
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strategy_structure_type_leg (
-                strategy_structure_type_leg_id bigserial PRIMARY KEY,
-                structure_type text NOT NULL REFERENCES strategy_structure_type(structure_type) ON DELETE CASCADE,
-                sort_order integer NOT NULL DEFAULT 0,
-                role text,
-                direction text,
-                option_right text,
-                quantity_default integer NOT NULL DEFAULT 1,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                UNIQUE (structure_type, sort_order)
-            )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS strategy_structure_type_leg_structure_type ON strategy_structure_type_leg (structure_type)"
-        )
-        _log_table("strategy_structure_subtype_leg", "Structure subtype default legs (one row per leg)")
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_leg (
-                strategy_structure_subtype_leg_id bigserial PRIMARY KEY,
-                structure_type text NOT NULL,
-                subtype text NOT NULL,
-                sort_order integer NOT NULL DEFAULT 0,
-                role text,
-                direction text,
-                option_right text,
-                quantity_default integer NOT NULL DEFAULT 1,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                UNIQUE (structure_type, subtype, sort_order),
-                FOREIGN KEY (structure_type, subtype)
-                    REFERENCES strategy_structure_subtype(structure_type, subtype)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE INDEX IF NOT EXISTS strategy_structure_subtype_leg_type_subtype
-            ON strategy_structure_subtype_leg (structure_type, subtype)
-            """
-        )
-        _log_table("strategy_structure_subtype", "Structure subtype template (config)")
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strategy_structure_subtype (
-                structure_type text NOT NULL REFERENCES strategy_structure_type(structure_type) ON DELETE CASCADE,
-                subtype text NOT NULL,
-                display_label text NOT NULL,
-                example text,
-                typical_use text,
-                subtype_explanation text,
-                nature text,
-                sort_order integer NOT NULL DEFAULT 0,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                updated_at timestamptz NOT NULL DEFAULT now(),
-                PRIMARY KEY (structure_type, subtype)
-            )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_structure_type ON strategy_structure_subtype (structure_type)"
-        )
-        _log_table("strategy_structure_subtype_characteristic", "Subtype characteristic (one row per item)")
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_characteristic (
-                strategy_structure_subtype_characteristic_id bigserial PRIMARY KEY,
-                structure_type text NOT NULL,
-                subtype text NOT NULL,
-                sort_order integer NOT NULL DEFAULT 0,
-                characteristic_text text NOT NULL,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE
-            )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_char_type_sub ON strategy_structure_subtype_characteristic (structure_type, subtype)"
-        )
-        _log_table("strategy_structure_subtype_meta_param", "Subtype meta param definition")
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_meta_param (
-                strategy_structure_subtype_meta_param_id bigserial PRIMARY KEY,
-                structure_type text NOT NULL,
-                subtype text NOT NULL,
-                meta_key text NOT NULL,
-                display_label text,
-                default_value_text text,
-                param_kind text,
-                sort_order integer NOT NULL DEFAULT 0,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE,
-                UNIQUE (structure_type, subtype, meta_key)
-            )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_meta_param_type_sub ON strategy_structure_subtype_meta_param (structure_type, subtype)"
-        )
-        _log_table("strategy_structure_subtype_rule", "Subtype inference rule from meta")
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strategy_structure_subtype_rule (
-                strategy_structure_subtype_rule_id bigserial PRIMARY KEY,
-                structure_type text NOT NULL,
-                subtype text NOT NULL,
-                meta_key text NOT NULL,
-                meta_value_text text NOT NULL,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                FOREIGN KEY (structure_type, subtype) REFERENCES strategy_structure_subtype(structure_type, subtype) ON DELETE CASCADE,
-                UNIQUE (structure_type, meta_key, meta_value_text)
-            )
-            """
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS strategy_structure_subtype_rule_lookup ON strategy_structure_subtype_rule (structure_type, meta_key, meta_value_text)"
-        )
         _log_table("strategy_opportunity", "Opportunity strategy")
         cur.execute(
             """
@@ -894,15 +855,13 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 name text NOT NULL,
                 strategy_structure_id bigint NOT NULL REFERENCES strategy_structure(strategy_structure_id),
                 default_gate_safety_strategy_id bigint REFERENCES gate_safety_strategy(gate_safety_strategy_id),
+                scope_type text,
                 is_active boolean NOT NULL DEFAULT true,
                 created_at timestamptz NOT NULL DEFAULT now(),
                 updated_at timestamptz NOT NULL DEFAULT now()
             )
             """
         )
-        cur.execute("ALTER TABLE strategy_opportunity ADD COLUMN IF NOT EXISTS scope_type text")
-        cur.execute("ALTER TABLE strategy_opportunity DROP COLUMN IF EXISTS symbol_scope")
-        cur.execute("ALTER TABLE strategy_opportunity DROP COLUMN IF EXISTS entry_conditions")
         _log_table("strategy_opportunity_symbol", "Opportunity strategy symbols")
         cur.execute(
             """
@@ -997,50 +956,18 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        # Migration: ensure columns exist (e.g. if table was created by older schema or manually)
-        cur.execute(
-            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS ts timestamptz NOT NULL DEFAULT now()"
-        )
-        cur.execute(
-            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS strategy_structure_id bigint REFERENCES strategy_structure(strategy_structure_id)"
-        )
-        cur.execute(
-            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS state_summary jsonb"
-        )
-        cur.execute(
-            "ALTER TABLE strategy_history ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()"
-        )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_history_ts ON strategy_history (ts DESC)"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_history_structure_id ON strategy_history (strategy_structure_id)"
         )
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_structure_id bigint")
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_gate_safety_strategy_id bigint")
-        cur.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS active_strategy_allocation_id bigint")
-        _log("account_positions / account_executions strategy attribution columns")
-        cur.execute(
-            "ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS strategy_opportunity_id bigint "
-            "REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE SET NULL"
-        )
-        cur.execute(
-            "ALTER TABLE account_positions ADD COLUMN IF NOT EXISTS strategy_instance_id bigint "
-            "REFERENCES strategy_instance(strategy_instance_id) ON DELETE SET NULL"
-        )
+        _log("account_positions / account_executions strategy attribution indexes")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS account_positions_strategy_opportunity_id ON account_positions (strategy_opportunity_id)"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS account_positions_strategy_instance_id ON account_positions (strategy_instance_id)"
-        )
-        cur.execute(
-            "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS strategy_opportunity_id bigint "
-            "REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE SET NULL"
-        )
-        cur.execute(
-            "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS strategy_instance_id bigint "
-            "REFERENCES strategy_instance(strategy_instance_id) ON DELETE SET NULL"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS account_executions_strategy_opportunity_id ON account_executions (strategy_opportunity_id)"
@@ -1061,24 +988,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 option_right text,
                 display_label text,
                 source text,
-                created_at timestamptz DEFAULT now()
+                created_at timestamptz DEFAULT now(),
+                category_id integer REFERENCES preference_position_categories(id) ON DELETE SET NULL,
+                optionable boolean DEFAULT false
             )
         """
-        )
-        cur.execute(
-            "SELECT 1 FROM information_schema.columns WHERE table_schema = %s AND table_name = %s AND column_name = %s",
-            ("public", "watchlist", "id"),
-        )
-        if cur.fetchone():
-            cur.execute("ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_pkey")
-            cur.execute("ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_contract_key_key")
-            cur.execute("ALTER TABLE watchlist DROP COLUMN IF EXISTS id")
-            cur.execute("ALTER TABLE watchlist ADD PRIMARY KEY (contract_key)")
-        cur.execute(
-            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS category_id integer REFERENCES preference_position_categories(id) ON DELETE SET NULL"
-        )
-        cur.execute(
-            "ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS optionable boolean DEFAULT false"
         )
         _log_table("job_bars_backfill", "Backfill job queue (Celery worker)")
         cur.execute(
@@ -1093,172 +1007,14 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 status text NOT NULL DEFAULT 'pending',
                 result jsonb,
                 created_at timestamptz DEFAULT now(),
-                updated_at timestamptz DEFAULT now()
+                updated_at timestamptz DEFAULT now(),
+                skip_ib boolean DEFAULT false,
+                api_interval_sec integer DEFAULT 10,
+                span_hours double precision
             )
             """
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS job_bars_backfill_status_created ON job_bars_backfill (status, created_at)"
         )
-        for col, default in (("skip_ib", "false"), ("api_interval_sec", "10")):
-            cur.execute(
-                f"ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS {col} {'boolean' if col == 'skip_ib' else 'integer'} DEFAULT {default}"
-            )
-        cur.execute("ALTER TABLE job_bars_backfill ADD COLUMN IF NOT EXISTS span_hours double precision DEFAULT NULL")
         conn.commit()
-        # R-A2 extended: add columns to account_executions for full IB / Flex data（含期权字段与 Flex Trades 字段）
-        # 不再在 account_executions 添加 commission/realized_pnl/currency，已迁至 account_execution_commissions
-        for _col, sql in [
-            ("expiry", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS expiry text"),
-            ("strike", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS strike double precision"),
-            ("option_right", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS option_right text"),
-            ("exchange", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS exchange text"),
-            ("order_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS order_id bigint"),
-            ("cum_qty", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS cum_qty double precision"),
-            ("contract_key", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS contract_key text"),
-            ("currency", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS currency text"),
-            ("asset_category", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS asset_category text"),
-            ("sub_category", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS sub_category text"),
-            ("description", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS description text"),
-            ("conid", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS conid bigint"),
-            ("security_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS security_id text"),
-            ("security_id_type", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS security_id_type text"),
-            ("cusip", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS cusip text"),
-            ("isin", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS isin text"),
-            ("figi", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS figi text"),
-            ("listing_exchange", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS listing_exchange text"),
-            ("underlying_conid", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_conid bigint"),
-            ("underlying_symbol", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_symbol text"),
-            ("underlying_security_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_security_id text"),
-            ("underlying_listing_exchange", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS underlying_listing_exchange text"),
-            ("issuer", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS issuer text"),
-            ("issuer_country_code", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS issuer_country_code text"),
-            ("trade_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS trade_id text"),
-            ("related_trade_id", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS related_trade_id text"),
-            ("report_date", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS report_date date"),
-            ("trade_date", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS trade_date date"),
-            ("settle_date_target", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS settle_date_target date"),
-            ("transaction_type", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS transaction_type text"),
-            ("multiplier", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS multiplier double precision"),
-            ("principal_adjust_factor", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS principal_adjust_factor text"),
-            ("proceeds", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS proceeds double precision"),
-            ("taxes", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS taxes double precision"),
-            ("net_cash", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS net_cash double precision"),
-            ("close_price", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS close_price double precision"),
-            ("open_close_indicator", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS open_close_indicator text"),
-            ("notes", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS notes text"),
-            ("cost", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS cost double precision"),
-            ("fifo_pnl_realized", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS fifo_pnl_realized double precision"),
-            ("mtm_pnl", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS mtm_pnl double precision"),
-            ("trade_money", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS trade_money double precision"),
-            ("fx_rate_to_base", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS fx_rate_to_base double precision"),
-            ("acct_alias", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS acct_alias text"),
-            ("model", "ALTER TABLE account_executions ADD COLUMN IF NOT EXISTS model text"),
-        ]:
-            try:
-                cur.execute(sql)
-                conn.commit()
-            except psycopg2.ProgrammingError as e:
-                conn.rollback()
-                if getattr(e, "pgcode", None) != "42701":
-                    raise
-        # RE-7: add columns if not exist (each ALTER in its own transaction so duplicate_column doesn't abort the rest)
-        for _col, sql in [
-            (
-                "ib_connected",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN ib_connected boolean DEFAULT false",
-            ),
-            (
-                "ib_client_id",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN ib_client_id integer",
-            ),
-            (
-                "next_retry_ts",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN next_retry_ts timestamptz",
-            ),
-            (
-                "seconds_until_retry",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN seconds_until_retry smallint",
-            ),
-            (
-                "graceful_shutdown_at",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN graceful_shutdown_at timestamptz",
-            ),
-            (
-                "heartbeat_interval_sec",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN heartbeat_interval_sec smallint",
-            ),
-            (
-                "redis_quotes_connected",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN redis_quotes_connected boolean DEFAULT false",
-            ),
-            (
-                "event_subscribe_ticker",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_ticker boolean DEFAULT false",
-            ),
-            (
-                "event_subscribe_positions",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_positions boolean DEFAULT false",
-            ),
-            (
-                "event_subscribe_fills",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_fills boolean DEFAULT false",
-            ),
-            (
-                "event_subscribe_commission",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_commission boolean DEFAULT false",
-            ),
-            (
-                "listener_connected",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_connected boolean DEFAULT false",
-            ),
-            (
-                "listener_client_id",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_client_id integer",
-            ),
-            (
-                "listener_2_connected",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_2_connected boolean DEFAULT false",
-            ),
-            (
-                "listener_2_client_id",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN listener_2_client_id integer",
-            ),
-            (
-                "event_subscribe_positions_ib2",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_positions_ib2 boolean DEFAULT false",
-            ),
-            (
-                "event_subscribe_fills_ib2",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_fills_ib2 boolean DEFAULT false",
-            ),
-            (
-                "event_subscribe_commission_ib2",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN event_subscribe_commission_ib2 boolean DEFAULT false",
-            ),
-            (
-                "last_control_message",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN last_control_message text",
-            ),
-            (
-                "subscribed_tickers",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN subscribed_tickers text[]",
-            ),
-            (
-                "mock_hedging",
-                "ALTER TABLE daemon_heartbeat ADD COLUMN mock_hedging boolean DEFAULT true",
-            ),
-            (
-                "run_status_heartbeat_interval",
-                "ALTER TABLE daemon_run_status ADD COLUMN heartbeat_interval_sec smallint",
-            ),
-        ]:
-            try:
-                cur.execute(sql)
-                conn.commit()
-            except psycopg2.ProgrammingError as e:
-                conn.rollback()  # clear aborted state so next ALTER can run
-                if (
-                    e.pgcode != "42701"
-                ):  # 42701 = duplicate_column (column already exists)
-                    raise
