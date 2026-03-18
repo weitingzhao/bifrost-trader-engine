@@ -34,20 +34,21 @@ export async function deletePositionCategory(id: number): Promise<{ ok: boolean;
   return { ok: j.ok === true, error: j.error }
 }
 
-/** Assign strategy opportunity and instance to a position (e.g. stock for Covered Call underlying). */
-export async function putPositionStrategy(body: {
+/** Batch update strategy attribution on executions (by contract_key or execution_ids). */
+export async function patchExecutionStrategyAttribution(body: {
   account_id: string
-  contract_key: string
+  contract_key?: string
+  execution_ids?: number[]
   strategy_opportunity_id: number | null
   strategy_instance_id?: number | null
-}): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${API}/positions/strategy`, {
-    method: 'PUT',
+}): Promise<{ ok: boolean; updated?: number; error?: string }> {
+  const res = await fetch(`${API}/executions/strategy-attribution`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   const j = await res.json().catch(() => ({}))
-  return { ok: j.ok === true, error: j.error }
+  return { ok: j.ok === true, updated: j.updated, error: j.error }
 }
 
 export async function putPositionCategoryTag(account_id: string, contract_key: string, category_id: number | null): Promise<{ ok: boolean; error?: string }> {

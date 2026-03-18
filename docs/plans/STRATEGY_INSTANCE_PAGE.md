@@ -63,3 +63,5 @@
 4. 详情页预留风险/回测/资金占用区块（标题 + 占位或链接）。
 
 数据库与 API 已就绪（DATABASE.md §2.24.11、PLAN_NEXT_STEPS SI.1–SI.4），无需改后端即可完成列表与详情首版。
+
+**归属模型**：account_positions 不存策略归属；策略信息唯一来源为 account_executions（一个持仓可对应多个策略）。实例详情页的持仓/风险数据来自 `GET /strategies/instances/{id}/open-option-legs`（executions ∩ positions）。列表页风险卡片通过 GET /status 的 positions.strategy_links 或 open-option-legs API 获取实例对应的 OPT 持仓。

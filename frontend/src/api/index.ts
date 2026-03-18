@@ -145,7 +145,7 @@ export {
   postPositionCategory,
   patchPositionCategory,
   deletePositionCategory,
-  putPositionStrategy,
+  patchExecutionStrategyAttribution,
   putPositionCategoryTag,
   fetchMarketStreamsSymbolOrder,
   putMarketStreamsSymbolOrder,

@@ -4,13 +4,9 @@ import { deleteExecution, fetchQuotes, subscribeQuotes } from '../api'
 import { fetchOpportunities, fetchStructures } from '../api/strategies'
 import type { StrategyOpportunity, StrategyStructure } from '../api/strategies'
 import { InfoTooltip } from '../components/InfoTooltip'
-import {
-  computeRiskProfile,
-  formatApproxUsd,
-  formatRiskHedgedBreakdown,
-  formatRiskLabel,
-} from '../utils/riskProfile'
+import { computeRiskProfile, formatRiskHedgedBreakdown, formatRiskLabel } from '../utils/riskProfile'
 import type { RiskPosition } from '../utils/riskProfile'
+import { RiskProfileDl } from '../components/RiskProfileDl'
 import {
   daysUntilExpiry,
   fmtDate,
@@ -51,15 +47,91 @@ function fmtSignedPct(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—'
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
+
+/** Surplus / gap in shares: 3 decimal places. */
+function fmtSurplusShares(n: number): string {
+  if (!Number.isFinite(n)) return '—'
+  return n >= 0 ? `+${n.toFixed(3)}` : n.toFixed(3)
+}
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
 import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
 import type { LinkExecutionContext } from './portfolio/LinkExecutionRecordModal'
 import { LinkExecutionRecordModal } from './portfolio/LinkExecutionRecordModal'
-import type { LinkPositionContext } from './portfolio/LinkPositionModal'
-import { LinkPositionModal } from './portfolio/LinkPositionModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
 import type { InstanceAllGroup, InstancePositionGroup, InstanceStockCoverage, LivePositionRow, OpenOptionPosition, PortfolioView, StockCoverageItem } from './portfolio/types'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
+
+/** Stock metrics for exactly one (symbol, account); never mixes other accounts. */
+function underlyingCoverageStockMetrics(
+  stocks: LivePositionRow[],
+  symbol: string,
+  accountId: string,
+): {
+  held: number
+  cost_basis_total: number | null
+  avg_cost_per_share: number | null
+  live_last_price: number | null
+  daily_pnl: number | null
+  daily_pct: number | null
+  total_pnl: number | null
+  total_pct: number | null
+} {
+  const sym = (symbol ?? '').toUpperCase().trim()
+  const acct = (accountId ?? '').trim()
+  let held = 0
+  let heldAbs = 0
+  let costBasisAbs = 0
+  let lastWeightedSum = 0
+  let lastWeight = 0
+  let dailyPnl = 0
+  let dailyBaseAbs = 0
+  let totalPnl = 0
+  for (const s of stocks) {
+    if ((s.symbol ?? '').toUpperCase().trim() !== sym) continue
+    if ((s.account_id ?? '').trim() !== acct) continue
+    const qty = Number(s.position)
+    if (!Number.isFinite(qty) || qty === 0) continue
+    const absQty = Math.abs(qty)
+    const avgCost = s.avgCost != null && Number.isFinite(Number(s.avgCost)) ? Number(s.avgCost) : null
+    const lastPrice = s.price != null && Number.isFinite(Number(s.price)) ? Number(s.price) : null
+    const dailyPrevClose =
+      s.daily_prev_close != null && Number.isFinite(Number(s.daily_prev_close))
+        ? Number(s.daily_prev_close)
+        : null
+    const unrealizedPnl =
+      s.unrealized_pnl != null && Number.isFinite(Number(s.unrealized_pnl))
+        ? Number(s.unrealized_pnl)
+        : lastPrice != null && avgCost != null
+          ? (lastPrice - avgCost) * qty
+          : 0
+    held += qty
+    heldAbs += absQty
+    if (avgCost != null) costBasisAbs += absQty * avgCost
+    if (lastPrice != null) {
+      lastWeightedSum += absQty * lastPrice
+      lastWeight += absQty
+    }
+    if (dailyPrevClose != null && lastPrice != null) {
+      dailyPnl += (lastPrice - dailyPrevClose) * qty
+      dailyBaseAbs += Math.abs(dailyPrevClose * qty)
+    }
+    totalPnl += unrealizedPnl
+  }
+  const costBasis = costBasisAbs > 0 ? costBasisAbs : null
+  const totalPct =
+    costBasis != null && costBasis > 0 && Number.isFinite(totalPnl) ? (totalPnl / costBasis) * 100 : null
+  const dailyPct = dailyBaseAbs > 0 ? (dailyPnl / dailyBaseAbs) * 100 : null
+  return {
+    held,
+    cost_basis_total: costBasis,
+    avg_cost_per_share: heldAbs > 0 ? costBasisAbs / heldAbs : null,
+    live_last_price: lastWeight > 0 ? lastWeightedSum / lastWeight : null,
+    daily_pnl: heldAbs > 0 ? dailyPnl : null,
+    daily_pct: dailyPct,
+    total_pnl: heldAbs > 0 ? totalPnl : null,
+    total_pct: totalPct,
+  }
+}
 
 function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
   if (!ex) return <td className="replay-strategy-opp-cell">—</td>
@@ -110,8 +182,6 @@ export function PositionsPage({
   const [editExec, setEditExec] = useState<Execution | null>(null)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [linkContext, setLinkContext] = useState<LinkExecutionContext | null>(null)
-  const [linkPositionModalOpen, setLinkPositionModalOpen] = useState(false)
-  const [linkPositionContext, setLinkPositionContext] = useState<LinkPositionContext | null>(null)
   const [deleteConfirmState, setDeleteConfirmState] = useState<{
     open: boolean
     title: string
@@ -535,22 +605,40 @@ export function PositionsPage({
       if (!underlyingLeg) return []
       const legDir = (underlyingLeg.direction ?? 'long').toLowerCase() as 'long' | 'short'
       const legQty = underlyingLeg.quantity ?? 1
-      const bySymbol = new Map<string, number>()
+      /** Same symbol may appear in multiple accounts; stock hedge is per account (no cross-margin). */
+      const bySymbolAccount = new Map<string, { symbol: string; account_id: string; contracts: number }>()
       for (const p of options) {
         const sym = getContractLabelParts(p.contract_key).symbol
         if (!sym) continue
-        bySymbol.set(sym, (bySymbol.get(sym) ?? 0) + Math.abs(p.qty))
+        const account_id = (p.account_id ?? '').trim()
+        const k = `${sym}\x00${account_id}`
+        const prev = bySymbolAccount.get(k) ?? { symbol: sym, account_id, contracts: 0 }
+        prev.contracts += Math.abs(p.qty)
+        bySymbolAccount.set(k, prev)
       }
       const result: InstanceStockCoverage[] = []
-      for (const [sym, optQty] of bySymbol) {
+      for (const v of bySymbolAccount.values()) {
         result.push({
-          symbol: sym,
-          required_shares: optQty * 100 * legQty,
+          symbol: v.symbol,
+          account_id: v.account_id,
+          required_shares: v.contracts * 100 * legQty,
           direction: legDir,
         })
       }
-      result.sort((a, b) => a.symbol.localeCompare(b.symbol))
+      result.sort((a, b) => a.symbol.localeCompare(b.symbol) || a.account_id.localeCompare(b.account_id))
       return result
+    }
+
+    const pickWorseRiskProfile = (a: import('../utils/riskProfile').RiskProfile, b: import('../utils/riskProfile').RiskProfile) => {
+      if (a.naked_short_call_contracts !== b.naked_short_call_contracts) {
+        return a.naked_short_call_contracts > b.naked_short_call_contracts ? a : b
+      }
+      if (a.max_loss == null && b.max_loss != null) return a
+      if (a.max_loss != null && b.max_loss == null) return b
+      if (a.max_loss != null && b.max_loss != null && a.max_loss !== b.max_loss) {
+        return a.max_loss < b.max_loss ? a : b
+      }
+      return a
     }
 
     const result: InstanceAllGroup[] = []
@@ -573,25 +661,44 @@ export function PositionsPage({
 
       let riskProfile = null as import('../utils/riskProfile').RiskProfile | null
       if (b.options.length > 0) {
-        const riskPositions: RiskPosition[] = []
+        const byAcct = new Map<string, OpenOptionPosition[]>()
         for (const p of b.options) {
-          const parsed = parseOptionContractKey(p.contract_key)
-          const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
-          if (r && p.avg_cost != null) {
-            riskPositions.push({ strike: p.strike, right: r, qty: p.qty, avg_cost: p.avg_cost })
-          }
+          const aid = (p.account_id ?? '').trim()
+          if (!byAcct.has(aid)) byAcct.set(aid, [])
+          byAcct.get(aid)!.push(p)
         }
-        if (riskPositions.length > 0) {
+        for (const optsInAcct of byAcct.values()) {
+          const riskPositions: RiskPosition[] = []
+          for (const p of optsInAcct) {
+            const parsed = parseOptionContractKey(p.contract_key)
+            const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
+            if (r && p.avg_cost != null) {
+              riskPositions.push({ strike: p.strike, right: r, qty: p.qty, avg_cost: p.avg_cost })
+            }
+          }
+          if (riskPositions.length === 0) continue
           let covShares = 0
           let covAvgCost: number | null = null
-          if (coverage.length > 0) {
-            const sym = coverage[0].symbol
-            const heldPos = liveStockPositions.find(s => (s.symbol ?? '').toUpperCase() === sym)
+          const covRows = computeStockCoverage(optsInAcct, str)
+          if (covRows.length > 0) {
+            const optSym = getContractLabelParts(optsInAcct[0].contract_key).symbol?.toUpperCase() ?? ''
+            const row =
+              optSym && covRows.some(c => c.symbol.toUpperCase() === optSym)
+                ? covRows.find(c => c.symbol.toUpperCase() === optSym)!
+                : covRows[0]
+            const sym = row.symbol
+            const acct = row.account_id
+            const heldPos = liveStockPositions.find(
+              s =>
+                (s.symbol ?? '').toUpperCase() === sym.toUpperCase() &&
+                (s.account_id ?? '').trim() === acct,
+            )
             const held = heldPos ? Math.abs(Number(heldPos.position) || 0) : 0
-            covShares = Math.min(held, coverage[0].required_shares)
+            covShares = Math.min(held, row.required_shares)
             covAvgCost = heldPos?.avgCost != null ? Number(heldPos.avgCost) : null
           }
-          riskProfile = computeRiskProfile(riskPositions, covShares, covAvgCost)
+          const rp = computeRiskProfile(riskPositions, covShares, covAvgCost)
+          riskProfile = riskProfile == null ? rp : pickWorseRiskProfile(riskProfile, rp)
         }
       }
 
@@ -604,7 +711,6 @@ export function PositionsPage({
         options: b.options,
         stock_coverage: coverage,
         options_unrealized_pnl: optPnl,
-        total_unrealized_pnl: optPnl,
         structure_type: str?.structure_type ?? null,
         scope_type: opp?.scope_type ?? null,
         risk_profile: riskProfile,
@@ -619,6 +725,8 @@ export function PositionsPage({
   }, [instanceGroups, oppMap, structureMap, livePositionExecutionsMap, liveStockPositions])
 
   const stockCoverageItems = useMemo((): StockCoverageItem[] => {
+    const covKey = (sym: string, accountId: string) =>
+      `${(sym ?? '').toUpperCase().trim()}\x1f${(accountId ?? '').trim()}`
     type DemandMeta = {
       required: number
       instances: number
@@ -631,7 +739,8 @@ export function PositionsPage({
       for (const sc of g.stock_coverage) {
         const sym = (sc.symbol ?? '').toUpperCase().trim()
         if (!sym) continue
-        const prev = demandMap.get(sym) ?? {
+        const k = covKey(sym, sc.account_id)
+        const prev = demandMap.get(k) ?? {
           required: 0,
           instances: 0,
           oppNames: new Set<string>(),
@@ -641,7 +750,7 @@ export function PositionsPage({
         prev.instances += 1
         if (oppName) prev.oppNames.add(oppName)
         if ((g.scope_type ?? '').trim() === 'watchlist_stk') prev.watchlistScopeInstances += 1
-        demandMap.set(sym, prev)
+        demandMap.set(k, prev)
       }
     }
 
@@ -662,6 +771,7 @@ export function PositionsPage({
     for (const s of liveStockPositions) {
       const sym = (s.symbol ?? '').toUpperCase().trim()
       if (!sym) continue
+      const k = covKey(sym, (s.account_id ?? '').trim())
       const qty = Number(s.position)
       if (!Number.isFinite(qty) || qty === 0) continue
       const absQty = Math.abs(qty)
@@ -674,7 +784,7 @@ export function PositionsPage({
         ? Number(s.unrealized_pnl)
         : (lastPrice != null && avgCost != null ? (lastPrice - avgCost) * qty : 0)
 
-      const prev = heldMap.get(sym) ?? {
+      const prev = heldMap.get(k) ?? {
         held: 0,
         heldAbs: 0,
         costBasisAbs: 0,
@@ -702,14 +812,17 @@ export function PositionsPage({
       if (s.optionable === true) prev.optionableTrue += 1
       else if (s.optionable === false) prev.optionableFalse += 1
       else prev.optionableUnknown += 1
-      heldMap.set(sym, prev)
+      heldMap.set(k, prev)
     }
 
-    const allSymbols = new Set([...demandMap.keys(), ...heldMap.keys()])
+    const allKeys = new Set([...demandMap.keys(), ...heldMap.keys()])
     const result: StockCoverageItem[] = []
-    for (const sym of allSymbols) {
-      const demand = demandMap.get(sym)
-      const heldMeta = heldMap.get(sym)
+    for (const key of allKeys) {
+      const sep = key.indexOf('\x1f')
+      const sym = sep >= 0 ? key.slice(0, sep) : key
+      const account_id = sep >= 0 ? key.slice(sep + 1) : ''
+      const demand = demandMap.get(key)
+      const heldMeta = heldMap.get(key)
       const required = demand?.required ?? 0
       const held = heldMeta?.held ?? 0
       if (required === 0 && held === 0) continue
@@ -726,6 +839,7 @@ export function PositionsPage({
 
       result.push({
         symbol: sym,
+        account_id,
         required_shares: required,
         held_shares: held,
         surplus_or_gap: held - required,
@@ -742,7 +856,7 @@ export function PositionsPage({
         total_pct: totalPct,
       })
     }
-    result.sort((a, b) => a.symbol.localeCompare(b.symbol))
+    result.sort((a, b) => a.symbol.localeCompare(b.symbol) || a.account_id.localeCompare(b.account_id))
     return result
   }, [instanceAllGroups, liveStockPositions])
 
@@ -908,6 +1022,7 @@ export function PositionsPage({
         <thead>
           <tr>
             <th>Symbol</th>
+            <th>Account</th>
             <th>Backed opportunities</th>
             <th>Held</th>
             <th>Required</th>
@@ -934,14 +1049,15 @@ export function PositionsPage({
                 : 'Mixed / Unknown'
             const backedOpps = ci.backing_opportunities ?? []
             return (
-              <tr key={`${keyPrefix}-${ci.symbol}`}>
+              <tr key={`${keyPrefix}-${ci.symbol}-${ci.account_id || '—'}`}>
                 <td><strong>{ci.symbol}</strong></td>
+                <td className="replay-muted">{ci.account_id || '—'}</td>
                 <td title={backedOpps.join(', ') || undefined}>
                   {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
                 </td>
                 <td>{ci.held_shares}</td>
                 <td>{ci.required_shares}{ci.instances_needing > 1 && <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>}</td>
-                <td><span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{ci.surplus_or_gap >= 0 ? '+' : ''}{ci.surplus_or_gap}</span></td>
+                <td><span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{fmtSurplusShares(ci.surplus_or_gap)}</span></td>
                 <td>{optionSupportLabel}</td>
                 <td>{fmtUsd(ci.cost_basis_total)}</td>
                 <td>{fmtUsd(ci.avg_cost_per_share)}</td>
@@ -1116,7 +1232,7 @@ export function PositionsPage({
                       ? 'All positions grouped by strategy instance. Each group shows its option and stock positions.'
                       : openTab === 'options'
                         ? 'Open option positions by contract; expand a row to see Details and Add/Edit/Close trades.'
-                        : 'Open stock positions from account snapshots (Live only). Link stock to strategy instance (e.g. Covered Call underlying).'}
+                        : 'Open stock positions from account snapshots (Live only). Tag stock fills with strategy from Ledger / Executions if needed.'}
                   </p>
                 </div>
               </div>
@@ -1190,7 +1306,6 @@ export function PositionsPage({
                             <th>Max Gain</th>
                             <th>Max Loss</th>
                             <th>Risk</th>
-                            <th>Total PNL</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1233,21 +1348,23 @@ export function PositionsPage({
                                 </td>
                                 <td className="instance-sheet-opp-cell">
                                   {allGroup.strategy_instance_id != null ? (
-                                    <a
-                                      href={`#/strategies/instances/${allGroup.strategy_instance_id}`}
-                                      className="instance-sheet-inst-link"
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      title={`View instance: ${instLabel}`}
-                                      onClick={e => e.stopPropagation()}
-                                    >
-                                      {oppName || instLabel}
-                                    </a>
+                                    <>
+                                      {oppName ? (
+                                        <span className="instance-sheet-opp-name">{oppName}</span>
+                                      ) : null}
+                                      <a
+                                        href={`#/strategies/instances/${allGroup.strategy_instance_id}`}
+                                        className="instance-sheet-inst-link instance-sheet-inst-sublabel"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title={`View instance: ${instLabel}`}
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        {instLabel}
+                                      </a>
+                                    </>
                                   ) : (
                                     <span>{oppName || instLabel}</span>
-                                  )}
-                                  {instLabel && oppName && (
-                                    <span className="instance-sheet-inst-sublabel replay-muted">{instLabel}</span>
                                   )}
                                 </td>
                                 <td><span className={structBadgeClass}>{structLabel}</span></td>
@@ -1260,16 +1377,24 @@ export function PositionsPage({
                                 <td>{optN}</td>
                                 <td>
                                   {covN > 0 ? (() => {
-                                    const covSymbols = allGroup.stock_coverage.map(sc => {
-                                      const ci = stockCoverageItems.find(c => c.symbol === sc.symbol)
-                                      const held = ci?.held_shares ?? 0
-                                      if (held >= sc.required_shares) return { status: 'covered' as const, sym: sc.symbol }
-                                      if (held > 0) return { status: 'partial' as const, sym: sc.symbol }
-                                      return { status: 'naked' as const, sym: sc.symbol }
-                                    })
-                                    const allCovered = covSymbols.every(c => c.status === 'covered')
-                                    const anyNaked = covSymbols.some(c => c.status === 'naked')
-                                    const statusClass = allCovered ? 'coverage-status-covered' : anyNaked ? 'coverage-status-naked' : 'coverage-status-partial'
+                                    let allCovered = true
+                                    let anyNaked = false
+                                    for (const sc of allGroup.stock_coverage) {
+                                      const hp = liveStockPositions.find(
+                                        s =>
+                                          (s.symbol ?? '').toUpperCase() === (sc.symbol ?? '').toUpperCase() &&
+                                          (s.account_id ?? '').trim() === (sc.account_id ?? '').trim(),
+                                      )
+                                      const held = hp ? Math.abs(Number(hp.position) || 0) : 0
+                                      if (held >= sc.required_shares) continue
+                                      allCovered = false
+                                      if (held === 0) anyNaked = true
+                                    }
+                                    const statusClass = allCovered
+                                      ? 'coverage-status-covered'
+                                      : anyNaked
+                                        ? 'coverage-status-naked'
+                                        : 'coverage-status-partial'
                                     const statusLabel = allCovered ? 'Covered' : anyNaked ? 'Naked' : 'Partial'
                                     return <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
                                   })() : <span className="replay-muted">—</span>}
@@ -1284,11 +1409,10 @@ export function PositionsPage({
                                     <td><span className={`coverage-status-badge ${allGroup.risk_profile.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
                                   </>
                                 })()}
-                                <td><strong><span className="replay-pnl-unrealized">{fmtUsd(allGroup.total_unrealized_pnl)}</span></strong></td>
                               </tr>,
                               ...(isExpanded ? [
                                 <tr key={`inst-detail-${instKey}`} className="instance-sheet-detail-row">
-                                  <td colSpan={12} className="instance-sheet-detail-cell">
+                                  <td colSpan={11} className="instance-sheet-detail-cell">
                                     {optN > 0 && (
                                       <div className="instance-sheet-sub-section">
                                         <h6 className="replay-sub instance-sheet-sub-heading">Options ({optN})</h6>
@@ -1424,32 +1548,86 @@ export function PositionsPage({
                                             <thead>
                                               <tr>
                                                 <th>Symbol</th>
+                                                <th>Account</th>
+                                                <th>Cost basis</th>
+                                                <th>Avg cost</th>
+                                                <th>Live last</th>
+                                                <th>Daily ($ / %)</th>
+                                                <th>Total ($ / %)</th>
                                                 <th>Direction</th>
                                                 <th>Required</th>
-                                                <th>Held (Account)</th>
+                                                <th>Held</th>
                                                 <th>Status</th>
                                                 <th>Surplus / Gap</th>
                                               </tr>
                                             </thead>
                                             <tbody>
                                               {allGroup.stock_coverage.map(sc => {
-                                                const ci = stockCoverageItems.find(c => c.symbol === sc.symbol)
-                                                const held = ci?.held_shares ?? 0
+                                                const acct = (sc.account_id ?? '').trim()
+                                                const m = underlyingCoverageStockMetrics(liveStockPositions, sc.symbol, acct)
+                                                const held = m.held
                                                 const gap = held - sc.required_shares
-                                                const statusLabel = held >= sc.required_shares ? 'Fully Covered' : held > 0 ? `Partial (${held}/${sc.required_shares})` : 'Naked'
-                                                const statusClass = held >= sc.required_shares ? 'coverage-status-covered' : held > 0 ? 'coverage-status-partial' : 'coverage-status-naked'
-                                                const sharedCount = ci?.instances_needing ?? 0
+                                                const statusLabel =
+                                                  held >= sc.required_shares
+                                                    ? 'Fully Covered'
+                                                    : held > 0
+                                                      ? `Partial (${held}/${sc.required_shares})`
+                                                      : 'Naked'
+                                                const statusClass =
+                                                  held >= sc.required_shares
+                                                    ? 'coverage-status-covered'
+                                                    : held > 0
+                                                      ? 'coverage-status-partial'
+                                                      : 'coverage-status-naked'
+                                                const hasStock = m.held !== 0 || m.cost_basis_total != null
                                                 return (
-                                                  <tr key={`ia-cov-${instKey}-${sc.symbol}`}>
+                                                  <tr key={`ia-cov-${instKey}-${sc.symbol}-${acct || 'x'}`}>
                                                     <td><strong>{sc.symbol}</strong></td>
+                                                    <td>
+                                                      <span className="underlying-coverage-account" title="Stock hedge must be in this account (same as options above)">
+                                                        {acct || '—'}
+                                                      </span>
+                                                    </td>
+                                                    <td>{fmtUsd(m.cost_basis_total)}</td>
+                                                    <td>{fmtUsd(m.avg_cost_per_share)}</td>
+                                                    <td>{fmtUsd(m.live_last_price)}</td>
+                                                    <td>
+                                                      {hasStock ? (
+                                                        <>
+                                                          <span className={((m.daily_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                                            {fmtUsd(m.daily_pnl)}
+                                                          </span>
+                                                          {' / '}
+                                                          <span className={((m.daily_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                                            {fmtSignedPct(m.daily_pct)}
+                                                          </span>
+                                                        </>
+                                                      ) : (
+                                                        '—'
+                                                      )}
+                                                    </td>
+                                                    <td>
+                                                      {hasStock ? (
+                                                        <>
+                                                          <span className={((m.total_pnl ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                                            {fmtUsd(m.total_pnl)}
+                                                          </span>
+                                                          {' / '}
+                                                          <span className={((m.total_pct ?? 0) >= 0) ? 'pnl-positive' : 'pnl-negative'}>
+                                                            {fmtSignedPct(m.total_pct)}
+                                                          </span>
+                                                        </>
+                                                      ) : (
+                                                        '—'
+                                                      )}
+                                                    </td>
                                                     <td>{sc.direction === 'long' ? 'Long' : 'Short'}</td>
                                                     <td>{sc.required_shares}</td>
                                                     <td>{held}</td>
                                                     <td>
                                                       <span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span>
-                                                      {sharedCount > 1 && <span className="coverage-shared-hint" title={`Shared across ${sharedCount} instances`}> ({sharedCount} inst.)</span>}
                                                     </td>
-                                                    <td><span className={gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{gap >= 0 ? '+' : ''}{gap}</span></td>
+                                                    <td><span className={gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{fmtSurplusShares(gap)}</span></td>
                                                   </tr>
                                                 )
                                               })}
@@ -1461,27 +1639,7 @@ export function PositionsPage({
                                     {allGroup.risk_profile && (
                                       <div className="instance-sheet-sub-section risk-profile-section">
                                         <h6 className="replay-sub instance-sheet-sub-heading">Risk Profile</h6>
-                                        <dl className="risk-profile-dl">
-                                          <dt>Risk Type</dt>
-                                          <dd><span className={`coverage-status-badge ${allGroup.risk_profile.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{allGroup.risk_profile.risk_type === 'defined' ? 'Defined' : 'Unlimited'}</span></dd>
-                                          <dt>Max Gain</dt>
-                                          <dd><span className="risk-value-gain">{formatRiskLabel(allGroup.risk_profile).gainLabel}</span></dd>
-                                          {allGroup.risk_profile.naked_short_call_contracts > 0 && allGroup.risk_profile.hedged_max_loss != null && (
-                                            <>
-                                              <dt>Hedged book max loss</dt>
-                                              <dd><span className="risk-value-loss">{formatApproxUsd(allGroup.risk_profile.hedged_max_loss)}</span></dd>
-                                              <dt>Naked short calls</dt>
-                                              <dd>{allGroup.risk_profile.naked_short_call_contracts} contract{allGroup.risk_profile.naked_short_call_contracts !== 1 ? 's' : ''}</dd>
-                                            </>
-                                          )}
-                                          <dt>Max Loss</dt>
-                                          <dd><span className={allGroup.risk_profile.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{formatRiskLabel(allGroup.risk_profile).lossLabel}</span></dd>
-                                          <dt>Net Premium</dt>
-                                          <dd>{fmtUsd(allGroup.risk_profile.net_premium)}</dd>
-                                          {allGroup.risk_profile.breakeven_prices.length > 0 && (
-                                            <><dt>Breakeven</dt><dd>{allGroup.risk_profile.breakeven_prices.map(p => fmtUsd(p)).join(', ')}</dd></>
-                                          )}
-                                        </dl>
+                                        <RiskProfileDl profile={allGroup.risk_profile} fmtUsd={fmtUsd} />
                                         {allGroup.risk_profile.naked_short_call_contracts > 0 && (
                                           <ul className="risk-hedged-breakdown" style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
                                             {formatRiskHedgedBreakdown(allGroup.risk_profile).map((line, i) => (
@@ -1499,18 +1657,18 @@ export function PositionsPage({
                         </tbody>
                         <tfoot>
                           <tr className="replay-opt-tfoot-total">
-                            <td colSpan={10} className="replay-opt-tfoot-label">Total ({sortedInstanceAllGroups.length} instance{sortedInstanceAllGroups.length !== 1 ? 's' : ''})</td>
-                            <td>
-                              <span className="replay-pnl-unrealized">
-                                {fmtUsd(sortedInstanceAllGroups.reduce((acc, g) => acc + g.options_unrealized_pnl, 0))}
-                              </span>
+                            <td colSpan={7} className="replay-opt-tfoot-label">
+                              Total ({sortedInstanceAllGroups.length} instance{sortedInstanceAllGroups.length !== 1 ? 's' : ''})
                             </td>
                             <td>
                               <strong>
                                 <span className="replay-pnl-unrealized">
-                                  {fmtUsd(sortedInstanceAllGroups.reduce((acc, g) => acc + g.total_unrealized_pnl, 0))}
+                                  {fmtUsd(sortedInstanceAllGroups.reduce((acc, g) => acc + g.options_unrealized_pnl, 0))}
                                 </span>
                               </strong>
+                            </td>
+                            <td colSpan={3} className="replay-muted">
+                              —
                             </td>
                           </tr>
                         </tfoot>
@@ -1880,8 +2038,6 @@ export function PositionsPage({
                             <th>Avg Cost</th>
                             <th>Mark</th>
                             <th>UN PNL</th>
-                            <th>Opportunity</th>
-                            <th>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1897,7 +2053,7 @@ export function PositionsPage({
                             for (const accId of accountIds) {
                               rows.push(
                                 <tr key={`open-stk-header-${accId}`} className="replay-portfolio-group-header">
-                                  <td colSpan={9}>
+                                  <td colSpan={7}>
                                     <strong>{accId}</strong>
                                   </td>
                                 </tr>,
@@ -1908,11 +2064,7 @@ export function PositionsPage({
                                   ? Number(position.unrealized_pnl)
                                   : null
                                 const pnlClass = pnl == null ? '' : 'replay-pnl-unrealized'
-                                const instId = position.strategy_instance_id
-                                const instLabel = position.strategy_instance_label?.trim()
-                                const oppName = position.strategy_opportunity_name?.trim()
                                 const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
-                                const instanceTitle = instLabel ? `Instance: ${instLabel}` : instId != null ? `View instance #${instId}` : ''
                                 rows.push(
                                   <tr key={`open-stk-${accId}-${position.symbol ?? ''}-${contractKey}`}>
                                     <td>{accId}</td>
@@ -1922,19 +2074,6 @@ export function PositionsPage({
                                     <td>{fmtUsd(position.avgCost)}</td>
                                     <td>{fmtUsd(position.price)}</td>
                                     <td><span className={pnlClass}>{fmtUsd(pnl ?? 0)}</span></td>
-                                    <td className="replay-strategy-opp-cell" title={[instanceTitle, oppName].filter(Boolean).join(' · ') || undefined}>
-                                      <span className="replay-strategy-opp-cell-inner">
-                                        {instId != null ? (
-                                          <a href={`#/strategies/instances/${instId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy instance'} onClick={e => e.stopPropagation()}>
-                                            <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="5" width="14" height="14" rx="1" /></svg>
-                                          </a>
-                                        ) : null}
-                                        <span className="replay-strategy-opp-text">{oppName || '—'}</span>
-                                      </span>
-                                    </td>
-                                    <td>
-                                      <LinkStrategyIconButton title="Link to strategy instance (e.g. Covered Call underlying)" onClick={() => { setLinkPositionContext({ account_id: (position.account_id ?? accId).trim() || accId, contract_key: contractKey, symbol: position.symbol ?? undefined, strategy_opportunity_id: position.strategy_opportunity_id ?? null, strategy_instance_id: position.strategy_instance_id ?? null, position: qty, avgCost: position.avgCost, price: position.price }); setLinkPositionModalOpen(true); setPageError(null) }} />
-                                    </td>
                                   </tr>,
                                 )
                               }
@@ -1980,18 +2119,6 @@ export function PositionsPage({
         onSuccess={() => {
           setPageError(null)
           loadReplayData()
-        }}
-      />
-      <LinkPositionModal
-        open={linkPositionModalOpen}
-        context={linkPositionContext}
-        onClose={() => {
-          setLinkPositionModalOpen(false)
-          setLinkPositionContext(null)
-        }}
-        onSuccess={async () => {
-          setPageError(null)
-          await loadReplayData()
         }}
       />
       {deleteConfirmState.open && (

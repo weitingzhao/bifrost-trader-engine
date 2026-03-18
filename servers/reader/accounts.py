@@ -122,10 +122,6 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ip.updated_at AS price_updated_at,
                         pct.category_id AS position_category_id,
                         pc.name AS position_category_name,
-                        ap.strategy_opportunity_id,
-                        ap.strategy_instance_id,
-                        so.name AS strategy_opportunity_name,
-                        si.label AS strategy_instance_label,
                         w.optionable AS watchlist_optionable
                     FROM account_positions ap
                     LEFT JOIN contract_quote_live ip
@@ -134,10 +130,6 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ON ap.account_id = pct.account_id AND ap.contract_key = pct.contract_key
                     LEFT JOIN preference_position_categories pc
                         ON pct.category_id = pc.id
-                    LEFT JOIN strategy_opportunity so
-                        ON ap.strategy_opportunity_id = so.strategy_opportunity_id
-                    LEFT JOIN strategy_instance si
-                        ON ap.strategy_instance_id = si.strategy_instance_id
                     LEFT JOIN watchlist w
                         ON w.contract_key = ap.contract_key
                     WHERE ap.account_id = %s
@@ -174,21 +166,6 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                 cat_name = p.get("position_category_name")
                 if cat_name is not None and str(cat_name).strip():
                     pos_dict["category"] = str(cat_name).strip()
-
-                if p.get("strategy_opportunity_id") is not None:
-                    try:
-                        pos_dict["strategy_opportunity_id"] = int(p["strategy_opportunity_id"])
-                    except (TypeError, ValueError):
-                        pass
-                if p.get("strategy_instance_id") is not None:
-                    try:
-                        pos_dict["strategy_instance_id"] = int(p["strategy_instance_id"])
-                    except (TypeError, ValueError):
-                        pass
-                if p.get("strategy_opportunity_name") is not None and str(p.get("strategy_opportunity_name")).strip():
-                    pos_dict["strategy_opportunity_name"] = str(p["strategy_opportunity_name"]).strip()
-                if p.get("strategy_instance_label") is not None and str(p.get("strategy_instance_label")).strip():
-                    pos_dict["strategy_instance_label"] = str(p["strategy_instance_label"]).strip()
 
                 wl_opt = p.get("watchlist_optionable")
                 if wl_opt is not None:
@@ -309,6 +286,52 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         pass
 
                 positions.append(pos_dict)
+            # Derive strategy_links from account_executions (one position may map to multiple strategies)
+            ck_list = [pd.get("contract_key") for pd in positions if pd.get("contract_key")]
+            strat_links_map: Dict[str, list] = {}
+            if ck_list:
+                try:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur_sl:
+                        cur_sl.execute(
+                            """
+                            SELECT e.contract_key,
+                                   e.strategy_opportunity_id,
+                                   e.strategy_instance_id,
+                                   so.name AS strategy_opportunity_name,
+                                   si.label AS strategy_instance_label
+                            FROM (
+                                SELECT DISTINCT ON (contract_key, strategy_opportunity_id, strategy_instance_id)
+                                       contract_key, strategy_opportunity_id, strategy_instance_id
+                                FROM account_executions
+                                WHERE account_id = %s
+                                  AND contract_key = ANY(%s::text[])
+                                  AND (strategy_opportunity_id IS NOT NULL OR strategy_instance_id IS NOT NULL)
+                            ) e
+                            LEFT JOIN strategy_opportunity so ON e.strategy_opportunity_id = so.strategy_opportunity_id
+                            LEFT JOIN strategy_instance si ON e.strategy_instance_id = si.strategy_instance_id
+                            """,
+                            (acc_id, ck_list),
+                        )
+                        for sl_row in cur_sl.fetchall():
+                            ck = sl_row.get("contract_key") or ""
+                            link: Dict[str, Any] = {}
+                            if sl_row.get("strategy_opportunity_id") is not None:
+                                link["strategy_opportunity_id"] = int(sl_row["strategy_opportunity_id"])
+                            if sl_row.get("strategy_instance_id") is not None:
+                                link["strategy_instance_id"] = int(sl_row["strategy_instance_id"])
+                            if sl_row.get("strategy_opportunity_name"):
+                                link["strategy_opportunity_name"] = str(sl_row["strategy_opportunity_name"]).strip()
+                            if sl_row.get("strategy_instance_label"):
+                                link["strategy_instance_label"] = str(sl_row["strategy_instance_label"]).strip()
+                            if link:
+                                strat_links_map.setdefault(ck, []).append(link)
+                except Exception as sl_err:
+                    logger.debug("strategy_links derivation failed: %s", sl_err)
+            for pd in positions:
+                ck = pd.get("contract_key") or ""
+                links = strat_links_map.get(ck, [])
+                if links:
+                    pd["strategy_links"] = links
             out.append({"account_id": acc_id, "summary": summary, "positions": positions})
         return out
     except Exception as e:
@@ -1056,41 +1079,52 @@ def delete_one_execution(status_config: dict, account_executions_id: int) -> boo
         return False
 
 
-def update_position_strategy(
+def batch_update_execution_strategy(
     conn: Any,
     account_id: str,
-    contract_key: str,
+    contract_key: Optional[str],
+    execution_ids: Optional[List[int]],
     strategy_opportunity_id: Optional[int],
     strategy_instance_id: Optional[int],
-) -> bool:
-    """Update strategy_opportunity_id and strategy_instance_id for a position (account_positions).
-    Used for linking stock positions (e.g. Covered Call underlying) to strategy instance."""
-    if not conn or not (account_id or "").strip() or not (contract_key or "").strip():
-        return False
+) -> int:
+    """Batch update strategy attribution on account_executions.
+    Either by contract_key (all matching executions) or by explicit execution_ids list.
+    Returns the number of rows updated."""
+    if not conn or not (account_id or "").strip():
+        return 0
     acc = str(account_id).strip()
-    ck = str(contract_key).strip()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE account_positions
-                SET strategy_opportunity_id = %s, strategy_instance_id = %s, updated_at = now()
-                WHERE account_id = %s AND contract_key = %s
-                """,
-                (strategy_opportunity_id, strategy_instance_id, acc, ck),
-            )
-            if cur.rowcount == 0:
-                conn.rollback()
-                return False
+            if execution_ids:
+                cur.execute(
+                    """
+                    UPDATE account_executions
+                    SET strategy_opportunity_id = %s, strategy_instance_id = %s
+                    WHERE account_id = %s AND account_executions_id = ANY(%s::bigint[])
+                    """,
+                    (strategy_opportunity_id, strategy_instance_id, acc, execution_ids),
+                )
+            elif contract_key and contract_key.strip():
+                cur.execute(
+                    """
+                    UPDATE account_executions
+                    SET strategy_opportunity_id = %s, strategy_instance_id = %s
+                    WHERE account_id = %s AND contract_key = %s
+                    """,
+                    (strategy_opportunity_id, strategy_instance_id, acc, contract_key.strip()),
+                )
+            else:
+                return 0
+            count = cur.rowcount
         conn.commit()
-        return True
+        return count
     except Exception as e:
-        logger.warning("update_position_strategy failed: %s", e)
+        logger.warning("batch_update_execution_strategy failed: %s", e)
         try:
             conn.rollback()
         except Exception:
             pass
-        return False
+        return 0
 
 
 __all__ = [
@@ -1101,5 +1135,5 @@ __all__ = [
     "upsert_account_transactions",
     "update_one_execution",
     "delete_one_execution",
-    "update_position_strategy",
+    "batch_update_execution_strategy",
 ]

@@ -236,4 +236,5 @@
 | **结论位置** | 本文档**开头「评估结论」**已给出当前进度、里程碑状态与建议下一步；每次评估时优先更新该节及「当前项目进展」「项目里程碑时间线」表。 |
 | **阶段 1/2** | 已实现（2026-02-14），**验收完成**（2026-02-26）；有 phase1/phase2 执行计划，验收为人工执行。 |
 | **阶段 3** | **当前项目工作阶段**；R-A1、R-M6、R-H2 已实现；有 phase3-execution-plan，无 phase3_0.py。 |
+| **归属模型调整（2026-03-18）** | account_positions 移除 strategy_opportunity_id / strategy_instance_id 列；策略归属唯一来源改为 account_executions；GET /status positions 通过子查询从 executions 推导 strategy_links[]（一对多）；新增 PATCH /executions/strategy-attribution 批量打标；废弃 PUT /positions/strategy。 |
 | **阶段 4/5** | 未开始。 |

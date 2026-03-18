@@ -31,16 +31,19 @@ export type InstancePositionGroup = {
   total_unrealized_pnl: number
 }
 
-/** Per-instance underlying stock coverage derived from structure legs + option positions. */
+/** Per-instance underlying stock coverage derived from structure legs + option positions (same account as those options). */
 export type InstanceStockCoverage = {
   symbol: string
+  /** IB account_id for the option legs that create this requirement; stock hedge must be in this account. */
+  account_id: string
   required_shares: number
   direction: 'long' | 'short'
 }
 
-/** Account-level stock coverage summary across all instances. */
+/** Per-(symbol, account) stock coverage summary across instances. */
 export type StockCoverageItem = {
   symbol: string
+  account_id: string
   required_shares: number
   held_shares: number
   surplus_or_gap: number
@@ -74,8 +77,8 @@ export type InstanceAllGroup = {
   strategy_instance_opened_at_epoch: number | null
   options: OpenOptionPosition[]
   stock_coverage: InstanceStockCoverage[]
+  /** Sum of option unrealized PnL for this instance (execution-based where available). */
   options_unrealized_pnl: number
-  total_unrealized_pnl: number
   /** From strategy_structure via opportunity → structure chain. E.g. covered_call, iron_condor. */
   structure_type: string | null
   /** From strategy_opportunity.scope_type. E.g. watchlist_stk, explicit_symbols. */

@@ -246,8 +246,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 strike double precision,
                 option_right text,
                 updated_at timestamptz DEFAULT now(),
-                strategy_opportunity_id bigint,
-                strategy_instance_id bigint,
                 PRIMARY KEY (account_id, contract_key)
             )
         """
@@ -1000,13 +998,11 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_history_structure_id ON strategy_history (strategy_structure_id)"
         )
-        _log("account_positions / account_executions strategy attribution indexes")
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS account_positions_strategy_opportunity_id ON account_positions (strategy_opportunity_id)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS account_positions_strategy_instance_id ON account_positions (strategy_instance_id)"
-        )
+        _log("account_positions strategy columns removed; account_executions strategy attribution indexes")
+        cur.execute("ALTER TABLE account_positions DROP COLUMN IF EXISTS strategy_opportunity_id")
+        cur.execute("ALTER TABLE account_positions DROP COLUMN IF EXISTS strategy_instance_id")
+        cur.execute("DROP INDEX IF EXISTS account_positions_strategy_opportunity_id")
+        cur.execute("DROP INDEX IF EXISTS account_positions_strategy_instance_id")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS account_executions_strategy_opportunity_id ON account_executions (strategy_opportunity_id)"
         )

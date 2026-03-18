@@ -46,6 +46,14 @@ export interface FlexConfig {
   rows?: FlexAccountItem[]
 }
 
+/** Strategy link derived from account_executions (one position may belong to multiple strategies). */
+export interface StrategyLink {
+  strategy_opportunity_id?: number
+  strategy_instance_id?: number
+  strategy_opportunity_name?: string
+  strategy_instance_label?: string
+}
+
 /** One position row from IB (R-A1 multi-account) */
 export interface IbPositionRow {
   account?: string
@@ -80,14 +88,8 @@ export interface IbPositionRow {
   category_id?: number | null
   /** 持仓分类名称（STK），如 Dividend、Short-term */
   category?: string | null
-  /** Strategy opportunity ID (trade attribution, SI.2). */
-  strategy_opportunity_id?: number | null
-  /** Strategy instance ID (trade attribution, SI.2). */
-  strategy_instance_id?: number | null
-  /** Strategy opportunity name (from JOIN). */
-  strategy_opportunity_name?: string | null
-  /** Strategy instance label (from JOIN). */
-  strategy_instance_label?: string | null
+  /** Strategy links derived from account_executions (one position may map to multiple strategies). */
+  strategy_links?: StrategyLink[]
   /** Whether this symbol has tradeable options (from watchlist.optionable). */
   optionable?: boolean | null
 }

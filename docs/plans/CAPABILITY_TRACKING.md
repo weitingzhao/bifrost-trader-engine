@@ -31,7 +31,7 @@
 | **18** | **暂停/恢复自动对冲** | R-C2，阶段 5 | ❌ 未实现 | 暂停期间不下新单，监控与自检仍可用；恢复后继续对冲。 |
 | **19** | **一键平敞口** | R-C3，阶段 5 | ❌ 未实现 | 红或紧急时一键平掉主账户本策略对冲敞口；仅主账户，不碰第二账户。 |
 | **20** | **自动下单（终极目标）** | 阶段 5 | ❌ 未实现 | 守护进程在满足策略与风控时自动发单；依赖 1–11 及 17–19 等能力齐备。 |
-| **21** | **交易归属与策略实例（按策略 PnL）** | 阶段 3 扩展 | ❌ 未实现 | strategy_instance 表；position/execution 归属 strategy_opportunity 与 strategy_instance；Performance/复盘按策略与实例聚合；**策略实例独立页面**（列表 + 详情：策略、盈亏、风险/回测/资金占用等）。步骤与验收见 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md)「策略实例与交易归属」及「策略实例独立页面」（SI.5）。实现后可按策略、按单笔开仓查看 PnL 与盈亏比，补齐 R-M7/R-H2 的按策略维度。 |
+| **21** | **交易归属与策略实例（按策略 PnL）** | 阶段 3 扩展 | ❌ 未实现 | strategy_instance 表；execution 归属 strategy_opportunity 与 strategy_instance（position 不存策略，从 executions 推导 strategy_links）；Performance/复盘按策略与实例聚合；**策略实例独立页面**（列表 + 详情：策略、盈亏、风险/回测/资金占用等）。步骤与验收见 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md)「策略实例与交易归属」及「策略实例独立页面」（SI.5）。实现后可按策略、按单笔开仓查看 PnL 与盈亏比，补齐 R-M7/R-H2 的按策略维度。 |
 
 ---
 

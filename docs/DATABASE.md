@@ -134,6 +134,7 @@
 | updated_at | timestamptz | 最后更新时间 |
 
 - **语义**：GET /status 的 `accounts` 从 **account** + **account_positions** 组装为 `[{ account_id, summary, positions }]` 形状；若表不存在或查询失败则返回空数组。GET /status 同时返回 **accounts_fetched_at**（Unix 秒，取 account 表 max(updated_at)），供监控页显示「数据来自 …，已过 N 分钟」。监控页「IB 账户」**刷新**由监控端维护的 **AccountIbClient** 直接向 IB 拉取账户/持仓并写入 account/account_positions，不写 daemon_control；该区块另有 **1 小时** 自动刷新（仅读 DB 更新展示）。
+- **策略归属**：本表**不存** strategy_opportunity_id / strategy_instance_id。一个持仓（contract_key）可能归属多个策略——策略信息通过 account_executions 推导（见 §2.24.11）。GET /status 的 positions 通过子查询返回 `strategy_links[]`（DISTINCT per contract_key）。
 
 ### 2.10 表 `contract_quote_live`（阶段 3 R-M6：持仓标的当前价）
 
@@ -1021,8 +1022,9 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 
 #### 2.24.11 策略实例与交易归属（Strategy Instance & Trade Attribution）
 
-- **用途**：将持仓与成交归属到**机会策略**（strategy_opportunity）与可选**策略实例**（strategy_instance），便于按策略、按单笔开仓做 PnL 与 Performance calendar；为「按策略盈亏比」提供数据基础。
+- **用途**：将成交归属到**机会策略**（strategy_opportunity）与可选**策略实例**（strategy_instance），便于按策略、按单笔开仓做 PnL 与 Performance calendar；为「按策略盈亏比」提供数据基础。
 - **策略实例**：代表某条机会策略在某账户下的一次开仓；同一实例的多腿（多 contract_key）共享同一 `strategy_instance_id`。
+- **归属原则**：**account_positions 不存策略归属**（一个持仓可能对应多个策略，无法用单一字段表达）。**唯一归属来源为 account_executions**——每条成交可带 strategy_opportunity_id / strategy_instance_id。对持仓展示策略信息时，通过 `(account_id, contract_key)` 从 account_executions 推导 DISTINCT 策略列表（`strategy_links`），一对多。
 
 ##### 2.24.11a 表 `strategy_instance`（策略实例）
 
@@ -1041,18 +1043,7 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 
 - **索引**：`(strategy_opportunity_id)`、`(account_id, opened_at)`，便于按机会、按账户查询。
 
-##### 2.24.11b `account_positions` 扩展（交易归属）
-
-- **新增列**：
-
-| 列名 | 类型 | 说明 |
-|------|------|------|
-| strategy_opportunity_id | bigint REFERENCES strategy_opportunity(strategy_opportunity_id) ON DELETE SET NULL | 归属机会策略；NULL 表示未归属 |
-| strategy_instance_id | bigint REFERENCES strategy_instance(strategy_instance_id) ON DELETE SET NULL | 归属策略实例（同笔开仓多腿填同一 id）；NULL 表示未归属或仅按 opportunity 统计 |
-
-- **索引**：`(strategy_opportunity_id)`、`(strategy_instance_id)`，便于按策略/实例筛选与聚合。
-
-##### 2.24.11c `account_executions` 扩展（交易归属）
+##### 2.24.11b `account_executions` 扩展（交易归属）
 
 - **新增列**：
 
@@ -1063,7 +1054,8 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 
 - **索引**：`(strategy_opportunity_id)`、`(strategy_instance_id)`，便于按策略/实例筛选与 Realized PnL 聚合。
 
-- **读取**：GET /status 的 positions、GET /executions 可带出上述 id 及可选 opportunity/instance 名称；GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+- **读取**：GET /status 的 positions 通过子查询从 account_executions 推导 `strategy_links[]`（DISTINCT strategy_opportunity_id + strategy_instance_id per contract_key），附带 opportunity 名称与 instance label；GET /executions 返回每条成交的 strategy 字段并可按其筛选；GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+- **批量打标**：`PATCH /executions/strategy-attribution`（替代原 `PUT /positions/strategy`）：按 account_id + contract_key 或 execution_ids 批量更新 executions 的 strategy 字段。`PUT /executions/{id}` 支持单条更新。
 
 ---
 
@@ -1225,7 +1217,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 策略分配（strategy_allocation）| 表 strategy_allocation、strategy_allocation_opportunity；主键 strategy_allocation_id；无 jsonb，机会列表通过关联表与 sort_order；API 请求/响应使用 allocation_limits（max_positions、max_bp_pct）。§2.24.3、§2.24.3a。 | — |
 | strategy_structure.structure_subtype | §2.24.1 表 strategy_structure 增加列 structure_subtype (text NULL)；covered_call 时存 otm/atm/itm/deep_otm，供 Edit Wizard 还原 Step 2 状态。 | — |
 | 结构类型配置表（方案 A） | 新增 6 张表：strategy_structure_type、strategy_structure_type_leg、strategy_structure_subtype、strategy_structure_subtype_characteristic、strategy_structure_subtype_meta_param、strategy_structure_subtype_rule。由 _ensure_tables 创建；初始数据由 scripts/db_init/seed_structure_type_config.py 写入。§2.24.0、§2.24.0a–f。 | — |
-| 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_positions、account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b、§2.24.11c）。步骤与验收见 PLAN_NEXT_STEPS「策略实例与交易归属」。 | 阶段 3 扩展 |
+| 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b）。**account_positions 不存策略归属**（已移除 strategy_opportunity_id、strategy_instance_id 列）；持仓的策略信息通过 account_executions 推导 strategy_links[]。步骤与验收见 PLAN_NEXT_STEPS「策略实例与交易归属」。 | 阶段 3 扩展 |
 
 ---
 

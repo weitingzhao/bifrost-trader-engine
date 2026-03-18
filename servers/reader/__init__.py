@@ -8,6 +8,7 @@ from servers.reader.status import (
     write_run_status,
 )
 from servers.reader.accounts import (
+    batch_update_execution_strategy,
     delete_one_execution,
     insert_one_execution,
     sync_accounts_snapshot_to_db,
@@ -36,6 +37,7 @@ from servers.reader.settings import (
 
 __all__ = [
     "StatusReader",
+    "batch_update_execution_strategy",
     "delete_all_job_bars_backfill",
     "delete_job_bars_backfill",
     "delete_one_execution",

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
-import { createStrategyInstance, fetchOpportunities, fetchStrategyInstances, putPositionStrategy } from '../../api'
+import { createStrategyInstance, fetchOpportunities, fetchStrategyInstances, patchExecutionStrategyAttribution } from '../../api'
 import { fmtUsd } from '../../utils/format'
 
 export interface LinkPositionContext {
@@ -165,7 +165,7 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
       instId = instRaw && Number.isFinite(Number(instRaw)) ? Number(instRaw) : null
     }
 
-    const res = await putPositionStrategy({
+    const res = await patchExecutionStrategyAttribution({
       account_id: context.account_id,
       contract_key: context.contract_key,
       strategy_opportunity_id: opp,
@@ -176,7 +176,7 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
       onClose()
       await onSuccess()
     } else {
-      setFormError(res.error ?? 'Update failed')
+      setFormError(res.error ?? 'No matching executions found or update failed.')
     }
   }
 
@@ -189,9 +189,9 @@ export function LinkPositionModal({ open, context, onClose, onSuccess }: LinkPos
       aria-labelledby="link-position-modal-title"
     >
       <div className="modal-panel replay-exec-modal link-exec-modal" onClick={ev => ev.stopPropagation()}>
-        <h3 id="link-position-modal-title">Link position to strategy</h3>
+        <h3 id="link-position-modal-title">Tag executions with strategy</h3>
         <p className="section-hint" style={{ marginTop: 0 }}>
-          Assign strategy opportunity and instance to this stock position (e.g. Covered Call underlying).
+          Assign strategy opportunity and instance to all executions for this contract. One position can have multiple strategies.
         </p>
         <p className="section-hint replay-muted" style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
           {context.symbol ?? '—'} · {context.account_id ?? '—'} · {context.position != null ? `${context.position > 0 ? 'Long' : 'Short'} ${Math.abs(context.position)}` : '—'}

@@ -493,6 +493,14 @@ def _parse_optional_ts(value: Any, field_name: str) -> Any:
     raise HTTPException(status_code=400, detail=f"{field_name} must be ISO 8601 or Unix timestamp")
 
 
+@router.get("/instances/{strategy_instance_id}/open-option-legs")
+def get_instance_open_option_legs(request: Request, strategy_instance_id: int) -> Dict[str, Any]:
+    """Return current open OPT positions linked to this instance (derived from executions intersected with positions)."""
+    reader = request.app.state.reader
+    legs = reader.get_instance_open_option_legs(strategy_instance_id)
+    return {"items": legs, "strategy_instance_id": strategy_instance_id}
+
+
 @router.delete("/instances/{strategy_instance_id}")
 def delete_strategy_instance_endpoint(request: Request, strategy_instance_id: int) -> Dict[str, Any]:
     """Delete a strategy instance by id. Fails with 409 if the instance has linked executions."""

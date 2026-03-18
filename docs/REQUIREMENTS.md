@@ -92,7 +92,7 @@
 - **目标**：提供**独立于实时交易监控**的**复盘与风控分析**页面，用于事后查看账户执行交易、辅助行情（如 K 线）及风险模型评估，与当前“红绿灯 + 状态 + 操作列表”的监控页**分离**，避免实时监控与复盘分析混在同一视图。
 - **范围**：监控应用内新增页面或路由（如「复盘」/「风控」）；可查看账户执行交易记录（R-A2）、辅助行情（R-A3）、以及基于历史数据的风险/统计视图；不要求与 R-M5 同屏，通过导航切换。数据由阶段 3 的 R-A2、R-A3 及 R-H2 提供。
 - **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + contract_quote_live；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径以实现与 PLAN_NEXT_STEPS 阶段 3 验收为准；分步实现顺序与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8。
-- **（扩展）按策略归属**：支持将交易结果归属到**机会策略**与**策略实例**，Performance 与复盘可按策略、按策略实例展示 PnL 与汇总；步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+- **（扩展）按策略归属**：支持将交易结果归属到**机会策略**与**策略实例**，Performance 与复盘可按策略、按策略实例展示 PnL 与汇总。**归属仅存于 account_executions**（每条成交可带 strategy_opportunity_id / strategy_instance_id）；account_positions 不存策略字段——一个持仓可对应多个策略，通过 executions 推导 strategy_links。Realized PnL 按 execution 归属聚合；Unrealized 按标的展示时附带策略维度（strategy_links）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
 - **策略实例独立页面（扩展）**：提供**策略实例**独立入口（列表 + 详情），用于按「单笔开仓」聚合展示：所属机会策略与结构、该实例的盈亏（Realized/Unrealized）、后续可扩展的风险与回测、资金占用等；与「按账户」的 Portfolio、「按策略定义」的 Strategy 页并列，形成「按实例」的分析视角。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」及「策略实例独立页面」。
 - **与分步计划**：阶段 3（与 R-A2、R-A3 数据能力一并交付）。
 

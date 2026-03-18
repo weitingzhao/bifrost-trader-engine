@@ -5,14 +5,10 @@ import type { PerformanceResponse } from '../types'
 import type { StrategyStructure } from '../api'
 import { fetchStrategyInstance, fetchPerformance, fetchExecutions, updateStrategyInstance, fetchStructure } from '../api'
 import { fmtTs, fmtTsShort, fmtUsd, unixToDatetimeLocal, parseOptionContractKey } from '../utils/format'
+import { RiskProfileDl } from '../components/RiskProfileDl'
 import { summarizeLegs, summarizeConstraints, getStructureTypeLabel } from './strategy/strategyFormUtils'
-import {
-  computeRiskProfile,
-  formatApproxUsd,
-  formatRiskHedgedBreakdown,
-  formatRiskLabel,
-} from '../utils/riskProfile'
-import type { RiskPosition } from '../utils/riskProfile'
+import { computeRiskProfile, formatRiskHedgedBreakdown } from '../utils/riskProfile'
+import type { RiskPosition, RiskProfile } from '../utils/riskProfile'
 
 export interface StrategyInstanceDetailPageProps {
   strategyInstanceId: number
@@ -161,51 +157,71 @@ export function StrategyInstanceDetailPage({
 
   const riskProfile = useMemo(() => {
     if (!executions.length) return null
-    const netByKey = new Map<string, { strike: number; right: 'C' | 'P'; qty: number; totalCost: number }>()
+    const hasUnderlying = structure?.legs?.some(l => (l.role ?? '').toLowerCase() === 'underlying')
+    const byAcct = new Map<string, Execution[]>()
     for (const e of executions) {
       if ((e.sec_type ?? '').toUpperCase() !== 'OPT') continue
-      const parsed = parseOptionContractKey(e.contract_key)
-      const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
-      if (!r) continue
-      const strike = Number(parsed.strike) || 0
-      if (strike <= 0) continue
-      const key = `${strike}|${r}`
-      const side = (e.side ?? '').toUpperCase()
-      const qty = Math.abs(Number(e.quantity) || 0)
-      const price = Number(e.price) || 0
-      const signedQty = (side === 'BUY' || side === 'BOT' || side === 'B') ? qty : -qty
-      const prev = netByKey.get(key) ?? { strike, right: r, qty: 0, totalCost: 0 }
-      prev.qty += signedQty
-      prev.totalCost += price * qty * (signedQty > 0 ? 1 : -1)
-      netByKey.set(key, prev)
+      const aid = (e.account_id ?? '').trim()
+      if (!byAcct.has(aid)) byAcct.set(aid, [])
+      byAcct.get(aid)!.push(e)
     }
-    const positions: RiskPosition[] = []
-    for (const [, v] of netByKey) {
-      if (v.qty === 0) continue
-      const avgCost = Math.abs(v.totalCost / v.qty)
-      positions.push({ strike: v.strike, right: v.right, qty: v.qty, avg_cost: avgCost })
+    const pickWorse = (a: RiskProfile, b: RiskProfile) => {
+      if (a.naked_short_call_contracts !== b.naked_short_call_contracts) {
+        return a.naked_short_call_contracts > b.naked_short_call_contracts ? a : b
+      }
+      if (a.max_loss == null && b.max_loss != null) return a
+      if (a.max_loss != null && b.max_loss == null) return b
+      if (a.max_loss != null && b.max_loss != null && a.max_loss !== b.max_loss) {
+        return a.max_loss < b.max_loss ? a : b
+      }
+      return a
     }
-    if (positions.length === 0) return null
-
-    let covShares = 0
-    let covAvgCost: number | null = null
-    const hasUnderlying = structure?.legs?.some(l => (l.role ?? '').toLowerCase() === 'underlying')
-    if (hasUnderlying && status?.accounts) {
-      const sym = (executions[0]?.symbol ?? '').toUpperCase()
-      if (sym) {
-        for (const a of status.accounts) {
-          const stk = (a.positions ?? []).find(p =>
-            (p.secType ?? '').toUpperCase() !== 'OPT' && (p.symbol ?? '').toUpperCase() === sym
+    let merged: RiskProfile | null = null
+    for (const exs of byAcct.values()) {
+      const netByKey = new Map<string, { strike: number; right: 'C' | 'P'; qty: number; totalCost: number }>()
+      for (const e of exs) {
+        const parsed = parseOptionContractKey(e.contract_key)
+        const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
+        if (!r) continue
+        const strike = Number(parsed.strike) || 0
+        if (strike <= 0) continue
+        const key = `${strike}|${r}`
+        const side = (e.side ?? '').toUpperCase()
+        const qty = Math.abs(Number(e.quantity) || 0)
+        const price = Number(e.price) || 0
+        const signedQty = (side === 'BUY' || side === 'BOT' || side === 'B') ? qty : -qty
+        const prev = netByKey.get(key) ?? { strike, right: r, qty: 0, totalCost: 0 }
+        prev.qty += signedQty
+        prev.totalCost += price * qty * (signedQty > 0 ? 1 : -1)
+        netByKey.set(key, prev)
+      }
+      const positions: RiskPosition[] = []
+      for (const [, v] of netByKey) {
+        if (v.qty === 0) continue
+        const avgCost = Math.abs(v.totalCost / v.qty)
+        positions.push({ strike: v.strike, right: v.right, qty: v.qty, avg_cost: avgCost })
+      }
+      if (positions.length === 0) continue
+      let covShares = 0
+      let covAvgCost: number | null = null
+      if (hasUnderlying && status?.accounts) {
+        const sym = (exs[0]?.symbol ?? '').toUpperCase()
+        const acct = (exs[0]?.account_id ?? '').trim()
+        if (sym && acct) {
+          const accRow = status.accounts.find(a => (a.account_id ?? '').trim() === acct)
+          const stk = accRow?.positions?.find(
+            p => (p.secType ?? '').toUpperCase() !== 'OPT' && (p.symbol ?? '').toUpperCase() === sym,
           )
           if (stk) {
             covShares = Math.abs(Number(stk.position) || 0)
             covAvgCost = stk.avgCost != null ? Number(stk.avgCost) : null
-            break
           }
         }
       }
+      const rp = computeRiskProfile(positions, covShares, covAvgCost)
+      merged = merged == null ? rp : pickWorse(merged, rp)
     }
-    return computeRiskProfile(positions, covShares, covAvgCost)
+    return merged
   }, [executions, structure, status?.accounts])
 
   return (
@@ -367,30 +383,7 @@ export function StrategyInstanceDetailPage({
           {riskProfile && (
             <section className="detail-block risk-profile-section" style={{ marginTop: '1.5rem' }}>
               <h3 style={{ marginBottom: '0.5rem' }}>Risk Profile (at expiration)</h3>
-              <dl className="info-dl risk-profile-dl" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 1rem', margin: 0 }}>
-                <dt>Risk Type</dt>
-                <dd><span className={`coverage-status-badge ${riskProfile.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{riskProfile.risk_type === 'defined' ? 'Defined' : 'Unlimited'}</span></dd>
-                <dt>Max Gain</dt>
-                <dd><span className="risk-value-gain">{formatRiskLabel(riskProfile).gainLabel}</span></dd>
-                {riskProfile.naked_short_call_contracts > 0 && riskProfile.hedged_max_loss != null && (
-                  <>
-                    <dt>Hedged book max loss</dt>
-                    <dd><span className="risk-value-loss">{formatApproxUsd(riskProfile.hedged_max_loss)}</span></dd>
-                    <dt>Naked short calls</dt>
-                    <dd>{riskProfile.naked_short_call_contracts} contract{riskProfile.naked_short_call_contracts !== 1 ? 's' : ''}</dd>
-                  </>
-                )}
-                <dt>Max Loss</dt>
-                <dd><span className={riskProfile.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{formatRiskLabel(riskProfile).lossLabel}</span></dd>
-                <dt>Net Premium</dt>
-                <dd>{fmtUsd(riskProfile.net_premium)}</dd>
-                {riskProfile.breakeven_prices.length > 0 && (
-                  <>
-                    <dt>Breakeven</dt>
-                    <dd>{riskProfile.breakeven_prices.map(p => fmtUsd(p)).join(', ')}</dd>
-                  </>
-                )}
-              </dl>
+              <RiskProfileDl profile={riskProfile} fmtUsd={fmtUsd} />
               {riskProfile.naked_short_call_contracts > 0 && (
                 <ul className="risk-hedged-breakdown" style={{ margin: '0.75rem 0 0', paddingLeft: '1.25rem' }}>
                   {formatRiskHedgedBreakdown(riskProfile).map((line, i) => (

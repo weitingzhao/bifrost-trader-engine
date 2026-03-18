@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { StatusResponse } from '../types'
+import type { IbPositionRow, StatusResponse } from '../types'
 import type { StrategyInstance } from '../types'
 import type { StrategyOpportunity, StrategyStructure } from '../api'
 import {
@@ -113,54 +113,82 @@ export function StrategyInstancesPage({
 
   const instanceRiskMap = useMemo(() => {
     const map = new Map<number, RiskProfile>()
-    const allPositions = (status?.accounts ?? []).flatMap(a =>
-      (a.positions ?? []).filter(p => (p.secType ?? '').toUpperCase() === 'OPT' && p.strategy_instance_id != null)
-    )
-    const byInstance = new Map<number, typeof allPositions>()
-    for (const pos of allPositions) {
-      const instId = Number(pos.strategy_instance_id)
-      if (!Number.isFinite(instId)) continue
-      const arr = byInstance.get(instId)
-      if (arr) arr.push(pos)
-      else byInstance.set(instId, [pos])
+    type OptRow = IbPositionRow & { account_id: string }
+    const allPositions: OptRow[] = []
+    for (const acc of status?.accounts ?? []) {
+      const aid = (acc.account_id ?? '').trim()
+      for (const p of acc.positions ?? []) {
+        if ((p.secType ?? '').toUpperCase() !== 'OPT' || !(p.strategy_links ?? []).length) continue
+        allPositions.push({ ...p, account_id: aid })
+      }
     }
-    const stkPositions = (status?.accounts ?? []).flatMap(a =>
-      (a.positions ?? []).filter(p => (p.secType ?? '').toUpperCase() !== 'OPT')
-    )
+    const byInstance = new Map<number, OptRow[]>()
+    for (const pos of allPositions) {
+      for (const link of pos.strategy_links ?? []) {
+        const instId = link.strategy_instance_id
+        if (instId == null || !Number.isFinite(instId)) continue
+        const arr = byInstance.get(instId)
+        if (arr) arr.push(pos)
+        else byInstance.set(instId, [pos])
+      }
+    }
+    const pickWorse = (a: RiskProfile, b: RiskProfile) => {
+      if (a.naked_short_call_contracts !== b.naked_short_call_contracts) {
+        return a.naked_short_call_contracts > b.naked_short_call_contracts ? a : b
+      }
+      if (a.max_loss == null && b.max_loss != null) return a
+      if (a.max_loss != null && b.max_loss == null) return b
+      if (a.max_loss != null && b.max_loss != null && a.max_loss !== b.max_loss) {
+        return a.max_loss < b.max_loss ? a : b
+      }
+      return a
+    }
     for (const [instId, opts] of byInstance) {
       const inst = items.find(i => i.strategy_instance_id === instId)
       if (!inst) continue
       const opp = opportunitiesById.get(inst.strategy_opportunity_id)
       const str = opp ? structuresById.get(opp.strategy_structure_id) : undefined
-      const riskPos: RiskPosition[] = []
-      for (const p of opts) {
-        const parsed = parseOptionContractKey(p.contract_key)
-        const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
-        const strike = Number(p.strike) || 0
-        const avgRaw = p.avgCost != null ? Number(p.avgCost) : null
-        const avgCost = avgRaw != null && avgRaw >= 10 ? avgRaw / 100 : avgRaw
-        const qty = Number(p.position) || 0
-        if (r && avgCost != null && strike > 0 && qty !== 0) {
-          riskPos.push({ strike, right: r, qty, avg_cost: avgCost })
-        }
-      }
-      if (riskPos.length === 0) continue
-      let covShares = 0
-      let covAvgCost: number | null = null
       const hasUnderlying = str?.legs?.some(l => (l.role ?? '').toLowerCase() === 'underlying')
-      if (hasUnderlying) {
-        const sym = parseOptionContractKey(opts[0]?.contract_key).expiry !== '—'
-          ? (opts[0]?.symbol ?? '').toUpperCase()
-          : ''
-        if (sym) {
-          const held = stkPositions.find(s => (s.symbol ?? '').toUpperCase() === sym)
-          if (held) {
-            covShares = Math.abs(Number(held.position) || 0)
-            covAvgCost = held.avgCost != null ? Number(held.avgCost) : null
+      const byAcct = new Map<string, OptRow[]>()
+      for (const p of opts) {
+        const aid = p.account_id
+        if (!byAcct.has(aid)) byAcct.set(aid, [])
+        byAcct.get(aid)!.push(p)
+      }
+      let merged: RiskProfile | null = null
+      for (const [acct, optsA] of byAcct) {
+        const riskPos: RiskPosition[] = []
+        for (const p of optsA) {
+          const parsed = parseOptionContractKey(p.contract_key)
+          const r = parsed.right === 'C' || parsed.right === 'P' ? parsed.right : null
+          const strike = Number(p.strike) || 0
+          const avgRaw = p.avgCost != null ? Number(p.avgCost) : null
+          const avgCost = avgRaw != null && avgRaw >= 10 ? avgRaw / 100 : avgRaw
+          const qty = Number(p.position) || 0
+          if (r && avgCost != null && strike > 0 && qty !== 0) {
+            riskPos.push({ strike, right: r, qty, avg_cost: avgCost })
           }
         }
+        if (riskPos.length === 0) continue
+        let covShares = 0
+        let covAvgCost: number | null = null
+        if (hasUnderlying) {
+          const sym = (optsA[0]?.symbol ?? '').toUpperCase()
+          if (sym) {
+            const accRow = (status?.accounts ?? []).find(a => (a.account_id ?? '').trim() === acct)
+            const held = accRow?.positions?.find(
+              s => (s.secType ?? '').toUpperCase() !== 'OPT' && (s.symbol ?? '').toUpperCase() === sym,
+            )
+            if (held) {
+              covShares = Math.abs(Number(held.position) || 0)
+              covAvgCost = held.avgCost != null ? Number(held.avgCost) : null
+            }
+          }
+        }
+        const rp = computeRiskProfile(riskPos, covShares, covAvgCost)
+        merged = merged == null ? rp : pickWorse(merged, rp)
       }
-      map.set(instId, computeRiskProfile(riskPos, covShares, covAvgCost))
+      if (merged != null) map.set(instId, merged)
     }
     return map
   }, [status?.accounts, items, opportunitiesById, structuresById])

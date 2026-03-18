@@ -1,6 +1,7 @@
-"""Strategy instance CRUD: list, get, create, update. Used for trade attribution (SI.2)."""
+"""Strategy instance CRUD: list, get, create, update, open-legs. Used for trade attribution (SI.2)."""
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -235,3 +236,59 @@ def update_instance(
             except Exception:
                 pass
         return False
+
+
+def get_instance_open_option_legs(conn: Any, strategy_instance_id: int) -> List[Dict[str, Any]]:
+    """Return current open OPT positions that have executions linked to this instance.
+    Intersects account_executions (instance tagged) with account_positions (position != 0)."""
+    if conn is None:
+        return []
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT ap.account_id, ap.contract_key, ap.symbol, ap.sec_type,
+                       ap.position, ap.avg_cost, ap.expiry, ap.strike, ap.option_right,
+                       ip.mid AS price_mid, ip.last AS price_last, ip.updated_at AS price_updated_at
+                FROM account_positions ap
+                INNER JOIN (
+                    SELECT DISTINCT account_id, contract_key
+                    FROM account_executions
+                    WHERE strategy_instance_id = %s
+                      AND upper(trim(COALESCE(sec_type, ''))) = 'OPT'
+                ) tagged ON ap.account_id = tagged.account_id AND ap.contract_key = tagged.contract_key
+                LEFT JOIN contract_quote_live ip ON ap.contract_key = ip.contract_key
+                WHERE ap.position IS NOT NULL AND ap.position != 0
+                ORDER BY ap.contract_key
+                """,
+                (strategy_instance_id,),
+            )
+            rows = cur.fetchall()
+        result: List[Dict[str, Any]] = []
+        for r in rows:
+            d: Dict[str, Any] = {
+                "account_id": r.get("account_id") or "",
+                "contract_key": r.get("contract_key") or "",
+                "symbol": r.get("symbol") or "",
+                "sec_type": r.get("sec_type") or "",
+                "position": r.get("position"),
+                "avg_cost": r.get("avg_cost"),
+                "expiry": r.get("expiry"),
+                "strike": r.get("strike"),
+                "option_right": r.get("option_right"),
+            }
+            for price_key in ("price_mid", "price_last"):
+                v = r.get(price_key)
+                if v is not None:
+                    try:
+                        fv = float(v)
+                        if math.isfinite(fv) and fv > 0:
+                            d["price"] = fv
+                            break
+                    except (TypeError, ValueError):
+                        pass
+            result.append(d)
+        return result
+    except Exception as e:
+        logger.warning("get_instance_open_option_legs failed: %s", e)
+        return []

@@ -515,6 +515,14 @@ class StatusReader:
             return False
         return strategy_instance_module.delete_instance(self._conn, strategy_instance_id)
 
+    def get_instance_open_option_legs(self, strategy_instance_id: int) -> list:
+        """Return open OPT positions linked to a strategy instance (via executions)."""
+        if not self._connect():
+            return []
+        result = strategy_instance_module.get_instance_open_option_legs(self._conn, strategy_instance_id)
+        self._end_read_txn()
+        return result
+
     # --- Risk (delegate to status module) ---
     def get_risk_summary(self) -> Dict[str, Any]:
         if not self._connect():
@@ -759,20 +767,22 @@ class StatusReader:
             return False
         return position_categories_module.set_position_category_tag(self._conn, account_id=account_id, contract_key=contract_key, category_id=category_id)
 
-    def update_position_strategy(
+    def batch_update_execution_strategy(
         self,
         account_id: str,
-        contract_key: str,
+        contract_key: Optional[str],
+        execution_ids: Optional[list],
         strategy_opportunity_id: Optional[int],
         strategy_instance_id: Optional[int],
-    ) -> bool:
-        """Update strategy attribution for a position (account_positions). Used for linking stock positions to strategy instance."""
+    ) -> int:
+        """Batch update strategy attribution on account_executions (by contract_key or execution_ids). Returns updated count."""
         if not self._connect():
-            return False
-        return accounts_module.update_position_strategy(
+            return 0
+        return accounts_module.batch_update_execution_strategy(
             self._conn,
             account_id=account_id,
             contract_key=contract_key,
+            execution_ids=execution_ids,
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
         )
