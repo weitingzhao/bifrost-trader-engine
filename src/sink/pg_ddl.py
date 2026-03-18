@@ -3,24 +3,33 @@
 Use an empty database or drop/recreate; existing tables are not altered to add missing columns.
 """
 
+
 def _ensure_tables(conn, log=None, log_table=None) -> None:
     """Apply full DDL (per DATABASE.md). CREATE IF NOT EXISTS only — no incremental ALTER for old databases.
     If log is callable, it is called with a short step name before each DDL section (for progress/debug).
     If log_table is callable, it is called as log_table(table_name, purpose) before each table is created/updated.
     """
+
     def _log(msg: str) -> None:
         if callable(log):
             log(msg)
+
     def _log_table(name: str, purpose: str) -> None:
         if callable(log_table):
             log_table(name, purpose)
+
     try:
         conn.rollback()
     except Exception:
         pass
     with conn.cursor() as cur:
-        _log("daemon_auto_status_current, daemon_auto_status_history, daemon_auto_operations")
-        _log_table("daemon_auto_status_current", "Daemon auto-trading current status snapshot (single row)")
+        _log(
+            "daemon_auto_status_current, daemon_auto_status_history, daemon_auto_operations"
+        )
+        _log_table(
+            "daemon_auto_status_current",
+            "Daemon auto-trading current status snapshot (single row)",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_auto_status_current (
@@ -42,7 +51,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        _log_table("daemon_auto_status_history", "Daemon auto-trading status snapshot history")
+        _log_table(
+            "daemon_auto_status_history", "Daemon auto-trading status snapshot history"
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_auto_status_history (
@@ -90,7 +101,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        _log_table("daemon_run_status", "Run suspended flag (single row). Default suspended=true so Trading Strategy and IB Trading Client stay off until Resume.")
+        _log_table(
+            "daemon_run_status",
+            "Run suspended flag (single row). Default suspended=true so Trading Strategy and IB Trading Client stay off until Resume.",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS daemon_run_status (
@@ -511,7 +525,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        cur.execute("CREATE INDEX IF NOT EXISTS option_contracts_contract_key ON option_contracts (contract_key)")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_contracts_contract_key ON option_contracts (contract_key)"
+        )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_contracts_symbol_expiry_strike_right ON option_contracts (symbol, expiry, strike, option_right)"
         )
@@ -535,7 +551,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         conn.commit()
         _log("preference_position_categories, preference_position_category_tags")
-        _log_table("preference_position_categories", "Position category definitions (preference)")
+        _log_table(
+            "preference_position_categories",
+            "Position category definitions (preference)",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS preference_position_categories (
@@ -548,7 +567,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        _log_table("preference_position_category_tags", "Position-to-category mapping (preference)")
+        _log_table(
+            "preference_position_category_tags",
+            "Position-to-category mapping (preference)",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS preference_position_category_tags (
@@ -564,7 +586,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "CREATE INDEX IF NOT EXISTS preference_position_category_tags_category_id ON preference_position_category_tags (category_id)"
         )
         _log("preference_market_streams_symbol_order")
-        _log_table("preference_market_streams_symbol_order", "Market Streams symbol order per category (preference)")
+        _log_table(
+            "preference_market_streams_symbol_order",
+            "Market Streams symbol order per category (preference)",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS preference_market_streams_symbol_order (
@@ -631,7 +656,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
             """
         )
-        _log_table("gate_safety_strategy_earnings_dates", "Strategy layer earnings blacklist dates")
+        _log_table(
+            "gate_safety_strategy_earnings_dates",
+            "Strategy layer earnings blacklist dates",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS gate_safety_strategy_earnings_dates (
@@ -700,7 +728,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_dim_dim_type ON strategy_dim (dim_type)"
         )
-        _log_table("strategy_template", "Flat option structure template (six dims + legs)")
+        _log_table(
+            "strategy_template", "Flat option structure template (six dims + legs)"
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS strategy_template (
@@ -815,7 +845,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_structure_leg_structure_id ON strategy_structure_leg (strategy_structure_id)"
         )
-        _log_table("strategy_structure_constraint", "Structure strategy constraint (typed key-value)")
+        _log_table(
+            "strategy_structure_constraint",
+            "Structure strategy constraint (typed key-value)",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS strategy_structure_constraint (
@@ -877,7 +910,10 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_opportunity_symbol_opportunity_id ON strategy_opportunity_symbol (strategy_opportunity_id)"
         )
-        _log_table("strategy_opportunity_entry_condition", "Opportunity strategy entry conditions")
+        _log_table(
+            "strategy_opportunity_entry_condition",
+            "Opportunity strategy entry conditions",
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS strategy_opportunity_entry_condition (
@@ -893,7 +929,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_opportunity_entry_condition_opportunity_id ON strategy_opportunity_entry_condition (strategy_opportunity_id)"
         )
-        _log_table("strategy_instance", "Strategy instance (one open per opportunity/account)")
+        _log_table(
+            "strategy_instance", "Strategy instance (one open per opportunity/account)"
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS strategy_instance (

@@ -342,7 +342,7 @@ export function StructureTypeConfigPage({
         <aside className="otc-sidebar">
           <div className="otc-sidebar-header">
             <span className="otc-sidebar-count">
-              {activeDimFilterCount > 0
+              {hasAnyFilter
                 ? `${filteredTemplates.length} / ${templates.length}`
                 : `${templates.length}`}{' '}
               templates
@@ -358,6 +358,24 @@ export function StructureTypeConfigPage({
                 <span className="otc-filter-badge">{activeDimFilterCount}</span>
               )}
             </button>
+          </div>
+          <div className="otc-search-bar">
+            <span className="otc-search-icon" aria-hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </span>
+            <input
+              className="otc-search-input"
+              type="text"
+              autoComplete="off"
+              placeholder="Search templates…"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+            {searchText && (
+              <button type="button" className="otc-search-clear" onClick={() => setSearchText('')} aria-label="Clear search">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            )}
           </div>
           {filtersExpanded && (
             <div className="otc-filter-panel">
@@ -406,7 +424,7 @@ export function StructureTypeConfigPage({
                 </button>
               </li>
             ))}
-            {filteredTemplates.length === 0 && activeDimFilterCount > 0 && (
+            {filteredTemplates.length === 0 && hasAnyFilter && (
               <li className="otc-sidebar-no-match">
                 No templates match the current filters.
               </li>

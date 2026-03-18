@@ -1002,32 +1002,31 @@ export function StrategyStructurePage({
                   <span className="structure-wizard-step-label">Template</span>
                 </div>
                 <div
-                  className={`structure-wizard-step-item ${
-                    wizardStep > 2
+                  className={`structure-wizard-step-item ${wizardStep > 2
                       ? 'structure-wizard-step-done'
                       : wizardStep === 2
                         ? 'structure-wizard-step-active'
                         : !(
-                            selectedTemplateId &&
-                            (wizardTemplateDetail?.meta_params ?? []).some(
-                              (p: MetaParamItem) => p.param_kind !== 'fixed'
-                            )
+                          selectedTemplateId &&
+                          (wizardTemplateDetail?.meta_params ?? []).some(
+                            (p: MetaParamItem) => p.param_kind !== 'fixed'
                           )
+                        )
                           ? 'structure-wizard-step-skip'
                           : ''
-                  }`}
+                    }`}
                   role="listitem"
                   aria-current={wizardStep === 2 ? 'step' : undefined}
                   onClick={
                     wizardStep > 2 &&
-                    selectedTemplateId &&
-                    (wizardTemplateDetail?.meta_params ?? []).some((p: MetaParamItem) => p.param_kind !== 'fixed')
+                      selectedTemplateId &&
+                      (wizardTemplateDetail?.meta_params ?? []).some((p: MetaParamItem) => p.param_kind !== 'fixed')
                       ? () => setWizardStep(2)
                       : undefined
                   }
                   style={
                     wizardStep > 2 &&
-                    (wizardTemplateDetail?.meta_params ?? []).some((p: MetaParamItem) => p.param_kind !== 'fixed')
+                      (wizardTemplateDetail?.meta_params ?? []).some((p: MetaParamItem) => p.param_kind !== 'fixed')
                       ? { cursor: 'pointer' }
                       : undefined
                   }
@@ -1299,174 +1298,174 @@ export function StrategyStructurePage({
               </div>
             </>
           ) : (
-          <div className="gates-form">
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Metadata</h4>
-              <div className="gates-form-row">
-                <label>Name</label>
-                <input
-                  type="text"
-                  value={formPayload.name}
-                  onChange={(e) => updateForm({ name: e.target.value })}
-                  placeholder="Structure name"
-                />
-              </div>
-              <div className="gates-form-row">
-                <label>Template</label>
-                <select
-                  value={formPayload.strategy_template_id ?? ''}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10)
-                    if (v) handleTemplateSelect(v)
-                  }}
-                  aria-label="Template"
-                >
-                  <option value="">— Select —</option>
-                  {templates.map((tpl) => (
-                    <option key={tpl.strategy_template_id} value={tpl.strategy_template_id}>
-                      {tpl.display_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="gates-form-row">
-                <label>Version</label>
-                <div>
+            <div className="gates-form">
+              <div className="gates-form-group">
+                <h4 className="gates-form-group-title">Metadata</h4>
+                <div className="gates-form-row">
+                  <label>Name</label>
                   <input
-                    type="number"
-                    min={1}
-                    value={formPayload.version ?? 1}
-                    onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
-                    disabled={typeof formOpen === 'number'}
-                    aria-label="Version"
+                    type="text"
+                    value={formPayload.name}
+                    onChange={(e) => updateForm({ name: e.target.value })}
+                    placeholder="Structure name"
                   />
-                  {typeof formOpen === 'number' && (
-                    <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
-                      Read-only when editing. Use new version (Version + 1) is offered on Save when Type, SubType, or Meta change.
-                    </p>
-                  )}
                 </div>
-              </div>
-              <div className="gates-form-row">
-                <label className="toggle-switch" style={{ cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={formPayload.is_active ?? true}
-                    onChange={(e) => updateForm({ is_active: e.target.checked })}
-                    aria-label="Available"
-                  />
-                  <span className="toggle-switch-caption">Available</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Legs (from template)</h4>
-              <p className="form-hint structure-legs-caption" style={{ marginBottom: 'var(--space-2)' }}>
-                Defined in Option Template Config. Not editable here.
-              </p>
-              {defaultLegsLoading && (
-                <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading legs…</p>
-              )}
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Role</th>
-                      <th>Direction</th>
-                      <th>Right</th>
-                      <th>Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {formLegs.map((leg, i) => (
-                      <tr key={i}>
-                        <td>{leg.role ?? '—'}</td>
-                        <td>{leg.direction ?? '—'}</td>
-                        <td>{leg.option_right ?? '—'}</td>
-                        <td>{leg.quantity ?? 1}</td>
-                      </tr>
+                <div className="gates-form-row">
+                  <label>Template</label>
+                  <select
+                    value={formPayload.strategy_template_id ?? ''}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10)
+                      if (v) handleTemplateSelect(v)
+                    }}
+                    aria-label="Template"
+                  >
+                    <option value="">— Select —</option>
+                    {templates.map((tpl) => (
+                      <option key={tpl.strategy_template_id} value={tpl.strategy_template_id}>
+                        {tpl.display_name}
+                      </option>
                     ))}
-                  </tbody>
-                </table>
+                  </select>
+                </div>
+                <div className="gates-form-row">
+                  <label>Version</label>
+                  <div>
+                    <input
+                      type="number"
+                      min={1}
+                      value={formPayload.version ?? 1}
+                      onChange={(e) => updateForm({ version: parseInt(e.target.value, 10) || 1 })}
+                      disabled={typeof formOpen === 'number'}
+                      aria-label="Version"
+                    />
+                    {typeof formOpen === 'number' && (
+                      <p className="form-hint" style={{ marginTop: 'var(--space-1)', marginBottom: 0 }}>
+                        Read-only when editing. Use new version (Version + 1) is offered on Save when Type, SubType, or Meta change.
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="gates-form-row">
+                  <label className="toggle-switch" style={{ cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={formPayload.is_active ?? true}
+                      onChange={(e) => updateForm({ is_active: e.target.checked })}
+                      aria-label="Available"
+                    />
+                    <span className="toggle-switch-caption">Available</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="gates-form-group">
+                <h4 className="gates-form-group-title">Legs (from template)</h4>
+                <p className="form-hint structure-legs-caption" style={{ marginBottom: 'var(--space-2)' }}>
+                  Defined in Option Template Config. Not editable here.
+                </p>
+                {defaultLegsLoading && (
+                  <p className="form-hint" style={{ marginBottom: 'var(--space-2)' }}>Loading legs…</p>
+                )}
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Role</th>
+                        <th>Direction</th>
+                        <th>Right</th>
+                        <th>Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formLegs.map((leg, i) => (
+                        <tr key={i}>
+                          <td>{leg.role ?? '—'}</td>
+                          <td>{leg.direction ?? '—'}</td>
+                          <td>{leg.option_right ?? '—'}</td>
+                          <td>{leg.quantity ?? 1}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="gates-form-group">
+                <h4 className="gates-form-group-title">Constraints</h4>
+                {formConstraints.map((c, i) => (
+                  <div key={i} className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={c.constraint_type ?? ''}
+                      onChange={(e) => updateConstraint(i, { constraint_type: e.target.value })}
+                      placeholder="constraint_type"
+                      style={{ width: '160px' }}
+                    />
+                    <input
+                      type="text"
+                      value={c.constraint_value_text ?? ''}
+                      onChange={(e) => updateConstraint(i, { constraint_value_text: e.target.value })}
+                      placeholder="value (text)"
+                      style={{ width: '120px' }}
+                    />
+                    <input
+                      type="number"
+                      value={c.constraint_value_int ?? ''}
+                      onChange={(e) => updateConstraint(i, { constraint_value_int: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
+                      placeholder="value (int)"
+                      style={{ width: '80px' }}
+                    />
+                    <button type="button" className="btn-secondary" onClick={() => removeConstraint(i)}>Remove</button>
+                  </div>
+                ))}
+                <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addConstraint}>Add constraint</button>
+              </div>
+
+              <div className="gates-form-group">
+                <h4 className="gates-form-group-title">Notes</h4>
+                <div className="gates-form-row">
+                  <textarea
+                    value={formNotes}
+                    onChange={(e) => setFormNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Optional notes"
+                    style={{ width: '100%', maxWidth: '600px' }}
+                  />
+                </div>
+              </div>
+
+              <div className="gates-form-group">
+                <h4 className="gates-form-group-title">Meta (key-value)</h4>
+                {formMeta.map((m, i) => (
+                  <div key={i} className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={m.meta_key ?? ''}
+                      onChange={(e) => updateMeta(i, { meta_key: e.target.value })}
+                      placeholder="key"
+                      style={{ width: '140px' }}
+                    />
+                    <input
+                      type="text"
+                      value={m.meta_value_text ?? ''}
+                      onChange={(e) => updateMeta(i, { meta_value_text: e.target.value })}
+                      placeholder="value"
+                      style={{ width: '180px' }}
+                    />
+                    <button type="button" className="btn-secondary" onClick={() => removeMeta(i)}>Remove</button>
+                  </div>
+                ))}
+                <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addMeta}>Add meta</button>
+              </div>
+
+              <div className="gates-form-actions">
+                <button type="button" className="btn-primary" onClick={submitForm} disabled={formLoading}>
+                  {formOpen === 'create' ? 'Create' : 'Save'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={closeForm}>Cancel</button>
               </div>
             </div>
-
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Constraints</h4>
-              {formConstraints.map((c, i) => (
-                <div key={i} className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    value={c.constraint_type ?? ''}
-                    onChange={(e) => updateConstraint(i, { constraint_type: e.target.value })}
-                    placeholder="constraint_type"
-                    style={{ width: '160px' }}
-                  />
-                  <input
-                    type="text"
-                    value={c.constraint_value_text ?? ''}
-                    onChange={(e) => updateConstraint(i, { constraint_value_text: e.target.value })}
-                    placeholder="value (text)"
-                    style={{ width: '120px' }}
-                  />
-                  <input
-                    type="number"
-                    value={c.constraint_value_int ?? ''}
-                    onChange={(e) => updateConstraint(i, { constraint_value_int: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
-                    placeholder="value (int)"
-                    style={{ width: '80px' }}
-                  />
-                  <button type="button" className="btn-secondary" onClick={() => removeConstraint(i)}>Remove</button>
-                </div>
-              ))}
-              <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addConstraint}>Add constraint</button>
-            </div>
-
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Notes</h4>
-              <div className="gates-form-row">
-                <textarea
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Optional notes"
-                  style={{ width: '100%', maxWidth: '600px' }}
-                />
-              </div>
-            </div>
-
-            <div className="gates-form-group">
-              <h4 className="gates-form-group-title">Meta (key-value)</h4>
-              {formMeta.map((m, i) => (
-                <div key={i} className="gates-form-row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    value={m.meta_key ?? ''}
-                    onChange={(e) => updateMeta(i, { meta_key: e.target.value })}
-                    placeholder="key"
-                    style={{ width: '140px' }}
-                  />
-                  <input
-                    type="text"
-                    value={m.meta_value_text ?? ''}
-                    onChange={(e) => updateMeta(i, { meta_value_text: e.target.value })}
-                    placeholder="value"
-                    style={{ width: '180px' }}
-                  />
-                  <button type="button" className="btn-secondary" onClick={() => removeMeta(i)}>Remove</button>
-                </div>
-              ))}
-              <button type="button" className="btn-secondary" style={{ marginTop: 'var(--space-2)' }} onClick={addMeta}>Add meta</button>
-            </div>
-
-            <div className="gates-form-actions">
-              <button type="button" className="btn-primary" onClick={submitForm} disabled={formLoading}>
-                {formOpen === 'create' ? 'Create' : 'Save'}
-              </button>
-              <button type="button" className="btn-secondary" onClick={closeForm}>Cancel</button>
-            </div>
-          </div>
           )}
         </section>
       )}

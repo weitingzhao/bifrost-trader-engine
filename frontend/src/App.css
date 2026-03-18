@@ -8214,6 +8214,66 @@ th {
   margin-top: 1px;
 }
 
+/* ── Sidebar search (flex row: icon | input | clear — no overlap) ── */
+
+.otc-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 var(--space-2) var(--space-2);
+  padding: 0.35rem 0.5rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.otc-search-bar:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.otc-search-bar .otc-search-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-dim);
+  pointer-events: none;
+}
+
+.otc-search-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  color: var(--color-text-main);
+  background: transparent;
+  border: none;
+  padding: 0.15rem 0;
+  outline: none;
+}
+.otc-search-input::placeholder {
+  color: var(--color-text-dim);
+}
+
+.otc-search-clear {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 0.2rem;
+  border-radius: 4px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+.otc-search-clear:hover {
+  color: var(--color-text-main);
+  background: var(--color-surface-elevated);
+}
+
 /* ── Sidebar filter panel ── */
 
 .otc-filter-toggle {

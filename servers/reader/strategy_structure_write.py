@@ -62,7 +62,9 @@ def _normalize_legs(
 
 
 def _conn_from_config(status_config: Optional[dict]) -> Any:
-    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+    if not status_config or (
+        status_config.get("sink") != "postgres" and not status_config.get("postgres")
+    ):
         return None
     try:
         params = _get_conn_params(status_config)
@@ -72,7 +74,9 @@ def _conn_from_config(status_config: Optional[dict]) -> Any:
         return None
 
 
-def _insert_legs(cur: Any, strategy_structure_id: int, legs: List[Dict[str, Any]]) -> None:
+def _insert_legs(
+    cur: Any, strategy_structure_id: int, legs: List[Dict[str, Any]]
+) -> None:
     for i, leg in enumerate(legs):
         if not isinstance(leg, dict):
             continue
@@ -91,12 +95,18 @@ def _insert_legs(cur: Any, strategy_structure_id: int, legs: List[Dict[str, Any]
                 leg.get("option_right"),
                 int(leg["quantity"]) if leg.get("quantity") is not None else 1,
                 float(leg["strike"]) if leg.get("strike") is not None else None,
-                str(leg["expiration"]).strip() if leg.get("expiration") is not None else None,
+                (
+                    str(leg["expiration"]).strip()
+                    if leg.get("expiration") is not None
+                    else None
+                ),
             ),
         )
 
 
-def _insert_constraints(cur: Any, strategy_structure_id: int, constraints: List[Dict[str, Any]]) -> None:
+def _insert_constraints(
+    cur: Any, strategy_structure_id: int, constraints: List[Dict[str, Any]]
+) -> None:
     if not constraints or not isinstance(constraints, list):
         return
     for c in constraints:
@@ -112,12 +122,18 @@ def _insert_constraints(cur: Any, strategy_structure_id: int, constraints: List[
                 strategy_structure_id,
                 (c.get("constraint_type") or "").strip(),
                 c.get("constraint_value_text"),
-                int(c["constraint_value_int"]) if c.get("constraint_value_int") is not None else None,
+                (
+                    int(c["constraint_value_int"])
+                    if c.get("constraint_value_int") is not None
+                    else None
+                ),
             ),
         )
 
 
-def _insert_meta(cur: Any, strategy_structure_id: int, meta: List[Dict[str, Any]]) -> None:
+def _insert_meta(
+    cur: Any, strategy_structure_id: int, meta: List[Dict[str, Any]]
+) -> None:
     if not meta or not isinstance(meta, list):
         return
     for m in meta:
@@ -178,7 +194,9 @@ def _resolve_template_id(
     return int(row["strategy_template_id"]), row
 
 
-def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> Optional[int]:
+def create_structure(
+    status_config: Optional[dict], payload: Dict[str, Any]
+) -> Optional[int]:
     name = (payload.get("name") or "").strip()
     if not name:
         raise ValueError("name is required")
@@ -188,7 +206,9 @@ def create_structure(status_config: Optional[dict], payload: Dict[str, Any]) -> 
     if not isinstance(legs, list):
         raise ValueError("legs must be an array")
     version = int(payload["version"]) if payload.get("version") is not None else 1
-    is_active = bool(payload["is_active"]) if payload.get("is_active") is not None else True
+    is_active = (
+        bool(payload["is_active"]) if payload.get("is_active") is not None else True
+    )
     notes = (payload.get("notes") or "").strip() or None
     constraints = payload.get("constraints")
     if constraints is not None and not isinstance(constraints, list):
@@ -256,7 +276,9 @@ def update_structure(
     if not isinstance(legs_in, list):
         raise ValueError("legs must be an array")
     version = int(payload["version"]) if payload.get("version") is not None else 1
-    is_active = bool(payload["is_active"]) if payload.get("is_active") is not None else True
+    is_active = (
+        bool(payload["is_active"]) if payload.get("is_active") is not None else True
+    )
     notes = (payload.get("notes") or "").strip() or None
     constraints = payload.get("constraints")
     if constraints is not None and not isinstance(constraints, list):
@@ -299,12 +321,18 @@ def update_structure(
             if cur.rowcount == 0:
                 conn.rollback()
                 return False
-            cur.execute("DELETE FROM strategy_structure_leg WHERE strategy_structure_id = %s", (strategy_structure_id,))
+            cur.execute(
+                "DELETE FROM strategy_structure_leg WHERE strategy_structure_id = %s",
+                (strategy_structure_id,),
+            )
             cur.execute(
                 "DELETE FROM strategy_structure_constraint WHERE strategy_structure_id = %s",
                 (strategy_structure_id,),
             )
-            cur.execute("DELETE FROM strategy_structure_meta WHERE strategy_structure_id = %s", (strategy_structure_id,))
+            cur.execute(
+                "DELETE FROM strategy_structure_meta WHERE strategy_structure_id = %s",
+                (strategy_structure_id,),
+            )
             _insert_legs(cur, strategy_structure_id, legs)
             _insert_constraints(cur, strategy_structure_id, constraints or [])
             _insert_meta(cur, strategy_structure_id, meta or [])
@@ -324,7 +352,9 @@ def update_structure(
             pass
 
 
-def deactivate_structure(status_config: Optional[dict], strategy_structure_id: int) -> bool:
+def deactivate_structure(
+    status_config: Optional[dict], strategy_structure_id: int
+) -> bool:
     conn = _conn_from_config(status_config)
     if conn is None:
         return False
