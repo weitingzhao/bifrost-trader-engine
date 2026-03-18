@@ -2718,6 +2718,73 @@ body::before {
   background: rgba(2, 132, 199, 0.03);
 }
 
+/* Light theme: settings page adjustments */
+[data-theme="light"] .settings-sidebar {
+  background: var(--color-surface);
+  border-right-color: var(--color-border);
+}
+[data-theme="light"] .settings-sidebar-link:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .settings-sidebar-subs {
+  border-left-color: rgba(14, 165, 233, 0.2);
+}
+[data-theme="light"] .settings-page-groups .daemon-group {
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .settings-page-groups .daemon-group::before {
+  background: var(--color-accent);
+}
+[data-theme="light"] .settings-page-groups .daemon-group:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .settings-ib-config-table-wrap,
+[data-theme="light"] .settings-holidays-table-wrap {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .settings-ib-collapsible-group-row:hover .settings-ib-collapsible-group-header {
+  background: rgba(0, 0, 0, 0.02);
+}
+[data-theme="light"] .settings-ib-config-table .flex-query-cell-type {
+  background: rgba(0, 0, 0, 0.02);
+}
+[data-theme="light"] .settings-ib-config-table tbody tr:hover .flex-query-cell-type {
+  background: rgba(0, 0, 0, 0.03);
+}
+[data-theme="light"] .settings-ib-config-table tbody tr:not(.settings-ib-collapsible-group-row):not(.client-ids-group-row):hover {
+  background: rgba(0, 0, 0, 0.015);
+}
+[data-theme="light"] .settings-ib-config-table .flex-query-cell-input,
+[data-theme="light"] .settings-ib-config-table .flex-query-cell-type {
+  border-bottom-color: var(--color-border);
+}
+[data-theme="light"] .settings-holidays-table td {
+  border-bottom-color: var(--color-border);
+}
+[data-theme="light"] .settings-holidays-table tbody tr:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+[data-theme="light"] .settings-holidays-table thead {
+  background: rgba(0, 0, 0, 0.02);
+}
+[data-theme="light"] .settings-holidays-add-row {
+  background: rgba(0, 0, 0, 0.015);
+  border-color: var(--color-border);
+}
+[data-theme="light"] .client-ids-group-row .client-ids-group-header {
+  border-bottom-color: var(--color-border);
+}
+[data-theme="light"] .settings-ib-section + .settings-ib-section {
+  border-top-color: var(--color-border);
+}
+[data-theme="light"] .settings-flex-preference {
+  background: rgba(0, 0, 0, 0.015);
+}
+[data-theme="light"] .settings-ib-config-th-label {
+  background: rgba(0, 0, 0, 0.025);
+}
+
 /* US market holidays: filters, add row, table — aligned with IB Configure styling */
 #settings-holidays .daemon-group-body {
   display: flex;
