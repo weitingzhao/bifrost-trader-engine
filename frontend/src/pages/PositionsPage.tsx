@@ -53,6 +53,66 @@ function fmtSurplusShares(n: number): string {
   if (!Number.isFinite(n)) return '—'
   return n >= 0 ? `+${n.toFixed(3)}` : n.toFixed(3)
 }
+
+/** Held shares: 3 decimal places (Option underlying Pool). */
+function fmtHeldShares3(n: number): string {
+  if (!Number.isFinite(n)) return '—'
+  return n.toFixed(3)
+}
+
+/** Sortable columns for Option underlying / backing Pool tables. */
+type CoveragePoolSortCol =
+  | 'symbol'
+  | 'account'
+  | 'held'
+  | 'held_amt'
+  | 'required'
+  | 'cost_basis'
+  | 'market_price'
+
+function sortStockCoverageItemsByColumn(
+  list: StockCoverageItem[],
+  col: CoveragePoolSortCol,
+  dir: 'asc' | 'desc',
+): StockCoverageItem[] {
+  const out = [...list]
+  const m = dir === 'asc' ? 1 : -1
+  out.sort((a, b) => {
+    if (col === 'symbol') return m * a.symbol.localeCompare(b.symbol)
+    if (col === 'account') return m * (a.account_id || '').localeCompare(b.account_id || '')
+    if (col === 'held') return m * ((a.held_shares || 0) - (b.held_shares || 0))
+    if (col === 'held_amt') {
+      const ca = Math.floor(Math.max(0, a.held_shares) / 100)
+      const cb = Math.floor(Math.max(0, b.held_shares) / 100)
+      return m * (ca - cb)
+    }
+    if (col === 'required') {
+      return m * ((a.required_shares || 0) - (b.required_shares || 0))
+    }
+    if (col === 'cost_basis') {
+      const va = a.cost_basis_total
+      const vb = b.cost_basis_total
+      const fa = va != null && Number.isFinite(va)
+      const fb = vb != null && Number.isFinite(vb)
+      if (!fa && !fb) return 0
+      if (!fa) return 1
+      if (!fb) return -1
+      return m * (va - vb)
+    }
+    if (col === 'market_price') {
+      const pa = a.live_last_price
+      const pb = b.live_last_price
+      const fa = pa != null && Number.isFinite(pa)
+      const fb = pb != null && Number.isFinite(pb)
+      if (!fa && !fb) return 0
+      if (!fa) return 1
+      if (!fb) return -1
+      return m * (pa - pb)
+    }
+    return 0
+  })
+  return out
+}
 import { buildOptExecutionGroups } from './portfolio/buildOptExecutionGroups'
 import { ExecutionFormModal } from './portfolio/ExecutionFormModal'
 import type { LinkExecutionContext } from './portfolio/LinkExecutionRecordModal'
@@ -729,6 +789,7 @@ export function PositionsPage({
       `${(sym ?? '').toUpperCase().trim()}\x1f${(accountId ?? '').trim()}`
     type DemandMeta = {
       required: number
+      requiredWatchlist: number
       instances: number
       oppNames: Set<string>
       watchlistScopeInstances: number
@@ -736,20 +797,23 @@ export function PositionsPage({
     const demandMap = new Map<string, DemandMeta>()
     for (const g of instanceAllGroups) {
       const oppName = (g.strategy_opportunity_name ?? '').trim()
+      const isWl = (g.scope_type ?? '').trim() === 'watchlist_stk'
       for (const sc of g.stock_coverage) {
         const sym = (sc.symbol ?? '').toUpperCase().trim()
         if (!sym) continue
         const k = covKey(sym, sc.account_id)
         const prev = demandMap.get(k) ?? {
           required: 0,
+          requiredWatchlist: 0,
           instances: 0,
           oppNames: new Set<string>(),
           watchlistScopeInstances: 0,
         }
         prev.required += sc.required_shares
+        if (isWl) prev.requiredWatchlist += sc.required_shares
         prev.instances += 1
         if (oppName) prev.oppNames.add(oppName)
-        if ((g.scope_type ?? '').trim() === 'watchlist_stk') prev.watchlistScopeInstances += 1
+        if (isWl) prev.watchlistScopeInstances += 1
         demandMap.set(k, prev)
       }
     }
@@ -841,6 +905,7 @@ export function PositionsPage({
         symbol: sym,
         account_id,
         required_shares: required,
+        required_watchlist_shares: demand?.requiredWatchlist ?? 0,
         held_shares: held,
         surplus_or_gap: held - required,
         instances_needing: demand?.instances ?? 0,
@@ -860,18 +925,110 @@ export function PositionsPage({
     return result
   }, [instanceAllGroups, liveStockPositions])
 
+  /** Watchlist opportunities: Required = watchlist-only hedge; Surplus vs that slice. */
   const watchlistOptionableCoverageItems = useMemo(
-    () => stockCoverageItems.filter((ci) => (ci.watchlist_scope_instances ?? 0) > 0 && ci.optionable_supported !== false),
+    () =>
+      stockCoverageItems
+        .filter((ci) => (ci.watchlist_scope_instances ?? 0) > 0 && ci.optionable_supported !== false)
+        .map(ci => {
+          const rw = ci.required_watchlist_shares ?? 0
+          return { ...ci, required_shares: rw, surplus_or_gap: ci.held_shares - rw }
+        }),
     [stockCoverageItems],
   )
-  const watchlistNonOptionableCoverageItems = useMemo(
-    () => stockCoverageItems.filter((ci) => (ci.watchlist_scope_instances ?? 0) > 0 && ci.optionable_supported === false),
-    [stockCoverageItems],
+
+  /**
+   * Long stock left after all current opportunity hedges (watchlist + explicit); can back further options.
+   */
+  const optionUnderlyingPoolItems = useMemo((): StockCoverageItem[] => {
+    const out: StockCoverageItem[] = []
+    for (const ci of stockCoverageItems) {
+      if (ci.optionable_supported === false) continue
+      const held = ci.held_shares
+      const req = ci.required_shares
+      if (!Number.isFinite(held) || held <= 0) continue
+      const avail = Math.max(0, held - req)
+      if (avail <= 0) continue
+      const ratio = held > 0 ? avail / held : 0
+      const costSlice = ci.cost_basis_total != null ? ci.cost_basis_total * ratio : null
+      const dailySlice = ci.daily_pnl != null ? ci.daily_pnl * ratio : null
+      const totalSlice = ci.total_pnl != null ? ci.total_pnl * ratio : null
+      const dailyPct =
+        dailySlice != null && ci.daily_pnl != null && Math.abs(ci.daily_pnl) > 1e-9
+          ? ci.daily_pct
+          : null
+      const totalPct =
+        costSlice != null && costSlice > 0 && totalSlice != null ? (totalSlice / costSlice) * 100 : null
+      out.push({
+        ...ci,
+        held_shares: avail,
+        required_shares: 0,
+        required_watchlist_shares: 0,
+        surplus_or_gap: avail,
+        cost_basis_total: costSlice,
+        daily_pnl: dailySlice,
+        daily_pct: dailyPct,
+        total_pnl: totalSlice,
+        total_pct: totalPct,
+        instances_needing: 0,
+        backing_opportunities: [],
+        watchlist_scope_instances: 0,
+      })
+    }
+    out.sort((a, b) => a.symbol.localeCompare(b.symbol) || a.account_id.localeCompare(b.account_id))
+    return out
+  }, [stockCoverageItems])
+
+  const optionUnderlyingPoolCostTotal = useMemo(
+    () => optionUnderlyingPoolItems.reduce((s, ci) => s + (ci.cost_basis_total ?? 0), 0),
+    [optionUnderlyingPoolItems],
   )
-  const nonWatchlistCoverageItems = useMemo(
-    () => stockCoverageItems.filter((ci) => (ci.watchlist_scope_instances ?? 0) === 0),
-    [stockCoverageItems],
+  const optionUnderlyingPoolMarketTotal = useMemo(
+    () =>
+      optionUnderlyingPoolItems.reduce((s, ci) => {
+        const h = ci.held_shares
+        const p = ci.live_last_price
+        if (p == null || !Number.isFinite(p) || !Number.isFinite(h)) return s
+        return s + h * p
+      }, 0),
+    [optionUnderlyingPoolItems],
   )
+
+  const streamHostAccountId = (status?.ib_config?.stream_host_account_id ?? '').toString().trim()
+  const streamSecondaryAccountId = (status?.ib_config?.stream_secondary_account_id ?? '').toString().trim()
+
+  const [underlyingPoolSort, setUnderlyingPoolSort] = useState<{
+    col: CoveragePoolSortCol
+    dir: 'asc' | 'desc'
+  }>({ col: 'market_price', dir: 'desc' })
+
+  const sortedOptionUnderlyingPoolItems = useMemo(
+    () => sortStockCoverageItemsByColumn(optionUnderlyingPoolItems, underlyingPoolSort.col, underlyingPoolSort.dir),
+    [optionUnderlyingPoolItems, underlyingPoolSort],
+  )
+
+  const onUnderlyingPoolSortClick = useCallback((col: CoveragePoolSortCol) => {
+    setUnderlyingPoolSort(prev =>
+      prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' },
+    )
+  }, [])
+
+  const [backingPoolSort, setBackingPoolSort] = useState<{
+    col: CoveragePoolSortCol
+    dir: 'asc' | 'desc'
+  }>({ col: 'market_price', dir: 'desc' })
+
+  const sortedWatchlistOptionableCoverageItems = useMemo(
+    () =>
+      sortStockCoverageItemsByColumn(watchlistOptionableCoverageItems, backingPoolSort.col, backingPoolSort.dir),
+    [watchlistOptionableCoverageItems, backingPoolSort],
+  )
+
+  const onBackingPoolSortClick = useCallback((col: CoveragePoolSortCol) => {
+    setBackingPoolSort(prev =>
+      prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' },
+    )
+  }, [])
 
   const unassignedOptStocks = useMemo(
     () => liveStockPositions.filter(s => {
@@ -1016,24 +1173,103 @@ export function PositionsPage({
     loadReplayData()
   }, [loadReplayData])
 
-  const renderStockCoverageSummaryTable = (rows: StockCoverageItem[], keyPrefix: string) => (
+  const renderStockCoverageSummaryTable = (
+    rows: StockCoverageItem[],
+    keyPrefix: string,
+    tableOpts?: {
+      showAvailableHeldContracts?: boolean
+      hideBackedOpportunities?: boolean
+      /** Option underlying Pool: fewer columns, Host/Secondary account colors, held amt = contracts only. */
+      underlyingPoolSlim?: boolean
+      backingPoolSlim?: boolean
+      underlyingPoolSort?: {
+        column: CoveragePoolSortCol
+        dir: 'asc' | 'desc'
+        onColumnClick: (col: CoveragePoolSortCol) => void
+      }
+    },
+  ) => {
+    const slim = tableOpts?.underlyingPoolSlim === true
+    const backingSlim = tableOpts?.backingPoolSlim === true
+    const backingLayout = backingSlim && !slim
+    const poolSort = tableOpts?.underlyingPoolSort
+    const showAvail = slim || tableOpts?.showAvailableHeldContracts === true
+    const hideBacked = slim || tableOpts?.hideBackedOpportunities === true
+    const showHeldColumn = !backingLayout
+    const showHeldAmtColumn = slim || backingLayout || (showAvail && !backingLayout && !slim)
+    const accountCellClass = (accountId: string) => {
+      const a = (accountId ?? '').trim()
+      if (streamSecondaryAccountId && a === streamSecondaryAccountId) return 'coverage-account-id coverage-account-secondary'
+      if (streamHostAccountId && a === streamHostAccountId) return 'coverage-account-id coverage-account-host'
+      return 'coverage-account-id coverage-account-other'
+    }
+    const poolSortOn = !!(poolSort && (slim || backingLayout))
+    const sortTh = (label: string, col: CoveragePoolSortCol, title?: string) => {
+      if (!poolSortOn) return <th title={title}>{label}</th>
+      const active = poolSort.column === col
+      return (
+        <th
+          className="replay-th-sortable coverage-pool-sort-th"
+          title={title}
+          role="button"
+          tabIndex={0}
+          aria-sort={active ? (poolSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+          onClick={() => poolSort.onColumnClick(col)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              poolSort.onColumnClick(col)
+            }
+          }}
+        >
+          {label}
+          {active ? (poolSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+        </th>
+      )
+    }
+    return (
     <div className="replay-portfolio-table-wrap">
-      <table className="table-operations instance-sheet-sub-table coverage-summary-table">
+      <table
+        className={`table-operations instance-sheet-sub-table coverage-summary-table${poolSortOn ? ' coverage-underlying-pool-sortable' : ''}`}
+      >
         <thead>
           <tr>
-            <th>Symbol</th>
-            <th>Account</th>
-            <th>Backed opportunities</th>
-            <th>Held</th>
-            <th>Required</th>
-            <th>Surplus / Gap</th>
-            <th>Option support</th>
-            <th>Cost basis</th>
+            {slim || backingLayout ? sortTh('Symbol', 'symbol') : <th>Symbol</th>}
+            {slim || backingLayout ? (
+              sortTh(
+                'Account',
+                'account',
+                'Host vs Secondary use Settings → Stream host / secondary account IDs.',
+              )
+            ) : (
+              <th>Account</th>
+            )}
+            {!hideBacked && <th>Backed opportunities</th>}
+            {showHeldColumn &&
+              (slim ? sortTh('Held', 'held', 'Share qty (3 dp).') : <th>Held</th>)}
+            {showHeldAmtColumn &&
+              (backingLayout ? (
+                sortTh('Held Amt', 'held_amt', 'Option contracts ≈ max(0, long shares) ÷ 100.')
+              ) : slim && poolSortOn ? (
+                sortTh('Held Amt', 'held_amt', 'Option contracts ≈ max(0, long shares) ÷ 100.')
+              ) : slim ? (
+                <th title="Option contracts ≈ max(0, long shares) ÷ 100.">Held Amt</th>
+              ) : (
+                <th title="Option contracts ≈ max(0, long shares) ÷ 100.">Available Held Amt</th>
+              ))}
+            {!slim && (backingLayout ? sortTh('Required', 'required', 'Hedge shares required (watchlist scope).') : <th>Required</th>)}
+            {!slim && !backingSlim && <th>Surplus / Gap</th>}
+            {!slim && !backingSlim && <th>Option support</th>}
+            {slim || backingLayout ? sortTh('Cost basis', 'cost_basis') : <th>Cost basis</th>}
             <th>Avg cost</th>
-            <th>Live last</th>
+            {slim || backingLayout ? (
+              sortTh('Market Price', 'market_price', 'Last price per share (live last).')
+            ) : (
+              <th>Live last</th>
+            )}
             <th>Daily ($ / %)</th>
             <th>Total ($ / %)</th>
-            <th>Status</th>
+            {!slim && !backingSlim && <th>Status</th>}
           </tr>
         </thead>
         <tbody>
@@ -1048,17 +1284,48 @@ export function PositionsPage({
                 ? 'Not optionable'
                 : 'Mixed / Unknown'
             const backedOpps = ci.backing_opportunities ?? []
+            const availContracts =
+              showAvail ? Math.floor(Math.max(0, ci.held_shares) / 100) : 0
+            const acc = ci.account_id || '—'
             return (
               <tr key={`${keyPrefix}-${ci.symbol}-${ci.account_id || '—'}`}>
                 <td><strong>{ci.symbol}</strong></td>
-                <td className="replay-muted">{ci.account_id || '—'}</td>
-                <td title={backedOpps.join(', ') || undefined}>
-                  {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
-                </td>
-                <td>{ci.held_shares}</td>
-                <td>{ci.required_shares}{ci.instances_needing > 1 && <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>}</td>
-                <td><span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{fmtSurplusShares(ci.surplus_or_gap)}</span></td>
-                <td>{optionSupportLabel}</td>
+                <td className={slim || backingLayout ? accountCellClass(acc) : 'replay-muted'}>{acc}</td>
+                {!hideBacked && (
+                  <td title={backedOpps.join(', ') || undefined}>
+                    {backedOpps.length > 0 ? backedOpps.join(', ') : '—'}
+                  </td>
+                )}
+                {showHeldColumn && (
+                  <td className={slim ? 'coverage-held-shares-cell' : undefined}>
+                    {slim ? fmtHeldShares3(ci.held_shares) : ci.held_shares}
+                  </td>
+                )}
+                {showHeldAmtColumn &&
+                  (slim || backingLayout ? (
+                    <td className="coverage-available-held-amt-cell coverage-available-held-amt-slim">
+                      <span className="coverage-available-contracts-only" title={`${ci.held_shares} sh ÷ 100`}>
+                        {Math.floor(Math.max(0, ci.held_shares) / 100)}
+                      </span>
+                    </td>
+                  ) : (
+                    <td className="coverage-available-held-amt-cell">
+                      <div className="coverage-available-contracts" title={`${ci.held_shares} sh ÷ 100`}>
+                        {availContracts}
+                      </div>
+                      <div className="coverage-available-contracts-label">contracts</div>
+                      <div className="coverage-available-shares-line" title="Share qty (100 sh per contract)">
+                        {ci.held_shares} sh
+                      </div>
+                    </td>
+                  ))}
+                {!slim && (
+                  <td>{ci.required_shares}{ci.instances_needing > 1 && <span className="coverage-shared-hint"> ({ci.instances_needing} inst.)</span>}</td>
+                )}
+                {!slim && !backingSlim && (
+                  <td><span className={ci.surplus_or_gap >= 0 ? 'pnl-positive' : 'pnl-negative'}>{fmtSurplusShares(ci.surplus_or_gap)}</span></td>
+                )}
+                {!slim && !backingSlim && <td>{optionSupportLabel}</td>}
                 <td>{fmtUsd(ci.cost_basis_total)}</td>
                 <td>{fmtUsd(ci.avg_cost_per_share)}</td>
                 <td>{fmtUsd(ci.live_last_price)}</td>
@@ -1080,14 +1347,15 @@ export function PositionsPage({
                     {fmtSignedPct(ci.total_pct)}
                   </span>
                 </td>
-                <td><span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span></td>
+                {!slim && !backingSlim && <td><span className={`coverage-status-badge ${statusClass}`}>{statusLabel}</span></td>}
               </tr>
             )
           })}
         </tbody>
       </table>
     </div>
-  )
+    )
+  }
 
   return (
     <div className="card process-section replay-page">
@@ -1675,31 +1943,59 @@ export function PositionsPage({
                       </table>
                     </div>
                   )}
-                  {stockCoverageItems.length > 0 && (
+                  {(watchlistOptionableCoverageItems.length > 0 || optionUnderlyingPoolItems.length > 0) && (
                     <div className="coverage-summary-section">
-                      <h6 className="replay-sub instance-sheet-sub-heading">Stock Coverage Summary</h6>
+                      <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
+                        Stock Coverage Summary
+                        <InfoTooltip text="Optionable symbols only. Positions without tradeable options (Independent Holdings below) are not listed here. Underlying pool = stock left after all current opportunity hedges." />
+                      </h6>
+                      {optionUnderlyingPoolItems.length > 0 && (
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
+                            Option underlying Pool
+                          </p>
+                          <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
+                            Long shares not needed for existing opportunity hedges (all scopes); can back additional options.
+                          </p>
+                          <p className="option-underlying-pool-totals" style={{ margin: '0.15rem 0 0.5rem' }}>
+                            <span className="option-underlying-pool-total-item">
+                              <span className="option-underlying-pool-total-label">Cost Total</span>{' '}
+                              <strong>{fmtUsd(optionUnderlyingPoolCostTotal)}</strong>
+                            </span>
+                            <span className="option-underlying-pool-total-sep" aria-hidden>
+                              {' · '}
+                            </span>
+                            <span className="option-underlying-pool-total-item">
+                              <span className="option-underlying-pool-total-label">Market Total</span>{' '}
+                              <strong>{fmtUsd(optionUnderlyingPoolMarketTotal)}</strong>
+                            </span>
+                          </p>
+                          {renderStockCoverageSummaryTable(sortedOptionUnderlyingPoolItems, 'underlying-pool', {
+                            underlyingPoolSlim: true,
+                            underlyingPoolSort: {
+                              column: underlyingPoolSort.col,
+                              dir: underlyingPoolSort.dir,
+                              onColumnClick: onUnderlyingPoolSortClick,
+                            },
+                          })}
+                        </div>
+                      )}
                       {watchlistOptionableCoverageItems.length > 0 && (
-                        <div style={{ marginBottom: '0.75rem' }}>
-                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
-                            Watchlist scope symbols (optionable) currently backing opportunities.
-                          </p>
-                          {renderStockCoverageSummaryTable(watchlistOptionableCoverageItems, 'watchlist-optionable')}
-                        </div>
-                      )}
-                      {watchlistNonOptionableCoverageItems.length > 0 && (
-                        <div style={{ marginBottom: '0.75rem' }}>
-                          <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
-                            Watchlist scope symbols that are not optionable (fixed-income-like / independent); separated because they cannot cover option strategies.
-                          </p>
-                          {renderStockCoverageSummaryTable(watchlistNonOptionableCoverageItems, 'watchlist-non-optionable')}
-                        </div>
-                      )}
-                      {nonWatchlistCoverageItems.length > 0 && (
                         <div>
                           <p className="section-hint" style={{ margin: '0.2rem 0 0.5rem' }}>
-                            Symbols backing opportunities from non-watchlist scope.
+                            Option backing Pool
                           </p>
-                          {renderStockCoverageSummaryTable(nonWatchlistCoverageItems, 'non-watchlist')}
+                          <p className="section-hint" style={{ margin: '0 0 0.45rem', fontSize: '0.82em' }}>
+                            Watchlist-scoped opportunities: Required = hedge from those strategies only.
+                          </p>
+                          {renderStockCoverageSummaryTable(sortedWatchlistOptionableCoverageItems, 'watchlist-optionable', {
+                            backingPoolSlim: true,
+                            underlyingPoolSort: {
+                              column: backingPoolSort.col,
+                              dir: backingPoolSort.dir,
+                              onColumnClick: onBackingPoolSortClick,
+                            },
+                          })}
                         </div>
                       )}
                     </div>

@@ -45,6 +45,8 @@ export type StockCoverageItem = {
   symbol: string
   account_id: string
   required_shares: number
+  /** Demand from watchlist_stk opportunities only (same symbol+account). */
+  required_watchlist_shares?: number
   held_shares: number
   surplus_or_gap: number
   instances_needing: number

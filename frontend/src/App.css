@@ -8844,6 +8844,82 @@ th {
 .coverage-summary-table {
   max-width: 48rem;
 }
+.coverage-pool-sort-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.coverage-held-shares-cell {
+  font-variant-numeric: tabular-nums;
+}
+.coverage-summary-heading-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.coverage-available-held-amt-cell {
+  text-align: center;
+  vertical-align: middle;
+  min-width: 4.5rem;
+}
+.coverage-available-contracts {
+  font-size: 1.15rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent-bright, #7dd3fc);
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+}
+.coverage-available-contracts-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted, #7a8492);
+  margin-top: 0.1rem;
+}
+.coverage-available-shares-line {
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-main, #e4e9ef);
+}
+.coverage-available-held-amt-slim {
+  text-align: center;
+}
+.coverage-available-contracts-only {
+  font-size: 1.2rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent-bright, #7dd3fc);
+}
+.coverage-account-id {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.82em;
+  font-weight: 600;
+}
+.coverage-account-host {
+  color: #5eead4;
+}
+.coverage-account-secondary {
+  color: #c4b5fd;
+}
+.coverage-account-other {
+  color: var(--color-text-muted, #7a8492);
+}
+.option-underlying-pool-totals {
+  font-size: 0.88rem;
+  color: var(--color-text-secondary, #c4cad4);
+}
+.option-underlying-pool-total-label {
+  color: var(--color-text-muted, #7a8492);
+  font-weight: 500;
+}
+.option-underlying-pool-total-sep {
+  color: var(--color-text-muted, #5c6570);
+}
 .instance-sheet-stock-section {
   margin-top: var(--space-4, 1rem);
   padding-top: var(--space-3, 0.75rem);
