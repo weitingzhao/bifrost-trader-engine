@@ -1884,13 +1884,28 @@ body::before {
   cursor: pointer;
 }
 
-/* Market Streams: Account filter pills (一字排开) */
+/* Market Streams card: hero section with elevated presence */
+.realtime-quotes-card {
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+.realtime-quotes-card > .daemon-header-with-lamp {
+  align-items: center;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-3);
+}
+
+/* Market Streams: Account filter pills */
 .realtime-stream-filters-row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-elevated);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
 }
 
 .realtime-stream-filter {
@@ -1906,19 +1921,40 @@ body::before {
 .realtime-stream-filter-pills {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 4px;
   flex-wrap: wrap;
+}
+.realtime-stream-filter .replay-filter-pill {
+  border-radius: 20px;
+  padding: 3px 12px;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+.realtime-stream-filter .replay-filter-pill:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-main);
 }
 .realtime-stream-filter .replay-filter-pill.active {
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: var(--color-bg);
+  font-weight: 600;
+  box-shadow: 0 0 8px var(--color-accent-glow);
 }
 .realtime-stream-filter .replay-filter-pill.active:hover {
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: var(--color-bg);
-  filter: brightness(1.08);
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px var(--color-accent-glow);
+}
+[data-theme="light"] .realtime-stream-filter .replay-filter-pill:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .replay-filter-pill-draggable {
@@ -1926,38 +1962,54 @@ body::before {
 }
 .replay-filter-pill-draggable:active {
   cursor: grabbing;
+  opacity: 0.7;
 }
 .replay-filter-pill-grip {
-  opacity: 0.6;
-  margin-right: 0.35em;
+  opacity: 0.4;
+  margin-right: 0.3em;
   user-select: none;
   pointer-events: none;
+  font-size: 0.85em;
 }
 
 .realtime-quote-drag-handle {
   cursor: grab;
   user-select: none;
-  margin-right: 0.35em;
-  opacity: 0.5;
+  margin-right: 0.3em;
+  opacity: 0.25;
   display: inline-block;
   vertical-align: middle;
+  font-size: 0.85em;
+  transition: opacity var(--transition-fast);
+}
+tr:hover .realtime-quote-drag-handle {
+  opacity: 0.6;
 }
 .realtime-quote-drag-handle:hover {
   opacity: 0.9;
 }
 .realtime-quote-drag-handle:active {
   cursor: grabbing;
+  opacity: 1;
 }
 
 /* 实时行情表格 */
 .realtime-quotes-table-wrap {
   overflow-x: auto;
   margin-top: var(--space-2);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
 }
 .realtime-quotes-table {
   width: 100%;
   min-width: 320px;
   table-layout: fixed;
+}
+.realtime-quotes-table thead th {
+  background: var(--color-surface-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .realtime-quotes-table th,
 .realtime-quotes-table td {
@@ -1970,45 +2022,66 @@ body::before {
 }
 .realtime-quotes-table .realtime-quote-num {
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
 }
-/* Symbol cell: color = quote freshness (replaces Since column). <3s normal, 3–10s gray, >10s darker */
+/* Symbol cell: color = quote freshness */
 .realtime-quotes-table .realtime-quote-symbol {
   font-weight: 700;
+  position: relative;
+}
+.realtime-quotes-table .realtime-quote-symbol.realtime-quote-symbol-fresh {
+  color: var(--color-text-main);
 }
 .realtime-quotes-table .realtime-quote-symbol.realtime-quote-symbol-stale {
   color: var(--color-text-muted);
   opacity: 0.85;
 }
 .realtime-quotes-table .realtime-quote-symbol.realtime-quote-symbol-very-stale {
-  color: var(--color-text-muted);
-  opacity: 0.55;
+  color: var(--color-text-dim);
+  opacity: 0.6;
 }
 /* Market Streams: category group header row */
 .realtime-quotes-table tr.ib-stock-group-header td {
-  background: var(--color-surface-elevated);
+  background: linear-gradient(90deg, var(--color-surface-elevated) 0%, rgba(163, 230, 53, 0.04) 100%);
   color: var(--color-text-muted);
   font-weight: 600;
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
   font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+[data-theme="light"] .realtime-quotes-table tr.ib-stock-group-header td {
+  background: linear-gradient(90deg, var(--color-surface-elevated) 0%, rgba(14, 165, 233, 0.04) 100%);
 }
 
 .realtime-quotes-table .realtime-quote-last-bid-ask {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
 }
 .realtime-quotes-table .realtime-quote-spread {
-  font-size: 0.875em;
-  margin-left: 0.2em;
+  font-size: 0.8em;
+  margin-left: 0.25em;
+  opacity: 0.75;
 }
 .realtime-quotes-table .realtime-quotes-sum-row td {
-  border-top: 3px solid var(--color-border, #888);
-  padding-top: 0.5rem;
+  border-top: 2px solid var(--color-border-strong);
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
   font-weight: 600;
-  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.07));
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
 }
 .realtime-quotes-table .realtime-quotes-sum-row td:first-child {
   font-weight: 700;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  letter-spacing: 0.02em;
 }
 .realtime-quotes-table .pnl-positive {
   color: var(--color-success);
@@ -2018,30 +2091,53 @@ body::before {
 }
 .realtime-quotes-table .realtime-quote-colgroup {
   font-weight: 600;
-  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.04));
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 2px solid var(--color-border-strong);
+}
+[data-theme="light"] .realtime-quotes-table .realtime-quote-colgroup {
+  background: rgba(0, 0, 0, 0.02);
 }
 
-/* Watchlist summary row: fixed width per segment to avoid layout jump when numbers change */
+/* Global PnL colors (also used in summary stats and other contexts) */
+.pnl-positive { color: var(--color-success); }
+.pnl-negative { color: var(--color-danger); }
+
+/* Watchlist summary row: KPI-style stats bar */
 .watchlist-summary-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 0.5rem;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-elevated);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
 }
 .watchlist-summary-segment {
   display: inline-flex;
-  align-items: baseline;
-  width: 10rem;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 8rem;
+  padding: var(--space-1) var(--space-3);
   font-variant-numeric: tabular-nums;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  font-weight: 500;
+  border-right: 1px solid var(--color-border);
+}
+.watchlist-summary-segment:last-child {
+  border-right: none;
 }
 .watchlist-summary-segment .watchlist-summary-value {
-  display: inline-block;
-  width: 6.5rem;
-  text-align: right;
-  margin-left: 0.25rem;
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-title);
+  font-weight: 700;
+  margin-top: 2px;
+  letter-spacing: -0.02em;
 }
 .watchlist-summary-segment .watchlist-summary-value-pct {
-  width: 4.5rem;
+  font-size: var(--text-body);
 }
 
 /* Watchlist Actions column: compact, small but clearly clickable buttons */
@@ -2171,19 +2267,25 @@ body::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface-elevated);
-  color: var(--color-text-main);
+  color: var(--color-text-muted);
   cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  transition: all var(--transition-fast);
 }
 .section-header-icon-btn:hover {
-  background: var(--color-surface-hover, rgba(128, 128, 128, 0.08));
-  border-color: var(--color-border-strong);
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  transform: rotate(45deg);
+}
+.section-header-icon-btn:active {
+  transform: rotate(180deg);
+  transition-duration: 0.3s;
 }
 .section-header-icon-btn:focus-visible {
   outline: 2px solid var(--color-accent);
@@ -2975,10 +3077,12 @@ body::before {
   background: var(--color-bg-subtle);
 }
 
-/* Live page Open Orders section (same table style) */
+/* Live page Open Orders section */
 .open-orders-live-card .open-orders-table-wrap {
   overflow-x: auto;
-  margin-top: var(--space-1);
+  margin-top: var(--space-2);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
 }
 .open-orders-live-card .open-orders-table {
   border-collapse: collapse;
@@ -2988,26 +3092,59 @@ body::before {
 }
 .open-orders-live-card .open-orders-table th,
 .open-orders-live-card .open-orders-table td {
-  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  padding: var(--space-2) var(--space-3);
   text-align: left;
   vertical-align: middle;
+  border-bottom: 1px solid var(--color-border);
 }
-.open-orders-live-card .open-orders-table th {
+.open-orders-live-card .open-orders-table thead th {
   font-weight: 600;
   color: var(--color-text-muted);
+  background: var(--color-surface-elevated);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--text-tiny);
 }
-.open-orders-live-card .open-orders-table tbody tr:nth-child(even) {
-  background: var(--color-bg-subtle);
+.open-orders-live-card .open-orders-table tbody tr {
+  transition: background var(--transition-fast);
 }
-/* Qty / Filled/Rem: integer part bold + yellow for visibility */
+.open-orders-live-card .open-orders-table tbody tr:hover {
+  background: rgba(163, 230, 53, 0.04);
+}
+[data-theme="light"] .open-orders-live-card .open-orders-table tbody tr:hover {
+  background: rgba(14, 165, 233, 0.06);
+}
+.open-orders-live-card .open-orders-table tbody td {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
 .open-orders-live-card .open-order-qty-intrinsic {
   font-weight: 700;
-  color: #e6b800;
+  color: var(--color-warning);
 }
-/* Filled/Rem: mute ".0" for whole numbers */
 .open-orders-live-card .decimal-muted {
-  color: var(--color-text-muted);
+  color: var(--color-text-dim);
   font-weight: 400;
+}
+.open-orders-live-card .open-orders-subtitle {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+.open-orders-live-card .section-hint {
+  padding: var(--space-3);
+  text-align: center;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+/* Watchlist Options card */
+.watchlist-options-live-card .realtime-quotes-table-wrap {
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+.watchlist-options-live-card .realtime-quotes-table thead th {
+  background: var(--color-surface-elevated);
 }
 
 .daemon-group-body .controls {
@@ -4446,18 +4583,21 @@ button:disabled {
   height: 1.1rem;
   flex-shrink: 0;
   color: var(--color-lamp-none);
+  transition: color var(--transition-fast), filter var(--transition-fast);
 }
 .title-inline-lamp.green {
   color: var(--color-lamp-green);
-  filter: drop-shadow(0 0 4px var(--color-lamp-green));
+  filter: drop-shadow(0 0 5px var(--color-lamp-green)) drop-shadow(0 0 10px rgba(74, 222, 128, 0.3));
+  animation: lamp-pulse-green 2.5s ease-in-out infinite;
 }
 .title-inline-lamp.yellow {
   color: var(--color-lamp-yellow);
-  filter: drop-shadow(0 0 4px var(--color-lamp-yellow));
+  filter: drop-shadow(0 0 5px var(--color-lamp-yellow)) drop-shadow(0 0 10px rgba(250, 204, 21, 0.3));
 }
 .title-inline-lamp.red {
   color: var(--color-lamp-red);
-  filter: drop-shadow(0 0 4px var(--color-lamp-red));
+  filter: drop-shadow(0 0 5px var(--color-lamp-red)) drop-shadow(0 0 10px rgba(248, 113, 113, 0.3));
+  animation: lamp-pulse-red 1.5s ease-in-out infinite;
 }
 .title-inline-lamp.none {
   color: var(--color-lamp-none);
@@ -4471,6 +4611,14 @@ button:disabled {
 }
 .title-inline-lamp svg[fill="none"] {
   fill: none;
+}
+@keyframes lamp-pulse-green {
+  0%, 100% { filter: drop-shadow(0 0 5px var(--color-lamp-green)) drop-shadow(0 0 10px rgba(74, 222, 128, 0.3)); }
+  50% { filter: drop-shadow(0 0 7px var(--color-lamp-green)) drop-shadow(0 0 14px rgba(74, 222, 128, 0.45)); }
+}
+@keyframes lamp-pulse-red {
+  0%, 100% { filter: drop-shadow(0 0 5px var(--color-lamp-red)) drop-shadow(0 0 10px rgba(248, 113, 113, 0.3)); }
+  50% { filter: drop-shadow(0 0 8px var(--color-lamp-red)) drop-shadow(0 0 16px rgba(248, 113, 113, 0.5)); }
 }
 
 .page-title-breadcrumb-link {
@@ -4690,11 +4838,55 @@ textarea::-webkit-scrollbar-thumb:hover {
 }
 
 /* Live page: Strategy Active card (reuses strategy-section / statusSummary) */
+.strategy-active-live-card {
+  border-left: 3px solid var(--color-accent);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(90deg, var(--color-accent-soft) 0%, var(--color-surface) 15%);
+}
 .strategy-active-live-card .statusSummary {
   margin-bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-1) var(--space-4);
+}
+.strategy-active-live-card .statusSummary > div {
+  display: flex;
+  gap: 0.4em;
+  align-items: baseline;
+}
+.strategy-active-live-card .statusSummary strong {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: var(--text-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 .strategy-active-live-card .section-hint {
   margin: var(--space-1) 0 0 0;
+  font-style: italic;
+  opacity: 0.7;
+}
+.strategy-active-live-card .daemon-card-title {
+  font-size: var(--text-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.strategy-active-live-card .btn-secondary.page-title-breadcrumb-link {
+  font-size: var(--text-caption);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 6px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  color: var(--color-accent);
+  font-weight: 600;
+  transition: all var(--transition-fast);
+}
+.strategy-active-live-card .btn-secondary.page-title-breadcrumb-link:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  text-decoration: none;
 }
 
 /* ---------- 表格（Skote 借鉴：表头背景、行悬停） ---------- */

@@ -1081,23 +1081,17 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
                 ? (totalDailyDollar / totalDailyDenom) * 100
                 : null
             return (
-              <p className="replay-sync-hint watchlist-summary-row" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+              <div className="watchlist-summary-row" style={{ marginTop: 'var(--space-3)' }}>
                 <span className="watchlist-summary-segment">
-                  Total $:{' '}
-                  <span
-                    className="watchlist-summary-value"
-                    style={{ color: totalCostPnl >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}
-                  >
+                  SINCE $
+                  <span className={`watchlist-summary-value ${totalCostPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
                     {fmtUsdRound0(totalCostPnl)}
                   </span>
                 </span>
                 {totalPct != null && Number.isFinite(totalPct) && (
                   <span className="watchlist-summary-segment">
-                    Total %:{' '}
-                    <span
-                      className="watchlist-summary-value watchlist-summary-value-pct"
-                      style={{ color: totalPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)' }}
-                    >
+                    SINCE %
+                    <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
                       {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
                     </span>
                   </span>
@@ -1105,33 +1099,22 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
                 {(Number.isFinite(totalDailyDollar) || (totalDailyPct != null && Number.isFinite(totalDailyPct))) && (
                   <>
                     <span className="watchlist-summary-segment">
-                      Daily $:{' '}
-                      <span
-                        className="watchlist-summary-value"
-                        style={{
-                          color: totalDailyDollar >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)',
-                        }}
-                      >
+                      DAILY $
+                      <span className={`watchlist-summary-value ${totalDailyDollar >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
                         {fmtUsdRound0(totalDailyDollar)}
                       </span>
                     </span>
                     {totalDailyPct != null && Number.isFinite(totalDailyPct) && (
                       <span className="watchlist-summary-segment">
-                        Daily %:{' '}
-                        <span
-                          className="watchlist-summary-value watchlist-summary-value-pct"
-                          style={{
-                            color:
-                              totalDailyPct >= 0 ? 'var(--color-success, green)' : 'var(--color-danger, #c00)',
-                          }}
-                        >
+                        DAILY %
+                        <span className={`watchlist-summary-value watchlist-summary-value-pct ${totalDailyPct >= 0 ? 'pnl-positive' : 'pnl-negative'}`}>
                           {totalDailyPct >= 0 ? '+' : ''}{totalDailyPct.toFixed(2)}%
                         </span>
                       </span>
                     )}
                   </>
                 )}
-              </p>
+              </div>
             )
           })()}
       </div>
