@@ -30,6 +30,17 @@ export type InstancePositionGroup = {
   total_unrealized_pnl: number
 }
 
+/** Combined option + stock positions per strategy instance (Positions Instance tab). */
+export type InstanceAllGroup = {
+  strategy_instance_id: number | null
+  strategy_instance_label: string | null
+  strategy_opportunity_name: string | null
+  strategy_instance_opened_at_epoch: number | null
+  options: OpenOptionPosition[]
+  stocks: LivePositionRow[]
+  total_unrealized_pnl: number
+}
+
 /** @deprecated kept for transition; use InstancePositionGroup */
 export type OpenOptionGroup = {
   kind: 'live' | 'offtrack'

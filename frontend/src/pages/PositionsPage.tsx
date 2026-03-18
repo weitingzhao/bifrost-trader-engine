@@ -44,7 +44,7 @@ import { LinkExecutionRecordModal } from './portfolio/LinkExecutionRecordModal'
 import type { LinkPositionContext } from './portfolio/LinkPositionModal'
 import { LinkPositionModal } from './portfolio/LinkPositionModal'
 import { QuickCloseModal } from './portfolio/QuickCloseModal'
-import type { InstancePositionGroup, LivePositionRow, OpenOptionPosition, PortfolioView } from './portfolio/types'
+import type { InstanceAllGroup, InstancePositionGroup, LivePositionRow, OpenOptionPosition, PortfolioView } from './portfolio/types'
 import { OFF_TRACK_ACCOUNT_ID, useExecutions } from './portfolio/useExecutions'
 
 function StrategyAttributionCells({ ex }: { ex: Execution | null }) {
@@ -114,7 +114,7 @@ export function PositionsPage({
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
   const [openFilterPool, setOpenFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
-  const [openTab, setOpenTab] = useState<'options' | 'stocks'>('options')
+  const [openTab, setOpenTab] = useState<'instance' | 'options' | 'stocks'>('instance')
   const getPositionKey = (p: OpenOptionPosition, instId: number | null) =>
     `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}`
   const [expandedPositionKeys, setExpandedPositionKeys] = useState<string[]>([])
@@ -416,6 +416,148 @@ export function PositionsPage({
     [livePositions],
   )
 
+  const instanceAllGroups = useMemo((): InstanceAllGroup[] => {
+    type Bucket = {
+      id: number | null
+      label: string | null
+      oppName: string | null
+      openedAt: number | null
+      options: OpenOptionPosition[]
+      stocks: LivePositionRow[]
+    }
+    const map = new Map<string, Bucket>()
+    const mergeMeta = (bucket: Bucket, patch: { label?: string | null; oppName?: string | null; openedAt?: number | null }) => {
+      if (patch.label != null && patch.label !== '' && !bucket.label) bucket.label = patch.label
+      if (patch.oppName != null && patch.oppName !== '' && !bucket.oppName) bucket.oppName = patch.oppName
+      if (patch.openedAt != null && Number.isFinite(patch.openedAt) && bucket.openedAt == null) bucket.openedAt = patch.openedAt
+    }
+    for (const g of instanceGroups) {
+      const key = g.strategy_instance_id != null ? String(g.strategy_instance_id) : '__unassigned__'
+      const existing = map.get(key)
+      if (existing) {
+        existing.options.push(...g.positions)
+        mergeMeta(existing, {
+          label: g.strategy_instance_label,
+          oppName: g.strategy_opportunity_name,
+          openedAt: g.strategy_instance_opened_at_epoch,
+        })
+      } else {
+        map.set(key, {
+          id: g.strategy_instance_id,
+          label: g.strategy_instance_label,
+          oppName: g.strategy_opportunity_name,
+          openedAt: g.strategy_instance_opened_at_epoch,
+          options: [...g.positions],
+          stocks: [],
+        })
+      }
+    }
+    for (const s of liveStockPositions) {
+      const instIdRaw = s.strategy_instance_id
+      const instId = instIdRaw != null && Number.isFinite(Number(instIdRaw)) ? Number(instIdRaw) : null
+      const key = instId != null ? String(instId) : '__unassigned__'
+      let bucket = map.get(key)
+      if (!bucket) {
+        bucket = {
+          id: instId,
+          label: s.strategy_instance_label?.trim() ?? null,
+          oppName: s.strategy_opportunity_name?.trim() ?? null,
+          openedAt: null,
+          options: [],
+          stocks: [],
+        }
+        map.set(key, bucket)
+      }
+      bucket.stocks.push(s)
+      if (instId != null) bucket.id = instId
+      mergeMeta(bucket, {
+        label: s.strategy_instance_label?.trim() ?? null,
+        oppName: s.strategy_opportunity_name?.trim() ?? null,
+      })
+    }
+    for (const b of map.values()) {
+      b.stocks.sort((a, x) => (a.symbol ?? '').localeCompare(x.symbol ?? ''))
+    }
+    const result: InstanceAllGroup[] = []
+    for (const [, b] of map) {
+      const optPnl = b.options.reduce((sum, p) => sum + p.unrealized_pnl, 0)
+      const stkPnl = b.stocks.reduce((sum, p) => {
+        const v = p.unrealized_pnl
+        return sum + (v != null && Number.isFinite(Number(v)) ? Number(v) : 0)
+      }, 0)
+      result.push({
+        strategy_instance_id: b.id,
+        strategy_instance_label: b.label,
+        strategy_opportunity_name: b.oppName,
+        strategy_instance_opened_at_epoch: b.openedAt,
+        options: b.options,
+        stocks: b.stocks,
+        total_unrealized_pnl: optPnl + stkPnl,
+      })
+    }
+    result.sort((a, b) => {
+      if (a.strategy_instance_id == null && b.strategy_instance_id != null) return 1
+      if (a.strategy_instance_id != null && b.strategy_instance_id == null) return -1
+      return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
+    })
+    return result
+  }, [instanceGroups, liveStockPositions])
+
+  const sortedInstanceAllGroups = useMemo((): InstanceAllGroup[] => {
+    const { column, dir } = openOptSort
+    const mult = dir === 'asc' ? 1 : -1
+    const sortPositions = (positions: OpenOptionPosition[]) => {
+      const list = [...positions]
+      list.sort((a, b) => {
+        if (column === 'contract') {
+          const aParts = getContractLabelParts(a.contract_key)
+          const bParts = getContractLabelParts(b.contract_key)
+          const cmp = (aParts.symbol ?? '').localeCompare(bParts.symbol ?? '')
+          if (cmp !== 0) return mult * cmp
+          const cmpExp = a.expiry.localeCompare(b.expiry)
+          if (cmpExp !== 0) return mult * cmpExp
+          return mult * (a.strike - b.strike)
+        }
+        if (column === 'expiry') {
+          const cmp = a.expiry.localeCompare(b.expiry)
+          if (cmp !== 0) return mult * cmp
+          return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
+        }
+        if (column === 'strike') {
+          const cmp = a.strike - b.strike
+          if (cmp !== 0) return mult * cmp
+          return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
+        }
+        if (column === 'last') {
+          const aLast = getPositionLast(a) ?? -Infinity
+          const bLast = getPositionLast(b) ?? -Infinity
+          if (aLast !== bLast) return mult * (aLast - bLast)
+          return 0
+        }
+        if (column === 'qty') {
+          return mult * (Math.abs(a.qty) - Math.abs(b.qty))
+        }
+        if (column === 'avg_cost') {
+          return mult * ((a.avg_cost ?? -Infinity) - (b.avg_cost ?? -Infinity))
+        }
+        if (column === 'value') {
+          const aVal = (a.avg_cost ?? 0) * Math.abs(a.qty) * 100
+          const bVal = (b.avg_cost ?? 0) * Math.abs(b.qty) * 100
+          return mult * (aVal - bVal)
+        }
+        if (column === 'time') {
+          return mult * ((getPositionTime(a) ?? 0) - (getPositionTime(b) ?? 0))
+        }
+        return mult * (a.unrealized_pnl - b.unrealized_pnl)
+      })
+      return list
+    }
+    return instanceAllGroups.map(g => ({
+      ...g,
+      options: sortPositions(g.options),
+    }))
+  }, [instanceAllGroups, openOptSort, quotesMap])
+
   const openFilterAccountOptions = useMemo(() => {
     const accounts = (status?.accounts ?? []).map(a => (a.account_id ?? '').trim()).filter(Boolean)
     const unique = Array.from(new Set(accounts))
@@ -425,15 +567,23 @@ export function PositionsPage({
 
   const hasOpenOptions = allFlatPositions.length > 0
   const hasOpenStocks = liveStockPositions.length > 0
+  const hasInstances = instanceAllGroups.length > 0
   useEffect(() => {
-    if (openTab === 'options' && !hasOpenOptions && hasOpenStocks) {
-      setOpenTab('stocks')
+    if (openTab === 'instance' && !hasInstances) {
+      if (hasOpenOptions) setOpenTab('options')
+      else if (hasOpenStocks) setOpenTab('stocks')
       return
     }
-    if (openTab === 'stocks' && !hasOpenStocks && hasOpenOptions) {
-      setOpenTab('options')
+    if (openTab === 'options' && !hasOpenOptions) {
+      if (hasInstances) setOpenTab('instance')
+      else if (hasOpenStocks) setOpenTab('stocks')
+      return
     }
-  }, [openTab, hasOpenOptions, hasOpenStocks])
+    if (openTab === 'stocks' && !hasOpenStocks) {
+      if (hasInstances) setOpenTab('instance')
+      else if (hasOpenOptions) setOpenTab('options')
+    }
+  }, [openTab, hasInstances, hasOpenOptions, hasOpenStocks])
 
   useEffect(() => {
     loadReplayData()
@@ -543,6 +693,18 @@ export function PositionsPage({
                     <button
                       type="button"
                       role="tab"
+                      id="open-tab-instance"
+                      aria-selected={openTab === 'instance'}
+                      aria-controls="open-panel-instance"
+                      className={`system-tab ${openTab === 'instance' ? 'active' : ''}`}
+                      onClick={() => setOpenTab('instance')}
+                      disabled={!hasInstances}
+                    >
+                      Instance
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
                       id="open-tab-options"
                       aria-selected={openTab === 'options'}
                       aria-controls="open-panel-options"
@@ -566,13 +728,306 @@ export function PositionsPage({
                     </button>
                   </div>
                   <p className="section-hint replay-portfolio-tab-hint">
-                    {openTab === 'options'
-                      ? 'Open option positions by contract; expand a row to see Details and Add/Edit/Close trades.'
-                      : 'Open stock positions from account snapshots (Live only). Link stock to strategy instance (e.g. Covered Call underlying).'}
+                    {openTab === 'instance'
+                      ? 'All positions grouped by strategy instance. Each group shows its option and stock positions.'
+                      : openTab === 'options'
+                        ? 'Open option positions by contract; expand a row to see Details and Add/Edit/Close trades.'
+                        : 'Open stock positions from account snapshots (Live only). Link stock to strategy instance (e.g. Covered Call underlying).'}
                   </p>
                 </div>
               </div>
-              {openTab === 'options' ? (
+              {openTab === 'instance' ? (
+                <div
+                  id="open-panel-instance"
+                  role="tabpanel"
+                  aria-labelledby="open-tab-instance"
+                  className="system-tab-panel"
+                >
+                  <h5 className="replay-sub">By strategy instance</h5>
+                  {!hasInstances ? (
+                    <p className="section-hint">No positions under the current filters.</p>
+                  ) : (
+                    <div className="replay-instance-all-groups">
+                      {sortedInstanceAllGroups.map(allGroup => {
+                        const instKey = allGroup.strategy_instance_id != null ? String(allGroup.strategy_instance_id) : '__unassigned__'
+                        const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Instance #${allGroup.strategy_instance_id}` : 'Unassigned')
+                        const oppName = allGroup.strategy_opportunity_name?.trim() || null
+                        const openedAt = allGroup.strategy_instance_opened_at_epoch
+                        const optN = allGroup.options.length
+                        const stkN = allGroup.stocks.length
+                        const optSortHead = (
+                          <thead>
+                            <tr>
+                              <th className="replay-opt-expand-col" />
+                              {(() => {
+                                const cols: { col: OpenOptSortCol; label: string; title?: string }[] = [
+                                  { col: 'contract', label: 'Contract' },
+                                  { col: 'expiry', label: 'Expiry' },
+                                  { col: 'strike', label: 'Strike' },
+                                  { col: 'last', label: 'Last', title: 'Underlying last price; (Last − Strike) / Last %' },
+                                  { col: 'qty', label: 'Qty' },
+                                  { col: 'avg_cost', label: '@' },
+                                  { col: 'value', label: 'Value' },
+                                  { col: 'time', label: 'Time' },
+                                  { col: 'un_pnl', label: 'UN PNL' },
+                                ]
+                                return cols.map(c => (
+                                  <th
+                                    key={c.col}
+                                    className="replay-th-sortable"
+                                    title={c.title ?? `Sort by ${c.label}`}
+                                    onClick={() => setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' })}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenOptSort(prev => prev.column === c.col ? { column: c.col, dir: prev.dir === 'desc' ? 'asc' : 'desc' } : { column: c.col, dir: 'desc' }) } }}
+                                    aria-sort={openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                                  >
+                                    {c.label}{openOptSort.column === c.col ? (openOptSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                                  </th>
+                                ))
+                              })()}
+                              <th>Pool</th>
+                              <th>Account</th>
+                              <th>Opportunity</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                        )
+                        const optionBodyRows = allGroup.options.flatMap((pos) => {
+                          const posKey = `ia-${instKey}-${getPositionKey(pos, allGroup.strategy_instance_id)}`
+                          const absQty = Math.abs(pos.qty)
+                          const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
+                          const value = (pos.avg_cost ?? 0) * absQty * 100
+                          const ts = getPositionTime(pos)
+                          const matchedExecs = pos.kind === 'live' && pos.position
+                            ? (livePositionExecutionsMap.get(optExecutionMatchKey(pos.account_id, pos.contract_key)) ?? [])
+                            : (pos.kind === 'offtrack' ? pos.trades ?? [] : [])
+                          const hasExecutions = matchedExecs.length > 0
+                          const isPosExpanded = expandedPositionKeys.includes(posKey)
+                          const posRow = (
+                            <tr
+                              key={posKey}
+                              className="detail-position-row"
+                              onClick={hasExecutions ? () => togglePositionExpand(posKey) : undefined}
+                              role={hasExecutions ? 'button' : undefined}
+                              tabIndex={hasExecutions ? 0 : undefined}
+                              onKeyDown={hasExecutions ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePositionExpand(posKey) } } : undefined}
+                              aria-expanded={hasExecutions ? isPosExpanded : undefined}
+                            >
+                              <td className="replay-opt-expand-col">
+                                {hasExecutions ? (
+                                  <span className={`replay-opt-expand-icon ${isPosExpanded ? 'expanded' : ''}`} aria-hidden>
+                                    {isPosExpanded ? '▼' : '▶'}
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="replay-opt-contract">
+                                {(() => {
+                                  const p = getContractLabelParts(pos.contract_key)
+                                  const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
+                                  return p.symbol ? (<><strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}</>) : pos.contract_key
+                                })()}
+                              </td>
+                              <td>
+                                {fmtExpiry(pos.expiry)}
+                                {(() => {
+                                  const days = daysUntilExpiry(pos.expiry)
+                                  if (days == null) return null
+                                  const label = days >= 0 ? (days === 0 ? ' today' : ` ${days}d`) : ` ${-days}d ago`
+                                  return <span className="expiry-days-remaining" title={days >= 0 ? `${days} days left` : `Expired ${-days} days ago`}>{label}</span>
+                                })()}
+                              </td>
+                              <td><strong>{fmtUsd(pos.strike)}</strong></td>
+                              <td>
+                                {(() => {
+                                  const underlying = getContractLabelParts(pos.contract_key).symbol
+                                  const q = underlying ? quotesMap[underlying] : undefined
+                                  const last = q?.last != null && Number.isFinite(q.last) ? q.last : null
+                                  const strikeNum = pos.strike != null && Number.isFinite(pos.strike) ? pos.strike : null
+                                  const pct = last != null && strikeNum != null && last !== 0 ? ((last - strikeNum) / last) * 100 : null
+                                  const right = parseOptionContractKey(pos.contract_key).right
+                                  const side: 'Buy' | 'Sell' = pos.qty > 0 ? 'Buy' : 'Sell'
+                                  const pctClass = pct != null ? optionLastStrikePctClass(right, side, pct) : ''
+                                  return (
+                                    <>
+                                      {last != null ? fmtUsd(last) : '—'}
+                                      {pct != null && <span className={`replay-last-strike-pct ${pctClass}`.trim()} title={`(Last − Strike) / Last = ${pct.toFixed(2)}%`}> {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}
+                                    </>
+                                  )
+                                })()}
+                              </td>
+                              <td>{sideLabel} {absQty}</td>
+                              <td>{fmtUsd(pos.avg_cost)}</td>
+                              <td>{fmtUsd(value)}</td>
+                              <td>
+                                {ts != null ? (
+                                  <>{fmtDate(ts)}{fmtDaysAgo(ts) ? <span className="replay-time-ago"> {fmtDaysAgo(ts)}</span> : null}</>
+                                ) : '—'}
+                              </td>
+                              <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
+                              <td className="replay-muted">{pos.pool_label}</td>
+                              <td>{pos.account_id || '—'}</td>
+                              <td className="replay-strategy-opp-cell">
+                                {matchedExecs.length === 0 ? '—' : (
+                                  <span className="replay-muted">{matchedExecs.length} execution{matchedExecs.length > 1 ? 's' : ''} ↓</span>
+                                )}
+                              </td>
+                              <td>—</td>
+                            </tr>
+                          )
+                          const execRows = isPosExpanded ? matchedExecs.map((ex, ei) => {
+                            const es = (ex.side ?? '').toUpperCase()
+                            const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
+                            const eQty = Math.abs(Number(ex.quantity) || 0)
+                            const ePrice = Number(ex.price) || 0
+                            const eComm = Number(ex.commission) || 0
+                            const eTs = ex.time != null ? Number(ex.time) : null
+                            const isOffTrack = pos.kind === 'offtrack'
+                            return (
+                              <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
+                                <td className="replay-opt-expand-col" />
+                                <td className="detail-exec-indent replay-muted">↳ exec #{ex.account_executions_id ?? '?'}</td>
+                                <td className="replay-muted">{ex.source ?? '—'}</td>
+                                <td />
+                                <td />
+                                <td>{eSideLabel} {eQty || '—'}</td>
+                                <td>{fmtUsd(ePrice)}</td>
+                                <td />
+                                <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
+                                <td>{eComm ? fmtUsd(eComm) : '—'}</td>
+                                <td className="replay-muted" />
+                                <td className="replay-muted">{ex.account_id ?? '—'}</td>
+                                <StrategyAttributionCells ex={ex} />
+                                <td>
+                                  <span className="replay-exec-row-actions">
+                                    <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); setEditExec(ex); setPageError(null) }} title="Edit" aria-label="Edit execution">
+                                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                                    </button>
+                                    {ex.account_executions_id != null ? (
+                                      <LinkStrategyIconButton title="Assign strategy opportunity and instance" onClick={() => { setLinkContext({ account_executions_id: ex.account_executions_id!, execution: ex }); setLinkModalOpen(true); setPageError(null) }} />
+                                    ) : null}
+                                    {isOffTrack ? (
+                                      <button type="button" className="btn btn-small" onClick={e => { e.stopPropagation(); setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
+                                    ) : null}
+                                    <button type="button" className="btn btn-icon-small btn-icon-danger" onClick={e => { e.stopPropagation(); setPageError(null); setDeleteConfirmState({ open: true, title: 'Delete execution', message: 'This will permanently remove this execution from trade history. This cannot be undone.', confirming: false, exec: ex }) }} title="Delete" aria-label="Delete execution">
+                                      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                                    </button>
+                                  </span>
+                                </td>
+                              </tr>
+                            )
+                          }) : []
+                          return [posRow, ...execRows]
+                        })
+                        return (
+                          <div key={`ia-group-${instKey}`} className="replay-instance-all-group" style={{ marginBottom: '1.5rem' }}>
+                            <div className="replay-portfolio-group-header replay-opt-group-row" style={{ padding: '0.5rem 0', marginBottom: '0.25rem' }}>
+                              <span className="replay-instance-header-content">
+                                {allGroup.strategy_instance_id != null ? (
+                                  <a
+                                    href={`#/strategies/instances/${allGroup.strategy_instance_id}`}
+                                    className="ledger-instance-icon-link"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={`View instance: ${instLabel}`}
+                                  >
+                                    <strong>{instLabel}</strong>
+                                  </a>
+                                ) : (
+                                  <strong>{instLabel}</strong>
+                                )}
+                                {oppName && <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>Opportunity Strategy: {oppName}</span>}
+                                {openedAt != null && Number.isFinite(openedAt) && (
+                                  <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
+                                    Instance Opened at: {fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? ` (${fmtDaysAgo(openedAt)})` : ''}
+                                  </span>
+                                )}
+                                <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
+                                  {optN} option{optN !== 1 ? 's' : ''}, {stkN} stock{stkN !== 1 ? 's' : ''}
+                                </span>
+                                <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>Total UN PNL:</span>{' '}
+                                <span className="replay-pnl-unrealized">{fmtUsd(allGroup.total_unrealized_pnl)}</span>
+                              </span>
+                            </div>
+                            {optN > 0 ? (
+                              <>
+                                <h6 className="replay-sub" style={{ marginTop: '0.5rem', marginBottom: '0.35rem' }}>Options</h6>
+                                <div className="replay-portfolio-table-wrap">
+                                  <table className="table-operations replay-opt-groups">
+                                    {optSortHead}
+                                    <tbody>{optionBodyRows}</tbody>
+                                  </table>
+                                </div>
+                              </>
+                            ) : null}
+                            {stkN > 0 ? (
+                              <>
+                                <h6 className="replay-sub" style={{ marginTop: '0.75rem', marginBottom: '0.35rem' }}>Stocks</h6>
+                                <div className="replay-portfolio-table-wrap">
+                                  <table className="table-operations">
+                                    <thead>
+                                      <tr>
+                                        <th>Account</th>
+                                        <th>Symbol</th>
+                                        <th>Side</th>
+                                        <th>Qty</th>
+                                        <th>Avg Cost</th>
+                                        <th>Mark</th>
+                                        <th>UN PNL</th>
+                                        <th>Opportunity</th>
+                                        <th>Actions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {allGroup.stocks.map(position => {
+                                        const accId = (position.account_id ?? '').trim() || '—'
+                                        const qty = Number(position.position)
+                                        const pnl = position.unrealized_pnl != null && Number.isFinite(Number(position.unrealized_pnl))
+                                          ? Number(position.unrealized_pnl)
+                                          : null
+                                        const pnlClass = pnl == null ? '' : 'replay-pnl-unrealized'
+                                        const instId = position.strategy_instance_id
+                                        const instLabelStk = position.strategy_instance_label?.trim()
+                                        const oppNameStk = position.strategy_opportunity_name?.trim()
+                                        const contractKey = position.contract_key ?? `${position.symbol ?? ''}|STK|||`
+                                        const instanceTitle = instLabelStk ? `Instance: ${instLabelStk}` : instId != null ? `View instance #${instId}` : ''
+                                        return (
+                                          <tr key={`ia-stk-${instKey}-${accId}-${position.symbol ?? ''}-${contractKey}`}>
+                                            <td>{accId}</td>
+                                            <td><strong>{position.symbol ?? '—'}</strong></td>
+                                            <td>{qty > 0 ? 'Long' : qty < 0 ? 'Short' : '—'}</td>
+                                            <td>{Number.isFinite(qty) ? qty : '—'}</td>
+                                            <td>{fmtUsd(position.avgCost)}</td>
+                                            <td>{fmtUsd(position.price)}</td>
+                                            <td><span className={pnlClass}>{fmtUsd(pnl ?? 0)}</span></td>
+                                            <td className="replay-strategy-opp-cell" title={[instanceTitle, oppNameStk].filter(Boolean).join(' · ') || undefined}>
+                                              <span className="replay-strategy-opp-cell-inner">
+                                                {instId != null ? (
+                                                  <a href={`#/strategies/instances/${instId}`} className="ledger-instance-icon-link" target="_blank" rel="noopener noreferrer" title={instanceTitle} aria-label={instanceTitle || 'View strategy instance'} onClick={e => e.stopPropagation()}>
+                                                    <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="5" y="5" width="14" height="14" rx="1" /></svg>
+                                                  </a>
+                                                ) : null}
+                                                <span className="replay-strategy-opp-text">{oppNameStk || '—'}</span>
+                                              </span>
+                                            </td>
+                                            <td>
+                                              <LinkStrategyIconButton title="Link to strategy instance (e.g. Covered Call underlying)" onClick={() => { setLinkPositionContext({ account_id: (position.account_id ?? accId).trim() || accId, contract_key: contractKey, symbol: position.symbol ?? undefined, strategy_opportunity_id: position.strategy_opportunity_id ?? null, strategy_instance_id: position.strategy_instance_id ?? null, position: qty, avgCost: position.avgCost, price: position.price }); setLinkPositionModalOpen(true); setPageError(null) }} />
+                                            </td>
+                                          </tr>
+                                        )
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : openTab === 'options' ? (
                 <div
                   id="open-panel-options"
                   role="tabpanel"

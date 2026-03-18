@@ -7558,6 +7558,715 @@ th {
   background: transparent;
 }
 
+/* ---------- Performance UI polish ---------- */
+
+/* Page layout */
+.performance-page {
+  gap: var(--space-5);
+}
+
+/* Section cards: glass-like frosted panels */
+.performance-page .performance-summary-section,
+.performance-page .performance-calendar-section {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse 100% 80% at 10% -10%, color-mix(in srgb, var(--color-accent-soft) 28%, transparent), transparent 50%),
+    linear-gradient(165deg, color-mix(in srgb, var(--color-surface-elevated) 78%, transparent), color-mix(in srgb, var(--color-surface) 88%, transparent));
+  box-shadow:
+    0 1px 0 inset color-mix(in srgb, var(--color-text-main) 5%, transparent),
+    0 16px 40px -12px color-mix(in srgb, var(--color-bg) 65%, transparent);
+}
+
+.performance-page .performance-summary-section::before,
+.performance-page .performance-calendar-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--color-text-main) 3%, transparent), transparent 12%);
+  opacity: 0.9;
+}
+
+.performance-page .performance-summary-section > *,
+.performance-page .performance-calendar-section > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Page title with breadcrumb */
+.performance-page .card-title.page-title-with-tooltip {
+  font-size: clamp(1.1rem, 2vw, 1.25rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.performance-page .page-title-breadcrumb-link {
+  font-weight: 500;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.performance-page .page-title-breadcrumb-link:hover {
+  opacity: 1;
+}
+
+/* Subtitle */
+.performance-page-subtitle {
+  margin: calc(var(--space-1) * -1) 0 var(--space-4);
+  max-width: 56rem;
+  color: var(--color-text-dim);
+  font-size: var(--text-caption);
+  letter-spacing: 0.02em;
+}
+
+/* Time range + filters pane */
+.performance-page .performance-pane {
+  border: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
+  border-radius: 14px;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-surface-elevated) 70%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.performance-page .performance-filters {
+  margin-top: 0;
+}
+
+.performance-page .performance-filters-inline .performance-filter-group {
+  width: 100%;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* Filter capsule styling */
+.performance-page .performance-filter {
+  min-height: 2.4rem;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 75%, transparent);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.performance-page .performance-filter:hover {
+  border-color: color-mix(in srgb, var(--color-border) 90%, transparent);
+}
+
+.performance-page .performance-filter-time-range {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.performance-page .performance-filter-legend-inline {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.6875rem;
+}
+
+.performance-page .performance-filter select {
+  min-height: 1.9rem;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border-radius: 8px;
+  border-color: color-mix(in srgb, var(--color-border) 60%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 85%, transparent);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.performance-page .performance-filter select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-soft) 65%, transparent);
+}
+
+/* Time range pills - refined */
+.performance-page .performance-time-range-pill {
+  min-height: 2rem;
+  padding: 0.3rem 0.85rem;
+  border-color: color-mix(in srgb, var(--color-border) 55%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: all 0.2s var(--ease-out);
+}
+
+.performance-page .performance-time-range-pill:hover {
+  background: color-mix(in srgb, var(--color-surface-elevated) 90%, transparent);
+  border-color: color-mix(in srgb, var(--color-border) 90%, transparent);
+}
+
+.performance-page .performance-time-range-pill.active {
+  color: color-mix(in srgb, var(--color-bg) 96%, #000);
+  font-weight: 600;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 80%, transparent),
+    0 6px 20px color-mix(in srgb, var(--color-accent-glow) 40%, transparent);
+}
+
+/* Range badge */
+.performance-page .performance-range-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.2rem;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 85%, transparent);
+  color: var(--color-text-main);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-caption);
+}
+
+.performance-page .performance-range-label-title {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-dim);
+  font-weight: 600;
+}
+
+/* Totals summary badge */
+.performance-page .by-day-total-summary-inline {
+  margin-left: 0;
+  margin-right: auto;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  font-size: var(--text-caption);
+}
+
+.performance-page .by-day-total-summary-kv {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* ---- By-day table ---- */
+.performance-page .performance-by-day-table-wrap {
+  margin-top: var(--space-4);
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+  overflow: auto;
+  background: color-mix(in srgb, var(--color-bg) 82%, transparent);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-bg) 50%, transparent);
+}
+
+.performance-page .performance-by-day-table-wrap .by-day-table {
+  margin: 0;
+}
+
+.performance-page .by-day-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--color-surface-elevated) 92%, transparent);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-dim);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.performance-page .by-day-table tbody tr {
+  transition: background-color 0.18s ease;
+}
+
+.performance-page .by-day-table tbody tr:hover {
+  background: color-mix(in srgb, var(--color-accent-soft) 18%, transparent);
+}
+
+.performance-page .by-day-table td {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.performance-page .by-day-table .by-day-group-row {
+  background: color-mix(in srgb, var(--color-surface-elevated) 60%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.performance-page .by-day-table .by-day-group-row:hover {
+  background: color-mix(in srgb, var(--color-surface-elevated) 85%, transparent);
+}
+
+.performance-page .by-day-table .by-day-group-row td {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.performance-page .by-day-table .by-day-group-expand {
+  transition: transform 0.2s var(--ease-out);
+  display: inline-block;
+}
+
+.performance-page .by-day-table .by-day-group-row[aria-expanded="true"] .by-day-group-expand {
+  transform: rotate(0deg);
+}
+
+.performance-page .by-day-table .by-day-day-row {
+  background: transparent;
+}
+
+.performance-page .by-day-table .by-day-day-row:nth-child(even) {
+  background: color-mix(in srgb, var(--color-surface) 25%, transparent);
+}
+
+/* ---- Calendar section ---- */
+.performance-page .performance-calendar-left {
+  border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+  border-radius: 14px;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-surface-elevated) 75%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.performance-page .performance-calendar-nav {
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.performance-page .performance-calendar-nav .btn {
+  min-width: 6.25rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.performance-page .performance-calendar-title {
+  font-weight: 700;
+  font-size: var(--text-title);
+  letter-spacing: -0.01em;
+}
+
+/* Calendar legend badges */
+.performance-page .performance-calendar-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.performance-page .performance-calendar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  font-size: var(--text-tiny);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.performance-page .performance-calendar-legend-item-realized {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success-soft) 50%, transparent);
+}
+
+.performance-page .performance-calendar-legend-item-unrealized {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning-soft) 50%, transparent);
+}
+
+/* Calendar grid */
+.performance-page .performance-calendar-grid {
+  gap: 3px;
+}
+
+.performance-page .performance-calendar-row {
+  gap: 3px;
+}
+
+.performance-page .performance-calendar-header .performance-calendar-cell {
+  background: transparent;
+  border: none;
+  font-weight: 600;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-dim);
+}
+
+/* Calendar cell: refined glass */
+.performance-page .performance-calendar-cell {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  background: color-mix(in srgb, var(--color-surface-elevated) 75%, transparent);
+  transition:
+    transform 0.22s var(--ease-out),
+    border-color 0.22s var(--ease-out),
+    box-shadow 0.22s var(--ease-out),
+    background 0.22s var(--ease-out);
+}
+
+/* Subtle tint for positive/negative days */
+.performance-page .performance-calendar-cell.tone-positive {
+  background: color-mix(in srgb, var(--color-success-soft) 35%, color-mix(in srgb, var(--color-surface-elevated) 75%, transparent));
+  border-color: color-mix(in srgb, var(--color-success) 18%, var(--color-border));
+}
+
+.performance-page .performance-calendar-cell.tone-negative {
+  background: color-mix(in srgb, var(--color-danger-soft) 30%, color-mix(in srgb, var(--color-surface-elevated) 75%, transparent));
+  border-color: color-mix(in srgb, var(--color-danger) 15%, var(--color-border));
+}
+
+.performance-page .performance-calendar-cell-clickable:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  box-shadow:
+    0 8px 20px -4px color-mix(in srgb, var(--color-bg) 55%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 15%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+}
+
+.performance-page .performance-calendar-cell-selected {
+  border-color: var(--color-accent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--color-accent-soft) 55%, transparent),
+    0 4px 12px color-mix(in srgb, var(--color-accent-glow) 25%, transparent);
+  outline: none;
+}
+
+.performance-page .performance-calendar-cell-outside {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Calendar PnL text refinement */
+.performance-page .performance-calendar-day {
+  font-weight: 700;
+  font-size: 0.8125rem;
+}
+
+.performance-page .performance-calendar-pnl {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* ---- Summary card (next to calendar) ---- */
+.performance-page .performance-calendar-summary-card {
+  border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+  border-radius: 14px;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-surface-elevated) 75%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.performance-page .performance-summary-inside-calendar.performance-summary-rows {
+  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(170px, 1fr));
+  gap: var(--space-3);
+}
+
+/* Individual summary column cards */
+.performance-page .performance-summary-inside-calendar .performance-summary-row {
+  border-right: none;
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  border-radius: 12px;
+  padding: var(--space-3);
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.performance-page .performance-summary-inside-calendar .performance-summary-row:hover {
+  border-color: color-mix(in srgb, var(--color-border) 80%, transparent);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--color-bg) 45%, transparent);
+}
+
+.performance-page .performance-summary-inside-calendar .performance-summary-row:last-child {
+  padding-right: var(--space-3);
+}
+
+/* Summary type label */
+.performance-page .performance-summary-inside-calendar .performance-summary-type {
+  margin-bottom: var(--space-2);
+  color: var(--color-text-main);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  font-weight: 700;
+}
+
+.performance-page .performance-summary-row-summary .performance-summary-type {
+  color: var(--color-accent);
+}
+
+/* Highlight key metrics in summary column: Total PnL and Net larger */
+.performance-page .performance-summary-row-summary .performance-summary-metric:first-child .performance-summary-metric-value,
+.performance-page .performance-summary-row-summary .performance-summary-metric:nth-child(3) .performance-summary-metric-value {
+  font-size: 0.9375rem;
+}
+
+.performance-page .performance-summary-inside-calendar .performance-summary-metrics {
+  gap: var(--space-2);
+}
+
+/* Individual metric pill */
+.performance-page .performance-summary-inside-calendar .performance-summary-metric {
+  padding: 5px var(--space-2);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 75%, transparent);
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.performance-page .performance-summary-inside-calendar .performance-summary-metric-label {
+  font-size: 0.65rem;
+  font-weight: 500;
+}
+
+.performance-page .performance-summary-inside-calendar .performance-summary-metric-value {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+/* ---- Day detail panel ---- */
+.performance-page .performance-calendar-day-detail {
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
+  background: color-mix(in srgb, var(--color-surface-elevated) 80%, transparent);
+  box-shadow:
+    0 1px 0 inset color-mix(in srgb, var(--color-text-main) 4%, transparent),
+    0 8px 24px -8px color-mix(in srgb, var(--color-bg) 50%, transparent);
+  padding: var(--space-4);
+  animation: perfDetailSlideIn 0.28s var(--ease-out);
+}
+
+@keyframes perfDetailSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.performance-page .performance-calendar-day-detail-title {
+  font-size: var(--text-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.performance-page .performance-calendar-day-detail-close {
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 1.1rem;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.performance-page .performance-calendar-day-detail-close:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+/* PnL type tabs: refined */
+.performance-page .performance-calendar-pnl-type-tabs {
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.performance-page .performance-calendar-pnl-type-tabs .system-tab,
+.performance-page .performance-calendar-symbol-tabs .system-tab {
+  border-radius: 10px;
+  padding: var(--space-2) var(--space-3);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: all 0.18s var(--ease-out);
+}
+
+.performance-page .performance-calendar-pnl-type-tabs .system-tab.active,
+.performance-page .performance-calendar-symbol-tabs .system-tab.active {
+  font-weight: 600;
+}
+
+/* Contract group styling */
+.performance-page .performance-calendar-contract-group {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.performance-page .performance-calendar-contract-title {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* Contract detail table */
+.performance-page .performance-calendar-unified-table {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.performance-page .performance-calendar-unified-table thead th {
+  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-dim);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-2);
+}
+
+.performance-page .performance-calendar-unified-table td {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.performance-page .performance-calendar-unified-table .performance-calendar-row-match {
+  background: color-mix(in srgb, var(--color-success-soft) 12%, transparent);
+}
+
+.performance-page .performance-calendar-unified-table .performance-calendar-row-execution {
+  background: transparent;
+}
+
+.performance-page .performance-calendar-unified-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.performance-page .performance-calendar-unified-table tbody tr:hover {
+  background: color-mix(in srgb, var(--color-accent-soft) 15%, transparent);
+}
+
+/* Unrealized total text */
+.performance-page .performance-calendar-total-unrealized {
+  font-size: var(--text-caption);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+  display: inline-block;
+  margin-bottom: var(--space-3);
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 1200px) {
+  .performance-page .performance-calendar-with-summary {
+    flex-direction: column;
+  }
+
+  .performance-page .performance-calendar-left,
+  .performance-page .performance-calendar-summary {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .performance-page .performance-summary-inside-calendar.performance-summary-rows {
+    grid-template-columns: 1fr;
+  }
+
+  .performance-page .performance-summary-inside-calendar .performance-summary-row {
+    padding: var(--space-2);
+  }
+
+  .performance-page .performance-filters-inline .performance-filter-group {
+    align-items: stretch;
+  }
+
+  .performance-page .performance-filter {
+    width: 100%;
+    min-height: auto;
+    border-radius: 12px;
+    justify-content: space-between;
+    padding: var(--space-2);
+  }
+
+  .performance-page .performance-filter-time-range {
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .performance-page .performance-time-range-pills {
+    flex: 1;
+  }
+
+  .performance-page .performance-filter select {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .performance-page .performance-pane {
+    padding: var(--space-2);
+  }
+
+  .performance-page .performance-calendar-nav {
+    gap: var(--space-2);
+  }
+
+  .performance-page .performance-calendar-nav .btn {
+    min-width: 0;
+    padding-inline: var(--space-2);
+  }
+
+  .performance-page .performance-calendar-row:not(.performance-calendar-header) {
+    height: 4rem;
+    min-height: 4rem;
+  }
+}
+
+/* Performance: loading pulse animation */
+.performance-page .section-hint {
+  animation: perfPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes perfPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Performance: calendar cell staggered appear */
+.performance-page .performance-calendar-row:not(.performance-calendar-header) .performance-calendar-cell {
+  animation: perfCellFade 0.3s var(--ease-out) both;
+}
+
+.performance-page .performance-calendar-row:nth-child(2) .performance-calendar-cell { animation-delay: 0s; }
+.performance-page .performance-calendar-row:nth-child(3) .performance-calendar-cell { animation-delay: 0.03s; }
+.performance-page .performance-calendar-row:nth-child(4) .performance-calendar-cell { animation-delay: 0.06s; }
+.performance-page .performance-calendar-row:nth-child(5) .performance-calendar-cell { animation-delay: 0.09s; }
+.performance-page .performance-calendar-row:nth-child(6) .performance-calendar-cell { animation-delay: 0.12s; }
+.performance-page .performance-calendar-row:nth-child(7) .performance-calendar-cell { animation-delay: 0.15s; }
+
+@keyframes perfCellFade {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Performance: by-day group expand animation */
+.performance-page .by-day-day-row {
+  animation: perfRowSlide 0.2s var(--ease-out) both;
+}
+
+@keyframes perfRowSlide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .replay-opt-groups {
   margin-bottom: var(--space-4);
 }

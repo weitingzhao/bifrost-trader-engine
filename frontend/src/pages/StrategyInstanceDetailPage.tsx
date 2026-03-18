@@ -70,6 +70,20 @@ export function StrategyInstanceDetailPage({
   }, [])
 
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd22d24' },
+      body: JSON.stringify({
+        sessionId: 'd22d24',
+        location: 'StrategyInstanceDetailPage.tsx:mount',
+        message: 'detail_page_mount',
+        data: { strategyInstanceId },
+        timestamp: Date.now(),
+        hypothesisId: 'D',
+      }),
+    }).catch(() => {})
+    // #endregion
     loadInstance()
   }, [loadInstance])
 

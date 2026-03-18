@@ -339,7 +339,10 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           </button>
           {' / Performance'}
         </h2>
-        <section className="performance-time-range-block" aria-label="Time range and daily statistics">
+        <p className="performance-page-subtitle">
+          Track realized and unrealized PnL with daily drill-downs.
+        </p>
+        <section className="performance-time-range-block performance-pane" aria-label="Time range and daily statistics">
         <div className="performance-filters performance-filters-inline">
           {loading && <p className="section-hint performance-filters-loading">Loading…</p>}
           <div className="performance-filter-group">
@@ -430,6 +433,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
               const toFmt = untilStr.replace(/-/g, '/')
               return (
                 <span className="performance-range-label" aria-label="Trade range">
+                  <span className="performance-range-label-title">Range</span>
                   {fromFmt} ~ {toFmt}
                 </span>
               )
@@ -502,9 +506,9 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           }
           return (
             <>
-            <div className="table-wrap">
+            <div className="table-wrap performance-by-day-table-wrap">
               <table className="data-table by-day-table" role="grid">
-                <thead><tr><th>Date</th><th>Option Realized</th><th>Option Unrealized</th><th>Stock Realized</th><th>Stock Unrealized</th></tr></thead>
+                <thead><tr><th>Date</th><th>Opt Realized</th><th>Opt Unrealized</th><th>Stk Realized</th><th>Stk Unrealized</th></tr></thead>
                 <tbody>
                   {groupEntriesNewestFirst.map(([monthKey, { monthLabel, rows: groupRows }]) => {
                     const sum = groupRows.reduce((a, r) => ({
@@ -614,9 +618,13 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                       <p className="section-hint performance-calendar-loading">Loading daily Realized/Unrealized…</p>
                     )}
                     <div className="performance-calendar-nav">
-                      <button type="button" className="btn btn-secondary" onClick={goPrev} aria-label="Previous month">← Prev</button>
+                      <button type="button" className="btn btn-secondary" onClick={goPrev} aria-label="Previous month">&larr; Prev</button>
                       <span className="performance-calendar-title">{monthLabel}</span>
-                      <button type="button" className="btn btn-secondary" onClick={goNext} aria-label="Next month">Next →</button>
+                      <button type="button" className="btn btn-secondary" onClick={goNext} aria-label="Next month">Next &rarr;</button>
+                    </div>
+                    <div className="performance-calendar-legend" aria-label="PnL legend">
+                      <span className="performance-calendar-legend-item performance-calendar-legend-item-realized">R = Realized</span>
+                      <span className="performance-calendar-legend-item performance-calendar-legend-item-unrealized">U = Unrealized</span>
                     </div>
                     <div className="performance-calendar-grid" role="grid">
                       <div className="performance-calendar-row performance-calendar-header">
@@ -676,7 +684,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                       ))}
                     </div>
                       </div>
-                    <div className="performance-calendar-summary">
+                    <div className="performance-calendar-summary performance-calendar-summary-card">
                     <div className="performance-summary-rows performance-summary-inside-calendar">
                       <div className="performance-summary-row performance-summary-row-summary">
                         <span className="performance-summary-type">Summary</span>
