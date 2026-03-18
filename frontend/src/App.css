@@ -2415,14 +2415,14 @@ body::before {
 
 .client-ids-group-row .client-ids-group-header {
   font-weight: 600;
-  color: var(--color-text-muted);
-  background: var(--color-surface-elevated);
+  color: var(--color-text-dim);
+  background: transparent;
   padding-top: var(--space-3);
   padding-bottom: var(--space-1);
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--text-caption);
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+  font-size: 0.625rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.08em;
 }
 .client-ids-group-row:first-child .client-ids-group-header {
   padding-top: var(--space-2);
@@ -2434,7 +2434,7 @@ body::before {
   outline: none;
 }
 .settings-ib-collapsible-group-row:hover .settings-ib-collapsible-group-header {
-  background: var(--color-bg-subtle);
+  background: rgba(255, 255, 255, 0.03);
 }
 .settings-ib-collapsible-group-row:focus-visible .settings-ib-collapsible-group-header {
   box-shadow: 0 0 0 2px var(--color-focus-ring, #0a84ff);
@@ -2459,9 +2459,9 @@ body::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.6em;
-  color: var(--color-text-muted);
-  transition: transform var(--transition-normal), color var(--transition-fast);
+  font-size: 0.55em;
+  color: var(--color-text-dim);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color var(--transition-fast);
   transform: rotate(0deg);
 }
 .settings-ib-collapsible-group-row:hover .settings-ib-collapsible-chevron {
@@ -2471,7 +2471,9 @@ body::before {
   transform: rotate(-90deg);
 }
 .settings-ib-collapsible-group-title {
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
+  font-size: var(--text-caption);
+  text-transform: uppercase;
 }
 
 /* Interactive Brokers Settings table: fixed layout so group rows don't stretch */
@@ -2501,16 +2503,16 @@ body::before {
 .settings-ib-config-subtitle {
   margin: 0 0 var(--space-3) 0;
   font-size: var(--text-caption);
-  color: var(--color-text-muted);
-  font-weight: 500;
-  line-height: 1.45;
+  color: var(--color-text-dim);
+  font-weight: 400;
+  line-height: 1.5;
 }
 .settings-ib-config-sheet-title {
   margin: 0 0 var(--space-2) 0;
-  font-size: var(--text-caption);
-  font-weight: 600;
+  font-size: 0.6875rem;
+  font-weight: 700;
   color: var(--color-text-muted);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .settings-ib-config-sheet-title + .settings-ib-config-table-wrap {
@@ -2522,23 +2524,36 @@ body::before {
 .settings-ib-section + .settings-ib-section {
   margin-top: var(--space-5);
   padding-top: var(--space-5);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
 }
 .settings-ib-preference-section .settings-ib-config-sheet-title {
   margin-bottom: var(--space-2);
 }
 .settings-flex-preference {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: var(--space-4) var(--space-4);
   margin-top: var(--space-3);
-  background: var(--color-surface-elevated);
+  background: rgba(255, 255, 255, 0.02);
+  position: relative;
+  overflow: hidden;
+}
+.settings-flex-preference::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-lamp-yellow) 0%, transparent 100%);
+  opacity: 0.5;
 }
 .settings-flex-preference-title {
   margin: 0 0 var(--space-2) 0;
-  font-size: var(--text-body);
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--color-lamp-yellow, #ca8a04);
 }
 .settings-flex-preference .settings-ib-config-subtitle {
@@ -2585,93 +2600,116 @@ body::before {
 /* Table container: softer border, rounded corners */
 .settings-ib-config-table-wrap {
   max-width: 42rem;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
   overflow: hidden;
   background: var(--color-surface-elevated);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 .settings-ib-config-table {
   table-layout: fixed;
   width: 100%;
+  border-collapse: collapse;
 }
 .settings-ib-config-col-label {
-  width: 26%;
+  width: 24%;
 }
 .settings-ib-config-col-host {
-  width: 37%;
+  width: 38%;
 }
 .settings-ib-config-col-secondary {
-  width: 37%;
+  width: 38%;
 }
 .settings-ib-config-th-label {
-  width: 26%;
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-subtle);
+  width: 24%;
+  padding: 0.6rem var(--space-3);
+  background: rgba(255, 255, 255, 0.02);
   border-bottom: 1px solid var(--color-border);
   font-weight: 600;
-  font-size: var(--text-caption);
-  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 .settings-ib-config-th-host,
 .settings-ib-config-th-secondary {
-  padding: var(--space-2) var(--space-3);
-  font-weight: 600;
-  font-size: var(--text-caption);
+  padding: 0.6rem var(--space-3);
+  font-weight: 700;
+  font-size: 0.6875rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   border-bottom: 1px solid var(--color-border);
 }
 .settings-ib-config-th-host {
-  background: var(--color-accent-soft);
-  color: var(--color-text-main);
+  background: rgba(163, 230, 53, 0.07);
+  color: var(--color-accent);
 }
 .settings-ib-config-th-secondary {
-  background: rgba(125, 211, 252, 0.08);
-  color: var(--color-text-main);
+  background: rgba(125, 211, 252, 0.06);
+  color: var(--color-link);
+}
+[data-theme="light"] .settings-ib-config-th-host {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 [data-theme="light"] .settings-ib-config-th-secondary {
   background: rgba(2, 132, 199, 0.06);
+  color: var(--color-link);
 }
 .settings-ib-config-table .flex-query-cell-input,
 .settings-ib-config-table .flex-query-cell-type {
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
+  padding: 0.45rem var(--space-3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   vertical-align: middle;
 }
 .settings-ib-config-table .flex-query-cell-type {
   font-weight: 500;
+  font-size: var(--text-caption);
   color: var(--color-text-muted);
-  background: var(--color-bg-subtle);
+  background: rgba(255, 255, 255, 0.015);
 }
 .settings-ib-config-table .flex-query-cell-input input,
 .settings-ib-config-table .flex-query-cell-input select {
   max-width: 100%;
   box-sizing: border-box;
   border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.settings-ib-config-table .flex-query-cell-input input:focus,
+.settings-ib-config-table .flex-query-cell-input select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+  outline: none;
 }
 .settings-ib-range-suffix {
   margin-left: 0.35rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-dim);
+  font-size: var(--text-caption);
 }
 .settings-ib-config-table .settings-ib-collapsible-group-header {
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: var(--space-2) var(--space-3);
+  padding: 0.55rem var(--space-3);
   border-bottom: 1px solid var(--color-border);
 }
 .settings-ib-config-table .settings-ib-collapsible-group-row td {
   border-bottom: 1px solid var(--color-border);
 }
 .settings-ib-config-table tbody tr:hover .flex-query-cell-type {
-  background: var(--color-surface-elevated);
+  background: rgba(255, 255, 255, 0.03);
+}
+.settings-ib-config-table tbody tr:not(.settings-ib-collapsible-group-row):not(.client-ids-group-row):hover {
+  background: rgba(255, 255, 255, 0.015);
 }
 .settings-ib-config-table .flex-query-cell-input:first-of-type {
-  background: rgba(163, 230, 53, 0.03);
+  background: rgba(163, 230, 53, 0.02);
 }
 .settings-ib-config-table .flex-query-cell-input:last-of-type {
-  background: rgba(125, 211, 252, 0.04);
+  background: rgba(125, 211, 252, 0.025);
 }
 [data-theme="light"] .settings-ib-config-table .flex-query-cell-input:first-of-type {
   background: rgba(14, 165, 233, 0.04);
@@ -2697,17 +2735,18 @@ body::before {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-caption);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--color-text-muted);
+  letter-spacing: 0.02em;
 }
 .settings-holidays-input {
-  padding: var(--space-2) var(--space-3);
+  padding: 0.4rem var(--space-3);
   border-radius: 6px;
   border: 1px solid var(--color-border);
   background: var(--color-bg);
   color: var(--color-text-main);
   font-size: var(--text-body);
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .settings-holidays-input:focus {
   outline: none;
@@ -2718,19 +2757,27 @@ body::before {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
 }
 .settings-holidays-add-label {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  font-size: var(--text-caption);
-  letter-spacing: 0.02em;
+  gap: 0.3rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .settings-holidays-add-label .settings-holidays-input {
   min-width: 10rem;
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: normal;
 }
 .settings-holidays-input-text {
   width: 14rem;
@@ -2743,13 +2790,15 @@ body::before {
 .settings-holidays-empty {
   margin: 0;
   font-size: var(--text-body);
-  color: var(--color-text-muted);
+  color: var(--color-text-dim);
+  font-style: italic;
 }
 .settings-holidays-table-wrap {
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
   overflow: hidden;
   background: var(--color-surface-elevated);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 .settings-holidays-table {
   width: 100%;
@@ -2757,15 +2806,16 @@ body::before {
   font-size: var(--text-body);
 }
 .settings-holidays-table thead {
-  background: var(--color-bg-subtle);
+  background: rgba(255, 255, 255, 0.02);
 }
 .settings-holidays-table th {
   text-align: left;
-  padding: var(--space-2) var(--space-3);
-  font-weight: 600;
-  font-size: var(--text-caption);
-  color: var(--color-text-muted);
-  letter-spacing: 0.03em;
+  padding: 0.55rem var(--space-3);
+  font-weight: 700;
+  font-size: 0.6875rem;
+  color: var(--color-text-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   border-bottom: 1px solid var(--color-border);
 }
 .settings-holidays-table th:last-child {
@@ -2773,12 +2823,12 @@ body::before {
   text-align: right;
 }
 .settings-holidays-table td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
+  padding: 0.45rem var(--space-3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   vertical-align: middle;
 }
 .settings-holidays-table tbody tr:hover {
-  background: var(--color-bg-subtle);
+  background: rgba(255, 255, 255, 0.02);
 }
 .settings-holidays-table tbody tr:last-child td {
   border-bottom: none;
@@ -2788,6 +2838,8 @@ body::before {
 }
 .settings-holidays-table .settings-holidays-date-cell {
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
   color: var(--color-text-main);
 }
 .settings-holidays-table .settings-holidays-label-cell {
@@ -3882,36 +3934,40 @@ button:disabled {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 0 var(--space-4);
-  gap: var(--space-4);
+  padding: 0;
+  gap: 0;
   min-height: 0;
 }
 
 .settings-sidebar {
   flex-shrink: 0;
-  width: 12.5rem;
-  padding: var(--space-2) 0;
-  padding-right: var(--space-4);
+  width: 13.5rem;
+  padding: var(--space-5) var(--space-3) var(--space-5) var(--space-4);
   border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
   position: sticky;
   top: 0;
   align-self: flex-start;
+  min-height: 100vh;
 }
 
 .settings-sidebar-group-block {
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.settings-sidebar-group-block:first-child {
+  margin-top: 0;
 }
 .settings-sidebar-group-block:last-child {
   margin-bottom: 0;
 }
 
 .settings-sidebar-group-label {
-  font-size: var(--text-caption);
-  font-weight: 600;
-  color: var(--color-text-muted);
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: var(--space-1) var(--space-3);
+  letter-spacing: 0.1em;
+  padding: 0 var(--space-3);
   margin-bottom: var(--space-2);
   display: block;
 }
@@ -3920,17 +3976,22 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: 0.4rem var(--space-3);
   font-size: var(--text-body);
   color: var(--color-text-muted);
   text-decoration: none;
-  border-radius: 6px;
-  margin-bottom: var(--space-1);
-  transition: background var(--transition-fast), color var(--transition-fast);
+  border-radius: 8px;
+  margin-bottom: 2px;
+  border-left: 2px solid transparent;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .settings-sidebar-icon {
   flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+.settings-sidebar-link:hover .settings-sidebar-icon {
   opacity: 0.85;
 }
 .settings-sidebar-link.active .settings-sidebar-icon {
@@ -3939,31 +4000,34 @@ button:disabled {
 
 .settings-sidebar-link:hover {
   color: var(--color-text-main);
-  background: var(--color-surface-elevated);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .settings-sidebar-link.active {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--color-accent);
   background: var(--color-accent-soft);
+  border-left-color: var(--color-accent);
 }
 
 .settings-sidebar-link:focus-visible {
   outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
 .settings-sidebar-group {
-  margin-bottom: var(--space-1);
+  margin-bottom: 2px;
 }
 
 .settings-sidebar-parent {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-radius: 6px;
-  margin-bottom: var(--space-1);
+  padding: 0.4rem var(--space-3);
+  border-radius: 8px;
+  margin-bottom: 2px;
+  border-left: 2px solid transparent;
+  transition: border-color var(--transition-fast);
 }
 
 .settings-sidebar-parent-label {
@@ -3981,8 +4045,12 @@ button:disabled {
   color: var(--color-text-main);
 }
 
+.settings-sidebar-parent.active {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
 .settings-sidebar-parent.active .settings-sidebar-parent-label {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--color-accent);
 }
 
@@ -3996,11 +4064,11 @@ button:disabled {
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text-dim);
   font-size: 0.5rem;
   cursor: pointer;
   border-radius: 4px;
-  transition: color var(--transition-fast), transform var(--transition-normal);
+  transition: color var(--transition-fast), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .settings-sidebar-chevron:hover {
@@ -4012,10 +4080,11 @@ button:disabled {
 }
 
 .settings-sidebar-subs {
-  padding-left: var(--space-3);
-  border-left: 1px solid var(--color-border);
-  margin-left: var(--space-2);
+  padding-left: var(--space-2);
+  border-left: 1px solid rgba(163, 230, 53, 0.15);
+  margin-left: calc(var(--space-3) + 1px);
   margin-bottom: var(--space-1);
+  margin-top: var(--space-1);
 }
 
 .settings-sidebar-subs[hidden] {
@@ -4025,18 +4094,25 @@ button:disabled {
 .settings-sidebar-link-sub {
   padding-left: var(--space-2);
   font-size: var(--text-caption);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
+}
+.settings-sidebar-link-sub .settings-sidebar-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .settings-main {
   flex: 1;
   min-width: 0;
-  padding: var(--space-4) var(--space-6);
-  padding-left: var(--space-8);
+  padding: var(--space-5) var(--space-6);
+  padding-left: var(--space-6);
 }
 
 .settings-page-card {
-  padding: var(--space-4) var(--space-4);
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .settings-page-header {
@@ -4045,14 +4121,25 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .settings-page-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-3);
+}
+
+.settings-page .settings-page-actions .btn-resume {
+  padding: 0.4rem 1.2rem;
+  font-size: var(--text-body);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 8px;
+  transition: all var(--transition-fast);
 }
 
 /* Settings page: buttons match System Status compact style */
@@ -4061,17 +4148,70 @@ button:disabled {
 .settings-page .btn-flatten,
 .settings-page .btn-pause,
 .settings-page .btn-secondary {
-  padding: 0.25rem 0.5rem;
+  padding: 0.3rem 0.65rem;
   font-size: 0.8125rem;
+  border-radius: 6px;
 }
 
 /* Secondary/cancel style for Refresh, Delete etc. in Settings (btn-pause used in HolidaysSection) */
 .settings-page .btn-pause {
   background: var(--color-border-strong);
   color: var(--color-text-main);
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
 }
 .settings-page .btn-pause:hover:not(:disabled) {
   background: #4a5568;
+  border-color: var(--color-border-strong);
+}
+
+/* Heartbeat section: refined layout */
+.settings-heartbeat-row {
+  display: flex;
+  align-items: center;
+}
+.settings-heartbeat-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.settings-heartbeat-label-text {
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+.settings-heartbeat-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.settings-heartbeat-input-wrap:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+.settings-heartbeat-input {
+  width: 3.5rem;
+  border: none;
+  background: transparent;
+  color: var(--color-text-main);
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  text-align: center;
+  outline: none;
+}
+.settings-heartbeat-input::-webkit-inner-spin-button,
+.settings-heartbeat-input::-webkit-outer-spin-button {
+  opacity: 0.5;
+}
+.settings-heartbeat-unit {
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+  font-weight: 500;
 }
 
 /* Host IB User / Second IB User: consistent input widths */
@@ -4121,21 +4261,48 @@ button:disabled {
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: var(--space-6);
+  gap: var(--space-5);
 }
 
 .settings-page-groups .daemon-group {
   flex: none;
   min-width: 0;
-  background: var(--color-surface-elevated);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: var(--space-4);
+  border-radius: 12px;
+  padding: var(--space-5);
+  position: relative;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-normal);
+}
+.settings-page-groups .daemon-group::before {
+  content: '';
+  position: absolute;
+  top: var(--space-4);
+  left: 0;
+  width: 3px;
+  height: calc(100% - var(--space-4) * 2);
+  background: var(--color-accent);
+  border-radius: 0 2px 2px 0;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
+}
+.settings-page-groups .daemon-group:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+.settings-page-groups .daemon-group:hover::before {
+  opacity: 1;
 }
 .settings-page-groups .daemon-group .daemon-group-header {
-  margin-bottom: var(--space-3);
-  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--color-border);
+}
+.settings-page-groups .daemon-group .daemon-group-title {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-text-main);
 }
 .settings-page-groups .daemon-group .daemon-group-body {
   padding: 0;
@@ -4149,7 +4316,7 @@ button:disabled {
 .settings-ib-connection-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 .settings-ib-connection-group .daemon-group[id] {
   scroll-margin-top: 1rem;
@@ -4163,11 +4330,44 @@ button:disabled {
 }
 
 /* Settings page: ? icon tooltip (hover to show) */
+.settings-page-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
 .settings-page-title,
 .page-title-with-tooltip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-headline);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.settings-page-subtitle {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+  font-weight: 400;
+}
+.settings-page-msg {
+  font-size: var(--text-caption);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+.settings-page-msg.msg-ok {
+  background: var(--color-success-soft);
+}
+.settings-page-msg.msg-error {
+  background: var(--color-danger-soft);
+}
+.settings-save-btn {
+  padding: 0.45rem 1.4rem !important;
+  font-size: var(--text-body) !important;
+  font-weight: 600;
+  border-radius: 8px !important;
+  letter-spacing: 0.02em;
 }
 
 /* Status lamp inline in title (same row as "?" help icon) */

@@ -337,19 +337,22 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
             highlightSection={systemHighlightSection}
           />
         ) : (
-        <div className="settings-page-card card">
+        <div className="settings-page-card">
           <div className="settings-page-header">
-            <h2 className="settings-page-title">
-              Settings
-              <InfoTooltip text="Configure daemon-related parameters; written to DB and read by daemon on start or next heartbeat." />
-            </h2>
+            <div className="settings-page-title-group">
+              <h2 className="settings-page-title">
+                Settings
+                <InfoTooltip text="Configure daemon-related parameters; written to DB and read by daemon on start or next heartbeat." />
+              </h2>
+              <p className="settings-page-subtitle">Configure daemon, IB connection and market calendar</p>
+            </div>
             <div className="settings-page-actions">
               {msg.text && (
-                <span className={msg.isErr ? 'msg-error' : 'msg-ok'}>
+                <span className={`settings-page-msg ${msg.isErr ? 'msg-error' : 'msg-ok'}`}>
                   {msg.text}
                 </span>
               )}
-              <button type="button" className="btn-resume" onClick={onSave}>
+              <button type="button" className="btn-resume settings-save-btn" onClick={onSave}>
                 Save settings
               </button>
             </div>
