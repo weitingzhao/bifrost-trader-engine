@@ -11,6 +11,7 @@ import {
   payoffOptionsAtPrice,
   stripNakedShortCalls,
 } from '../utils/riskProfile'
+import { RiskProfilePayoffChart } from './RiskProfilePayoffChart'
 
 function RiskFieldHelp({
   helpKey,
@@ -863,6 +864,10 @@ export function RiskProfileDl({
   const hasSecondaryDl =
     profile.naked_short_call_contracts > 0 && profile.hedged_max_loss != null
 
+  const hasPayoffChart = Boolean(
+    ctx && (ctx.positions.length > 0 || ctx.covered_shares > 0),
+  )
+
   return (
     <>
       <div className="risk-profile-top-line" onClick={e => e.stopPropagation()}>
@@ -918,7 +923,49 @@ export function RiskProfileDl({
         </div>
       </div>
 
-      {showScenarioSummary && (
+      {showScenarioSummary && hasPayoffChart ? (
+        <>
+          <div className="risk-profile-scenario-payoff-row" onClick={e => e.stopPropagation()}>
+            <div className="risk-profile-scenario-col">
+              <div className="risk-profile-scenario-summary risk-profile-scenario-summary--embedded">
+                <div className="risk-profile-scenario-summary-head">
+                  <span className="risk-profile-scenario-summary-label">
+                    Scenario P&amp;L (expiration, sampled)
+                  </span>
+                  <span className="risk-profile-scenario-summary-hint">
+                    · Click <strong>Option</strong> or <strong>Stk</strong> for breakdown.
+                  </span>
+                </div>
+                {profile.max_gain == null && profile.max_gain_sample_scenario ? (
+                  <p className="risk-profile-scenario-note">
+                    Max gain row = <strong>best total among sampled S</strong>; headline may still read{' '}
+                    <strong>Unlimited</strong> past last sample — use <strong>?</strong> next to Max gain.
+                  </p>
+                ) : null}
+                <ScenarioPnLMatrix
+                  profile={profile}
+                  explainSelection={matrixExplain}
+                  onExplain={setMatrixExplain}
+                  scenarioMaxGainHelp={scenarioMaxGainHelp}
+                  scenarioMaxLossHelp={scenarioMaxLossHelp}
+                  openRiskHelpKey={openRiskHelpKey}
+                  onSetRiskHelpOpen={setOpenRiskHelpKey}
+                />
+              </div>
+            </div>
+            <div className="risk-profile-payoff-col">
+              <RiskProfilePayoffChart profile={profile} ctx={ctx!} variant="compact" />
+            </div>
+          </div>
+          {matrixExplain ? (
+            <ScenarioMatrixExplainPanel
+              selection={matrixExplain}
+              profile={profile}
+              onDismiss={() => setMatrixExplain(null)}
+            />
+          ) : null}
+        </>
+      ) : showScenarioSummary ? (
         <div className="risk-profile-scenario-summary" onClick={e => e.stopPropagation()}>
           <div className="risk-profile-scenario-summary-head">
             <span className="risk-profile-scenario-summary-label">Scenario P&amp;L (expiration, sampled)</span>
@@ -949,7 +996,11 @@ export function RiskProfileDl({
             />
           ) : null}
         </div>
-      )}
+      ) : null}
+
+      {hasPayoffChart && !showScenarioSummary ? (
+        <RiskProfilePayoffChart profile={profile} ctx={ctx!} variant="standalone" />
+      ) : null}
 
       {hasSecondaryDl ? (
         <dl className="risk-profile-dl risk-profile-dl-with-help">

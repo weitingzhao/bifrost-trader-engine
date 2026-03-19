@@ -48,6 +48,19 @@
   --color-success: #22c55e;
   --color-success-soft: rgba(34, 197, 94, 0.15);
 
+  /* Payoff chart (dark: high-contrast on dark plot) */
+  --risk-payoff-plot-bg: #0d1118;
+  --risk-payoff-plot-border: rgba(74, 222, 128, 0.22);
+  --risk-payoff-profit-fill: rgba(74, 222, 128, 0.38);
+  --risk-payoff-loss-fill: rgba(248, 113, 113, 0.38);
+  --risk-payoff-line: #f8fafc;
+  --risk-payoff-axis: #cbd5e1;
+  --risk-payoff-tick: #94a3b8;
+  --risk-payoff-grid: rgba(148, 163, 184, 0.18);
+  --risk-payoff-zero: #e2e8f0;
+  --risk-payoff-breakeven: rgba(250, 204, 21, 0.9);
+  --risk-payoff-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2), 0 4px 20px rgba(0, 0, 0, 0.5);
+
   /* 仪表盘 / 卡片 tile 背景（与 surface-elevated 区分） */
   --color-dashboard-tile: rgba(255, 255, 255, 0.05);
   --color-dashboard-shadow: rgba(0, 0, 0, 0.25);
@@ -102,6 +115,18 @@
   --color-dashboard-shadow: rgba(0, 0, 0, 0.08);
   --color-success: #16a34a;
   --color-success-soft: rgba(22, 163, 74, 0.12);
+
+  --risk-payoff-plot-bg: #f9fafb;
+  --risk-payoff-plot-border: rgba(0, 0, 0, 0.08);
+  --risk-payoff-profit-fill: rgba(34, 197, 94, 0.28);
+  --risk-payoff-loss-fill: rgba(239, 68, 68, 0.28);
+  --risk-payoff-line: #111827;
+  --risk-payoff-axis: #374151;
+  --risk-payoff-tick: #4b5563;
+  --risk-payoff-grid: rgba(55, 65, 81, 0.2);
+  --risk-payoff-zero: #1f2937;
+  --risk-payoff-breakeven: rgba(202, 138, 4, 0.85);
+  --risk-payoff-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 * {
@@ -9307,10 +9332,42 @@ th:has(> .coverage-pool-th-held-amt) {
   color: #fbbf24;
 }
 
+.risk-profile-scenario-payoff-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.85rem 1.15rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+}
+.risk-profile-scenario-col {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.risk-profile-payoff-col {
+  flex: 0 1 17.5rem;
+  width: min(100%, 17.5rem);
+  max-width: 20rem;
+  align-self: stretch;
+}
+@media (max-width: 640px) {
+  .risk-profile-payoff-col {
+    flex: 1 1 100%;
+    max-width: none;
+    width: 100%;
+  }
+}
+
 .risk-profile-scenario-summary {
   margin-bottom: 0.85rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+}
+.risk-profile-scenario-summary--embedded {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 .risk-profile-scenario-summary-head {
   display: flex;
@@ -9336,6 +9393,73 @@ th:has(> .coverage-pool-th-held-amt) {
   color: var(--color-text-muted, #8b95a5);
   line-height: 1.35;
 }
+
+.risk-payoff-chart {
+  margin: 0;
+  padding: 0;
+}
+.risk-payoff-chart--standalone {
+  margin: 0.65rem 0 0.85rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
+}
+.risk-payoff-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.45rem;
+  margin-bottom: 0.3rem;
+}
+.risk-payoff-chart--compact .risk-payoff-chart-head {
+  margin-bottom: 0.2rem;
+}
+.risk-payoff-chart-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted, #7a8492);
+}
+.risk-payoff-chart-data {
+  font-size: 0.65rem;
+  color: var(--color-text-dim, #8b95a5);
+  font-variant-numeric: tabular-nums;
+}
+.risk-payoff-chart-sub {
+  font-size: 0.65rem;
+  color: var(--color-text-muted, #8b95a5);
+  font-variant-numeric: tabular-nums;
+}
+.risk-payoff-chart-svg {
+  display: block;
+  max-width: 100%;
+  border-radius: 8px;
+  box-shadow: var(--risk-payoff-shadow);
+  border: 1px solid var(--risk-payoff-plot-border);
+}
+.risk-payoff-chart-axis-label {
+  font-size: 8.5px;
+  font-weight: 600;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  fill: var(--risk-payoff-axis);
+}
+.risk-payoff-chart-tick {
+  font-size: 8px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  fill: var(--risk-payoff-tick);
+}
+.risk-payoff-chart-caption {
+  margin: 0.35rem 0 0;
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: var(--color-text-muted, #8b95a5);
+}
+.risk-payoff-chart--compact .risk-payoff-chart-caption {
+  margin-top: 0.25rem;
+  font-size: 0.62rem;
+}
+
 .risk-scenario-matrix {
   width: 100%;
   border-collapse: collapse;
