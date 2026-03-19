@@ -6824,6 +6824,51 @@ th {
 }
 
 /* ---------- Performance 页 ---------- */
+.performance-page .performance-on-the-fly-section {
+  margin-top: var(--space-4);
+}
+
+.performance-page .performance-on-the-fly-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.performance-page .performance-on-the-fly-title {
+  margin: 0;
+  font-size: var(--text-heading-sm, 1.1rem);
+}
+
+.performance-page .performance-on-the-fly-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: var(--text-body);
+}
+
+.performance-page .performance-on-the-fly-summary-kv strong {
+  font-weight: 600;
+}
+
+.performance-page .performance-on-the-fly-hint {
+  margin-top: var(--space-1);
+}
+
+.performance-page .performance-inline-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--color-bg-muted, rgba(127, 127, 127, 0.12));
+}
+
+.performance-page .performance-on-the-fly-table-wrap {
+  margin-top: var(--space-2);
+}
+
 .performance-page .performance-filters {
   display: flex;
   flex-wrap: wrap;
@@ -8719,6 +8764,144 @@ th {
   color: var(--color-text-muted, #888);
 }
 
+/* Trade ledger — collapsed instance groups (theme-aware) */
+.replay-instance-group {
+  margin-bottom: 1rem;
+  border: 1px solid var(--color-border, var(--border-subtle, #2a313c));
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-surface, var(--bg-card, #1a1a1a));
+}
+.replay-instance-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface-elevated, var(--bg-surface-subtle, #161616));
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--color-text-main, var(--text-primary, #e4e9ef));
+}
+.replay-instance-group-header:hover {
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
+}
+.replay-instance-chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--color-text-muted, #888);
+  flex-shrink: 0;
+}
+.replay-instance-chevron--open {
+  transform: rotate(90deg);
+}
+.replay-instance-group-title {
+  font-weight: 600;
+}
+.replay-instance-group-opp {
+  color: var(--color-text-muted, #8b949e);
+  font-size: 0.82rem;
+}
+.replay-instance-group-stats {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #8b949e);
+}
+.replay-instance-group-body {
+  padding: 0.5rem 0.75rem 0.75rem;
+  border-top: 1px solid var(--color-border, var(--border-subtle, #2a313c));
+  background: var(--color-surface, var(--bg-card, #1a1a1a));
+}
+.replay-instance-group-block {
+  margin-bottom: 0.75rem;
+}
+.replay-instance-group-block:last-child {
+  margin-bottom: 0;
+}
+.replay-instance-subheading {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #8b949e);
+}
+.replay-instance-no-inst-sheet {
+  border: 1px solid var(--color-border, var(--border-subtle, #2a313c));
+  border-radius: 8px;
+  padding: 0.75rem 1rem 1rem;
+  background: var(--color-surface, var(--bg-card, #1a1a1a));
+}
+.replay-instance-no-inst-sheet-intro {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+/* Trade ledger — Instance tab: Contain open bubble filter */
+.replay-instance-contain-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.65rem;
+  padding: 0.4rem 0;
+}
+.replay-instance-contain-filter--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.replay-instance-contain-filter-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #8b949e);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.replay-instance-contain-filter-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #8b949e);
+  margin-left: 0.25rem;
+}
+.replay-bubble-switch {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--color-surface-elevated, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--color-border, var(--border-subtle, #2a313c));
+  gap: 2px;
+}
+.replay-bubble-switch-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted, #8b949e);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.28rem 0.85rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.replay-bubble-switch-btn:hover:not(:disabled):not(.active) {
+  color: var(--color-text-main, #e4e9ef);
+  background: rgba(255, 255, 255, 0.05);
+}
+.replay-bubble-switch-btn.active {
+  background: var(--color-surface, #1e242c);
+  color: var(--color-text-main, #e4e9ef);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.replay-bubble-switch-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 /* ── Instance Sheet (Positions > Instance tab) ── */
 .instance-sheet-filters {
   display: flex;
@@ -8789,6 +8972,18 @@ th {
   background: rgba(125,211,252,0.1);
   color: var(--color-link, #7dd3fc);
 }
+/* Attribution badges */
+.attr-badge {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.75em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.attr-single { background: rgba(34,197,94,0.13); color: #22c55e; }
+.attr-mixed  { background: rgba(251,191,36,0.16); color: #fbbf24; }
+.attr-unassigned { background: rgba(148,163,184,0.1); color: #64748b; }
 .instance-sheet-detail-row {
   background: var(--color-surface, #13171d);
 }
@@ -10809,6 +11004,58 @@ th:has(> .coverage-pool-th-held-amt) {
   gap: var(--space-2);
 }
 
+/* Stg/Ins cell styling in Trade History Details tables */
+.replay-stg-ins {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 240px;
+  white-space: nowrap;
+}
+.replay-stg-ins-strategy {
+  color: var(--color-text-main);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replay-stg-ins-sep {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+.replay-stg-ins-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-accent, #2563eb) 45%, transparent);
+  background: color-mix(in srgb, var(--color-accent, #2563eb) 12%, transparent);
+  color: var(--color-accent, #2563eb);
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.replay-stg-ins-link:hover {
+  color: var(--color-accent-hover, #1d4ed8);
+  border-color: color-mix(in srgb, var(--color-accent-hover, #1d4ed8) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent-hover, #1d4ed8) 16%, transparent);
+}
+.replay-stg-ins-link:focus-visible {
+  outline: 2px solid var(--color-accent, #2563eb);
+  outline-offset: 2px;
+}
+.replay-stg-ins-empty {
+  color: var(--color-text-muted);
+}
+
+.replay-contract-exec-id {
+  margin-left: 0.45rem;
+  font-size: 0.72em;
+  color: var(--color-text-muted);
+  opacity: 0.75;
+  font-weight: 500;
+}
+
 /* Instance icon link in Trade History Detail (Contract cell) */
 .ledger-instance-icon-link {
   display: inline-flex;
@@ -12211,6 +12458,56 @@ th:has(> .coverage-pool-th-held-amt) {
 .otc-dims-add-row .otc-select {
   flex: 1;
   min-width: 0;
+}
+
+/* Manual journal / Flex reconciliation warnings (Trade History, Positions edit, expired close) */
+.execution-flex-manual-warning {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.1);
+  color: #fecaca;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.execution-flex-manual-warning strong {
+  color: #fca5a5;
+}
+.execution-flex-manual-warning code.performance-inline-code {
+  color: #fde68a;
+}
+
+/* ── Execution Source Badges ── */
+
+.exec-source-badge {
+  display: inline-block;
+  padding: 0.08rem 0.4rem;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.exec-source-badge--flex {
+  background: rgba(74, 222, 128, 0.13);
+  color: #4ade80;
+}
+.exec-source-badge--tws {
+  background: rgba(96, 165, 250, 0.13);
+  color: #60a5fa;
+}
+.exec-source-badge--journal {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+}
+.exec-source-badge--manual {
+  background: rgba(192, 132, 252, 0.13);
+  color: #c084fc;
+}
+.exec-source-badge--unknown {
+  background: rgba(148, 163, 184, 0.1);
+  color: #94a3b8;
 }
 
 /* ── Responsive ── */

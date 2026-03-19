@@ -9,6 +9,8 @@ from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
+_EXEC_READ_TABLE = "account_executions_final"
+
 
 def list_instances(
     conn: Any,
@@ -43,7 +45,7 @@ def list_instances(
                        si.opened_at, si.label, si.notes, si.created_at, si.updated_at,
                        so.name AS strategy_opportunity_name,
                        ss.strategy_structure_id, ss.name AS strategy_structure_name,
-                       (SELECT COUNT(*) FROM account_executions e WHERE e.strategy_instance_id = si.strategy_instance_id) AS executions_count
+                       (SELECT COUNT(*) FROM {_EXEC_READ_TABLE} e WHERE e.strategy_instance_id = si.strategy_instance_id) AS executions_count
                 FROM strategy_instance si
                 LEFT JOIN strategy_opportunity so ON si.strategy_opportunity_id = so.strategy_opportunity_id
                 LEFT JOIN strategy_structure ss ON so.strategy_structure_id = ss.strategy_structure_id
@@ -246,14 +248,14 @@ def get_instance_open_option_legs(conn: Any, strategy_instance_id: int) -> List[
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """
+                f"""
                 SELECT ap.account_id, ap.contract_key, ap.symbol, ap.sec_type,
                        ap.position, ap.avg_cost, ap.expiry, ap.strike, ap.option_right,
                        ip.mid AS price_mid, ip.last AS price_last, ip.updated_at AS price_updated_at
                 FROM account_positions ap
                 INNER JOIN (
                     SELECT DISTINCT account_id, contract_key
-                    FROM account_executions
+                    FROM {_EXEC_READ_TABLE}
                     WHERE strategy_instance_id = %s
                       AND upper(trim(COALESCE(sec_type, ''))) = 'OPT'
                 ) tagged ON ap.account_id = tagged.account_id AND ap.contract_key = tagged.contract_key

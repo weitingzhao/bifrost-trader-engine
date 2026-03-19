@@ -61,7 +61,7 @@ export function StrategyInstanceDetailPage({
 
   const loadExecutions = useCallback(() => {
     setExecutionsLoading(true)
-    fetchExecutions(undefined, undefined, 500, false, undefined, strategyInstanceId)
+    fetchExecutions(undefined, undefined, 500, false, undefined, strategyInstanceId, 'performance_book')
       .then((res) => setExecutions(res.executions ?? []))
       .catch(() => setExecutions([]))
       .finally(() => setExecutionsLoading(false))
@@ -433,10 +433,22 @@ export function StrategyInstanceDetailPage({
                   <tbody>
                     {executions.map((e) => (
                       <tr key={e.account_executions_id ?? e.exec_id ?? Math.random()}>
-                        <td
-                          title={e.account_executions_id != null ? `account_executions_id: ${e.account_executions_id}` : undefined}
-                        >
+                        <td>
                           {e.symbol ?? '—'}
+                          {e.account_executions_id != null ? (
+                            <span
+                              title={`account_executions_id: ${e.account_executions_id}`}
+                              style={{
+                                color: 'var(--color-text-muted)',
+                                fontSize: '0.8125rem',
+                                fontWeight: 400,
+                                marginLeft: '0.25em',
+                              }}
+                            >
+                              {' '}
+                              #{e.account_executions_id}
+                            </span>
+                          ) : null}
                         </td>
                         <td>
                           {e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}

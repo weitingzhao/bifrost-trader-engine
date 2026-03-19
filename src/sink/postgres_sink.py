@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -267,8 +268,13 @@ class PostgreSQLSink(StatusSink):
             self._conn.rollback()
             logger.warning("write_contract_quote_live failed: %s", e, exc_info=True)
 
+    # DECOMMISSION: set EXECUTIONS_WRITE_LEGACY=false to stop writing to account_executions.
+    # Only do this after raw tables are backfilled, canonical view verified, and reads switched.
+    _write_legacy = os.environ.get("EXECUTIONS_WRITE_LEGACY", "false").strip().lower() != "false"
+
     def write_account_executions(self, rows: Any) -> None:
-        """R-A2: 写入账户执行/成交记录到 account_executions；CommissionReport 写入 account_execution_commissions。"""
+        """R-A2: 写入账户执行/成交记录到 account_executions；CommissionReport 写入 account_execution_commissions。
+        Dual-write: also inserts into executions_raw_tws for source-split migration."""
         if not rows:
             return
         if not self._ensure_conn():
@@ -335,11 +341,6 @@ class PostgreSQLSink(StatusSink):
                     if raw_extra is not None and not isinstance(raw_extra, str):
                         raw_extra = json.dumps(raw_extra) if raw_extra else None
 
-                    # 对于期权，从 TWS 侧写入前先补齐/重建 contract_key。
-                    # Flex Trades 侧仍使用 symbol|OPT|expiry|strike|right；TWS 侧（tws_event/tws_client）
-                    # 则改为以 IB localSymbol 样式为前缀：
-                    #   local_symbol = symbol + "  " + yymmdd + right + strike8
-                    #   contract_key = local_symbol|sec_type|expiry|strike|option_right
                     sec_type_norm = (sec_type or "").strip().upper()
                     if sec_type_norm == "OPT":
                         sym_key = (symbol or "").strip()
@@ -357,7 +358,6 @@ class PostgreSQLSink(StatusSink):
                         if len(right_key) > 1:
                             right_key = "C" if right_key.startswith("C") else "P" if right_key.startswith("P") else right_key[:1]
 
-                        # 若来源是 TWS（tws_event / tws_client），则按 localSymbol 规则重建 contract_key
                         source_norm = (source or "").strip()
                         if (
                             source_norm in ("tws_event", "tws_client")
@@ -366,7 +366,6 @@ class PostgreSQLSink(StatusSink):
                             and strike_key is not None
                             and right_key
                         ):
-                            # expiry 期望为 YYYYMMDD；取 yymmdd
                             exp_digits = "".join(ch for ch in exp_key if ch.isdigit())
                             yymmdd = exp_digits[2:8] if len(exp_digits) >= 8 else exp_digits[-6:]
                             try:
@@ -385,7 +384,6 @@ class PostgreSQLSink(StatusSink):
                                         right_key,
                                     ]
                                 )
-                        # 非 TWS 来源或上面没能成功重建时，回退到 symbol|OPT|expiry|strike|right 规范
                         if not contract_key and sym_key:
                             contract_key = "|".join(
                                 [
@@ -396,26 +394,70 @@ class PostgreSQLSink(StatusSink):
                                     right_key,
                                 ]
                             )
-                    # 若当前账户下已存在同一 contract_key 且 source=flex_trades，则认为 Flex 已覆盖，
-                    # 不再写入 TWS 侧记录（无论是 tws_client 还是 tws_event），避免重复。
-                    if (
-                        account_id
-                        and contract_key
-                        and (source or "").strip() != "flex_trades"
-                    ):
-                        cur.execute(
-                            """
-                            SELECT 1
-                            FROM account_executions
-                            WHERE account_id = %s
-                              AND contract_key = %s
-                              AND source = 'flex_trades'
-                            LIMIT 1
-                            """,
-                            (account_id, contract_key),
-                        )
-                        if cur.fetchone():
-                            continue
+                    # DECOMMISSION-CANDIDATE: cross-source override check (skip TWS if flex exists)
+                    # Remove this block after canonical view is live and EXECUTIONS_WRITE_LEGACY=false.
+                    if self._write_legacy:
+                        if (
+                            account_id
+                            and contract_key
+                            and (source or "").strip() != "flex_trades"
+                        ):
+                            cur.execute(
+                                """
+                                SELECT 1
+                                FROM account_executions
+                                WHERE account_id = %s
+                                  AND contract_key = %s
+                                  AND source = 'flex_trades'
+                                LIMIT 1
+                                """,
+                                (account_id, contract_key),
+                            )
+                            if cur.fetchone():
+                                # Still write to raw_tws even when skipping legacy
+                                try:
+                                    if exec_time is not None:
+                                        try:
+                                            from datetime import datetime as _dt, timezone as _tz
+                                            _exec_dt = _dt.fromtimestamp(float(exec_time), tz=_tz.utc) if isinstance(exec_time, (int, float)) else exec_time
+                                        except Exception:
+                                            _exec_dt = None
+                                    else:
+                                        _exec_dt = None
+                                    _skip_cols = (
+                                        "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, "
+                                        "expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, "
+                                        "asset_category, sub_category, description, conid, security_id, security_id_type, "
+                                        "cusip, isin, figi, listing_exchange, underlying_conid, underlying_symbol, "
+                                        "underlying_security_id, underlying_listing_exchange, issuer, issuer_country_code, "
+                                        "trade_id, related_trade_id, report_date, trade_date, settle_date_target, "
+                                        "transaction_type, multiplier, principal_adjust_factor, proceeds, taxes, net_cash, "
+                                        "close_price, open_close_indicator, notes, cost, fifo_pnl_realized, mtm_pnl, "
+                                        "trade_money, fx_rate_to_base, acct_alias, model, raw_extra"
+                                    )
+                                    _skip_ph = ", ".join(["%s"] * 54)
+                                    _skip_vals = (
+                                        account_id, exec_id, _exec_dt, symbol, sec_type, side, quantity, price, source,
+                                        expiry, strike, option_right, exchange, order_id, cum_qty, contract_key,
+                                        asset_category, sub_category, description, conid, security_id, security_id_type,
+                                        cusip, isin, figi, listing_exchange, underlying_conid, underlying_symbol,
+                                        underlying_security_id, underlying_listing_exchange, issuer, issuer_country_code,
+                                        trade_id, related_trade_id, report_date, trade_date, settle_date_target,
+                                        transaction_type, multiplier, principal_adjust_factor, proceeds, taxes, net_cash,
+                                        close_price, open_close_indicator, notes, cost, fifo_pnl_realized, mtm_pnl,
+                                        trade_money, fx_rate_to_base, acct_alias, model, raw_extra,
+                                    )
+                                    if exec_id:
+                                        cur.execute(
+                                            f"INSERT INTO executions_raw_tws ({_skip_cols}) VALUES ({_skip_ph}) "
+                                            "ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING",
+                                            _skip_vals,
+                                        )
+                                    else:
+                                        cur.execute(f"INSERT INTO executions_raw_tws ({_skip_cols}) VALUES ({_skip_ph})", _skip_vals)
+                                except Exception:
+                                    pass
+                                continue
                     if exec_time is not None:
                         try:
                             from datetime import datetime, timezone
@@ -427,7 +469,6 @@ class PostgreSQLSink(StatusSink):
                             exec_dt = None
                     else:
                         exec_dt = None
-                    # When source is not flex_trades, trade_date is not provided by the source; set it from exec_time.
                     if (source or "").strip() != "flex_trades" and trade_date is None and exec_dt is not None:
                         try:
                             trade_date = exec_dt.date() if hasattr(exec_dt, "date") else None
@@ -501,23 +542,48 @@ class PostgreSQLSink(StatusSink):
                         model,
                         raw_extra,
                     )
-                    if exec_id:
-                        cur.execute(
-                            f"""
-                            INSERT INTO account_executions ({cols})
-                            VALUES ({placeholders})
-                            ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
-                            """,
-                            vals,
-                        )
-                    else:
-                        cur.execute(
-                            f"""
-                            INSERT INTO account_executions ({cols})
-                            VALUES ({placeholders})
-                            """,
-                            vals,
-                        )
+                    # Legacy write to account_executions (kept for backward compat; disable via EXECUTIONS_WRITE_LEGACY=false)
+                    if self._write_legacy:
+                        if exec_id:
+                            cur.execute(
+                                f"""
+                                INSERT INTO account_executions ({cols})
+                                VALUES ({placeholders})
+                                ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                                """,
+                                vals,
+                            )
+                        else:
+                            cur.execute(
+                                f"""
+                                INSERT INTO account_executions ({cols})
+                                VALUES ({placeholders})
+                                """,
+                                vals,
+                            )
+
+                    # Dual-write: executions_raw_tws (no cross-source override logic)
+                    try:
+                        if exec_id:
+                            cur.execute(
+                                f"""
+                                INSERT INTO executions_raw_tws ({cols})
+                                VALUES ({placeholders})
+                                ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                                """,
+                                vals,
+                            )
+                        else:
+                            cur.execute(
+                                f"""
+                                INSERT INTO executions_raw_tws ({cols})
+                                VALUES ({placeholders})
+                                """,
+                                vals,
+                            )
+                    except Exception:
+                        pass  # raw table may not exist yet on older DBs
+
                     commission = r.get("commission")
                     realized_pnl = r.get("realized_pnl")
                     currency = r.get("currency")
@@ -547,7 +613,6 @@ class PostgreSQLSink(StatusSink):
                         or _has_meaningful_commission(yield_)
                         or _has_meaningful_commission(yield_redemption_date)
                     )
-                    # 仅当有至少一个「有意义」的 commission 字段时才写，避免 7 天拉取用空数据覆盖 1 天拉到的有效值
                     if exec_id and has_comm:
                         cur.execute(
                             """

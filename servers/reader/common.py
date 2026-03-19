@@ -555,6 +555,7 @@ class StatusReader:
         limit: Optional[int] = 200,
         strategy_opportunity_id: Optional[int] = None,
         strategy_instance_id: Optional[int] = None,
+        source_scope: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
@@ -566,6 +567,7 @@ class StatusReader:
             limit=limit,
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
+            source_scope=source_scope,
         )
         self._end_read_txn()
         return result
@@ -622,6 +624,7 @@ class StatusReader:
         limit: int = 200,
         strategy_opportunity_id: Optional[int] = None,
         strategy_instance_id: Optional[int] = None,
+        source_scope: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not self._connect():
             return {"executions": [], "opt_pairs": []}
@@ -633,6 +636,7 @@ class StatusReader:
             limit=limit,
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
+            source_scope=source_scope,
         )
         self._end_read_txn()
         return result
@@ -643,10 +647,18 @@ class StatusReader:
         until_ts: Optional[float] = None,
         account_id: Optional[str] = None,
         limit: int = 5000,
+        source_scope: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         if not self._connect():
             return []
-        result = executions_module.get_executions_with_opt_pairs_single_query(self._conn, since_ts=since_ts, until_ts=until_ts, account_id=account_id, limit=limit)
+        result = executions_module.get_executions_with_opt_pairs_single_query(
+            self._conn,
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=account_id,
+            limit=limit,
+            source_scope=source_scope,
+        )
         self._end_read_txn()
         return result
 
@@ -683,6 +695,7 @@ class StatusReader:
         granularity: str = "day",
         strategy_opportunity_id: Optional[int] = None,
         strategy_instance_id: Optional[int] = None,
+        source_scope: str = "performance_book",
     ) -> Dict[str, Any]:
         if not self._connect():
             return {}
@@ -694,6 +707,7 @@ class StatusReader:
             granularity=granularity,
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
+            source_scope=source_scope,
         )
         self._end_read_txn()
         return result
@@ -722,6 +736,20 @@ class StatusReader:
             )
         finally:
             self._end_read_txn()
+
+    # --- Position×Instance attribution (delegate to executions module) ---
+    def get_position_instance_attribution(
+        self,
+        account_id: Optional[str] = None,
+        sec_type_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if not self._connect():
+            return []
+        result = executions_module.get_position_instance_attribution(
+            self._conn, account_id=account_id, sec_type_filter=sec_type_filter,
+        )
+        self._end_read_txn()
+        return result
 
     # --- Position categories (delegate to position_categories module) ---
     def get_position_categories(self) -> List[Dict[str, Any]]:

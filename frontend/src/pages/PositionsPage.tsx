@@ -1,8 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Execution, IbAccountSnapshot, RealtimeQuote, StatusResponse } from '../types'
+import type { Execution, IbAccountSnapshot, PositionInstanceAttribution, RealtimeQuote, StatusResponse } from '../types'
 import { deleteExecution, fetchQuotes, subscribeQuotes } from '../api'
+import { fetchPositionAttribution } from '../api/executions'
 import { fetchOpportunities, fetchStructures } from '../api/strategies'
 import type { StrategyOpportunity, StrategyStructure } from '../api/strategies'
+import ExecSourceBadge from '../components/ExecSourceBadge'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { computeRiskProfile, formatRiskHedgedBreakdown, formatRiskLabel } from '../utils/riskProfile'
 import type { RiskPosition } from '../utils/riskProfile'
@@ -316,8 +318,11 @@ export function PositionsPage({
   showViewTabs: _showViewTabs = true,
 }: PositionsPageProps) {
   const { executions, loadReplayData, executionAccountOptions } = useExecutions(status)
-  const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
+  const [editExecConfirmState, setEditExecConfirmState] = useState<{
+    open: boolean
+    exec: Execution | null
+  }>({ open: false, exec: null })
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [linkContext, setLinkContext] = useState<LinkExecutionContext | null>(null)
   const [deleteConfirmState, setDeleteConfirmState] = useState<{
@@ -348,6 +353,14 @@ export function PositionsPage({
 
   useEffect(() => { loadStrategyMeta() }, [loadStrategyMeta])
 
+  const [attributions, setAttributions] = useState<PositionInstanceAttribution[]>([])
+  const loadAttributions = useCallback(async () => {
+    try {
+      const res = await fetchPositionAttribution()
+      setAttributions(res.attributions ?? [])
+    } catch { /* non-critical: falls back to empty → unassigned */ }
+  }, [])
+
   const oppMap = useMemo(() => {
     const m = new Map<number, StrategyOpportunity>()
     for (const o of opportunities) m.set(o.strategy_opportunity_id, o)
@@ -367,6 +380,7 @@ export function PositionsPage({
   const [instanceFilterStructureType, setInstanceFilterStructureType] = useState<string>('all')
   const [instanceFilterScopeType, setInstanceFilterScopeType] = useState<string>('all')
   const [instanceFilterOppName, setInstanceFilterOppName] = useState<string>('all')
+  const [instanceFilterAttributionType, setInstanceFilterAttributionType] = useState<string>('all')
   const getPositionKey = (p: OpenOptionPosition, instId: number | null) =>
     `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}`
   const [expandedPositionKeys, setExpandedPositionKeys] = useState<string[]>([])
@@ -483,14 +497,75 @@ export function PositionsPage({
     return map
   }, [executions])
 
+  /** Index live positions by (account_id, contract_key) for fast lookup when merging attribution data. */
+  const livePositionMap = useMemo(() => {
+    const m = new Map<string, LivePositionRow>()
+    for (const pos of liveOptionPositions) {
+      const key = `${(pos.account_id ?? '').trim()}\x00${(pos.contract_key ?? '').trim()}`
+      m.set(key, pos)
+    }
+    return m
+  }, [liveOptionPositions])
+
   const instanceGroups = useMemo((): InstancePositionGroup[] => {
-    const allPositions: OpenOptionPosition[] = []
+    const byInstance = new Map<string, { id: number | null; label: string | null; oppName: string | null; openedAt: number | null; positions: OpenOptionPosition[] }>()
+
+    const addToInstance = (instId: number | null, instLabel: string | null, oppName: string | null, openedAt: number | null, pos: OpenOptionPosition) => {
+      const key = instId != null ? String(instId) : '__unassigned__'
+      if (!byInstance.has(key)) byInstance.set(key, { id: instId, label: instLabel, oppName, openedAt, positions: [] })
+      byInstance.get(key)!.positions.push(pos)
+    }
+
+    const positionsHandledByAttribution = new Set<string>()
+
+    for (const a of attributions) {
+      if ((a.sec_type ?? '').toUpperCase() !== 'OPT') continue
+      const acct = (a.account_id ?? '').trim()
+      const ck = (a.contract_key ?? '').trim()
+      if (openFilterAccountId !== 'all' && acct !== openFilterAccountId) continue
+      const sym = openFilterSymbol.trim().toUpperCase()
+      if (sym && (a.symbol ?? '').toUpperCase() !== sym) continue
+      const expFilter = openFilterExpiryStart.trim()
+      if (expFilter && !optionExpiryMatchesFilter((a.expiry ?? '').trim(), expFilter)) continue
+
+      positionsHandledByAttribution.add(`${acct}\x00${ck}`)
+
+      const livePos = livePositionMap.get(`${acct}\x00${ck}`)
+      const markPrice = livePos?.price != null && Number.isFinite(Number(livePos.price)) ? Number(livePos.price) : null
+      const rawAvgCost = livePos?.avgCost != null && Number.isFinite(Number(livePos.avgCost)) ? Number(livePos.avgCost) : null
+      const avgCostPerShare = rawAvgCost != null ? (rawAvgCost >= 10 ? rawAvgCost / 100 : rawAvgCost) : null
+      const estQty = a.open_qty_est
+      const pnl = markPrice != null && avgCostPerShare != null
+        ? (markPrice - avgCostPerShare) * estQty * 100
+        : (a.unrealized_pnl_est ?? 0)
+      const attrType: 'single' | 'mixed' | 'unassigned' =
+        a.strategy_instance_id == null ? 'unassigned' : a.is_mixed ? 'mixed' : 'single'
+
+      const pos: OpenOptionPosition = {
+        kind: 'live',
+        contract_key: ck,
+        strike: a.strike ?? 0,
+        expiry: a.expiry ?? '',
+        qty: estQty,
+        avg_cost: avgCostPerShare,
+        mark_price: markPrice,
+        unrealized_pnl: pnl,
+        pool_label: 'On',
+        account_id: acct,
+        position: livePos,
+        attribution_type: attrType,
+        attribution_ratio: a.attribution_ratio,
+      }
+      addToInstance(a.strategy_instance_id, a.strategy_instance_label, a.strategy_opportunity_name, a.strategy_instance_opened_at_epoch, pos)
+    }
 
     for (const pos of liveOptionPositions) {
+      const acct = (pos.account_id ?? '').trim()
+      const ck = (pos.contract_key ?? '').trim()
+      if (positionsHandledByAttribution.has(`${acct}\x00${ck}`)) continue
+
       const expiry = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
       const strike = Number(pos.strike) || 0
-      const right = (pos.right ?? '').toUpperCase().slice(0, 1)
-      const contractKey = pos.contract_key ?? `${pos.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`
       const qty = Number(pos.position) || 0
       const rawAvgCost = pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) ? Number(pos.avgCost) : null
       const avgCostPerShare = rawAvgCost != null ? (rawAvgCost >= 10 ? rawAvgCost / 100 : rawAvgCost) : null
@@ -498,7 +573,8 @@ export function PositionsPage({
       const pnl = markPrice != null && avgCostPerShare != null
         ? (markPrice - avgCostPerShare) * qty * 100
         : Number(pos.unrealized_pnl) || 0
-      allPositions.push({
+      const contractKey = ck || `${pos.symbol ?? ''}|OPT|${expiry}|${strike}|${(pos.right ?? '').toUpperCase().slice(0, 1)}`
+      addToInstance(null, null, null, null, {
         kind: 'live',
         contract_key: contractKey,
         strike,
@@ -508,12 +584,12 @@ export function PositionsPage({
         mark_price: markPrice,
         unrealized_pnl: pnl,
         pool_label: 'On',
-        account_id: (pos.account_id ?? '').trim(),
+        account_id: acct,
         position: pos,
+        attribution_type: 'unassigned',
       })
     }
 
-    /** Off-track when viewing all accounts only (not tied to Host/Secondary filter). */
     if (openFilterAccountId === 'all') {
       const offTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions)
         .filter(g => g.status === 'unrealized')
@@ -522,7 +598,7 @@ export function PositionsPage({
         const avgPrice = group.net_qty > 0
           ? (group.buy_avg_price ?? 0)
           : (group.sell_avg_price ?? 0)
-        allPositions.push({
+        addToInstance(null, null, null, null, {
           kind: 'offtrack',
           contract_key: group.contract_key,
           strike: group.strike,
@@ -534,23 +610,9 @@ export function PositionsPage({
           pool_label: 'Off',
           account_id: (group.trades[0]?.account_id ?? '').trim(),
           trades: group.trades,
+          attribution_type: 'unassigned',
         })
       }
-    }
-
-    const byInstance = new Map<string, { id: number | null; label: string | null; oppName: string | null; openedAt: number | null; positions: OpenOptionPosition[] }>()
-    for (const p of allPositions) {
-      const matchedExecs = p.kind === 'live'
-        ? (livePositionExecutionsMap.get(optExecutionMatchKey(p.account_id, p.contract_key)) ?? [])
-        : (p.trades ?? [])
-      const execWithInstance = matchedExecs.find(e => e.strategy_instance_id != null && Number.isFinite(Number(e.strategy_instance_id)))
-      const instId = execWithInstance?.strategy_instance_id ?? null
-      const instLabel = execWithInstance?.strategy_instance_label ?? null
-      const oppName = execWithInstance?.strategy_opportunity_name ?? null
-      const openedAt = execWithInstance?.strategy_instance_opened_at_epoch ?? null
-      const key = instId != null ? String(instId) : '__unassigned__'
-      if (!byInstance.has(key)) byInstance.set(key, { id: instId, label: instLabel, oppName, openedAt, positions: [] })
-      byInstance.get(key)!.positions.push(p)
     }
 
     const result: InstancePositionGroup[] = []
@@ -578,7 +640,7 @@ export function PositionsPage({
       return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
     })
     return result
-  }, [openFilterAccountId, liveOptionPositions, openOffTrackBaseExecutions, livePositionExecutionsMap])
+  }, [attributions, openFilterAccountId, openFilterSymbol, openFilterExpiryStart, liveOptionPositions, livePositionMap, openOffTrackBaseExecutions])
 
   const getPositionTime = (p: OpenOptionPosition): number | null => {
     if (p.kind === 'live' && p.position) {
@@ -702,6 +764,12 @@ export function PositionsPage({
 
     const resolveOppId = (bucket: Bucket): number | null => {
       if (bucket.oppId != null) return bucket.oppId
+      if (bucket.id != null) {
+        for (const a of attributions) {
+          if (a.strategy_instance_id === bucket.id && a.strategy_opportunity_id != null)
+            return a.strategy_opportunity_id
+        }
+      }
       for (const p of bucket.options) {
         const execs = p.kind === 'live' && p.position
           ? (livePositionExecutionsMap.get(optExecutionMatchKey(p.account_id, p.contract_key)) ?? [])
@@ -788,6 +856,9 @@ export function PositionsPage({
       const oppId = resolveOppId(b)
       const opp = oppId != null ? oppMap.get(oppId) : undefined
       const str = opp ? structureMap.get(opp.strategy_structure_id) : undefined
+      const attrForInstance = b.id != null ? attributions.find(a => a.strategy_instance_id === b.id) : undefined
+      const resolvedStructureType = str?.structure_type ?? attrForInstance?.structure_type ?? null
+      const resolvedScopeType = opp?.scope_type ?? attrForInstance?.scope_type ?? null
       const coverage = computeStockCoverage(b.options, str)
 
       let riskProfile = null as import('../utils/riskProfile').RiskProfile | null
@@ -842,8 +913,8 @@ export function PositionsPage({
         options: b.options,
         stock_coverage: coverage,
         options_unrealized_pnl: optPnl,
-        structure_type: str?.structure_type ?? null,
-        scope_type: opp?.scope_type ?? null,
+        structure_type: resolvedStructureType,
+        scope_type: resolvedScopeType,
         risk_profile: riskProfile,
       })
     }
@@ -853,7 +924,7 @@ export function PositionsPage({
       return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
     })
     return result
-  }, [instanceGroups, oppMap, structureMap, livePositionExecutionsMap, liveStockPositions])
+  }, [instanceGroups, oppMap, structureMap, livePositionExecutionsMap, liveStockPositions, attributions])
 
   const stockCoverageItems = useMemo((): StockCoverageItem[] => {
     const covKey = (sym: string, accountId: string) =>
@@ -1153,8 +1224,17 @@ export function PositionsPage({
     if (instanceFilterOppName !== 'all') {
       list = list.filter(g => (g.strategy_opportunity_name ?? '') === instanceFilterOppName)
     }
+    if (instanceFilterAttributionType !== 'all') {
+      list = list.filter(g => {
+        const types = new Set(g.options.map(p => p.attribution_type ?? 'unassigned'))
+        if (instanceFilterAttributionType === 'mixed') return types.has('mixed')
+        if (instanceFilterAttributionType === 'single') return types.has('single') && !types.has('mixed')
+        if (instanceFilterAttributionType === 'unassigned') return g.strategy_instance_id == null
+        return true
+      })
+    }
     return list
-  }, [instanceAllGroups, instanceFilterStructureType, instanceFilterScopeType, instanceFilterOppName])
+  }, [instanceAllGroups, instanceFilterStructureType, instanceFilterScopeType, instanceFilterOppName, instanceFilterAttributionType])
 
   const instanceFilterOptions = useMemo(() => {
     const stSet = new Set<string>()
@@ -1221,10 +1301,11 @@ export function PositionsPage({
       })
       return list
     }
-    return filteredInstanceAllGroups.map(g => ({
+    const out = filteredInstanceAllGroups.map(g => ({
       ...g,
       options: sortPositions(g.options),
     }))
+    return out
   }, [filteredInstanceAllGroups, openOptSort, quotesMap])
 
   const [expandedInstanceKeys, setExpandedInstanceKeys] = useState<string[]>([])
@@ -1264,7 +1345,8 @@ export function PositionsPage({
 
   useEffect(() => {
     loadReplayData()
-  }, [loadReplayData])
+    loadAttributions()
+  }, [loadReplayData, loadAttributions])
 
   const renderStockCoverageSummaryTable = (
     rows: StockCoverageItem[],
@@ -1585,17 +1667,6 @@ export function PositionsPage({
           {' / Positions'}
           <InfoTooltip text="Open positions (Pool On and Off) and manual execution records." />
         </h2>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            setAddExecOpen(true)
-            setPageError(null)
-          }}
-          aria-label="Add execution record manually (historical)"
-        >
-          Add Trade
-        </button>
       </div>
 
       <section className="replay-section replay-section-trade-records" aria-label="Open positions">
@@ -1755,11 +1826,22 @@ export function PositionsPage({
                         <option key={s} value={s}>{s === 'watchlist_stk' ? 'Watchlist (stocks)' : s === 'explicit_symbols' ? 'Explicit symbols' : s}</option>
                       ))}
                     </select>
-                    {(instanceFilterStructureType !== 'all' || instanceFilterScopeType !== 'all' || instanceFilterOppName !== 'all') && (
+                    <select
+                      className="replay-filter-select"
+                      value={instanceFilterAttributionType}
+                      onChange={e => setInstanceFilterAttributionType(e.target.value)}
+                      aria-label="Filter by attribution type"
+                    >
+                      <option value="all">All Attribution</option>
+                      <option value="single">Single</option>
+                      <option value="mixed">Mixed</option>
+                      <option value="unassigned">Unassigned</option>
+                    </select>
+                    {(instanceFilterStructureType !== 'all' || instanceFilterScopeType !== 'all' || instanceFilterOppName !== 'all' || instanceFilterAttributionType !== 'all') && (
                       <button
                         type="button"
                         className="btn btn-secondary btn-small"
-                        onClick={() => { setInstanceFilterStructureType('all'); setInstanceFilterScopeType('all'); setInstanceFilterOppName('all') }}
+                        onClick={() => { setInstanceFilterStructureType('all'); setInstanceFilterScopeType('all'); setInstanceFilterOppName('all'); setInstanceFilterAttributionType('all') }}
                       >
                         Clear Filters
                       </button>
@@ -1908,6 +1990,7 @@ export function PositionsPage({
                                                 <th>Time</th>
                                                 <th>UN PNL</th>
                                                 <th>Pool</th>
+                                                <th>Attr</th>
                                                 <th>Account</th>
                                               </tr>
                                             </thead>
@@ -1985,6 +2068,15 @@ export function PositionsPage({
                                                     </td>
                                                     <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
                                                     <td className="replay-muted">{pos.pool_label}</td>
+                                                    <td>
+                                                      {pos.attribution_type === 'mixed' ? (
+                                                        <span className="attr-badge attr-mixed" title={`Estimated attribution (net): ${((pos.attribution_ratio ?? 0) * 100).toFixed(0)}%`}>Mixed</span>
+                                                      ) : pos.attribution_type === 'single' ? (
+                                                        <span className="attr-badge attr-single" title="Single instance attribution">Single</span>
+                                                      ) : (
+                                                        <span className="attr-badge attr-unassigned" title="No strategy attribution">—</span>
+                                                      )}
+                                                    </td>
                                                     <td>{pos.account_id || '—'}</td>
                                                   </tr>,
                                                   ...(isPosExpanded ? matchedExecs.map((ex, ei) => {
@@ -1997,7 +2089,7 @@ export function PositionsPage({
                                                     return (
                                                       <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
                                                         <td className="replay-opt-expand-col" />
-                                                        <td className="detail-exec-indent replay-muted" colSpan={2}>↳ exec #{ex.account_executions_id ?? '?'} ({ex.source ?? '—'})</td>
+                                                        <td className="detail-exec-indent replay-muted" colSpan={2}>↳ exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} /></td>
                                                         <td />
                                                         <td />
                                                         <td>{eSideLabel} {eQty || '—'}</td>
@@ -2005,6 +2097,7 @@ export function PositionsPage({
                                                         <td />
                                                         <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
                                                         <td>{eComm ? fmtUsd(eComm) : '—'}</td>
+                                                        <td />
                                                         <td />
                                                         <td className="replay-muted">{ex.account_id ?? '—'}</td>
                                                       </tr>
@@ -2528,7 +2621,7 @@ export function PositionsPage({
                                 <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
                                   <td className="replay-opt-expand-col" />
                                   <td className="detail-exec-indent replay-muted">↳ exec #{ex.account_executions_id ?? '?'}</td>
-                                  <td className="replay-muted">{ex.source ?? '—'}</td>
+                                  <td><ExecSourceBadge source={ex.source} /></td>
                                   <td />
                                   <td />
                                   <td>{eSideLabel} {eQty || '—'}</td>
@@ -2541,7 +2634,7 @@ export function PositionsPage({
                                   <StrategyAttributionCells ex={ex} />
                                   <td>
                                     <span className="replay-exec-row-actions">
-                                      <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); setEditExec(ex); setPageError(null) }} title="Edit" aria-label="Edit execution">
+                                      <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); setPageError(null); setEditExecConfirmState({ open: true, exec: ex }) }} title="Edit" aria-label="Edit execution">
                                         <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                                       </button>
                                       {ex.account_executions_id != null ? (
@@ -2550,7 +2643,7 @@ export function PositionsPage({
                                       {isOffTrack ? (
                                         <button type="button" className="btn btn-small" onClick={e => { e.stopPropagation(); setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
                                       ) : null}
-                                      <button type="button" className="btn btn-icon-small btn-icon-danger" onClick={e => { e.stopPropagation(); setPageError(null); setDeleteConfirmState({ open: true, title: 'Delete execution', message: 'This will permanently remove this execution from trade history. This cannot be undone.', confirming: false, exec: ex }) }} title="Delete" aria-label="Delete execution">
+                                      <button type="button" className="btn btn-icon-small btn-icon-danger" onClick={e => { e.stopPropagation(); setPageError(null); setDeleteConfirmState({ open: true, title: 'Delete execution', message: 'This will permanently remove this execution from the trade ledger. This cannot be undone.', confirming: false, exec: ex }) }} title="Delete" aria-label="Delete execution">
                                         <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
                                       </button>
                                     </span>
@@ -2655,19 +2748,66 @@ export function PositionsPage({
       {pageError && (
         <p className="section-hint replay-form-error" style={{ marginTop: '0.5rem' }}>{pageError}</p>
       )}
+      {editExecConfirmState.open && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="positions-edit-exec-confirm-title"
+          onClick={() => setEditExecConfirmState({ open: false, exec: null })}
+        >
+          <div
+            className="modal-panel replay-exec-modal"
+            style={{ maxWidth: 440 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="positions-edit-exec-confirm-title" className="section-subtitle" style={{ marginTop: 0 }}>
+              Edit execution?
+            </h3>
+            <p className="section-hint execution-flex-manual-warning" role="alert" style={{ marginTop: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
+              When Flex and TWS sync are healthy, missing or late fills usually appear automatically after the next Flex refresh.
+              Manual edits can conflict with or duplicate those rows. Continue only if you are intentionally reconciling or correcting
+              this line.
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setEditExecConfirmState({ open: false, exec: null })}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const ex = editExecConfirmState.exec
+                  setEditExecConfirmState({ open: false, exec: null })
+                  if (ex) {
+                    setEditExec(ex)
+                    setPageError(null)
+                  }
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <ExecutionFormModal
-        open={addExecOpen || !!editExec}
+        open={!!editExec}
         editExec={editExec}
         accountOptions={executionAccountOptions}
         initialDraft={null}
         onClose={() => {
-          setAddExecOpen(false)
           setEditExec(null)
           setPageError(null)
         }}
         onSuccess={() => {
           setPageError(null)
           loadReplayData()
+          loadAttributions()
         }}
       />
       <LinkExecutionRecordModal
@@ -2680,6 +2820,7 @@ export function PositionsPage({
         onSuccess={() => {
           setPageError(null)
           loadReplayData()
+          loadAttributions()
         }}
       />
       {deleteConfirmState.open && (
@@ -2728,6 +2869,7 @@ export function PositionsPage({
                   if (res.ok) {
                     if (editExec?.account_executions_id === exec.account_executions_id) setEditExec(null)
                     await loadReplayData()
+                    loadAttributions()
                   } else {
                     setPageError(res.error ?? 'Delete failed')
                   }
@@ -2744,7 +2886,7 @@ export function PositionsPage({
       <QuickCloseModal
         exec={closeAgainstExec}
         onClose={() => setCloseAgainstExec(null)}
-        onSuccess={() => loadReplayData()}
+        onSuccess={() => { loadReplayData(); loadAttributions() }}
       />
     </div>
   )

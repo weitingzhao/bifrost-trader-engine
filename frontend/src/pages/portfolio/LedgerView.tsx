@@ -3,6 +3,7 @@ import type { Execution, OptExecutionGroup, StatusResponse } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
 import { deleteExecution, fetchOpportunities, fetchStrategyInstances } from '../../api'
+import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
   fmtExpiry,
@@ -19,49 +20,16 @@ import type { LinkExecutionContext } from './LinkExecutionRecordModal'
 import { LinkExecutionRecordModal } from './LinkExecutionRecordModal'
 import type { PortfolioView } from './types'
 import { useExecutions } from './useExecutions'
+import { LedgerClosedOptionContractsSection } from './LedgerClosedOptionContractsSection'
+import { LedgerOrphanOpenOptionSection } from './LedgerOrphanOpenOptionSection'
+import { getOptGroupKey } from './ledgerOptHelpers'
 
 export interface LedgerViewProps {
   status: StatusResponse | null
   onViewChange: (view: PortfolioView) => void
-}
-
-function getOptGroupKey(g: OptExecutionGroup): string {
-  return `${g.contract_key}-${g.strike}-${g.expiry}`
-}
-
-type InstanceConsistencyState = 'same' | 'mixed' | 'different' | 'none'
-
-function getInstanceConsistencyState(trades: Execution[]): InstanceConsistencyState {
-  if (trades.length === 0) return 'none'
-  const instanceIds = trades
-    .map(t => t.strategy_instance_id)
-    .filter((id): id is number => id != null && Number.isFinite(id))
-  const hasAnyInstance = instanceIds.length > 0
-  const allHaveInstance = trades.every(
-    t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id),
-  )
-  if (!hasAnyInstance) return 'none'
-  if (!allHaveInstance) return 'mixed'
-  return new Set(instanceIds).size === 1 ? 'same' : 'different'
-}
-
-function getAggregatedInstanceConsistencyState(trades: Execution[]): InstanceConsistencyState {
-  if (trades.length === 0) return 'none'
-  const byAccount = new Map<string, Execution[]>()
-  for (const t of trades) {
-    const accountId = (t.account_id ?? '').trim() || '__NO_ACCOUNT__'
-    if (!byAccount.has(accountId)) byAccount.set(accountId, [])
-    byAccount.get(accountId)!.push(t)
-  }
-  const states = Array.from(byAccount.values(), accountTrades =>
-    getInstanceConsistencyState(accountTrades),
-  )
-  if (states.every(s => s === 'none')) return 'none'
-  if (states.some(s => s === 'different')) return 'different'
-  if (states.some(s => s === 'mixed')) return 'mixed'
-  if (states.some(s => s === 'none')) return 'mixed'
-  if (states.every(s => s === 'same')) return 'same'
-  return 'none'
+  /** Controlled by Trade ledger page header — opens Add journal modal. */
+  addJournalOpen: boolean
+  onAddJournalOpenChange: (open: boolean) => void
 }
 
 function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
@@ -84,7 +52,12 @@ function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title
   )
 }
 
-export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewProps) {
+export function LedgerView({
+  status,
+  onViewChange: _onViewChange,
+  addJournalOpen,
+  onAddJournalOpenChange,
+}: LedgerViewProps) {
   const [ledgerFilterStrategyOpportunityId, setLedgerFilterStrategyOpportunityId] = useState<number | ''>('')
   const [ledgerFilterStrategyInstanceId, setLedgerFilterStrategyInstanceId] = useState<number | ''>('')
   const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
@@ -97,7 +70,11 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
     }),
     [ledgerFilterStrategyOpportunityId, ledgerFilterStrategyInstanceId],
   )
-  const { executions, loadReplayData, executionAccountOptions } = useExecutions(status, strategyFilters)
+  const { executions, executionsBook, loadReplayData, executionAccountOptions } = useExecutions(
+    status,
+    strategyFilters,
+    true,
+  )
 
   useEffect(() => {
     fetchOpportunities(true)
@@ -118,7 +95,12 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
   const [ledgerFilterSymbol, setLedgerFilterSymbol] = useState('')
   const [ledgerFilterExpiryStart, setLedgerFilterExpiryStart] = useState('')
   const [ledgerFilterAccount, setLedgerFilterAccount] = useState<string>('')
-  const [ledgerTab, setLedgerTab] = useState<'options' | 'stocks'>('options')
+  const [ledgerTab, setLedgerTab] = useState<'instance' | 'options' | 'stocks'>('instance')
+  const [ledgerOptionSubTab, setLedgerOptionSubTab] = useState<'contracts' | 'orphans'>('contracts')
+  const [ledgerInstanceSubTab, setLedgerInstanceSubTab] = useState<'with_instance' | 'no_instance'>('with_instance')
+  /** With-instance list: filter by whether the instance has any unrealized (open) contract group. */
+  const [instanceContainOpenFilter, setInstanceContainOpenFilter] = useState<'all' | 'yes' | 'no'>('all')
+  const [instanceExpandedIds, setInstanceExpandedIds] = useState<Set<number>>(new Set())
   const [ledgerAccordionMode, setLedgerAccordionMode] = useState<boolean>(false)
   const [ledgerStockGroupByPosition, setLedgerStockGroupByPosition] = useState<boolean>(false)
   const [ledgerStockCategoryTab, setLedgerStockCategoryTab] = useState<string>('All')
@@ -131,7 +113,6 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
     dir: 'asc' | 'desc'
   }>({ column: 'trade_date', dir: 'desc' })
   const [expandedDetailKeys, setExpandedDetailKeys] = useState<string[]>([])
-  const [addExecOpen, setAddExecOpen] = useState(false)
   const [editExec, setEditExec] = useState<Execution | null>(null)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [linkContext, setLinkContext] = useState<LinkExecutionContext | null>(null)
@@ -144,6 +125,33 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
     confirming: boolean
     exec: Execution | null
   }>({ open: false, title: '', message: '', confirming: false, exec: null })
+
+  const handleEditExecution = useCallback((ex: Execution) => {
+    setEditExec(ex)
+    setPageError(null)
+  }, [])
+
+  const handleLinkExecution = useCallback((ex: Execution) => {
+    if (ex.account_executions_id == null) return
+    setLinkContext({
+      account_executions_id: ex.account_executions_id,
+      execution: ex,
+    })
+    setLinkModalOpen(true)
+    setPageError(null)
+  }, [])
+
+  const handleDeleteExecution = useCallback((ex: Execution) => {
+    setPageError(null)
+    setDeleteConfirmState({
+      open: true,
+      title: 'Delete execution',
+      message:
+        'This will permanently remove this execution from the trade ledger. This cannot be undone.',
+      confirming: false,
+      exec: ex,
+    })
+  }, [])
 
   const toggleDetailExpand = useCallback(
     (key: string) => {
@@ -226,10 +234,181 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
     return list
   }, [ledgerBaseFilteredExecutions, ledgerFilterAccount])
 
-  const optExecutionGroups = useMemo(
-    (): OptExecutionGroup[] => buildOptExecutionGroups(filteredExecutions),
-    [filteredExecutions],
+  /** Same UI filters as `ledgerBaseFilteredExecutions`, applied to official-book executions (GET /executions performance_book → account_executions_final). */
+  const ledgerBaseFilteredExecutionsBook = useMemo(() => {
+    let list = [...(executionsBook || [])]
+    const sym = ledgerFilterSymbol.trim().toUpperCase()
+    if (sym) {
+      list = list.filter(e => {
+        const directSymbol = (e.symbol || '').toUpperCase().trim()
+        if (directSymbol === sym || directSymbol.startsWith(sym)) return true
+        const ck = (e.contract_key ?? '').trim()
+        if (!ck) return false
+        const partSymbol = getContractLabelParts(ck).symbol.toUpperCase().trim()
+        if (!partSymbol) return false
+        return partSymbol === sym || partSymbol.startsWith(sym)
+      })
+    }
+    const expMonth = ledgerFilterExpiryStart.trim().replace(/-/g, '').slice(0, 6)
+    if (expMonth) {
+      list = list.filter(e => {
+        const ex = (e.expiry || '').trim().replace(/-/g, '')
+        const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
+        return cmp === expMonth
+      })
+    }
+    return list
+  }, [executionsBook, ledgerFilterSymbol, ledgerFilterExpiryStart])
+
+  const filteredExecutionsBook = useMemo(() => {
+    let list = [...ledgerBaseFilteredExecutionsBook]
+    const acc = ledgerFilterAccount.trim()
+    if (acc && acc !== 'All') list = list.filter(e => (e.account_id ?? '').trim() === acc)
+    return list
+  }, [ledgerBaseFilteredExecutionsBook, ledgerFilterAccount])
+
+  /** OPT-only executions from the book feed — single source for Instance / Options tabs. */
+  const optionExecutionsBook = useMemo(
+    () => filteredExecutionsBook.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT'),
+    [filteredExecutionsBook],
   )
+
+  /** All Options UI (Closed Option + Open Option): `GET /executions?source_scope=performance_book` → account_executions_final only. */
+  const optExecutionGroups = useMemo(
+    (): OptExecutionGroup[] => buildOptExecutionGroups(filteredExecutionsBook),
+    [filteredExecutionsBook],
+  )
+
+  /* ── Instance tab data derivations ── */
+
+  const withInstanceExecs = useMemo(
+    () => optionExecutionsBook.filter(e => e.strategy_instance_id != null),
+    [optionExecutionsBook],
+  )
+  const noInstanceExecs = useMemo(
+    () => optionExecutionsBook.filter(e => e.strategy_instance_id == null),
+    [optionExecutionsBook],
+  )
+
+  /** Groups by strategy_instance_id, each containing its own closed/open contract groups. */
+  const instanceGroups = useMemo(() => {
+    const byId = new Map<number, Execution[]>()
+    for (const e of withInstanceExecs) {
+      const id = e.strategy_instance_id!
+      const arr = byId.get(id)
+      if (arr) arr.push(e)
+      else byId.set(id, [e])
+    }
+    return Array.from(byId.entries())
+      .map(([id, trades]) => {
+        const groups = buildOptExecutionGroups(trades)
+        const label =
+          trades.find(t => t.strategy_instance_label?.trim())?.strategy_instance_label?.trim() ?? null
+        const oppName =
+          trades.find(t => t.strategy_opportunity_name?.trim())?.strategy_opportunity_name?.trim() ?? null
+        return { instanceId: id, label, opportunityName: oppName, groups, trades }
+      })
+      .sort((a, b) => b.instanceId - a.instanceId)
+  }, [withInstanceExecs])
+
+  const filteredInstanceGroups = useMemo(() => {
+    if (instanceContainOpenFilter === 'all') return instanceGroups
+    return instanceGroups.filter(ig => {
+      const open = ig.groups.filter(g => g.status === 'unrealized')
+      const hasOpen = open.length > 0
+      return instanceContainOpenFilter === 'yes' ? hasOpen : !hasOpen
+    })
+  }, [instanceGroups, instanceContainOpenFilter])
+
+  const noInstanceOptGroups = useMemo(
+    (): OptExecutionGroup[] => buildOptExecutionGroups(noInstanceExecs),
+    [noInstanceExecs],
+  )
+
+  const noInstanceClosedGroups = useMemo(
+    () => noInstanceOptGroups.filter(g => g.status === 'realized'),
+    [noInstanceOptGroups],
+  )
+  const noInstanceOpenGroups = useMemo(
+    () => noInstanceOptGroups.filter(g => g.status === 'unrealized'),
+    [noInstanceOptGroups],
+  )
+
+  const hasWithInstance = instanceGroups.length > 0
+  const hasNoInstance = noInstanceOptGroups.length > 0
+
+  const sortedNoInstanceClosedGroups = useMemo(() => {
+    const list = [...noInstanceClosedGroups]
+    const { column, dir } = ledgerOptSort
+    const mult = dir === 'asc' ? 1 : -1
+    list.sort((a, b) => {
+      if (column === 'expiry') {
+        const sa = (a.expiry ?? '').trim().replace(/-/g, '')
+        const sb = (b.expiry ?? '').trim().replace(/-/g, '')
+        return mult * sa.localeCompare(sb, undefined, { numeric: true })
+      }
+      const datesA = [
+        ...(a.trades ?? []).map(t => t.trade_date).filter((d): d is string => d != null && String(d).trim() !== ''),
+      ].sort()
+      const datesB = [
+        ...(b.trades ?? []).map(t => t.trade_date).filter((d): d is string => d != null && String(d).trim() !== ''),
+      ].sort()
+      const va = datesA.length > 0 ? datesA[0] : ''
+      const vb = datesB.length > 0 ? datesB[0] : ''
+      return mult * va.localeCompare(vb)
+    })
+    return list
+  }, [noInstanceClosedGroups, ledgerOptSort])
+
+  const noInstanceOpenNotExpired = useMemo(
+    () => noInstanceOpenGroups.filter(g => !isOptionExpired(g.expiry)),
+    [noInstanceOpenGroups],
+  )
+  const noInstanceExpiredUnrealized = useMemo(
+    () => noInstanceOpenGroups.filter(g => isOptionExpired(g.expiry)),
+    [noInstanceOpenGroups],
+  )
+  const sortedNoInstanceOpenNotExpired = useMemo(() => {
+    const list = [...noInstanceOpenNotExpired]
+    list.sort((a, b) => {
+      const sa = (a.expiry ?? '').trim().replace(/-/g, '')
+      const sb = (b.expiry ?? '').trim().replace(/-/g, '')
+      return sb.localeCompare(sa, undefined, { numeric: true })
+    })
+    return list
+  }, [noInstanceOpenNotExpired])
+
+  const noInstanceOrphanGroups = useMemo(
+    () => [...sortedNoInstanceOpenNotExpired, ...noInstanceExpiredUnrealized],
+    [sortedNoInstanceOpenNotExpired, noInstanceExpiredUnrealized],
+  )
+  const noInstanceOrphanExpandedOptionGroups = useMemo(
+    () => noInstanceOrphanGroups.filter(g => expandedDetailKeys.includes(getOptGroupKey(g))),
+    [noInstanceOrphanGroups, expandedDetailKeys],
+  )
+  const noInstanceClosedExpandedOptionGroups = useMemo(
+    () => sortedNoInstanceClosedGroups.filter(g => expandedDetailKeys.includes(getOptGroupKey(g))),
+    [sortedNoInstanceClosedGroups, expandedDetailKeys],
+  )
+  const noInstanceClosedPnlSum = useMemo(
+    () => sortedNoInstanceClosedGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0),
+    [sortedNoInstanceClosedGroups],
+  )
+  const noInstanceClosedDetailsTotalPnl = useMemo(() => {
+    let sum = 0
+    for (const g of noInstanceClosedExpandedOptionGroups) {
+      for (const ex of g.trades ?? []) {
+        const s = (ex.side ?? '').toUpperCase()
+        const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+        const q = Number(ex.quantity) || 0
+        const p = Number(ex.price) || 0
+        const c = Number(ex.commission) || 0
+        const value = q * p * 100 - c
+        sum += isBuy ? -value : value
+      }
+    }
+    return sum
+  }, [noInstanceClosedExpandedOptionGroups])
 
   const closedOptionGroups = useMemo(
     () => optExecutionGroups.filter(group => group.status === 'realized'),
@@ -267,23 +446,58 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
     [optExecutionGroups],
   )
 
+  /** Open option legs (net qty ≠ 0, expiry not past): excluded from Summary and main closed table. */
+  const openUnrealizedOptionGroups = useMemo(
+    () =>
+      optExecutionGroups.filter(
+        group => group.status === 'unrealized' && !isOptionExpired(group.expiry),
+      ),
+    [optExecutionGroups],
+  )
+
+  const sortedOpenUnrealizedOptionGroups = useMemo(() => {
+    const list = [...openUnrealizedOptionGroups]
+    list.sort((a, b) => {
+      const sa = (a.expiry ?? '').trim().replace(/-/g, '')
+      const sb = (b.expiry ?? '').trim().replace(/-/g, '')
+      return sb.localeCompare(sa, undefined, { numeric: true })
+    })
+    return list
+  }, [openUnrealizedOptionGroups])
+
   const expiredCloseGroup =
     expiredCloseKey != null
       ? expiredUnrealizedOptionGroups.find(g => getOptGroupKey(g) === expiredCloseKey) ?? null
       : null
+
+  const orphanOptionGroups = useMemo(
+    () => [...sortedOpenUnrealizedOptionGroups, ...expiredUnrealizedOptionGroups],
+    [sortedOpenUnrealizedOptionGroups, expiredUnrealizedOptionGroups],
+  )
+  const orphanOptionCount = orphanOptionGroups.length
+  const orphanOptionDetailsCount = useMemo(
+    () => orphanOptionGroups.reduce((sum, g) => sum + (g.trades?.length ?? 0), 0),
+    [orphanOptionGroups],
+  )
 
   const closedOptGroupsPnlSum = useMemo(
     () => closedOptionGroups.reduce((acc, g) => acc + (Number(g.realized_pnl) || 0), 0),
     [closedOptionGroups],
   )
 
-  /** Details sheet: sum of per-trade PnL for expanded rows only (same formula as table). */
+  const closedExpandedOptionGroups = useMemo(
+    () => sortedClosedOptionGroups.filter(g => expandedDetailKeys.includes(getOptGroupKey(g))),
+    [sortedClosedOptionGroups, expandedDetailKeys],
+  )
+  const orphanExpandedOptionGroups = useMemo(
+    () => orphanOptionGroups.filter(g => expandedDetailKeys.includes(getOptGroupKey(g))),
+    [orphanOptionGroups, expandedDetailKeys],
+  )
+
+  /** Closed-details sheet total PnL for expanded closed rows only. */
   const ledgerDetailsTotalPnl = useMemo(() => {
-    const expanded = sortedClosedOptionGroups.filter(g =>
-      expandedDetailKeys.includes(getOptGroupKey(g)),
-    )
     let sum = 0
-    for (const g of expanded) {
+    for (const g of closedExpandedOptionGroups) {
       for (const ex of g.trades ?? []) {
         const s = (ex.side ?? '').toUpperCase()
         const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
@@ -295,7 +509,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
       }
     }
     return sum
-  }, [sortedClosedOptionGroups, expandedDetailKeys])
+  }, [closedExpandedOptionGroups])
 
   const ledgerStockCategoryTabs = useMemo(() => {
     const stockExecs = (executions ?? []).filter(
@@ -352,8 +566,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
     return Array.from(byMonth.entries()).sort(([a], [b]) => b.localeCompare(a))
   }, [filteredExecutions, ledgerStockCategoryTab, getStockExecCategory])
 
-  const hasOptionExecutions =
-    closedOptionGroups.length > 0 || expiredUnrealizedOptionGroups.length > 0
+  const hasOptionExecutions = optExecutionGroups.length > 0
   const hasStockExecutions = useMemo(
     () => filteredExecutions.some(e => (e.sec_type ?? '').toUpperCase() !== 'OPT'),
     [filteredExecutions],
@@ -380,14 +593,29 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
   }, [filteredExecutions, ledgerStockCategoryTab, ledgerStockSort, getStockExecCategory])
 
   useEffect(() => {
+    if (ledgerTab === 'instance' && !hasOptionExecutions && hasStockExecutions) {
+      setLedgerTab('stocks')
+      return
+    }
     if (ledgerTab === 'options' && !hasOptionExecutions && hasStockExecutions) {
       setLedgerTab('stocks')
       return
     }
     if (ledgerTab === 'stocks' && !hasStockExecutions && hasOptionExecutions) {
-      setLedgerTab('options')
+      setLedgerTab('instance')
     }
   }, [ledgerTab, hasOptionExecutions, hasStockExecutions])
+
+  useEffect(() => {
+    if (ledgerTab !== 'instance') return
+    if (ledgerInstanceSubTab === 'with_instance' && !hasWithInstance && hasNoInstance) {
+      setLedgerInstanceSubTab('no_instance')
+      return
+    }
+    if (ledgerInstanceSubTab === 'no_instance' && !hasNoInstance && hasWithInstance) {
+      setLedgerInstanceSubTab('with_instance')
+    }
+  }, [ledgerTab, ledgerInstanceSubTab, hasWithInstance, hasNoInstance])
 
   useEffect(() => {
     if (ledgerTab !== 'stocks') return
@@ -397,36 +625,25 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
   }, [ledgerTab, ledgerStockCategoryTab, ledgerStockCategoryTabs])
 
   useEffect(() => {
+    if (ledgerTab !== 'options') return
+    if (ledgerOptionSubTab === 'contracts' && sortedClosedOptionGroups.length === 0 && orphanOptionCount > 0) {
+      setLedgerOptionSubTab('orphans')
+      return
+    }
+    if (ledgerOptionSubTab === 'orphans' && orphanOptionCount === 0 && sortedClosedOptionGroups.length > 0) {
+      setLedgerOptionSubTab('contracts')
+    }
+  }, [ledgerTab, ledgerOptionSubTab, sortedClosedOptionGroups.length, orphanOptionCount])
+
+  useEffect(() => {
     loadReplayData()
   }, [loadReplayData])
 
   return (
     <>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '0.5rem',
-          flexWrap: 'wrap',
-          marginBottom: '0.5rem',
-        }}
-      >
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            setAddExecOpen(true)
-            setPageError(null)
-          }}
-          aria-label="Add execution record manually (historical)"
-        >
-          Add Trade
-        </button>
-      </div>
       <section
         className="replay-section replay-section-trade-records"
-        aria-label="Trade History"
+        aria-label="Trade ledger"
       >
         <div className="replay-filters replay-filters--bar">
           <label className="replay-filter-wrap-symbol">
@@ -515,8 +732,20 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
               <div
                 className="system-tabs replay-portfolio-tabs"
                 role="tablist"
-                aria-label="Closed trade asset sections"
+                aria-label="Instance, option and stock ledger sections"
               >
+                <button
+                  type="button"
+                  role="tab"
+                  id="replay-tab-instance"
+                  aria-selected={ledgerTab === 'instance'}
+                  aria-controls="replay-panel-instance"
+                  className={`system-tab ${ledgerTab === 'instance' ? 'active' : ''}`}
+                  onClick={() => setLedgerTab('instance')}
+                  disabled={!hasOptionExecutions}
+                >
+                  Instance
+                </button>
                 <button
                   type="button"
                   role="tab"
@@ -544,7 +773,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
               </div>
             </div>
             <div className="replay-portfolio-filters">
-              {ledgerTab === 'options' && (
+              {(ledgerTab === 'options' || (ledgerTab === 'instance' && ledgerInstanceSubTab === 'no_instance')) && (
                 <div
                   className="replay-fetch-range-group"
                   role="radiogroup"
@@ -622,10 +851,10 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
               )}
             </div>
           </div>
-          {filteredExecutions.length === 0 ? (
+          {filteredExecutions.length === 0 && filteredExecutionsBook.length === 0 ? (
             <p className="section-hint">
-              No execution data. Use Overview to fetch from IB (Refresh), or Positions to add manual
-              history (Add Trade).
+              No execution data. Use Overview to fetch from IB (Refresh), or Trade ledger to add a manual journal
+              entry (Add journal).
               {[ledgerFilterSymbol, ledgerFilterExpiryStart].some(Boolean) ||
               (ledgerFilterAccount && ledgerFilterAccount !== 'All') ||
               ledgerFilterStrategyOpportunityId !== '' ||
@@ -639,7 +868,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                 className="replay-ledger-summary"
                 aria-label="Summary by month"
               >
-                {ledgerTab === 'options' ? (
+                {ledgerTab === 'options' || ledgerTab === 'instance' ? (
                   <>
                     <span className="replay-ledger-summary-label">Summary</span>
                     <span className="replay-ledger-summary-inline">
@@ -712,7 +941,253 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                   </>
                 )}
               </section>
-              {ledgerTab === 'options' ? (
+              {ledgerTab === 'instance' && (
+                <div
+                  id="replay-panel-instance"
+                  role="tabpanel"
+                  aria-labelledby="replay-tab-instance"
+                  className="system-tab-panel"
+                >
+                  {hasOptionExecutions ? (
+                    <>
+                      <div
+                        className={`replay-instance-contain-filter ${ledgerInstanceSubTab === 'no_instance' ? 'replay-instance-contain-filter--disabled' : ''}`}
+                        role="group"
+                        aria-label="Filter instances by open positions"
+                      >
+                        <span className="replay-instance-contain-filter-label">Contain open</span>
+                        <InfoTooltip text="Filters the With instance list: Yes = at least one open (unrealized) option contract; No = only closed legs; All = every instance." />
+                        <div
+                          className="replay-bubble-switch"
+                          role="radiogroup"
+                          aria-label="Contain open"
+                        >
+                          {(['all', 'yes', 'no'] as const).map(v => (
+                            <button
+                              key={v}
+                              type="button"
+                              role="radio"
+                              aria-checked={instanceContainOpenFilter === v}
+                              className={`replay-bubble-switch-btn ${instanceContainOpenFilter === v ? 'active' : ''}`}
+                              disabled={ledgerInstanceSubTab === 'no_instance'}
+                              onClick={() => setInstanceContainOpenFilter(v)}
+                            >
+                              {v === 'all' ? 'All' : v === 'yes' ? 'Yes' : 'No'}
+                            </button>
+                          ))}
+                        </div>
+                        {ledgerInstanceSubTab === 'with_instance' &&
+                          instanceContainOpenFilter !== 'all' &&
+                          instanceGroups.length > 0 && (
+                            <span className="replay-instance-contain-filter-meta">
+                              Showing {filteredInstanceGroups.length} of {instanceGroups.length}
+                            </span>
+                          )}
+                      </div>
+                      <div
+                        className="system-tabs replay-stock-group-tabs"
+                        role="tablist"
+                        aria-label="With instance and No instance"
+                        style={{ marginBottom: '0.5rem' }}
+                      >
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={ledgerInstanceSubTab === 'with_instance'}
+                          className={`system-tab ${ledgerInstanceSubTab === 'with_instance' ? 'active' : ''}`}
+                          onClick={() => setLedgerInstanceSubTab('with_instance')}
+                          disabled={!hasWithInstance}
+                        >
+                          With instance ({instanceGroups.length})
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={ledgerInstanceSubTab === 'no_instance'}
+                          className={`system-tab ${ledgerInstanceSubTab === 'no_instance' ? 'active' : ''}`}
+                          onClick={() => setLedgerInstanceSubTab('no_instance')}
+                          disabled={!hasNoInstance}
+                        >
+                          No instance ({noInstanceOptGroups.length})
+                        </button>
+                      </div>
+
+                      {ledgerInstanceSubTab === 'with_instance' && (
+                        <div>
+                          {instanceGroups.length === 0 ? (
+                            <p className="section-hint">No option trades with a strategy instance under the current filters.</p>
+                          ) : filteredInstanceGroups.length === 0 ? (
+                            <p className="section-hint">
+                              No instances match Contain open = {instanceContainOpenFilter === 'yes' ? 'Yes' : 'No'}. Change the filter or clear it (All).
+                            </p>
+                          ) : (
+                            filteredInstanceGroups.map(ig => {
+                              const closed = ig.groups.filter(g => g.status === 'realized')
+                              const open = ig.groups.filter(g => g.status === 'unrealized')
+                              const pnl = closed.reduce((s, g) => s + (Number(g.realized_pnl) || 0), 0)
+                              const isExpanded = instanceExpandedIds.has(ig.instanceId)
+                              return (
+                                <div key={ig.instanceId} className="replay-instance-group">
+                                  <button
+                                    type="button"
+                                    className="replay-instance-group-header"
+                                    onClick={() => setInstanceExpandedIds(prev => {
+                                      const next = new Set(prev)
+                                      if (next.has(ig.instanceId)) next.delete(ig.instanceId)
+                                      else next.add(ig.instanceId)
+                                      return next
+                                    })}
+                                    aria-expanded={isExpanded}
+                                  >
+                                    <span className={`replay-instance-chevron ${isExpanded ? 'replay-instance-chevron--open' : ''}`}>▶</span>
+                                    <span className="replay-instance-group-title">
+                                      {ig.label ?? `Instance #${ig.instanceId}`}
+                                    </span>
+                                    {ig.opportunityName && (
+                                      <span className="replay-instance-group-opp">({ig.opportunityName})</span>
+                                    )}
+                                    <span className="replay-instance-group-stats">
+                                      <span>Closed: {closed.length}</span>
+                                      <span>Open: {open.length}</span>
+                                      <span className={pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                        PnL: {fmtUsd0(pnl)}
+                                      </span>
+                                    </span>
+                                  </button>
+                                  {isExpanded && (
+                                    <div className="replay-instance-group-body">
+                                      {closed.length > 0 && (
+                                        <div className="replay-instance-group-block">
+                                          <h6 className="replay-instance-subheading">Closed Option</h6>
+                                          <div className="replay-portfolio-table-wrap">
+                                            <table className="table-operations replay-opt-groups">
+                                              <thead>
+                                                <tr>
+                                                  <th>Contract</th>
+                                                  <th>Expiry</th>
+                                                  <th>Strike</th>
+                                                  <th>Type</th>
+                                                  <th>Buy&nbsp;Qty</th>
+                                                  <th>Sell&nbsp;Qty</th>
+                                                  <th>PnL</th>
+                                                  <th>Trades</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {closed.map(g => {
+                                                  const parts = getContractLabelParts(g.contract_key ?? '')
+                                                  return (
+                                                    <tr key={getOptGroupKey(g)}>
+                                                      <td>{parts.symbol || g.contract_key}</td>
+                                                      <td>{fmtExpiry(g.expiry)}</td>
+                                                      <td>{g.strike ?? '—'}</td>
+                                                      <td>{parts.rightLabel || '—'}</td>
+                                                      <td>{g.buy_volume}</td>
+                                                      <td>{g.sell_volume}</td>
+                                                      <td className={Number(g.realized_pnl) >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                                        {fmtUsd0(Number(g.realized_pnl))}
+                                                      </td>
+                                                      <td>{g.trades?.length ?? 0}</td>
+                                                    </tr>
+                                                  )
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {open.length > 0 && (
+                                        <div className="replay-instance-group-block">
+                                          <h6 className="replay-instance-subheading">Open Option</h6>
+                                          <div className="replay-portfolio-table-wrap">
+                                            <table className="table-operations replay-opt-groups">
+                                              <thead>
+                                                <tr>
+                                                  <th>Contract</th>
+                                                  <th>Expiry</th>
+                                                  <th>Strike</th>
+                                                  <th>Type</th>
+                                                  <th>Net&nbsp;Qty</th>
+                                                  <th>Trades</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {open.map(g => {
+                                                  const parts = getContractLabelParts(g.contract_key ?? '')
+                                                  return (
+                                                    <tr key={getOptGroupKey(g)}>
+                                                      <td>{parts.symbol || g.contract_key}</td>
+                                                      <td>{fmtExpiry(g.expiry)}</td>
+                                                      <td>{g.strike ?? '—'}</td>
+                                                      <td>{parts.rightLabel || '—'}</td>
+                                                      <td>{g.net_qty ?? '—'}</td>
+                                                      <td>{g.trades?.length ?? 0}</td>
+                                                    </tr>
+                                                  )
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {closed.length === 0 && open.length === 0 && (
+                                        <p className="section-hint">No grouped contract data for this instance.</p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+                      )}
+
+                      {ledgerInstanceSubTab === 'no_instance' && (
+                        <div
+                          className="replay-instance-no-inst-sheet"
+                          aria-label="Option trades without strategy instance"
+                        >
+                          <p className="section-hint replay-instance-no-inst-sheet-intro">
+                            All trades in this sheet have no strategy instance. Expand closed rows and use Link in Details (per trade) to assign an opportunity and instance.
+                          </p>
+                          <LedgerClosedOptionContractsSection
+                            sortedClosedGroups={sortedNoInstanceClosedGroups}
+                            closedExpandedGroups={noInstanceClosedExpandedOptionGroups}
+                            closedPnlSum={noInstanceClosedPnlSum}
+                            detailsTotalPnl={noInstanceClosedDetailsTotalPnl}
+                            expandedDetailKeys={expandedDetailKeys}
+                            toggleDetailExpand={toggleDetailExpand}
+                            ledgerOptSort={ledgerOptSort}
+                            setLedgerOptSort={setLedgerOptSort}
+                            onEditExecution={handleEditExecution}
+                            onLinkExecution={handleLinkExecution}
+                            onDeleteExecution={handleDeleteExecution}
+                            detailPlaceholder="Click a closed trade row above to load details; then use Link to assign an instance."
+                            sectionAriaLabel="No-instance closed option positions and details"
+                          />
+                          <LedgerOrphanOpenOptionSection
+                            sortedOpenUnrealized={sortedNoInstanceOpenNotExpired}
+                            expiredUnrealized={noInstanceExpiredUnrealized}
+                            orphanExpandedGroups={noInstanceOrphanExpandedOptionGroups}
+                            expandedDetailKeys={expandedDetailKeys}
+                            toggleDetailExpand={toggleDetailExpand}
+                            onExpiredCloseClick={key => setExpiredCloseKey(key)}
+                            onEditExecution={handleEditExecution}
+                            onLinkExecution={handleLinkExecution}
+                            onDeleteExecution={handleDeleteExecution}
+                            detailPlaceholder="Click an open or expired row above to load details; then use Link to assign an instance."
+                          />
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="section-hint">
+                      No option trades under the current filters.
+                    </p>
+                  )}
+                </div>
+              )}
+              {ledgerTab === 'options' && (
                 <div
                   id="replay-panel-options"
                   role="tabpanel"
@@ -721,648 +1196,73 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                 >
                   {hasOptionExecutions ? (
                     <>
-                      <div className="replay-portfolio-table-wrap">
-                        <table className="table-operations replay-opt-groups">
-                          <thead>
-                            <tr>
-                              <th rowSpan={2} className="replay-opt-expand-col"></th>
-                              <th rowSpan={2}>Contract</th>
-                              <th
-                                rowSpan={2}
-                                className="replay-th-sortable"
-                                onClick={e => {
-                                  e.stopPropagation()
-                                  setLedgerOptSort(prev =>
-                                    prev.column === 'expiry'
-                                      ? {
-                                          column: 'expiry',
-                                          dir: prev.dir === 'desc' ? 'asc' : 'desc',
-                                        }
-                                      : { column: 'expiry', dir: 'desc' },
-                                  )
-                                }}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    setLedgerOptSort(prev =>
-                                      prev.column === 'expiry'
-                                        ? {
-                                            column: 'expiry',
-                                            dir: prev.dir === 'desc' ? 'asc' : 'desc',
-                                          }
-                                        : { column: 'expiry', dir: 'desc' },
-                                    )
-                                  }
-                                }}
-                                role="button"
-                                tabIndex={0}
-                                title="Sort by Expiry"
-                              >
-                                Expiry{' '}
-                                {ledgerOptSort.column === 'expiry'
-                                  ? ledgerOptSort.dir === 'asc'
-                                    ? ' ▲'
-                                    : ' ▼'
-                                  : ''}
-                              </th>
-                              <th rowSpan={2}>STRIKE</th>
-                              <th colSpan={3}>BUY</th>
-                              <th colSpan={3}>SELL</th>
-                              <th rowSpan={2}>Realized PnL</th>
-                              <th rowSpan={2}>Account</th>
-                              <th
-                                rowSpan={2}
-                                className="replay-th-sortable"
-                                onClick={e => {
-                                  e.stopPropagation()
-                                  setLedgerOptSort(prev =>
-                                    prev.column === 'trade_date'
-                                      ? {
-                                          column: 'trade_date',
-                                          dir: prev.dir === 'desc' ? 'asc' : 'desc',
-                                        }
-                                      : { column: 'trade_date', dir: 'desc' },
-                                  )
-                                }}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    setLedgerOptSort(prev =>
-                                      prev.column === 'trade_date'
-                                        ? {
-                                            column: 'trade_date',
-                                            dir: prev.dir === 'desc' ? 'asc' : 'desc',
-                                        }
-                                        : { column: 'trade_date', dir: 'desc' },
-                                    )
-                                  }
-                                }}
-                                role="button"
-                                tabIndex={0}
-                                title="Sort by Trade date"
-                              >
-                                Trade date{' '}
-                                {ledgerOptSort.column === 'trade_date'
-                                  ? ledgerOptSort.dir === 'asc'
-                                    ? ' ▲'
-                                    : ' ▼'
-                                  : ''}
-                              </th>
-                            </tr>
-                            <tr>
-                              <th className="replay-th-sub">Size</th>
-                              <th className="replay-th-sub">@</th>
-                              <th className="replay-th-sub">Cost</th>
-                              <th className="replay-th-sub">Size</th>
-                              <th className="replay-th-sub">@</th>
-                              <th className="replay-th-sub">Premium</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {sortedClosedOptionGroups.map(g => {
-                              const uniqueAccounts = Array.from(
-                                new Set(
-                                  (g.trades ?? [])
-                                    .map(t => (t.account_id ?? '').trim())
-                                    .filter(Boolean),
-                                ),
-                              )
-                              const accountLabel =
-                                uniqueAccounts.length === 0
-                                  ? '—'
-                                  : uniqueAccounts.length === 1
-                                    ? uniqueAccounts[0]
-                                    : 'Mix'
-                              const groupKey = getOptGroupKey(g)
-                              const isExpanded = expandedDetailKeys.includes(groupKey)
-                              return (
-                                <tr
-                                  key={groupKey}
-                                  className="replay-opt-group-row"
-                                  onClick={() => toggleDetailExpand(groupKey)}
-                                  role="button"
-                                  tabIndex={0}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                      e.preventDefault()
-                                      toggleDetailExpand(groupKey)
-                                    }
-                                  }}
-                                  aria-expanded={isExpanded}
-                                  aria-label={
-                                    isExpanded
-                                      ? 'Collapse group details'
-                                      : 'Expand group details'
-                                  }
-                                >
-                                  <td className="replay-opt-expand-col">
-                                    <span
-                                      className={`replay-opt-expand-icon ${isExpanded ? 'expanded' : ''}`}
-                                      aria-hidden
-                                    >
-                                      {isExpanded ? '▼' : '▶'}
-                                    </span>
-                                  </td>
-                                                                    <td className="replay-opt-contract">
-                                    {(() => {
-                                      const trades = g.trades ?? []
-                                      const singleAccountState = getInstanceConsistencyState(trades)
-                                      const aggregatedAccountState =
-                                        getAggregatedInstanceConsistencyState(trades)
-                                      const resolvedState =
-                                        new Set(
-                                          trades
-                                            .map(t => (t.account_id ?? '').trim())
-                                            .filter(Boolean),
-                                        ).size <= 1
-                                          ? singleAccountState
-                                          : aggregatedAccountState
-                                      const isSameState = resolvedState === 'same'
-                                      const isDifferentState = resolvedState === 'different'
-                                      const allSameInstance = singleAccountState === 'same'
-                                      const singleInstanceId = allSameInstance
-                                        ? trades.find(t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id))
-                                            ?.strategy_instance_id ?? null
-                                        : null
-                                      const p = getContractLabelParts(g.contract_key)
-                                      const strikeStr =
-                                        g.strike != null ? ` ${g.strike}` : ''
-                                      const instanceIcon =
-                                        resolvedState !== 'none' ? (
-                                          isSameState && singleInstanceId != null ? (
-                                            <a
-                                              href={`#/strategies/instances/${singleInstanceId}`}
-                                              className="ledger-instance-icon-link ledger-instance-icon-link--same"
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              title="Instance consistency is green across accounts (click to open when there is a single shared instance)"
-                                              aria-label="View strategy instance"
-                                              onClick={e => e.stopPropagation()}
-                                            >
-                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <rect x="5" y="5" width="14" height="14" rx="1" />
-                                              </svg>
-                                            </a>
-                                          ) : isSameState ? (
-                                            <span
-                                              className="ledger-instance-icon-link ledger-instance-icon-link--same"
-                                              title="All accounts are consistent on instance assignment (green)"
-                                              aria-label="Instance status is green"
-                                              onClick={e => e.stopPropagation()}
-                                              role="img"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <rect x="5" y="5" width="14" height="14" rx="1" />
-                                              </svg>
-                                            </span>
-                                          ) : isDifferentState ? (
-                                            <span
-                                              className="ledger-instance-icon-link ledger-instance-icon-link--different"
-                                              title="At least one account has different instance IDs in details"
-                                              aria-label="Instance status is red"
-                                              onClick={e => e.stopPropagation()}
-                                              role="img"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <rect x="5" y="5" width="14" height="14" rx="1" />
-                                              </svg>
-                                            </span>
-                                          ) : (
-                                            <span
-                                              className="ledger-instance-icon-link ledger-instance-icon-link--mixed"
-                                              title="At least one account has mixed or missing instance links in details"
-                                              aria-label="Instance status is yellow"
-                                              onClick={e => e.stopPropagation()}
-                                              role="img"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <rect x="5" y="5" width="14" height="14" rx="1" />
-                                              </svg>
-                                            </span>
-                                          )
-                                        ) : null
-                                      return (
-                                        <>
-                                          {instanceIcon}
-                                          {p.symbol ? (
-                                            <>
-                                              <strong>{p.symbol}</strong> {p.rightLabel}
-                                              {strikeStr}
-                                            </>
-                                          ) : (
-                                            g.contract_key
-                                          )}
-                                        </>
-                                      )
-                                    })()}
-                                  </td>
-                                  <td>{fmtExpiry(g.expiry)}</td>
-                                  <td>
-                                    <strong>{fmtUsd(g.strike)}</strong>
-                                  </td>
-                                  <td>{g.buy_volume}</td>
-                                  <td>{fmtUsd(g.buy_avg_price)}</td>
-                                  <td>
-                                    <span className="replay-cost">{fmtUsd(g.buy_cost)}</span>
-                                  </td>
-                                  <td>{g.sell_volume}</td>
-                                  <td>{fmtUsd(g.sell_avg_price)}</td>
-                                  <td>
-                                    <span className="replay-premium">
-                                      {fmtUsd(g.sell_premium)}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <span
-                                      className={
-                                        g.realized_pnl >= 0
-                                          ? 'replay-pnl-realized'
-                                          : 'replay-pnl-detail-negative'
-                                      }
-                                    >
-                                      {fmtUsd0(g.realized_pnl)}
-                                    </span>
-                                  </td>
-                                  <td>{accountLabel}</td>
-                                  <td>
-                                    {(() => {
-                                      const dates = (g.trades ?? [])
-                                        .map(t => t.trade_date)
-                                        .filter(
-                                          (d): d is string =>
-                                            d != null && String(d).trim() !== '',
-                                        )
-                                      if (dates.length === 0) return '—'
-                                      dates.sort()
-                                      return fmtTradeDate(dates[0])
-                                    })()}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                          <tfoot>
-                            <tr className="replay-opt-summary-row">
-                              <td colSpan={10}>Total</td>
-                              <td>
-                                <strong
-                                  className={
-                                    closedOptGroupsPnlSum >= 0
-                                      ? 'replay-pnl-realized'
-                                      : 'replay-pnl-detail-negative'
-                                  }
-                                >
-                                  {fmtUsd0(closedOptGroupsPnlSum)}
-                                </strong>
-                              </td>
-                              <td colSpan={2} />
-                            </tr>
-                          </tfoot>
-                        </table>
+                      <div
+                        className="system-tabs replay-stock-group-tabs"
+                        role="tablist"
+                        aria-label="Closed Option and Open Option"
+                        style={{ marginBottom: '0.5rem' }}
+                      >
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={ledgerOptionSubTab === 'contracts'}
+                          className={`system-tab ${ledgerOptionSubTab === 'contracts' ? 'active' : ''}`}
+                          onClick={() => setLedgerOptionSubTab('contracts')}
+                          disabled={sortedClosedOptionGroups.length === 0}
+                        >
+                          Closed Option
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={ledgerOptionSubTab === 'orphans'}
+                          className={`system-tab ${ledgerOptionSubTab === 'orphans' ? 'active' : ''}`}
+                          onClick={() => setLedgerOptionSubTab('orphans')}
+                          disabled={orphanOptionCount === 0}
+                        >
+                          Open Option ({orphanOptionCount} / {orphanOptionDetailsCount})
+                        </button>
                       </div>
-
-                      {expiredUnrealizedOptionGroups.length > 0 && (
-                        <div className="replay-portfolio-table-wrap replay-portfolio-table-wrap--no-scroll">
-                          <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
-                            Expired but not closed
-                            <InfoTooltip text="These option contracts have expired but net quantity is not zero. This usually means some executions are missing in Trade History; please add the missing trades to close the position." />
-                          </h5>
-                          <table className="table-operations replay-opt-groups">
-                            <thead>
-                              <tr>
-                                <th>Contract</th>
-                                <th>Account</th>
-                                <th>Expiry</th>
-                                <th>STRIKE</th>
-                                <th>Net qty</th>
-                                <th>Trades (side / qty / price / id)</th>
-                                <th>Source</th>
-                                <th>Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {expiredUnrealizedOptionGroups.map(g => {
-                                const p = getContractLabelParts(g.contract_key)
-                                const strikeStr =
-                                  g.strike != null ? ` ${g.strike}` : ''
-                                const tradesSummary = (g.trades ?? [])
-                                  .map(ex => {
-                                    const s = (ex.side ?? '').toUpperCase()
-                                    const sideLabel =
-                                      s === 'BUY' || s === 'BOT' || s === 'B'
-                                        ? 'Buy'
-                                        : s === 'SELL' || s === 'SLD' || s === 'S'
-                                          ? 'Sell'
-                                          : (ex.side ?? '—')
-                                    const q =
-                                      ex.quantity != null ? Number(ex.quantity) : NaN
-                                    const p_ =
-                                      ex.price != null ? Number(ex.price) : NaN
-                                    const idLabel =
-                                      ex.account_executions_id != null ? `#${ex.account_executions_id}` : 'id?'
-                                    const parts: string[] = []
-                                    parts.push(sideLabel)
-                                    if (Number.isFinite(q)) parts.push(String(q))
-                                    if (Number.isFinite(p_)) parts.push(`@${p_}`)
-                                    parts.push(`(${idLabel})`)
-                                    return parts.join(' ')
-                                  })
-                                  .join('; ')
-                                const uniqueSources = Array.from(
-                                  new Set(
-                                    (g.trades ?? [])
-                                      .map(ex => (ex.source ?? '').trim())
-                                      .filter(src => src.length > 0),
-                                  ),
-                                )
-                                const groupKey = getOptGroupKey(g)
-                                const uniqueAccounts = Array.from(
-                                  new Set(
-                                    (g.trades ?? [])
-                                      .map(ex => (ex.account_id ?? '').trim())
-                                      .filter(acc => acc.length > 0),
-                                  ),
-                                )
-                                return (
-                                  <tr key={`expired-${groupKey}`}>
-                                    <td>
-                                      {p.symbol ? (
-                                        <>
-                                          <strong>{p.symbol}</strong> {p.rightLabel}
-                                          {strikeStr}
-                                        </>
-                                      ) : (
-                                        g.contract_key
-                                      )}
-                                    </td>
-                                    <td>
-                                      {uniqueAccounts.length > 0
-                                        ? uniqueAccounts.join(', ')
-                                        : '—'}
-                                    </td>
-                                    <td>{fmtExpiry(g.expiry)}</td>
-                                    <td>
-                                      <strong>{fmtUsd(g.strike)}</strong>
-                                    </td>
-                                    <td>{g.net_qty}</td>
-                                    <td>{tradesSummary || '—'}</td>
-                                    <td>
-                                      {uniqueSources.length > 0
-                                        ? uniqueSources.join(', ')
-                                        : '—'}
-                                    </td>
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="btn btn-small"
-                                        onClick={() => {
-                                          setExpiredCloseKey(groupKey)
-                                        }}
-                                      >
-                                        Close
-                                      </button>
-                                    </td>
-                                  </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
+                      {ledgerOptionSubTab === 'contracts' && (
+                      <LedgerClosedOptionContractsSection
+                        sortedClosedGroups={sortedClosedOptionGroups}
+                        closedExpandedGroups={closedExpandedOptionGroups}
+                        closedPnlSum={closedOptGroupsPnlSum}
+                        detailsTotalPnl={ledgerDetailsTotalPnl}
+                        expandedDetailKeys={expandedDetailKeys}
+                        toggleDetailExpand={toggleDetailExpand}
+                        ledgerOptSort={ledgerOptSort}
+                        setLedgerOptSort={setLedgerOptSort}
+                        onEditExecution={handleEditExecution}
+                        onLinkExecution={handleLinkExecution}
+                        onDeleteExecution={handleDeleteExecution}
+                      />
                       )}
 
-                      <h5 className="replay-sub replay-opt-detail-title page-title-with-tooltip">
-                        Details (per trade)
-                        <InfoTooltip text="Click a closed trade row above to load its execution details." />
-                      </h5>
-                      <table className="table-operations">
-                        <thead>
-                          <tr>
-                            <th>Contract</th>
-                            <th>Expiry</th>
-                            <th>STRIKE</th>
-                            <th>Time</th>
-                            <th>Trade date</th>
-                            <th>Side</th>
-                            <th>Qty</th>
-                            <th>Price</th>
-                            <th>Comm.</th>
-                            <th>PnL</th>
-                            <th>Account</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {expandedDetailKeys.length === 0 ? (
-                            <tr>
-                              <td
-                                colSpan={12}
-                                className="replay-detail-placeholder"
-                              >
-                                Click a closed trade row above to load details
-                              </td>
-                            </tr>
-                          ) : (
-                            sortedClosedOptionGroups
-                              .filter(g =>
-                                expandedDetailKeys.includes(getOptGroupKey(g)),
-                              )
-                              .flatMap(g =>
-                                (g.trades ?? []).map((ex, ti) => {
-                                  const s = (ex.side ?? '').toUpperCase()
-                                  const sideLabel =
-                                    s === 'BUY' || s === 'BOT' || s === 'B'
-                                      ? 'Buy'
-                                      : s === 'SELL' ||
-                                          s === 'SLD' ||
-                                          s === 'S'
-                                        ? 'Sell'
-                                        : (ex.side ?? '—')
-                                  const q = Number(ex.quantity) || 0
-                                  const p = Number(ex.price) || 0
-                                  const c = Number(ex.commission) || 0
-                                  const value = q * p * 100 - c
-                                  const isBuy =
-                                    s === 'BUY' || s === 'BOT' || s === 'B'
-                                  const isSell = !isBuy
-                                  const pnl = isBuy ? -value : value
-                                  // Sell = premium received → show as positive (profit)
-                                  const displayPnl = isSell ? Math.abs(pnl) : pnl
-                                  const pnlClass =
-                                    displayPnl < 0
-                                      ? 'replay-pnl-detail-negative'
-                                      : displayPnl > 0
-                                        ? 'replay-pnl-detail-positive'
-                                        : ''
-                                  return (
-                                    <tr
-                                      key={`${getOptGroupKey(g)}-${ti}-${ex.time ?? ti}`}
-                                    >
-                                      <td>
-                                        {(() => {
-                                          const p_ = getContractLabelParts(
-                                            g.contract_key,
-                                          )
-                                          const strikeStr_ =
-                                            g.strike != null
-                                              ? ` ${g.strike}`
-                                              : ''
-                                          const instanceId = ex.strategy_instance_id
-                                          const instanceLabel = ex.strategy_instance_label?.trim()
-                                          const instanceTitle = instanceLabel
-                                            ? `Instance: ${instanceLabel}`
-                                            : instanceId != null
-                                              ? `View instance #${instanceId}`
-                                              : ''
-                                          return (
-                                            <>
-                                              {instanceId != null && (
-                                                <a
-                                                  href={`#/strategies/instances/${instanceId}`}
-                                                  className="ledger-instance-icon-link"
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  title={instanceTitle}
-                                                  aria-label={instanceTitle || 'View strategy instance'}
-                                                >
-                                                  <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                    <rect x="5" y="5" width="14" height="14" rx="1" />
-                                                  </svg>
-                                                </a>
-                                              )}
-                                              {p_.symbol ? (
-                                                <>
-                                                  <strong>{p_.symbol}</strong>{' '}
-                                                  {p_.rightLabel}
-                                                  {strikeStr_}
-                                                </>
-                                              ) : (
-                                                g.contract_key
-                                              )}
-                                            </>
-                                          )
-                                        })()}
-                                      </td>
-                                      <td>
-                                        {fmtExpiry(ex.expiry ?? g.expiry)}
-                                      </td>
-                                      <td>
-                                        <strong>{fmtUsd(g.strike)}</strong>
-                                      </td>
-                                      <td>
-                                        {ex.time != null
-                                          ? fmtTs(ex.time)
-                                          : '—'}
-                                      </td>
-                                      <td>{fmtTradeDate(ex.trade_date)}</td>
-                                      <td>{sideLabel}</td>
-                                      <td>
-                                        {ex.quantity != null
-                                          ? Number(ex.quantity)
-                                          : '—'}
-                                      </td>
-                                      <td>{fmtUsd(ex.price)}</td>
-                                      <td>
-                                        {fmtUsd(ex.commission ?? 0)}
-                                      </td>
-                                      <td>
-                                        <span className={pnlClass}>
-                                          {fmtUsd(displayPnl)}
-                                        </span>
-                                      </td>
-                                      <td>{ex.account_id ?? '—'}</td>
-                                      <td>
-                                        {ex.account_executions_id != null ? (
-                                          <span className="replay-exec-row-actions">
-                                            <button
-                                              type="button"
-                                              className="btn btn-icon-small"
-                                              onClick={() => {
-                                                setEditExec(ex)
-                                                setPageError(null)
-                                              }}
-                                              title="Edit"
-                                              aria-label="Edit execution"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                              </svg>
-                                            </button>
-                                            <LinkStrategyIconButton
-                                              title="Assign strategy opportunity and instance"
-                                              onClick={() => {
-                                                setLinkContext({
-                                                  account_executions_id:
-                                                    ex.account_executions_id!,
-                                                  execution: ex,
-                                                })
-                                                setLinkModalOpen(true)
-                                                setPageError(null)
-                                              }}
-                                            />
-                                            <button
-                                              type="button"
-                                              className="btn btn-icon-small btn-icon-danger"
-                                              onClick={() => {
-                                                setPageError(null)
-                                                setDeleteConfirmState({
-                                                  open: true,
-                                                  title: 'Delete execution',
-                                                  message:
-                                                    'This will permanently remove this execution from trade history. This cannot be undone.',
-                                                  confirming: false,
-                                                  exec: ex,
-                                                })
-                                              }}
-                                              title="Delete"
-                                              aria-label="Delete execution"
-                                            >
-                                              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                <polyline points="3 6 5 6 21 6" />
-                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                                <line x1="10" y1="11" x2="10" y2="17" />
-                                                <line x1="14" y1="11" x2="14" y2="17" />
-                                              </svg>
-                                            </button>
-                                          </span>
-                                        ) : (
-                                          '—'
-                                        )}
-                                      </td>
-                                    </tr>
-                                  )
-                                }),
-                              )
-                          )}
-                        </tbody>
-                        <tfoot>
-                          <tr>
-                            <td colSpan={9} className="replay-detail-total-label">Total PNL</td>
-                            <td
-                              className={
-                                ledgerDetailsTotalPnl < 0
-                                  ? 'replay-pnl-detail-negative'
-                                  : ledgerDetailsTotalPnl > 0
-                                    ? 'replay-pnl-detail-positive'
-                                    : ''
-                              }
-                            >
-                              <strong>{fmtUsd(ledgerDetailsTotalPnl)}</strong>
-                            </td>
-                            <td colSpan={2} />
-                          </tr>
-                        </tfoot>
-                      </table>
+
+                      {ledgerOptionSubTab === 'orphans' && (
+                        <LedgerOrphanOpenOptionSection
+                          sortedOpenUnrealized={sortedOpenUnrealizedOptionGroups}
+                          expiredUnrealized={expiredUnrealizedOptionGroups}
+                          orphanExpandedGroups={orphanExpandedOptionGroups}
+                          expandedDetailKeys={expandedDetailKeys}
+                          toggleDetailExpand={toggleDetailExpand}
+                          onExpiredCloseClick={key => setExpiredCloseKey(key)}
+                          onEditExecution={handleEditExecution}
+                          onLinkExecution={handleLinkExecution}
+                          onDeleteExecution={handleDeleteExecution}
+                        />
+                      )}
+
                     </>
                   ) : (
                     <p className="section-hint">
-                      No closed option trades under the current filters.
+                      No option trades under the current filters.
                     </p>
                   )}
                 </div>
-              ) : (
+              )}
+              {ledgerTab === 'stocks' && (
                 <div
                   id="replay-panel-stocks"
                   role="tabpanel"
@@ -1444,7 +1344,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                     </td>
                                     <td>{fmtUsd(ex.price)}</td>
                                     <td>{fmtUsd(ex.commission ?? 0)}</td>
-                                    <td>{ex.source ?? '—'}</td>
+                                    <td><ExecSourceBadge source={ex.source} /></td>
                                     <td>
                                       {ex.account_executions_id != null ? (
                                         <span className="replay-exec-row-actions">
@@ -1484,7 +1384,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                                 open: true,
                                                 title: 'Delete execution',
                                                 message:
-                                                  'This will permanently remove this execution from trade history. This cannot be undone.',
+                                                  'This will permanently remove this execution from the trade ledger. This cannot be undone.',
                                                 confirming: false,
                                                 exec: ex,
                                               })
@@ -1583,7 +1483,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                     </td>
                                     <td>{fmtUsd(ex.price)}</td>
                                     <td>{fmtUsd(ex.commission ?? 0)}</td>
-                                    <td>{ex.source ?? '—'}</td>
+                                    <td><ExecSourceBadge source={ex.source} /></td>
                                     <td>
                                       {ex.account_executions_id != null ? (
                                         <span className="replay-exec-row-actions">
@@ -1623,7 +1523,7 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
                                                 open: true,
                                                 title: 'Delete execution',
                                                 message:
-                                                  'This will permanently remove this execution from trade history. This cannot be undone.',
+                                                  'This will permanently remove this execution from the trade ledger. This cannot be undone.',
                                                 confirming: false,
                                                 exec: ex,
                                               })
@@ -1674,11 +1574,12 @@ export function LedgerView({ status, onViewChange: _onViewChange }: LedgerViewPr
         </p>
       )}
       <ExecutionFormModal
-        open={addExecOpen || !!editExec}
+        open={addJournalOpen || !!editExec}
         editExec={editExec}
         accountOptions={executionAccountOptions}
+        createExecutionSource="journal_closed"
         onClose={() => {
-          setAddExecOpen(false)
+          onAddJournalOpenChange(false)
           setEditExec(null)
           setPageError(null)
         }}

@@ -5,6 +5,7 @@ import type {
   ExecutionsResponseWithPairs,
   ExecutionsFreshnessResponse,
   ExecutionsFlexUploadResponse,
+  PositionAttributionResponse,
 } from '../types'
 import { API } from './constants'
 
@@ -69,6 +70,19 @@ export async function postExecutionsFetchFlex(
   }
 }
 
+/** GET /executions/position-attribution: Position×Instance net-estimated attribution. */
+export async function fetchPositionAttribution(
+  account_id?: string,
+  sec_type?: string,
+): Promise<PositionAttributionResponse> {
+  const params = new URLSearchParams()
+  if (account_id) params.set('account_id', account_id)
+  if (sec_type) params.set('sec_type', sec_type)
+  const r = await fetch(`${API}/executions/position-attribution?${params}`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
 /** GET /executions/link-candidates: existing rows to attach strategy (no insert). */
 export async function fetchExecutionLinkCandidates(params: {
   account_id: string
@@ -95,6 +109,7 @@ export async function fetchExecutionLinkCandidates(params: {
   return { executions: (j as { executions?: Execution[] }).executions ?? [], error: (j as { error?: string }).error }
 }
 
+/** source_scope on_the_fly → GET /executions reads account_executions_fly (TWS rows not in final book; excludes BAG). */
 export async function fetchExecutions(
   since_ts?: number,
   until_ts?: number,
@@ -102,6 +117,7 @@ export async function fetchExecutions(
   include_opt_pairs = false,
   strategy_opportunity_id?: number,
   strategy_instance_id?: number,
+  source_scope?: 'performance_book' | 'on_the_fly',
 ): Promise<ExecutionsResponse | ExecutionsResponseWithPairs> {
   const params = new URLSearchParams()
   if (since_ts != null) params.set('since_ts', String(since_ts))
@@ -110,6 +126,7 @@ export async function fetchExecutions(
   if (include_opt_pairs) params.set('include_opt_pairs', 'true')
   if (strategy_opportunity_id != null) params.set('strategy_opportunity_id', String(strategy_opportunity_id))
   if (strategy_instance_id != null) params.set('strategy_instance_id', String(strategy_instance_id))
+  if (source_scope) params.set('source_scope', source_scope)
   const r = await fetch(`${API}/executions?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()

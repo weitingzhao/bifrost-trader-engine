@@ -322,6 +322,40 @@ export interface Execution {
   strategy_instance_opened_at_epoch?: number | null
 }
 
+/** One row from GET /executions/position-attribution: one (position, instance) estimated share. */
+export interface PositionInstanceAttribution {
+  account_id: string
+  contract_key: string
+  symbol: string
+  sec_type: string
+  expiry: string
+  strike: number | null
+  option_right: string
+  position_qty: number
+  avg_cost: number | null
+  price_mid: number | null
+  price_last: number | null
+  strategy_instance_id: number | null
+  strategy_instance_label: string | null
+  strategy_opportunity_id: number | null
+  strategy_opportunity_name: string | null
+  strategy_instance_opened_at_epoch: number | null
+  structure_type: string | null
+  scope_type: string | null
+  strategy_structure_id: number | null
+  open_qty_est: number
+  attribution_ratio: number
+  unrealized_pnl_est: number | null
+  source_exec_count: number
+  is_mixed: boolean
+  has_unassigned: boolean
+  method: string
+}
+
+export interface PositionAttributionResponse {
+  attributions: PositionInstanceAttribution[]
+}
+
 /** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */
 export interface OptExecutionGroup {
   contract_key: string

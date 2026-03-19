@@ -20,6 +20,10 @@ export type OpenOptionPosition = {
   account_id: string
   position?: LivePositionRow
   trades?: Execution[]
+  /** Attribution type for this position row (from position-attribution API). */
+  attribution_type?: 'single' | 'mixed' | 'unassigned'
+  /** Estimated share of position qty attributed to the instance (0–1). */
+  attribution_ratio?: number
 }
 
 export type InstancePositionGroup = {

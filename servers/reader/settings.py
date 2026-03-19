@@ -11,6 +11,8 @@ from src.sink.postgres_sink import _get_conn_params
 
 logger = logging.getLogger(__name__)
 
+_EXEC_READ_TABLE = "account_executions"
+
 _VALID_IB_PORT_TYPES = frozenset(("tws_live", "tws_paper", "gateway"))
 
 
@@ -207,13 +209,13 @@ def get_flex_executions_stats(conn: Any) -> Dict[str, Any]:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) AS count,
                     COUNT(DISTINCT account_id) AS accounts,
                     MIN(exec_time)::date AS min_date,
                     MAX(exec_time)::date AS max_date
-                FROM account_executions
+                FROM {_EXEC_READ_TABLE}
                 WHERE source = %s
                 """,
                 ("flex_trades",),

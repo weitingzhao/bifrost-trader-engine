@@ -37,8 +37,15 @@ export function ExpiredCloseModal({ group, onClose, onSuccess }: ExpiredCloseMod
       <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
         <h3 id="expired-close-modal-title">Close expired option</h3>
         {error && <p className="section-hint replay-form-error">{error}</p>}
+        <p className="section-hint execution-flex-manual-warning" role="alert">
+          <strong>Warning:</strong> If Flex sync is working normally, the missing closing fill will usually appear
+          automatically after the next Flex refresh, which completes the position without a manual journal line.
+          Only use this when you have confirmed Flex will not supply the trade and you need a manual{' '}
+          <code className="performance-inline-code">journal_closed</code> entry to reconcile.
+        </p>
         <p className="section-hint">
-          This will add a closing trade with source = journal_closed for this expired option group.
+          This will add a closing execution with source <code className="performance-inline-code">journal_closed</code>{' '}
+          (stored in the journal execution store) for this expired option group.
         </p>
         <div className="replay-expired-close-summary">
           <div>

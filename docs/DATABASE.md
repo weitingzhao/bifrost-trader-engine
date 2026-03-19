@@ -1054,8 +1054,21 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 
 - **索引**：`(strategy_opportunity_id)`、`(strategy_instance_id)`，便于按策略/实例筛选与 Realized PnL 聚合。
 
-- **读取**：GET /status 的 positions 通过子查询从 account_executions 推导 `strategy_links[]`（DISTINCT strategy_opportunity_id + strategy_instance_id per contract_key），附带 opportunity 名称与 instance label；GET /executions 返回每条成交的 strategy 字段并可按其筛选；GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+- **读取**：GET /status 的 positions 通过子查询从 account_executions 推导 `strategy_links[]`（DISTINCT strategy_opportunity_id + strategy_instance_id per contract_key），附带 opportunity 名称与 instance label；GET /executions 返回每条成交的 strategy 字段并可按其筛选；**GET /performance**（默认 `source_scope=performance_book`）及 Performance 页相关 executions 请求均从 **`account_executions_final`** 视图读取（仅 flex + journal，不含 TWS 补洞行），无需在 SQL 中按 source 过滤；**Trade ledger（Portfolio → Trade ledger）** 的 **Instance** 与 **Options** 两个顶层 Tab 均通过 `GET /executions?source_scope=performance_book` 拉取 **`account_executions_final`** 构建分组（Instance Tab 按 `strategy_instance_id` 是否存在分为 With instance / No instance，前端分组，无新增 API）；前端不对 `source` 做过滤。GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
 - **批量打标**：`PATCH /executions/strategy-attribution`（替代原 `PUT /positions/strategy`）：按 account_id + contract_key 或 execution_ids 批量更新 executions 的 strategy 字段。`PUT /executions/{id}` 支持单条更新。
+
+##### 2.24.11c Position × Instance 归因读模型（净仓近似归因）
+
+- **目的**：一个 `account_positions` 持仓可由多个 `strategy_instance` 的成交组成。本读模型将持仓按实例拆分，输出 `(account_id, contract_key, strategy_instance_id)` 粒度的归因行，替代前端单实例归属逻辑。
+- **方法**：`net_estimated`——按 `(account_id, contract_key, strategy_instance_id)` 从 `account_executions` 聚合净数量贡献（Buy 为正、Sell 为负，与源 QTY 规范化一致），只保留与持仓方向同号的贡献者；按绝对净数量比例分摊 `open_qty_est`、`attribution_ratio`、`unrealized_pnl_est`。
+- **实现**：方案 A（推荐，当前）——在 reader 查询时实时计算（`servers/reader/executions.py → get_position_instance_attribution`），不落表。方案 B（稳定后可选）——定时写入快照表 `position_instance_attribution`。
+- **API**：`GET /executions/position-attribution?account_id=&sec_type=`，返回 `{ attributions: PositionInstanceAttribution[] }`。每行包含：
+  - 位置维度：`account_id`, `contract_key`, `symbol`, `sec_type`, `expiry`, `strike`, `option_right`, `position_qty`
+  - 归因维度：`strategy_instance_id`, `strategy_instance_label`, `strategy_opportunity_id`, `strategy_opportunity_name`, `strategy_instance_opened_at_epoch`, `structure_type`, `scope_type`, `strategy_structure_id`
+  - 估算指标：`open_qty_est`, `attribution_ratio`, `unrealized_pnl_est`, `method="net_estimated"`
+  - 透明度字段：`source_exec_count`, `is_mixed`, `has_unassigned`
+- **前端**：`PositionsPage` 的 Opportunity Sheet 使用归因 API 构建 `instanceGroups` / `instanceAllGroups`，支持同一合约在多个实例下并存展示，并提供 `Attribution` 筛选器（Single / Mixed / Unassigned）。
+- **局限**：净仓近似在频繁开平/滚仓场景存在偏差（与 FIFO lot 引擎相比）。返回的 `method` 字段与 UI 提示 `Estimated attribution (net)` 明确标识估算口径。
 
 ---
 
@@ -1218,6 +1231,8 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | strategy_structure.structure_subtype | §2.24.1 表 strategy_structure 增加列 structure_subtype (text NULL)；covered_call 时存 otm/atm/itm/deep_otm，供 Edit Wizard 还原 Step 2 状态。 | — |
 | 结构类型配置表（方案 A） | 新增 6 张表：strategy_structure_type、strategy_structure_type_leg、strategy_structure_subtype、strategy_structure_subtype_characteristic、strategy_structure_subtype_meta_param、strategy_structure_subtype_rule。由 _ensure_tables 创建；初始数据由 scripts/db_init/seed_structure_type_config.py 写入。§2.24.0、§2.24.0a–f。 | — |
 | 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b）。**account_positions 不存策略归属**（已移除 strategy_opportunity_id、strategy_instance_id 列）；持仓的策略信息通过 account_executions 推导 strategy_links[]。步骤与验收见 PLAN_NEXT_STEPS「策略实例与交易归属」。 | 阶段 3 扩展 |
+| 2026-03-19 Position×Instance 归因读模型 | §2.24.11c：净仓近似归因——GET /executions/position-attribution 将持仓按实例拆分（net_estimated），返回 open_qty_est / attribution_ratio / unrealized_pnl_est / is_mixed / has_unassigned；前端 PositionsPage Opportunity Sheet 改用该 API，同一合约可在多个实例下并存展示；新增 Attribution 筛选器（Single / Mixed / Unassigned）。实时读模型（不落表），见 servers/reader/executions.py。 | 阶段 3 扩展 |
+| 2026-03-19 Executions 分源迁移 | 三张原始源表：`executions_raw_tws`（TWS/manual 源）、`executions_raw_flex`（Flex 源权威成交）、`executions_raw_journal`（journal_closed 人工会计调整）。`account_executions` 为统一只读视图（UNION ALL，Flex 优先覆盖 TWS，Journal 独立流）。**`account_executions_final`**：仅 UNION `executions_raw_flex` + `executions_raw_journal`（不含 TWS 补洞行），列与主键编码规则与全量视图中对应两分支一致。**`account_executions_fly`**：源为 `executions_raw_tws`，`account_executions_id = -(executions_raw_tws_id)`；排除 `sec_type = BAG`（多腿组合占位）；排除在 **`account_executions_final` 中已出现相同 `(account_id, contract_key)`（非空、trim 后相等）** 的 TWS 行。**GET /executions**、**GET /performance** 在 `source_scope=on_the_fly` 时读此视图。回填脚本 `scripts/db_backfill_executions_raw.py`。 | 阶段 3 扩展 |
 
 ---
 

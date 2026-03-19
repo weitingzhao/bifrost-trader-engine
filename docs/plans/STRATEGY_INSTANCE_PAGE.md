@@ -49,7 +49,7 @@
 ## 4. 与现有页面的关系
 
 - **Add Trade**：可选 Strategy/Instance 下拉；本页不替代，补「新建实例」入口后可在此页创建实例再在 Add Trade 中选择。
-- **Trade History（Ledger）**：按 Strategy/Instance 筛选；本页详情中的「成交」可复用相同数据与展示逻辑。
+- **Trade ledger（Ledger）**：按 Strategy/Instance 筛选；本页详情中的「成交」可复用相同数据与展示逻辑。
 - **Performance**：按 Strategy/Instance 筛选；本页详情中的「盈亏」即该 instance 的 Performance 视图。
 - **Accounts**：持仓表展示 Strategy/Instance 列；本页为「实例为中心」的汇总与详情，不替代 Accounts。
 

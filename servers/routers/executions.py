@@ -32,6 +32,10 @@ def get_executions(
     include_opt_pairs: bool = Query(False, description="Include C↔P pairing"),
     strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
     strategy_instance_id: Optional[int] = Query(None, description="Filter by strategy instance ID"),
+    source_scope: Optional[str] = Query(
+        None,
+        description="Optional: all (default, full account_executions) | performance_book (account_executions_final) | on_the_fly (account_executions_fly: TWS not covered by final, no BAG)",
+    ),
 ) -> Dict[str, Any]:
     """Account-level executions/trades (R-A2). If include_opt_pairs=true: returns paired_execution_ids and opt_pairs."""
     reader = request.app.state.reader
@@ -44,6 +48,7 @@ def get_executions(
             limit=effective_limit or 5000,
             strategy_opportunity_id=strategy_opportunity_id,
             strategy_instance_id=strategy_instance_id,
+            source_scope=source_scope,
         )
     items = reader.get_executions(
         since_ts=since_ts,
@@ -52,8 +57,24 @@ def get_executions(
         limit=effective_limit,
         strategy_opportunity_id=strategy_opportunity_id,
         strategy_instance_id=strategy_instance_id,
+        source_scope=source_scope,
     )
     return {"executions": items}
+
+
+@router.get("/executions/position-attribution")
+def get_position_attribution(
+    request: Request,
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    sec_type: Optional[str] = Query(None, description="Filter by sec_type (e.g. OPT, STK)"),
+) -> Dict[str, Any]:
+    """Position × Instance attribution (net-estimated). Returns one row per (position, instance)."""
+    reader = request.app.state.reader
+    items = reader.get_position_instance_attribution(
+        account_id=account_id,
+        sec_type_filter=sec_type,
+    )
+    return {"attributions": items}
 
 
 @router.get("/executions/link-candidates")
@@ -105,12 +126,16 @@ def get_performance(
     granularity: str = Query("day", description="day | week | month"),
     strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
     strategy_instance_id: Optional[int] = Query(None, description="Filter by strategy instance ID"),
+    source_scope: str = Query(
+        "performance_book",
+        description="performance_book (default, account_executions_final) | on_the_fly (account_executions_fly)",
+    ),
     summary_only: bool = Query(
         False,
         description="With strategy_instance_id only: return summary via one SQL aggregate (fast)",
     ),
 ) -> Dict[str, Any]:
-    """Performance stats and calendar PnL from account_executions."""
+    """Performance stats and calendar PnL. Default source_scope=performance_book reads account_executions_final (flex+journal only)."""
     reader = request.app.state.reader
     if summary_only:
         if strategy_instance_id is None:
@@ -133,6 +158,7 @@ def get_performance(
         granularity=granularity,
         strategy_opportunity_id=strategy_opportunity_id,
         strategy_instance_id=strategy_instance_id,
+        source_scope=source_scope,
     )
     return out
 

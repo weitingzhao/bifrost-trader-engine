@@ -4,6 +4,7 @@ Execution/transaction read and preference_position_categories live in executions
 import json
 import logging
 import math
+import os
 import uuid
 from datetime import date, datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,6 +23,28 @@ from servers.reader.accounts_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Logical account_executions_id in unified views → physical raw table + PK (see pg_ddl account_executions / account_executions_final).
+_JOURNAL_ID_OFFSET = 1000000000
+
+
+def _raw_table_pk_for_account_executions_id(account_executions_id: int) -> Tuple[str, str, int]:
+    """
+    Map overlay account_executions_id to the row in executions_raw_flex | executions_raw_tws | executions_raw_journal.
+
+    Encoding (same as account_executions view):
+    - flex:    account_executions_id = executions_raw_flex_id  (> 0)
+    - TWS:     account_executions_id = -executions_raw_tws_id  (negative, > -_JOURNAL_ID_OFFSET)
+    - journal: account_executions_id = -(_JOURNAL_ID_OFFSET + executions_raw_journal_id)  (<= -_JOURNAL_ID_OFFSET)
+
+    Source field (flex_trades / tws_client / journal_closed) follows from which table the row lives in; do not UPDATE the view.
+    """
+    aid = int(account_executions_id)
+    if aid > 0:
+        return ("executions_raw_flex", "executions_raw_flex_id", aid)
+    if aid <= -_JOURNAL_ID_OFFSET:
+        return ("executions_raw_journal", "executions_raw_journal_id", -aid - _JOURNAL_ID_OFFSET)
+    return ("executions_raw_tws", "executions_raw_tws_id", -aid)
 
 
 def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
@@ -51,9 +74,10 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
             if isinstance(extra, dict):
                 for k, v in extra.items():
                     summary[k] = v if isinstance(v, str) else str(v)
+            _exec_tbl = "account_executions"
             with conn.cursor(cursor_factory=RealDictCursor) as cur2:
                 cur2.execute(
-                    """
+                    f"""
                     SELECT
                         ap.account_id,
                         ap.symbol,
@@ -64,7 +88,7 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                         ap.avg_cost,
                         ap.updated_at AS position_updated_at,
                         (SELECT e.exec_time
-                         FROM account_executions e
+                         FROM {_exec_tbl} e
                          WHERE e.account_id = ap.account_id
                            AND (
                              e.contract_key = ap.contract_key
@@ -89,7 +113,7 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                          ORDER BY e.exec_time DESC NULLS LAST
                          LIMIT 1) AS position_exec_time,
                         (SELECT e.trade_date
-                         FROM account_executions e
+                         FROM {_exec_tbl} e
                          WHERE e.account_id = ap.account_id
                            AND (
                              e.contract_key = ap.contract_key
@@ -293,7 +317,7 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                 try:
                     with conn.cursor(cursor_factory=RealDictCursor) as cur_sl:
                         cur_sl.execute(
-                            """
+                            f"""
                             SELECT e.contract_key,
                                    e.strategy_opportunity_id,
                                    e.strategy_instance_id,
@@ -302,7 +326,7 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                             FROM (
                                 SELECT DISTINCT ON (contract_key, strategy_opportunity_id, strategy_instance_id)
                                        contract_key, strategy_opportunity_id, strategy_instance_id
-                                FROM account_executions
+                                FROM {_exec_tbl}
                                 WHERE account_id = %s
                                   AND contract_key = ANY(%s::text[])
                                   AND (strategy_opportunity_id IS NOT NULL OR strategy_instance_id IS NOT NULL)
@@ -379,6 +403,10 @@ def sync_accounts_snapshot_to_db(
     except Exception as e:
         logger.warning("sync_accounts_snapshot_to_db failed: %s", e)
         return False
+# DECOMMISSION: set EXECUTIONS_WRITE_LEGACY=false to stop writing to account_executions.
+_WRITE_LEGACY = os.environ.get("EXECUTIONS_WRITE_LEGACY", "false").strip().lower() != "false"
+
+
 def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any]]) -> bool:
     """R-A2: 写入执行记录到 account_executions；CommissionReport 写入 account_execution_commissions。按 exec_id 去重。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
@@ -498,26 +526,26 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                                         ]
                                     )
 
-                    # 若当前账户下已存在同一 contract_key 且 source=flex_trades，则认为 Flex 已覆盖，
-                    # 不再写入 TWS 侧记录（无论是 tws_client 还是 tws_event），避免重复。
-                    if (
-                        account_id
-                        and contract_key
-                        and (source or "").strip() != "flex_trades"
-                    ):
-                        cur.execute(
-                            """
-                            SELECT 1
-                            FROM account_executions
-                            WHERE account_id = %s
-                              AND contract_key = %s
-                              AND source = 'flex_trades'
-                            LIMIT 1
-                            """,
-                            (account_id, contract_key),
-                        )
-                        if cur.fetchone():
-                            continue
+                    # DECOMMISSION-CANDIDATE: cross-source override check
+                    if _WRITE_LEGACY:
+                        if (
+                            account_id
+                            and contract_key
+                            and (source or "").strip() != "flex_trades"
+                        ):
+                            cur.execute(
+                                """
+                                SELECT 1
+                                FROM account_executions
+                                WHERE account_id = %s
+                                  AND contract_key = %s
+                                  AND source = 'flex_trades'
+                                LIMIT 1
+                                """,
+                                (account_id, contract_key),
+                            )
+                            if cur.fetchone():
+                                continue
                     if exec_time is not None:
                         try:
                             if isinstance(exec_time, (int, float)):
@@ -602,39 +630,85 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                         model,
                         raw_extra,
                     )
-                    if exec_id:
-                        # Flex is authoritative but lagging: when same exec_id exists with source != flex_trades, override in place (keep id).
-                        is_flex = (source == "flex_trades")
-                        if is_flex:
-                            update_set = ", ".join(
-                                f"{c.strip()} = EXCLUDED.{c.strip()}" for c in cols.split(",")
-                            )
-                            cur.execute(
-                                f"""
-                                INSERT INTO account_executions ({cols})
-                                VALUES ({placeholders})
-                                ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != ''
-                                DO UPDATE SET {update_set}
-                                """,
-                                vals,
-                            )
+                    # DECOMMISSION-CANDIDATE: legacy write to account_executions
+                    if _WRITE_LEGACY:
+                        if exec_id:
+                            is_flex = (source == "flex_trades")
+                            if is_flex:
+                                update_set = ", ".join(
+                                    f"{c.strip()} = EXCLUDED.{c.strip()}" for c in cols.split(",")
+                                )
+                                cur.execute(
+                                    f"""
+                                    INSERT INTO account_executions ({cols})
+                                    VALUES ({placeholders})
+                                    ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != ''
+                                    DO UPDATE SET {update_set}
+                                    """,
+                                    vals,
+                                )
+                            else:
+                                cur.execute(
+                                    f"""
+                                    INSERT INTO account_executions ({cols})
+                                    VALUES ({placeholders})
+                                    ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                                    """,
+                                    vals,
+                                )
                         else:
                             cur.execute(
                                 f"""
                                 INSERT INTO account_executions ({cols})
                                 VALUES ({placeholders})
-                                ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
                                 """,
                                 vals,
                             )
-                    else:
-                        cur.execute(
-                            f"""
-                            INSERT INTO account_executions ({cols})
-                            VALUES ({placeholders})
-                            """,
-                            vals,
-                        )
+
+                    # ── Dual-write to source-split raw tables ──
+                    try:
+                        is_flex_source = (source == "flex_trades")
+                        is_journal_source = (source == "journal_closed")
+                        if is_flex_source:
+                            raw_table = "executions_raw_flex"
+                        elif is_journal_source:
+                            raw_table = "executions_raw_journal"
+                        else:
+                            raw_table = "executions_raw_tws"
+                        if exec_id:
+                            if is_flex_source:
+                                raw_update_set = ", ".join(
+                                    f"{c.strip()} = EXCLUDED.{c.strip()}" for c in cols.split(",")
+                                )
+                                cur.execute(
+                                    f"""
+                                    INSERT INTO {raw_table} ({cols})
+                                    VALUES ({placeholders})
+                                    ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != ''
+                                    DO UPDATE SET {raw_update_set}
+                                    """,
+                                    vals,
+                                )
+                            else:
+                                cur.execute(
+                                    f"""
+                                    INSERT INTO {raw_table} ({cols})
+                                    VALUES ({placeholders})
+                                    ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                                    """,
+                                    vals,
+                                )
+                        else:
+                            cur.execute(
+                                f"""
+                                INSERT INTO {raw_table} ({cols})
+                                VALUES ({placeholders})
+                                """,
+                                vals,
+                            )
+                    except Exception:
+                        pass  # raw tables may not exist on older DBs
+
                     commission = r.get("commission")
                     realized_pnl = r.get("realized_pnl")
                     currency = r.get("currency")
@@ -770,8 +844,9 @@ def update_execution_commission(
 
 
 def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[int]:
-    """R-A2 扩展：手动添加一条执行记录（历史补录）。返回新行 account_executions_id，失败返回 None。
-    body: account_id, time(Unix s), symbol, sec_type, side, quantity, price; 可选 source('manual'), exec_id, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key; 可选 commission, realized_pnl, currency。
+    """R-A2 扩展：手动添加一条执行记录（历史补录）。返回新行 account_executions_id（与 account_executions 视图一致），失败返回 None。
+    body: account_id, time(Unix s), symbol, sec_type, side, quantity, price; 可选 source('manual'|'journal_closed'), …
+    source='journal_closed' 时仅写入 executions_raw_journal，返回 -(1e9 + executions_raw_journal_id)。
     若未提供 exec_id 则生成 manual_<uuid> 以便可写 commission 表。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return None
@@ -819,12 +894,40 @@ def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[
                 cols = "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra, strategy_opportunity_id, strategy_instance_id"
                 placeholders = "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
                 vals = (account_id, exec_id, exec_dt, symbol, sec_type, side, quantity, price, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, raw_extra, strategy_opportunity_id, strategy_instance_id)
-                cur.execute(
-                    f"INSERT INTO account_executions ({cols}) VALUES ({placeholders}) RETURNING account_executions_id",
-                    vals,
-                )
-                row = cur.fetchone()
-                new_id = row[0] if row else None
+                new_id = None
+                # account_executions is a read-only UNION view: journal rows must be inserted into executions_raw_journal only.
+                if source == "journal_closed":
+                    cur.execute(
+                        f"""
+                        INSERT INTO executions_raw_journal ({cols}, legacy_account_executions_id)
+                        VALUES ({placeholders}, NULL)
+                        RETURNING executions_raw_journal_id
+                        """,
+                        vals,
+                    )
+                    row = cur.fetchone()
+                    raw_jid = row[0] if row else None
+                    if raw_jid is not None:
+                        new_id = -(1000000000 + int(raw_jid))
+                else:
+                    cur.execute(
+                        f"INSERT INTO account_executions ({cols}) VALUES ({placeholders}) RETURNING account_executions_id",
+                        vals,
+                    )
+                    row = cur.fetchone()
+                    new_id = row[0] if row else None
+                    _raw_tbl = "executions_raw_tws"
+                    try:
+                        cur.execute(
+                            f"""
+                            INSERT INTO {_raw_tbl} ({cols}, legacy_account_executions_id)
+                            VALUES ({placeholders}, %s)
+                            ON CONFLICT (exec_id) WHERE exec_id IS NOT NULL AND exec_id != '' DO NOTHING
+                            """,
+                            vals + (new_id,),
+                        )
+                    except Exception:
+                        pass
                 commission = body.get("commission")
                 realized_pnl = body.get("realized_pnl")
                 currency = body.get("currency")
@@ -979,10 +1082,10 @@ def upsert_account_transactions(status_config: dict, rows: List[Dict[str, Any]])
 
 
 def update_one_execution(status_config: dict, account_executions_id: int, body: Dict[str, Any]) -> bool:
-    """R-A2 扩展：按 account_executions_id 更新一条执行记录（手动修正）。body 可含任意子集：time, symbol, sec_type, side, quantity, price, account_id, source, expiry, strike, option_right, exchange, order_id, cum_qty, contract_key; 以及 commission, realized_pnl, currency（写 account_execution_commissions，以该行 exec_id 关联；若无 exec_id 则设为 manual_<account_executions_id> 再写入）。"""
+    """R-A2 扩展：按 account_executions_id 更新一条执行记录（手动修正）。写入物理表 executions_raw_flex / executions_raw_tws / executions_raw_journal（与 account_executions 视图编码一致）；不可 UPDATE 联合视图本身。body 可含任意子集：time, symbol, … strategy_opportunity_id, strategy_instance_id；以及 commission, realized_pnl, currency（写 account_execution_commissions）。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
-    # 可更新列（account_executions）
+    # 可更新列（与 raw 表一致）
     exec_cols = ("exec_time", "symbol", "sec_type", "side", "quantity", "price", "account_id", "source", "expiry", "strike", "option_right", "exchange", "order_id", "cum_qty", "contract_key", "strategy_opportunity_id", "strategy_instance_id")
     commission_keys = ("commission", "realized_pnl", "currency")
     updates: List[str] = []
@@ -1007,7 +1110,8 @@ def update_one_execution(status_config: dict, account_executions_id: int, body: 
             v = json.dumps(v) if v else None
         updates.append(f'"{k}" = %s')
         values.append(v)
-    values.append(account_executions_id)
+    raw_tbl, pk_col, pk_val = _raw_table_pk_for_account_executions_id(account_executions_id)
+    values.append(pk_val)
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -1015,20 +1119,32 @@ def update_one_execution(status_config: dict, account_executions_id: int, body: 
             with conn.cursor() as cur:
                 if updates:
                     cur.execute(
-                        "UPDATE account_executions SET " + ", ".join(updates) + " WHERE account_executions_id = %s",
+                        f"UPDATE {raw_tbl} SET " + ", ".join(updates) + f" WHERE {pk_col} = %s",
                         values,
                     )
                     if cur.rowcount == 0:
                         conn.rollback()
+                        logger.warning(
+                            "update_one_execution: no row in %s for %s=%s (account_executions_id=%s)",
+                            raw_tbl,
+                            pk_col,
+                            pk_val,
+                            account_executions_id,
+                        )
                         return False
-                # commission 相关
+                elif not any(k in body for k in commission_keys):
+                    return False
+                # commission 相关（exec_id 从物理表读取）
                 if any(k in body for k in commission_keys):
-                    cur.execute("SELECT exec_id FROM account_executions WHERE account_executions_id = %s", (account_executions_id,))
+                    cur.execute(f"SELECT exec_id FROM {raw_tbl} WHERE {pk_col} = %s", (pk_val,))
                     row = cur.fetchone()
                     exec_id = row[0] if row and row[0] and str(row[0]).strip() else None
                     if not exec_id:
                         exec_id = "manual_" + str(account_executions_id)
-                        cur.execute("UPDATE account_executions SET exec_id = %s WHERE account_executions_id = %s", (exec_id, account_executions_id))
+                        cur.execute(
+                            f'UPDATE {raw_tbl} SET exec_id = %s WHERE {pk_col} = %s',
+                            (exec_id, pk_val),
+                        )
                     comm = body.get("commission")
                     pnl = body.get("realized_pnl")
                     cur_ = body.get("currency")
@@ -1053,20 +1169,21 @@ def update_one_execution(status_config: dict, account_executions_id: int, body: 
 
 
 def delete_one_execution(status_config: dict, account_executions_id: int) -> bool:
-    """R-A2 扩展：按 account_executions_id 删除一条执行记录。先删 account_execution_commissions 中关联的 exec_id，再删 account_executions。"""
+    """R-A2 扩展：按 account_executions_id 删除一条执行记录。删除物理表行（与 account_executions 视图编码一致），并清理 account_execution_commissions。"""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
+    raw_tbl, pk_col, pk_val = _raw_table_pk_for_account_executions_id(account_executions_id)
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT exec_id FROM account_executions WHERE account_executions_id = %s", (account_executions_id,))
+                cur.execute(f"SELECT exec_id FROM {raw_tbl} WHERE {pk_col} = %s", (pk_val,))
                 row = cur.fetchone()
                 exec_id = row[0] if row and row[0] and str(row[0]).strip() else None
                 if exec_id:
                     cur.execute("DELETE FROM account_execution_commissions WHERE exec_id = %s", (exec_id,))
-                cur.execute("DELETE FROM account_executions WHERE account_executions_id = %s", (account_executions_id,))
+                cur.execute(f"DELETE FROM {raw_tbl} WHERE {pk_col} = %s", (pk_val,))
                 if cur.rowcount == 0:
                     conn.rollback()
                     return False
@@ -1087,35 +1204,43 @@ def batch_update_execution_strategy(
     strategy_opportunity_id: Optional[int],
     strategy_instance_id: Optional[int],
 ) -> int:
-    """Batch update strategy attribution on account_executions.
-    Either by contract_key (all matching executions) or by explicit execution_ids list.
-    Returns the number of rows updated."""
+    """Batch update strategy attribution on raw execution tables (not the account_executions union view).
+    Either by contract_key (all matching rows in each raw table) or by explicit account_executions_id list."""
     if not conn or not (account_id or "").strip():
         return 0
     acc = str(account_id).strip()
+    count = 0
     try:
         with conn.cursor() as cur:
             if execution_ids:
-                cur.execute(
-                    """
-                    UPDATE account_executions
-                    SET strategy_opportunity_id = %s, strategy_instance_id = %s
-                    WHERE account_id = %s AND account_executions_id = ANY(%s::bigint[])
-                    """,
-                    (strategy_opportunity_id, strategy_instance_id, acc, execution_ids),
-                )
+                for eid in execution_ids:
+                    try:
+                        raw_tbl, pk_col, pk_val = _raw_table_pk_for_account_executions_id(int(eid))
+                    except (TypeError, ValueError):
+                        continue
+                    cur.execute(
+                        f"""
+                        UPDATE {raw_tbl}
+                        SET strategy_opportunity_id = %s, strategy_instance_id = %s
+                        WHERE account_id = %s AND {pk_col} = %s
+                        """,
+                        (strategy_opportunity_id, strategy_instance_id, acc, pk_val),
+                    )
+                    count += cur.rowcount
             elif contract_key and contract_key.strip():
-                cur.execute(
-                    """
-                    UPDATE account_executions
-                    SET strategy_opportunity_id = %s, strategy_instance_id = %s
-                    WHERE account_id = %s AND contract_key = %s
-                    """,
-                    (strategy_opportunity_id, strategy_instance_id, acc, contract_key.strip()),
-                )
+                ck = contract_key.strip()
+                for raw_tbl in ("executions_raw_tws", "executions_raw_flex", "executions_raw_journal"):
+                    cur.execute(
+                        f"""
+                        UPDATE {raw_tbl}
+                        SET strategy_opportunity_id = %s, strategy_instance_id = %s
+                        WHERE account_id = %s AND contract_key = %s
+                        """,
+                        (strategy_opportunity_id, strategy_instance_id, acc, ck),
+                    )
+                    count += cur.rowcount
             else:
                 return 0
-            count = cur.rowcount
         conn.commit()
         return count
     except Exception as e:

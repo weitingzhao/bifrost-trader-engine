@@ -4,6 +4,7 @@ import type { BackendOptPair } from '../types'
 import type { StrategyOpportunity } from '../api'
 import type { StrategyInstance } from '../types'
 import { fetchExecutions, fetchPerformance, fetchOpportunities, fetchStrategyInstances } from '../api'
+import ExecSourceBadge from '../components/ExecSourceBadge'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
 import {
@@ -58,6 +59,11 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   const [strategyInstanceId, setStrategyInstanceId] = useState<number | null>(null)
   const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
   const [instances, setInstances] = useState<StrategyInstance[]>([])
+  const [onTheFlyOpen, setOnTheFlyOpen] = useState(false)
+  const [onTheFlyPerf, setOnTheFlyPerf] = useState<PerformanceResponse | null>(null)
+  const [onTheFlyExecs, setOnTheFlyExecs] = useState<Execution[]>([])
+  const [onTheFlyLoading, setOnTheFlyLoading] = useState(false)
+  const [onTheFlyError, setOnTheFlyError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchOpportunities(true)
@@ -101,6 +107,49 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   useEffect(() => {
     load()
   }, [load])
+
+  const loadOnTheFly = useCallback(async () => {
+    setOnTheFlyLoading(true)
+    setOnTheFlyError(null)
+    const { sinceStr, untilStr } = getTimeRangeDates(timeRange, calendarMonth)
+    const { since_ts } = getChicagoDayRange(sinceStr)
+    const { until_ts } = getChicagoDayRange(untilStr)
+    try {
+      const [perf, exRes] = await Promise.all([
+        fetchPerformance({
+          since_ts,
+          until_ts,
+          granularity: 'day',
+          strategy_opportunity_id: strategyOpportunityId ?? undefined,
+          strategy_instance_id: strategyInstanceId ?? undefined,
+          source_scope: 'on_the_fly',
+        }),
+        fetchExecutions(
+          since_ts,
+          until_ts,
+          5000,
+          false,
+          strategyOpportunityId ?? undefined,
+          strategyInstanceId ?? undefined,
+          'on_the_fly',
+        ),
+      ])
+      setOnTheFlyPerf(perf)
+      const raw = exRes.executions ?? []
+      setOnTheFlyExecs([...raw].sort((a, b) => sortExecByTradeDateThenTime(a, b)).reverse())
+    } catch (e) {
+      setOnTheFlyError(e instanceof Error ? e.message : 'Failed to load on-the-fly data')
+      setOnTheFlyPerf(null)
+      setOnTheFlyExecs([])
+    } finally {
+      setOnTheFlyLoading(false)
+    }
+  }, [timeRange, calendarMonth, strategyOpportunityId, strategyInstanceId])
+
+  useEffect(() => {
+    if (!onTheFlyOpen) return
+    void loadOnTheFly()
+  }, [onTheFlyOpen, loadOnTheFly])
 
   // By day: default all months collapsed (do not auto-expand current month)
   // useEffect that auto-expanded calendarMonth removed so newest month is not expanded by default
@@ -340,7 +389,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           {' / Performance'}
         </h2>
         <p className="performance-page-subtitle">
-          Track realized and unrealized PnL with daily drill-downs.
+          Track realized and unrealized PnL with daily drill-downs. Charts and aggregates above use Flex Trades and journal-closed executions only.
         </p>
         <section className="performance-time-range-block performance-pane" aria-label="Time range and daily statistics">
         <div className="performance-filters performance-filters-inline">
@@ -546,15 +595,8 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           )
         })()}
         </section>
-      </section>
 
-      {error && (
-        <div className="card card-error" role="alert">
-          <p>{error}</p>
-        </div>
-      )}
-
-      <section className="card performance-calendar-section" aria-label="Calendar">
+      <section className="performance-calendar-section performance-pane" aria-label="Calendar">
         <h3 className="card-subtitle page-title-with-tooltip">
           Calendar
           <InfoTooltip text="Daily Option Realized and Unrealized in calendar form." />
@@ -1200,6 +1242,106 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           <p className="section-hint">Select time range above and load data to see calendar.</p>
         )}
       </section>
+
+      <section className="performance-on-the-fly-section performance-pane" aria-label="On the fly executions">
+        <div className="performance-on-the-fly-header">
+          <h3 className="card-title performance-on-the-fly-title">On the fly</h3>
+          <button
+            type="button"
+            className="btn btn-secondary performance-on-the-fly-toggle"
+            aria-expanded={onTheFlyOpen}
+            onClick={() => setOnTheFlyOpen((o) => !o)}
+          >
+            {onTheFlyOpen ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        <p className="section-hint performance-on-the-fly-hint">
+          TWS-side executions that are not already covered by the official book (same account and contract as a row in
+          the Flex/Journal ledger). Option combo legs (<code className="performance-inline-code">BAG</code>) are
+          omitted. Same time range and strategy filters as above.
+        </p>
+        {onTheFlyOpen && (
+          <>
+            {onTheFlyLoading && <p className="section-hint">Loading…</p>}
+            {onTheFlyError && <p className="section-hint tone-negative">{onTheFlyError}</p>}
+            {!onTheFlyLoading && !onTheFlyError && onTheFlyPerf?.summary != null && (
+              <div className="performance-on-the-fly-summary" aria-label="On the fly summary">
+                <span className="performance-on-the-fly-summary-kv">
+                  Trades <strong>{onTheFlyPerf.summary.trade_count ?? 0}</strong>
+                </span>
+                <span className="performance-on-the-fly-summary-kv">
+                  Net PnL{' '}
+                  <strong className={(() => {
+                    const n = onTheFlyPerf.summary.net_pnl ?? 0
+                    if (Math.abs(n) < 0.005) return ''
+                    return n >= 0 ? 'tone-positive' : 'tone-negative'
+                  })()}>{fmtPnl(onTheFlyPerf.summary.net_pnl ?? 0)}</strong>
+                </span>
+                <span className="performance-on-the-fly-summary-kv">
+                  Realized <strong>{fmtPnl(onTheFlyPerf.summary.total_realized_pnl ?? 0)}</strong>
+                </span>
+                <span className="performance-on-the-fly-summary-kv">
+                  Commission <strong>{fmtUsd(onTheFlyPerf.summary.total_commission ?? 0)}</strong>
+                </span>
+              </div>
+            )}
+            {!onTheFlyLoading && !onTheFlyError && onTheFlyExecs.length === 0 && (
+              <p className="section-hint">No on-the-fly executions in this range.</p>
+            )}
+            {!onTheFlyLoading && onTheFlyExecs.length > 0 && (
+              <div className="table-wrap performance-on-the-fly-table-wrap">
+                <table className="data-table performance-on-the-fly-table">
+                  <thead>
+                    <tr>
+                      <th>Execution ID</th>
+                      <th>Trade date</th>
+                      <th>Time</th>
+                      <th>Account</th>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th>Qty</th>
+                      <th>Price</th>
+                      <th>Source</th>
+                      <th>Realized PnL</th>
+                      <th>Commission</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {onTheFlyExecs.map((e) => {
+                      const rp = e.realized_pnl
+                      const rpNum = rp != null && typeof rp === 'number' && Number.isFinite(rp) ? rp : null
+                      return (
+                        <tr key={e.account_executions_id ?? `${e.account_id}-${e.time}-${e.symbol}`}>
+                          <td>{e.account_executions_id ?? '—'}</td>
+                          <td>{e.trade_date?.trim() || '—'}</td>
+                          <td>{fmtChicagoTime(e.time)}</td>
+                          <td>{e.account_id ?? '—'}</td>
+                          <td>{e.symbol ?? '—'}</td>
+                          <td>{e.side ?? '—'}</td>
+                          <td>{e.quantity ?? '—'}</td>
+                          <td>{fmtUsd(e.price)}</td>
+                          <td><ExecSourceBadge source={e.source} /></td>
+                          <td className={rpNum == null ? '' : rpNum >= 0 ? 'tone-positive' : 'tone-negative'}>
+                            {rpNum == null ? '—' : fmtPnl(rpNum)}
+                          </td>
+                          <td>{fmtUsd(e.commission)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+      </section>
+
+      {error && (
+        <div className="card card-error" role="alert">
+          <p>{error}</p>
+        </div>
+      )}
     </div>
   )
 }

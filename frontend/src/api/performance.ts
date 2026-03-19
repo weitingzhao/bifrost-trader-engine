@@ -14,6 +14,8 @@ export async function fetchPerformance(params?: {
   granularity?: 'day' | 'week' | 'month'
   strategy_opportunity_id?: number
   strategy_instance_id?: number
+  /** Omit or performance_book (default) = account_executions_final; on_the_fly = account_executions_fly */
+  source_scope?: 'performance_book' | 'on_the_fly'
   /** Instance Detail: one aggregate query instead of full calendar curve */
   summary_only?: boolean
 }): Promise<PerformanceResponse> {
@@ -24,6 +26,7 @@ export async function fetchPerformance(params?: {
   if (params?.granularity) search.set('granularity', params.granularity)
   if (params?.strategy_opportunity_id != null) search.set('strategy_opportunity_id', String(params.strategy_opportunity_id))
   if (params?.strategy_instance_id != null) search.set('strategy_instance_id', String(params.strategy_instance_id))
+  if (params?.source_scope) search.set('source_scope', params.source_scope)
   if (params?.summary_only) search.set('summary_only', 'true')
   const r = await fetch(`${API}/performance?${search}`)
   if (!r.ok) throw new Error(r.statusText)

@@ -52,6 +52,8 @@ interface ExecutionFormModalProps {
   accountOptions: string[]
   /** When opening Add (no editExec), merge into form after defaults. Cleared when modal closes. */
   initialDraft?: Partial<ExecutionFormState> | null
+  /** Create payload source; journal_closed is stored in executions_raw_journal (Trade ledger manual journal). */
+  createExecutionSource?: 'journal_closed' | 'manual'
   onClose: () => void
   onSuccess: () => void | Promise<void>
 }
@@ -61,6 +63,7 @@ export function ExecutionFormModal({
   editExec,
   accountOptions,
   initialDraft = null,
+  createExecutionSource = 'manual',
   onClose,
   onSuccess,
 }: ExecutionFormModalProps) {
@@ -147,7 +150,15 @@ export function ExecutionFormModal({
       aria-labelledby="exec-modal-title"
     >
       <div className="modal-panel replay-exec-modal" onClick={e => e.stopPropagation()}>
-        <h3 id="exec-modal-title">{editExec ? 'Edit execution' : 'Add history'}</h3>
+        <h3 id="exec-modal-title">
+          {editExec ? 'Edit execution' : createExecutionSource === 'journal_closed' ? 'Add journal' : 'Add history'}
+        </h3>
+        {!editExec && createExecutionSource === 'journal_closed' && (
+          <p className="section-hint execution-flex-manual-warning" role="alert">
+            Manual journal entry: stored as <code className="performance-inline-code">journal_closed</code> in the journal
+            execution store. Use only when IB / Flex cannot supply the fill (e.g. reconciliation or expired exercise).
+          </p>
+        )}
         {execFormError && <p className="section-hint replay-form-error">{execFormError}</p>}
         <form
           className="replay-exec-form"
@@ -219,7 +230,7 @@ export function ExecutionFormModal({
                 side: sideUpper,
                 quantity: quantityForDb,
                 price: p,
-                source: 'manual',
+                source: createExecutionSource === 'journal_closed' ? 'journal_closed' : 'manual',
                 expiry: execForm.expiry.trim() || undefined,
                 strike: execForm.strike ? Number(execForm.strike) : undefined,
                 option_right: execForm.option_right || undefined,
@@ -377,7 +388,7 @@ export function ExecutionFormModal({
               Cancel
             </button>
             <button type="submit" className="btn btn-primary">
-              {editExec ? 'Save' : 'Add'}
+              {editExec ? 'Save' : createExecutionSource === 'journal_closed' ? 'Add journal' : 'Add'}
             </button>
           </div>
         </form>

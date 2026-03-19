@@ -3,6 +3,7 @@ import type { Execution } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
 import { createStrategyInstance, fetchOpportunities, fetchStrategyInstances, updateExecution } from '../../api'
+import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { fmtDate, fmtUsd, getContractLabelParts } from '../../utils/format'
 
 export interface LinkExecutionContext {
@@ -223,7 +224,7 @@ export function LinkExecutionRecordModal({ open, context, onClose, onSuccess }: 
         {ex ? (
           <p className="section-hint replay-muted" style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
             {eTs != null && Number.isFinite(eTs) ? `${fmtDate(eTs)} · ` : ''}
-            {ex.side ?? '—'} {ex.quantity ?? '—'} @ {ex.price != null ? fmtUsd(Number(ex.price)) : '—'} · {ex.source ?? '—'}
+            {ex.side ?? '—'} {ex.quantity ?? '—'} @ {ex.price != null ? fmtUsd(Number(ex.price)) : '—'} · <ExecSourceBadge source={ex.source} />
           </p>
         ) : null}
         {formError ? <p className="section-hint replay-form-error">{formError}</p> : null}

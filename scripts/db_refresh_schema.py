@@ -17,35 +17,18 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)
 
-# Category order (1–12). Tables are reported in this order.
-CATEGORY_ORDER = [
-    "account",
-    "contract",
-    "daemon",
-    "gate_safety",
-    "job",
-    "option",
-    "preference",
-    "reference",
-    "settings",
-    "stock",
-    "strategy",
-    "watchlist",
-]
-
-# Expected tables by category (canonical list). Used to report counts and missing tables.
+# Expected schema objects by category (canonical list).
+# NOTE: `account_executions`, `account_executions_final`, and `account_executions_fly` are VIEWs.
 EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     "account": [
         "account",
-        "account_execution_commissions",
-        "account_executions",
         "account_positions",
         "account_transactions",
     ],
@@ -58,6 +41,15 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
         "daemon_heartbeat",
         "daemon_open_orders",
         "daemon_run_status",
+    ],
+    "execution": [
+        "account_execution_commissions",
+        "account_executions",
+        "account_executions_final",
+        "account_executions_fly",
+        "executions_raw_flex",
+        "executions_raw_journal",
+        "executions_raw_tws",
     ],
     "gate_safety": [
         "gate_safety_guard",
@@ -96,6 +88,9 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     ],
     "watchlist": ["watchlist"],
 }
+
+# Category order is alphabetical.
+CATEGORY_ORDER = sorted(EXPECTED_TABLES_BY_CATEGORY.keys())
 
 # Table -> category (for logging during _ensure_tables)
 TABLE_TO_CATEGORY: Dict[str, str] = {
@@ -203,41 +198,45 @@ def main() -> int:
     try:
         _progress("Running _ensure_tables (if it hangs, the last table in progress holds the lock).", no_color)
         tables_by_category: Dict[str, List[Tuple[str, str]]] = {c: [] for c in CATEGORY_ORDER}
-        last_cat: List[Optional[str]] = [None]
-
-        def step_for_category(cat: str) -> None:
-            idx = CATEGORY_ORDER.index(cat) + 1 if cat in CATEGORY_ORDER else 0
-            label = f"{idx}. {cat}" if idx else cat
-            _step(f"Category {label}", no_color)
-
-        def flush_category(cat: str) -> None:
-            items = tables_by_category.get(cat, [])
-            if not items:
-                return
-            step_for_category(cat)
-            for table_name, purpose in items:
-                _log_table(table_name, purpose, no_color)
 
         def log_table_by_category(table_name: str, purpose: str) -> None:
             cat = TABLE_TO_CATEGORY.get(table_name, "other")
             if cat not in tables_by_category:
                 tables_by_category[cat] = []
-            if last_cat[0] is not None and cat != last_cat[0]:
-                flush_category(last_cat[0])
             tables_by_category[cat].append((table_name, purpose))
-            last_cat[0] = cat
 
         def step_log(msg: str) -> None:
             _step(msg, no_color)
 
         _ensure_tables(conn, log=step_log, log_table=log_table_by_category)
-        if last_cat[0] is not None:
-            flush_category(last_cat[0])
         conn.commit()
 
+        # Print DDL touched objects grouped by category in alphabetical order.
+        print("", file=sys.stderr)
+        print(_c(no_color, BOLD + GREEN, "═══ DDL touch log (alphabetical) ═══"), file=sys.stderr)
+        for i, cat in enumerate(CATEGORY_ORDER, start=1):
+            items = sorted(tables_by_category.get(cat, []), key=lambda x: x[0])
+            if not items:
+                continue
+            _step(f"Category {i}. {cat}", no_color)
+            for table_name, purpose in items:
+                _log_table(table_name, purpose, no_color)
+
         total_expected = sum(len(tables) for tables in EXPECTED_TABLES_BY_CATEGORY.values())
-        total_updated = 0
+        total_present = 0
         missing_all: List[str] = []
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.relname, c.relkind
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = current_schema()
+                  AND c.relkind IN ('r', 'v')
+                """
+            )
+            relkind_map = {r[0]: r[1] for r in cur.fetchall()}
 
         print("", file=sys.stderr)
         print(_c(no_color, BOLD + GREEN, "═══ Schema refreshed ═══"), file=sys.stderr)
@@ -246,39 +245,45 @@ def main() -> int:
         for i, cat in enumerate(CATEGORY_ORDER, start=1):
             expected_list = EXPECTED_TABLES_BY_CATEGORY.get(cat, [])
             expected_count = len(expected_list)
-            updated_list = [name for name, _ in tables_by_category.get(cat, [])]
-            updated_count = len(updated_list)
-            total_updated += updated_count
-            missing = [t for t in expected_list if t not in updated_list]
+            present_list = [t for t in expected_list if t in relkind_map]
+            present_count = len(present_list)
+            total_present += present_count
+            missing = [t for t in expected_list if t not in relkind_map]
             missing_all.extend(missing)
 
             if expected_count == 0:
                 continue
             cat_header = _c(no_color, BOLD + CYAN, f"  {i:2}. {cat}")
             line = f"{cat_header}: {expected_count} table(s) in category"
-            if updated_count == expected_count:
-                line += _c(no_color, GREEN, f", {updated_count} updated")
-                line += f"  {_c(no_color, DIM, '--')} {', '.join(updated_list)}"
+            if present_count == expected_count:
+                line += _c(no_color, GREEN, f", {present_count} present")
             else:
-                line += _c(no_color, YELLOW, f", {updated_count} updated")
+                line += _c(no_color, YELLOW, f", {present_count} present")
                 if missing:
                     line += _c(no_color, RED, f", {len(missing)} missing ({', '.join(missing)})")
-                line += f"  {_c(no_color, DIM, '--')} updated: {', '.join(updated_list)}"
+            detail = ", ".join(
+                f"{name}[{'view' if relkind_map.get(name) == 'v' else 'table'}]"
+                for name in sorted(present_list)
+            )
+            if detail:
+                line += f"  {_c(no_color, DIM, '--')} {detail}"
             print(line, file=sys.stderr)
 
         others = [name for name, _ in tables_by_category.get("other", [])]
         if others:
-            total_updated += len(others)
-            print(f"     {_c(no_color, DIM, 'other')}: {len(others)} table(s)  -- {', '.join(others)}", file=sys.stderr)
+            print(
+                f"     {_c(no_color, DIM, 'other')}: {len(others)} object(s)  -- {', '.join(sorted(others))}",
+                file=sys.stderr,
+            )
 
         print("", file=sys.stderr)
         sep = _c(no_color, BOLD, "────────────────────────────────────────")
         print(sep, file=sys.stderr)
         total_line = _c(no_color, BOLD, "  Total: ")
         total_line += _c(no_color, CYAN, f"{total_expected}")
-        total_line += " table(s) expected, "
-        total_line += _c(no_color, GREEN, f"{total_updated}")
-        total_line += " table(s) updated."
+        total_line += " object(s) expected, "
+        total_line += _c(no_color, GREEN, f"{total_present}")
+        total_line += " object(s) present."
         print(total_line, file=sys.stderr)
         if missing_all:
             print(_c(no_color, RED, f"  Missing ({len(missing_all)}): ") + ", ".join(missing_all), file=sys.stderr)

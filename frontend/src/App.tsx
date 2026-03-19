@@ -588,7 +588,7 @@ export default function App() {
     { id: 'accounts', label: 'Accounts' },
     { id: 'open', label: 'Positions' },
     { id: 'performance', label: 'Performance' },
-    { id: 'ledger', label: 'Trade History' },
+    { id: 'ledger', label: 'Trade ledger' },
     { id: 'transfer', label: 'Transfer & Pay' },
   ]
   const isStrategyInstanceDetailMode = isDetailMode
@@ -1090,7 +1090,7 @@ export default function App() {
 
       {activeTab === 'replay' && (
         <>
-          {/* Portfolio sub-pages: each menu item → one page component (AccountsPage, PositionsPage, PerformancePage, TradeHistoryPage, TransferPayPage). */}
+          {/* Portfolio sub-pages: each menu item → one page component (AccountsPage, PositionsPage, PerformancePage, Trade ledger = TradeHistoryPage, TransferPayPage). */}
           {portfolioView === 'accounts' ? (
             <AccountsPage
               status={status}
