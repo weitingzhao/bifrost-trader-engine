@@ -31,11 +31,14 @@ export interface StrategyOpportunityPageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
   breadcrumbLabel?: string
+  /** From hash #/strategies/opportunities/:id — open edit drawer for this opportunity. */
+  urlFocusOpportunityId?: number | null
 }
 
 export function StrategyOpportunityPage({
   loadStatus,
   breadcrumbLabel = 'Opportunity',
+  urlFocusOpportunityId = null,
 }: StrategyOpportunityPageProps) {
   const [structures, setStructures] = useState<StrategyStructure[]>([])
   const [gateSafetySets, setGateSafetySets] = useState<GateSafetySet[]>([])
@@ -215,10 +218,32 @@ export function StrategyOpportunityPage({
       .finally(() => setOppFormLoading(false))
   }
 
+  const lastUrlFocusOppRef = useRef<number | null>(null)
+  useEffect(() => {
+    const id = urlFocusOpportunityId
+    if (id == null || !Number.isFinite(id)) {
+      lastUrlFocusOppRef.current = null
+      return
+    }
+    if (lastUrlFocusOppRef.current === id) return
+    lastUrlFocusOppRef.current = id
+    openOppEdit(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open once per hash id; openOppEdit stable enough
+  }, [urlFocusOpportunityId])
+
   const closeOppForm = () => {
     setOppFormOpen(null)
     setOppFormIsCopy(false)
     setOppFormError(null)
+    try {
+      const raw = window.location.hash
+      const h = raw.startsWith('#') ? raw.slice(1) : raw
+      if (/^\/strategies\/opportunities\/\d+\/?$/.test(h)) {
+        window.location.hash = '#/strategies/opportunities'
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   const submitOppForm = async () => {

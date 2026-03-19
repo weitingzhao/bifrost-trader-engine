@@ -5372,6 +5372,25 @@ th {
   color: var(--color-accent);
 }
 
+.ib-accounts-tab--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  line-height: 1.25;
+  min-width: 6.5rem;
+  max-width: 12rem;
+}
+.ib-accounts-tab-primary {
+  font-weight: 500;
+}
+.ib-accounts-tab-id {
+  font-size: 0.7rem;
+  margin-top: 2px;
+  word-break: break-all;
+  line-height: 1.2;
+}
+
 /* Account switcher on Accounts page: same underline-tab look as Positions page */
 .ib-accounts-tab-row.system-tabs {
   margin-top: 0;

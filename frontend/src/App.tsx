@@ -153,6 +153,8 @@ export default function App() {
   const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'>('structure')
   /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
   const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
+  /** Opportunity id from #/strategies/opportunities/:id — opens edit form on Opportunity page. */
+  const [urlStrategyOpportunityId, setUrlStrategyOpportunityId] = useState<number | null>(null)
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [operations, setOperations] = useState<Operation[]>([])
@@ -190,16 +192,23 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [activeTab, hashToSettingsViewSection])
 
-  /** Sync tab/view and instance id from hash #/strategies/instances and #/strategies/instances/:id (e.g. new tab with direct link). */
+  /** Sync Strategy tab from hash: instances, opportunities (incl. deep link to edit one opportunity). */
   useEffect(() => {
     const syncFromHash = () => {
       const raw = window.location.hash
       const h = raw.startsWith('#') ? raw.slice(1) : raw
-      const match = /^\/strategies\/instances(?:\/(\d+))?\/?$/.exec(h)
-      if (match) {
+      const instMatch = /^\/strategies\/instances(?:\/(\d+))?\/?$/.exec(h)
+      const oppMatch = /^\/strategies\/opportunities(?:\/(\d+))?\/?$/.exec(h)
+      if (instMatch) {
         setActiveTab('strategy')
         setStrategyView('instances')
-        setUrlStrategyInstanceId(match[1] != null ? Number(match[1]) : null)
+        setUrlStrategyInstanceId(instMatch[1] != null ? Number(instMatch[1]) : null)
+        setUrlStrategyOpportunityId(null)
+      } else if (oppMatch) {
+        setActiveTab('strategy')
+        setStrategyView('opportunity')
+        setUrlStrategyOpportunityId(oppMatch[1] != null ? Number(oppMatch[1]) : null)
+        setUrlStrategyInstanceId(null)
       }
     }
     syncFromHash()
@@ -1166,6 +1175,7 @@ export default function App() {
           status={status}
           loadStatus={loadStatus}
           breadcrumbLabel="Opportunity"
+          urlFocusOpportunityId={urlStrategyOpportunityId}
         />
       )}
 

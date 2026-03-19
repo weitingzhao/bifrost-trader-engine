@@ -48,6 +48,16 @@ function fmtSignedPct(value: number | null | undefined): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 
+/** Expiry filter: digits only (YYYYMMDD or shorter prefix). Compares normalized option expiry. */
+function optionExpiryMatchesFilter(expiryRaw: string, filterRaw: string): boolean {
+  const f = filterRaw.replace(/\D/g, '')
+  if (!f) return true
+  const ex = (expiryRaw ?? '').replace(/\D/g, '')
+  if (!ex) return false
+  if (ex.length >= f.length) return ex.startsWith(f)
+  return f.startsWith(ex)
+}
+
 /** Account table total_cash / buying_power via status.accounts[].summary (TotalCashValue, BuyingPower). */
 function accountTotalCashBuyingPower(acc: IbAccountSnapshot | undefined): {
   cash: number | null
@@ -352,7 +362,6 @@ export function PositionsPage({
 
   const [openFilterSymbol, setOpenFilterSymbol] = useState('')
   const [openFilterExpiryStart, setOpenFilterExpiryStart] = useState('')
-  const [openFilterPool, setOpenFilterPool] = useState<'Mix' | 'ON' | 'Off'>('Mix')
   const [openFilterAccountId, setOpenFilterAccountId] = useState<string>('all')
   const [openTab, setOpenTab] = useState<'instance' | 'options' | 'stocks'>('instance')
   const [instanceFilterStructureType, setInstanceFilterStructureType] = useState<string>('all')
@@ -405,19 +414,14 @@ export function PositionsPage({
     list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
     const sym = openFilterSymbol.trim().toUpperCase()
     if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
-    const expMonth = openFilterExpiryStart.trim().replace(/-/g, '').slice(0, 6)
-    if (expMonth) {
-      list = list.filter(e => {
-        const ex = (e.expiry || '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
-        return cmp === expMonth
-      })
+    const expFilter = openFilterExpiryStart.trim()
+    if (expFilter) {
+      list = list.filter(e => optionExpiryMatchesFilter((e.expiry ?? '').trim(), expFilter))
     }
     return list
   }, [executions, openFilterSymbol, openFilterExpiryStart])
 
   const livePositions = useMemo((): LivePositionRow[] => {
-    if (openFilterPool === 'Off') return []
     const accounts = status?.accounts ?? []
     let rows = accounts.flatMap(account => {
       const accId = (account.account_id ?? '').trim()
@@ -438,14 +442,14 @@ export function PositionsPage({
       rows = rows.filter(position => (position.symbol ?? '').toUpperCase() === sym)
     }
 
-    const expMonth = openFilterExpiryStart.trim().replace(/-/g, '').slice(0, 6)
-    if (expMonth) {
+    const expFilter = openFilterExpiryStart.trim()
+    if (expFilter) {
       rows = rows.filter(position => {
-        const secType = (position.secType ?? '').toUpperCase()
-        if (secType !== 'OPT') return true
-        const ex = (position.lastTradeDateOrContractMonth ?? position.expiry ?? '').trim().replace(/-/g, '')
-        const cmp = ex.length >= 6 ? ex.slice(0, 6) : ex
-        return cmp === expMonth
+        if ((position.secType ?? '').toUpperCase() !== 'OPT') return true
+        return optionExpiryMatchesFilter(
+          (position.lastTradeDateOrContractMonth ?? position.expiry ?? '').trim(),
+          expFilter,
+        )
       })
     }
 
@@ -456,7 +460,7 @@ export function PositionsPage({
       return (a.account_id ?? '').localeCompare(b.account_id ?? '')
     })
     return rows
-  }, [openFilterAccountId, openFilterExpiryStart, openFilterPool, openFilterSymbol, status?.accounts])
+  }, [openFilterAccountId, openFilterExpiryStart, openFilterSymbol, status?.accounts])
 
   const liveOptionPositions = useMemo(
     () => livePositions.filter(position => (position.secType ?? '').toUpperCase() === 'OPT'),
@@ -482,36 +486,35 @@ export function PositionsPage({
   const instanceGroups = useMemo((): InstancePositionGroup[] => {
     const allPositions: OpenOptionPosition[] = []
 
-    if (openFilterPool !== 'Off') {
-      for (const pos of liveOptionPositions) {
-        const expiry = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
-        const strike = Number(pos.strike) || 0
-        const right = (pos.right ?? '').toUpperCase().slice(0, 1)
-        const contractKey = pos.contract_key ?? `${pos.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`
-        const qty = Number(pos.position) || 0
-        const rawAvgCost = pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) ? Number(pos.avgCost) : null
-        const avgCostPerShare = rawAvgCost != null ? (rawAvgCost >= 10 ? rawAvgCost / 100 : rawAvgCost) : null
-        const markPrice = pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null
-        const pnl = markPrice != null && avgCostPerShare != null
-          ? (markPrice - avgCostPerShare) * qty * 100
-          : Number(pos.unrealized_pnl) || 0
-        allPositions.push({
-          kind: 'live',
-          contract_key: contractKey,
-          strike,
-          expiry,
-          qty,
-          avg_cost: avgCostPerShare,
-          mark_price: markPrice,
-          unrealized_pnl: pnl,
-          pool_label: 'On',
-          account_id: (pos.account_id ?? '').trim(),
-          position: pos,
-        })
-      }
+    for (const pos of liveOptionPositions) {
+      const expiry = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
+      const strike = Number(pos.strike) || 0
+      const right = (pos.right ?? '').toUpperCase().slice(0, 1)
+      const contractKey = pos.contract_key ?? `${pos.symbol ?? ''}|OPT|${expiry}|${strike}|${right}`
+      const qty = Number(pos.position) || 0
+      const rawAvgCost = pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) ? Number(pos.avgCost) : null
+      const avgCostPerShare = rawAvgCost != null ? (rawAvgCost >= 10 ? rawAvgCost / 100 : rawAvgCost) : null
+      const markPrice = pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null
+      const pnl = markPrice != null && avgCostPerShare != null
+        ? (markPrice - avgCostPerShare) * qty * 100
+        : Number(pos.unrealized_pnl) || 0
+      allPositions.push({
+        kind: 'live',
+        contract_key: contractKey,
+        strike,
+        expiry,
+        qty,
+        avg_cost: avgCostPerShare,
+        mark_price: markPrice,
+        unrealized_pnl: pnl,
+        pool_label: 'On',
+        account_id: (pos.account_id ?? '').trim(),
+        position: pos,
+      })
     }
 
-    if (openFilterPool !== 'ON') {
+    /** Off-track when viewing all accounts only (not tied to Host/Secondary filter). */
+    if (openFilterAccountId === 'all') {
       const offTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions)
         .filter(g => g.status === 'unrealized')
       for (const group of offTrackGroups) {
@@ -575,7 +578,7 @@ export function PositionsPage({
       return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
     })
     return result
-  }, [openFilterPool, liveOptionPositions, openOffTrackBaseExecutions, livePositionExecutionsMap])
+  }, [openFilterAccountId, liveOptionPositions, openOffTrackBaseExecutions, livePositionExecutionsMap])
 
   const getPositionTime = (p: OpenOptionPosition): number | null => {
     if (p.kind === 'live' && p.position) {
@@ -1061,6 +1064,29 @@ export function PositionsPage({
   const streamHostAccountId = (status?.ib_config?.stream_host_account_id ?? '').toString().trim()
   const streamSecondaryAccountId = (status?.ib_config?.stream_secondary_account_id ?? '').toString().trim()
 
+  /** Open Positions account filter: All vs IB Host / Secondary only (Settings → IB Connection). */
+  const openFilterAccountTabs = useMemo(() => {
+    const tabs: { accountId: string; displayLabel: string }[] = []
+    if (streamHostAccountId) {
+      tabs.push({ accountId: streamHostAccountId, displayLabel: `IB Host ${streamHostAccountId}` })
+    }
+    if (streamSecondaryAccountId && streamSecondaryAccountId !== streamHostAccountId) {
+      tabs.push({
+        accountId: streamSecondaryAccountId,
+        displayLabel: `IB Secondary ${streamSecondaryAccountId}`,
+      })
+    }
+    return tabs
+  }, [streamHostAccountId, streamSecondaryAccountId])
+
+  useEffect(() => {
+    if (openFilterAccountId === 'all') return
+    const ok =
+      (streamHostAccountId && openFilterAccountId === streamHostAccountId) ||
+      (streamSecondaryAccountId && openFilterAccountId === streamSecondaryAccountId)
+    if (!ok) setOpenFilterAccountId('all')
+  }, [openFilterAccountId, streamHostAccountId, streamSecondaryAccountId])
+
   const hostSecondaryAccountCashBp = useMemo(() => {
     const list = status?.accounts ?? []
     const snap = (id: string) =>
@@ -1203,17 +1229,18 @@ export function PositionsPage({
 
   const [expandedInstanceKeys, setExpandedInstanceKeys] = useState<string[]>([])
   const toggleInstanceExpand = (key: string) => {
-    setExpandedInstanceKeys(prev =>
-      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-    )
+    setExpandedInstanceKeys(prev => {
+      const isOpen = prev.includes(key)
+      if (openAccordionMode) return isOpen ? [] : [key]
+      return isOpen ? prev.filter(k => k !== key) : [...prev, key]
+    })
   }
 
-  const openFilterAccountOptions = useMemo(() => {
-    const accounts = (status?.accounts ?? []).map(a => (a.account_id ?? '').trim()).filter(Boolean)
-    const unique = Array.from(new Set(accounts))
-    unique.sort()
-    return unique
-  }, [status?.accounts])
+  /** Accordion: keep at most one expanded opportunity/instance row. */
+  useEffect(() => {
+    if (!openAccordionMode) return
+    setExpandedInstanceKeys(prev => (prev.length <= 1 ? prev : [prev[prev.length - 1]!]))
+  }, [openAccordionMode])
 
   const hasOpenOptions = allFlatPositions.length > 0
   const hasOpenStocks = liveStockPositions.length > 0
@@ -1584,49 +1611,44 @@ export function PositionsPage({
               <label className="replay-filter-label-month">
                 <span className="replay-filter-label">Exp</span>
                 <input
-                  type="month"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="YYYYMMDD"
                   value={openFilterExpiryStart}
-                  onChange={e => setOpenFilterExpiryStart(e.target.value)}
+                  onChange={e => setOpenFilterExpiryStart(e.target.value.replace(/\D/g, '').slice(0, 8))}
                   className="replay-filter-input replay-filter-date"
-                  title="Expiry month"
+                  title="Option expiry: YYYYMMDD digits; shorter prefix also matches (e.g. 202503)"
+                  maxLength={8}
+                  aria-label="Filter by option expiry YYYYMMDD"
                 />
               </label>
             </div>
-            <div className="ib-accounts-tabs">
+            <div className="ib-accounts-tabs ib-accounts-tabs--open-filter">
               <button
                 type="button"
                 className={`ib-accounts-tab ${openFilterAccountId === 'all' ? 'active' : ''}`}
                 onClick={() => setOpenFilterAccountId('all')}
+                title="All accounts"
               >
                 All
               </button>
-              {openFilterAccountOptions.map(id => (
+              {openFilterAccountTabs.map(({ accountId, displayLabel }) => (
                 <button
-                  key={id}
+                  key={accountId}
                   type="button"
-                  className={`ib-accounts-tab ${openFilterAccountId === id ? 'active' : ''}`}
-                  onClick={() => setOpenFilterAccountId(id)}
+                  className={`ib-accounts-tab ${openFilterAccountId === accountId ? 'active' : ''}`}
+                  onClick={() => setOpenFilterAccountId(accountId)}
+                  title={displayLabel}
                 >
-                  {id}
+                  {displayLabel}
                 </button>
               ))}
             </div>
-            <div className="replay-fetch-range-group replay-pool-group" role="radiogroup" aria-label="Account filter">
-              <span className="replay-fetch-days-label">Account</span>
-              <label className="replay-fetch-radio">
-                <input type="radio" name="portfolio-open-pool" value="Mix" checked={openFilterPool === 'Mix'} onChange={() => setOpenFilterPool('Mix')} />
-                <span>Mix</span>
-              </label>
-              <label className="replay-fetch-radio">
-                <input type="radio" name="portfolio-open-pool" value="ON" checked={openFilterPool === 'ON'} onChange={() => setOpenFilterPool('ON')} />
-                <span>On</span>
-              </label>
-              <label className="replay-fetch-radio">
-                <input type="radio" name="portfolio-open-pool" value="Off" checked={openFilterPool === 'Off'} onChange={() => setOpenFilterPool('Off')} />
-                <span>Off</span>
-              </label>
-            </div>
-            <div className="replay-fetch-range-group" role="radiogroup" aria-label="Open position detail view mode">
+            <div
+              className="replay-fetch-range-group"
+              role="radiogroup"
+              aria-label="Detail view: accordion for Instance opportunity rows and option execution rows"
+            >
               <span className="replay-fetch-days-label">Detail view</span>
               <label className="replay-fetch-radio">
                 <input type="radio" name="open-detail-view" value="accordion" checked={openAccordionMode} onChange={() => setOpenAccordionMode(true)} />
@@ -1684,9 +1706,9 @@ export function PositionsPage({
                   </div>
                   <p className="section-hint replay-portfolio-tab-hint">
                     {openTab === 'instance'
-                      ? 'All positions grouped by strategy instance. Each group shows its option and stock positions.'
+                      ? `Grouped by strategy instance (Opportunity). Detail view ${openAccordionMode ? 'Accordion' : 'Multi'}: ${openAccordionMode ? 'only one opportunity row expanded at a time' : 'several opportunity rows may stay open'}.`
                       : openTab === 'options'
-                        ? 'Open option positions by contract; expand a row to see Details and Add/Edit/Close trades.'
+                        ? `By contract; expand for executions. Same Detail view mode (${openAccordionMode ? 'Accordion' : 'Multi'}) controls how many contract rows show execution detail.`
                         : 'Open stock positions from account snapshots (Live only). Tag stock fills with strategy from Ledger / Executions if needed.'}
                   </p>
                 </div>

@@ -245,7 +245,18 @@ export function StrategyInstanceDetailPage({
             <h3 style={{ marginBottom: '0.5rem' }}>Strategy info</h3>
             <dl className="info-dl" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '0.25rem 1rem', margin: 0 }}>
               <dt>Opportunity</dt>
-              <dd>{instance.strategy_opportunity_name ?? instance.strategy_opportunity_id ?? '—'}</dd>
+              <dd>
+                {instance.strategy_opportunity_id != null && Number.isFinite(Number(instance.strategy_opportunity_id)) ? (
+                  <a
+                    href={`#/strategies/opportunities/${instance.strategy_opportunity_id}`}
+                    className="instance-sheet-inst-link"
+                  >
+                    {instance.strategy_opportunity_name ?? `Opportunity #${instance.strategy_opportunity_id}`}
+                  </a>
+                ) : (
+                  <span>{instance.strategy_opportunity_name ?? instance.strategy_opportunity_id ?? '—'}</span>
+                )}
+              </dd>
               <dt>Structure</dt>
               <dd>
                 {instance.strategy_structure_name != null || instance.strategy_structure_id != null ? (
