@@ -1,45 +1,46 @@
 # 产品需求
 
-本文档是 **Bifrost Trader Engine** 的**产品功能需求**唯一定义。需求不随运行环境变化；**运行环境与部署约束**见 [ARCHITECTURE.md](ARCHITECTURE.md) 的「运行环境与部署约束」（§2）。
+本文档是 **Bifrost Trader Engine** 的**产品需求**唯一定义。**功能需求**（R-M*/R-C*/R-H*/R-B*/R-A* 等）不随运行环境变化；**环境与部署约束**（R-DV*）定义 Dev/Prod 隔离与共享 TWS 纪律，详见本文档 §7 及 [ARCHITECTURE.md](ARCHITECTURE.md) §2。
 
-与 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 对齐：各需求按阶段交付，验收标准与 Test Case 以分步计划为准。
+能力进度与差距评估见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ---
 
 ## 产品需求分类（总览）
 
-产品需求按以下五类组织：
+产品需求按以下类别组织：
 
-| 分类 | 需求编号 | 需求简述 | 实现状态 | 对应阶段 | 说明章节 | 验收与 Test Case |
-|------|----------|----------|----------|----------|----------|-------------------|
-| **a. 守护程序相关** | **R-H1** | 状态可扩展为带历史：写入接口支持“当前 + 历史”，避免先文件后迁库。 | 待实现 | 阶段 1 | §1.1 | PLAN_NEXT_STEPS 阶段 1 |
-| | **R-C1** | 一键停止：能在局域网内停止守护程序（含优雅退出）；停止后不再下发任何新单；须支持通过监控 Web 界面发起停止。 | 待实现 | 阶段 1（R-C1a）+ 阶段 2（R-C1b） | §1.2 | 同上 R-C1a/1b |
-| | **R-C2** | 暂停/恢复自动对冲；暂停期间不下新单，监控与自检仍可用。 | 待实现 | 阶段 5 | §1.3 | 阶段 5 Test Case |
-| **b. 监控相关** | **R-M1** | 状态可观测：运行状态（持仓、FSM、指标、配置摘要）可不依赖控制台查看。 | 待实现 | 阶段 1（写出）+ 阶段 2（读与展示） | §2.1 | R-M1a/1b |
-| | **R-M2** | 状态自检：可对守护程序发起自检，得到健康结论（ok/degraded/blocked）与 block_reasons。 | 待实现 | 阶段 2 | §2.2 | 阶段 2 |
-| | **R-M3** | 红绿灯监控：监控界面须提供红/黄/绿式状态指示，一目了然识别运行是否正常。 | 待实现 | 阶段 2 | §2.1 | 阶段 2 |
-| | **R-M4** | 操作可查：能查询执行过的操作，尤其涉及持仓变化的操作（对冲下单、成交、撤单等）。 | 待实现 | 阶段 1（写出）+ 阶段 2（查询） | §2.3 | R-M4a/4b |
-| | **R-M5** | 监控 Web 界面：操作者通过浏览器访问监控应用，直观查看守护进程运行状态（红绿灯、自检、状态摘要、操作列表），并通过界面发起停止等控制。 | 待实现 | 阶段 2 | §2.4 | 阶段 2 |
-| | **R-M7** | 复盘与风控分析页面：独立于实时监控的复盘与风控分析页面（账户执行交易、辅助行情、风控评估）。 | 待实现 | 阶段 3 | §2.5 | 阶段 3 |
-| **c. 金融数据采集** | **R-A1** | 账户与持仓可获取：从 IB 获取当前账户基本信息与当前持仓，作为自动交易对冲的基本能力。 | 待实现 | 阶段 3 | §3.1 | 阶段 3 |
-| | **R-A4** | 双 IB 账户与统一 Portfolio：支持两账户；主账户自动+行情，第二账户仅手动；统一 Portfolio 展示与管理。 | 待实现 | 阶段 3 | §3.1.1 | 阶段 3 |
-| | **R-A2** | 账户执行交易可获取：从 IB 获取账户执行/成交记录（含手动与机器），用于事后复盘与风控。 | 待实现 | 阶段 3 | §3.3 | 阶段 3 |
-| | **R-A5** | 未成交订单可观测（事件驱动）：以事件驱动方式获取并展示当前未成交订单（Limit 挂单等）。 | 待实现 | 阶段 3（或实时行情步骤） | §3.3.1 | PLAN_NEXT_STEPS |
-| | **R-A3** | 复盘辅助行情可获取：为复盘与风控分析提供辅助行情数据（如 K 线、历史 tick 等）。 | 待实现 | 阶段 3 | §3.4 | 阶段 3 |
-| | **R-M6** | 标的与持仓当前市价可获取：监控页须能获取并展示交易标的与持仓的当前市价（spot/last/mid 等），供评估持仓盈亏、期权虚实与风险。 | 待实现 | 阶段 3 | §3.2 | 阶段 3 |
-| **d. 策略编辑、回测与历史统计** | **R-H2** | 历史统计：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。 | 待实现 | 阶段 3 | §4.1 | 阶段 3 |
-| | **R-B1** | 策略 PnL 优化：在历史数据上对比不同参数的理论 P&L、收益曲线、回撤等，优化策略回报。 | 待实现 | 阶段 4 | §4.2 | 阶段 4 |
-| | **R-B2** | 安全边界验证：Guard/边界参数可验证；不同参数下对冲与拦截次数及原因可复盘。 | 待实现 | 阶段 4 | §4.2 | 阶段 4 |
-| | **R-OS1** | 期权结构细化：每种结构类型对应明确腿模式与可选盈亏模型，便于校验、风控与监控。 | 待实现 | 后续（见分步计划） | §4.4 | PLAN_NEXT_STEPS「期权结构细化」 |
-| **e. 策略应用（自动交易）** | **R-C3** | 一键平敞口：异常或红时可一键平掉本策略管理的对冲敞口；仅针对本守护程序负责的对冲仓位。依赖 R-A1 及策略边界等。 | 待实现 | 阶段 5 | §5 | 阶段 5（Test Case 待补全） |
-| **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | 待实现 | 见分步计划「实时行情」 | §7 | PLAN_NEXT_STEPS「实时行情与联动」 |
-| | **R-RM2** | 事件订阅所得行情写入 Redis 缓存；唯一写入方为守护进程，监控不写 Redis 行情。 | 待实现 | 同上 | §7 | 同上 |
-| | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | 待实现 | 同上 | §7 | 同上 |
-| **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；第一步为 UI 与占位 API。 | 待实现 | Option Discovery 步骤（第一步 阶段 3 扩展） | §2.6 | PLAN_NEXT_STEPS「期权发现」 |
+| 分类 | 需求编号 | 需求简述 | 说明章节 |
+|------|----------|----------|----------|
+| **a. 守护程序相关** | **R-H1** | 状态可扩展为带历史：写入接口支持“当前 + 历史”，避免先文件后迁库。 | §1.1 |
+| | **R-C1** | 一键停止：能在局域网内停止守护程序（含优雅退出）；停止后不再下发任何新单；须支持通过监控 Web 界面发起停止。 | §1.2 |
+| | **R-C2** | 暂停/恢复自动对冲；暂停期间不下新单，监控与自检仍可用。 | §1.3 |
+| **b. 监控相关** | **R-M1** | 状态可观测：运行状态（持仓、FSM、指标、配置摘要）可不依赖控制台查看。 | §2.1 |
+| | **R-M2** | 状态自检：可对守护程序发起自检，得到健康结论（ok/degraded/blocked）与 block_reasons。 | §2.2 |
+| | **R-M3** | 红绿灯监控：监控界面须提供红/黄/绿式状态指示，一目了然识别运行是否正常。 | §2.1 |
+| | **R-M4** | 操作可查：能查询执行过的操作，尤其涉及持仓变化的操作（对冲下单、成交、撤单等）。 | §2.3 |
+| | **R-M5** | 监控 Web 界面：操作者通过浏览器访问监控应用，直观查看守护进程运行状态（红绿灯、自检、状态摘要、操作列表），并通过界面发起停止等控制。 | §2.4 |
+| | **R-M7** | 复盘与风控分析页面：独立于实时监控的复盘与风控分析页面（账户执行交易、辅助行情、风控评估）。 | §2.5 |
+| **c. 金融数据采集** | **R-A1** | 账户与持仓可获取：从 IB 获取当前账户基本信息与当前持仓，作为自动交易对冲的基本能力。 | §3.1 |
+| | **R-A4** | 双 IB 账户与统一 Portfolio：支持两账户；主账户自动+行情，第二账户仅手动；统一 Portfolio 展示与管理。 | §3.1.1 |
+| | **R-A2** | 账户执行交易可获取：从 IB 获取账户执行/成交记录（含手动与机器），用于事后复盘与风控。 | §3.3 |
+| | **R-A5** | 未成交订单可观测（事件驱动）：以事件驱动方式获取并展示当前未成交订单（Limit 挂单等）。 | §3.3.1 |
+| | **R-A3** | 复盘辅助行情可获取：为复盘与风控分析提供辅助行情数据（如 K 线、历史 tick 等）。 | §3.4 |
+| | **R-M6** | 标的与持仓当前市价可获取：监控页须能获取并展示交易标的与持仓的当前市价（spot/last/mid 等），供评估持仓盈亏、期权虚实与风险。 | §3.2 |
+| **d. 策略编辑、回测与历史统计** | **R-H2** | 历史统计：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。 | §4.1 |
+| | **R-B1** | 策略 PnL 优化：在历史数据上对比不同参数的理论 P&L、收益曲线、回撤等，优化策略回报。 | §4.2 |
+| | **R-B2** | 安全边界验证：Guard/边界参数可验证；不同参数下对冲与拦截次数及原因可复盘。 | §4.2 |
+| | **R-OS1** | 期权结构细化：每种结构类型对应明确腿模式与可选盈亏模型，便于校验、风控与监控。 | §4.4 |
+| **e. 策略应用（自动交易）** | **R-C3** | 一键平敞口：异常或红时可一键平掉本策略管理的对冲敞口；仅针对本守护程序负责的对冲仓位。依赖 R-A1 及策略边界等。 | §5 |
+| **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | §6 |
+| | **R-RM2** | 事件订阅所得行情写入 Redis 缓存；唯一写入方为守护进程，监控不写 Redis 行情。 | §6 |
+| | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | §6 |
+| **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；第一步为 UI 与占位 API。 | §2.6 |
+| **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离：独立 database，各进程仅连本环境库，settings 与业务数据不跨环境混用。 | §7 |
+| | **R-DV2** | 生产在 Linux 服务器部署完整运行栈（Engine、Server、Redis、Celery）；开发在本机连 Dev 库。 | §7 |
+| | **R-DV3** | IB/TWS 为共享基础设施（两台 Mac Mini）；Dev/Prod 通过不同 client_id 或 TWS 端口区分；同一 IB 账户同一时刻仅一个 Engine 下单。 | §7 |
 
-**说明**：  
-- 「说明章节」列指向本文档中该需求的细节描述位置。  
-- 验收与 Test Case 以 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 各阶段验证标准与 Test Case 清单为准。
+**说明**：「说明章节」列指向本文档中该需求的细节描述位置。能力进度见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ---
 
@@ -91,16 +92,16 @@
 
 - **目标**：提供**独立于实时交易监控**的**复盘与风控分析**页面，用于事后查看账户执行交易、辅助行情（如 K 线）及风险模型评估，与当前“红绿灯 + 状态 + 操作列表”的监控页**分离**，避免实时监控与复盘分析混在同一视图。
 - **范围**：监控应用内新增页面或路由（如「复盘」/「风控」）；可查看账户执行交易记录（R-A2）、辅助行情（R-A3）、以及基于历史数据的风险/统计视图；不要求与 R-M5 同屏，通过导航切换。数据由阶段 3 的 R-A2、R-A3 及 R-H2 提供。
-- **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + contract_quote_live；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径以实现与 PLAN_NEXT_STEPS 阶段 3 验收为准；分步实现顺序与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8。
-- **（扩展）按策略归属**：支持将交易结果归属到**机会策略**与**策略实例**，Performance 与复盘可按策略、按策略实例展示 PnL 与汇总。**归属仅存于 account_executions**（每条成交可带 strategy_opportunity_id / strategy_instance_id）；account_positions 不存策略字段——一个持仓可对应多个策略，通过 executions 推导 strategy_links。Realized PnL 按 execution 归属聚合；Unrealized 按标的展示时附带策略维度（strategy_links）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
-- **策略实例独立页面（扩展）**：提供**策略实例**独立入口（列表 + 详情），用于按「单笔开仓」聚合展示：所属机会策略与结构、该实例的盈亏（Realized/Unrealized）、后续可扩展的风险与回测、资金占用等；与「按账户」的 Portfolio、「按策略定义」的 Strategy 页并列，形成「按实例」的分析视角。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」及「策略实例独立页面」。
+- **Performance 页面细化**：Performance 页面由 **Realized PnL** 与 **Unrealized PnL** 分开展示；按**账户**、按**标的类型（股票/期权）** 拆分计算与展示；考虑**资金流入流出（Transaction）** 对收益率分母的影响，并支持**盈亏百分比**。数据来源：Realized 来自 account_executions + account_execution_commissions（R-A2）；Unrealized 来自 account_positions + contract_quote_live；**Transaction 来自 IB Flex Web Service（Activity Flex Query - Cash Transactions），拉取后写入 account_transactions**；期初权益与 capital_base 口径以实现时对齐本文档与 [ARCHITECTURE.md](ARCHITECTURE.md) 为准。
+- **（扩展）按策略归属**：支持将交易结果归属到**机会策略**与**策略实例**，Performance 与复盘可按策略、按策略实例展示 PnL 与汇总。**归属仅存于 account_executions**（每条成交可带 strategy_opportunity_id / strategy_instance_id）；account_positions 不存策略字段——一个持仓可对应多个策略，通过 executions 推导 strategy_links。Realized PnL 按 execution 归属聚合；Unrealized 按标的展示时附带策略维度（strategy_links）。产品边界见 [STRATEGY_INSTANCE_PAGE.md](plans/STRATEGY_INSTANCE_PAGE.md)。
+- **策略实例独立页面（扩展）**：提供**策略实例**独立入口（列表 + 详情），用于按「单笔开仓」聚合展示：所属机会策略与结构、该实例的盈亏（Realized/Unrealized）、后续可扩展的风险与回测、资金占用等；与「按账户」的 Portfolio、「按策略定义」的 Strategy 页并列，形成「按实例」的分析视角。产品边界见 [STRATEGY_INSTANCE_PAGE.md](plans/STRATEGY_INSTANCE_PAGE.md)。
 - **与分步计划**：阶段 3（与 R-A2、R-A3 数据能力一并交付）。
 
 ### 2.6 期权发现入口（R-OD1）
 
 - **目标**：在 Research 下提供 **Option Discovery** 子页，作为按到期询价与机会发现的入口；操作者可选择标的（来自 Watchlist STK）与到期日，后续步骤展示该到期下的期权报价与 IV 等。
 - **范围**：第一步为 **UI 与占位 API**——Research 二级菜单新增「Option Discovery」、新页面含标的选择（Watchlist STK）、到期选择（占位）、占位表格/说明；后端提供 `GET /research/option-expirations?symbol=...`，可返回空列表或 mock 到期。后续步骤：接入 IB reqSecDefOptParams 返回真实到期与行权价、期权快照与发现逻辑。
-- **与分步计划**：见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「期权发现（Option Discovery）」步骤；验收以该节为准。
+- **能力进度**：见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ---
 
@@ -141,7 +142,7 @@
   - 状态写入 sink（如 PG 表或现有心跳/状态通道）或经联动通道推送；监控端提供 **GET /open-orders**（或等效）查询当前挂单列表；
   - 监控页可展示挂单列表（标的、方向、数量、限价、状态、已成交/剩余等），数据以事件驱动更新为主，可辅以轮询快照。
 - **与 R-A2 区分**：R-A2 为**已成交**执行记录（复盘与风控）；R-A5 为**未成交**订单的实时可观测性。
-- **与分步计划**：阶段 3 或「实时行情与联动」步骤中实现（见 PLAN_NEXT_STEPS）。
+- **能力进度**：见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ### 3.4 复盘辅助行情可获取（R-A3）
 
@@ -163,15 +164,14 @@
 
 - **目标**：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。
 - **形态**：存在**独立脚本或模块**（如 `scripts/check/stats_from_history.py` 或 `src/stats/`），**只读**阶段 1 sink 写入的历史表；**不跑** FSM/Guard/StateClassifier。输出至少包含按日/周对冲次数、盈亏分布或汇总；可离线运行，不依赖守护进程在线。
-- **Performance 计算逻辑**：按日/周/月汇总、胜率、盈亏分布及 Performance 页的**计算逻辑**与 R-M7 的 Performance 子页一致，按 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 步骤 3.8 与阶段 3 验收清单分阶段实现并验收。
-- **（扩展）按策略归属**：历史统计与 Performance 可支持按**机会策略**、按**策略实例**聚合 PnL 与汇总；策略实例独立页面可展示该实例维度的历史统计与汇总。步骤见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
-- **与分步计划**：阶段 3。
+- **Performance 计算逻辑**：按日/周/月汇总、胜率、盈亏分布及 Performance 页的**计算逻辑**与 R-M7 的 Performance 子页一致。
+- **（扩展）按策略归属**：历史统计与 Performance 可支持按**机会策略**、按**策略实例**聚合 PnL 与汇总；策略实例独立页面可展示该实例维度的历史统计与汇总。能力进度见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ### 4.2 回测（R-B1、R-B2）
 
 - **R-B1（策略 PnL 优化）**：在历史数据上对比不同参数组合下的理论 P&L、夏普/回撤、对冲频率与滑点等，用于**优化策略收益**。
 - **R-B2（安全边界验证）**：Guard 与边界参数的有效性与合理性可验证；不同参数下对冲次数、被各 guard 拦截的次数及原因便于复盘与微调。
-- **回测作为手段**：**不连接 TWS 实盘**，用**历史行情与持仓快照**回放，驱动与实盘**同一套** StateClassifier、TradingFSM、ExecutionGuard 逻辑；产出理论 P&L、收益曲线、最大回撤及决策与 block reason。实现依赖历史存储，见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md) 阶段 4。
+- **回测作为手段**：**不连接 TWS 实盘**，用**历史行情与持仓快照**回放，驱动与实盘**同一套** StateClassifier、TradingFSM、ExecutionGuard 逻辑；产出理论 P&L、收益曲线、最大回撤及决策与 block reason。实现依赖历史存储。
 - **策略编辑**：当前阶段以配置（YAML/gates）与回测参数对比为主；若后续支持可视化策略编辑或策略模板，可在本类下扩展需求。
 
 ### 4.3 策略与安全边界数据模型与落库（扩展）
@@ -180,7 +180,7 @@
 - **范围**：
   - **结构策略**（strategy_structure）、**机会策略**（strategy_opportunity）、**策略分配**（strategy_allocation / Allocations）存于 DB；安全边界以 **gate_safety_strategy**（根表）及 **gate_safety_state**、**gate_safety_intent**、**gate_safety_guard**、**gate_safety_strategy_earnings_dates** 存于 DB，**无 JSON 列**，仅标量列。
   - 当前生效的结构策略与安全边界由 **settings** 表字段 **active_strategy_structure_id**、**active_gate_safety_strategy_id** 指定；守护进程可**优先从 DB 加载 gates**，未配置时回退 config 文件。
-- **引用**：表结构与命名标准见 [docs/DATABASE.md](docs/DATABASE.md) §2.24 与 [.cursor/rules/database-design.mdc](.cursor/rules/database-design.mdc)。实现步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略与安全边界落库」步骤。**Phase A** 提供后台管理与监控：GET /status 返回当前生效策略与安全边界 id/name；GET /strategies/structures、/history、/gate-safety、/gate-safety/{id} 及 POST/PUT /gate-safety 供管理端与策略使用情况查询及 Gates CRUD；strategy_history 由守护进程在 append_history 时写入。**监控端提供 Research → Strategy 页面**，用于查看当前生效策略/边界、结构策略列表、安全边界列表、策略使用历史，并支持在页面上将某条结构或某条安全边界设为当前生效（POST /config/active-strategy）；**Research → Gates 页面**用于 Gates 参数配置管理：创建、编辑、复制边界集，以及将某条设为当前生效；守护进程在下次启动或重载时使用新生效 id。
+- **引用**：表结构与命名标准见 [docs/DATABASE.md](docs/DATABASE.md) §2.24 与 [.cursor/rules/database-design.mdc](.cursor/rules/database-design.mdc)。**Phase A** 提供后台管理与监控：GET /status 返回当前生效策略与安全边界 id/name；GET /strategies/structures、/history、/gate-safety、/gate-safety/{id} 及 POST/PUT /gate-safety 供管理端与策略使用情况查询及 Gates CRUD；strategy_history 由守护进程在 append_history 时写入。**监控端提供 Research → Strategy 页面**，用于查看当前生效策略/边界、结构策略列表、安全边界列表、策略使用历史，并支持在页面上将某条结构或某条安全边界设为当前生效（POST /config/active-strategy）；**Research → Gates 页面**用于 Gates 参数配置管理：创建、编辑、复制边界集，以及将某条设为当前生效；守护进程在下次启动或重载时使用新生效 id。
 - **Allocations 层「当前生效」**：策略分配（Allocations）目前仅落库与 CRUD；**当前生效的 Allocations**（如 settings 增加 active_strategy_allocation_id）为**后续扩展**，用于多账户/多策略组合时指定当前监控或执行的分配集，并与机会监控、Daemon 按分配集加载 opportunity 列表等能力衔接。实现步骤与验收在后续阶段规划时细化；能力拆解与进度见 [plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ### 4.4 期权结构细化（R-OS1）
@@ -195,7 +195,7 @@
   - 为各 `structure_type`（如 covered_call、iron_condor、straddle_strangle、cash_secured_put、calendar_spread、leaps、custom）定义**腿 schema**（腿数、每腿角色/方向/option_right 等约束）；Covered Call 等类型采用业界通行定义（如股票 + 卖出看涨期权互相对冲）。
   - Structure 页面与（可选）后端按类型进行**校验或引导**（预填模板、限制腿数、下拉约束）；`custom` 可保持自由编辑。
   - 可选：将结构类型与**盈亏模型**关联，为风控、复盘与回测提供依据；具体模型定义与实现阶段在立项时再定。
-- **与分步计划**：阶段与验收标准见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「期权结构细化」步骤；当前为需求与方向预留，具体实施计划在后续阶段规划时细化。
+- **当前状态**：需求与方向预留，具体实施在后续规划时细化。
 
 ---
 
@@ -214,7 +214,7 @@
 
 ## 6. 实时行情与联动（f，R-RM*）
 
-此处仅作索引与简述；详细步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」。
+此处仅作索引与简述。
 
 | 编号 | 需求简述 | 说明 |
 |------|----------|------|
@@ -223,11 +223,34 @@
 | **R-RM3** | 联动机制：Redis Pub/Sub 或 Streams | 守护写 Redis 后发布通知；监控订阅，收到后读 Redis（或消息体）并推给 Web UI。 |
 | **R-RM9**（可选） | 第一里程碑可为「仅建议、不实盘」 | 守护完整跑策略与风控，执行层截断，将 hedge 建议写入 daemon_auto_operations，由 Web UI 呈现。 |
 
-**何时在 UI 提供实时行情**：操作中监控、与守护行为对照、同屏决策、建议模式时需要；仅健康检查、事后复盘、只看统计时不需要。**阶段归属**：见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「实时行情与联动」步骤或阶段。
+**何时在 UI 提供实时行情**：操作中监控、与守护行为对照、同屏决策、建议模式时需要；仅健康检查、事后复盘、只看统计时不需要。
 
 ---
 
-## 7. 小结表（便于快速查阅）
+## 7. 环境与部署约束（h，R-DV*）
+
+环境与部署约束定义 Dev/Prod 的隔离规则与共享 TWS 纪律。技术实现与拓扑细节见 [ARCHITECTURE.md](ARCHITECTURE.md) §2（尤其 §2.1、§2.8）及 §6。
+
+### 7.1 Dev/Prod PostgreSQL 逻辑隔离（R-DV1）
+
+- **目标**：Dev 与 Prod 使用**独立 database**（可在同一 PostgreSQL 服务器上以不同 database 名区分，如 `bifrost_dev` / `bifrost_prod`）。
+- **约束**：各进程（Engine、Server、Celery）仅连接**本环境**配置的数据库。`settings`、`daemon_control`、`daemon_run_status` 及所有业务表**不跨环境混用**。数据库迁移、种子数据、备份按环境独立执行。
+
+### 7.2 Prod 完整运行栈（R-DV2）
+
+- **目标**：**生产环境**在指定 **Linux 服务器**（如局域网 192.168.10.70）上部署**完整运行栈**——`run_engine.py`、`run_server.py`、Redis、Celery bars worker——连接 **Prod DB**。
+- **开发环境**默认在本机运行 Server（+ 可选 Engine/Redis/Celery），连接 **Dev DB**。
+- 具体主机 IP 与端口以 [ARCHITECTURE.md](ARCHITECTURE.md) §2.8 与 §6 为准。
+
+### 7.3 TWS 共享与 Engine 互斥（R-DV3）
+
+- **目标**：**两台 Mac Mini** 各运行一套 TWS（Host / Secondary），为 Dev 与 Prod **共享基础设施**（与 R-A4 一致）。
+- **区分**：Dev 与 Prod 通过 **不同 `client_id` 与/或不同 TWS/Gateway 监听端口** 区分连接。
+- **互斥**：**同一 IB 账户同一时刻仅允许一个自动交易 Engine** 对该账户下单，避免双环境双 Engine 实盘冲突。与现有单进程约束（RE-6）及控制语义一致。
+
+---
+
+## 8. 小结表（便于快速查阅）
 
 | 分类 | 需求编号 | 主题 |
 |------|----------|------|
@@ -254,9 +277,12 @@
 | | **R-RM2** | 行情写 Redis，唯一写入方为守护 |
 | | **R-RM3** | 联动机制（Redis Pub/Sub 或 Streams） |
 | | R-RM9（可选） | 仅建议不实盘（第一里程碑） |
+| **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离 |
+| | **R-DV2** | Prod Linux 完整运行栈；Dev 本机 |
+| | **R-DV3** | TWS 共享 + Engine 互斥 |
 
-**运行环境与约束**（如 IB/账户、部署、监控与交易分离、单进程、守护程序与 IB 连接等）见 [ARCHITECTURE.md](ARCHITECTURE.md)「运行环境与部署约束」（§2）。
+**运行环境与约束**（IB/账户、Dev/Prod 隔离、部署拓扑、监控与交易分离、单进程、守护程序与 IB 连接等）见 [ARCHITECTURE.md](ARCHITECTURE.md)「运行环境与部署约束」（§2）。
 
 ---
 
-*最后更新：2026-03-15，R-OS1 期权结构细化（§4.4）、总览与§7 小结表。*
+*最后更新：2026-03-19，新增 R-DV1–3 环境与部署约束（§7）、§8 小结表。*

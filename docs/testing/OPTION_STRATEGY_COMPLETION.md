@@ -1,6 +1,6 @@
 # Option 策略完成度：结构策略 / 机会策略 / 策略分配（Allocations）
 
-基于 [REQUIREMENTS.md](../REQUIREMENTS.md) §4.3、[PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md)「策略与安全边界落库」及 [DATABASE.md](../DATABASE.md) §2.24，对当前项目中 **结构策略（strategy_structure）**、**机会策略（strategy_opportunity）**、**策略分配（strategy_allocation / Allocations）** 三层的实现与完成度做一梳理。
+基于 [REQUIREMENTS.md](../REQUIREMENTS.md) §4.3 及 [DATABASE.md](../DATABASE.md) §2.24，对当前项目中 **结构策略（strategy_structure）**、**机会策略（strategy_opportunity）**、**策略分配（strategy_allocation / Allocations）** 三层的实现与完成度做一梳理。
 
 ---
 
@@ -12,7 +12,7 @@
 | **机会策略** | `strategy_opportunity` + 子表 symbol/entry_condition | 存于 DB；引用结构策略 + 可选 default_gate_safety_strategy_id；scope_type + 标的与入场条件子表（无 jsonb）。Phase A 扩展：列表/详情、创建/更新 API 与 UI。 |
 | **策略分配（Allocations）** | `strategy_allocation` | 存于 DB；包含多条机会策略（通过 strategy_allocation_opportunity）、可选分配级 gate_safety_strategy_id、max_positions/max_bp_pct；供“分配”管理与切换。 |
 
-验收依据：PLAN_NEXT_STEPS「策略与安全边界落库」SG.1–SG.4 及 **Phase A**（只读闭环 + 后台管理与监控）、Phase A 监控端 UI（Research → Strategy 页）。
+验收依据：[REQUIREMENTS.md](../REQUIREMENTS.md) §4.3 及 **Phase A**（只读闭环 + 后台管理与监控）、Phase A 监控端 UI（Research → Strategy 页）。
 
 ---
 
@@ -104,7 +104,7 @@
 
 **状态**：待实现（SI.1–SI.4）。  
 **设计**：[DATABASE.md](../DATABASE.md) §2.24.11（表 strategy_instance；account_executions 增加 strategy_opportunity_id、strategy_instance_id；account_positions 不存策略归属，从 executions 推导 strategy_links）。  
-**步骤与验收**：[PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+**需求定义**：[REQUIREMENTS.md](../REQUIREMENTS.md) §2.5（策略实例与交易归属）。
 
 ---
 

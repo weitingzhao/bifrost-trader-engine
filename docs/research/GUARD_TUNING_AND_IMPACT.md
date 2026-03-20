@@ -88,7 +88,7 @@
 
 - **现状**：Guard 拦单时，`apply_hedge_gates` 仅返回 `None`，**未把 block 原因写入日志或状态**；ExecutionGuard 返回 `(False, reason)`，但 reason 未持久化。
 - **建议**：
-  1. **记录“被拦原因”**：在 `apply_hedge_gates` 或调用处，当 `allowed is False` 时打一条日志（如 `logger.debug("hedge blocked: %s", reason)`），或写入状态 sink（见 PLAN_NEXT_STEPS）。这样后续可统计：今日被 cooldown / max_daily_hedge_count / spread_too_wide 等各拦了多少次。
+  1. **记录“被拦原因”**：在 `apply_hedge_gates` 或调用处，当 `allowed is False` 时打一条日志（如 `logger.debug("hedge blocked: %s", reason)`），或写入状态 sink。这样后续可统计：今日被 cooldown / max_daily_hedge_count / spread_too_wide 等各拦了多少次。
   2. **状态 sink 中带上 guard 信息**：若实现阶段 1 的 StatusSink，可在 snapshot 中增加“最近一次 block reason”或“本周期内各 reason 计数”，便于监控与事后分析。
   3. **历史与统计（阶段 3）**：用 SQLite 历史表做“按日/周：对冲次数、被拦次数（按 reason 分）、平均延迟、滑点”。据此可量化“调大 cooldown 后，拦单次数与对冲次数的变化”。
 

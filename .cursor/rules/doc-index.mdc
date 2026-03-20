@@ -1,30 +1,21 @@
 ---
-description: Document index — where to find project docs by task type (流程 / 工作流 / 资源)
+description: Document index — where to find project docs by task type
 alwaysApply: true
 ---
 
 # Document Index (文档首页与 Agent 查文档)
 
-**文档首页**：**docs/index.md**。所有项目文档按三类组织，Agent 按任务类型到对应区块查找。
+**文档首页**：**docs/index.md**。所有项目文档按两类组织，Agent 按任务类型到对应区块查找。
 
-## 1. 流程相关 (docs/index.md § 流程相关)
+## 1. 核心文档
 
-- **产品需求** → docs/REQUIREMENTS.md  
-- **系统架构与运行环境** → docs/ARCHITECTURE.md（§2 运行环境与部署约束）  
-- **分步推进计划（与需求对比）** → docs/PLAN_NEXT_STEPS.md（稳定，仅需求/架构变更时改）  
-- **阶段评估、当前进展、里程碑** → docs/plans/PHASE_ASSESSMENT.md（每次阶段评估时更新）  
-- **分阶段执行现状**（各阶段 Todo、验收清单）→ docs/plans/phase1-execution-plan.md、phase2-execution-plan.md、phase3-execution-plan.md  
+- **产品需求** → docs/REQUIREMENTS.md（含环境部署约束 R-DV*，§7）  
+- **系统架构与运行环境** → docs/ARCHITECTURE.md（§2 运行环境与部署约束，含 Dev/Prod 隔离 §2.8）  
+- **能力评估与进度** → docs/plans/CAPABILITY_TRACKING.md（各能力维度当前进度与短板）
 
-**何时用**：需求/架构讨论、阶段划分与验收、当前进展与里程碑、执行计划与验收清单。
+**何时用**：需求/架构讨论、能力差距分析、进度评估。
 
-## 2. AI Agent 工作流 (docs/index.md § AI Agent 工作流)
-
-- **项目运行工作流**（稳定三角、执行→评估→决策）→ **docs/plans/PROJECT_WORKFLOW.md**  
-- **本规则** → .cursor/rules/project-workflow.mdc（与 PROJECT_WORKFLOW.md 一致）
-
-**何时用**：参与规划、执行某阶段、阶段验收、更新阶段进展或里程碑时，**先读 PROJECT_WORKFLOW.md 与 project-workflow.mdc**，再决定改哪些文档、做哪些步骤。
-
-## 3. 项目资源 (docs/index.md § 项目资源)
+## 2. 项目资源
 
 - **数据库设计（PostgreSQL）** → docs/DATABASE.md（策略与安全边界表见 §2.24）  
 - **数据库设计标准**（表命名、主外键、无 JSON 约定）→ .cursor/rules/database-design.mdc  
@@ -33,8 +24,8 @@ alwaysApply: true
 - **配置安全分类 / 风险模型** → docs/research/CONFIG_SAFETY_TAXONOMY.md  
 - **Guard 边界与微调** → docs/research/GUARD_TUNING_AND_IMPACT.md  
 
-**何时用**：实现或修改**数据表、写入策略、sink** 时查 DATABASE.md；实现或修改**状态机、状态空间、风控边界、Guard 参数、block reason** 与回测验证时，查 FSM/状态空间/风险/Guard 文档。
+**何时用**：实现或修改**数据表、写入策略、sink** 时查 DATABASE.md；实现或修改**状态机、状态空间、风控边界、Guard 参数、block reason** 时查 FSM/状态空间/风险/Guard 文档。
 
 ---
 
-**总结**：每次工作先看 **docs/index.md** 确定当前任务属于「流程相关 / AI Agent 工作流 / 项目资源」哪一类，再到对应区块打开具体文档；若涉及阶段执行或评估，同时遵循 **project-workflow.mdc** 与 **PROJECT_WORKFLOW.md**。
+**总结**：每次工作先看 **docs/index.md** 确定当前任务属于「核心文档 / 项目资源」哪一类，再到对应区块打开具体文档。

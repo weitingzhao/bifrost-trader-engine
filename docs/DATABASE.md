@@ -12,7 +12,8 @@
   - `postgres.host`, `postgres.port`, `postgres.database`, `postgres.user`, `postgres.password`；或
   - 使用环境变量（如 `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`）或 DSN。
 - **代码入口**：`StatusSink` 实现（如 `PostgreSQLSink`）在守护程序启动时根据上述配置建立连接；需处理连接失败与重连（见各阶段实现说明）。
-- **引用**：阶段 1 执行计划 → [plans/phase1-execution-plan.md](plans/phase1-execution-plan.md) 步骤 1、2。
+- **多环境（R-DV1）**：Dev 与 Prod 通过 **`postgres.database`**（及必要时 `postgres.host` / `postgres.user`）区分；同一 PostgreSQL 服务器上使用不同 database 名（如 `bifrost_dev` / `bifrost_prod`）。各环境独立执行迁移与种子，不跨环境混用。详见 [ARCHITECTURE.md](ARCHITECTURE.md) §2.8。
+- **引用**：产品需求 [REQUIREMENTS.md](REQUIREMENTS.md)；系统架构 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ---
 
@@ -1054,7 +1055,7 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 
 - **索引**：`(strategy_opportunity_id)`、`(strategy_instance_id)`，便于按策略/实例筛选与 Realized PnL 聚合。
 
-- **读取**：GET /status 的 positions 通过子查询从 account_executions 推导 `strategy_links[]`（DISTINCT strategy_opportunity_id + strategy_instance_id per contract_key），附带 opportunity 名称与 instance label；GET /executions 返回每条成交的 strategy 字段并可按其筛选；**GET /performance**（默认 `source_scope=performance_book`）及 Performance 页相关 executions 请求均从 **`account_executions_final`** 视图读取（仅 flex + journal，不含 TWS 补洞行），无需在 SQL 中按 source 过滤；**Trade ledger（Portfolio → Trade ledger）** 的 **Instance** 与 **Options** 两个顶层 Tab 均通过 `GET /executions?source_scope=performance_book` 拉取 **`account_executions_final`** 构建分组（Instance Tab 按 `strategy_instance_id` 是否存在分为 With instance / No instance，前端分组，无新增 API）；前端不对 `source` 做过滤。GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。步骤与验收见 [PLAN_NEXT_STEPS.md](PLAN_NEXT_STEPS.md)「策略实例与交易归属」。
+- **读取**：GET /status 的 positions 通过子查询从 account_executions 推导 `strategy_links[]`（DISTINCT strategy_opportunity_id + strategy_instance_id per contract_key），附带 opportunity 名称与 instance label；GET /executions 返回每条成交的 strategy 字段并可按其筛选；**GET /performance**（默认 `source_scope=performance_book`）及 Performance 页相关 executions 请求均从 **`account_executions_final`** 视图读取（仅 flex + journal，不含 TWS 补洞行），无需在 SQL 中按 source 过滤；**Trade ledger（Portfolio → Trade ledger）** 的 **Instance** 与 **Options** 两个顶层 Tab 均通过 `GET /executions?source_scope=performance_book` 拉取 **`account_executions_final`** 构建分组（Instance Tab 按 `strategy_instance_id` 是否存在分为 With instance / No instance，前端分组，无新增 API）；前端不对 `source` 做过滤。GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。
 - **批量打标**：`PATCH /executions/strategy-attribution`（替代原 `PUT /positions/strategy`）：按 account_id + contract_key 或 execution_ids 批量更新 executions 的 strategy 字段。`PUT /executions/{id}` 支持单条更新。
 
 ##### 2.24.11c Position × Instance 归因读模型（净仓近似归因）
@@ -1078,7 +1079,7 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 - **daemon_auto_status_history**：仅在 `append_history=True` 时追加；调用方（GsTrading）在**发生对冲相关操作**时（对冲意图、下单、成交、拒绝）传入 `append_history=True`，或可选每心跳一次。纯无操作心跳不追加历史。
 - **daemon_auto_operations**：仅在对冲意图、order_sent、fill、reject 四处插入记录。
 
-上述策略的代码与配置说明见 [plans/phase1-execution-plan.md](plans/phase1-execution-plan.md)。
+上述策略的代码与配置详见 `PostgreSQLSink` 实现。
 
 ---
 
@@ -1230,10 +1231,10 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 策略分配（strategy_allocation）| 表 strategy_allocation、strategy_allocation_opportunity；主键 strategy_allocation_id；无 jsonb，机会列表通过关联表与 sort_order；API 请求/响应使用 allocation_limits（max_positions、max_bp_pct）。§2.24.3、§2.24.3a。 | — |
 | strategy_structure.structure_subtype | §2.24.1 表 strategy_structure 增加列 structure_subtype (text NULL)；covered_call 时存 otm/atm/itm/deep_otm，供 Edit Wizard 还原 Step 2 状态。 | — |
 | 结构类型配置表（方案 A） | 新增 6 张表：strategy_structure_type、strategy_structure_type_leg、strategy_structure_subtype、strategy_structure_subtype_characteristic、strategy_structure_subtype_meta_param、strategy_structure_subtype_rule。由 _ensure_tables 创建；初始数据由 scripts/db_init/seed_structure_type_config.py 写入。§2.24.0、§2.24.0a–f。 | — |
-| 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b）。**account_positions 不存策略归属**（已移除 strategy_opportunity_id、strategy_instance_id 列）；持仓的策略信息通过 account_executions 推导 strategy_links[]。步骤与验收见 PLAN_NEXT_STEPS「策略实例与交易归属」。 | 阶段 3 扩展 |
+| 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b）。**account_positions 不存策略归属**（已移除 strategy_opportunity_id、strategy_instance_id 列）；持仓的策略信息通过 account_executions 推导 strategy_links[]。详见 §2.24.11a、§2.24.11b。 | 阶段 3 扩展 |
 | 2026-03-19 Position×Instance 归因读模型 | §2.24.11c：净仓近似归因——GET /executions/position-attribution 将持仓按实例拆分（net_estimated），返回 open_qty_est / attribution_ratio / unrealized_pnl_est / is_mixed / has_unassigned；前端 PositionsPage Opportunity Sheet 改用该 API，同一合约可在多个实例下并存展示；新增 Attribution 筛选器（Single / Mixed / Unassigned）。实时读模型（不落表），见 servers/reader/executions.py。 | 阶段 3 扩展 |
 | 2026-03-19 Executions 分源迁移 | 三张原始源表：`executions_raw_tws`（TWS/manual 源）、`executions_raw_flex`（Flex 源权威成交）、`executions_raw_journal`（journal_closed 人工会计调整）。`account_executions` 为统一只读视图（UNION ALL，Flex 优先覆盖 TWS，Journal 独立流）。**`account_executions_final`**：仅 UNION `executions_raw_flex` + `executions_raw_journal`（不含 TWS 补洞行），列与主键编码规则与全量视图中对应两分支一致。**`account_executions_fly`**：源为 `executions_raw_tws`，`account_executions_id = -(executions_raw_tws_id)`；排除 `sec_type = BAG`（多腿组合占位）；排除在 **`account_executions_final` 中已出现相同 `(account_id, contract_key)`（非空、trim 后相等）** 的 TWS 行。**GET /executions**、**GET /performance** 在 `source_scope=on_the_fly` 时读此视图。回填脚本 `scripts/db_backfill_executions_raw.py`。 | 阶段 3 扩展 |
 
 ---
 
-*本文档与 [分步推进计划](PLAN_NEXT_STEPS.md)、[阶段 1 执行计划](plans/phase1-execution-plan.md) 及运行环境需求保持一致；所有数据库相关设计与改动以本文档为唯一引用。*
+*本文档与 [REQUIREMENTS.md](REQUIREMENTS.md)、[ARCHITECTURE.md](ARCHITECTURE.md) 及运行环境需求保持一致；所有数据库相关设计与改动以本文档为唯一引用。*

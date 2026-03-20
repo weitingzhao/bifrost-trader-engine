@@ -1,6 +1,6 @@
 # 策略实例独立页面设计
 
-本文档定义**策略实例**独立页面的产品与实现边界，供前端/全栈实施时查阅。步骤与验收见 [PLAN_NEXT_STEPS.md](../PLAN_NEXT_STEPS.md)「策略实例与交易归属」及 SI.5。
+本文档定义**策略实例**独立页面的产品与实现边界，供前端/全栈实施时查阅。需求定义见 [REQUIREMENTS.md](../REQUIREMENTS.md) §2.5。
 
 ---
 
@@ -62,6 +62,6 @@
 3. 可选：列表页或详情页增加「新建实例」入口。
 4. 详情页预留风险/回测/资金占用区块（标题 + 占位或链接）。
 
-数据库与 API 已就绪（DATABASE.md §2.24.11、PLAN_NEXT_STEPS SI.1–SI.4），无需改后端即可完成列表与详情首版。
+数据库与 API 已就绪（DATABASE.md §2.24.11），无需改后端即可完成列表与详情首版。
 
 **归属模型**：account_positions 不存策略归属；策略信息唯一来源为 account_executions（一个持仓可对应多个策略）。实例详情页的持仓/风险数据来自 `GET /strategies/instances/{id}/open-option-legs`（executions ∩ positions）。列表页风险卡片通过 GET /status 的 positions.strategy_links 或 open-option-legs API 获取实例对应的 OPT 持仓。

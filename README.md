@@ -95,7 +95,7 @@ The system has **three parts**: (1) **auto-trading** daemon, (2) **monitoring & 
 
 - **Auto-trading**: IB Connector, Store, Portfolio (parse 21–35 DTE near ATM → delta), Gamma Scalper (|Δ| > threshold → hedge), Risk Guard (cooldown, daily limits, earnings blackout), Daemon (single process, single asyncio loop; on ticker/heartbeat run maybe_hedge).
 - **Monitoring & control**: Daemon writes state via a sink (e.g. SQLite); a **separate** app reads it and exposes HTTP/CLI and sends stop/pause (see run environment doc).
-- **Backtest**: Same StateClassifier + FSM + Guard, fed by historical replay; no live orders; used primarily to **optimize strategy PnL** (theory P&L, curve, drawdown) and to validate/tune Guard/boundary parameters (see docs/PLAN_NEXT_STEPS.md).
+- **Backtest**: Same StateClassifier + FSM + Guard, fed by historical replay; no live orders; used primarily to **optimize strategy PnL** (theory P&L, curve, drawdown) and to validate/tune Guard/boundary parameters (see docs/REQUIREMENTS.md §4.2).
 
 ## State space (O,D,M,L,E,S)
 
