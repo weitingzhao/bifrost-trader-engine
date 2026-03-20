@@ -566,30 +566,81 @@ export default function App() {
     { id: 'research', label: 'Research' },
   ]
 
-  const researchSubtabs: { id: 'risk' | 'screener' | 'data' | 'backtest' | 'options'; label: string }[] = [
-    { id: 'screener', label: 'Screener' },
-    { id: 'risk', label: 'Risk Model' },
-    { id: 'data', label: 'Data' },
-    { id: 'backtest', label: 'Backtest' },
-    { id: 'options', label: 'Option Discovery' },
+  /** Research dropdown: Discovery vs Risk & tools (same pattern as Strategy / Portfolio groups). */
+  const researchSubmenuGroups: {
+    id: string
+    label: string
+    items: { id: 'risk' | 'screener' | 'data' | 'backtest' | 'options'; label: string }[]
+  }[] = [
+    {
+      id: 'discovery',
+      label: 'Discovery',
+      items: [
+        { id: 'screener', label: 'Screener' },
+        { id: 'options', label: 'Option Discovery' },
+      ],
+    },
+    {
+      id: 'risk-tools',
+      label: 'Risk & tools',
+      items: [
+        { id: 'risk', label: 'Risk Model' },
+        { id: 'data', label: 'Data' },
+        { id: 'backtest', label: 'Backtest' },
+      ],
+    },
   ]
 
-  const strategySubtabs: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'; label: string }[] = [
-    { id: 'watchlist', label: 'Watchlist' },
-    { id: 'structure', label: 'Structure' },
-    { id: 'opportunity', label: 'Opportunity' },
-    { id: 'instances', label: 'Instances' },
-    { id: 'allocations', label: 'Allocations' },
-    { id: 'gates', label: 'Gates' },
-    { id: 'typeConfig', label: 'Option Type Config' },
+  /** Strategy dropdown: one level with section labels (operations vs configuration). */
+  const strategySubmenuGroups: {
+    id: string
+    label: string
+    items: { id: 'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'; label: string }[]
+  }[] = [
+    {
+      id: 'operations',
+      label: 'Operations',
+      items: [
+        { id: 'watchlist', label: 'Watchlist' },
+        { id: 'instances', label: 'Instances' },
+      ],
+    },
+    {
+      id: 'configuration',
+      label: 'Configuration',
+      items: [
+        { id: 'structure', label: 'Structure' },
+        { id: 'opportunity', label: 'Opportunity' },
+        { id: 'allocations', label: 'Allocations' },
+        { id: 'gates', label: 'Gates' },
+        { id: 'typeConfig', label: 'Option Type Config' },
+      ],
+    },
   ]
 
-  const portfolioSubtabs: { id: PortfolioView; label: string }[] = [
-    { id: 'accounts', label: 'Accounts' },
-    { id: 'open', label: 'Positions' },
-    { id: 'performance', label: 'Performance' },
-    { id: 'ledger', label: 'Trade ledger' },
-    { id: 'transfer', label: 'Transfer & Pay' },
+  /** Portfolio dropdown: Overview vs Activity & cash (same pattern as Strategy groups). */
+  const portfolioSubmenuGroups: {
+    id: string
+    label: string
+    items: { id: PortfolioView; label: string }[]
+  }[] = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      items: [
+        { id: 'accounts', label: 'Accounts' },
+        { id: 'open', label: 'Positions' },
+        { id: 'performance', label: 'Performance' },
+      ],
+    },
+    {
+      id: 'activity-cash',
+      label: 'Activity & cash',
+      items: [
+        { id: 'ledger', label: 'Trade ledger' },
+        { id: 'transfer', label: 'Transfer & Pay' },
+      ],
+    },
   ]
   const isStrategyInstanceDetailMode = isDetailMode
 
@@ -718,21 +769,33 @@ export default function App() {
                       <span className="app-tab-caret" aria-hidden>▾</span>
                     </button>
                     <div className="app-submenu" role="menu" aria-label="Portfolio sections">
-                      {portfolioSubtabs.map(({ id: viewId, label: viewLabel }) => (
-                        <button
-                          key={viewId}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={activeTab === 'replay' && portfolioView === viewId}
-                          className={`app-submenu-item ${activeTab === 'replay' && portfolioView === viewId ? 'active' : ''}`}
-                          onClick={() => {
-                            setActiveTab('replay')
-                            setPortfolioView(viewId)
-                          }}
+                      {portfolioSubmenuGroups.map((group) => (
+                        <div
+                          key={group.id}
+                          role="group"
+                          className="app-submenu-group"
+                          aria-labelledby={`portfolio-submenu-${group.id}`}
                         >
-                          <SubmenuIcon name={viewId} />
-                          <span>{viewLabel}</span>
-                        </button>
+                          <div id={`portfolio-submenu-${group.id}`} className="app-submenu-group-label">
+                            {group.label}
+                          </div>
+                          {group.items.map(({ id: viewId, label: viewLabel }) => (
+                            <button
+                              key={viewId}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={activeTab === 'replay' && portfolioView === viewId}
+                              className={`app-submenu-item ${activeTab === 'replay' && portfolioView === viewId ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveTab('replay')
+                                setPortfolioView(viewId)
+                              }}
+                            >
+                              <SubmenuIcon name={viewId} />
+                              <span>{viewLabel}</span>
+                            </button>
+                          ))}
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -753,21 +816,33 @@ export default function App() {
                       <span className="app-tab-caret" aria-hidden>▾</span>
                     </button>
                     <div className="app-submenu" role="menu" aria-label="Research sections">
-                      {researchSubtabs.map(({ id: viewId, label: viewLabel }) => (
-                        <button
-                          key={viewId}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={activeTab === 'research' && researchView === viewId}
-                          className={`app-submenu-item ${activeTab === 'research' && researchView === viewId ? 'active' : ''}`}
-                          onClick={() => {
-                            setActiveTab('research')
-                            setResearchView(viewId)
-                          }}
+                      {researchSubmenuGroups.map((group) => (
+                        <div
+                          key={group.id}
+                          role="group"
+                          className="app-submenu-group"
+                          aria-labelledby={`research-submenu-${group.id}`}
                         >
-                          <SubmenuIcon name={viewId} />
-                          <span>{viewLabel}</span>
-                        </button>
+                          <div id={`research-submenu-${group.id}`} className="app-submenu-group-label">
+                            {group.label}
+                          </div>
+                          {group.items.map(({ id: viewId, label: viewLabel }) => (
+                            <button
+                              key={viewId}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={activeTab === 'research' && researchView === viewId}
+                              className={`app-submenu-item ${activeTab === 'research' && researchView === viewId ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveTab('research')
+                                setResearchView(viewId)
+                              }}
+                            >
+                              <SubmenuIcon name={viewId} />
+                              <span>{viewLabel}</span>
+                            </button>
+                          ))}
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -795,21 +870,33 @@ export default function App() {
                       <span className="app-tab-caret" aria-hidden>▾</span>
                     </button>
                     <div className="app-submenu" role="menu" aria-label="Strategy sections">
-                      {strategySubtabs.map(({ id: viewId, label: viewLabel }) => (
-                        <button
-                          key={viewId}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={activeTab === 'strategy' && strategyView === viewId}
-                          className={`app-submenu-item ${activeTab === 'strategy' && strategyView === viewId ? 'active' : ''}`}
-                          onClick={() => {
-                            setActiveTab('strategy')
-                            setStrategyView(viewId)
-                          }}
+                      {strategySubmenuGroups.map((group) => (
+                        <div
+                          key={group.id}
+                          role="group"
+                          className="app-submenu-group"
+                          aria-labelledby={`strategy-submenu-${group.id}`}
                         >
-                          <SubmenuIcon name={viewId} />
-                          <span>{viewLabel}</span>
-                        </button>
+                          <div id={`strategy-submenu-${group.id}`} className="app-submenu-group-label">
+                            {group.label}
+                          </div>
+                          {group.items.map(({ id: viewId, label: viewLabel }) => (
+                            <button
+                              key={viewId}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={activeTab === 'strategy' && strategyView === viewId}
+                              className={`app-submenu-item ${activeTab === 'strategy' && strategyView === viewId ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveTab('strategy')
+                                setStrategyView(viewId)
+                              }}
+                            >
+                              <SubmenuIcon name={viewId} />
+                              <span>{viewLabel}</span>
+                            </button>
+                          ))}
+                        </div>
                       ))}
                     </div>
                   </div>

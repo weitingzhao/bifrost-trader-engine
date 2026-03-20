@@ -792,7 +792,7 @@ body::before {
   min-width: 13rem;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   padding: var(--space-2);
   padding-top: 0.5rem;
   border: 1px solid var(--color-border);
@@ -803,6 +803,29 @@ body::before {
   transform: translateY(-4px);
   pointer-events: none;
   transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.app-submenu-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.app-submenu-group + .app-submenu-group {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.app-submenu-group-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.9;
+  padding: 0.2rem var(--space-3) 0;
+  pointer-events: none;
+  user-select: none;
 }
 
 .app-submenu::before {

@@ -1,6 +1,6 @@
 # Portfolio menu → page mapping
 
-Each secondary item under the **Portfolio** menu is implemented in its own page file and rendered by a single page component:
+Each secondary item under the **Portfolio** menu is implemented in its own page file and rendered by a single page component. The header dropdown groups them as **Overview** (Accounts, Positions, Performance) and **Activity & cash** (Trade ledger, Transfer & Pay).
 
 | Menu label      | View id   | Page component    | File                  |
 |-----------------|-----------|-------------------|------------------------|
