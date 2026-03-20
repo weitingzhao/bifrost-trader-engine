@@ -1,7 +1,8 @@
 import { createPortal } from 'react-dom'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { RiskProfile, RiskPosition, RiskScenarioBreakdown } from '../utils/riskProfile'
 import {
+  computeRiskProfile,
   formatApproxUsd,
   formatRiskLabel,
   formatRiskUsd,
@@ -272,9 +273,11 @@ function ScenarioMatrixExplainPanel({
           </button>
         </div>
         <p className="risk-scenario-matrix-explain-principle">
-          <strong>Principle:</strong> Expiration snapshot at hypothetical spot <strong>S = {S.toFixed(2)}</strong>.
+          <strong>Principle:</strong> Expiration snapshot at hypothetical spot <strong>S = {S.toFixed(2)}</strong>{' '}
+          (a <strong>sample grid</strong> value—e.g. 0, each strike, or 2× highest strike—not today&apos;s live quote).
           Each leg uses <strong>intrinsic only</strong> vs your average cost (per-share premium). Multiply by{' '}
-          <code>|contracts| × 100</code> shares per contract.
+          <code>|contracts| × 100</code> shares per contract. For a call,{' '}
+          <strong>intrinsic = max(S − K, 0)</strong> (e.g. S=160 and K=76 → intrinsic 84).
         </p>
         <ul className="risk-scenario-matrix-explain-rules">
           <li>
@@ -287,6 +290,15 @@ function ScenarioMatrixExplainPanel({
             Call intrinsic = max(S − K, 0); Put intrinsic = max(K − S, 0)
           </li>
         </ul>
+        {positionsForOption.length >= 2 && (
+          <p className="risk-scenario-matrix-explain-note">
+            <strong>Multi-leg book:</strong> Lines below are per leg. At a high <strong>S</strong>, intrinsics can be
+            large but <strong>offset</strong> (e.g. bear call spread: short lower strike vs long higher strike). Trust the{' '}
+            <strong>sum of legs</strong> and the Option cell—bear call max loss does not &quot;depend on S=160&quot;; that
+            point is just one grid sample where the <strong>net</strong> book P&amp;L equals the same worst-case region as
+            for <strong>S</strong> at or above the long strike (given your avg costs).
+          </p>
+        )}
         {selection.row === 'hedged' && (
           <p className="risk-scenario-matrix-explain-note">
             This row uses the <strong>hedged book</strong> (naked short calls removed from highest strikes first),
@@ -678,6 +690,15 @@ export function RiskProfileDl({
   const callBal = ctx ? netCallShareBalance(ctx.positions, ctx.covered_shares) : null
   const rl = formatRiskLabel(profile)
 
+  const profileOptionsOnly = useMemo(() => {
+    if (!ctx || ctx.positions.length === 0) return null
+    return computeRiskProfile(ctx.positions, 0, null)
+  }, [ctx])
+  const ctxOptionsOnly = profileOptionsOnly?.calc_context ?? null
+  const showDualPayoffCharts = Boolean(
+    ctx && ctx.positions.length > 0 && ctx.covered_shares > 0 && ctxOptionsOnly,
+  )
+
   const [matrixExplain, setMatrixExplain] = useState<MatrixExplainSelection | null>(null)
   const [openRiskHelpKey, setOpenRiskHelpKey] = useState<string | null>(null)
 
@@ -953,8 +974,30 @@ export function RiskProfileDl({
                 />
               </div>
             </div>
-            <div className="risk-profile-payoff-col">
-              <RiskProfilePayoffChart profile={profile} ctx={ctx!} variant="compact" />
+            <div
+              className={
+                'risk-profile-payoff-col' +
+                (showDualPayoffCharts ? ' risk-profile-payoff-col--dual' : '')
+              }
+            >
+              {showDualPayoffCharts && ctxOptionsOnly && profileOptionsOnly ? (
+                <div className="risk-profile-payoff-charts">
+                  <RiskProfilePayoffChart
+                    profile={profileOptionsOnly}
+                    ctx={ctxOptionsOnly}
+                    variant="compact"
+                    payoffScope="options_only"
+                  />
+                  <RiskProfilePayoffChart
+                    profile={profile}
+                    ctx={ctx!}
+                    variant="compact"
+                    payoffScope="with_coverage"
+                  />
+                </div>
+              ) : (
+                <RiskProfilePayoffChart profile={profile} ctx={ctx!} variant="compact" />
+              )}
             </div>
           </div>
           {matrixExplain ? (
@@ -999,7 +1042,24 @@ export function RiskProfileDl({
       ) : null}
 
       {hasPayoffChart && !showScenarioSummary ? (
-        <RiskProfilePayoffChart profile={profile} ctx={ctx!} variant="standalone" />
+        showDualPayoffCharts && ctxOptionsOnly && profileOptionsOnly ? (
+          <div className="risk-profile-payoff-charts risk-profile-payoff-charts--standalone">
+            <RiskProfilePayoffChart
+              profile={profileOptionsOnly}
+              ctx={ctxOptionsOnly}
+              variant="standalone"
+              payoffScope="options_only"
+            />
+            <RiskProfilePayoffChart
+              profile={profile}
+              ctx={ctx!}
+              variant="standalone"
+              payoffScope="with_coverage"
+            />
+          </div>
+        ) : (
+          <RiskProfilePayoffChart profile={profile} ctx={ctx!} variant="standalone" />
+        )
       ) : null}
 
       {hasSecondaryDl ? (

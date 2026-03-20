@@ -9761,11 +9761,43 @@ th:has(> .coverage-pool-th-held-amt) {
   max-width: 20rem;
   align-self: stretch;
 }
+.risk-profile-payoff-col--dual {
+  flex: 1 1 28rem;
+  width: min(100%, 38rem);
+  max-width: 38rem;
+}
+.risk-profile-payoff-charts {
+  display: flex;
+  flex-wrap: wrap;
+  /* Bottom-align paired charts so plot baselines line up when headers differ in height */
+  align-items: flex-end;
+  gap: 0.65rem 0.85rem;
+  width: 100%;
+}
+.risk-profile-payoff-charts .risk-payoff-chart {
+  flex: 1 1 12.5rem;
+  min-width: 0;
+}
+.risk-profile-payoff-charts--standalone {
+  margin: 0.65rem 0 0.85rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
+}
+.risk-profile-payoff-charts--standalone .risk-payoff-chart--standalone {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  border-top: none;
+  flex: 1 1 16rem;
+}
 @media (max-width: 640px) {
   .risk-profile-payoff-col {
     flex: 1 1 100%;
     max-width: none;
     width: 100%;
+  }
+  .risk-profile-payoff-col--dual {
+    max-width: none;
   }
 }
 
@@ -9813,14 +9845,41 @@ th:has(> .coverage-pool-th-held-amt) {
   padding-top: 0.5rem;
   border-top: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
 }
+.risk-payoff-chart-help-wrap {
+  position: relative;
+  width: 100%;
+  margin-bottom: 0.3rem;
+}
+.risk-payoff-chart-help-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin-top: 0.2rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.65rem;
+  line-height: 1.4;
+  color: var(--color-text-muted, #8b95a5);
+  background: var(--color-surface-elevated, rgba(28, 32, 40, 0.98));
+  border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.risk-payoff-chart-help-panel-p {
+  margin: 0;
+}
+.risk-payoff-chart-help-panel-p + .risk-payoff-chart-help-panel-p {
+  margin-top: 0.35rem;
+}
 .risk-payoff-chart-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.25rem 0.45rem;
-  margin-bottom: 0.3rem;
+  margin-bottom: 0;
 }
-.risk-payoff-chart--compact .risk-payoff-chart-head {
+.risk-payoff-chart--compact .risk-payoff-chart-help-wrap {
   margin-bottom: 0.2rem;
 }
 .risk-payoff-chart-title {

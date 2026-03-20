@@ -1,4 +1,4 @@
-import { useId, useMemo } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { RiskCalcContext, RiskProfile } from '../utils/riskProfile'
 import { payoffOptionsAtPrice, payoffStockAtPrice } from '../utils/riskProfile'
 
@@ -90,16 +90,24 @@ function segmentFills(
   return { green, red }
 }
 
+export type RiskPayoffScope = 'with_coverage' | 'options_only'
+
 export function RiskProfilePayoffChart({
   profile,
   ctx,
   variant = 'standalone',
+  payoffScope = 'with_coverage',
 }: {
   profile: RiskProfile
   ctx: RiskCalcContext
   variant?: 'compact' | 'standalone'
+  /** Options-only omits stock leg; use a profile computed with covered_shares=0 for breakevens / unlimited tail. */
+  payoffScope?: RiskPayoffScope
 }) {
   const clipId = useId().replace(/:/g, '_')
+  const helpPanelId = useId().replace(/:/g, '_')
+  const helpWrapRef = useRef<HTMLDivElement>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
   const compact = variant === 'compact'
 
   const { points, xMin, xMax, yMin, yMax, unlimitedTail } = useMemo(() => {
@@ -210,30 +218,98 @@ export function RiskProfilePayoffChart({
 
   const optionLegs = ctx.positions.length
   const coverageSh = ctx.covered_shares
+  const isOptionsOnly = payoffScope === 'options_only'
   const opportunityDataLabel =
-    optionLegs > 0 || coverageSh > 0
-      ? `Options: ${optionLegs} leg${optionLegs !== 1 ? 's' : ''} · Coverage: ${coverageSh} sh`
-      : null
+    isOptionsOnly && optionLegs > 0
+      ? `Options: ${optionLegs} leg${optionLegs !== 1 ? 's' : ''}`
+      : !isOptionsOnly && (optionLegs > 0 || coverageSh > 0)
+        ? `Options: ${optionLegs} leg${optionLegs !== 1 ? 's' : ''} · Coverage: ${coverageSh} sh`
+        : null
+
+  const chartTitle = isOptionsOnly ? 'Options-only' : 'Payoff at expiration'
+  const ariaLabel = isOptionsOnly
+    ? 'Options-only payoff at expiration: option legs P and L versus underlying price, excluding stock coverage.'
+    : 'Payoff at expiration for this opportunity: profit and loss versus underlying price, including options and stock coverage when modeled.'
+
+  const helpMainText = isOptionsOnly
+    ? compact
+      ? 'Option legs only (no stock coverage). Green / red vs zero. Dashed ≈ breakeven.'
+      : 'Option legs only at expiration (no underlying stock in this chart). Green = profit vs zero; red = loss. Dashed ≈ breakeven.'
+    : compact
+      ? 'This opportunity’s options + coverage at expiry. Green / red vs zero. Dashed ≈ breakeven.'
+      : 'This opportunity’s options + underlying coverage at expiration (same as scenario grid). Green = profit vs zero; red = loss. Dashed ≈ breakeven.'
+
+  const helpNakedShortText = unlimitedTail ? 'Naked short call: loss unbounded right of chart.' : null
+
+  useEffect(() => {
+    if (!helpOpen) return
+    const onDocDown = (e: MouseEvent) => {
+      const el = helpWrapRef.current
+      if (el && e.target instanceof Node && !el.contains(e.target)) {
+        setHelpOpen(false)
+      }
+    }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHelpOpen(false)
+    }
+    document.addEventListener('mousedown', onDocDown)
+    window.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDocDown)
+      window.removeEventListener('keydown', onEsc)
+    }
+  }, [helpOpen])
 
   return (
-    <div
-      className={rootClass}
-      onClick={e => e.stopPropagation()}
-      role="img"
-      aria-label="Payoff at expiration for this opportunity: profit and loss versus underlying price."
-    >
-      <div className="risk-payoff-chart-head">
-        <span className="risk-payoff-chart-title">Payoff at expiration</span>
-        {opportunityDataLabel ? (
-          <span className="risk-payoff-chart-data" title="This opportunity’s option legs and underlying coverage">
-            {opportunityDataLabel}
-          </span>
+    <div className={rootClass} onClick={e => e.stopPropagation()}>
+      <div className="risk-payoff-chart-help-wrap" ref={helpWrapRef}>
+        <div className="risk-payoff-chart-head">
+          <span className="risk-payoff-chart-title">{chartTitle}</span>
+          {opportunityDataLabel ? (
+            <span
+              className="risk-payoff-chart-data"
+              title={
+                isOptionsOnly
+                  ? 'Option legs only; underlying stock coverage is not included in this chart'
+                  : 'This opportunity’s option legs and underlying coverage'
+              }
+            >
+              {opportunityDataLabel}
+            </span>
+          ) : null}
+          {!compact ? (
+            <span className="risk-payoff-chart-sub">Underlying (X) · P&amp;L (Y)</span>
+          ) : (
+            <span className="risk-payoff-chart-sub">X = spot · Y = $</span>
+          )}
+          <button
+            type="button"
+            className={`risk-field-help-trigger${helpOpen ? ' risk-field-help-trigger-active' : ''}`}
+            aria-label="How to read this chart"
+            aria-expanded={helpOpen}
+            aria-controls={helpPanelId}
+            onClick={e => {
+              e.stopPropagation()
+              setHelpOpen(o => !o)
+            }}
+          >
+            ?
+          </button>
+        </div>
+        {helpOpen ? (
+          <div
+            id={helpPanelId}
+            className="risk-payoff-chart-help-panel"
+            role="region"
+            aria-label="Chart guide"
+            onClick={e => e.stopPropagation()}
+          >
+            <p className="risk-payoff-chart-help-panel-p">{helpMainText}</p>
+            {helpNakedShortText ? (
+              <p className="risk-payoff-chart-help-panel-p">{helpNakedShortText}</p>
+            ) : null}
+          </div>
         ) : null}
-        {!compact ? (
-          <span className="risk-payoff-chart-sub">Underlying (X) · P&amp;L (Y)</span>
-        ) : (
-          <span className="risk-payoff-chart-sub">X = spot · Y = $</span>
-        )}
       </div>
       <svg
         className="risk-payoff-chart-svg"
@@ -241,6 +317,8 @@ export function RiskProfilePayoffChart({
         width="100%"
         height={H}
         preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label={ariaLabel}
       >
         <defs>
           <clipPath id={clipId}>
@@ -392,12 +470,6 @@ export function RiskProfilePayoffChart({
           )
         })}
       </svg>
-      <p className="risk-payoff-chart-caption">
-        {compact
-          ? 'This opportunity’s options + coverage at expiry. Green / red vs zero. Dashed ≈ breakeven.'
-          : 'This opportunity’s options + underlying coverage at expiration (same as scenario grid). Green = profit vs zero; red = loss. Dashed ≈ breakeven.'}
-        {unlimitedTail ? ' Naked short call: loss unbounded right of chart.' : ''}
-      </p>
     </div>
   )
 }
