@@ -48,6 +48,10 @@ export function StrategyInstancesPage({
   const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; instanceId: number | null; label: string; deleting: boolean; error: string | null }>({
     open: false, instanceId: null, label: '', deleting: false, error: null,
   })
+  /** Symbol group key → collapsed (rows hidden). Default expanded when key absent. */
+  const [collapsedSymbolGroups, setCollapsedSymbolGroups] = useState<Record<string, boolean>>({})
+  /** Accordion: only one symbol group expanded at a time. Multi: several may stay open (same as Portfolio Open → Detail view). */
+  const [symbolGroupAccordionMode, setSymbolGroupAccordionMode] = useState<boolean>(true)
 
   /** Detail view is shown when URL has an instance id or user picked one in-page (e.g. after create). */
   const effectiveDetailId = urlStrategyInstanceId ?? selectedInstanceId
@@ -220,6 +224,173 @@ export function StrategyInstancesPage({
     return groups
   }, [items, opportunitiesById])
 
+  const toggleSymbolGroup = useCallback((key: string) => {
+    setCollapsedSymbolGroups((prev) => {
+      const wasCollapsed = Boolean(prev[key])
+      if (symbolGroupAccordionMode) {
+        if (wasCollapsed) {
+          const next: Record<string, boolean> = {}
+          for (const g of groupedItems) next[g.key] = true
+          delete next[key]
+          return next
+        }
+        return { ...prev, [key]: true }
+      }
+      return { ...prev, [key]: !prev[key] }
+    })
+  }, [symbolGroupAccordionMode, groupedItems])
+
+  const expandAllSymbolGroups = useCallback(() => {
+    if (symbolGroupAccordionMode && groupedItems.length > 0) {
+      const next: Record<string, boolean> = {}
+      for (const g of groupedItems) next[g.key] = true
+      delete next[groupedItems[0].key]
+      setCollapsedSymbolGroups(next)
+    } else {
+      setCollapsedSymbolGroups({})
+    }
+  }, [symbolGroupAccordionMode, groupedItems])
+
+  const collapseAllSymbolGroups = useCallback(() => {
+    setCollapsedSymbolGroups((prev) => {
+      const next = { ...prev }
+      for (const g of groupedItems) next[g.key] = true
+      return next
+    })
+  }, [groupedItems])
+
+  const openDeleteConfirm = useCallback((row: StrategyInstance) => {
+    const displayLabel = row.label ?? row.strategy_opportunity_name ?? `#${row.strategy_instance_id}`
+    setConfirmDelete({ open: true, instanceId: row.strategy_instance_id, label: displayLabel, deleting: false, error: null })
+  }, [])
+
+  const instanceListTableBody = useMemo(() => {
+    if (items.length === 0) {
+      return (
+        <tr>
+          <td colSpan={11}>No strategy instances found.</td>
+        </tr>
+      )
+    }
+    return (
+      <>
+        {groupedItems.flatMap((group) => {
+          const collapsed = Boolean(collapsedSymbolGroups[group.key])
+          const headerRow = (
+            <tr key={`group-${group.key}`} className="strategy-instance-symbol-group-row">
+              <td
+                colSpan={11}
+                style={{
+                  fontWeight: 600,
+                  background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))',
+                  padding: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  className="strategy-instance-symbol-group-toggle"
+                  onClick={() => toggleSymbolGroup(group.key)}
+                  aria-expanded={!collapsed}
+                  id={`symbol-group-head-${group.key}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '0.5rem 0.75rem',
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'inherit',
+                    font: 'inherit',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span className={`replay-opt-expand-icon ${collapsed ? '' : 'expanded'}`} aria-hidden>
+                    {collapsed ? '▶' : '▼'}
+                  </span>
+                  <span>
+                    Symbol group: {group.label}
+                    <span className="replay-muted" style={{ fontWeight: 400, marginLeft: '0.35rem' }}>
+                      ({group.rows.length} instance{group.rows.length !== 1 ? 's' : ''})
+                    </span>
+                  </span>
+                </button>
+              </td>
+            </tr>
+          )
+          if (collapsed) return [headerRow]
+          const dataRows = group.rows.map((row) => {
+            const rp = instanceRiskMap.get(row.strategy_instance_id)
+            const riskCells = !rp ? (
+              <><td className="replay-muted">—</td><td className="replay-muted">—</td><td className="replay-muted">—</td></>
+            ) : (() => {
+              const rl = formatRiskLabel(rp)
+              return <>
+                <td><span className="risk-value-gain">{rl.gainLabel}</span></td>
+                <td><span className={rp.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{rl.lossLabel}</span></td>
+                <td><span className={`coverage-status-badge ${rp.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
+              </>
+            })()
+            return (
+              <tr key={row.strategy_instance_id}>
+                <td>{row.strategy_instance_id}</td>
+                <td>{row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}</td>
+                <td>{row.account_id}</td>
+                <td>
+                  {row.opened_at_epoch != null
+                    ? fmtDate(row.opened_at_epoch)
+                    : row.opened_at && row.opened_at.length >= 10
+                      ? row.opened_at.slice(0, 10)
+                      : row.opened_at ?? '—'}
+                </td>
+                <td>
+                  {row.created_at_epoch != null
+                    ? fmtTsShort(row.created_at_epoch)
+                    : row.created_at ?? '—'}
+                </td>
+                <td>{row.executions_count != null ? row.executions_count : '—'}</td>
+                {riskCells}
+                <td>{row.label ?? '—'}</td>
+                <td style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                  <a
+                    href={`#/strategies/instances/${row.strategy_instance_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-icon-small"
+                    title="View instance"
+                    aria-label="View instance"
+                  >
+                    <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </a>
+                  <button
+                    type="button"
+                    className="btn btn-icon-small btn-icon-danger"
+                    title="Delete instance"
+                    aria-label="Delete instance"
+                    onClick={() => openDeleteConfirm(row)}
+                  >
+                    <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4h6v2" />
+                    </svg>
+                  </button>
+                </td>
+              </tr>
+            )
+          })
+          return [headerRow, ...dataRows]
+        })}
+      </>
+    )
+  }, [items, groupedItems, collapsedSymbolGroups, instanceRiskMap, toggleSymbolGroup, openDeleteConfirm])
+
   if (effectiveDetailId != null) {
     return (
       <StrategyInstanceDetailPage
@@ -240,11 +411,6 @@ export function StrategyInstancesPage({
     setCreateNotes('')
     setCreateError(null)
     setCreateModalOpen(true)
-  }
-
-  const openDeleteConfirm = (row: StrategyInstance) => {
-    const displayLabel = row.label ?? row.strategy_opportunity_name ?? `#${row.strategy_instance_id}`
-    setConfirmDelete({ open: true, instanceId: row.strategy_instance_id, label: displayLabel, deleting: false, error: null })
   }
 
   const handleDeleteConfirm = async () => {
@@ -359,6 +525,71 @@ export function StrategyInstancesPage({
         <p style={{ marginTop: '1rem' }}>Loading…</p>
       ) : (
         <div className="table-wrapper" style={{ overflowX: 'auto', marginTop: '1rem' }}>
+          {items.length > 0 && groupedItems.length > 0 && (
+            <div className="instance-list-symbol-toolbar">
+              <div className="instance-sheet-filter-bubble-row">
+                <span className="instance-sheet-filter-bubble-label" id="instance-list-detail-view-label">
+                  Detail view
+                </span>
+                <div
+                  className="replay-bubble-switch"
+                  role="radiogroup"
+                  aria-labelledby="instance-list-detail-view-label"
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={symbolGroupAccordionMode}
+                    className={`replay-bubble-switch-btn ${symbolGroupAccordionMode ? 'active' : ''}`}
+                    onClick={() => setSymbolGroupAccordionMode(true)}
+                  >
+                    Accordion
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!symbolGroupAccordionMode}
+                    className={`replay-bubble-switch-btn ${!symbolGroupAccordionMode ? 'active' : ''}`}
+                    onClick={() => setSymbolGroupAccordionMode(false)}
+                  >
+                    Multi
+                  </button>
+                </div>
+              </div>
+              <div className="instance-sheet-filter-bubble-row">
+                <span className="instance-sheet-filter-bubble-label" id="instance-list-symbol-groups-label">
+                  Symbol groups
+                </span>
+                <div
+                  className="replay-bubble-switch"
+                  role="group"
+                  aria-labelledby="instance-list-symbol-groups-label"
+                >
+                  <button
+                    type="button"
+                    className="replay-bubble-switch-btn"
+                    onClick={expandAllSymbolGroups}
+                    aria-label="Expand all symbol groups"
+                  >
+                    Expand all
+                  </button>
+                  <button
+                    type="button"
+                    className="replay-bubble-switch-btn"
+                    onClick={collapseAllSymbolGroups}
+                    aria-label="Collapse all symbol groups"
+                  >
+                    Collapse all
+                  </button>
+                </div>
+              </div>
+              <p className="section-hint instance-list-symbol-toolbar-hint">
+                {symbolGroupAccordionMode
+                  ? 'Accordion: only one symbol group expanded at a time. Expand all keeps the first group open.'
+                  : 'Multi: several symbol groups may stay expanded.'}
+              </p>
+            </div>
+          )}
           <table className="data-table">
             <thead>
               <tr>
@@ -376,81 +607,7 @@ export function StrategyInstancesPage({
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 ? (
-                <tr>
-                  <td colSpan={11}>No strategy instances found.</td>
-                </tr>
-              ) : (
-                groupedItems.flatMap((group) => [
-                  (
-                    <tr key={`group-${group.key}`}>
-                      <td colSpan={11} style={{ fontWeight: 600, background: 'var(--color-surface-elevated, rgba(255,255,255,0.03))' }}>
-                        Symbol group: {group.label}
-                      </td>
-                    </tr>
-                  ),
-                  ...group.rows.map((row) => (
-                    <tr key={row.strategy_instance_id}>
-                      <td>{row.strategy_instance_id}</td>
-                      <td>{row.strategy_opportunity_name ?? row.strategy_opportunity_id ?? '—'}</td>
-                      <td>{row.account_id}</td>
-                      <td>
-                        {row.opened_at_epoch != null
-                          ? fmtDate(row.opened_at_epoch)
-                          : row.opened_at && row.opened_at.length >= 10
-                            ? row.opened_at.slice(0, 10)
-                            : row.opened_at ?? '—'}
-                      </td>
-                      <td>
-                        {row.created_at_epoch != null
-                          ? fmtTsShort(row.created_at_epoch)
-                          : row.created_at ?? '—'}
-                      </td>
-                      <td>{row.executions_count != null ? row.executions_count : '—'}</td>
-                      {(() => {
-                        const rp = instanceRiskMap.get(row.strategy_instance_id)
-                        if (!rp) return <><td className="replay-muted">—</td><td className="replay-muted">—</td><td className="replay-muted">—</td></>
-                        const rl = formatRiskLabel(rp)
-                        return <>
-                          <td><span className="risk-value-gain">{rl.gainLabel}</span></td>
-                          <td><span className={rp.max_loss == null ? 'risk-value-loss risk-value-unlimited' : 'risk-value-loss'}>{rl.lossLabel}</span></td>
-                          <td><span className={`coverage-status-badge ${rp.risk_type === 'defined' ? 'risk-badge-defined' : 'risk-badge-unlimited'}`}>{rl.riskBadge}</span></td>
-                        </>
-                      })()}
-                      <td>{row.label ?? '—'}</td>
-                      <td style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                        <a
-                          href={`#/strategies/instances/${row.strategy_instance_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="btn btn-icon-small"
-                          title="View instance"
-                          aria-label="View instance"
-                        >
-                          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                            <circle cx="12" cy="12" r="3" />
-                          </svg>
-                        </a>
-                        <button
-                          type="button"
-                          className="btn btn-icon-small btn-icon-danger"
-                          title="Delete instance"
-                          aria-label="Delete instance"
-                          onClick={() => openDeleteConfirm(row)}
-                        >
-                          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14H6L5 6" />
-                            <path d="M10 11v6M14 11v6" />
-                            <path d="M9 6V4h6v2" />
-                          </svg>
-                        </button>
-                      </td>
-                    </tr>
-                  )),
-                ])
-              )}
+              {instanceListTableBody}
             </tbody>
           </table>
         </div>

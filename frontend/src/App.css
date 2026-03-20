@@ -9125,6 +9125,20 @@ th {
   max-width: min(100%, 42rem);
   row-gap: 2px;
 }
+/* Strategy Instances list: Detail view + symbol group bubble controls */
+.instance-list-symbol-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.instance-list-symbol-toolbar-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
 .replay-filter-select {
   appearance: none;
   -webkit-appearance: none;
