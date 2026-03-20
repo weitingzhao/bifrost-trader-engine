@@ -196,7 +196,7 @@ async def heartbeat(app: Any) -> None:
             and app._status_sink
         ):
             logger.info(
-                "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
+                "[Daemon] control (db): refresh_replay → syncing executions from IB for replay / risk"
             )
             await app._refresh_executions_only()
         if (
@@ -300,7 +300,7 @@ async def heartbeat(app: Any) -> None:
             and app._status_sink
         ):
             logger.info(
-                "[Daemon] control (db): refresh_replay → syncing executions from IB for 复盘"
+                "[Daemon] control (db): refresh_replay → syncing executions from IB for replay / risk"
             )
             await app._refresh_executions_only()
         if (

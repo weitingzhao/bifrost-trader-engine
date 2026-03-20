@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""启动 MkDocs 文档服务。默认 http://127.0.0.1:8000，可通过环境变量 DOCS_PORT 或 --port 指定端口。
-若端口已被占用，会先 kill 占用该端口的进程，再启动 serve。"""
+"""Start MkDocs (mkdocs serve). Default http://127.0.0.1:8000; port via DOCS_PORT or --port.
+If the port is in use, kills the owning process(es) before serve."""
 
 import argparse
 import os
@@ -57,17 +57,17 @@ def _free_port(port: int, wait_sec: float = 0.6) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="启动 MkDocs 文档服务 (mkdocs serve)")
+    parser = argparse.ArgumentParser(description="Start MkDocs (mkdocs serve)")
     parser.add_argument(
         "-p", "--port",
         type=int,
         default=int(os.environ.get("DOCS_PORT", "8000")),
-        help="监听端口 (默认 8000，或环境变量 DOCS_PORT)",
+        help="Listen port (default 8000 or env DOCS_PORT)",
     )
     parser.add_argument(
         "-a", "--addr",
         default="127.0.0.1",
-        help="监听地址 (默认 127.0.0.1)",
+        help="Listen address (default 127.0.0.1)",
     )
     args = parser.parse_args()
     if not _free_port(args.port):

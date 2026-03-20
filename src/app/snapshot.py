@@ -168,7 +168,7 @@ async def refresh_and_build_snapshot(
     Refresh positions and spot, parse legs, greeks, classify, build snapshot.
     Returns (snapshot, spot, cs, data_lag_ms) or None if no valid spot.
     Shared by _handle_connected (bootstrap) and _eval_hedge (tick).
-    Positions 与账户一样按 1 小时间隔拉取，避免每心跳请求 IB。
+    Positions refresh on the same hourly interval as accounts to avoid requesting IB every heartbeat.
     """
     now_ts = time.time()
     if (

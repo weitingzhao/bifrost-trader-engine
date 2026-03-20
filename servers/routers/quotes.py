@@ -58,11 +58,11 @@ def get_quotes(
         except Exception as e:
             logger.warning("GET /quotes contract_quote_live failed: %s", e)
     if not symbol_list and not contract_keys_opt:
-        return {"quotes": [], "message": "无关注标的"}
+        return {"quotes": [], "message": "No symbols in watchlist"}
     if not quotes and not symbol_list and contract_keys_opt:
-        return {"quotes": [], "message": "暂无期权报价"}
+        return {"quotes": [], "message": "No option quotes"}
     if not quotes and symbol_list and not (rq and getattr(rq, "available", False)):
-        return {"quotes": [], "message": "实时行情未开启或 Redis 不可用"}
+        return {"quotes": [], "message": "Real-time quotes disabled or Redis unavailable"}
     return {"quotes": quotes}
 
 
@@ -74,7 +74,7 @@ async def get_quotes_stream(request: Request):
     if rq is None or not getattr(rq, "available", False):
         return JSONResponse(
             status_code=503,
-            content={"detail": "实时行情未开启或 Redis 不可用"},
+            content={"detail": "Real-time quotes disabled or Redis unavailable"},
         )
     queue: asyncio.Queue = asyncio.Queue(maxsize=256)
 

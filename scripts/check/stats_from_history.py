@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""R-H2 历史统计：只读 daemon_auto_status_history、daemon_auto_operations 表，产出按日/周对冲次数、盈亏汇总等。
+"""R-H2 history stats: read-only daemon_auto_status_history, daemon_auto_operations; daily/weekly hedge counts and PnL.
 
-不跑 FSM/Guard/StateClassifier；可离线运行，不依赖守护进程在线。
-数据来源与守护程序写出一致（阶段 1 sink 写入的历史表）。
+Does not run FSM/Guard/StateClassifier; offline OK; no daemon required.
+Data matches phase-1 sink writes to those tables.
 
 Usage:
   python scripts/check/stats_from_history.py [--config PATH] [--format json|text] [--days N]
-  --config  配置文件路径（默认 config/config.yaml）
-  --format  输出格式：json 或 text（默认 text）
-  --days    统计最近 N 天的数据（默认 30，0 表示全部）
+  --config  Path to config (default config/config.yaml)
+  --format  json or text (default text)
+  --days    Last N days (default 30; 0 = all)
 """
 
 from __future__ import annotations
@@ -217,45 +217,45 @@ def run_stats(
 def format_text(data: Dict[str, Any]) -> str:
     """Format stats as human-readable text."""
     lines: List[str] = []
-    lines.append("=== R-H2 历史统计（只读 daemon_auto_status_history、daemon_auto_operations）===")
+    lines.append("=== R-H2 history stats (read-only daemon_auto_status_history, daemon_auto_operations) ===")
     lines.append("")
     s = data.get("summary") or {}
-    lines.append("【汇总】")
-    lines.append(f"  总成交次数 (fill): {s.get('total_fills', 0)}")
-    lines.append(f"  总对冲意图 (hedge_intent): {s.get('total_hedge_intents', 0)}")
-    lines.append(f"  总操作数: {s.get('total_operations', 0)}")
-    lines.append(f"  有 PnL 记录的天数: {s.get('days_with_pnl', 0)}")
-    lines.append(f"  盈亏汇总（各日 daily_pnl 之和）: {s.get('total_daily_pnl_sum', 0)}")
+    lines.append("[Summary]")
+    lines.append(f"  Total fills: {s.get('total_fills', 0)}")
+    lines.append(f"  Total hedge intents: {s.get('total_hedge_intents', 0)}")
+    lines.append(f"  Total operations: {s.get('total_operations', 0)}")
+    lines.append(f"  Days with PnL: {s.get('days_with_pnl', 0)}")
+    lines.append(f"  Sum of daily_pnl: {s.get('total_daily_pnl_sum', 0)}")
     lines.append("")
-    lines.append("【按日对冲次数】")
+    lines.append("[Daily hedge counts]")
     for item in (data.get("daily_hedge_counts") or [])[:14]:
         lines.append(f"  {item.get('date', '')}: fill={item.get('fill_count', 0)}, intent={item.get('hedge_intent_count', 0)}, total={item.get('total', 0)}")
     if not data.get("daily_hedge_counts"):
-        lines.append("  （无数据）")
+        lines.append("  (no data)")
     lines.append("")
-    lines.append("【按周对冲次数】")
+    lines.append("[Weekly hedge counts]")
     for item in (data.get("weekly_hedge_counts") or [])[:8]:
         lines.append(f"  {item.get('week_start', '')}: fill={item.get('fill_count', 0)}, intent={item.get('hedge_intent_count', 0)}, total={item.get('total', 0)}")
     if not data.get("weekly_hedge_counts"):
-        lines.append("  （无数据）")
+        lines.append("  (no data)")
     lines.append("")
-    lines.append("【按日盈亏 (daily_pnl)】")
+    lines.append("[Daily PnL (daily_pnl)]")
     for item in (data.get("daily_pnl") or [])[:14]:
         pnl = item.get("daily_pnl")
         pnl_str = f"{pnl:.2f}" if pnl is not None else "—"
         lines.append(f"  {item.get('date', '')}: {pnl_str} (snapshots={item.get('snapshot_count', 0)})")
     if not data.get("daily_pnl"):
-        lines.append("  （无数据）")
+        lines.append("  (no data)")
     return "\n".join(lines)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="R-H2 历史统计：只读 daemon_auto_status_history、daemon_auto_operations，产出按日/周对冲次数、盈亏汇总。"
+        description="R-H2 history stats: read-only daemon_auto_status_history, daemon_auto_operations; daily/weekly hedge counts and PnL summary."
     )
-    parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
-    parser.add_argument("--format", choices=["json", "text"], default="text", help="输出格式")
-    parser.add_argument("--days", type=int, default=30, help="统计最近 N 天（0=全部）")
+    parser.add_argument("--config", default="config/config.yaml", help="Path to config file")
+    parser.add_argument("--format", choices=["json", "text"], default="text", help="Output format")
+    parser.add_argument("--days", type=int, default=30, help="Last N days (0 = all)")
     args = parser.parse_args()
 
     status_config = _load_config(args.config)

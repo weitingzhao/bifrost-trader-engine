@@ -81,7 +81,7 @@ def derive_self_check(
 def derive_daemon_self_check(daemon_heartbeat: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Compute daemon self_check, status_lamp and block_reasons from daemon_heartbeat (RE-6/RE-7).
 
-    Used for the 守护程序 status lamp on the monitoring UI. Heartbeat is written by the stable
+    Used for the daemon status lamp on the monitoring UI. Heartbeat is written by the stable
     daemon (run_engine.py); when absent or stale, daemon is considered not running.
 
     Args:

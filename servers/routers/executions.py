@@ -262,7 +262,7 @@ def post_executions_fetch_flex(request: Request, body: Dict[str, Any] = Body(def
     reader = request.app.state.reader
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "count": 0}
+        return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
     try:
         entries: List[Dict[str, Any]] = []
         flex_list = reader.get_flex_config(purpose="trades")
@@ -450,7 +450,7 @@ def post_executions_fetch_flex_upload(request: Request, body: Dict[str, Any] = B
     """Upload Flex Trades XML and upsert into account_executions. Body: { \"xml\": \"<FlexStatement ...>...</FlexStatement>\" }"""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "count": 0}
+        return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
     try:
         raw_xml = (body.get("xml") or "").strip()
         if not raw_xml:
@@ -481,11 +481,11 @@ def post_execution(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[s
     """Add one execution record manually (history). body: account_id, time, symbol, sec_type, side, quantity, price; optional fields."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "account_executions_id": None}
+        return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "account_executions_id": None}
     new_account_executions_id = insert_one_execution(control_via_db, body)
     if new_account_executions_id is None:
-        return {"ok": False, "error": "添加执行记录失败（请检查必填项：symbol, quantity, price）。", "account_executions_id": None}
-    return {"ok": True, "account_executions_id": new_account_executions_id, "message": "已添加一条执行记录。"}
+        return {"ok": False, "error": "Failed to add execution (required fields: symbol, quantity, price).", "account_executions_id": None}
+    return {"ok": True, "account_executions_id": new_account_executions_id, "message": "Execution record added."}
 
 
 def _parse_account_executions_path_id(execution_id: str) -> int:
@@ -502,10 +502,10 @@ def put_execution(request: Request, execution_id: str, body: Dict[str, Any] = Bo
     eid = _parse_account_executions_path_id(execution_id)
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
+        return {"ok": False, "error": "PostgreSQL is required to write account_executions."}
     if update_one_execution(control_via_db, eid, body):
-        return {"ok": True, "message": "已更新执行记录。"}
-    return {"ok": False, "error": "更新失败（account_executions_id 不存在或数据库错误）。"}
+        return {"ok": True, "message": "Execution record updated."}
+    return {"ok": False, "error": "Update failed (account_executions_id missing or database error)."}
 
 
 @router.delete("/executions/{execution_id}")
@@ -514,10 +514,10 @@ def delete_execution(request: Request, execution_id: str) -> Dict[str, Any]:
     eid = _parse_account_executions_path_id(execution_id)
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
+        return {"ok": False, "error": "PostgreSQL is required to write account_executions."}
     if delete_one_execution(control_via_db, eid):
-        return {"ok": True, "message": "已删除该条执行记录。"}
-    return {"ok": False, "error": "删除失败（account_executions_id 不存在或数据库错误）。"}
+        return {"ok": True, "message": "Execution record deleted."}
+    return {"ok": False, "error": "Delete failed (account_executions_id missing or database error)."}
 
 
 @router.post("/executions/fetch")
@@ -530,16 +530,16 @@ async def post_executions_fetch(
     reader = app.state.reader
     control_via_db = app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。", "count": 0}
+        return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
-        return {"ok": False, "error": "监控已停止，无法拉取执行记录。", "count": 0}
+        return {"ok": False, "error": "Monitor stopped; cannot fetch executions.", "count": 0}
     client = getattr(app.state, "account_ib_client", None)
     if client is None:
-        return {"ok": False, "error": "监控端 AccountIbClient 未初始化。", "count": 0}
+        return {"ok": False, "error": "AccountIbClient is not initialized.", "count": 0}
     try:
         await client.ensure_connected()
     except Exception as e:
-        return {"ok": False, "error": f"连接 IB 失败：{e}", "count": 0}
+        return {"ok": False, "error": f"Failed to connect to IB: {e}", "count": 0}
     await client.set_commission_report_callback(
         lambda eid, c, pnl, cur, y_, yrd: update_execution_commission(control_via_db, eid, c, pnl, cur, y_, yrd)
     )
@@ -562,9 +562,9 @@ async def post_executions_fetch(
     if not all_execs:
         return {
             "ok": True,
-            "message": f"IB 未返回执行记录（当前范围：最近{days}天；若选多天请确认 TWS Trade Log 已勾选对应天数）。",
+            "message": f"IB returned no executions (range: last {days} day(s); for a multi-day range ensure TWS Trade Log includes those days).",
             "count": 0,
         }
     if not write_account_executions_to_db(control_via_db, all_execs):
-        return {"ok": False, "error": "写入 account_executions 失败。", "count": 0}
-    return {"ok": True, "count": len(all_execs), "message": f"已写入 {len(all_execs)} 条执行记录。"}
+        return {"ok": False, "error": "Failed to write account_executions.", "count": 0}
+    return {"ok": True, "count": len(all_execs), "message": f"Wrote {len(all_execs)} execution record(s)."}

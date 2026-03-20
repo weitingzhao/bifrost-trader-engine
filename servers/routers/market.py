@@ -114,7 +114,7 @@ def _enqueue_job_bars_backfill(
         api_interval_sec=api_interval_sec,
     )
     if jid is None:
-        return False, None, "入队失败。"
+        return False, None, "Enqueue failed."
     logger.info(
         "bars/backfill enqueue job_id=%s symbol=%s period=%s years=%s days=%s override_days=%s span_hours=%s",
         jid, symbol, period, years, days, override_days, span_hours,
@@ -129,7 +129,7 @@ def _enqueue_job_bars_backfill(
     except Exception as e:
         logger.exception("Celery enqueue failed: %s", e)
         update_job_bars_backfill_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
-        return False, None, f"Celery 入队失败: {e}"
+        return False, None, f"Celery enqueue failed: {e}"
     return True, str(jid), None
 
 
@@ -146,7 +146,7 @@ def get_bars(
     reader = request.app.state.reader
     sym = (symbol or "").strip()
     if not sym:
-        return {"bars": [], "message": "请提供 symbol 参数。"}
+        return {"bars": [], "message": "Missing symbol parameter."}
     per = (period or "1 D").strip()
     items = reader.get_bars(symbol=sym, period=per, limit=limit)
     bars = [
@@ -173,7 +173,7 @@ def get_bars_latest(
     reader = request.app.state.reader
     sym = (symbol or "").strip()
     if not sym:
-        return {"latest": None, "message": "请提供 symbol 参数。"}
+        return {"latest": None, "message": "Missing symbol parameter."}
     per = (period or "1 D").strip()
     t = reader.get_bars_latest(symbol=sym, period=per)
     return {"latest": t}
@@ -219,7 +219,7 @@ def get_bars_stats(
     reader = request.app.state.reader
     sym = (symbol or "").strip()
     if not sym:
-        return {"stock_day": 0, "stock_min": {}, "message": "请提供 symbol 参数。"}
+        return {"stock_day": 0, "stock_min": {}, "message": "Missing symbol parameter."}
     stats = reader.get_bars_stats(symbol=sym)
     return stats
 
@@ -391,17 +391,17 @@ def delete_bars_for_symbol(
     """Delete stock_day and/or stock_min rows for the given symbol."""
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以删除 K 线数据。"}
+        return {"ok": False, "error": "PostgreSQL is required to delete bar data."}
     sym = (symbol or "").strip().upper()
     if not sym:
-        return {"ok": False, "error": "请提供 symbol 参数。"}
+        return {"ok": False, "error": "Missing symbol parameter."}
     period_list = None
     if body and body.periods and len(body.periods) > 0:
         period_list = [p.strip() for p in body.periods if (p or "").strip()]
     result = delete_stock_bars_for_symbol(control_via_db, sym, periods=period_list)
     if result.get("ok"):
-        return {"ok": True, "deleted_day": result.get("deleted_day", 0), "deleted_min": result.get("deleted_min", 0), "message": f"已删除 {sym} 的选定周期记录，可重新 Pull。"}
-    return {"ok": False, "error": result.get("error", "删除失败")}
+        return {"ok": True, "deleted_day": result.get("deleted_day", 0), "deleted_min": result.get("deleted_min", 0), "message": f"Deleted selected periods for {sym}; you can pull again."}
+    return {"ok": False, "error": result.get("error", "Delete failed")}
 
 
 # --- Bars fetch and backfill ---
@@ -420,15 +420,15 @@ async def post_bars_fetch(
     control_via_db = app.state.control_via_db
     sym = (symbol or "").strip()
     if not sym:
-        return {"ok": False, "error": "请提供 symbol 参数。", "bars": [], "count": 0}
+        return {"ok": False, "error": "Missing symbol parameter.", "bars": [], "count": 0}
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "bars": [], "count": 0}
+        return {"ok": False, "error": "PostgreSQL is required to write bar tables.", "bars": [], "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
-        return {"ok": False, "error": "监控已停止，无法拉取 K 线。", "bars": [], "count": 0}
+        return {"ok": False, "error": "Monitor stopped; cannot fetch bars.", "bars": [], "count": 0}
     from servers.ib_clients import MarketIbClient
     client = getattr(app.state, "market_ib_client", None)
     if client is None:
-        return {"ok": False, "error": "监控端 MarketIbClient 未初始化。", "bars": [], "count": 0}
+        return {"ok": False, "error": "MarketIbClient is not initialized.", "bars": [], "count": 0}
     per = (period or "1 D").strip()
     dur = (duration or "30 D").strip()
     if per.lower() in ("1 min", "1min"):
@@ -449,13 +449,13 @@ async def post_bars_fetch(
     try:
         await client.ensure_connected()
     except Exception as e:
-        return {"ok": False, "error": f"连接 IB 失败：{e}", "bars": [], "count": 0}
+        return {"ok": False, "error": f"Failed to connect to IB: {e}", "bars": [], "count": 0}
     raw = await client.fetch_bars(sym, per, dur)
     if not raw:
-        return {"ok": True, "message": "IB 未返回 K 线数据。", "bars": [], "count": 0}
+        return {"ok": True, "message": "IB returned no bar data.", "bars": [], "count": 0}
     rows = [dict(b, symbol=sym, period=per) for b in raw]
     if not write_ohlc_bars_to_db(control_via_db, rows):
-        return {"ok": False, "error": "写入 K 线表失败。", "bars": [], "count": 0}
+        return {"ok": False, "error": "Failed to write bar tables.", "bars": [], "count": 0}
     bars = [
         {"time": float(b.get("bar_time") or 0), "open": float(b.get("open") or 0), "high": float(b.get("high") or 0), "low": float(b.get("low") or 0), "close": float(b.get("close") or 0), "volume": float(b.get("volume") or 0)}
         for b in raw
@@ -474,7 +474,7 @@ async def post_watchlist_eod_refresh_preview(
     reader = app.state.reader
     control_via_db = app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以读取 K 线表与 Watchlist。"}
+        return {"ok": False, "error": "PostgreSQL is required to read bar tables and Watchlist."}
     from servers.bars_backfill import build_backfill_preview
     symbols = _get_watchlist_stock_symbols(reader)
     periods = _WATCHLIST_EOD_PERIODS
@@ -530,19 +530,19 @@ async def post_bars_backfill(
     control_via_db = app.state.control_via_db
     sym = (symbol or "").strip().upper()
     if not sym:
-        return {"ok": False, "error": "请提供 symbol 参数。", "count": 0}
+        return {"ok": False, "error": "Missing symbol parameter.", "count": 0}
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "count": 0}
+        return {"ok": False, "error": "PostgreSQL is required to write bar tables.", "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
-        return {"ok": False, "error": "监控已停止，无法补全 K 线。", "count": 0}
+        return {"ok": False, "error": "Monitor stopped; cannot backfill bars.", "count": 0}
     per = (period or "1 D").strip()
     if not queue:
-        return {"ok": False, "error": "Backfill 仅支持 queue=true，由 Celery Worker 在后台拉取（IB 速率限制）。", "count": 0}
+        return {"ok": False, "error": "Backfill requires queue=true (Celery worker pulls in background; IB rate limits).", "count": 0}
     ok, job_id, error = _enqueue_job_bars_backfill(
         control_via_db, sym, per, years=years, days=days, override_days=override_days, span_hours=span_hours, is_test=is_test, api_interval_sec=api_interval_sec
     )
     if not ok or not job_id:
-        return {"ok": False, "error": error or "入队失败。", "count": 0}
+        return {"ok": False, "error": error or "Enqueue failed.", "count": 0}
     trim_job_bars_backfill(control_via_db, keep=200)
     return {"ok": True, "job_id": job_id, "message": "Queued (Celery). Poll GET /bars/jobs/{job_id} for status."}
 
@@ -559,13 +559,13 @@ async def post_watchlist_eod_refresh(
     reader = app.state.reader
     control_via_db = app.state.control_via_db
     if not control_via_db:
-        return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。", "queued_count": 0}
+        return {"ok": False, "error": "PostgreSQL is required to write bar tables.", "queued_count": 0}
     if not getattr(app.state, "monitor_enabled", True):
-        return {"ok": False, "error": "监控已停止，无法补全 K 线。", "queued_count": 0}
+        return {"ok": False, "error": "Monitor stopped; cannot backfill bars.", "queued_count": 0}
     symbols = _get_watchlist_stock_symbols(reader)
     periods = _WATCHLIST_EOD_PERIODS
     if not symbols:
-        return {"ok": True, "queued_count": 0, "failed_count": 0, "symbols_count": 0, "symbols": [], "periods": periods, "override_days": override_days, "message": "Watchlist 中没有股票 symbol，无需执行收盘刷新。"}
+        return {"ok": True, "queued_count": 0, "failed_count": 0, "symbols_count": 0, "symbols": [], "periods": periods, "override_days": override_days, "message": "No stock symbols in Watchlist; nothing to enqueue for close refresh."}
     queued_jobs = []
     failures = []
     for sym in symbols:
@@ -574,12 +574,12 @@ async def post_watchlist_eod_refresh(
             if ok and job_id:
                 queued_jobs.append({"job_id": job_id, "symbol": sym, "period": per})
             else:
-                failures.append({"symbol": sym, "period": per, "error": error or "入队失败。"})
+                failures.append({"symbol": sym, "period": per, "error": error or "Enqueue failed."})
     trim_job_bars_backfill(control_via_db, keep=200)
     queued_count = len(queued_jobs)
     failed_count = len(failures)
     if queued_count == 0:
-        return {"ok": False, "error": "收盘刷新任务入队失败。", "queued_count": 0, "failed_count": failed_count, "symbols_count": len(symbols), "symbols": symbols, "periods": periods, "override_days": override_days, "failures": failures}
+        return {"ok": False, "error": "Failed to enqueue close refresh tasks.", "queued_count": 0, "failed_count": failed_count, "symbols_count": len(symbols), "symbols": symbols, "periods": periods, "override_days": override_days, "failures": failures}
     message = f"Queued {queued_count} EOD refresh job(s) for {len(symbols)} watchlist symbol(s). override_days={override_days:g}."
     if failed_count > 0:
         message += f" Failed: {failed_count}."

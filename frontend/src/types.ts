@@ -214,7 +214,7 @@ export interface DaemonHeartbeat {
   event_subscribe_commission_ib2?: boolean
   /** Mock hedging mode: treat as live for Status lamp (green when running). */
   mock_hedging?: boolean
-  /** Last control message (e.g. init_ticker error: 请清空订阅). Cleared on success. */
+  /** Last control message (e.g. init_ticker error: clear subscriptions first). Cleared on success. */
   last_control_message?: string | null
 }
 
@@ -260,7 +260,7 @@ export interface ControlResponse {
   statusText?: string
 }
 
-/** Risk/post-mortem summary for 复盘与风控 page (GET /risk_summary) */
+/** Risk/post-mortem summary for replay & risk page (GET /risk_summary) */
 export interface RiskSummaryResponse {
   daily_hedge_count?: number | null
   daily_pnl?: number | null
@@ -356,7 +356,7 @@ export interface PositionAttributionResponse {
   attributions: PositionInstanceAttribution[]
 }
 
-/** 期权按 contract_key + strike 分组后的汇总（复盘业务逻辑：兑现/未兑现） */
+/** Per-underlying option summary by contract_key + strike (realized vs open P&L logic) */
 export interface OptExecutionGroup {
   contract_key: string
   strike: number

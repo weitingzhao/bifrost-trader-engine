@@ -201,23 +201,23 @@ async def run_one_backfill(
         else:
             start_ts, end_ts = _backfill_resolve_span(period_key, config, years, days, span_hours=span_hours)
         if ib_client is None:
-            return {"ok": False, "error": "MarketIbClient 未初始化。"}
+            return {"ok": False, "error": "MarketIbClient is not initialized."}
         if skip_fetch:
             plan = _backfill_ib_request_plan(sym, per, start_ts, end_ts)
             # 打印将要发给 IB 的参数，便于预先查看、避免超限
             logger.info(
-                "[bars_skip_ib] 未拉取 IB 数据，仅打印计划请求: symbol=%s period=%s start_ts=%.0f end_ts=%.0f chunks=%s",
+                "[bars_skip_ib] IB fetch skipped, planned requests only: symbol=%s period=%s start_ts=%.0f end_ts=%.0f chunks=%s",
                 sym, per, start_ts, end_ts, len(plan),
             )
             for i, req in enumerate(plan):
                 logger.info(
-                    "[bars_skip_ib] 计划请求 #%s: barSizeSetting=%s durationStr=%s endDateTime=%s (seg %.0f..%.0f)",
+                    "[bars_skip_ib] planned request #%s: barSizeSetting=%s durationStr=%s endDateTime=%s (seg %.0f..%.0f)",
                     i + 1, req["barSizeSetting"], req["durationStr"], req["endDateTime"],
                     req["seg_start_ts"], req["seg_end_ts"],
                 )
             print(
                 f"[bars_skip_ib] symbol={sym} period={per} start_ts={start_ts:.0f} end_ts={end_ts:.0f} "
-                f"num_chunks={len(plan)} (不拉取，仅预览)"
+                f"num_chunks={len(plan)} (preview only, no fetch)"
             )
             for i, req in enumerate(plan):
                 print(
@@ -228,15 +228,15 @@ async def run_one_backfill(
         try:
             await ib_client.ensure_connected()
         except Exception as e:
-            return {"ok": False, "error": f"连接 IB 失败：{e}"}
+            return {"ok": False, "error": f"Failed to connect to IB: {e}"}
         interval_sec = float(api_interval_sec) if api_interval_sec is not None and api_interval_sec > 0 else None
         bars = await ib_client.fetch_bars_range(symbol=sym, period=per, start_ts=start_ts, end_ts=end_ts, interval_sec=interval_sec)
         if not bars:
             return {"ok": True, "count": 0, "message": "IB returned no data for this range."}
         if not control_via_db:
-            return {"ok": False, "error": "需要 postgres 配置以写入 K 线表。"}
+            return {"ok": False, "error": "PostgreSQL is required to write bar tables."}
         if not write_stock_bars(control_via_db, sym, per, bars):
-            return {"ok": False, "error": "写入 K 线表失败。"}
+            return {"ok": False, "error": "Failed to write bar tables."}
         return {"ok": True, "count": len(bars), "message": f"Backfilled {len(bars)} bar(s)."}
     except IBConnectionDroppedError:
         raise

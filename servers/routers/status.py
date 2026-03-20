@@ -313,6 +313,6 @@ def get_operations(
 
 @router.get("/risk_summary")
 def get_risk_summary(request: Request) -> Dict[str, Any]:
-    """Return risk/post-mortem summary for 复盘与风控 page (R-M7): daily_hedge_count, daily_pnl, operations_count_24h, etc."""
+    """Return risk/post-mortem summary for replay & risk page (R-M7): daily_hedge_count, daily_pnl, operations_count_24h, etc."""
     reader = request.app.state.reader
     return reader.get_risk_summary()

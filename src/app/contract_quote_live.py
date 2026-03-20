@@ -157,7 +157,7 @@ async def init_ticker_subscriptions(app: Any) -> None:
     if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
         subscribed = app._redis_quotes.get_subscribed_symbols()
     if subscribed:
-        msg = "请清空订阅"
+        msg = "Clear subscriptions first (Redis ticker subscribed set is non-empty)."
         if app._status_sink and hasattr(app._status_sink, "write_daemon_control_message"):
             app._status_sink.write_daemon_control_message(msg)
         logger.warning("[Daemon] init_ticker_subscriptions: Redis subscribed set non-empty (%s), %s", len(subscribed), msg)

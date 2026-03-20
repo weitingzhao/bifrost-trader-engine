@@ -138,8 +138,10 @@ def _log_table(table_name: str, purpose: str, no_color: bool = False) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="刷新 status 用 PostgreSQL 库表结构（与 DATABASE.md 一致）。")
-    parser.add_argument("--config", default="config/config.yaml", help="配置文件路径")
+    parser = argparse.ArgumentParser(
+        description="Refresh PostgreSQL schema for status (aligned with DATABASE.md)."
+    )
+    parser.add_argument("--config", default="config/config.yaml", help="Path to config file")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     args = parser.parse_args()
     no_color = args.no_color

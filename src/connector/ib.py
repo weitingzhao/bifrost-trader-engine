@@ -131,7 +131,7 @@ class IBConnector:
         When max_attempts is 1 (e.g. daemon heartbeat retry): try once with current client_id and return.
         When max_attempts is None or >1: try up to max_attempts (default 10) with client_id, client_id+1, ...
         so that "client_id in use" (326) can be worked around. No delay between attempts when >1.
-        When bars_only is True, do not register commissionReportEvent (used by 拉取K线 to avoid position/exec side effects).
+        When bars_only is True, do not register commissionReportEvent (used by bar fetch to avoid position/exec side effects).
         """
         if self.is_connected:
             return True
