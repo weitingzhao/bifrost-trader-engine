@@ -26,8 +26,8 @@ export const SETTINGS_SECTIONS = [...STATUS_SECTIONS, ...CONFIG_SECTIONS] as con
 
 /** Sub-anchors for IB Configure: table groups + Flex Preference (under IB Preference section). */
 export const IB_CONNECTION_SUBSECTIONS = [
-  { id: 'ib-users', label: 'User', icon: 'user-host' as const },
-  { id: 'ib-client-ids', label: 'Client ID', icon: 'user-host' as const },
+  { id: 'ib-users', label: 'User (YAML)', icon: 'user-host' as const },
+  { id: 'ib-client-ids', label: 'Client ID (YAML)', icon: 'user-host' as const },
   { id: 'ib-account', label: 'Account', icon: 'stream' as const },
   { id: 'ib-flex-query', label: 'Flex Query', icon: 'flex' as const },
   { id: 'flex-preference', label: 'Flex Preference', icon: 'flex' as const },

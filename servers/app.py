@@ -13,6 +13,7 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+from src.app.config import get_effective_ib_config
 from servers.flex_client import fetch_cash_transactions, fetch_trades
 from servers.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
@@ -101,65 +102,56 @@ def create_app(
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        """初始化监控端 IB 客户端（账户 + 行情），使用 settings 中的 host/port/client_id。若启用 Redis 行情，启动 SUBSCRIBE 线程供 SSE 推送。"""
+        """初始化监控端 IB 客户端（账户 + 行情），使用 config.yaml 的 host/port/client_id。若启用 Redis 行情，启动 SUBSCRIBE 线程供 SSE 推送。"""
         app.state._sse_loop = asyncio.get_running_loop()
+        skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
+        if skip_ib:
+            logger.info("skip_monitor_ib=true: skipping AccountIbClient / MarketIbClient initialisation (Management mode)")
         try:
-            ib_cfg = reader.get_ib_config() or {
-                "ib_host": "127.0.0.1",
-                "ib_port_type": "tws_paper",
-                "ib_client_id_daemon": 1,
-                "ib_client_id_listener": 2,
-                "ib_client_id_account": 100,
-                "ib_client_id_markets": 101,
-                "ib_client_id_worker_market": 500,
-                "ib2_host": None,
-                "ib2_port_type": None,
-                "ib2_client_id_listener": 3,
-                "ib2_client_id_account": 102,
-            }
-            host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
-            port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
-            port_map = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
-            port = port_map.get(port_type, 7497)
+            ib_cfg = get_effective_ib_config(reader._config)
+            host = ib_cfg["host"]
+            port = ib_cfg["port"]
 
-            app.state.account_ib_client = AccountIbClient(
-                host=host,
-                port=port,
-                client_id=int(ib_cfg.get("ib_client_id_account", 100)),
-                name="AccountIbClient",
-            )
-            app.state.market_ib_client = MarketIbClient(
-                host=host,
-                port=port,
-                client_id=int(ib_cfg.get("ib_client_id_markets", 101)),
-                name="MarketIbClient",
-            )
-            # Second IB (manual-only account): different host = different TWS machine
-            ib2_host = (ib_cfg.get("ib2_host") or "").strip()
-            if ib2_host:
-                port_type_2 = (ib_cfg.get("ib2_port_type") or "tws_paper").strip().lower()
-                port_2 = port_map.get(port_type_2, 7497)
-                app.state.account_ib_client_2 = AccountIbClient(
-                    host=ib2_host,
-                    port=port_2,
-                    client_id=int(ib_cfg.get("ib2_client_id_account", 102)),
-                    name="AccountIbClient2",
-                )
-                logger.info(
-                    "Monitor AccountIbClient2 (second IB) initialized host=%s port=%s client_id=%s",
-                    ib2_host,
-                    port_2,
-                    ib_cfg.get("ib2_client_id_account", 102),
-                )
-            else:
+            if skip_ib:
+                app.state.account_ib_client = None
+                app.state.market_ib_client = None
                 app.state.account_ib_client_2 = None
-            logger.info(
-                "Monitor IB clients initialized (host=%s port=%s account_id=%s market_id=%s)",
-                host,
-                port,
-                getattr(app.state.account_ib_client, "client_id", None),
-                getattr(app.state.market_ib_client, "client_id", None),
-            )
+            else:
+                app.state.account_ib_client = AccountIbClient(
+                    host=host,
+                    port=port,
+                    client_id=ib_cfg["client_id_account"],
+                    name="AccountIbClient",
+                )
+                app.state.market_ib_client = MarketIbClient(
+                    host=host,
+                    port=port,
+                    client_id=ib_cfg["client_id_markets"],
+                    name="MarketIbClient",
+                )
+                ib2_host = ib_cfg.get("ib2_host") or ""
+                if ib2_host:
+                    app.state.account_ib_client_2 = AccountIbClient(
+                        host=ib2_host,
+                        port=ib_cfg["ib2_port"],
+                        client_id=ib_cfg["ib2_client_id_account"],
+                        name="AccountIbClient2",
+                    )
+                    logger.info(
+                        "Monitor AccountIbClient2 (second IB) initialized host=%s port=%s client_id=%s",
+                        ib2_host,
+                        ib_cfg["ib2_port"],
+                        ib_cfg["ib2_client_id_account"],
+                    )
+                else:
+                    app.state.account_ib_client_2 = None
+                logger.info(
+                    "Monitor IB clients initialized (host=%s port=%s account_id=%s market_id=%s)",
+                    host,
+                    port,
+                    getattr(app.state.account_ib_client, "client_id", None),
+                    getattr(app.state.market_ib_client, "client_id", None),
+                )
             # 后台尝试建立 IB 连接，不阻塞 startup，避免 GET /status、GET /health 等不到响应导致前端显示 Fetch failed
             async def _connect_ib_in_background() -> None:
                 acc_client = getattr(app.state, "account_ib_client", None)

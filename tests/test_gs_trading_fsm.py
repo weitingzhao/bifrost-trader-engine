@@ -11,7 +11,19 @@ from src.core.state.enums import TradingState
 @pytest.fixture
 def minimal_config():
     return {
-        "ib": {"host": "127.0.0.1", "port": 4001},
+        "ib": {
+            "host": {
+                "ip": "127.0.0.1",
+                "port_type": "tws_paper",
+                "client_id": {
+                    "daemon": 1,
+                    "listener": 2,
+                    "account": 100,
+                    "markets": 101,
+                    "worker_market": 500,
+                },
+            },
+        },
         "greeks": {"risk_free_rate": 0.05, "volatility": 0.35},
         "gates": {
             "structure": {"min_dte": 21, "max_dte": 35, "atm_band_pct": 0.03},

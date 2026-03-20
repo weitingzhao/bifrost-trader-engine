@@ -22,7 +22,19 @@ def test_all_non_terminal_states_have_handlers_in_gs_trading():
 
     # Create minimal config to instantiate GsTrading
     config = {
-        "ib": {"host": "127.0.0.1", "port": 4001},
+        "ib": {
+            "host": {
+                "ip": "127.0.0.1",
+                "port_type": "tws_paper",
+                "client_id": {
+                    "daemon": 1,
+                    "listener": 2,
+                    "account": 100,
+                    "markets": 101,
+                    "worker_market": 500,
+                },
+            },
+        },
         "structure": {},
         "risk": {"paper_trade": True},
         "greeks": {},
@@ -54,6 +66,7 @@ def test_every_valid_transition_has_implementation_path():
     # RUNNING <-> RUNNING_SUSPENDED and RUNNING->WAITING_IB happen inside _handle_running (heartbeat).
     implementation_paths = {
         (DaemonState.IDLE, DaemonState.CONNECTING): "_handle_idle returns CONNECTING",
+        (DaemonState.IDLE, DaemonState.WAITING_IB): "_handle_idle returns WAITING_IB when suspended (no Trading Client until Resume)",
         (DaemonState.IDLE, DaemonState.STOPPED): "request_stop() when IDLE",
         (DaemonState.CONNECTING, DaemonState.CONNECTED): "_handle_connecting returns CONNECTED on success",
         (DaemonState.CONNECTING, DaemonState.WAITING_IB): "_handle_connecting returns WAITING_IB on connect fail (RE-7)",

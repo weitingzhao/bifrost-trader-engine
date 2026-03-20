@@ -2853,6 +2853,45 @@ tr:hover .realtime-quote-drag-handle {
   color: var(--color-text-dim);
   font-size: var(--text-caption);
 }
+
+/* IB Configure: YAML-sourced blocks (User + Client ID) — static headers, no collapse */
+.settings-ib-config-table .settings-ib-readonly-section-header td {
+  padding: 0.5rem var(--space-3) 0.35rem;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.02);
+  cursor: default;
+}
+[data-theme="light"] .settings-ib-config-table .settings-ib-readonly-section-header td {
+  background: rgba(0, 0, 0, 0.02);
+}
+.settings-ib-readonly-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-dim, #888);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.settings-ib-readonly-inline-hint {
+  margin-left: 0.5rem;
+  font-size: 0.82em;
+  font-style: italic;
+  color: var(--color-text-dim, #888);
+}
+.settings-ib-readonly-field {
+  opacity: 0.72;
+  cursor: default;
+}
+.settings-ib-readonly-field:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
 .settings-ib-config-table .settings-ib-collapsible-group-header {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -176,26 +176,15 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             )
         """
         )
-        _log("settings + ib_client_id columns")
-        _log_table("settings", "App settings (IB config, stream accounts, etc.)")
+        _log("settings (account/stream + flex + active strategy refs; IB host/port/client IDs in config YAML)")
+        _log_table("settings", "App settings (account IDs, stream accounts, Flex, active strategy refs)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS settings (
                 id integer PRIMARY KEY DEFAULT 1,
-                ib_host text NOT NULL DEFAULT '127.0.0.1',
-                ib_port_type text NOT NULL DEFAULT 'tws_paper',
-                ib_client_id_daemon integer NOT NULL DEFAULT 1,
-                ib_client_id_listener integer NOT NULL DEFAULT 2,
-                ib_client_id_account integer NOT NULL DEFAULT 100,
-                ib_client_id_markets integer NOT NULL DEFAULT 101,
-                ib_client_id_worker_market integer NOT NULL DEFAULT 500,
                 ib_host_account_id text,
                 stream_host_account_id text,
                 stream_secondary_account_id text,
-                ib2_host text,
-                ib2_port_type text DEFAULT 'tws_paper',
-                ib2_client_id_listener integer NOT NULL DEFAULT 3,
-                ib2_client_id_account integer NOT NULL DEFAULT 102,
                 ib_flex_host_token text,
                 ib_flex_secondary_token text,
                 flex_default_range_days integer NOT NULL DEFAULT 30,
@@ -208,7 +197,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         cur.execute(
             """
-            INSERT INTO settings (id, ib_host, ib_port_type) VALUES (1, '127.0.0.1', 'tws_paper')
+            INSERT INTO settings (id) VALUES (1)
             ON CONFLICT (id) DO NOTHING
         """
         )

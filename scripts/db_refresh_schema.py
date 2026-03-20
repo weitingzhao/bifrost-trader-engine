@@ -6,8 +6,14 @@ Use an empty database or recreate objects as needed; this script does not migrat
 Strategy templates: ``python scripts/db_init/seed_structure_type_config.py`` after refresh.
 
 Usage:
-  python scripts/db_refresh_schema.py [--config PATH]
-  --config  Config file path (default config/config.yaml)
+  python scripts/db_refresh_schema.py [--config PATH] [--no-color]
+  python scripts/db_refresh_schema.py --prod
+  python scripts/db_refresh_schema.py --dev
+
+Config resolution (when ``--config`` is omitted) matches ``run_server`` / ``run_engine``:
+``BIFROST_CONFIG``, first positional YAML path, ``--prod`` / ``--dev`` / ``--env``,
+``BIFROST_ENV``, then ``config/config.{dev|prod}.yaml`` if present, else ``config/config.yaml``,
+else ``config/config.yaml.example``.
 """
 
 from __future__ import annotations
@@ -140,13 +146,27 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Refresh PostgreSQL schema for status (aligned with DATABASE.md)."
     )
-    parser.add_argument("--config", default="config/config.yaml", help="Path to config file")
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="YAML config (must contain postgres). If omitted, same rules as run_server: "
+        "BIFROST_CONFIG, positional path, --prod/--dev/--env, BIFROST_ENV, config.dev.yaml / config.yaml.",
+    )
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
-    args = parser.parse_args()
+    args, argv_remainder = parser.parse_known_args(sys.argv[1:])
     no_color = args.no_color
-    config_path = args.config
-    if not os.path.isabs(config_path):
-        config_path = str(_PROJECT_ROOT / config_path)
+
+    if args.config:
+        config_path = args.config
+        if not os.path.isabs(config_path):
+            config_path = str(_PROJECT_ROOT / config_path)
+        config_path = str(Path(config_path).resolve())
+    else:
+        from src.app.config import resolve_startup_config_path
+
+        config_path, _ = resolve_startup_config_path(str(_PROJECT_ROOT), argv_remainder)
+
     if not Path(config_path).exists():
         print(f"{_c(no_color, RED, 'Config not found:')} {config_path}", file=sys.stderr)
         return 1
@@ -170,6 +190,7 @@ def main() -> int:
     params["connect_timeout"] = 10
     dbname = params["dbname"]
 
+    _progress(f"Using config: {config_path}", no_color)
     _progress("Connecting to PostgreSQL...", no_color)
     conn = None
     try:

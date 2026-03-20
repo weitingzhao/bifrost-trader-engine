@@ -32,7 +32,7 @@ python -m pip install -e .
 
 Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 
-- **ib**: host, port, client_id (or use env `IB_HOST`, `IB_PORT`, `IB_CLIENT_ID`)
+- **ib**: `ib.host` (ip, port_type, client_id) and optional `ib.secondary` for the second TWS — see `config/config.dev.yaml.example`, `config/config.prod.yaml.example`, and `config/config.yaml.example`.
 - **postgres**: host, port, database, user, password (or use env `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`)
 - **server**: monitoring/control API port (default 8765)
 - **hedge**: threshold_hedge_shares (25), cooldown_sec (60), max_hedge_shares_per_order
@@ -40,11 +40,15 @@ Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 - **risk**: max_daily_hedge_count, max_position_shares, max_daily_loss_usd, trading_hours_only, **paper_trade** (set `false` for live)
 - **redis** (optional, R-RM*): set `redis.enabled: true` and `redis.host`/`redis.port` (default 6379) so the daemon writes real-time quotes to Redis and the status server exposes GET /quotes. Omit or `enabled: false` to disable. See [docs/REALTIME_MARKET_DATA_DESIGN.md](docs/REALTIME_MARKET_DATA_DESIGN.md).
 
+**Multi-environment**: default config file is **`config/config.dev.yaml`** (gitignored, like `config/config.yaml`). Copy from **`config/config.dev.yaml.example`**; for prod profile copy **`config/config.prod.yaml.example`** → **`config/config.prod.yaml`**. Use **`--prod`** / **`--env prod`** / **`BIFROST_ENV=prod`**, or **`BIFROST_CONFIG`**, or the first CLI argument as the YAML path. Different environments must use different `postgres.database` and different IB client IDs under `ib.host.client_id` / `ib.secondary.client_id` to avoid conflicts (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §2.8).
+
 ## Run
 
 **On the trading machine** (same host as TWS/IB):
 
 ```bash
+python scripts/run_engine.py
+# default: config/config.dev.yaml; prod: add --prod or BIFROST_ENV=prod
 python scripts/run_engine.py config/config.yaml
 ```
 
@@ -64,7 +68,7 @@ The **status server** (monitoring and control) is a **separate process** from th
 
 ```bash
 python scripts/run_server.py
-# or
+# default: config/config.dev.yaml; prod: --prod or BIFROST_ENV=prod
 python scripts/run_server.py config/config.yaml
 ```
 

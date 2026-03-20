@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Entry point: run the gamma scalping daemon."""
+"""Entry point: run the gamma scalping daemon.
+
+Config resolution (see ``src.app.config.resolve_startup_config_path``):
+
+- Default: ``config/config.dev.yaml``
+- Prod: ``--prod``, ``--env prod``, or ``BIFROST_ENV=prod`` → ``config/config.prod.yaml``
+- Explicit: first positional path, or ``BIFROST_CONFIG`` env
+"""
 
 import logging
 import os
@@ -125,12 +132,10 @@ def setup_logging(debug: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    config_path = args[0] if args else None
-    if config_path and not os.path.isabs(config_path):
-        config_path = os.path.join(_PROJECT_ROOT, config_path)
-    elif config_path is None:
-        config_path = os.path.join(_PROJECT_ROOT, "config", "config.yaml")
+    from src.app.config import resolve_startup_config_path
+
+    argv_raw = sys.argv[1:]
+    config_path, _ = resolve_startup_config_path(_PROJECT_ROOT, argv_raw)
     os.environ["BIFROST_CONFIG"] = config_path
     if "--debug" in sys.argv:
         setup_logging(debug=True)

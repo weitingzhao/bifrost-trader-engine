@@ -1,0 +1,33 @@
+# Copy to config/config.dev.yaml (gitignored). Default when no BIFROST_CONFIG / no args.
+# Dev environment — local Mac, Dev DB, same TWS (different client_id from Prod)
+
+postgres:
+  host: "192.168.10.80"
+  port: 5432
+  database: "bifrost_dev"
+  user: "bifrost"
+  password: ""   # or PGPASSWORD env
+
+server:
+  port: 8765
+
+ib:
+  connect_timeout: 60.0
+  host:
+    ip: "192.168.10.30"
+    port_type: "tws_paper"
+    client_id:
+      daemon: 11
+      listener: 12
+      account: 110
+      markets: 111
+      worker_market: 510
+  # Omit secondary if no second TWS
+
+redis:
+  enabled: true
+  host: "127.0.0.1"
+  port: 6379
+
+frontend:
+  port: 5173

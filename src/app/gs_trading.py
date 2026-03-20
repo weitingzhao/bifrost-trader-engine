@@ -28,7 +28,7 @@ from src.guards.execution_guard import ExecutionGuard
 from src.sink import StatusSink
 from src.sink.postgres_sink import PostgreSQLSink
 from src.realtime.redis_quotes import create_from_config as create_redis_quotes
-from src.app.config import read_config
+from src.app.config import read_config, get_effective_ib_config
 from src.app import accounts as _accounts
 from src.app import snapshot as _snapshot
 from src.app import symbol_position as _symbol_position
@@ -58,22 +58,16 @@ class GsTrading:
             except Exception as e:
                 logger.warning("PostgreSQL sink init failed: %s", e)
 
-        # 1.b IB Connector: host/port/client_id 仅来自 PostgreSQL settings（系统默认使用数据库）.
-        ib_cfg = config.get("ib", {})
-        db_ib = None
-        if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
-            db_ib = self._status_sink.get_ib_connection_config()
-        if not db_ib:
-            raise RuntimeError(
-                "IB connection config must be set in PostgreSQL settings (public.settings). "
-                "Use Settings page or ensure settings row exists with ib_host, ib_port_type, ib_client_id_*."
-            )
-        host = db_ib.get("host", "127.0.0.1")
-        port = int(db_ib.get("port", 7497))
+        # 1.b IB Connector: host/port/client_id from config.yaml (single source of truth).
+        ib_eff = get_effective_ib_config(config)
+        host = ib_eff["host"]
+        port = ib_eff["port"]
+        timeout = ib_eff["connect_timeout"]
+
         last_ib = None
         if hasattr(self._status_sink, "get_last_ib_client_id"):
             last_ib = self._status_sink.get_last_ib_client_id()
-        client_id_daemon = int(db_ib.get("client_id_daemon", 1))
+        client_id_daemon = ib_eff["client_id_daemon"]
         client_id = (last_ib + 1) if last_ib is not None else client_id_daemon
         if last_ib is not None:
             logger.info(
@@ -82,46 +76,46 @@ class GsTrading:
                 client_id,
             )
         logger.info(
-            "IB connection from DB: host=%s port=%s (port_type=%s)",
+            "IB connection from config: host=%s port=%s (port_type=%s)",
             host,
             port,
-            db_ib.get("port_type", ""),
+            ib_eff["port_type"],
         )
         self.connector = IBConnector(
             host=host,
             port=port,
             client_id=client_id,
-            connect_timeout=ib_cfg.get("connect_timeout", 60.0),
+            connect_timeout=timeout,
         )
-        listener_client_id = int(db_ib.get("client_id_listener", 2))
         self.listener_connector = IBConnector(
             host=host,
             port=port,
-            client_id=listener_client_id,
-            connect_timeout=ib_cfg.get("connect_timeout", 60.0),
+            client_id=ib_eff["client_id_listener"],
+            connect_timeout=timeout,
         )
         # Secondary IB (Second TWS): Listener on Secondary host with its own client_id
-        ib2_host = (db_ib.get("ib2_host") or "").strip() if isinstance(db_ib.get("ib2_host"), str) else ""
+        ib2_host = ib_eff.get("ib2_host") or ""
         if ib2_host:
-            ib2_port = int(db_ib.get("ib2_port", 7497))
-            ib2_client_id_listener = int(db_ib.get("ib2_client_id_listener", 3))
             self.listener_connector_2 = IBConnector(
                 host=ib2_host,
-                port=ib2_port,
-                client_id=ib2_client_id_listener,
-                connect_timeout=ib_cfg.get("connect_timeout", 60.0),
+                port=ib_eff["ib2_port"],
+                client_id=ib_eff["ib2_client_id_listener"],
+                connect_timeout=timeout,
             )
             logger.info(
                 "IB Listener (Secondary): host=%s port=%s client_id=%s",
                 ib2_host,
-                ib2_port,
-                ib2_client_id_listener,
+                ib_eff["ib2_port"],
+                ib_eff["ib2_client_id_listener"],
             )
         else:
             self.listener_connector_2 = None
 
-        # Host account for hedging/market data when multiple IB accounts exist (R-A4). From DB only.
+        # Host account for hedging/market data (R-A4). Still from DB settings (not a client_id).
         self._host_account_id: Optional[str] = None
+        db_ib = None
+        if self._status_sink and hasattr(self._status_sink, "get_ib_connection_config"):
+            db_ib = self._status_sink.get_ib_connection_config()
         if db_ib and db_ib.get("host_account_id"):
             self._host_account_id = str(db_ib["host_account_id"]).strip()
             logger.info("[R-A4] host_account_id=%s (for hedging and market data)", self._host_account_id)

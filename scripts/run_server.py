@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Phase 2: Standalone status/control server. Reads PostgreSQL; GET /status, GET /operations, POST /control/stop.
 
-On startup, reads server.port from config and frees the port if already in use (kills existing process), then starts the server (servers.app)."""
+On startup, reads server.port from config and frees the port if already in use (kills existing process), then starts the server (servers.app).
+
+Default config: ``config/config.dev.yaml``. Use ``--prod`` or ``BIFROST_ENV=prod`` for ``config/config.prod.yaml``, or ``BIFROST_CONFIG`` / first positional path."""
 
 import logging
 import logging.config
@@ -185,14 +187,10 @@ def _free_port(port: int, wait_sec: float = 0.6) -> bool:
 
 
 def main() -> None:
-    from src.app.config import read_config
+    from src.app.config import read_config, resolve_startup_config_path
 
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    config_path = args[0] if args else None
-    if config_path and not os.path.isabs(config_path):
-        config_path = os.path.join(_PROJECT_ROOT, config_path)
-    elif config_path is None:
-        config_path = os.path.join(_PROJECT_ROOT, "config", "config.yaml")
+    argv_raw = sys.argv[1:]
+    config_path, _ = resolve_startup_config_path(_PROJECT_ROOT, argv_raw)
     os.environ["BIFROST_CONFIG"] = config_path
     setup_logging()
     config, _ = read_config(config_path)

@@ -205,7 +205,6 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
 
   const onSave = async () => {
     setMsg({ text: 'Saving…', isErr: false })
-    const host = ibHost.trim() || DEFAULT_HOST
     const sec = Math.max(5, Math.min(120, Math.round(Number(heartbeatIntervalSec)) || DEFAULT_HEARTBEAT_SEC))
     const flexToSave = flexAccounts.map((a, i) => ({
       purpose: FLEX_QUERY_TYPES[i].purpose,
@@ -214,19 +213,10 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
       query_secondary_id: (a.query_secondary_id || '').trim() || undefined,
     }))
     const [resIb, resHb, resFlex] = await Promise.all([
-      postIbConfig(host, ibPortType, {
-        ib_client_id_daemon: clientIdDaemon,
-        ib_client_id_listener: clientIdListener,
-        ib_client_id_account: clientIdAccount,
-        ib_client_id_markets: clientIdMarkets,
-        ib_client_id_worker_market: clientIdWorker,
+      postIbConfig({
         ib_host_account_id: hostAccountId.trim() || null,
         stream_host_account_id: streamHostAccountId.trim() || null,
         stream_secondary_account_id: streamSecondaryAccountId.trim() || null,
-        ib2_host: ib2Host.trim() || null,
-        ib2_port_type: ib2Host.trim() ? ib2PortType : null,
-        ib2_client_id_listener: ib2ClientIdListener,
-        ib2_client_id_account: ib2ClientIdAccount,
       }),
       postSetHeartbeatInterval(sec),
       postFlexConfig(flexHostToken.trim() || undefined, flexSecondaryToken.trim() || undefined, flexToSave, defaultFlexRangeDays, initFlexRangeDays),
@@ -235,7 +225,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
     const err = !resIb.ok ? resIb.error : !resHb.ok ? resHb.error : !resFlex.ok ? resFlex.error : undefined
     setMsg({
       text: ok
-        ? 'Settings saved. IB connection and client_id apply on next start/use; heartbeat interval on next heartbeat.'
+        ? 'Settings saved. IB host/port/client IDs are in config.yaml (restart processes after file changes). Account/stream IDs and heartbeat apply as before.'
         : err ?? 'Save failed',
       isErr: !ok,
     })
@@ -364,15 +354,11 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
             />
             <IbConnectionSection
               ibHost={ibHost}
-              setIbHost={setIbHost}
               ibPortType={ibPortType}
-              setIbPortType={setIbPortType}
               flexHostToken={flexHostToken}
               setFlexHostToken={setFlexHostToken}
               ib2Host={ib2Host}
-              setIb2Host={setIb2Host}
               ib2PortType={ib2PortType}
-              setIb2PortType={setIb2PortType}
               flexSecondaryToken={flexSecondaryToken}
               setFlexSecondaryToken={setFlexSecondaryToken}
               hostAccountId={hostAccountId}
@@ -382,19 +368,12 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
               streamSecondaryAccountId={streamSecondaryAccountId}
               setStreamSecondaryAccountId={setStreamSecondaryAccountId}
               clientIdDaemon={clientIdDaemon}
-              setClientIdDaemon={setClientIdDaemon}
               clientIdListener={clientIdListener}
-              setClientIdListener={setClientIdListener}
               ib2ClientIdListener={ib2ClientIdListener}
-              setIb2ClientIdListener={setIb2ClientIdListener}
               clientIdAccount={clientIdAccount}
-              setClientIdAccount={setClientIdAccount}
               ib2ClientIdAccount={ib2ClientIdAccount}
-              setIb2ClientIdAccount={setIb2ClientIdAccount}
               clientIdMarkets={clientIdMarkets}
-              setClientIdMarkets={setClientIdMarkets}
               clientIdWorker={clientIdWorker}
-              setClientIdWorker={setClientIdWorker}
               defaultFlexRangeDays={defaultFlexRangeDays}
               setDefaultFlexRangeDays={setDefaultFlexRangeDays}
               initFlexRangeDays={initFlexRangeDays}

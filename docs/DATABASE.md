@@ -586,43 +586,36 @@
 
 ### 2.9 表 `settings`（阶段 2：统一设置表，单行多列，便于维护）
 
-- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1），避免为每类设置单独建表。**IB 配置**（host、port_type、client_id、host_account_id、第二 IB）**全部在 DB**，config.yaml 不再定义 client_id 或 host_account_id；host/port 仅作 DB 无数据时的 fallback。**Host 账户**由 `ib_host_account_id` 指定；**第二 IB**（不同 TWS 机器，手动交易账户）由 `ib2_*` 指定，用于统一 Portfolio（R-A4）。
-- **写入**：监控应用在用户点击「保存」时通过 POST /config/ib 写入；StatusReader 的 `write_ib_config(...)` 执行 UPDATE。
+- **用途**：集中存放与守护程序/监控相关的**可持久化设置**，单行表（id=1）。**IB 连接参数**（Host/Secondary IP、`port_type`、全部 `client_id`）**仅**来自 `config.yaml` 的 `ib.host` / `ib.secondary`（单一真源），**不**存入本表。本表保留：**Host 交易账户**（`ib_host_account_id`，R-A4）、Live 页 stream 账户标签、Flex token 与 Flex 天数、当前激活策略/边界 id 等。
+- **写入**：POST /config/ib 仅更新 `ib_host_account_id`、`stream_host_account_id`、`stream_secondary_account_id`；Flex 由 POST /config/flex 等写入。
+- **历史**：旧版曾在本表存放 `ib_host`、`ib_port_type`、`ib_client_id_*`、`ib2_*` 等列；已迁移完成的库不再包含这些列，代码亦不再读写。
 - **列**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | id | integer | 主键，固定为 1（单行表） |
-| ib_host | text NOT NULL | 连接 IB 的主机（IP 或主机名），默认 '127.0.0.1' |
-| ib_port_type | text NOT NULL | 端口类型：`tws_live`（7496）、`tws_paper`（7497）、`gateway`（4002）；默认 `tws_paper` |
-| ib_client_id_daemon | integer | 守护进程（交易进程）连接 IB 使用的 Client ID（默认 1）；TWS 多连接时与手动/其他程序区分 |
-| ib_client_id_listener | integer | 守护侧监听进程使用的 Client ID（预留，默认 2），避免与交易进程及监控端冲突 |
-| ib_client_id_account | integer | 监控端拉取账户信息/执行记录（POST /executions/fetch）使用的 Client ID（默认 100） |
-| ib_client_id_markets | integer | 监控端拉取市场数据/K 线（POST /bars/fetch）使用的 Client ID（默认 101） |
-| ib_client_id_worker_market | integer | Celery worker（如 Bars 补全，worker_market）连接 IB 使用的 Client ID（默认 500），与 Daemon/Monitor 隔离，避免冲突 |
 | ib_host_account_id | text | Host 账户 account_id（如 U17113214），用于对冲与行情；空则使用 TWS managed accounts 首个（R-A4） |
 | stream_host_account_id | text | Live 页 Market Streams Host 账户 ID，用于按账户分类/筛选；空则不显示 Account 列与筛选器 |
-| stream_secondary_account_id | text | Live 页 Market Streams 次账户 ID，用于按账户分类/筛选；空则同上 |
-| ib2_host | text | 第二 IB 主机（不同 TWS 机器，手动交易账户）；空则未配置 |
-| ib2_port_type | text | 第二 IB 端口类型（tws_live/tws_paper/gateway），默认 tws_paper |
-| ib2_client_id_listener | integer | 第二 IB 监听 Client ID（默认 3），用于获取更新 |
-| ib2_client_id_account | integer | 第二 IB 账户拉取 Client ID（默认 102） |
+| stream_secondary_account_id | text | Live 页 Market Streams 次账户 ID；空则同上 |
 | ib_flex_host_token | text | IB Flex Web Service Token（主 IB）；与 settings_ib_flex 的 query_host_id 配合使用 |
 | ib_flex_secondary_token | text | IB Flex Token（第二 IB）；与 settings_ib_flex 的 query_secondary_id 配合使用 |
-| flex_default_range_days | integer | Default Flex Query 天数（如 30）；未传 from_date/to_date 时由后台按「昨日 − N 天」计算；默认 30 |
-| flex_init_range_days | integer | Init Flex Query 天数（如 360），用于首次/全量拉取；默认 360 |
+| flex_default_range_days | integer | Default Flex Query 天数（如 30）；默认 30 |
+| flex_init_range_days | integer | Init Flex Query 天数（如 360）；默认 360 |
+| active_strategy_structure_id | bigint | 当前激活策略结构（若有） |
+| active_gate_safety_strategy_id | bigint | 当前激活安全边界集（若有） |
+| active_strategy_allocation_id | bigint | 当前激活资金分配（若有） |
 
-- **Client ID 使用场景**（与 Settings 页 Client IDs 表一致；双 IB 时 Host 与 Secondary 各一套，**市场数据仅 Host 有**，故无 `ib2_client_id_markets` 列）：
+- **IB Client ID 与连接**（运行时均从 `config.yaml` 的 `get_effective_ib_config` 读取；与 `daemon_heartbeat.ib_client_id` 心跳列无关）：
 
-| 分组 | 角色 | 列名（Host） | 列名（Secondary） | 使用场景 |
-|------|------|--------------|-------------------|----------|
-| Daemon | Trading | ib_client_id_daemon | — | 守护进程交易连接 IB（下单、持仓、行情） |
-| Daemon | Listener | ib_client_id_listener | ib2_client_id_listener | 守护进程/监控端第二条连接（事件、订阅） |
-| Monitor | Account | ib_client_id_account | ib2_client_id_account | 监控端拉取账户摘要、执行记录（POST /executions/fetch 等） |
-| Monitor | Market data | ib_client_id_markets | — | 监控端拉取市场数据/K 线（POST /bars/fetch）；仅主账户有数据订阅，第二 IB 无此列 |
-| Celery | Market Data | ib_client_id_worker_market | — | Celery worker（如 Bars 补全）连接 IB，与 Daemon/Monitor 隔离 |
+| 分组 | 角色 | config.yaml 键（Host / Secondary） | 使用场景 |
+|------|------|-------------------------------------|----------|
+| Daemon | Trading | `client_id_daemon` / — | 主连接下单、持仓、行情 |
+| Daemon | Listener | `client_id_listener` / `ib2_client_id_listener` | 事件、订阅；Secondary 无行情订阅 |
+| Monitor | Account | `client_id_account` / `secondary.client_id.account` | 账户摘要、执行记录等 |
+| Monitor | Market data | `client_id_markets` / — | K 线、市场数据 |
+| Celery | Market Data | `client_id_worker_market` / — | Bars 补全等 worker |
 
-- **语义**：后台将 `ib_port_type` 映射为端口号：TWS Live → 7496，TWS Paper → 7497，Gateway → 4002。**config.yaml 不再定义 client_id 或 host_account_id**，均由本表提供。守护进程启动时若 status sink 为 postgres 且该表有行，则优先使用此配置及 `ib_client_id_daemon`；否则使用 config 的 `ib.host`、`ib.port`（client_id 默认 1）。**Host 账户**：若本表 `ib_host_account_id` 非空，守护进程使用该 account_id 作为对冲与行情账户；否则使用 TWS managed accounts 首个（R-A4）。**第二 IB**：若 `ib2_host` 非空，监控端创建 AccountIbClient2 连接第二 TWS，用于拉取该账户的持仓/执行，供统一 Portfolio；第二 IB 无 daemon、无 market data（无 `ib2_client_id_markets` 列）。**Daemon 对第二 IB 的订阅**：当 `ib2_host` 非空时，守护进程会使用 `ib2_client_id_listener` 建立 listener_connector_2 连接，并订阅 Secondary 的 **Position updates、Open orders、Fill/execution、Commission**（不订阅 Real-time ticker，行情由 Host 承担）；订阅结果写入 `account` / `account_positions`、`daemon_open_orders`、`account_executions` / `account_execution_commissions`，与 Host 数据按 `account_id` 区分。**账户信息/成交** 与 **市场数据/K 线** 两个 API 分别使用 `ib_client_id_account`、`ib_client_id_markets`（仅 Host）；**Celery** 使用 `ib_client_id_worker_market`。**Flex**：`ib_flex_host_token` 与 `ib_flex_secondary_token` 由 Settings 页 Flex 区块或 POST /config/flex 写入。修改后**守护进程需重启**生效（client_id 在启动时读取）；API 与 Worker 的 client_id 每次启动或请求时从 settings 读取。
+- **语义**：**第二 IB**（`ib.secondary`，扁平键为 `ib2_*`）用于统一 Portfolio 与 listener_connector_2；行情仍由 Host 承担。**Flex**：token 与 Query 行由 Settings 或 POST /config/flex 写入。修改 **YAML 中的 client_id 或 host** 后需**重启**相关进程。
 
 ### 2.24 策略与安全边界表（设计标准与具体表结构，未来实现）
 
@@ -1234,6 +1227,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 策略实例与交易归属 | 新增表 strategy_instance（§2.24.11a）；account_executions 增加 strategy_opportunity_id、strategy_instance_id（§2.24.11b）。**account_positions 不存策略归属**（已移除 strategy_opportunity_id、strategy_instance_id 列）；持仓的策略信息通过 account_executions 推导 strategy_links[]。详见 §2.24.11a、§2.24.11b。 | 阶段 3 扩展 |
 | 2026-03-19 Position×Instance 归因读模型 | §2.24.11c：净仓近似归因——GET /executions/position-attribution 将持仓按实例拆分（net_estimated），返回 open_qty_est / attribution_ratio / unrealized_pnl_est / is_mixed / has_unassigned；前端 PositionsPage Opportunity Sheet 改用该 API，同一合约可在多个实例下并存展示；新增 Attribution 筛选器（Single / Mixed / Unassigned）。实时读模型（不落表），见 servers/reader/executions.py。 | 阶段 3 扩展 |
 | 2026-03-19 Executions 分源迁移 | 三张原始源表：`executions_raw_tws`（TWS/manual 源）、`executions_raw_flex`（Flex 源权威成交）、`executions_raw_journal`（journal_closed 人工会计调整）。`account_executions` 为统一只读视图（UNION ALL，Flex 优先覆盖 TWS，Journal 独立流）。**`account_executions_final`**：仅 UNION `executions_raw_flex` + `executions_raw_journal`（不含 TWS 补洞行），列与主键编码规则与全量视图中对应两分支一致。**`account_executions_fly`**：源为 `executions_raw_tws`，`account_executions_id = -(executions_raw_tws_id)`；排除 `sec_type = BAG`（多腿组合占位）；排除在 **`account_executions_final` 中已出现相同 `(account_id, contract_key)`（非空、trim 后相等）** 的 TWS 行。**GET /executions**、**GET /performance** 在 `source_scope=on_the_fly` 时读此视图。回填脚本 `scripts/db_backfill_executions_raw.py`。 | 阶段 3 扩展 |
+| 2026-03-20 settings 移除 IB 连接列 | `settings` 表不再包含 `ib_host`、`ib_port_type`、`ib_client_id_*`、`ib2_*` 等列；IB 连接与 client_id 以 YAML `ib.host` / `ib.secondary` 为唯一真源；`pg_ddl` 新建库不含上述列。§2.9。 | 阶段 2 |
 
 ---
 

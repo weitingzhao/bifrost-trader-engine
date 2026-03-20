@@ -23,11 +23,11 @@ def project_root() -> Path:
 
 @pytest.fixture
 def config_path(project_root: Path) -> Path:
-    """Path to config file. Prefers config.yaml, falls back to example."""
-    cfg = project_root / "config" / "config.yaml"
-    if cfg.exists():
-        return cfg
-    return project_root / "config" / "config.yaml.example"
+    """Path to config file. Prefer example so tests get a valid ``ib.host`` shape without local overrides."""
+    example = project_root / "config" / "config.yaml.example"
+    if example.exists():
+        return example
+    return project_root / "config" / "config.yaml"
 
 
 @pytest.fixture
@@ -39,8 +39,10 @@ def config(config_path: Path) -> dict:
 
 @pytest.fixture
 def ib_config(config: dict) -> dict:
-    """IB connection config."""
-    return config.get("ib", {})
+    """Effective IB connection dict from ``get_effective_ib_config`` (``ib.host`` + optional ``ib.secondary``)."""
+    from src.app.config import get_effective_ib_config
+
+    return get_effective_ib_config(config)
 
 
 @pytest.fixture
@@ -51,6 +53,6 @@ def connector(ib_config: dict):
     return IBConnector(
         host=ib_config.get("host", "127.0.0.1"),
         port=ib_config.get("port", 4001),
-        client_id=ib_config.get("client_id", 1),
-        connect_timeout=ib_config.get("connect_timeout", 60.0),
+        client_id=ib_config.get("client_id_daemon", 1),
+        connect_timeout=float(ib_config.get("connect_timeout") or 60.0),
     )

@@ -24,7 +24,7 @@
 - **数据与下单**：均通过 IB API 来自 **TWS**（Trader Workstation）。
 - **TWS 主机**：**两台 Mac Mini**，各运行一套 TWS（或 IB Gateway）；分别承载 **Host 账户** 与 **Secondary 账户**（见需求 R-A4）。两台 Mac Mini 均在局域网内，供守护程序与监控端通过 IB API 连接。
 - **账户**：**两个 IB 账户**（见需求 R-A4）。
-  - **Host 账户**：数据与下单经当前 IB API 连接 TWS；承担**自动交易**（本项目 Gamma scalping）、**手动交易**及**行情/持仓数据源**。由 settings 表 `host_account_id`（列名 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。**Client ID 与 host_account_id 均在 PostgreSQL settings 表**，config.yaml 不再定义。
+  - **Host 账户**：数据与下单经当前 IB API 连接 TWS；承担**自动交易**（本项目 Gamma scalping）、**手动交易**及**行情/持仓数据源**。由 settings 表 `host_account_id`（列名 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。**Client ID 在 `config.yaml`（单一真源）**；`host_account_id` 等账户信息仍在 PostgreSQL settings 表。
   - **第二账户**：**仅手动交易**；守护进程不对其下单或订阅行情。若与主账户在同一 TWS 同一登录下，由现有守护进程/监控端拉取并写入 `account` / `account_positions` 等表；若在**另一 TWS 或另一登录**下，则通过监控端或独立服务的**第二 IB 连接**拉取后写入同一库（当前计划仅文档预留，不实现第二连接）。
 - **实现方式**：TWS 允许多个 API 连接，用不同的 **client_id** 区分。守护程序使用一个 `client_id`（如 1）；手动交易使用 TWS 界面或另一 `client_id`（如 2）的客户端；监控端 Account/Market、Celery 各用不同 client_id。
 - **Dev/Prod 与 TWS 共享**（R-DV3）：两台 Mac Mini 上的 TWS 为 Dev 与 Prod **共享基础设施**。Dev 与 Prod 通过 **不同 `client_id` 与/或不同 TWS socket 端口** 区分连接。**同一 IB 账户同一时刻仅允许一个自动交易 Engine 对该账户下单**，避免双环境双 Engine 实盘冲突。
@@ -99,8 +99,18 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 **约束**：
 - 数据库**迁移（schema migration）、种子数据、备份**按环境独立执行；**禁止**将 Dev 的破坏性操作（清表、重建等）默认指向 Prod。
-- `config/config.yaml` 按环境维护（或通过环境变量 / 多配置文件区分），至少 `postgres.database`（及必要时 `postgres.host`/`postgres.user`）不同。
+- 配置文件按环境维护：`config/config.dev.yaml`（默认）与 `config/config.prod.yaml`（均不提交仓库；模板为 `config/config.dev.yaml.example`、`config/config.prod.yaml.example`，复制后填写）。通过 `BIFROST_CONFIG`、`BIFROST_ENV=dev|prod`、或启动参数 `--prod` / `--env prod` / 首个路径参数选择。至少 `postgres.database`、IB 各 `client_id`（`ib.host.client_id` / 可选 `ib.secondary.client_id`）（及必要时 `postgres.host`/`redis.host`）不同。
 - **TWS 共享纪律**：见 §2.1「Dev/Prod 与 TWS 共享」——同一 IB 账户同一时刻仅允许一个自动交易 Engine 下单。
+
+### 2.9 Management 专用部署（无后台写库）
+
+当一台主机**仅作为 Management / 前端测试**（如本地 Mac 开发机）而不运行 Engine 时，遵循以下约定：
+
+- **不运行 Celery**（`scripts/run_celery.py`）：bars worker 会通过 IB 拉取数据并写 `stock_*` 等业务表，Management 主机不应有此行为。
+- **不运行 Engine**（`scripts/run_engine.py`）：守护进程连接 IB 下单/写心跳，仅在 Prod（或 Dev 调试时临时）主机运行。
+- **仅运行 Server + Frontend**：`run_server.py` + `run_frontend.sh`，依赖 Daemon 写入 PostgreSQL 与 Redis 的数据；前端通过 SSE 消费 Redis 行情。
+- **Redis 地址**：若 Management 主机需要读取另一台（如 192.168.10.70）上 Daemon 写入的行情，将 `redis.host` 指向该服务器 IP。
+- **可选**：`server.skip_monitor_ib: true`（config.yaml 中），启用后 Server 的 `startup_event` 不初始化 `AccountIbClient` / `MarketIbClient`，避免 Management 机器尝试连接 IB。
 
 ---
 

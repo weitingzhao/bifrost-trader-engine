@@ -102,16 +102,7 @@ def get_status(request: Request) -> Dict[str, Any]:
         if payload["accounts"] is None:
             payload["accounts"] = []
         payload["accounts_fetched_at"] = reader.get_accounts_fetched_at()
-        ib_cfg = reader.get_ib_config()
-        payload["ib_config"] = ib_cfg if ib_cfg else {
-            "ib_host": "127.0.0.1",
-            "ib_port_type": "tws_paper",
-            "ib_client_id_daemon": 1,
-            "ib_client_id_listener": 2,
-            "ib_client_id_account": 100,
-            "ib_client_id_markets": 101,
-            "ib_client_id_worker_market": 500,
-        }
+        payload["ib_config"] = reader.get_ib_config() or {}
         payload["flex_config"] = reader.get_flex_config()
         payload["open_orders"] = reader.get_open_orders()
         # Phase A: active strategy structure and gate safety set (management & monitoring)

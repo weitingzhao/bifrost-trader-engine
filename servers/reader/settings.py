@@ -13,37 +13,23 @@ logger = logging.getLogger(__name__)
 
 _EXEC_READ_TABLE = "account_executions"
 
-_VALID_IB_PORT_TYPES = frozenset(("tws_live", "tws_paper", "gateway"))
-
-
 # ----- Conn-based (for common.StatusReader delegation) -----
 
 def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
-    """Return settings row id=1: ib_host, port_type, client_ids, ib_host_account_id, ib2_*, flex_default_range_days, flex_init_range_days. None if table missing."""
+    """Return settings row id=1: ib_host_account_id, flex ranges, stream account IDs.
+
+    IB host/port/client IDs come from config YAML (see get_effective_ib_config), not from DB.
+    """
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT ib_host, ib_port_type, "
-                "COALESCE(ib_client_id_daemon, 1) AS ib_client_id_daemon, "
-                "COALESCE(ib_client_id_listener, 2) AS ib_client_id_listener, "
-                "COALESCE(ib_client_id_account, 100) AS ib_client_id_account, "
-                "COALESCE(ib_client_id_markets, 101) AS ib_client_id_markets, "
-                "COALESCE(ib_client_id_worker_market, 500) AS ib_client_id_worker_market, "
-                "ib_host_account_id, flex_default_range_days, flex_init_range_days "
-                "FROM settings WHERE id = 1"
+                "SELECT ib_host_account_id, flex_default_range_days, flex_init_range_days, "
+                "stream_host_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
             )
             row = cur.fetchone()
         if row is None:
             return None
-        out = {
-            "ib_host": (row.get("ib_host") or "127.0.0.1").strip(),
-            "ib_port_type": (row.get("ib_port_type") or "tws_paper").strip().lower(),
-            "ib_client_id_daemon": int(row["ib_client_id_daemon"]) if row.get("ib_client_id_daemon") is not None else 1,
-            "ib_client_id_listener": int(row["ib_client_id_listener"]) if row.get("ib_client_id_listener") is not None else 2,
-            "ib_client_id_account": int(row["ib_client_id_account"]) if row.get("ib_client_id_account") is not None else 4,
-            "ib_client_id_markets": int(row["ib_client_id_markets"]) if row.get("ib_client_id_markets") is not None else 10,
-            "ib_client_id_worker_market": int(row["ib_client_id_worker_market"]) if row.get("ib_client_id_worker_market") is not None else 500,
-        }
+        out: Dict[str, Any] = {}
         if row.get("flex_default_range_days") is not None:
             try:
                 out["flex_default_range_days"] = max(1, int(row["flex_default_range_days"]))
@@ -62,78 +48,18 @@ def get_ib_config(conn: Any) -> Optional[Dict[str, Any]]:
             out["ib_host_account_id"] = str(row["ib_host_account_id"]).strip()
         else:
             out["ib_host_account_id"] = None
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur_s:
-                cur_s.execute(
-                    "SELECT stream_host_account_id, stream_secondary_account_id FROM settings WHERE id = 1"
-                )
-                r_s = cur_s.fetchone()
-            if r_s and (r_s.get("stream_host_account_id") or "").strip():
-                out["stream_host_account_id"] = str(r_s["stream_host_account_id"]).strip()
-            else:
-                out["stream_host_account_id"] = None
-            if r_s and (r_s.get("stream_secondary_account_id") or "").strip():
-                out["stream_secondary_account_id"] = str(r_s["stream_secondary_account_id"]).strip()
-            else:
-                out["stream_secondary_account_id"] = None
-        except Exception:
+        if row.get("stream_host_account_id") is not None and str(row.get("stream_host_account_id")).strip():
+            out["stream_host_account_id"] = str(row["stream_host_account_id"]).strip()
+        else:
             out["stream_host_account_id"] = None
+        if row.get("stream_secondary_account_id") is not None and str(row.get("stream_secondary_account_id")).strip():
+            out["stream_secondary_account_id"] = str(row["stream_secondary_account_id"]).strip()
+        else:
             out["stream_secondary_account_id"] = None
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur2:
-                cur2.execute(
-                    "SELECT ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account FROM settings WHERE id = 1"
-                )
-                r2 = cur2.fetchone()
-            if r2:
-                # Always return DB values for client IDs (Settings display and status).
-                out["ib2_client_id_listener"] = int(r2.get("ib2_client_id_listener") or 3)
-                out["ib2_client_id_account"] = int(r2.get("ib2_client_id_account") or 102)
-                if (r2.get("ib2_host") or "").strip():
-                    out["ib2_host"] = (r2.get("ib2_host") or "").strip()
-                    out["ib2_port_type"] = (r2.get("ib2_port_type") or "tws_paper").strip().lower()
-                else:
-                    out["ib2_host"] = None
-                    out["ib2_port_type"] = None
-            else:
-                out["ib2_host"] = None
-                out["ib2_port_type"] = None
-                out["ib2_client_id_listener"] = 3
-                out["ib2_client_id_account"] = 102
-        except Exception:
-            out["ib2_host"] = None
-            out["ib2_port_type"] = None
-            out["ib2_client_id_listener"] = 3
-            out["ib2_client_id_account"] = 102
         return out
     except Exception as e:
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT ib_host, ib_port_type FROM settings WHERE id = 1")
-                row = cur.fetchone()
-            if row is None:
-                return None
-            return {
-                "ib_host": (row.get("ib_host") or "127.0.0.1").strip(),
-                "ib_port_type": (row.get("ib_port_type") or "tws_paper").strip().lower(),
-                "ib_client_id_daemon": 1,
-                "ib_client_id_listener": 2,
-                "ib_client_id_account": 100,
-                "ib_client_id_markets": 101,
-                "ib_client_id_worker_market": 500,
-                "ib_host_account_id": None,
-                "flex_default_range_days": 30,
-                "flex_init_range_days": 360,
-                "ib2_host": None,
-                "ib2_port_type": None,
-                "ib2_client_id_listener": 3,
-                "ib2_client_id_account": 102,
-                "stream_host_account_id": None,
-                "stream_secondary_account_id": None,
-            }
-        except Exception as e2:
-            logger.debug("get_ib_config failed: %s", e2)
-            return None
+        logger.debug("get_ib_config failed: %s", e)
+        return None
 
 
 def get_flex_config(conn: Any, purpose: Optional[str] = None) -> Any:
@@ -250,74 +176,41 @@ def get_flex_init_range_dates(conn: Any) -> Tuple[str, str]:
 
 def write_ib_config(
     status_config: dict,
-    ib_host: str,
-    ib_port_type: str,
-    ib_client_id_daemon: int = 1,
-    ib_client_id_listener: int = 2,
-    ib_client_id_account: int = 100,
-    ib_client_id_markets: int = 101,
-    ib_client_id_worker_market: int = 500,
     ib_host_account_id: Optional[str] = None,
-    ib2_host: Optional[str] = None,
-    ib2_port_type: Optional[str] = None,
-    ib2_client_id_listener: Optional[int] = None,
-    ib2_client_id_account: Optional[int] = None,
     stream_host_account_id: Optional[str] = None,
     stream_secondary_account_id: Optional[str] = None,
 ) -> bool:
-    """Update settings (id=1): ib_host, port_type, client_ids, ib_host_account_id, ib2_*, stream_*_account_id. Returns True on success."""
+    """Update settings (id=1): ib_host_account_id, stream_*_account_id. IB host/port/client IDs are not stored in DB."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
         return False
-    host = (ib_host or "").strip() or "127.0.0.1"
-    port_type = (ib_port_type or "").strip().lower() or "tws_paper"
-    if port_type not in _VALID_IB_PORT_TYPES:
-        port_type = "tws_paper"
-    cid_d = max(1, int(ib_client_id_daemon)) if ib_client_id_daemon is not None else 1
-    cid_l = max(1, int(ib_client_id_listener)) if ib_client_id_listener is not None else 2
-    cid_a = max(1, int(ib_client_id_account)) if ib_client_id_account is not None else 100
-    cid_m = max(1, int(ib_client_id_markets)) if ib_client_id_markets is not None else 101
-    cid_w = max(1, int(ib_client_id_worker_market)) if ib_client_id_worker_market is not None else 500
+    host_val = (ib_host_account_id or "").strip() or None
+    stream_host_val = (stream_host_account_id or "").strip() or None
+    stream_secondary_val = (stream_secondary_account_id or "").strip() or None
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor() as cur:
-                host_val = (ib_host_account_id or "").strip() or None
-                stream_host_val = (stream_host_account_id or "").strip() or None
-                stream_secondary_val = (stream_secondary_account_id or "").strip() or None
-                ib2_h = (ib2_host or "").strip() or None
-                ib2_pt = (ib2_port_type or "").strip().lower() or None
-                if ib2_pt and ib2_pt not in _VALID_IB_PORT_TYPES:
-                    ib2_pt = "tws_paper"
-                cid2_l = int(ib2_client_id_listener) if ib2_client_id_listener is not None else 3
-                cid2_a = int(ib2_client_id_account) if ib2_client_id_account is not None else 102
                 cur.execute(
                     """
-                    INSERT INTO settings (id, ib_host, ib_port_type, ib_client_id_daemon, ib_client_id_listener, ib_client_id_account, ib_client_id_markets, ib_client_id_worker_market, ib_host_account_id, ib2_host, ib2_port_type, ib2_client_id_listener, ib2_client_id_account, stream_host_account_id, stream_secondary_account_id)
-                    VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET
-                        ib_host = EXCLUDED.ib_host,
-                        ib_port_type = EXCLUDED.ib_port_type,
-                        ib_client_id_daemon = EXCLUDED.ib_client_id_daemon,
-                        ib_client_id_listener = EXCLUDED.ib_client_id_listener,
-                        ib_client_id_account = EXCLUDED.ib_client_id_account,
-                        ib_client_id_markets = EXCLUDED.ib_client_id_markets,
-                        ib_client_id_worker_market = EXCLUDED.ib_client_id_worker_market,
-                        ib_host_account_id = EXCLUDED.ib_host_account_id,
-                        ib2_host = EXCLUDED.ib2_host,
-                        ib2_port_type = EXCLUDED.ib2_port_type,
-                        ib2_client_id_listener = EXCLUDED.ib2_client_id_listener,
-                        ib2_client_id_account = EXCLUDED.ib2_client_id_account,
-                        stream_host_account_id = EXCLUDED.stream_host_account_id,
-                        stream_secondary_account_id = EXCLUDED.stream_secondary_account_id
+                    UPDATE settings SET
+                        ib_host_account_id = %s,
+                        stream_host_account_id = %s,
+                        stream_secondary_account_id = %s
+                    WHERE id = 1
                     """,
-                    (host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, host_val, ib2_h, ib2_pt, cid2_l, cid2_a, stream_host_val, stream_secondary_val),
+                    (host_val, stream_host_val, stream_secondary_val),
                 )
+                if cur.rowcount == 0:
+                    cur.execute(
+                        """
+                        INSERT INTO settings (id, ib_host_account_id, stream_host_account_id, stream_secondary_account_id)
+                        VALUES (1, %s, %s, %s)
+                        """,
+                        (host_val, stream_host_val, stream_secondary_val),
+                    )
             conn.commit()
-            logger.info(
-                "[R-A3] write_ib_config: wrote settings id=1 host=%r port_type=%r",
-                host, port_type,
-            )
+            logger.info("[R-A3] write_ib_config: wrote settings id=1 account/stream fields")
             return True
         finally:
             conn.close()

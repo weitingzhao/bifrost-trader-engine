@@ -1,0 +1,38 @@
+# Copy to config/config.prod.yaml (gitignored). Use: --prod or BIFROST_ENV=prod
+# Prod environment — e.g. Linux 192.168.10.70, Prod DB; Engine + Server + Redis + Celery
+
+postgres:
+  host: "192.168.10.80"
+  port: 5432
+  database: "bifrost_prod"
+  user: "bifrost"
+  password: ""   # or PGPASSWORD env
+
+server:
+  port: 8765
+
+ib:
+  connect_timeout: 60.0
+  host:
+    ip: "192.168.10.30"
+    port_type: "tws_live"
+    client_id:
+      daemon: 1
+      listener: 2
+      account: 100
+      markets: 101
+      worker_market: 500
+  secondary:
+    ip: "192.168.10.31"
+    port_type: "tws_paper"
+    client_id:
+      listener: 3
+      account: 102
+
+redis:
+  enabled: true
+  host: "127.0.0.1"
+  port: 6379
+
+frontend:
+  port: 5173

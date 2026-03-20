@@ -30,12 +30,24 @@
 # frontend:
 #   port: 5173
 
-# IB connection (env overrides: IB_HOST, IB_PORT, IB_CLIENT_ID)
+# IB connection: single source of truth (ib.host + optional ib.secondary). Restart processes after changes.
 ib:
-  host: "127.0.0.1"
-  port: 7497
-  client_id: 1          # daemon (run_engine.py) uses this to connect to TWS
-  connect_timeout: 60   # seconds; increase for slow/remote connections (default 4)
+  connect_timeout: 60
+  host:
+    ip: "127.0.0.1"
+    port_type: "tws_paper"
+    client_id:
+      daemon: 1
+      listener: 2
+      account: 100
+      markets: 101
+      worker_market: 500
+  secondary:
+    ip: ""
+    port_type: "tws_paper"
+    client_id:
+      listener: 3
+      account: 102
 
 # Greeks (Black-Scholes) — model inputs, not gates
 greeks:

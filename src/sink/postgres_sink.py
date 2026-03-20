@@ -30,14 +30,6 @@ from src.sink.accounts_sync import (
 
 logger = logging.getLogger(__name__)
 
-# IB port type (stored in settings.ib_port_type) → TWS/Gateway port
-IB_PORT_TYPE_TO_PORT = {
-    "tws_live": 7496,
-    "tws_paper": 7497,
-    "gateway": 4002,
-}
-
-
 class PostgreSQLSink(StatusSink):
     """Writes snapshot to daemon_auto_status_current (and optionally daemon_auto_status_history) and operations to daemon_auto_operations table."""
 
@@ -888,8 +880,8 @@ class PostgreSQLSink(StatusSink):
         redis_quotes_connected: whether daemon is writing real-time quotes to Redis (R-RM*).
         event_subscribe_*: daemon IB event subscription status for System page (ticker, positions, fills, commission).
         event_subscribe_*_ib2: Secondary (listener_connector_2) subscription status.
-        listener_connected/listener_client_id: daemon Listener on Host (settings.ib_client_id_listener).
-        listener_2_connected/listener_2_client_id: daemon Listener on Secondary host (settings.ib2_host, ib2_client_id_listener)."""
+        listener_connected/listener_client_id: daemon Listener on Host (config YAML ib.client_id_listener).
+        listener_2_connected/listener_2_client_id: Secondary listener (config YAML ib2_host / ib2_client_id_listener)."""
         if not self._ensure_conn():
             return
         for attempt in (1, 2):
@@ -1018,51 +1010,19 @@ class PostgreSQLSink(StatusSink):
             return None
 
     def get_ib_connection_config(self) -> Optional[Dict[str, Any]]:
-        """Read settings (id=1): host, port_type, client_id (Trading/Listener/Account/Market data). Used by daemon at startup. See DATABASE.md §2.9 Client ID 使用场景."""
+        """Read settings.ib_host_account_id for R-A4 (hedging / market data account). Host/port/client IDs come from config YAML."""
         if not self._ensure_conn():
             return None
         try:
             with self._conn.cursor() as cur:
-                cur.execute(
-                    "SELECT ib_host, ib_port_type, "
-                    "COALESCE(ib_client_id_daemon, 1), COALESCE(ib_client_id_listener, 2), COALESCE(ib_client_id_account, 100), COALESCE(ib_client_id_markets, 101) "
-                    "FROM settings WHERE id = 1"
-                )
+                cur.execute("SELECT ib_host_account_id FROM settings WHERE id = 1")
                 row = cur.fetchone()
-            if row is None or not row[0]:
-                return None
-            host = (row[0] or "").strip() or "127.0.0.1"
-            port_type = (row[1] or "").strip().lower() or "tws_paper"
-            port = IB_PORT_TYPE_TO_PORT.get(port_type, 7497)
-            out = {
-                "host": host,
-                "port_type": port_type,
-                "port": port,
-                "client_id_daemon": int(row[2]) if row[2] is not None else 1,
-                "client_id_listener": int(row[3]) if row[3] is not None else 2,
-                "ib_client_id_account": int(row[4]) if row[4] is not None else 4,
-                "ib_client_id_markets": int(row[5]) if row[5] is not None else 10,
-            }
-            try:
-                with self._conn.cursor() as cur2:
-                    cur2.execute(
-                        "SELECT ib_host_account_id, ib2_host, ib2_port_type, ib2_client_id_listener FROM settings WHERE id = 1"
-                    )
-                    r2 = cur2.fetchone()
-                    if r2 and r2[0] is not None and str(r2[0]).strip():
-                        out["host_account_id"] = str(r2[0]).strip()
-                    if r2 and len(r2) > 1 and r2[1] is not None and str(r2[1]).strip():
-                        ib2_host = str(r2[1]).strip()
-                        ib2_port_type = (r2[2] or "").strip().lower() if len(r2) > 2 else "tws_paper"
-                        ib2_port = IB_PORT_TYPE_TO_PORT.get(ib2_port_type, 7497)
-                        out["ib2_host"] = ib2_host
-                        out["ib2_port"] = ib2_port
-                        out["ib2_port_type"] = ib2_port_type or "tws_paper"
-                        out["ib2_client_id_listener"] = int(r2[3]) if len(r2) > 3 and r2[3] is not None else 3
-            except Exception:
-                pass
             self._conn.rollback()
-            return out
+            if row is None:
+                return None
+            if row[0] is None or not str(row[0]).strip():
+                return None
+            return {"host_account_id": str(row[0]).strip()}
         except Exception as e:
             self._conn.rollback()
             logger.debug("get_ib_connection_config failed: %s", e)

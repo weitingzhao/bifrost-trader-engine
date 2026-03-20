@@ -9,6 +9,8 @@ import psycopg2
 
 from src.sink.postgres_sink import _get_conn_params
 
+from src.app.config import get_effective_ib_config
+
 from servers.reader import accounts as accounts_module
 from servers.reader import executions as executions_module
 from servers.reader import gate_safety as gate_safety_module
@@ -259,11 +261,30 @@ class StatusReader:
 
     # --- Settings domain (delegate to settings module) ---
     def get_ib_config(self) -> Optional[Dict[str, Any]]:
-        if not self._connect():
-            return None
-        result = settings_module.get_ib_config(self._conn)
-        self._end_read_txn()
-        return result
+        """Return merged IB config: host/port/client IDs from config.yaml; DB supplies ib_host_account_id, flex_*, stream_*."""
+        ib_eff = get_effective_ib_config(self._config)
+        db_cfg: Optional[Dict[str, Any]] = None
+        if self._connect():
+            db_cfg = settings_module.get_ib_config(self._conn)
+            self._end_read_txn()
+        merged = dict(ib_eff)
+        if db_cfg:
+            for key in (
+                "ib_host_account_id",
+                "flex_default_range_days",
+                "flex_init_range_days",
+                "stream_host_account_id",
+                "stream_secondary_account_id",
+            ):
+                if key in db_cfg:
+                    merged[key] = db_cfg[key]
+        else:
+            merged.setdefault("ib_host_account_id", None)
+            merged.setdefault("flex_default_range_days", 30)
+            merged.setdefault("flex_init_range_days", 360)
+            merged.setdefault("stream_host_account_id", None)
+            merged.setdefault("stream_secondary_account_id", None)
+        return merged
 
     def get_flex_config(self, purpose: Optional[str] = None) -> Any:
         if not self._connect():

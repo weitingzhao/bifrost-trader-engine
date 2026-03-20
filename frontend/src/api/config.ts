@@ -11,44 +11,16 @@ export async function postSetHeartbeatInterval(heartbeat_interval_sec: number): 
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-/** Save IB and client_id (POST /config/ib). Omitted fields unchanged. R-A4: ib_host_account_id, ib2_* optional. */
-export async function postIbConfig(
-  ib_host: string,
-  ib_port_type: 'tws_live' | 'tws_paper' | 'gateway',
-  clientIds?: {
-    ib_client_id_daemon?: number
-    ib_client_id_listener?: number
-    ib_client_id_account?: number
-    ib_client_id_markets?: number
-    ib_client_id_worker_market?: number
-    ib_host_account_id?: string | null
-    stream_host_account_id?: string | null
-    stream_secondary_account_id?: string | null
-    ib2_host?: string | null
-    ib2_port_type?: string | null
-    ib2_client_id_listener?: number
-    ib2_client_id_account?: number
-  }
-): Promise<ControlResponse & Partial<IbConfig>> {
-  const body: Record<string, string | number | null> = { ib_host, ib_port_type }
-  if (clientIds) {
-    if (clientIds.ib_client_id_daemon != null) body.ib_client_id_daemon = clientIds.ib_client_id_daemon
-    if (clientIds.ib_client_id_listener != null) body.ib_client_id_listener = clientIds.ib_client_id_listener
-    if (clientIds.ib_client_id_account != null) body.ib_client_id_account = clientIds.ib_client_id_account
-    if (clientIds.ib_client_id_markets != null) body.ib_client_id_markets = clientIds.ib_client_id_markets
-    if (clientIds.ib_client_id_worker_market != null) body.ib_client_id_worker_market = clientIds.ib_client_id_worker_market
-    if (clientIds.ib_host_account_id !== undefined) body.ib_host_account_id = clientIds.ib_host_account_id
-    if (clientIds.stream_host_account_id !== undefined) body.stream_host_account_id = clientIds.stream_host_account_id
-    if (clientIds.stream_secondary_account_id !== undefined) body.stream_secondary_account_id = clientIds.stream_secondary_account_id
-    if (clientIds.ib2_host !== undefined) body.ib2_host = clientIds.ib2_host
-    if (clientIds.ib2_port_type !== undefined) body.ib2_port_type = clientIds.ib2_port_type
-    if (clientIds.ib2_client_id_listener != null) body.ib2_client_id_listener = clientIds.ib2_client_id_listener
-    if (clientIds.ib2_client_id_account != null) body.ib2_client_id_account = clientIds.ib2_client_id_account
-  }
+/** Save account/stream IDs (POST /config/ib). IB host, port, client IDs come from server config.yaml only. */
+export async function postIbConfig(accounts: {
+  ib_host_account_id?: string | null
+  stream_host_account_id?: string | null
+  stream_secondary_account_id?: string | null
+}): Promise<ControlResponse & Partial<IbConfig>> {
   const r = await fetch(`${API}/config/ib`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(accounts),
   })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }

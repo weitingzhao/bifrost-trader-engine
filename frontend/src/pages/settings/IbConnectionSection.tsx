@@ -2,11 +2,6 @@ import { useEffect, useState } from 'react'
 import type { FlexAccountItem } from '../../types'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
-  DEFAULT_BARS_FETCH,
-  DEFAULT_DAEMON,
-  DEFAULT_LISTENER,
-  DEFAULT_REFRESH_EXECUTIONS,
-  DEFAULT_WORKER,
   FLEX_QUERY_TYPES,
 } from './settingsConstants'
 
@@ -14,15 +9,11 @@ type PortType = 'tws_live' | 'tws_paper' | 'gateway'
 
 export interface IbConnectionSectionProps {
   ibHost: string
-  setIbHost: (v: string) => void
   ibPortType: PortType
-  setIbPortType: (v: PortType) => void
   flexHostToken: string
   setFlexHostToken: (v: string) => void
   ib2Host: string
-  setIb2Host: (v: string) => void
   ib2PortType: PortType
-  setIb2PortType: (v: PortType) => void
   flexSecondaryToken: string
   setFlexSecondaryToken: (v: string) => void
   hostAccountId: string
@@ -32,41 +23,30 @@ export interface IbConnectionSectionProps {
   streamSecondaryAccountId: string
   setStreamSecondaryAccountId: (v: string) => void
   clientIdDaemon: number
-  setClientIdDaemon: (v: number) => void
   clientIdListener: number
-  setClientIdListener: (v: number) => void
   ib2ClientIdListener: number
-  setIb2ClientIdListener: (v: number) => void
   clientIdAccount: number
-  setClientIdAccount: (v: number) => void
   ib2ClientIdAccount: number
-  setIb2ClientIdAccount: (v: number) => void
   clientIdMarkets: number
-  setClientIdMarkets: (v: number) => void
   clientIdWorker: number
-  setClientIdWorker: (v: number) => void
   defaultFlexRangeDays: number
   setDefaultFlexRangeDays: (v: number) => void
   initFlexRangeDays: number
   setInitFlexRangeDays: (v: number) => void
   flexAccounts: FlexAccountItem[]
   setFlexAccounts: (v: FlexAccountItem[] | ((prev: FlexAccountItem[]) => FlexAccountItem[])) => void
-  /** Current hash-based sub-anchor (e.g. ib-users); when set, the corresponding group is expanded. */
+  /** Current hash-based sub-anchor; expands Account / Flex Query groups. User & Client ID are always visible. */
   activeSubId?: string
 }
 
 export function IbConnectionSection(props: IbConnectionSectionProps) {
   const {
     ibHost,
-    setIbHost,
     ibPortType,
-    setIbPortType,
     flexHostToken,
     setFlexHostToken,
     ib2Host,
-    setIb2Host,
     ib2PortType,
-    setIb2PortType,
     flexSecondaryToken,
     setFlexSecondaryToken,
     hostAccountId,
@@ -76,19 +56,12 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     streamSecondaryAccountId,
     setStreamSecondaryAccountId,
     clientIdDaemon,
-    setClientIdDaemon,
     clientIdListener,
-    setClientIdListener,
     ib2ClientIdListener,
-    setIb2ClientIdListener,
     clientIdAccount,
-    setClientIdAccount,
     ib2ClientIdAccount,
-    setIb2ClientIdAccount,
     clientIdMarkets,
-    setClientIdMarkets,
     clientIdWorker,
-    setClientIdWorker,
     defaultFlexRangeDays,
     setDefaultFlexRangeDays,
     initFlexRangeDays,
@@ -98,16 +71,12 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     activeSubId,
   } = props
 
-  const [userGroupOpen, setUserGroupOpen] = useState(false)
-  const [clientIdGroupOpen, setClientIdGroupOpen] = useState(false)
   const [streamAccountsGroupOpen, setStreamAccountsGroupOpen] = useState(false)
   const [flexQueryGroupOpen, setFlexQueryGroupOpen] = useState(false)
 
-  // When user clicks a sidebar link: expand the target group, collapse the others, and scroll to it.
+  // Sidebar anchor: expand editable groups only (User & Client ID are always visible, read-only).
   useEffect(() => {
     if (!activeSubId) return
-    setUserGroupOpen(activeSubId === 'ib-users')
-    setClientIdGroupOpen(activeSubId === 'ib-client-ids')
     setStreamAccountsGroupOpen(activeSubId === 'ib-account')
     setFlexQueryGroupOpen(activeSubId === 'ib-flex-query')
   }, [activeSubId])
@@ -117,14 +86,14 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
       <div className="daemon-group settings-ib-config-sheet" id="ib-config-sheet">
         <div className="daemon-group-header">
           <span className="daemon-group-title">IB Configure</span>
-          <InfoTooltip text="Configure two IB connections: Host (TWS for daemon, auto-trading, market data) and Secondary (optional second TWS). Expand each group below to edit. Flex range preferences are at the bottom." />
+          <InfoTooltip text="User and Client ID blocks are read-only and reflect config.yaml. Edit that file and restart processes to change host, port, or client IDs. Account, Flex Query, and preferences below can still be saved to the database." />
         </div>
-        <p className="settings-ib-config-subtitle">Host and Secondary (optional second TWS). Same fields for each.</p>
+        <p className="settings-ib-config-subtitle">Host, Secondary, and all Client IDs come from config.yaml (ib.host and optional ib.secondary). Read-only below. Account stream IDs, Flex, and range preferences are saved via this page.</p>
         <div className="daemon-group-body">
           <section className="settings-ib-section">
-            <h3 className="settings-ib-config-sheet-title">User client related settings</h3>
+            <h3 className="settings-ib-config-sheet-title">Host &amp; Client ID (read-only · YAML)</h3>
             <div className="flex-query-table-wrap settings-ib-config-table-wrap">
-            <table className="flex-query-table settings-ib-config-table" aria-label="User client related settings: Host and Secondary">
+            <table className="flex-query-table settings-ib-config-table" aria-label="IB connection: read-only User and Client ID from config.yaml; editable Account and Flex below">
               <colgroup>
                 <col className="settings-ib-config-col-label" />
                 <col className="settings-ib-config-col-host" />
@@ -138,43 +107,35 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                 </tr>
               </thead>
               <tbody>
-                <tr
-                  id="ib-users"
-                  className="settings-ib-collapsible-group-row"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setUserGroupOpen((o) => !o)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setUserGroupOpen((o) => !o) } }}
-                  aria-expanded={userGroupOpen}
-                  aria-label="User group"
-                >
-                  <td colSpan={3} className="settings-ib-collapsible-group-header">
-                    <span className={`settings-ib-collapsible-chevron ${userGroupOpen ? 'open' : ''}`} aria-hidden>▼</span>
+                <tr id="ib-users" className="settings-ib-readonly-section-header">
+                  <td colSpan={3}>
                     <span className="settings-ib-collapsible-group-title">User</span>
+                    <span className="settings-ib-readonly-badge" aria-hidden>Read-only</span>
+                    <span className="settings-ib-readonly-inline-hint">IP/host and port type from config.yaml.</span>
                   </td>
                 </tr>
-                {userGroupOpen && (
-                  <>
                 <tr>
                   <td className="flex-query-cell-type">IP/Host</td>
                   <td className="flex-query-cell-input">
                     <input
                       type="text"
                       value={ibHost}
-                      onChange={(e) => setIbHost(e.target.value)}
+                      readOnly
                       placeholder="127.0.0.1"
-                      className="flex-query-input"
-                      aria-label="IP/Host — Host"
+                      className="flex-query-input settings-ib-readonly-field"
+                      aria-label="IP/Host — Host (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                   <td className="flex-query-cell-input">
                     <input
                       type="text"
                       value={ib2Host}
-                      onChange={(e) => setIb2Host(e.target.value)}
+                      readOnly
                       placeholder="e.g. 192.168.10.31 (empty = disabled)"
-                      className="flex-query-input"
-                      aria-label="IP/Host — Secondary"
+                      className="flex-query-input settings-ib-readonly-field"
+                      aria-label="IP/Host — Secondary (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                 </tr>
@@ -183,9 +144,9 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td className="flex-query-cell-input">
                     <select
                       value={ibPortType}
-                      onChange={(e) => setIbPortType(e.target.value as PortType)}
-                      className="flex-query-input"
-                      aria-label="Port type — Host"
+                      className="flex-query-input settings-ib-readonly-field"
+                      disabled
+                      aria-label="Port type — Host (read-only, config.yaml)"
                     >
                       <option value="tws_paper">TWS Paper (7497)</option>
                       <option value="tws_live">TWS Live (7496)</option>
@@ -195,10 +156,9 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td className="flex-query-cell-input">
                     <select
                       value={ib2PortType}
-                      onChange={(e) => setIb2PortType(e.target.value as PortType)}
-                      className="flex-query-input"
-                      disabled={!ib2Host.trim()}
-                      aria-label="Port type — Secondary"
+                      className="flex-query-input settings-ib-readonly-field"
+                      disabled
+                      aria-label="Port type — Secondary (read-only, config.yaml)"
                     >
                       <option value="tws_paper">TWS Paper (7497)</option>
                       <option value="tws_live">TWS Live (7496)</option>
@@ -206,25 +166,13 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                     </select>
                   </td>
                 </tr>
-                  </>
-                )}
-                <tr
-                  className="settings-ib-collapsible-group-row"
-                  id="ib-client-ids"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setClientIdGroupOpen((o) => !o)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setClientIdGroupOpen((o) => !o) } }}
-                  aria-expanded={clientIdGroupOpen}
-                  aria-label="Client ID group"
-                >
-                  <td colSpan={3} className="settings-ib-collapsible-group-header">
-                    <span className={`settings-ib-collapsible-chevron ${clientIdGroupOpen ? 'open' : ''}`} aria-hidden>▼</span>
+                <tr id="ib-client-ids" className="settings-ib-readonly-section-header">
+                  <td colSpan={3}>
                     <span className="settings-ib-collapsible-group-title">Client ID</span>
+                    <span className="settings-ib-readonly-badge" aria-hidden>Read-only</span>
+                    <span className="settings-ib-readonly-inline-hint">From config.yaml; restart processes after changes.</span>
                   </td>
                 </tr>
-                {clientIdGroupOpen && (
-                  <>
                 <tr className="client-ids-group-row">
                   <td colSpan={3} className="client-ids-group-header">Daemon</td>
                 </tr>
@@ -233,13 +181,12 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      min={1}
-                      max={32}
                       value={clientIdDaemon}
-                      onChange={(e) => setClientIdDaemon(parseInt(e.target.value, 10) || DEFAULT_DAEMON)}
-                      className="flex-query-input"
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Trading — Host"
+                      aria-label="Trading — Host (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                   <td className="flex-query-cell-input">—</td>
@@ -249,25 +196,23 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      min={1}
-                      max={32}
                       value={clientIdListener}
-                      onChange={(e) => setClientIdListener(parseInt(e.target.value, 10) || DEFAULT_LISTENER)}
-                      className="flex-query-input"
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Listener — Host"
+                      aria-label="Listener — Host (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      min={1}
-                      max={32}
                       value={ib2ClientIdListener}
-                      onChange={(e) => setIb2ClientIdListener(parseInt(e.target.value, 10) || 3)}
-                      className="flex-query-input"
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Listener — Secondary"
+                      aria-label="Listener — Secondary (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                 </tr>
@@ -279,25 +224,23 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      min={1}
-                      max={32}
                       value={clientIdAccount}
-                      onChange={(e) => setClientIdAccount(parseInt(e.target.value, 10) || DEFAULT_REFRESH_EXECUTIONS)}
-                      className="flex-query-input"
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Account — Host"
+                      aria-label="Account — Host (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      min={1}
-                      max={32}
                       value={ib2ClientIdAccount}
-                      onChange={(e) => setIb2ClientIdAccount(parseInt(e.target.value, 10) || 102)}
-                      className="flex-query-input"
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Account — Secondary"
+                      aria-label="Account — Secondary (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                 </tr>
@@ -306,13 +249,12 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      min={1}
-                      max={32}
                       value={clientIdMarkets}
-                      onChange={(e) => setClientIdMarkets(parseInt(e.target.value, 10) || DEFAULT_BARS_FETCH)}
-                      className="flex-query-input"
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Market data — Host"
+                      aria-label="Market data — Host (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                   <td className="flex-query-cell-input">—</td>
@@ -325,19 +267,16 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      min={1}
-                      max={999}
                       value={clientIdWorker}
-                      onChange={(e) => setClientIdWorker(parseInt(e.target.value, 10) || DEFAULT_WORKER)}
-                      className="flex-query-input"
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Market Data (worker_market) — Host"
+                      aria-label="Market Data (worker_market) — Host (read-only, config.yaml)"
+                      tabIndex={-1}
                     />
                   </td>
                   <td className="flex-query-cell-input">—</td>
                 </tr>
-                  </>
-                )}
                 <tr
                   id="ib-account"
                   className="settings-ib-collapsible-group-row"

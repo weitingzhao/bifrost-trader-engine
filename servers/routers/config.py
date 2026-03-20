@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from servers.reader import (
     write_flex_config,
@@ -19,24 +19,13 @@ router = APIRouter(tags=["config"])
 
 
 class IbConfigBody(BaseModel):
-    """POST /config/ib body. Client IDs: Daemon (Trading, Listener), Monitor (Account, Market data), Celery (Market Data). Second IB: Listener + Account only. Stream accounts: for Live page categorization."""
-    ib_host: Optional[str] = None
-    ib_port_type: Optional[str] = None
-    ib_client_id_daemon: Optional[int] = None
-    ib_client_id_listener: Optional[int] = None
-    ib_client_id_account: Optional[int] = None
-    ib_client_id_markets: Optional[int] = None
-    ib_client_id_worker_market: Optional[int] = None
+    """POST /config/ib body: account/stream IDs only. IB host, port, client IDs live in config.yaml."""
+
+    model_config = ConfigDict(extra="ignore")
+
     ib_host_account_id: Optional[str] = None
-    ib2_host: Optional[str] = None
-    ib2_port_type: Optional[str] = None
-    ib2_client_id_listener: Optional[int] = None
-    ib2_client_id_account: Optional[int] = None
     stream_host_account_id: Optional[str] = None
     stream_secondary_account_id: Optional[str] = None
-
-    class Config:
-        extra = "ignore"
 
 
 class FlexAccountItem(BaseModel):
@@ -72,83 +61,44 @@ class ActiveStrategyBody(BaseModel):
         extra = "ignore"
 
 
+def _optional_account_field(
+    body: IbConfigBody,
+    field: str,
+    current: Dict[str, Any],
+) -> Optional[str]:
+    fs = getattr(body, "model_fields_set", None) or getattr(body, "__fields_set__", None) or set()
+    if field not in fs:
+        v = current.get(field)
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+    v = getattr(body, field, None)
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s or None
+
+
 @router.post("/config/ib")
 def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResponse:
-    """Update settings: ib_host, ib_port_type, IB client IDs. Daemon loads on next start."""
+    """Persist ib_host_account_id and stream account IDs. IB host/port/client IDs come from config.yaml only."""
     control_via_db = request.app.state.control_via_db
     reader = request.app.state.reader
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
-    current = reader.get_ib_config() or {
-        "ib_host": "127.0.0.1",
-        "ib_port_type": "tws_paper",
-        "ib_client_id_daemon": 1,
-        "ib_client_id_listener": 2,
-        "ib_client_id_account": 100,
-        "ib_client_id_markets": 101,
-        "ib_client_id_worker_market": 500,
-        "ib_host_account_id": None,
-        "ib2_host": None,
-        "ib2_port_type": None,
-        "ib2_client_id_listener": 3,
-        "ib2_client_id_account": 102,
-        "stream_host_account_id": None,
-        "stream_secondary_account_id": None,
-    }
-    host = (str(body.ib_host or current.get("ib_host", "127.0.0.1"))).strip() or "127.0.0.1"
-    port_type = (str(body.ib_port_type or current.get("ib_port_type", "tws_paper"))).strip().lower() or "tws_paper"
-    if port_type not in ("tws_live", "tws_paper", "gateway"):
-        port_type = "tws_paper"
-    cid_d = body.ib_client_id_daemon if body.ib_client_id_daemon is not None else current.get("ib_client_id_daemon", 1)
-    cid_l = body.ib_client_id_listener if body.ib_client_id_listener is not None else current.get("ib_client_id_listener", 2)
-    cid_a = body.ib_client_id_account if body.ib_client_id_account is not None else current.get("ib_client_id_account", 100)
-    cid_m = body.ib_client_id_markets if body.ib_client_id_markets is not None else current.get("ib_client_id_markets", 101)
-    cid_w = body.ib_client_id_worker_market if body.ib_client_id_worker_market is not None else current.get("ib_client_id_worker_market", 500)
-    cid_d, cid_l, cid_a, cid_m, cid_w = int(cid_d), int(cid_l), int(cid_a), int(cid_m), int(cid_w)
-    host_id = body.ib_host_account_id if body.ib_host_account_id is not None else current.get("ib_host_account_id")
-    if host_id is not None:
-        host_id = (str(host_id)).strip() or None
-    ib2_h = body.ib2_host if body.ib2_host is not None else current.get("ib2_host")
-    if ib2_h is not None:
-        ib2_h = (str(ib2_h)).strip() or None
-    ib2_pt = body.ib2_port_type if body.ib2_port_type is not None else current.get("ib2_port_type")
-    if ib2_pt is not None:
-        ib2_pt = (str(ib2_pt)).strip().lower() or None
-    cid2_l = body.ib2_client_id_listener if body.ib2_client_id_listener is not None else current.get("ib2_client_id_listener", 3)
-    cid2_a = body.ib2_client_id_account if body.ib2_client_id_account is not None else current.get("ib2_client_id_account", 102)
-    cid2_l = int(cid2_l) if cid2_l is not None else 3
-    cid2_a = int(cid2_a) if cid2_a is not None else 102
-    stream_host_id = body.stream_host_account_id if body.stream_host_account_id is not None else current.get("stream_host_account_id")
-    stream_secondary_id = body.stream_secondary_account_id if body.stream_secondary_account_id is not None else current.get("stream_secondary_account_id")
-    if stream_host_id is not None:
-        stream_host_id = (str(stream_host_id)).strip() or None
-    if stream_secondary_id is not None:
-        stream_secondary_id = (str(stream_secondary_id)).strip() or None
-    logger.info(
-        "[config/ib] writing settings: host=%r port_type=%r ... ib2_host=%r ib2_port_type=%r",
-        host, port_type, ib2_h, ib2_pt,
-    )
-    if write_ib_config(control_via_db, host, port_type, cid_d, cid_l, cid_a, cid_m, cid_w, host_id, ib2_h, ib2_pt, cid2_l, cid2_a, stream_host_id, stream_secondary_id):
-        return JSONResponse(
-            status_code=200,
-            content={
-                "ok": True,
-                "ib_host": host,
-                "ib_port_type": port_type,
-                "ib_client_id_daemon": cid_d,
-                "ib_client_id_listener": cid_l,
-                "ib_client_id_account": cid_a,
-                "ib_client_id_markets": cid_m,
-                "ib_client_id_worker_market": cid_w,
-                "ib_host_account_id": host_id,
-                "ib2_host": ib2_h,
-                "ib2_port_type": ib2_pt,
-                "ib2_client_id_listener": cid2_l,
-                "ib2_client_id_account": cid2_a,
-                "stream_host_account_id": stream_host_id,
-                "stream_secondary_account_id": stream_secondary_id,
-            },
-        )
+    current = reader.get_ib_config() or {}
+
+    host_id = _optional_account_field(body, "ib_host_account_id", current)
+    stream_host_id = _optional_account_field(body, "stream_host_account_id", current)
+    stream_secondary_id = _optional_account_field(body, "stream_secondary_account_id", current)
+
+    logger.info("[config/ib] writing settings: host_account_id=%r stream_host=%r stream_secondary=%r", host_id, stream_host_id, stream_secondary_id)
+    if write_ib_config(control_via_db, host_id, stream_host_id, stream_secondary_id):
+        merged = reader.get_ib_config() or {}
+        out: Dict[str, Any] = {"ok": True}
+        out.update(merged)
+        return JSONResponse(status_code=200, content=out)
     return JSONResponse(status_code=500, content={"error": "failed to write settings"})
 
 

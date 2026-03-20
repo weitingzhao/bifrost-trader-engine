@@ -4,13 +4,15 @@
 Requires Redis (config.redis or REDIS_* env) and postgres. Usage:
 
   python scripts/run_celery.py [config_path]
+  python scripts/run_celery.py --prod
+  BIFROST_ENV=prod python scripts/run_celery.py
 
 Before starting, kills any existing Celery worker process for this app (same script or celery -A servers.celery_app worker -Q bars)
 so the port/process is not left occupied. Uses --pool=solo (single process) so Stop button and IB connection work reliably.
 Or run Celery directly:
   celery -A servers.celery_app worker -l info -Q bars --pool=solo
 
-Default config_path: config/config.yaml
+Default config: config/config.dev.yaml (or BIFROST_CONFIG / first positional path / BIFROST_ENV=prod → config.prod.yaml).
 """
 
 from __future__ import annotations
@@ -59,10 +61,10 @@ def _kill_existing_celery_workers() -> None:
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    config_path = args[0] if args else str(_PROJECT_ROOT / "config" / "config.yaml")
-    if not os.path.isabs(config_path):
-        config_path = str(_PROJECT_ROOT / config_path)
+    from src.app.config import resolve_startup_config_path
+
+    argv_raw = sys.argv[1:]
+    config_path, _ = resolve_startup_config_path(str(_PROJECT_ROOT), argv_raw)
     os.environ["BIFROST_CONFIG"] = config_path
     _kill_existing_celery_workers()
     from servers.celery_app import app

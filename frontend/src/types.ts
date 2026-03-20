@@ -1,4 +1,4 @@
-/** IB connection config (from DB). Client IDs: Daemon (Trading, Listener), Monitor (Account, Market data), Celery (Market Data). Second IB: Listener + Account only (no market data). See DATABASE.md §2.9. */
+/** IB connection config. Client IDs come from server config.yaml (read-only in UI). Non-ID fields (host, account IDs, flex) from DB. See ARCHITECTURE.md §2.1. */
 export interface IbConfig {
   ib_host?: string
   ib_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
@@ -202,10 +202,10 @@ export interface DaemonHeartbeat {
   event_subscribe_positions?: boolean
   event_subscribe_fills?: boolean
   event_subscribe_commission?: boolean
-  /** 守护进程第二条 IB 连接（settings.ib_client_id_listener），TWS 中会显示该 Client ID */
+  /** Daemon second IB connection (YAML client_id.listener); shown as this Client ID in TWS */
   listener_connected?: boolean
   listener_client_id?: number | null
-  /** Listener on Secondary host (settings.ib2_host, ib2_client_id_listener) */
+  /** Listener on Secondary TWS (YAML ib.secondary → ib2_host / ib2_client_id_listener) */
   listener_2_connected?: boolean
   listener_2_client_id?: number | null
   /** Secondary IB event subscribe: positions, fills, commission (no ticker). */

@@ -1,5 +1,7 @@
-# Config with secrets (use config.yaml.example as template)
+# Config with secrets (use *.example in config/ as template)
 config/config.yaml
+config/config.dev.yaml
+config/config.prod.yaml
 
 # Python
 __pycache__/
