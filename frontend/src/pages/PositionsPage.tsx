@@ -103,6 +103,27 @@ function findMatchingFinalForTws(t: Execution, finals: Execution[]): Execution |
   )
 }
 
+/** Inverse: match a final book row to a TWS raw row (same fill rules as findMatchingFinalForTws). */
+function findMatchingTwsForFinal(f: Execution, twsRows: Execution[]): Execution | null {
+  const acc = (f.account_id ?? '').trim()
+  const eid = (f.exec_id ?? '').trim()
+  if (eid) {
+    const hit = twsRows.find(t => (t.exec_id ?? '').trim() === eid && (t.account_id ?? '').trim() === acc)
+    if (hit) return hit
+  }
+  const ft = f.time != null && Number.isFinite(Number(f.time)) ? Number(f.time) : null
+  const ck = (f.contract_key ?? '').trim()
+  if (ft == null || !ck) return null
+  return (
+    twsRows.find(t => {
+      if ((t.account_id ?? '').trim() !== acc) return false
+      if ((t.contract_key ?? '').trim() !== ck) return false
+      const tt = t.time != null ? Number(t.time) : null
+      return tt != null && Math.abs(tt - ft) < 1.5
+    }) ?? null
+  )
+}
+
 function finalHasStrategyAttribution(f: Execution): boolean {
   return f.strategy_instance_id != null || f.strategy_opportunity_id != null
 }
@@ -110,6 +131,16 @@ function finalHasStrategyAttribution(f: Execution): boolean {
 /** True when final has opp/instance set and TWS row differs (needs sync). */
 function twsNeedsStrategySyncFromFinal(t: Execution, f: Execution): boolean {
   if (!finalHasStrategyAttribution(f)) return false
+  const siT = t.strategy_instance_id ?? null
+  const soT = t.strategy_opportunity_id ?? null
+  const siF = f.strategy_instance_id ?? null
+  const soF = f.strategy_opportunity_id ?? null
+  return siT !== siF || soT !== soF
+}
+
+/** True when TWS row has opp/instance set and final book row differs (needs sync the other way). */
+function finalNeedsStrategySyncFromTws(f: Execution, t: Execution): boolean {
+  if (!finalHasStrategyAttribution(t)) return false
   const siT = t.strategy_instance_id ?? null
   const soT = t.strategy_opportunity_id ?? null
   const siF = f.strategy_instance_id ?? null
@@ -438,6 +469,7 @@ export function PositionsPage({
   /** Inline error for e.g. delete execution failure (not modal form errors). */
   const [pageError, setPageError] = useState<string | null>(null)
   const [syncingTwsAttributionKey, setSyncingTwsAttributionKey] = useState<string | null>(null)
+  const [syncingFinalAttributionKey, setSyncingFinalAttributionKey] = useState<string | null>(null)
 
   const handleSyncTwsStrategyFromFinal = useCallback(async (t: Execution, f: Execution) => {
     const id = t.account_executions_id
@@ -455,6 +487,25 @@ export function PositionsPage({
       setPageError(e instanceof Error ? e.message : String(e))
     } finally {
       setSyncingTwsAttributionKey(null)
+    }
+  }, [loadReplayData])
+
+  const handleSyncFinalStrategyFromTws = useCallback(async (f: Execution, t: Execution) => {
+    const id = f.account_executions_id
+    if (id == null) return
+    setSyncingFinalAttributionKey(String(id))
+    setPageError(null)
+    try {
+      const res = await updateExecution(id, {
+        strategy_instance_id: t.strategy_instance_id ?? null,
+        strategy_opportunity_id: t.strategy_opportunity_id ?? null,
+      })
+      if (!res.ok) throw new Error(res.error || 'Sync failed')
+      await loadReplayData()
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSyncingFinalAttributionKey(null)
     }
   }, [loadReplayData])
 
@@ -2952,7 +3003,7 @@ export function PositionsPage({
                                 <td>—</td>
                               </tr>
                             )
-                            const renderOptsExecRow = (ex: Execution, ei: number, book: 'final' | 'tws', finalMatch: Execution | null) => {
+                            const renderOptsExecRow = (ex: Execution, ei: number, book: 'final' | 'tws', crossBookMatch: Execution | null) => {
                               const es = (ex.side ?? '').toUpperCase()
                               const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
                               const eQty = Math.abs(Number(ex.quantity) || 0)
@@ -2965,12 +3016,18 @@ export function PositionsPage({
                               const rowKey = `${posKey}-exec-${book}-${ex.account_executions_id ?? ei}`
                               const twsContractKey = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
                               const hasCanonicalContractRow = canonicalOptContractKeySet.has(twsContractKey)
-                              const showSync =
+                              const showSyncTws =
                                 book === 'tws' &&
                                 hasCanonicalContractRow &&
-                                finalMatch != null &&
-                                twsNeedsStrategySyncFromFinal(ex, finalMatch)
-                              const syncBusy = syncingTwsAttributionKey === String(ex.account_executions_id ?? '')
+                                crossBookMatch != null &&
+                                twsNeedsStrategySyncFromFinal(ex, crossBookMatch)
+                              const showSyncFinal =
+                                book === 'final' &&
+                                hasCanonicalContractRow &&
+                                crossBookMatch != null &&
+                                finalNeedsStrategySyncFromTws(ex, crossBookMatch)
+                              const syncBusyTws = syncingTwsAttributionKey === String(ex.account_executions_id ?? '')
+                              const syncBusyFinal = syncingFinalAttributionKey === String(ex.account_executions_id ?? '')
                               return (
                                 <tr key={rowKey} className="detail-execution-row">
                                   <td className="replay-opt-expand-col" />
@@ -2996,17 +3053,36 @@ export function PositionsPage({
                                           </>
                                         ) : null}
                                       </div>
-                                      {showSync && finalMatch != null ? (
+                                      {showSyncTws && crossBookMatch != null ? (
                                         <div className="detail-exec-line-sync">
                                           <button
                                             type="button"
                                             className="btn btn-icon-small detail-exec-sync-btn"
                                             title="Apply strategy opportunity and instance from the final book row"
                                             aria-label="Sync strategy attribution from final book"
-                                            disabled={syncBusy}
+                                            disabled={syncBusyTws}
                                             onClick={e => {
                                               e.stopPropagation()
-                                              handleSyncTwsStrategyFromFinal(ex, finalMatch)
+                                              handleSyncTwsStrategyFromFinal(ex, crossBookMatch)
+                                            }}
+                                          >
+                                            <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
+                                              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
+                                            </svg>
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                      {showSyncFinal && crossBookMatch != null ? (
+                                        <div className="detail-exec-line-sync">
+                                          <button
+                                            type="button"
+                                            className="btn btn-icon-small detail-exec-sync-btn"
+                                            title="Apply strategy opportunity and instance from the TWS client row"
+                                            aria-label="Sync strategy attribution from TWS client book"
+                                            disabled={syncBusyFinal}
+                                            onClick={e => {
+                                              e.stopPropagation()
+                                              handleSyncFinalStrategyFromTws(ex, crossBookMatch)
                                             }}
                                           >
                                             <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
@@ -3049,7 +3125,9 @@ export function PositionsPage({
                             }
                             const execRows = isPosExpanded
                               ? [
-                                  ...execLists.final.map((ex, ei) => renderOptsExecRow(ex, ei, 'final', null)),
+                                  ...execLists.final.map((ex, ei) =>
+                                    renderOptsExecRow(ex, ei, 'final', findMatchingTwsForFinal(ex, execLists.tws)),
+                                  ),
                                   ...execLists.tws.map((ex, ei) =>
                                     renderOptsExecRow(ex, ei, 'tws', findMatchingFinalForTws(ex, execLists.final)),
                                   ),
