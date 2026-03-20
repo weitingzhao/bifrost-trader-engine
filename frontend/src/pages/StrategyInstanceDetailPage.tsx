@@ -234,64 +234,107 @@ export function StrategyInstanceDetailPage({
     return merged
   }, [executionsFinal, structure, status?.accounts])
 
-  const executionTable = (rows: Execution[]) => (
-    <div className="table-wrapper" style={{ overflowX: 'auto' }}>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Contract</th>
-            <th title="Display date: trade_date if set, otherwise exec time">Date</th>
-            <th>Trade date</th>
-            <th>Report date</th>
-            <th>Settle date target</th>
-            <th>Transaction type</th>
-            <th>Taxes</th>
-            <th>Net cash</th>
-            <th>Side</th>
-            <th>Qty</th>
-            <th>Price</th>
-            <th>Realized PnL</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((e) => (
-            <tr key={`${e.account_executions_id ?? ''}-${e.exec_id ?? ''}-${e.time ?? ''}`}>
-              <td>
-                {e.symbol ?? '—'}
-                {e.account_executions_id != null ? (
-                  <span
-                    title={`account_executions_id: ${e.account_executions_id}`}
-                    style={{
-                      color: 'var(--color-text-muted)',
-                      fontSize: '0.8125rem',
-                      fontWeight: 400,
-                      marginLeft: '0.25em',
-                    }}
-                  >
-                    {' '}
-                    #{e.account_executions_id}
-                  </span>
-                ) : null}
-              </td>
-              <td>
-                {e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}
-              </td>
-              <td>{e.trade_date ?? '—'}</td>
-              <td>{e.report_date ?? '—'}</td>
-              <td>{e.settle_date_target ?? '—'}</td>
-              <td>{e.transaction_type ?? '—'}</td>
-              <td>{e.taxes != null ? fmtUsd(e.taxes) : '—'}</td>
-              <td>{e.net_cash != null ? fmtUsd(e.net_cash) : '—'}</td>
-              <td>{e.side ?? '—'}</td>
-              <td>{e.quantity ?? '—'}</td>
-              <td>{e.price != null ? Number(e.price).toFixed(2) : '—'}</td>
-              <td>{e.realized_pnl != null ? fmtUsd(e.realized_pnl) : '—'}</td>
+  const formatExecutionStrike = (strike: number | undefined | null): string => {
+    if (strike == null || !Number.isFinite(Number(strike))) return '—'
+    const n = Number(strike)
+    return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '')
+  }
+
+  type ExecutionTableSource = 'performance_final' | 'tws_raw'
+
+  const executionTable = (rows: Execution[], source: ExecutionTableSource) => {
+    const isTwsRaw = source === 'tws_raw'
+    return (
+      <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Contract</th>
+              <th title="Display date: trade_date if set, otherwise exec time">Date</th>
+              <th>Trade date</th>
+              {!isTwsRaw ? (
+                <>
+                  <th>Report date</th>
+                  <th>Settle date target</th>
+                  <th>Transaction type</th>
+                  <th>Taxes</th>
+                  <th>Net cash</th>
+                </>
+              ) : (
+                <>
+                  <th>Expiry</th>
+                  <th>Strike</th>
+                </>
+              )}
+              <th>Side</th>
+              <th
+                title={
+                  isTwsRaw
+                    ? 'TWS raw table: quantity is always positive; use Side for Buy vs Sell. (Final book uses signed quantity: Sell negative.)'
+                    : 'Final book: Sell rows use negative quantity.'
+                }
+              >
+                Qty
+              </th>
+              <th>Price</th>
+              <th>Realized PnL</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+          </thead>
+          <tbody>
+            {rows.map((e) => (
+              <tr key={`${e.account_executions_id ?? ''}-${e.exec_id ?? ''}-${e.time ?? ''}`}>
+                <td>
+                  {e.symbol ?? '—'}
+                  {e.account_executions_id != null ? (
+                    <span
+                      title={`account_executions_id: ${e.account_executions_id}`}
+                      style={{
+                        color: 'var(--color-text-muted)',
+                        fontSize: '0.8125rem',
+                        fontWeight: 400,
+                        marginLeft: '0.25em',
+                      }}
+                    >
+                      {' '}
+                      #{e.account_executions_id}
+                    </span>
+                  ) : null}
+                </td>
+                <td>
+                  {e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}
+                </td>
+                <td>{e.trade_date ?? '—'}</td>
+                {!isTwsRaw ? (
+                  <>
+                    <td>{e.report_date ?? '—'}</td>
+                    <td>{e.settle_date_target ?? '—'}</td>
+                    <td>{e.transaction_type ?? '—'}</td>
+                    <td>{e.taxes != null ? fmtUsd(e.taxes) : '—'}</td>
+                    <td>{e.net_cash != null ? fmtUsd(e.net_cash) : '—'}</td>
+                  </>
+                ) : (
+                  <>
+                    <td>{e.expiry != null && String(e.expiry).trim() !== '' ? String(e.expiry) : '—'}</td>
+                    <td>{formatExecutionStrike(e.strike)}</td>
+                  </>
+                )}
+                <td>{e.side ?? '—'}</td>
+                <td>
+                  {e.quantity == null || !Number.isFinite(Number(e.quantity))
+                    ? '—'
+                    : isTwsRaw
+                      ? String(Math.abs(Number(e.quantity)))
+                      : String(e.quantity)}
+                </td>
+                <td>{e.price != null ? Number(e.price).toFixed(2) : '—'}</td>
+                <td>{e.realized_pnl != null ? fmtUsd(e.realized_pnl) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
 
   return (
     <div className="card process-section">
@@ -488,18 +531,19 @@ export function StrategyInstanceDetailPage({
                   {executionsFinal.length === 0 ? (
                     <p>No rows in the final book for this instance.</p>
                   ) : (
-                    executionTable(executionsFinal)
+                    executionTable(executionsFinal, 'performance_final')
                   )}
                 </div>
                 <div style={{ marginTop: '1.5rem' }}>
                   <h5 style={{ margin: '0 0 0.35rem' }}>Executions (TWS client)</h5>
                   <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.875rem' }}>
                     Source: executions_raw_tws (IB client / manual fills). IDs are negative (synthetic account_executions_id).
+                    Quantity is always positive here; direction is in Side. The final book uses signed quantity (Sell negative).
                   </p>
                   {executionsTwsRaw.length === 0 ? (
                     <p>No TWS client rows tagged for this instance.</p>
                   ) : (
-                    executionTable(executionsTwsRaw)
+                    executionTable(executionsTwsRaw, 'tws_raw')
                   )}
                 </div>
               </>

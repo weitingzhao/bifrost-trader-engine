@@ -2035,29 +2035,70 @@ export function PositionsPage({
                         <option key={n} value={n}>{n}</option>
                       ))}
                     </select>
-                    <select
-                      className="replay-filter-select"
-                      value={instanceFilterScopeType}
-                      onChange={e => setInstanceFilterScopeType(e.target.value)}
-                      aria-label="Filter by symbol scope"
-                    >
-                      <option value="all">All Symbol Scopes</option>
-                      <option value="__none__">— None</option>
-                      {instanceFilterOptions.scopeTypes.filter(s => s !== '').map(s => (
-                        <option key={s} value={s}>{s === 'watchlist_stk' ? 'Watchlist (stocks)' : s === 'explicit_symbols' ? 'Explicit symbols' : s}</option>
-                      ))}
-                    </select>
-                    <select
-                      className="replay-filter-select"
-                      value={instanceFilterAttributionType}
-                      onChange={e => setInstanceFilterAttributionType(e.target.value)}
-                      aria-label="Filter by attribution type"
-                    >
-                      <option value="all">All Attribution</option>
-                      <option value="single">Single</option>
-                      <option value="mixed">Mixed</option>
-                      <option value="unassigned">Unassigned</option>
-                    </select>
+                    <div className="instance-sheet-filter-bubble-row">
+                      <span className="instance-sheet-filter-bubble-label" id="instance-filter-scope-label">
+                        Symbol scope
+                      </span>
+                      <div
+                        className="replay-bubble-switch instance-sheet-bubble-switch--wrap"
+                        role="radiogroup"
+                        aria-labelledby="instance-filter-scope-label"
+                      >
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={instanceFilterScopeType === 'all'}
+                          className={`replay-bubble-switch-btn ${instanceFilterScopeType === 'all' ? 'active' : ''}`}
+                          onClick={() => setInstanceFilterScopeType('all')}
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={instanceFilterScopeType === '__none__'}
+                          className={`replay-bubble-switch-btn ${instanceFilterScopeType === '__none__' ? 'active' : ''}`}
+                          onClick={() => setInstanceFilterScopeType('__none__')}
+                        >
+                          None
+                        </button>
+                        {instanceFilterOptions.scopeTypes.filter(s => s !== '').map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            role="radio"
+                            aria-checked={instanceFilterScopeType === s}
+                            className={`replay-bubble-switch-btn ${instanceFilterScopeType === s ? 'active' : ''}`}
+                            onClick={() => setInstanceFilterScopeType(s)}
+                          >
+                            {s === 'watchlist_stk' ? 'Watchlist (stocks)' : s === 'explicit_symbols' ? 'Explicit symbols' : s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="instance-sheet-filter-bubble-row">
+                      <span className="instance-sheet-filter-bubble-label" id="instance-filter-attr-label">
+                        Attribution
+                      </span>
+                      <div
+                        className="replay-bubble-switch"
+                        role="radiogroup"
+                        aria-labelledby="instance-filter-attr-label"
+                      >
+                        {(['all', 'single', 'mixed', 'unassigned'] as const).map(v => (
+                          <button
+                            key={v}
+                            type="button"
+                            role="radio"
+                            aria-checked={instanceFilterAttributionType === v}
+                            className={`replay-bubble-switch-btn ${instanceFilterAttributionType === v ? 'active' : ''}`}
+                            onClick={() => setInstanceFilterAttributionType(v)}
+                          >
+                            {v === 'all' ? 'All' : v === 'single' ? 'Single' : v === 'mixed' ? 'Mixed' : 'Unassigned'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     {(instanceFilterStructureType !== 'all' || instanceFilterScopeType !== 'all' || instanceFilterOppName !== 'all' || instanceFilterAttributionType !== 'all') && (
                       <button
                         type="button"
@@ -2223,7 +2264,13 @@ export function PositionsPage({
                                                 const value = (pos.avg_cost ?? 0) * absQty * 100
                                                 const ts = getPositionTime(pos)
                                                 const execLists = getPositionExecLists(pos)
-                                                const execCount = execLists.final.length + execLists.tws.length
+                                                const execMatchesInstance = (ex: Execution) =>
+                                                  allGroup.strategy_instance_id == null
+                                                    ? ex.strategy_instance_id == null
+                                                    : ex.strategy_instance_id === allGroup.strategy_instance_id
+                                                const scopedFinalExecs = execLists.final.filter(execMatchesInstance)
+                                                const scopedTwsExecs = execLists.tws.filter(execMatchesInstance)
+                                                const execCount = scopedFinalExecs.length + scopedTwsExecs.length
                                                 const hasExecutions = execCount > 0
                                                 const isPosExpanded = expandedPositionKeys.includes(posKey)
                                                 return [
@@ -2300,7 +2347,7 @@ export function PositionsPage({
                                                     <td>{pos.account_id || '—'}</td>
                                                   </tr>,
                                                   ...(isPosExpanded ? [
-                                                    ...execLists.final.map((ex, ei) => {
+                                                    ...scopedFinalExecs.map((ex, ei) => {
                                                       const es = (ex.side ?? '').toUpperCase()
                                                       const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
                                                       const eQty = Math.abs(Number(ex.quantity) || 0)
@@ -2312,6 +2359,23 @@ export function PositionsPage({
                                                           <td className="replay-opt-expand-col" />
                                                           <td className="detail-exec-indent replay-muted" colSpan={2}>
                                                             ↳ [Final] exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} />
+                                                            {ex.strategy_instance_id != null ? (
+                                                              <>
+                                                                {' '}
+                                                                <span className="replay-muted">·</span>{' '}
+                                                                <a
+                                                                  href={`#/strategies/instances/${ex.strategy_instance_id}`}
+                                                                  className="ledger-instance-icon-link"
+                                                                  target="_blank"
+                                                                  rel="noopener noreferrer"
+                                                                  title={`strategy_instance_id ${ex.strategy_instance_id}`}
+                                                                  aria-label={`View instance #${ex.strategy_instance_id}`}
+                                                                  onClick={e => e.stopPropagation()}
+                                                                >
+                                                                  instance #{ex.strategy_instance_id}
+                                                                </a>
+                                                              </>
+                                                            ) : null}
                                                           </td>
                                                           <td />
                                                           <td />
@@ -2326,7 +2390,7 @@ export function PositionsPage({
                                                         </tr>
                                                       )
                                                     }),
-                                                    ...execLists.tws.map((ex, ei) => {
+                                                    ...scopedTwsExecs.map((ex, ei) => {
                                                       const es = (ex.side ?? '').toUpperCase()
                                                       const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
                                                       const eQty = Math.abs(Number(ex.quantity) || 0)
@@ -2338,6 +2402,23 @@ export function PositionsPage({
                                                           <td className="replay-opt-expand-col" />
                                                           <td className="detail-exec-indent replay-muted" colSpan={2}>
                                                             ↳ [TWS client] exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} />
+                                                            {ex.strategy_instance_id != null ? (
+                                                              <>
+                                                                {' '}
+                                                                <span className="replay-muted">·</span>{' '}
+                                                                <a
+                                                                  href={`#/strategies/instances/${ex.strategy_instance_id}`}
+                                                                  className="ledger-instance-icon-link"
+                                                                  target="_blank"
+                                                                  rel="noopener noreferrer"
+                                                                  title={`strategy_instance_id ${ex.strategy_instance_id}`}
+                                                                  aria-label={`View instance #${ex.strategy_instance_id}`}
+                                                                  onClick={e => e.stopPropagation()}
+                                                                >
+                                                                  instance #{ex.strategy_instance_id}
+                                                                </a>
+                                                              </>
+                                                            ) : null}
                                                           </td>
                                                           <td />
                                                           <td />
@@ -2897,22 +2978,24 @@ export function PositionsPage({
                                     <div className="detail-exec-indent-stack">
                                       <div className="detail-exec-line-primary">
                                         ↳ {bookLabel} exec #{ex.account_executions_id ?? '?'}
+                                        {execInstanceId != null ? (
+                                          <>
+                                            {' '}
+                                            <span className="replay-muted">·</span>{' '}
+                                            <a
+                                              href={`#/strategies/instances/${execInstanceId}`}
+                                              className="ledger-instance-icon-link"
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              title={`strategy_instance_id ${execInstanceId}`}
+                                              aria-label={`View instance #${execInstanceId}`}
+                                              onClick={e => e.stopPropagation()}
+                                            >
+                                              instance #{execInstanceId}
+                                            </a>
+                                          </>
+                                        ) : null}
                                       </div>
-                                      {execInstanceId != null ? (
-                                        <div className="detail-exec-line-instance">
-                                          <a
-                                            href={`#/strategies/instances/${execInstanceId}`}
-                                            className="ledger-instance-icon-link"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            title={`View instance #${execInstanceId}`}
-                                            aria-label={`View instance #${execInstanceId}`}
-                                            onClick={e => e.stopPropagation()}
-                                          >
-                                            Instance #{execInstanceId}
-                                          </a>
-                                        </div>
-                                      ) : null}
                                       {showSync && finalMatch != null ? (
                                         <div className="detail-exec-line-sync">
                                           <button

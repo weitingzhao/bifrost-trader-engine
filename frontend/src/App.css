@@ -9106,6 +9106,25 @@ th {
   flex-wrap: wrap;
   margin-bottom: var(--space-3);
 }
+.instance-sheet-filter-bubble-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+.instance-sheet-filter-bubble-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #8b949e);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+.instance-sheet-filters .instance-sheet-bubble-switch--wrap {
+  flex-wrap: wrap;
+  max-width: min(100%, 42rem);
+  row-gap: 2px;
+}
 .replay-filter-select {
   appearance: none;
   -webkit-appearance: none;

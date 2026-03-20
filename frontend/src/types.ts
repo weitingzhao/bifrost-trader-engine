@@ -322,7 +322,7 @@ export interface Execution {
   strategy_instance_opened_at_epoch?: number | null
 }
 
-/** One row from GET /executions/position-attribution: one (position, instance) estimated share. */
+/** One row from GET /executions/position-attribution: one (position, instance); open_qty_est = sum of signed exec qty for that instance (final-only or TWS-only per position, see reader). */
 export interface PositionInstanceAttribution {
   account_id: string
   contract_key: string

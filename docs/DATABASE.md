@@ -1060,7 +1060,7 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 ##### 2.24.11c Position × Instance 归因读模型（净仓近似归因）
 
 - **目的**：一个 `account_positions` 持仓可由多个 `strategy_instance` 的成交组成。本读模型将持仓按实例拆分，输出 `(account_id, contract_key, strategy_instance_id)` 粒度的归因行，替代前端单实例归属逻辑。
-- **方法**：`net_estimated`——按 `(account_id, contract_key, strategy_instance_id)` 从 `account_executions` 聚合净数量贡献（Buy 为正、Sell 为负，与源 QTY 规范化一致），只保留与持仓方向同号的贡献者；按绝对净数量比例分摊 `open_qty_est`、`attribution_ratio`、`unrealized_pnl_est`。
+- **方法**：`net_estimated`——**执行来源**：若该持仓在 `account_executions_final`（flex+journal）上存在任意匹配成交，则**仅**用 final 成交聚合；否则**仅**用 `executions_raw_tws`。按 `(account_id, contract_key, strategy_instance_id)` 对**有符号**数量求和得到 `open_qty_est`（final 侧沿用 flex/tws_client 的 QTY 符号约定；TWS 原始表数量恒为正，由 side 决定符号）。**不再**按「与持仓同号」过滤实例，凡有成交的实例均返回一行。`attribution_ratio` 为该行 `|open_qty_est|` 占本合约所有归因行 `|open_qty_est|` 之和的比例；`unrealized_pnl_est ≈ (价 − avg_cost) × open_qty_est × 合约乘数`（与 OPT 100 乘数一致）。
 - **实现**：方案 A（推荐，当前）——在 reader 查询时实时计算（`servers/reader/executions.py → get_position_instance_attribution`），不落表。方案 B（稳定后可选）——定时写入快照表 `position_instance_attribution`。
 - **API**：`GET /executions/position-attribution?account_id=&sec_type=`，返回 `{ attributions: PositionInstanceAttribution[] }`。每行包含：
   - 位置维度：`account_id`, `contract_key`, `symbol`, `sec_type`, `expiry`, `strike`, `option_right`, `position_qty`

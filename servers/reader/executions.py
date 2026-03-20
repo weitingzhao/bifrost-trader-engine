@@ -101,6 +101,17 @@ _COMM_NORM_E = (
 )
 
 
+def _qty_expr_e_for_scope(source_scope: Optional[str]) -> str:
+    """Quantity column for get_executions FROM clause alias `e`.
+
+    executions_raw_tws stores quantity as unsigned (positive); direction is in `side`.
+    Do not apply Flex-style Sell→negative normalization for source_scope=tws_raw.
+    """
+    if (source_scope or "").strip().lower() == "tws_raw":
+        return "e.quantity AS quantity"
+    return _QTY_NORM_E
+
+
 def get_executions(
     conn: Any,
     since_ts: Optional[float] = None,
@@ -140,12 +151,13 @@ def get_executions(
             values.append(limit)
         limit_clause = " LIMIT %s" if use_limit else ""
         from_table = _exec_from_for_scope(source_scope)
+        _qty_e = _qty_expr_e_for_scope(source_scope)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             try:
                 cur.execute(
                     f"""
                     SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                           e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+                           e.symbol, e.sec_type, e.side, {_qty_e}, e.price,
                            {_COMM_NORM_E}, e.source,
                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                            c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
@@ -169,7 +181,7 @@ def get_executions(
                         cur.execute(
                             f"""
                             SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                                   e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+                                   e.symbol, e.sec_type, e.side, {_qty_e}, e.price,
                                    {_COMM_NORM_E}, e.source,
                                    e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                    c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date,
@@ -185,7 +197,7 @@ def get_executions(
                         cur.execute(
                             f"""
                                     SELECT e.account_executions_id, e.account_id, e.exec_id, {_EXEC_EPOCH_E} AS time,
-                                           e.symbol, e.sec_type, e.side, {_QTY_NORM_E}, e.price,
+                                           e.symbol, e.sec_type, e.side, {_qty_e}, e.price,
                                            NULL::double precision AS commission, e.source,
                                            e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
                                            NULL::double precision AS realized_pnl, e.contract_key,
@@ -1317,10 +1329,34 @@ def get_performance_stats(
 # Position × Instance attribution (net-estimated, real-time read model)
 # ---------------------------------------------------------------------------
 
-_NET_QTY_CONTRIBUTION_SQL = (
-    "SUM(CASE WHEN lower(trim(COALESCE(e.source, ''))) = 'tws_client' THEN e.quantity "
+# Join account_positions row `p` to execution row `e` (final view or executions_raw_tws).
+_POS_EXEC_JOIN_PE = """(
+  (
+    upper(trim(COALESCE(split_part(p.contract_key, '|', 2), p.sec_type, ''))) = 'OPT'
+    AND upper(trim(COALESCE(split_part(e.contract_key, '|', 2), e.sec_type, ''))) = 'OPT'
+    AND trim(COALESCE(split_part(p.contract_key, '|', 3), p.expiry, '')) = trim(COALESCE(split_part(e.contract_key, '|', 3), e.expiry, ''))
+    AND upper(trim(COALESCE(split_part(p.contract_key, '|', 5), p.option_right, ''))) = upper(trim(COALESCE(split_part(e.contract_key, '|', 5), e.option_right, '')))
+    AND NULLIF(trim(COALESCE(split_part(p.contract_key, '|', 4), '')), '') IS NOT NULL
+    AND NULLIF(trim(COALESCE(split_part(e.contract_key, '|', 4), '')), '') IS NOT NULL
+    AND abs((split_part(p.contract_key, '|', 4))::double precision - (split_part(e.contract_key, '|', 4))::double precision) < 1e-9
+  )
+  OR (
+    upper(trim(COALESCE(p.sec_type, ''))) <> 'OPT'
+    AND p.contract_key = e.contract_key
+  )
+)"""
+
+# Per-row signed qty for account_executions_final (flex/journal; same convention as net aggregation elsewhere).
+_SIGNED_QTY_FINAL_ROW_E = (
+    "CASE WHEN lower(trim(COALESCE(e.source, ''))) = 'tws_client' THEN e.quantity "
     "WHEN upper(trim(COALESCE(e.side, ''))) IN ('SELL', 'SLD', 'S') THEN -abs(e.quantity) "
-    "ELSE abs(e.quantity) END)"
+    "ELSE abs(e.quantity) END"
+)
+
+# executions_raw_tws: quantity stored unsigned; sign from side only.
+_SIGNED_QTY_TWS_RAW_ROW_E = (
+    "CASE WHEN upper(trim(COALESCE(e.side, ''))) IN ('SELL', 'SLD', 'S') THEN -abs(e.quantity) "
+    "ELSE abs(e.quantity) END"
 )
 
 
@@ -1329,11 +1365,16 @@ def get_position_instance_attribution(
     account_id: Optional[str] = None,
     sec_type_filter: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Compute Position × Instance attribution using net-estimated method.
+    """Compute Position × Instance attribution.
 
-    Returns one row per (account_id, contract_key, strategy_instance_id) with
-    proportional open_qty_est and unrealized_pnl_est.  Positions with no
-    executions or no strategy attribution appear as strategy_instance_id=None.
+    Execution source rule (per physical position / contract):
+    if any row in account_executions_final matches the position, only those
+    executions contribute; otherwise executions_raw_tws only.
+
+    open_qty_est per instance = SUM(signed execution quantity) for that instance
+    (not a proportional split of broker position). PnL estimate scales with
+    open_qty_est. All instances with non-zero contribution appear under the
+    instance (no same-sign filter that dropped rows).
     """
     if conn is None:
         return []
@@ -1357,31 +1398,40 @@ def get_position_instance_attribution(
             LEFT JOIN contract_quote_live cql ON ap.contract_key = cql.contract_key
             WHERE {pos_where}
         ),
-        exec_grouped AS (
+        pos_has_final AS (
+            SELECT DISTINCT p.account_id, p.contract_key
+            FROM pos p
+            INNER JOIN {_EXEC_FINAL_TABLE} e ON p.account_id = e.account_id AND {_POS_EXEC_JOIN_PE}
+        ),
+        exec_labeled AS (
             SELECT p.account_id, p.contract_key AS pos_contract_key,
                    e.strategy_instance_id,
                    COALESCE(e.strategy_opportunity_id, si2.strategy_opportunity_id) AS strategy_opportunity_id,
-                   {_NET_QTY_CONTRIBUTION_SQL} AS net_qty_contribution,
-                   COUNT(*) AS exec_count
-            FROM {_EXEC_READ_TABLE} e
-            INNER JOIN pos p ON p.account_id = e.account_id AND (
-                (
-                    upper(trim(COALESCE(split_part(p.contract_key, '|', 2), p.sec_type, ''))) = 'OPT'
-                    AND upper(trim(COALESCE(split_part(e.contract_key, '|', 2), e.sec_type, ''))) = 'OPT'
-                    AND trim(COALESCE(split_part(p.contract_key, '|', 3), p.expiry, '')) = trim(COALESCE(split_part(e.contract_key, '|', 3), e.expiry, ''))
-                    AND upper(trim(COALESCE(split_part(p.contract_key, '|', 5), p.option_right, ''))) = upper(trim(COALESCE(split_part(e.contract_key, '|', 5), e.option_right, '')))
-                    AND NULLIF(trim(COALESCE(split_part(p.contract_key, '|', 4), '')), '') IS NOT NULL
-                    AND NULLIF(trim(COALESCE(split_part(e.contract_key, '|', 4), '')), '') IS NOT NULL
-                    AND abs((split_part(p.contract_key, '|', 4))::double precision - (split_part(e.contract_key, '|', 4))::double precision) < 1e-9
-                )
-                OR (
-                    upper(trim(COALESCE(p.sec_type, ''))) <> 'OPT'
-                    AND p.contract_key = e.contract_key
-                )
-            )
+                   {_SIGNED_QTY_FINAL_ROW_E} AS signed_qty
+            FROM pos p
+            INNER JOIN {_EXEC_FINAL_TABLE} e ON p.account_id = e.account_id AND {_POS_EXEC_JOIN_PE}
+            INNER JOIN pos_has_final hf ON hf.account_id = p.account_id AND hf.contract_key = p.contract_key
             LEFT JOIN strategy_instance si2 ON e.strategy_instance_id = si2.strategy_instance_id
-            GROUP BY p.account_id, p.contract_key, e.strategy_instance_id,
-                     COALESCE(e.strategy_opportunity_id, si2.strategy_opportunity_id)
+            UNION ALL
+            SELECT p.account_id, p.contract_key AS pos_contract_key,
+                   e.strategy_instance_id,
+                   COALESCE(e.strategy_opportunity_id, si2.strategy_opportunity_id) AS strategy_opportunity_id,
+                   {_SIGNED_QTY_TWS_RAW_ROW_E} AS signed_qty
+            FROM pos p
+            INNER JOIN executions_raw_tws e ON p.account_id = e.account_id AND {_POS_EXEC_JOIN_PE}
+            LEFT JOIN strategy_instance si2 ON e.strategy_instance_id = si2.strategy_instance_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM pos_has_final hf
+                WHERE hf.account_id = p.account_id AND hf.contract_key = p.contract_key
+            )
+        ),
+        exec_grouped AS (
+            SELECT account_id, pos_contract_key, strategy_instance_id,
+                   MAX(strategy_opportunity_id) AS strategy_opportunity_id,
+                   SUM(signed_qty) AS net_qty_contribution,
+                   COUNT(*) AS exec_count
+            FROM exec_labeled
+            GROUP BY account_id, pos_contract_key, strategy_instance_id
         )
         SELECT
             p.account_id, p.contract_key, p.symbol, p.sec_type,
@@ -1455,36 +1505,25 @@ def _build_attribution_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             except (TypeError, ValueError):
                 pass
 
-        has_any_exec = any(r.get("exec_count") is not None for r in group)
+        contrib_rows = [
+            r
+            for r in group
+            if r.get("exec_count") is not None and int(r.get("exec_count") or 0) > 0
+        ]
+        has_any_exec = len(contrib_rows) > 0
+
         instance_ids = set()
         has_unassigned_execs = False
-        for r in group:
-            if r.get("exec_count") is not None:
-                sid = r.get("strategy_instance_id")
-                instance_ids.add(sid)
-                if sid is None:
-                    has_unassigned_execs = True
+        for r in contrib_rows:
+            sid = r.get("strategy_instance_id")
+            instance_ids.add(sid)
+            if sid is None:
+                has_unassigned_execs = True
 
         distinct_instances = {sid for sid in instance_ids if sid is not None}
         is_mixed = len(distinct_instances) > 1 or (len(distinct_instances) >= 1 and has_unassigned_execs)
 
-        same_sign_contributions: List[Tuple[Dict[str, Any], float]] = []
-        for r in group:
-            nq = float(r.get("net_qty_contribution") or 0)
-            if r.get("exec_count") is None:
-                continue
-            if pos_qty > 0 and nq > 0:
-                same_sign_contributions.append((r, nq))
-            elif pos_qty < 0 and nq < 0:
-                same_sign_contributions.append((r, nq))
-            elif nq == 0:
-                pass
-            else:
-                pass
-
-        total_abs_contrib = sum(abs(c) for _, c in same_sign_contributions)
-
-        if not has_any_exec or total_abs_contrib == 0:
+        if not has_any_exec:
             result.append(_make_attribution_row(
                 meta, pos_qty, total_unrealized,
                 strategy_instance_id=None,
@@ -1498,17 +1537,32 @@ def _build_attribution_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 open_qty_est=pos_qty,
                 attribution_ratio=1.0,
                 unrealized_pnl_est=total_unrealized,
-                source_exec_count=sum(int(r.get("exec_count") or 0) for r in group),
+                source_exec_count=0,
                 is_mixed=False,
-                has_unassigned=not has_any_exec,
+                has_unassigned=True,
                 method="net_estimated",
             ))
             continue
 
-        for r, nq in same_sign_contributions:
-            ratio = abs(nq) / total_abs_contrib if total_abs_contrib > 0 else 0
-            open_qty = round(pos_qty * ratio, 6)
-            pnl_est = round(total_unrealized * ratio, 2) if total_unrealized is not None else None
+        sum_abs_nq = sum(abs(float(r.get("net_qty_contribution") or 0)) for r in contrib_rows)
+
+        def _pnl_for_open_qty(open_qty: float) -> Optional[float]:
+            if price_for_pnl is None or avg_cost is None:
+                return None
+            try:
+                c = float(avg_cost)
+                if not math.isfinite(c):
+                    return None
+                mult = 100 if sec_type == "OPT" else 1
+                return round((price_for_pnl - c) * open_qty * mult, 2)
+            except (TypeError, ValueError):
+                return None
+
+        for r in contrib_rows:
+            nq = float(r.get("net_qty_contribution") or 0)
+            open_qty = round(nq, 6)
+            ratio = round(abs(nq) / sum_abs_nq, 6) if sum_abs_nq > 0 else 0.0
+            pnl_est = _pnl_for_open_qty(open_qty)
             result.append(_make_attribution_row(
                 meta, pos_qty, total_unrealized,
                 strategy_instance_id=r.get("strategy_instance_id"),
@@ -1520,35 +1574,13 @@ def _build_attribution_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 scope_type=r.get("scope_type"),
                 strategy_structure_id=r.get("strategy_structure_id"),
                 open_qty_est=open_qty,
-                attribution_ratio=round(ratio, 6),
+                attribution_ratio=ratio,
                 unrealized_pnl_est=pnl_est,
                 source_exec_count=int(r.get("exec_count") or 0),
                 is_mixed=is_mixed,
                 has_unassigned=has_unassigned_execs,
                 method="net_estimated",
             ))
-
-        if has_unassigned_execs and not any(r.get("strategy_instance_id") is None for r, _ in same_sign_contributions):
-            unassigned_r = next((r for r in group if r.get("strategy_instance_id") is None and r.get("exec_count") is not None), None)
-            if unassigned_r is not None:
-                result.append(_make_attribution_row(
-                    meta, pos_qty, total_unrealized,
-                    strategy_instance_id=None,
-                    strategy_instance_label=None,
-                    strategy_opportunity_id=unassigned_r.get("strategy_opportunity_id"),
-                    strategy_opportunity_name=unassigned_r.get("strategy_opportunity_name"),
-                    strategy_instance_opened_at_epoch=None,
-                    structure_type=unassigned_r.get("structure_type"),
-                    scope_type=unassigned_r.get("scope_type"),
-                    strategy_structure_id=unassigned_r.get("strategy_structure_id"),
-                    open_qty_est=0,
-                    attribution_ratio=0,
-                    unrealized_pnl_est=0,
-                    source_exec_count=int(unassigned_r.get("exec_count") or 0),
-                    is_mixed=is_mixed,
-                    has_unassigned=True,
-                    method="net_estimated",
-                ))
 
     return result
 
