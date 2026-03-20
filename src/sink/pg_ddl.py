@@ -1,11 +1,8 @@
-"""PostgreSQL DDL: current schema only (CREATE TABLE IF NOT EXISTS + indexes).
-
-Use an empty database or drop/recreate; existing tables are not altered to add missing columns.
-"""
+"""PostgreSQL DDL: current schema (CREATE TABLE IF NOT EXISTS + indexes only)."""
 
 
 def _ensure_tables(conn, log=None, log_table=None) -> None:
-    """Apply full DDL (per DATABASE.md). CREATE IF NOT EXISTS only — no incremental ALTER for old databases.
+    """Apply full DDL (per DATABASE.md). CREATE IF NOT EXISTS and index DDL only.
     If log is callable, it is called with a short step name before each DDL section (for progress/debug).
     If log_table is callable, it is called as log_table(table_name, purpose) before each table is created/updated.
     """
@@ -248,11 +245,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 updated_at timestamptz DEFAULT now(),
                 PRIMARY KEY (account_id, contract_key)
             )
-        """
-        )
-        cur.execute(
-            """
-            DROP INDEX IF EXISTS account_positions_account_symbol_sectype_key
         """
         )
         cur.execute(
@@ -926,11 +918,6 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS strategy_history_structure_id ON strategy_history (strategy_structure_id)"
         )
-        _log("account_positions strategy columns removed")
-        cur.execute("ALTER TABLE account_positions DROP COLUMN IF EXISTS strategy_opportunity_id")
-        cur.execute("ALTER TABLE account_positions DROP COLUMN IF EXISTS strategy_instance_id")
-        cur.execute("DROP INDEX IF EXISTS account_positions_strategy_opportunity_id")
-        cur.execute("DROP INDEX IF EXISTS account_positions_strategy_instance_id")
         _log("watchlist, job_bars_backfill")
         _log_table("watchlist", "Watchlist items (STK/OPT)")
         cur.execute(
@@ -974,10 +961,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
             "CREATE INDEX IF NOT EXISTS job_bars_backfill_status_created ON job_bars_backfill (status, created_at)"
         )
 
-        # ── Executions source-split: raw tables + single account_executions view ──
-        # Phase 1 of executions migration: TWS and Flex stored separately;
-        # canonical view merges them (Flex authoritative, TWS fills gaps).
-        # Cross-source match key: exec_id (IB Execution ID = Flex ibExecID).
+        # ── Executions: raw tables + account_executions view ──
+        # TWS and Flex stored separately; view merges (Flex authoritative, TWS fills gaps).
+        # Match key: exec_id (IB Execution ID = Flex ibExecID).
         _log("executions_raw_tws, executions_raw_flex, account_executions(view)")
         _log_table("executions_raw_tws", "Raw TWS/manual executions (tws_event, tws_client, manual)")
         cur.execute(

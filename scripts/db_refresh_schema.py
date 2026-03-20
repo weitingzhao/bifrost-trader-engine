@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Refresh PostgreSQL schema (PostgreSQLSink._ensure_tables). DDL is CREATE IF NOT EXISTS only.
+"""Refresh PostgreSQL schema via PostgreSQLSink._ensure_tables (CREATE IF NOT EXISTS + indexes).
 
-**New or empty database recommended.** An older database whose tables already exist but lack
-columns will not be patched; use a fresh DB or drop tables before refresh.
+Use an empty database or recreate objects as needed; this script does not migrate existing tables.
 
 Strategy templates: ``python scripts/db_init/seed_structure_type_config.py`` after refresh.
 
