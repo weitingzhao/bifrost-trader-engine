@@ -34,7 +34,7 @@ def get_executions(
     strategy_instance_id: Optional[int] = Query(None, description="Filter by strategy instance ID"),
     source_scope: Optional[str] = Query(
         None,
-        description="Optional: all (default, full account_executions) | performance_book (account_executions_final) | on_the_fly (account_executions_fly: TWS not covered by final, no BAG)",
+        description="Optional: all (default, full account_executions) | performance_book (account_executions_final) | on_the_fly (account_executions_fly: TWS not covered by final, no BAG) | tws_raw (executions_raw_tws only, synthetic negative account_executions_id)",
     ),
 ) -> Dict[str, Any]:
     """Account-level executions/trades (R-A2). If include_opt_pairs=true: returns paired_execution_ids and opt_pairs."""
@@ -488,24 +488,34 @@ def post_execution(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[s
     return {"ok": True, "account_executions_id": new_account_executions_id, "message": "已添加一条执行记录。"}
 
 
-@router.put("/executions/{execution_id:int}")
-def put_execution(request: Request, execution_id: int, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Update one execution by account_executions_id (manual correction)."""
+def _parse_account_executions_path_id(execution_id: str) -> int:
+    """Path segment for account_executions_id (flex >0, TWS <0, journal <= -1e9). Starlette's :int only matches [0-9]+, so negative ids must be parsed here."""
+    try:
+        return int(str(execution_id).strip())
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=422, detail="Invalid execution id") from e
+
+
+@router.put("/executions/{execution_id}")
+def put_execution(request: Request, execution_id: str, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Update one execution by account_executions_id (manual correction). Negative ids = TWS raw rows."""
+    eid = _parse_account_executions_path_id(execution_id)
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
-    if update_one_execution(control_via_db, execution_id, body):
+    if update_one_execution(control_via_db, eid, body):
         return {"ok": True, "message": "已更新执行记录。"}
     return {"ok": False, "error": "更新失败（account_executions_id 不存在或数据库错误）。"}
 
 
-@router.delete("/executions/{execution_id:int}")
-def delete_execution(request: Request, execution_id: int) -> Dict[str, Any]:
-    """Delete one execution by account_executions_id."""
+@router.delete("/executions/{execution_id}")
+def delete_execution(request: Request, execution_id: str) -> Dict[str, Any]:
+    """Delete one execution by account_executions_id. Negative ids = TWS raw rows."""
+    eid = _parse_account_executions_path_id(execution_id)
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return {"ok": False, "error": "需要 postgres 配置以写入 account_executions。"}
-    if delete_one_execution(control_via_db, execution_id):
+    if delete_one_execution(control_via_db, eid):
         return {"ok": True, "message": "已删除该条执行记录。"}
     return {"ok": False, "error": "删除失败（account_executions_id 不存在或数据库错误）。"}
 

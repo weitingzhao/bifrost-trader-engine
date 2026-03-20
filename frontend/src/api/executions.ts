@@ -109,7 +109,7 @@ export async function fetchExecutionLinkCandidates(params: {
   return { executions: (j as { executions?: Execution[] }).executions ?? [], error: (j as { error?: string }).error }
 }
 
-/** source_scope on_the_fly → GET /executions reads account_executions_fly (TWS rows not in final book; excludes BAG). */
+/** source_scope: performance_book → account_executions_final; on_the_fly → account_executions_fly; tws_raw → executions_raw_tws. */
 export async function fetchExecutions(
   since_ts?: number,
   until_ts?: number,
@@ -117,7 +117,7 @@ export async function fetchExecutions(
   include_opt_pairs = false,
   strategy_opportunity_id?: number,
   strategy_instance_id?: number,
-  source_scope?: 'performance_book' | 'on_the_fly',
+  source_scope?: 'performance_book' | 'on_the_fly' | 'tws_raw',
 ): Promise<ExecutionsResponse | ExecutionsResponseWithPairs> {
   const params = new URLSearchParams()
   if (since_ts != null) params.set('since_ts', String(since_ts))

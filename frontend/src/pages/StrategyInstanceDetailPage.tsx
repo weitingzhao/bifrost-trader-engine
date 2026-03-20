@@ -24,7 +24,8 @@ export function StrategyInstanceDetailPage({
   const [instanceError, setInstanceError] = useState<string | null>(null)
   const [performance, setPerformance] = useState<PerformanceResponse | null>(null)
   const [performanceLoading, setPerformanceLoading] = useState(true)
-  const [executions, setExecutions] = useState<Execution[]>([])
+  const [executionsFinal, setExecutionsFinal] = useState<Execution[]>([])
+  const [executionsTwsRaw, setExecutionsTwsRaw] = useState<Execution[]>([])
   const [executionsLoading, setExecutionsLoading] = useState(true)
   const [openedAtEdit, setOpenedAtEdit] = useState<string>('')
   const [openedAtSaving, setOpenedAtSaving] = useState(false)
@@ -61,9 +62,18 @@ export function StrategyInstanceDetailPage({
 
   const loadExecutions = useCallback(() => {
     setExecutionsLoading(true)
-    fetchExecutions(undefined, undefined, 500, false, undefined, strategyInstanceId, 'performance_book')
-      .then((res) => setExecutions(res.executions ?? []))
-      .catch(() => setExecutions([]))
+    Promise.all([
+      fetchExecutions(undefined, undefined, 500, false, undefined, strategyInstanceId, 'performance_book')
+        .then((res) => res.executions ?? [])
+        .catch(() => [] as Execution[]),
+      fetchExecutions(undefined, undefined, 500, false, undefined, strategyInstanceId, 'tws_raw')
+        .then((res) => res.executions ?? [])
+        .catch(() => [] as Execution[]),
+    ])
+      .then(([final, tws]) => {
+        setExecutionsFinal(final)
+        setExecutionsTwsRaw(tws)
+      })
       .finally(() => setExecutionsLoading(false))
   }, [strategyInstanceId])
 
@@ -116,8 +126,8 @@ export function StrategyInstanceDetailPage({
   }, [instance?.opened_at_epoch, instance?.opened_at])
 
   const oldestExecution =
-    executions.length > 0
-      ? executions.reduce((a, b) => {
+    executionsFinal.length > 0
+      ? executionsFinal.reduce((a, b) => {
           const at = a.time != null && Number.isFinite(a.time) ? a.time : Infinity
           const bt = b.time != null && Number.isFinite(b.time) ? b.time : Infinity
           return at <= bt ? a : b
@@ -156,10 +166,10 @@ export function StrategyInstanceDetailPage({
   const summary = performance?.summary
 
   const riskProfile = useMemo(() => {
-    if (!executions.length) return null
+    if (!executionsFinal.length) return null
     const hasUnderlying = structure?.legs?.some(l => (l.role ?? '').toLowerCase() === 'underlying')
     const byAcct = new Map<string, Execution[]>()
-    for (const e of executions) {
+    for (const e of executionsFinal) {
       if ((e.sec_type ?? '').toUpperCase() !== 'OPT') continue
       const aid = (e.account_id ?? '').trim()
       if (!byAcct.has(aid)) byAcct.set(aid, [])
@@ -222,7 +232,66 @@ export function StrategyInstanceDetailPage({
       merged = merged == null ? rp : pickWorse(merged, rp)
     }
     return merged
-  }, [executions, structure, status?.accounts])
+  }, [executionsFinal, structure, status?.accounts])
+
+  const executionTable = (rows: Execution[]) => (
+    <div className="table-wrapper" style={{ overflowX: 'auto' }}>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Contract</th>
+            <th title="Display date: trade_date if set, otherwise exec time">Date</th>
+            <th>Trade date</th>
+            <th>Report date</th>
+            <th>Settle date target</th>
+            <th>Transaction type</th>
+            <th>Taxes</th>
+            <th>Net cash</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Realized PnL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((e) => (
+            <tr key={`${e.account_executions_id ?? ''}-${e.exec_id ?? ''}-${e.time ?? ''}`}>
+              <td>
+                {e.symbol ?? '—'}
+                {e.account_executions_id != null ? (
+                  <span
+                    title={`account_executions_id: ${e.account_executions_id}`}
+                    style={{
+                      color: 'var(--color-text-muted)',
+                      fontSize: '0.8125rem',
+                      fontWeight: 400,
+                      marginLeft: '0.25em',
+                    }}
+                  >
+                    {' '}
+                    #{e.account_executions_id}
+                  </span>
+                ) : null}
+              </td>
+              <td>
+                {e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}
+              </td>
+              <td>{e.trade_date ?? '—'}</td>
+              <td>{e.report_date ?? '—'}</td>
+              <td>{e.settle_date_target ?? '—'}</td>
+              <td>{e.transaction_type ?? '—'}</td>
+              <td>{e.taxes != null ? fmtUsd(e.taxes) : '—'}</td>
+              <td>{e.net_cash != null ? fmtUsd(e.net_cash) : '—'}</td>
+              <td>{e.side ?? '—'}</td>
+              <td>{e.quantity ?? '—'}</td>
+              <td>{e.price != null ? Number(e.price).toFixed(2) : '—'}</td>
+              <td>{e.realized_pnl != null ? fmtUsd(e.realized_pnl) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 
   return (
     <div className="card process-section">
@@ -409,65 +478,31 @@ export function StrategyInstanceDetailPage({
             <h4 style={{ marginTop: '0', marginBottom: '0.5rem' }}>Executions</h4>
             {executionsLoading ? (
               <p>Loading executions…</p>
-            ) : executions.length === 0 ? (
-              <p>No executions for this instance.</p>
             ) : (
-              <div className="table-wrapper" style={{ overflowX: 'auto' }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Contract</th>
-                      <th title="Display date: trade_date if set, otherwise exec time">Date</th>
-                      <th>Trade date</th>
-                      <th>Report date</th>
-                      <th>Settle date target</th>
-                      <th>Transaction type</th>
-                      <th>Taxes</th>
-                      <th>Net cash</th>
-                      <th>Side</th>
-                      <th>Qty</th>
-                      <th>Price</th>
-                      <th>Realized PnL</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {executions.map((e) => (
-                      <tr key={e.account_executions_id ?? e.exec_id ?? Math.random()}>
-                        <td>
-                          {e.symbol ?? '—'}
-                          {e.account_executions_id != null ? (
-                            <span
-                              title={`account_executions_id: ${e.account_executions_id}`}
-                              style={{
-                                color: 'var(--color-text-muted)',
-                                fontSize: '0.8125rem',
-                                fontWeight: 400,
-                                marginLeft: '0.25em',
-                              }}
-                            >
-                              {' '}
-                              #{e.account_executions_id}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td>
-                          {e.trade_date ?? (e.time != null ? fmtTsShort(e.time) : '—')}
-                        </td>
-                        <td>{e.trade_date ?? '—'}</td>
-                        <td>{e.report_date ?? '—'}</td>
-                        <td>{e.settle_date_target ?? '—'}</td>
-                        <td>{e.transaction_type ?? '—'}</td>
-                        <td>{e.taxes != null ? fmtUsd(e.taxes) : '—'}</td>
-                        <td>{e.net_cash != null ? fmtUsd(e.net_cash) : '—'}</td>
-                        <td>{e.side ?? '—'}</td>
-                        <td>{e.quantity ?? '—'}</td>
-                        <td>{e.price != null ? Number(e.price).toFixed(2) : '—'}</td>
-                        <td>{e.realized_pnl != null ? fmtUsd(e.realized_pnl) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <div style={{ marginTop: '1rem' }}>
+                  <h5 style={{ margin: '0 0 0.35rem' }}>Executions Final</h5>
+                  <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.875rem' }}>
+                    Source: account_executions_final (Flex + journal performance book).
+                  </p>
+                  {executionsFinal.length === 0 ? (
+                    <p>No rows in the final book for this instance.</p>
+                  ) : (
+                    executionTable(executionsFinal)
+                  )}
+                </div>
+                <div style={{ marginTop: '1.5rem' }}>
+                  <h5 style={{ margin: '0 0 0.35rem' }}>Executions (TWS client)</h5>
+                  <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.875rem' }}>
+                    Source: executions_raw_tws (IB client / manual fills). IDs are negative (synthetic account_executions_id).
+                  </p>
+                  {executionsTwsRaw.length === 0 ? (
+                    <p>No TWS client rows tagged for this instance.</p>
+                  ) : (
+                    executionTable(executionsTwsRaw)
+                  )}
+                </div>
+              </>
             )}
           </section>
 

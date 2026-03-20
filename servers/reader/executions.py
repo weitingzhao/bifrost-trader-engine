@@ -24,11 +24,28 @@ _EXEC_FINAL_TABLE = "account_executions_final"
 # On-the-fly: TWS rows whose (account_id, contract_key) is not in final; excludes BAG (see view DDL).
 _EXEC_FLY_TABLE = "account_executions_fly"
 
+# Raw TWS table (all rows); same canonical columns as account_executions TWS branch, with synthetic id.
+_EXEC_TWS_RAW_SUBQUERY = (
+    "(SELECT -(executions_raw_tws_id) AS account_executions_id, "
+    "account_id, exec_id, exec_time, symbol, sec_type, side, quantity, price, source, "
+    "expiry, strike, option_right, exchange, order_id, cum_qty, contract_key, "
+    "currency, asset_category, sub_category, description, conid, "
+    "security_id, security_id_type, cusip, isin, figi, listing_exchange, "
+    "underlying_conid, underlying_symbol, underlying_security_id, underlying_listing_exchange, "
+    "issuer, issuer_country_code, trade_id, related_trade_id, report_date, trade_date, "
+    "settle_date_target, transaction_type, multiplier, principal_adjust_factor, "
+    "proceeds, taxes, net_cash, close_price, open_close_indicator, notes, cost, "
+    "fifo_pnl_realized, mtm_pnl, trade_money, fx_rate_to_base, acct_alias, model, "
+    "raw_extra, strategy_opportunity_id, strategy_instance_id, created_at "
+    "FROM executions_raw_tws)"
+)
+
 
 def _exec_table_for_scope(source_scope: Optional[str]) -> str:
     """Return the FROM table name for the given source_scope.
     performance_book → final view (flex+journal only, no extra predicate needed).
     on_the_fly → account_executions_fly (TWS not covered by final book).
+    tws_raw → subquery over executions_raw_tws (use _exec_from_for_scope).
     all / None → full canonical view.
     """
     s = (source_scope or "").strip().lower()
@@ -37,6 +54,14 @@ def _exec_table_for_scope(source_scope: Optional[str]) -> str:
     if s == "on_the_fly":
         return _EXEC_FLY_TABLE
     return _EXEC_READ_TABLE
+
+
+def _exec_from_for_scope(source_scope: Optional[str]) -> str:
+    """FROM … e fragment: either a bare view/table name or a TWS raw subquery."""
+    s = (source_scope or "").strip().lower()
+    if s == "tws_raw":
+        return _EXEC_TWS_RAW_SUBQUERY
+    return _exec_table_for_scope(source_scope)
 
 
 def _source_scope_predicate_e(_source_scope: Optional[str]) -> Optional[str]:
@@ -114,7 +139,7 @@ def get_executions(
         if use_limit:
             values.append(limit)
         limit_clause = " LIMIT %s" if use_limit else ""
-        from_table = _exec_table_for_scope(source_scope)
+        from_table = _exec_from_for_scope(source_scope)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             try:
                 cur.execute(
@@ -638,7 +663,7 @@ def get_executions_with_opt_pairs_single_query(
         strat_cond += " AND e.strategy_instance_id = %s"
         values.append(strategy_instance_id)
     src_frag = _source_scope_sql_fragment(source_scope)
-    from_table = _exec_table_for_scope(source_scope)
+    from_table = _exec_from_for_scope(source_scope)
     values2: List[Any] = [since_ts, until_ts, since_ts, until_ts]
     if account_id and account_id.strip():
         values2.append(account_id.strip())

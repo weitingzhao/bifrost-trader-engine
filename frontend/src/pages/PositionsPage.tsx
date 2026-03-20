@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Execution, IbAccountSnapshot, PositionInstanceAttribution, RealtimeQuote, StatusResponse } from '../types'
-import { deleteExecution, fetchQuotes, subscribeQuotes } from '../api'
+import { deleteExecution, fetchQuotes, subscribeQuotes, updateExecution } from '../api'
 import { fetchPositionAttribution } from '../api/executions'
 import { fetchOpportunities, fetchStructures } from '../api/strategies'
 import type { StrategyOpportunity, StrategyStructure } from '../api/strategies'
@@ -31,6 +31,102 @@ function optExecutionMatchKey(accountId: string, contractKey: string): string {
     return `${acc}|OPT|${exp}|${strikeKey}|${right}`
   }
   return `${acc}|${(contractKey ?? '').trim()}`
+}
+
+/** OPT executions keyed like optExecutionMatchKey; from account_executions_final or executions_raw_tws lists only. */
+function buildLiveOptExecutionMap(executions: Execution[]): Map<string, Execution[]> {
+  const map = new Map<string, Execution[]>()
+  const opt = executions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
+  for (const ex of opt) {
+    if (ex.account_executions_id == null) continue
+    const key = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
+    const arr = map.get(key)
+    if (arr) arr.push(ex)
+    else map.set(key, [ex])
+  }
+  for (const arr of map.values()) {
+    arr.sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
+  }
+  return map
+}
+
+function mergeExecsUniqueById(a: Execution[], b: Execution[]): Execution[] {
+  const seen = new Set<number>()
+  const out: Execution[] = []
+  for (const e of [...a, ...b]) {
+    const id = e.account_executions_id
+    if (id == null) continue
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(e)
+  }
+  return out
+}
+
+function splitOffTrackTradesBySource(
+  trades: Execution[] | undefined,
+  finalIds: Set<number>,
+  twsIds: Set<number>,
+): { final: Execution[]; tws: Execution[] } {
+  const list = trades ?? []
+  const final: Execution[] = []
+  const tws: Execution[] = []
+  for (const t of list) {
+    const id = t.account_executions_id
+    if (id != null && finalIds.has(id)) final.push(t)
+    else if (id != null && twsIds.has(id)) tws.push(t)
+    else if (id != null) final.push(t)
+  }
+  final.sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
+  tws.sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
+  return { final, tws }
+}
+
+/** Match a TWS raw row to a performance-book row (same fill): exec_id + account, else account + contract_key + exec_time. */
+function findMatchingFinalForTws(t: Execution, finals: Execution[]): Execution | null {
+  const acc = (t.account_id ?? '').trim()
+  const eid = (t.exec_id ?? '').trim()
+  if (eid) {
+    const hit = finals.find(f => (f.exec_id ?? '').trim() === eid && (f.account_id ?? '').trim() === acc)
+    if (hit) return hit
+  }
+  const tt = t.time != null && Number.isFinite(Number(t.time)) ? Number(t.time) : null
+  const ck = (t.contract_key ?? '').trim()
+  if (tt == null || !ck) return null
+  return (
+    finals.find(f => {
+      if ((f.account_id ?? '').trim() !== acc) return false
+      if ((f.contract_key ?? '').trim() !== ck) return false
+      const ft = f.time != null ? Number(f.time) : null
+      return ft != null && Math.abs(ft - tt) < 1.5
+    }) ?? null
+  )
+}
+
+function finalHasStrategyAttribution(f: Execution): boolean {
+  return f.strategy_instance_id != null || f.strategy_opportunity_id != null
+}
+
+/** True when final has opp/instance set and TWS row differs (needs sync). */
+function twsNeedsStrategySyncFromFinal(t: Execution, f: Execution): boolean {
+  if (!finalHasStrategyAttribution(f)) return false
+  const siT = t.strategy_instance_id ?? null
+  const soT = t.strategy_opportunity_id ?? null
+  const siF = f.strategy_instance_id ?? null
+  const soF = f.strategy_opportunity_id ?? null
+  return siT !== siF || soT !== soF
+}
+
+/** Open Options Contract column: icon before label from merged Final+TWS executions (deduped). */
+function instanceIconFillFromMergedExecutions(merged: Execution[]): 'empty' | 'none' | 'all' | 'mixed' {
+  if (merged.length === 0) return 'empty'
+  let withInstance = 0
+  for (const ex of merged) {
+    if (ex.strategy_instance_id != null) withInstance += 1
+  }
+  if (withInstance === 0) return 'none'
+  if (withInstance === merged.length) return 'all'
+  return 'mixed'
 }
 
 /** Option Last-column (Last − Strike) / Last %: color by right and side. Call+Sell: +% red, −% green; Call+Buy: opposite; Put+Sell: +% green, −% red; Put+Buy: opposite. */
@@ -317,7 +413,12 @@ export function PositionsPage({
   onViewChange,
   showViewTabs: _showViewTabs = true,
 }: PositionsPageProps) {
-  const { executions, loadReplayData, executionAccountOptions } = useExecutions(status)
+  const { executionsFinal, executionsTws, executionsCanonical, loadReplayData, executionAccountOptions } = useExecutions(
+    status,
+    undefined,
+    false,
+    true,
+  )
   const [editExec, setEditExec] = useState<Execution | null>(null)
   const [editExecConfirmState, setEditExecConfirmState] = useState<{
     open: boolean
@@ -336,6 +437,26 @@ export function PositionsPage({
   const [closeAgainstExec, setCloseAgainstExec] = useState<Execution | null>(null)
   /** Inline error for e.g. delete execution failure (not modal form errors). */
   const [pageError, setPageError] = useState<string | null>(null)
+  const [syncingTwsAttributionKey, setSyncingTwsAttributionKey] = useState<string | null>(null)
+
+  const handleSyncTwsStrategyFromFinal = useCallback(async (t: Execution, f: Execution) => {
+    const id = t.account_executions_id
+    if (id == null) return
+    setSyncingTwsAttributionKey(String(id))
+    setPageError(null)
+    try {
+      const res = await updateExecution(id, {
+        strategy_instance_id: f.strategy_instance_id ?? null,
+        strategy_opportunity_id: f.strategy_opportunity_id ?? null,
+      })
+      if (!res.ok) throw new Error(res.error || 'Sync failed')
+      await loadReplayData()
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSyncingTwsAttributionKey(null)
+    }
+  }, [loadReplayData])
 
   const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
   const [structures, setStructures] = useState<StrategyStructure[]>([])
@@ -383,6 +504,9 @@ export function PositionsPage({
   const [instanceFilterAttributionType, setInstanceFilterAttributionType] = useState<string>('all')
   const getPositionKey = (p: OpenOptionPosition, instId: number | null) =>
     `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}`
+  /** Options tab (physical rows only): stable expand key without instance slice. */
+  const getOptionsTabPositionKey = (p: OpenOptionPosition) =>
+    `${p.pool_label}-${p.account_id}-${p.contract_key}-${p.expiry}-${p.strike}`
   const [expandedPositionKeys, setExpandedPositionKeys] = useState<string[]>([])
   const togglePositionExpand = (posKey: string) => {
     setExpandedPositionKeys(prev => {
@@ -423,8 +547,19 @@ export function PositionsPage({
     }
   }, [])
 
+  /** OPT rows present in unified `account_executions` (canonical), keyed like optExecutionMatchKey — for TWS sync precheck. */
+  const canonicalOptContractKeySet = useMemo(() => {
+    const s = new Set<string>()
+    for (const e of executionsCanonical) {
+      if ((e.sec_type ?? '').toUpperCase() !== 'OPT') continue
+      if (e.account_executions_id == null) continue
+      s.add(optExecutionMatchKey(e.account_id ?? '', e.contract_key ?? ''))
+    }
+    return s
+  }, [executionsCanonical])
+
   const openOffTrackBaseExecutions = useMemo(() => {
-    let list = [...(executions || [])]
+    let list = [...executionsFinal, ...executionsTws]
     list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
     const sym = openFilterSymbol.trim().toUpperCase()
     if (sym) list = list.filter(e => (e.symbol || '').toUpperCase() === sym)
@@ -433,7 +568,7 @@ export function PositionsPage({
       list = list.filter(e => optionExpiryMatchesFilter((e.expiry ?? '').trim(), expFilter))
     }
     return list
-  }, [executions, openFilterSymbol, openFilterExpiryStart])
+  }, [executionsFinal, executionsTws, openFilterSymbol, openFilterExpiryStart])
 
   const livePositions = useMemo((): LivePositionRow[] => {
     const accounts = status?.accounts ?? []
@@ -481,21 +616,45 @@ export function PositionsPage({
     [livePositions],
   )
 
-  const livePositionExecutionsMap = useMemo(() => {
-    const map = new Map<string, Execution[]>()
-    const opt = (executions || []).filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
-    for (const ex of opt) {
-      if (ex.account_executions_id == null) continue
-      const key = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
-      const arr = map.get(key)
-      if (arr) arr.push(ex)
-      else map.set(key, [ex])
-    }
-    for (const arr of map.values()) {
-      arr.sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
-    }
-    return map
-  }, [executions])
+  const executionsFinalIdSet = useMemo(
+    () => new Set(executionsFinal.map(e => e.account_executions_id).filter((id): id is number => id != null)),
+    [executionsFinal],
+  )
+  const executionsTwsIdSet = useMemo(
+    () => new Set(executionsTws.map(e => e.account_executions_id).filter((id): id is number => id != null)),
+    [executionsTws],
+  )
+
+  const livePositionExecutionsFinalMap = useMemo(
+    () => buildLiveOptExecutionMap(executionsFinal),
+    [executionsFinal],
+  )
+  const livePositionExecutionsTwsMap = useMemo(
+    () => buildLiveOptExecutionMap(executionsTws),
+    [executionsTws],
+  )
+
+  const getPositionExecLists = useCallback(
+    (pos: OpenOptionPosition): { final: Execution[]; tws: Execution[]; merged: Execution[] } => {
+      if (pos.kind === 'live' && pos.position) {
+        const key = optExecutionMatchKey(pos.account_id, pos.contract_key)
+        const final = livePositionExecutionsFinalMap.get(key) ?? []
+        const tws = livePositionExecutionsTwsMap.get(key) ?? []
+        return { final, tws, merged: mergeExecsUniqueById(final, tws) }
+      }
+      if (pos.kind === 'offtrack') {
+        const { final, tws } = splitOffTrackTradesBySource(pos.trades, executionsFinalIdSet, executionsTwsIdSet)
+        return { final, tws, merged: mergeExecsUniqueById(final, tws) }
+      }
+      return { final: [], tws: [], merged: [] }
+    },
+    [
+      livePositionExecutionsFinalMap,
+      livePositionExecutionsTwsMap,
+      executionsFinalIdSet,
+      executionsTwsIdSet,
+    ],
+  )
 
   /** Index live positions by (account_id, contract_key) for fast lookup when merging attribution data. */
   const livePositionMap = useMemo(() => {
@@ -642,6 +801,79 @@ export function PositionsPage({
     return result
   }, [attributions, openFilterAccountId, openFilterSymbol, openFilterExpiryStart, liveOptionPositions, livePositionMap, openOffTrackBaseExecutions])
 
+  /** Options tab: one row per actual holding (IB snapshot + off-track), not per attribution / instance slice. */
+  const optionsTabPositions = useMemo((): OpenOptionPosition[] => {
+    const rows: OpenOptionPosition[] = []
+    for (const pos of liveOptionPositions) {
+      const acct = (pos.account_id ?? '').trim()
+      const ck = (pos.contract_key ?? '').trim()
+      const expiry = pos.lastTradeDateOrContractMonth ?? pos.expiry ?? ''
+      const strike = Number(pos.strike) || 0
+      const qty = Number(pos.position) || 0
+      const rawAvgCost = pos.avgCost != null && Number.isFinite(Number(pos.avgCost)) ? Number(pos.avgCost) : null
+      const avgCostPerShare = rawAvgCost != null ? (rawAvgCost >= 10 ? rawAvgCost / 100 : rawAvgCost) : null
+      const markPrice = pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null
+      const pnl =
+        markPrice != null && avgCostPerShare != null
+          ? (markPrice - avgCostPerShare) * qty * 100
+          : Number(pos.unrealized_pnl) || 0
+      const contractKey =
+        ck || `${pos.symbol ?? ''}|OPT|${expiry}|${strike}|${(pos.right ?? '').toUpperCase().slice(0, 1)}`
+      const optKey = optExecutionMatchKey(acct, contractKey)
+      const attrs = attributions.filter(a => {
+        if ((a.sec_type ?? '').toUpperCase() !== 'OPT') return false
+        if ((a.account_id ?? '').trim() !== acct) return false
+        return optExecutionMatchKey(acct, a.contract_key ?? '') === optKey
+      })
+      let attribution_type: OpenOptionPosition['attribution_type'] = 'unassigned'
+      if (attrs.length === 1) {
+        const a0 = attrs[0]!
+        attribution_type = a0.strategy_instance_id == null ? 'unassigned' : a0.is_mixed ? 'mixed' : 'single'
+      } else if (attrs.length > 1) {
+        const ids = new Set(attrs.map(a => a.strategy_instance_id))
+        const anyMixed = attrs.some(a => a.is_mixed)
+        attribution_type =
+          anyMixed || ids.size > 1 ? 'mixed' : attrs[0]!.strategy_instance_id == null ? 'unassigned' : 'single'
+      }
+      rows.push({
+        kind: 'live',
+        contract_key: contractKey,
+        strike,
+        expiry,
+        qty,
+        avg_cost: avgCostPerShare,
+        mark_price: markPrice,
+        unrealized_pnl: pnl,
+        pool_label: 'On',
+        account_id: acct,
+        position: pos,
+        attribution_type,
+      })
+    }
+    if (openFilterAccountId === 'all') {
+      const offTrackGroups = buildOptExecutionGroups(openOffTrackBaseExecutions).filter(g => g.status === 'unrealized')
+      for (const group of offTrackGroups) {
+        const pnl = group.sell_premium - group.buy_cost
+        const avgPrice = group.net_qty > 0 ? (group.buy_avg_price ?? 0) : (group.sell_avg_price ?? 0)
+        rows.push({
+          kind: 'offtrack',
+          contract_key: group.contract_key,
+          strike: group.strike,
+          expiry: group.expiry,
+          qty: group.net_qty,
+          avg_cost: avgPrice,
+          mark_price: null,
+          unrealized_pnl: pnl,
+          pool_label: 'Off',
+          account_id: (group.trades[0]?.account_id ?? '').trim(),
+          trades: group.trades,
+          attribution_type: 'unassigned',
+        })
+      }
+    }
+    return rows
+  }, [liveOptionPositions, attributions, openFilterAccountId, openOffTrackBaseExecutions])
+
   const getPositionTime = (p: OpenOptionPosition): number | null => {
     if (p.kind === 'live' && p.position) {
       const ts = p.position.exec_time != null ? Number(p.position.exec_time) : null
@@ -662,62 +894,55 @@ export function PositionsPage({
     return q?.last != null && Number.isFinite(q.last) ? q.last : null
   }
 
-  const allFlatPositions = useMemo(() => instanceGroups.flatMap(g => g.positions), [instanceGroups])
-
-  const sortedInstanceGroups = useMemo((): InstancePositionGroup[] => {
+  /** Options tab: sorted physical rows. */
+  const sortedOptionsTabPositions = useMemo((): OpenOptionPosition[] => {
+    const list = [...optionsTabPositions]
     const { column, dir } = openOptSort
     const mult = dir === 'asc' ? 1 : -1
-    const sortPositions = (positions: OpenOptionPosition[]) => {
-      const list = [...positions]
-      list.sort((a, b) => {
-        if (column === 'contract') {
-          const aParts = getContractLabelParts(a.contract_key)
-          const bParts = getContractLabelParts(b.contract_key)
-          const cmp = (aParts.symbol ?? '').localeCompare(bParts.symbol ?? '')
-          if (cmp !== 0) return mult * cmp
-          const cmpExp = a.expiry.localeCompare(b.expiry)
-          if (cmpExp !== 0) return mult * cmpExp
-          return mult * (a.strike - b.strike)
-        }
-        if (column === 'expiry') {
-          const cmp = a.expiry.localeCompare(b.expiry)
-          if (cmp !== 0) return mult * cmp
-          return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
-        }
-        if (column === 'strike') {
-          const cmp = a.strike - b.strike
-          if (cmp !== 0) return mult * cmp
-          return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
-        }
-        if (column === 'last') {
-          const aLast = getPositionLast(a) ?? -Infinity
-          const bLast = getPositionLast(b) ?? -Infinity
-          if (aLast !== bLast) return mult * (aLast - bLast)
-          return 0
-        }
-        if (column === 'qty') {
-          return mult * (Math.abs(a.qty) - Math.abs(b.qty))
-        }
-        if (column === 'avg_cost') {
-          return mult * ((a.avg_cost ?? -Infinity) - (b.avg_cost ?? -Infinity))
-        }
-        if (column === 'value') {
-          const aVal = (a.avg_cost ?? 0) * Math.abs(a.qty) * 100
-          const bVal = (b.avg_cost ?? 0) * Math.abs(b.qty) * 100
-          return mult * (aVal - bVal)
-        }
-        if (column === 'time') {
-          return mult * ((getPositionTime(a) ?? 0) - (getPositionTime(b) ?? 0))
-        }
-        return mult * (a.unrealized_pnl - b.unrealized_pnl)
-      })
-      return list
-    }
-    return instanceGroups.map(g => ({
-      ...g,
-      positions: sortPositions(g.positions),
-    }))
-  }, [instanceGroups, openOptSort, quotesMap])
+    list.sort((a, b) => {
+      if (column === 'contract') {
+        const aParts = getContractLabelParts(a.contract_key)
+        const bParts = getContractLabelParts(b.contract_key)
+        const cmp = (aParts.symbol ?? '').localeCompare(bParts.symbol ?? '')
+        if (cmp !== 0) return mult * cmp
+        const cmpExp = a.expiry.localeCompare(b.expiry)
+        if (cmpExp !== 0) return mult * cmpExp
+        return mult * (a.strike - b.strike)
+      }
+      if (column === 'expiry') {
+        const cmp = a.expiry.localeCompare(b.expiry)
+        if (cmp !== 0) return mult * cmp
+        return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
+      }
+      if (column === 'strike') {
+        const cmp = a.strike - b.strike
+        if (cmp !== 0) return mult * cmp
+        return mult * (getContractLabelParts(a.contract_key).symbol ?? '').localeCompare(getContractLabelParts(b.contract_key).symbol ?? '')
+      }
+      if (column === 'last') {
+        const aLast = getPositionLast(a) ?? -Infinity
+        const bLast = getPositionLast(b) ?? -Infinity
+        if (aLast !== bLast) return mult * (aLast - bLast)
+        return 0
+      }
+      if (column === 'qty') {
+        return mult * (Math.abs(a.qty) - Math.abs(b.qty))
+      }
+      if (column === 'avg_cost') {
+        return mult * ((a.avg_cost ?? -Infinity) - (b.avg_cost ?? -Infinity))
+      }
+      if (column === 'value') {
+        const aVal = (a.avg_cost ?? 0) * Math.abs(a.qty) * 100
+        const bVal = (b.avg_cost ?? 0) * Math.abs(b.qty) * 100
+        return mult * (aVal - bVal)
+      }
+      if (column === 'time') {
+        return mult * ((getPositionTime(a) ?? 0) - (getPositionTime(b) ?? 0))
+      }
+      return mult * (a.unrealized_pnl - b.unrealized_pnl)
+    })
+    return list
+  }, [optionsTabPositions, openOptSort, quotesMap])
 
   const liveStockPositions = useMemo(
     () => livePositions.filter(position => (position.secType ?? '').toUpperCase() !== 'OPT'),
@@ -771,9 +996,7 @@ export function PositionsPage({
         }
       }
       for (const p of bucket.options) {
-        const execs = p.kind === 'live' && p.position
-          ? (livePositionExecutionsMap.get(optExecutionMatchKey(p.account_id, p.contract_key)) ?? [])
-          : (p.trades ?? [])
+        const execs = getPositionExecLists(p).merged
         for (const e of execs) {
           if (e.strategy_opportunity_id != null) return e.strategy_opportunity_id
         }
@@ -844,9 +1067,7 @@ export function PositionsPage({
     for (const [, b] of map) {
       let optPnl = 0
       for (const p of b.options) {
-        const matchedExecs = p.kind === 'live' && p.position
-          ? (livePositionExecutionsMap.get(optExecutionMatchKey(p.account_id, p.contract_key)) ?? [])
-          : (p.trades ?? [])
+        const matchedExecs = getPositionExecLists(p).merged
         if (matchedExecs.length > 0) {
           optPnl += execPremiumPnl(matchedExecs)
         } else {
@@ -924,7 +1145,7 @@ export function PositionsPage({
       return (a.strategy_instance_label ?? '').localeCompare(b.strategy_instance_label ?? '')
     })
     return result
-  }, [instanceGroups, oppMap, structureMap, livePositionExecutionsMap, liveStockPositions, attributions])
+  }, [instanceGroups, oppMap, structureMap, getPositionExecLists, liveStockPositions, attributions])
 
   const stockCoverageItems = useMemo((): StockCoverageItem[] => {
     const covKey = (sym: string, accountId: string) =>
@@ -1323,7 +1544,7 @@ export function PositionsPage({
     setExpandedInstanceKeys(prev => (prev.length <= 1 ? prev : [prev[prev.length - 1]!]))
   }, [openAccordionMode])
 
-  const hasOpenOptions = allFlatPositions.length > 0
+  const hasOpenOptions = optionsTabPositions.length > 0
   const hasOpenStocks = liveStockPositions.length > 0
   const hasInstances = instanceAllGroups.length > 0
   useEffect(() => {
@@ -1731,7 +1952,7 @@ export function PositionsPage({
               </label>
             </div>
           </div>
-          {allFlatPositions.length === 0 && liveStockPositions.length === 0 ? (
+          {optionsTabPositions.length === 0 && liveStockPositions.length === 0 ? (
             <p className="section-hint">No open positions under the current filters. Position data comes from account snapshots in `Accounts`, while Off-Track options are inferred from execution history.</p>
           ) : (
             <div className="replay-portfolio-block">
@@ -2001,10 +2222,9 @@ export function PositionsPage({
                                                 const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
                                                 const value = (pos.avg_cost ?? 0) * absQty * 100
                                                 const ts = getPositionTime(pos)
-                                                const matchedExecs = pos.kind === 'live' && pos.position
-                                                  ? (livePositionExecutionsMap.get(optExecutionMatchKey(pos.account_id, pos.contract_key)) ?? [])
-                                                  : (pos.kind === 'offtrack' ? pos.trades ?? [] : [])
-                                                const hasExecutions = matchedExecs.length > 0
+                                                const execLists = getPositionExecLists(pos)
+                                                const execCount = execLists.final.length + execLists.tws.length
+                                                const hasExecutions = execCount > 0
                                                 const isPosExpanded = expandedPositionKeys.includes(posKey)
                                                 return [
                                                   <tr
@@ -2079,30 +2299,60 @@ export function PositionsPage({
                                                     </td>
                                                     <td>{pos.account_id || '—'}</td>
                                                   </tr>,
-                                                  ...(isPosExpanded ? matchedExecs.map((ex, ei) => {
-                                                    const es = (ex.side ?? '').toUpperCase()
-                                                    const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
-                                                    const eQty = Math.abs(Number(ex.quantity) || 0)
-                                                    const ePrice = Number(ex.price) || 0
-                                                    const eComm = Number(ex.commission) || 0
-                                                    const eTs = ex.time != null ? Number(ex.time) : null
-                                                    return (
-                                                      <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
-                                                        <td className="replay-opt-expand-col" />
-                                                        <td className="detail-exec-indent replay-muted" colSpan={2}>↳ exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} /></td>
-                                                        <td />
-                                                        <td />
-                                                        <td>{eSideLabel} {eQty || '—'}</td>
-                                                        <td>{fmtUsd(ePrice)}</td>
-                                                        <td />
-                                                        <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
-                                                        <td>{eComm ? fmtUsd(eComm) : '—'}</td>
-                                                        <td />
-                                                        <td />
-                                                        <td className="replay-muted">{ex.account_id ?? '—'}</td>
-                                                      </tr>
-                                                    )
-                                                  }) : []),
+                                                  ...(isPosExpanded ? [
+                                                    ...execLists.final.map((ex, ei) => {
+                                                      const es = (ex.side ?? '').toUpperCase()
+                                                      const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
+                                                      const eQty = Math.abs(Number(ex.quantity) || 0)
+                                                      const ePrice = Number(ex.price) || 0
+                                                      const eComm = Number(ex.commission) || 0
+                                                      const eTs = ex.time != null ? Number(ex.time) : null
+                                                      return (
+                                                        <tr key={`${posKey}-exec-final-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
+                                                          <td className="replay-opt-expand-col" />
+                                                          <td className="detail-exec-indent replay-muted" colSpan={2}>
+                                                            ↳ [Final] exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} />
+                                                          </td>
+                                                          <td />
+                                                          <td />
+                                                          <td>{eSideLabel} {eQty || '—'}</td>
+                                                          <td>{fmtUsd(ePrice)}</td>
+                                                          <td />
+                                                          <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
+                                                          <td>{eComm ? fmtUsd(eComm) : '—'}</td>
+                                                          <td />
+                                                          <td />
+                                                          <td className="replay-muted">{ex.account_id ?? '—'}</td>
+                                                        </tr>
+                                                      )
+                                                    }),
+                                                    ...execLists.tws.map((ex, ei) => {
+                                                      const es = (ex.side ?? '').toUpperCase()
+                                                      const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
+                                                      const eQty = Math.abs(Number(ex.quantity) || 0)
+                                                      const ePrice = Number(ex.price) || 0
+                                                      const eComm = Number(ex.commission) || 0
+                                                      const eTs = ex.time != null ? Number(ex.time) : null
+                                                      return (
+                                                        <tr key={`${posKey}-exec-tws-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
+                                                          <td className="replay-opt-expand-col" />
+                                                          <td className="detail-exec-indent replay-muted" colSpan={2}>
+                                                            ↳ [TWS client] exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} />
+                                                          </td>
+                                                          <td />
+                                                          <td />
+                                                          <td>{eSideLabel} {eQty || '—'}</td>
+                                                          <td>{fmtUsd(ePrice)}</td>
+                                                          <td />
+                                                          <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
+                                                          <td>{eComm ? fmtUsd(eComm) : '—'}</td>
+                                                          <td />
+                                                          <td />
+                                                          <td className="replay-muted">{ex.account_id ?? '—'}</td>
+                                                        </tr>
+                                                      )
+                                                    }),
+                                                  ] : []),
                                                 ]
                                               })}
                                             </tbody>
@@ -2447,7 +2697,7 @@ export function PositionsPage({
                   className="system-tab-panel"
                 >
                   <h5 className="replay-sub">Option positions</h5>
-                  {allFlatPositions.length === 0 ? (
+                  {optionsTabPositions.length === 0 ? (
                     <p className="section-hint">No open option positions under the current filters.</p>
                   ) : (
                 <div className="replay-portfolio-table-wrap">
@@ -2489,54 +2739,15 @@ export function PositionsPage({
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedInstanceGroups.map(instGroup => {
-                        const instKey = instGroup.strategy_instance_id != null ? String(instGroup.strategy_instance_id) : '__unassigned__'
-                        const instLabel = instGroup.strategy_instance_label ?? (instGroup.strategy_instance_id != null ? `Instance #${instGroup.strategy_instance_id}` : 'Unassigned')
-                        const oppName = instGroup.strategy_opportunity_name?.trim() || null
-                        const openedAt = instGroup.strategy_instance_opened_at_epoch
-                        const colCount = 14
-                        return [
-                          <tr key={`inst-header-${instKey}`} className="replay-portfolio-group-header replay-opt-group-row">
-                            <td colSpan={colCount - 1}>
-                              <span className="replay-instance-header-content">
-                                {instGroup.strategy_instance_id != null ? (
-                                  <a
-                                    href={`#/strategies/instances/${instGroup.strategy_instance_id}`}
-                                    className="ledger-instance-icon-link"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={`View instance: ${instLabel}`}
-                                  >
-                                    <strong>{instLabel}</strong>
-                                  </a>
-                                ) : (
-                                  <strong>{instLabel}</strong>
-                                )}
-                                {oppName && <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>Opportunity Strategy: {oppName}</span>}
-                                {openedAt != null && Number.isFinite(openedAt) && (
-                                  <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
-                                    Instance Opened at: {fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? ` (${fmtDaysAgo(openedAt)})` : ''}
-                                  </span>
-                                )}
-                                <span className="replay-muted" style={{ marginLeft: '0.75rem' }}>
-                                  {instGroup.positions.length} position{instGroup.positions.length !== 1 ? 's' : ''}
-                                </span>
-                              </span>
-                            </td>
-                            <td>
-                              <span className="replay-pnl-unrealized">{fmtUsd(instGroup.total_unrealized_pnl)}</span>
-                            </td>
-                          </tr>,
-                          ...instGroup.positions.flatMap((pos) => {
-                            const posKey = getPositionKey(pos, instGroup.strategy_instance_id)
+                      {sortedOptionsTabPositions.flatMap(pos => {
+                            const posKey = getOptionsTabPositionKey(pos)
                             const absQty = Math.abs(pos.qty)
                             const sideLabel = pos.qty > 0 ? 'Long' : pos.qty < 0 ? 'Short' : '—'
                             const value = (pos.avg_cost ?? 0) * absQty * 100
                             const ts = getPositionTime(pos)
-                            const matchedExecs = pos.kind === 'live' && pos.position
-                              ? (livePositionExecutionsMap.get(optExecutionMatchKey(pos.account_id, pos.contract_key)) ?? [])
-                              : (pos.kind === 'offtrack' ? pos.trades ?? [] : [])
-                            const hasExecutions = matchedExecs.length > 0
+                            const execLists = getPositionExecLists(pos)
+                            const execCount = execLists.final.length + execLists.tws.length
+                            const hasExecutions = execCount > 0
                             const isPosExpanded = expandedPositionKeys.includes(posKey)
                             const posRow = (
                               <tr
@@ -2559,7 +2770,58 @@ export function PositionsPage({
                                   {(() => {
                                     const p = getContractLabelParts(pos.contract_key)
                                     const strikeStr = pos.strike != null ? ` ${pos.strike}` : ''
-                                    return p.symbol ? (<><strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}</>) : pos.contract_key
+                                    const fill = instanceIconFillFromMergedExecutions(execLists.merged)
+                                    const instanceIcon =
+                                      fill === 'empty'
+                                        ? null
+                                        : fill === 'none' ? (
+                                            <span
+                                              className="ledger-instance-icon-link ledger-instance-icon-link--different"
+                                              title="None of the matched executions have a strategy instance"
+                                              aria-label="No strategy instance on matched executions"
+                                              role="img"
+                                              onClick={e => e.stopPropagation()}
+                                            >
+                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <rect x="5" y="5" width="14" height="14" rx="1" />
+                                              </svg>
+                                            </span>
+                                          ) : fill === 'all' ? (
+                                            <span
+                                              className="ledger-instance-icon-link ledger-instance-icon-link--same"
+                                              title="All matched executions have a strategy instance"
+                                              aria-label="All matched executions have a strategy instance"
+                                              role="img"
+                                              onClick={e => e.stopPropagation()}
+                                            >
+                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <rect x="5" y="5" width="14" height="14" rx="1" />
+                                              </svg>
+                                            </span>
+                                          ) : (
+                                            <span
+                                              className="ledger-instance-icon-link ledger-instance-icon-link--mixed"
+                                              title="Some matched executions have a strategy instance, some do not"
+                                              aria-label="Mixed strategy instance on matched executions"
+                                              role="img"
+                                              onClick={e => e.stopPropagation()}
+                                            >
+                                              <svg viewBox="0 0 24 24" width={14} height={14} className="ledger-instance-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                <rect x="5" y="5" width="14" height="14" rx="1" />
+                                              </svg>
+                                            </span>
+                                          )
+                                    return p.symbol ? (
+                                      <>
+                                        {instanceIcon}
+                                        <strong>{p.symbol}</strong> {p.rightLabel}{strikeStr}
+                                      </>
+                                    ) : (
+                                      <>
+                                        {instanceIcon}
+                                        {pos.contract_key}
+                                      </>
+                                    )
                                   })()}
                                 </td>
                                 <td>
@@ -2602,14 +2864,14 @@ export function PositionsPage({
                                 <td className="replay-muted">{pos.pool_label}</td>
                                 <td>{pos.account_id || '—'}</td>
                                 <td className="replay-strategy-opp-cell">
-                                  {matchedExecs.length === 0 ? '—' : (
-                                    <span className="replay-muted">{matchedExecs.length} execution{matchedExecs.length > 1 ? 's' : ''} ↓</span>
+                                  {execCount === 0 ? '—' : (
+                                    <span className="replay-muted">{execCount} execution{execCount > 1 ? 's' : ''} ↓</span>
                                   )}
                                 </td>
                                 <td>—</td>
                               </tr>
                             )
-                            const execRows = isPosExpanded ? matchedExecs.map((ex, ei) => {
+                            const renderOptsExecRow = (ex: Execution, ei: number, book: 'final' | 'tws', finalMatch: Execution | null) => {
                               const es = (ex.side ?? '').toUpperCase()
                               const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
                               const eQty = Math.abs(Number(ex.quantity) || 0)
@@ -2617,10 +2879,61 @@ export function PositionsPage({
                               const eComm = Number(ex.commission) || 0
                               const eTs = ex.time != null ? Number(ex.time) : null
                               const isOffTrack = pos.kind === 'offtrack'
+                              const execInstanceId = ex.strategy_instance_id
+                              const bookLabel = book === 'final' ? '[Final]' : '[TWS client]'
+                              const rowKey = `${posKey}-exec-${book}-${ex.account_executions_id ?? ei}`
+                              const twsContractKey = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
+                              const hasCanonicalContractRow = canonicalOptContractKeySet.has(twsContractKey)
+                              const showSync =
+                                book === 'tws' &&
+                                hasCanonicalContractRow &&
+                                finalMatch != null &&
+                                twsNeedsStrategySyncFromFinal(ex, finalMatch)
+                              const syncBusy = syncingTwsAttributionKey === String(ex.account_executions_id ?? '')
                               return (
-                                <tr key={`${posKey}-exec-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
+                                <tr key={rowKey} className="detail-execution-row">
                                   <td className="replay-opt-expand-col" />
-                                  <td className="detail-exec-indent replay-muted">↳ exec #{ex.account_executions_id ?? '?'}</td>
+                                  <td className="detail-exec-indent replay-muted detail-exec-indent--stack">
+                                    <div className="detail-exec-indent-stack">
+                                      <div className="detail-exec-line-primary">
+                                        ↳ {bookLabel} exec #{ex.account_executions_id ?? '?'}
+                                      </div>
+                                      {execInstanceId != null ? (
+                                        <div className="detail-exec-line-instance">
+                                          <a
+                                            href={`#/strategies/instances/${execInstanceId}`}
+                                            className="ledger-instance-icon-link"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            title={`View instance #${execInstanceId}`}
+                                            aria-label={`View instance #${execInstanceId}`}
+                                            onClick={e => e.stopPropagation()}
+                                          >
+                                            Instance #{execInstanceId}
+                                          </a>
+                                        </div>
+                                      ) : null}
+                                      {showSync && finalMatch != null ? (
+                                        <div className="detail-exec-line-sync">
+                                          <button
+                                            type="button"
+                                            className="btn btn-icon-small detail-exec-sync-btn"
+                                            title="Apply strategy opportunity and instance from the final book row"
+                                            aria-label="Sync strategy attribution from final book"
+                                            disabled={syncBusy}
+                                            onClick={e => {
+                                              e.stopPropagation()
+                                              handleSyncTwsStrategyFromFinal(ex, finalMatch)
+                                            }}
+                                          >
+                                            <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
+                                              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
+                                            </svg>
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </td>
                                   <td><ExecSourceBadge source={ex.source} /></td>
                                   <td />
                                   <td />
@@ -2650,10 +2963,16 @@ export function PositionsPage({
                                   </td>
                                 </tr>
                               )
-                            }) : []
+                            }
+                            const execRows = isPosExpanded
+                              ? [
+                                  ...execLists.final.map((ex, ei) => renderOptsExecRow(ex, ei, 'final', null)),
+                                  ...execLists.tws.map((ex, ei) =>
+                                    renderOptsExecRow(ex, ei, 'tws', findMatchingFinalForTws(ex, execLists.final)),
+                                  ),
+                                ]
+                              : []
                             return [posRow, ...execRows]
-                          }),
-                        ]
                       })}
                     </tbody>
                     <tfoot>
@@ -2661,7 +2980,7 @@ export function PositionsPage({
                         <td colSpan={13} className="replay-opt-tfoot-label">Total</td>
                         <td>
                           <span className="replay-pnl-unrealized">
-                            {fmtUsd(instanceGroups.reduce((acc, g) => acc + g.total_unrealized_pnl, 0))}
+                            {fmtUsd(optionsTabPositions.reduce((acc, p) => acc + p.unrealized_pnl, 0))}
                           </span>
                         </td>
                       </tr>

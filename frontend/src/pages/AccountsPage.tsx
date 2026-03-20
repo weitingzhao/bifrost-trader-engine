@@ -7,6 +7,51 @@ import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtExpiry, fmtUsd, fmtUsdRound0 } from '../utils/format'
 import { computeDailyChange, formatLastUpdate, getNetLiq, optionIntrinsic, optionMoneyness, resolvePreferredPrice, rightLabel, type DailyBenchmark } from './accounts/accountsUtils'
 
+/** Tag icon for header Categories (stroke follows currentColor). */
+function AccountsCategoriesIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      aria-hidden
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 2H2v10l9.29 9.29a1 1 0 0 0 1.41 0l6.59-6.59a1 1 0 0 0 0-1.41L12 2Z" />
+      <path d="M7 7h.01" />
+    </svg>
+  )
+}
+
+/** Inline refresh icon for TWS / Flex import buttons (stroke follows currentColor). */
+function ReplayRefreshIcon({ spinning, size = 14 }: { spinning?: boolean; size?: number }) {
+  return (
+    <svg
+      className={spinning ? 'replay-fetch-refresh-svg replay-fetch-refresh-svg--spin' : 'replay-fetch-refresh-svg'}
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      aria-hidden
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M3 21v-5h5" />
+    </svg>
+  )
+}
+
 export interface AccountsPageProps {
   status: StatusResponse | null
   accountsDisplay: IbAccountSnapshot[] | null
@@ -236,30 +281,40 @@ export function AccountsPage({
             {' / Accounts'}
             <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
           </h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn btn-small btn-size-default"
-              onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
-              aria-label="Manage position categories"
+          <div className="accounts-page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span
+              className="accounts-page-header-icon-wrap"
+              title="Manage position categories"
             >
-              Categories
-            </button>
-            <button
-              type="button"
-              className="btn-resume"
-              disabled={ibAccountsRefreshing}
-              onClick={onRefreshAccounts}
+              <button
+                type="button"
+                className="section-header-icon-btn"
+                onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
+                aria-label="Manage position categories"
+              >
+                <AccountsCategoriesIcon size={16} />
+              </button>
+            </span>
+            <span
+              className="accounts-page-header-icon-wrap"
               title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
             >
-              {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
-            </button>
+              <button
+                type="button"
+                className="section-header-icon-btn"
+                disabled={ibAccountsRefreshing}
+                onClick={onRefreshAccounts}
+                aria-label="Refresh accounts and positions from IB"
+                aria-busy={ibAccountsRefreshing}
+              >
+                <ReplayRefreshIcon spinning={ibAccountsRefreshing} size={16} />
+              </button>
+            </span>
           </div>
         </div>
-        <section className="replay-section" aria-label="Execution fetch range">
+        <section className="replay-section accounts-import-pills" aria-label="Execution import from Tws and Flex">
           <div className="replay-toolbar">
-            <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
-              <span className="replay-fetch-days-label">Fetch</span>
+            <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch time range">
               <label className="replay-fetch-radio">
                 <input type="radio" name="ib-replay-fetch-days" value={1} checked={replayFetchDays === 1} onChange={() => setReplayFetchDays(1)} disabled={replaySyncing} />
                 <span>Today</span>
@@ -274,16 +329,17 @@ export function AccountsPage({
               </label>
               <button
                 type="button"
-                className="btn btn-small replay-fetch-refresh-btn"
+                className={`replay-fetch-refresh-btn${replaySyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
                 disabled={replaySyncing}
                 onClick={async () => {
                   setReplaySyncing(true)
                   await postExecutionsFetch(replayFetchDays)
                   setReplaySyncing(false)
                 }}
-                aria-label="Fetch executions from IB and write to DB"
+                aria-label="Fetch executions from IB Tws and write to DB"
               >
-                {replaySyncing ? 'Fetching…' : 'Refresh'}
+                <ReplayRefreshIcon spinning={replaySyncing} />
+                <span>{replaySyncing ? 'Fetching…' : 'Tws Refresh'}</span>
               </button>
             </div>
             {replaySyncing && <span className="replay-sync-hint">Fetching executions from IB…</span>}
@@ -515,30 +571,40 @@ export function AccountsPage({
           {' / Accounts'}
           <InfoTooltip text="Multi-account summary & positions from DB; auto-refresh every 1h." />
         </h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="btn btn-small btn-size-default"
-            onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
-            aria-label="Manage position categories"
+        <div className="accounts-page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span
+            className="accounts-page-header-icon-wrap"
+            title="Manage position categories"
           >
-            Categories
-          </button>
-          <button
-            type="button"
-            className="btn-resume"
-            disabled={ibAccountsRefreshing}
-            onClick={onRefreshAccounts}
+            <button
+              type="button"
+              className="section-header-icon-btn"
+              onClick={() => { setCategoryModalOpen(true); setCategoryError(null); }}
+              aria-label="Manage position categories"
+            >
+              <AccountsCategoriesIcon size={16} />
+            </button>
+          </span>
+          <span
+            className="accounts-page-header-icon-wrap"
             title="Monitor Account Client fetches accounts & positions from IB, writes to DB, then updates display"
           >
-            {ibAccountsRefreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
+            <button
+              type="button"
+              className="section-header-icon-btn"
+              disabled={ibAccountsRefreshing}
+              onClick={onRefreshAccounts}
+              aria-label="Refresh accounts and positions from IB"
+              aria-busy={ibAccountsRefreshing}
+            >
+              <ReplayRefreshIcon spinning={ibAccountsRefreshing} size={16} />
+            </button>
+          </span>
         </div>
       </div>
-      <section className="replay-section" aria-label="Execution fetch range">
+      <section className="replay-section accounts-import-pills" aria-label="Execution import from Tws and Flex">
         <div className="replay-toolbar">
-          <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch range">
-            <span className="replay-fetch-days-label">Fetch</span>
+          <div className="replay-fetch-range-group" role="radiogroup" aria-label="Execution fetch time range">
             <label className="replay-fetch-radio">
               <input type="radio" name="ib-replay-fetch-days" value={1} checked={replayFetchDays === 1} onChange={() => setReplayFetchDays(1)} disabled={replaySyncing} />
               <span>Today</span>
@@ -553,7 +619,7 @@ export function AccountsPage({
             </label>
             <button
               type="button"
-              className="btn btn-small replay-fetch-refresh-btn"
+              className={`replay-fetch-refresh-btn${replaySyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
               disabled={replaySyncing || flexSyncing}
               onClick={async () => {
                 setReplaySyncing(true)
@@ -565,27 +631,42 @@ export function AccountsPage({
                   setReplaySyncing(false)
                 }
               }}
-              aria-label="Fetch executions from IB and write to DB"
+              aria-label="Fetch executions from IB Tws and write to DB"
             >
-              {replaySyncing ? 'Fetching…' : 'Refresh'}
+              <ReplayRefreshIcon spinning={replaySyncing} />
+              <span>{replaySyncing ? 'Fetching…' : 'Tws Refresh'}</span>
             </button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <input
-                id="flex-use-upload"
-                type="checkbox"
-                checked={flexUseUpload}
-                onChange={(e) => setFlexUseUpload(e.target.checked)}
+          <div className="replay-fetch-range-group" role="group" aria-label="Flex executions import">
+            <div className="accounts-flex-xml-toggle-wrap">
+              <span className="accounts-flex-xml-toggle-label" id="flex-xml-local-label">
+                Use local Flex XML
+              </span>
+              <button
+                type="button"
+                className="watchlist-toggle-switch accounts-flex-xml-toggle"
+                role="switch"
+                aria-checked={flexUseUpload}
+                aria-labelledby="flex-xml-local-label"
                 disabled={replaySyncing || flexSyncing}
-              />
-              <label htmlFor="flex-use-upload" className="section-hint">
-                Use Local Flex Xml
-              </label>
+                onClick={() => setFlexUseUpload((v) => !v)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return
+                  e.preventDefault()
+                  if (!replaySyncing && !flexSyncing) setFlexUseUpload((v) => !v)
+                }}
+              >
+                <span className="watchlist-toggle-switch-track" />
+                <span
+                  className={
+                    flexUseUpload ? 'watchlist-toggle-switch-thumb on' : 'watchlist-toggle-switch-thumb'
+                  }
+                />
+              </button>
             </div>
             <button
               type="button"
-              className="btn btn-small replay-fetch-refresh-btn"
+              className={`replay-fetch-refresh-btn${flexSyncing ? ' replay-fetch-refresh-btn--busy' : ''}`}
               disabled={replaySyncing || flexSyncing}
               onClick={async () => {
                 if (flexUseUpload) {
@@ -741,30 +822,31 @@ export function AccountsPage({
               }}
               aria-label="Fetch executions from IB Flex Trades and write to DB"
             >
-              {flexSyncing ? 'Fetching…' : 'Flex Refresh'}
+              <ReplayRefreshIcon spinning={flexSyncing} />
+              <span>{flexSyncing ? 'Fetching…' : 'Flex Refresh'}</span>
             </button>
-            {(replaySyncing || flexSyncing) && (
-              <span className="replay-sync-hint">
-                {replaySyncing ? 'Fetching executions from IB (TWS)…' : 'Fetching executions from IB Flex…'}
-              </span>
-            )}
-            {fetchedAt != null && Number.isFinite(fetchedAt) && (
-              <span className="section-hint replay-data-from-inline">
-                Data from {new Date(fetchedAt * 1000).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium' })}
-                , {(() => {
-                  const sec = Math.floor(Date.now() / 1000 - fetchedAt)
-                  if (sec < 60) return `${sec}s ago`
-                  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
-                  return `${(sec / 3600).toFixed(1)}h ago`
-                })()}
-              </span>
-            )}
-            {hasAccounts && (fetchedAt == null || !Number.isFinite(fetchedAt)) && (
-              <span className="section-hint replay-data-from-inline">
-                Data time unknown (click "Refresh" to have monitor fetch from IB and write to DB)
-              </span>
-            )}
           </div>
+          {(replaySyncing || flexSyncing) && (
+            <span className="replay-sync-hint">
+              {replaySyncing ? 'Fetching executions from IB (TWS)…' : 'Fetching executions from IB Flex…'}
+            </span>
+          )}
+          {fetchedAt != null && Number.isFinite(fetchedAt) && (
+            <span className="section-hint replay-data-from-inline">
+              Data from {new Date(fetchedAt * 1000).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'medium' })}
+              , {(() => {
+                const sec = Math.floor(Date.now() / 1000 - fetchedAt)
+                if (sec < 60) return `${sec}s ago`
+                if (sec < 3600) return `${Math.floor(sec / 60)}m ago`
+                return `${(sec / 3600).toFixed(1)}h ago`
+              })()}
+            </span>
+          )}
+          {hasAccounts && (fetchedAt == null || !Number.isFinite(fetchedAt)) && (
+            <span className="section-hint replay-data-from-inline">
+              Data time unknown (click "Refresh" to have monitor fetch from IB and write to DB)
+            </span>
+          )}
         </div>
         {flexMessage && (
           <p className="section-hint" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
