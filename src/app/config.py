@@ -8,6 +8,11 @@ import yaml
 
 IB_PORT_MAP = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}
 
+# IB block shape is the same in dev/prod templates; error messages reference both.
+_IB_YAML_EXAMPLE_HINT = (
+    "See config/config.dev.yaml.example or config/config.prod.yaml.example for the `ib:` shape."
+)
+
 _VALID_ENV_NAMES = frozenset(("dev", "prod"))
 
 
@@ -94,15 +99,43 @@ def resolve_startup_config_path(project_root: str, argv: List[str]) -> Tuple[str
     return str((root / "config" / "config.yaml.example").resolve()), rest
 
 
+def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge overlay onto base (overlay wins for scalars and replaces nested dicts leaf-by-leaf)."""
+    out: Dict[str, Any] = dict(base)
+    for k, v in overlay.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
-    """Load YAML. Returns (config, resolved_path)."""
+    """Load YAML. Returns (config, resolved_path).
+
+    When the resolved file is ``config/config.dev.yaml`` or ``config/config.prod.yaml`` and
+    ``config/config.yaml`` exists in the same directory, load ``config.yaml`` first and **deep-merge**
+    the env-specific file on top (overlay wins). This matches a split where shared keys live in
+    ``config.yaml`` and env overrides live in ``config.dev.yaml`` / ``config.prod.yaml``.
+    """
     config_path = config_path or os.environ.get("BIFROST_CONFIG", "config/config.yaml")
     if not Path(config_path).exists():
         config_path = "config/config.yaml.example"
     config_path = str(Path(config_path).resolve())
+    path_obj = Path(config_path)
+    name = path_obj.name
+
     with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-    return config, config_path
+        overlay: Dict[str, Any] = yaml.safe_load(f) or {}
+
+    if name in ("config.dev.yaml", "config.prod.yaml"):
+        base_path = path_obj.parent / "config.yaml"
+        if base_path.is_file():
+            with open(base_path, "r", encoding="utf-8") as f:
+                base: Dict[str, Any] = yaml.safe_load(f) or {}
+            return _deep_merge(base, overlay), config_path
+
+    return overlay, config_path
 
 
 def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
@@ -115,7 +148,7 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
     if not isinstance(h, dict):
         raise ValueError(
             "config['ib']['host'] is required (dict with ip, port_type, client_id). "
-            "See config/config.dev.yaml.example."
+            + _IB_YAML_EXAMPLE_HINT
         )
     s = ib.get("secondary") if isinstance(ib.get("secondary"), dict) else {}
     hc = h.get("client_id") if isinstance(h.get("client_id"), dict) else {}
@@ -158,7 +191,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
             port_type: ...
             client_id: { listener, account }
 
-    See ``config/config.dev.yaml.example``.
+    See ``config/config.dev.yaml.example`` or ``config/config.prod.yaml.example`` (same ``ib`` shape).
 
     Returns a dict with normalised keys consumed by daemon, server, and celery:
       host, port_type, port, connect_timeout,
@@ -168,9 +201,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
     """
     ib_raw = config.get("ib")
     if not ib_raw or not isinstance(ib_raw, dict):
-        raise ValueError(
-            "config['ib'] is required in YAML. See config/config.dev.yaml.example."
-        )
+        raise ValueError("config['ib'] is required in YAML. " + _IB_YAML_EXAMPLE_HINT)
     ib = _flatten_host_secondary_ib(ib_raw)
     host = str(ib.get("host") or "127.0.0.1").strip()
     port_type = str(ib.get("port_type") or "tws_paper").strip().lower()

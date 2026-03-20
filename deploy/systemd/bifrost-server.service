@@ -1,0 +1,17 @@
+[Unit]
+Description=Bifrost status/control API (run_server.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_ENV=prod
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_server.py --prod
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -32,6 +32,7 @@
 | **[配置安全分类（风险模型）](research/CONFIG_SAFETY_TAXONOMY.md)** | 配置中的安全边界分类与风险维度 |
 | **[Guard 微调与影响](research/GUARD_TUNING_AND_IMPACT.md)** | Guard/边界参数微调方法、后果分析、block reason 与回测验证 |
 | **[策略实例页面设计](plans/STRATEGY_INSTANCE_PAGE.md)** | 策略实例独立页面（列表 + 详情）的产品与实现边界、API 依赖、与现有页面关系 |
+| **[Linux SSH 部署](deploy/linux-ssh.md)** | 本机 `rsync` + 远端 venv/npm build、`bifrost_ssh.sh`（经 SSH 同步与 `systemctl`）、`deploy/systemd` 单元与首次上线顺序 |
 
 **Reference（部署初始化数据）**：**reference/init/** 目录可放置一次性 SQL 脚本；执行顺序见 [reference/init/README.md](../reference/init/README.md)。当前无必跑脚本，仅需执行 `db_refresh_schema.py`；Flex 默认范围由 settings.flex_default_range_days 控制。
 

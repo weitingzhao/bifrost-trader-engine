@@ -100,6 +100,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 **约束**：
 - 数据库**迁移（schema migration）、种子数据、备份**按环境独立执行；**禁止**将 Dev 的破坏性操作（清表、重建等）默认指向 Prod。
 - 配置文件按环境维护：`config/config.dev.yaml`（默认）与 `config/config.prod.yaml`（均不提交仓库；模板为 `config/config.dev.yaml.example`、`config/config.prod.yaml.example`，复制后填写）。通过 `BIFROST_CONFIG`、`BIFROST_ENV=dev|prod`、或启动参数 `--prod` / `--env prod` / 首个路径参数选择。至少 `postgres.database`、IB 各 `client_id`（`ib.host.client_id` / 可选 `ib.secondary.client_id`）（及必要时 `postgres.host`/`redis.host`）不同。
+- **配置合并**：若存在 **`config/config.yaml`**，在解析到 `config.dev.yaml` / `config.prod.yaml` 时，会先读入 `config.yaml` 再与环境文件做**深度合并**（环境文件覆盖同名键）。合并后的整表供 Engine / Server / Celery 使用。**Status Server**（`run_server.py`）在默认情况下要求合并结果中含**合法 `ib:`**（与监控端 IB 能力一致）；仅 **Management 专用**时可设 `server.skip_monitor_ib: true` 以跳过 IB 校验与监控端 IB 客户端初始化（见 §2.9）。
 - **TWS 共享纪律**：见 §2.1「Dev/Prod 与 TWS 共享」——同一 IB 账户同一时刻仅允许一个自动交易 Engine 下单。
 
 ### 2.9 Management 专用部署（无后台写库）
@@ -110,7 +111,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **不运行 Engine**（`scripts/run_engine.py`）：守护进程连接 IB 下单/写心跳，仅在 Prod（或 Dev 调试时临时）主机运行。
 - **仅运行 Server + Frontend**：`run_server.py` + `run_frontend.sh`，依赖 Daemon 写入 PostgreSQL 与 Redis 的数据；前端通过 SSE 消费 Redis 行情。
 - **Redis 地址**：若 Management 主机需要读取另一台（如 192.168.10.70）上 Daemon 写入的行情，将 `redis.host` 指向该服务器 IP。
-- **可选**：`server.skip_monitor_ib: true`（config.yaml 中），启用后 Server 的 `startup_event` 不初始化 `AccountIbClient` / `MarketIbClient`，避免 Management 机器尝试连接 IB。
+- **可选**：`server.skip_monitor_ib: true`（config 中），启用后 `run_server.py` **不**校验 YAML 中的 `ib` 段，且 `startup_event` 不初始化 `AccountIbClient` / `MarketIbClient`，避免 Management 机器连接 IB。正常运行 Status Server（与 Engine 同栈或需监控 IB）时应提供完整 `ib:`，勿依赖此项。
 
 ---
 

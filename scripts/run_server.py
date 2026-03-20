@@ -8,6 +8,7 @@ Default config: ``config/config.dev.yaml``. Use ``--prod`` or ``BIFROST_ENV=prod
 import logging
 import logging.config
 import os
+from pathlib import Path
 import signal
 import subprocess
 import sys
@@ -187,13 +188,42 @@ def _free_port(port: int, wait_sec: float = 0.6) -> bool:
 
 
 def main() -> None:
-    from src.app.config import read_config, resolve_startup_config_path
+    from src.app.config import get_effective_ib_config, read_config, resolve_startup_config_path
 
     argv_raw = sys.argv[1:]
     config_path, _ = resolve_startup_config_path(_PROJECT_ROOT, argv_raw)
     os.environ["BIFROST_CONFIG"] = config_path
     setup_logging()
-    config, _ = read_config(config_path)
+    config, resolved_config_path = read_config(config_path)
+    print(f"bifrost status server: YAML loaded (env file): {resolved_config_path}", file=sys.stderr)
+    # Same merge rule as read_config(): if config.yaml exists next to config.{dev,prod}.yaml, it was merged (env overlays base).
+    _rp = Path(resolved_config_path)
+    if _rp.name in ("config.dev.yaml", "config.prod.yaml"):
+        _base = _rp.parent / "config.yaml"
+        if _base.is_file():
+            print(
+                f"bifrost status server: merged config base {_base} + env {_rp.name} (env wins on conflicts).",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"bifrost status server: no {_base.name} beside env file; using {_rp.name} only.",
+                file=sys.stderr,
+            )
+    # Status server requires a valid IB section in YAML for monitor IB clients and APIs (after merge
+    # of config.yaml + config.{dev|prod}.yaml). Management-only: set server.skip_monitor_ib: true.
+    if not (config.get("server") or {}).get("skip_monitor_ib", False):
+        try:
+            get_effective_ib_config(config)
+        except ValueError as e:
+            print(
+                "Status server: invalid or missing IB config. "
+                "Provide a full 'ib:' block in YAML (merge config.yaml with config.prod.yaml if split). "
+                "Or set server.skip_monitor_ib: true for API-only management hosts. "
+                f"Detail: {e}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     port = _port_from_config(config)
     if not _free_port(port):
         print(f"Could not free port {port}. Run: lsof -i :{port}", file=sys.stderr)

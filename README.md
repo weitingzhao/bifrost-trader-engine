@@ -40,7 +40,7 @@ Copy `config/config.yaml.example` to `config/config.yaml`. Set:
 - **risk**: max_daily_hedge_count, max_position_shares, max_daily_loss_usd, trading_hours_only, **paper_trade** (set `false` for live)
 - **redis** (optional, R-RM*): set `redis.enabled: true` and `redis.host`/`redis.port` (default 6379) so the daemon writes real-time quotes to Redis and the status server exposes GET /quotes. Omit or `enabled: false` to disable. See [docs/REALTIME_MARKET_DATA_DESIGN.md](docs/REALTIME_MARKET_DATA_DESIGN.md).
 
-**Multi-environment**: default config file is **`config/config.dev.yaml`** (gitignored, like `config/config.yaml`). Copy from **`config/config.dev.yaml.example`**; for prod profile copy **`config/config.prod.yaml.example`** → **`config/config.prod.yaml`**. Use **`--prod`** / **`--env prod`** / **`BIFROST_ENV=prod`**, or **`BIFROST_CONFIG`**, or the first CLI argument as the YAML path. Different environments must use different `postgres.database` and different IB client IDs under `ib.host.client_id` / `ib.secondary.client_id` to avoid conflicts (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §2.8).
+**Multi-environment**: default config file is **`config/config.dev.yaml`** (gitignored, like `config/config.yaml`). Copy from **`config/config.dev.yaml.example`**; for prod profile copy **`config/config.prod.yaml.example`** → **`config/config.prod.yaml`**. Use **`--prod`** / **`--env prod`** / **`BIFROST_ENV=prod`**, or **`BIFROST_CONFIG`**, or the first CLI argument as the YAML path. If **`config/config.yaml`** exists, it is loaded first and **`config.dev.yaml` / `config.prod.yaml` is deep-merged on top** (env file wins on conflicts). Different environments must use different `postgres.database` and different IB client IDs under `ib.host.client_id` / `ib.secondary.client_id` to avoid conflicts (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §2.8). The **status server** requires a valid **`ib:`** section after merge unless **`server.skip_monitor_ib: true`** (management-only).
 
 ## Run
 
@@ -104,6 +104,10 @@ The system has **three parts**: (1) **auto-trading** daemon, (2) **monitoring & 
 ## State space (O,D,M,L,E,S)
 
 The engine uses a six-dimensional state space for hedge gating. See [docs/research/STATE_SPACE_MAPPING.md](docs/research/STATE_SPACE_MAPPING.md) for the state space table → code mapping, threshold config and defaults, and when TargetPosition is output vs SAFE_MODE.
+
+## Deploy to Linux (SSH)
+
+Production deploy over `rsync` + SSH, optional remote `systemctl`: **[docs/deploy/linux-ssh.md](docs/deploy/linux-ssh.md)**. Script [`scripts/bifrost_ssh.sh`](scripts/bifrost_ssh.sh) (`--help` for CLI; `deploy_remote.sh` forwards to it). Unit templates: [`deploy/systemd/`](deploy/systemd/).
 
 ## License
 

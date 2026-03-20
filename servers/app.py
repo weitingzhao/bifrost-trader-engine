@@ -1,4 +1,6 @@
-"""Phase 2: FastAPI app for GET /status, GET /operations, POST /control/*. API only; frontend is separate (frontend/).
+"""Phase 2: FastAPI app for GET /status, GET /operations, POST /control/*.
+
+When ``frontend/dist`` exists (``npm run build``), GET ``/`` serves the SPA and ``/assets`` is mounted; otherwise GET ``/`` returns a small API stub. Dev hot-reload: ``./scripts/run_frontend.sh dev``.
 
 Monitoring runs on a separate host from the trading daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server."""
 
@@ -7,11 +9,13 @@ import logging
 import os
 import threading
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import asyncio
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.app.config import get_effective_ib_config
 from servers.flex_client import fetch_cash_transactions, fetch_trades
@@ -61,7 +65,10 @@ def create_app(
 ) -> FastAPI:
     """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*).
     status_cfg_for_read: when set, GET /bars/jobs (and GET /bars/jobs/{id}) use this for DB read even if control_via_db is None (e.g. only PGHOST or postgres configured without sink=postgres)."""
-    app = FastAPI(title="Bifrost Trader API", description="Phase 2: status and control API (frontend is separate)")
+    app = FastAPI(
+        title="Bifrost Trader API",
+        description="Phase 2: status and control API; monitoring UI when frontend/dist is built.",
+    )
     app.state.redis_quotes = redis_quotes
     # SSE 实时行情：每个连接一个 asyncio.Queue；Redis 订阅线程收到消息后广播到各 queue
     app.state.sse_queues: list = []
@@ -100,6 +107,37 @@ def create_app(
     app.state.data_lag_threshold_ms = data_lag_threshold_ms
     app.state.status_cfg_for_read = status_cfg_for_read
 
+    from servers.routers import (
+        config_router,
+        core_router,
+        daemon_router,
+        executions_router,
+        logs_router,
+        market_router,
+        quotes_router,
+        research_router,
+        status_router,
+        strategies_router,
+        watchlist_router,
+    )
+
+    app.include_router(core_router)
+    app.include_router(quotes_router)
+    app.include_router(logs_router)
+    app.include_router(status_router)
+    app.include_router(executions_router)
+    app.include_router(market_router)
+    app.include_router(watchlist_router)
+    app.include_router(research_router)
+    app.include_router(daemon_router)
+    app.include_router(config_router)
+    app.include_router(strategies_router)
+
+    _root = Path(__file__).resolve().parent.parent
+    _dist_assets = _root / "frontend" / "dist" / "assets"
+    if _dist_assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_dist_assets)), name="dist_assets")
+
     @app.on_event("startup")
     async def startup_event() -> None:
         """初始化监控端 IB 客户端（账户 + 行情），使用 config.yaml 的 host/port/client_id。若启用 Redis 行情，启动 SUBSCRIBE 线程供 SSE 推送。"""
@@ -107,16 +145,15 @@ def create_app(
         skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
         if skip_ib:
             logger.info("skip_monitor_ib=true: skipping AccountIbClient / MarketIbClient initialisation (Management mode)")
-        try:
-            ib_cfg = get_effective_ib_config(reader._config)
-            host = ib_cfg["host"]
-            port = ib_cfg["port"]
+            app.state.account_ib_client = None
+            app.state.market_ib_client = None
+            app.state.account_ib_client_2 = None
+        else:
+            try:
+                ib_cfg = get_effective_ib_config(reader._config)
+                host = ib_cfg["host"]
+                port = ib_cfg["port"]
 
-            if skip_ib:
-                app.state.account_ib_client = None
-                app.state.market_ib_client = None
-                app.state.account_ib_client_2 = None
-            else:
                 app.state.account_ib_client = AccountIbClient(
                     host=host,
                     port=port,
@@ -152,43 +189,45 @@ def create_app(
                     getattr(app.state.account_ib_client, "client_id", None),
                     getattr(app.state.market_ib_client, "client_id", None),
                 )
-            # 后台尝试建立 IB 连接，不阻塞 startup，避免 GET /status、GET /health 等不到响应导致前端显示 Fetch failed
-            async def _connect_ib_in_background() -> None:
-                acc_client = getattr(app.state, "account_ib_client", None)
-                acc_client_2 = getattr(app.state, "account_ib_client_2", None)
-                mkt_client = getattr(app.state, "market_ib_client", None)
-                if acc_client is not None:
-                    try:
-                        await acc_client.ensure_connected()
-                        logger.info("Monitor AccountIbClient connected on startup")
-                    except Exception as e:
-                        logger.warning(
-                            "AccountIbClient auto-connect on startup failed: %s (will retry on first use)",
-                            e,
-                        )
-                if acc_client_2 is not None:
-                    try:
-                        await acc_client_2.ensure_connected()
-                        logger.info("Monitor AccountIbClient2 (Secondary) connected on startup")
-                    except Exception as e:
-                        logger.warning(
-                            "AccountIbClient2 auto-connect on startup failed: %s (will retry on Connect or first use)",
-                            e,
-                        )
-                if mkt_client is not None:
-                    try:
-                        await mkt_client.ensure_connected()
-                        logger.info("Monitor MarketIbClient connected on startup")
-                    except Exception as e:
-                        logger.warning(
-                            "MarketIbClient auto-connect on startup failed: %s (will retry on first use)",
-                            e,
-                        )
-            asyncio.create_task(_connect_ib_in_background())
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to initialize monitor IB clients: %s", exc, exc_info=True)
-            app.state.account_ib_client = None
-            app.state.market_ib_client = None
+                # 后台尝试建立 IB 连接，不阻塞 startup，避免 GET /status、GET /health 等不到响应导致前端显示 Fetch failed
+                async def _connect_ib_in_background() -> None:
+                    acc_client = getattr(app.state, "account_ib_client", None)
+                    acc_client_2 = getattr(app.state, "account_ib_client_2", None)
+                    mkt_client = getattr(app.state, "market_ib_client", None)
+                    if acc_client is not None:
+                        try:
+                            await acc_client.ensure_connected()
+                            logger.info("Monitor AccountIbClient connected on startup")
+                        except Exception as e:
+                            logger.warning(
+                                "AccountIbClient auto-connect on startup failed: %s (will retry on first use)",
+                                e,
+                            )
+                    if acc_client_2 is not None:
+                        try:
+                            await acc_client_2.ensure_connected()
+                            logger.info("Monitor AccountIbClient2 (Secondary) connected on startup")
+                        except Exception as e:
+                            logger.warning(
+                                "AccountIbClient2 auto-connect on startup failed: %s (will retry on Connect or first use)",
+                                e,
+                            )
+                    if mkt_client is not None:
+                        try:
+                            await mkt_client.ensure_connected()
+                            logger.info("Monitor MarketIbClient connected on startup")
+                        except Exception as e:
+                            logger.warning(
+                                "MarketIbClient auto-connect on startup failed: %s (will retry on first use)",
+                                e,
+                            )
+
+                asyncio.create_task(_connect_ib_in_background())
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to initialize monitor IB clients: %s", exc, exc_info=True)
+                app.state.account_ib_client = None
+                app.state.market_ib_client = None
+                app.state.account_ib_client_2 = None
 
         # R-RM* SSE: 若 Redis 行情可用，启动 SUBSCRIBE 线程，收到 daemon:quotes 后广播到各 SSE 连接的 queue
         rq = getattr(app.state, "redis_quotes", None)
@@ -247,20 +286,6 @@ def create_app(
                 rq.close()
         except Exception:
             pass
-
-    from servers.routers import core_router, quotes_router, logs_router, status_router, executions_router, market_router, watchlist_router, research_router, daemon_router, config_router, strategies_router
-
-    app.include_router(core_router)
-    app.include_router(quotes_router)
-    app.include_router(logs_router)
-    app.include_router(status_router)
-    app.include_router(executions_router)
-    app.include_router(market_router)
-    app.include_router(watchlist_router)
-    app.include_router(research_router)
-    app.include_router(daemon_router)
-    app.include_router(config_router)
-    app.include_router(strategies_router)
 
     return app
 
