@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Execution, OptExecutionGroup, StatusResponse } from '../../types'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
+import type { Execution, IbConfig, OptExecutionGroup, StatusResponse } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
 import { deleteExecution, fetchOpportunities, fetchStrategyInstances, updateExecution } from '../../api'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
+import { DraggableExplainPanel } from '../../components/DraggableExplainPanel'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
   fmtExpiry,
@@ -31,6 +32,17 @@ import {
   getOptGroupKey,
   sliceExecutionForInstanceOptView,
 } from './ledgerOptHelpers'
+import {
+  LEDGER_SUMMARY_PERIOD_TABS,
+  formatPeriodLabel,
+  rollupOptionsFromMonthly,
+  rollupStocksFromMonthly,
+  type LedgerSummaryPeriod,
+} from './ledgerSummaryPeriod'
+import type { LedgerMetricExplainKind } from './ledgerMetricExplainKinds'
+import type { LedgerMetricExplainPayload } from './ledgerSummaryExplainPayload'
+import { buildLedgerMetricExplainPayload } from './ledgerSummaryExplainPayload'
+import { LedgerSummaryMetricExplainContent, ledgerMetricExplainTitle } from './ledgerSummaryMetricExplain'
 
 export interface LedgerViewProps {
   status: StatusResponse | null
@@ -38,26 +50,6 @@ export interface LedgerViewProps {
   /** Controlled by Trade ledger page header — opens Add journal modal. */
   addJournalOpen: boolean
   onAddJournalOpenChange: (open: boolean) => void
-}
-
-function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
-  return (
-    <button
-      type="button"
-      className="btn btn-icon-small"
-      onClick={e => {
-        e.stopPropagation()
-        onClick()
-      }}
-      title={title}
-      aria-label={title}
-    >
-      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-      </svg>
-    </button>
-  )
 }
 
 export function LedgerView({
@@ -83,6 +75,24 @@ export function LedgerView({
     strategyFilters,
     true,
   )
+
+  /** Trade ledger account tabs: All + Host/Secondary from Settings (Event Account), not every account in data. */
+  const ledgerTradeAccountTabs = useMemo(() => {
+    const ib = status?.ib_config as IbConfig | undefined
+    const host = (ib?.stream_host_account_id ?? '').trim()
+    const secondary = (ib?.stream_secondary_account_id ?? '').trim()
+    const tabs: { id: string; label: string }[] = []
+    const seen = new Set<string>()
+    if (host && !seen.has(host)) {
+      seen.add(host)
+      tabs.push({ id: host, label: 'Host' })
+    }
+    if (secondary && !seen.has(secondary)) {
+      seen.add(secondary)
+      tabs.push({ id: secondary, label: 'Secondary' })
+    }
+    return tabs
+  }, [status?.ib_config])
 
   useEffect(() => {
     fetchOpportunities(true)
@@ -126,6 +136,13 @@ export function LedgerView({
     column: 'trade_date'
     dir: 'asc' | 'desc'
   }>({ column: 'trade_date', dir: 'desc' })
+  const [ledgerSummaryPeriod, setLedgerSummaryPeriod] = useState<LedgerSummaryPeriod>('month')
+  const [ledgerMetricExplain, setLedgerMetricExplain] = useState<{
+    id: string
+    kind: LedgerMetricExplainKind
+    anchor: { x: number; y: number }
+    payload: LedgerMetricExplainPayload
+  } | null>(null)
   const [expandedDetailKeys, setExpandedDetailKeys] = useState<string[]>([])
   const [editExec, setEditExec] = useState<Execution | null>(null)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
@@ -629,6 +646,41 @@ export function LedgerView({
     return ['All', ...list, 'Uncategorized']
   }, [executions, positionCategoryByAccountContract, stkContractKey])
 
+  const ledgerTabLabel = useMemo(() => {
+    switch (ledgerTab) {
+      case 'strategy':
+        return 'Strategy'
+      case 'instance':
+        return 'Instance'
+      case 'options':
+        return 'Options'
+      case 'stocks':
+        return 'Stocks'
+      default:
+        return ledgerTab
+    }
+  }, [ledgerTab])
+
+  const summaryPeriodModeLabel = useMemo(
+    () =>
+      LEDGER_SUMMARY_PERIOD_TABS.find(t => t.id === ledgerSummaryPeriod)?.label ??
+      ledgerSummaryPeriod,
+    [ledgerSummaryPeriod],
+  )
+
+  const ledgerStockFilteredExecutions = useMemo(() => {
+    let stockExecs = filteredExecutions.filter(
+      ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT',
+    )
+    if (ledgerStockCategoryTab !== 'All') {
+      stockExecs =
+        ledgerStockCategoryTab === 'Uncategorized'
+          ? stockExecs.filter(ex => getStockExecCategory(ex) === '—')
+          : stockExecs.filter(ex => getStockExecCategory(ex) === ledgerStockCategoryTab)
+    }
+    return stockExecs
+  }, [filteredExecutions, ledgerStockCategoryTab, getStockExecCategory])
+
   const ledgerOptionsSummaryByMonth = useMemo(() => {
     const byMonth = new Map<string, { count: number; realizedPnl: number }>()
     for (const g of closedOptionGroups) {
@@ -645,29 +697,72 @@ export function LedgerView({
   }, [closedOptionGroups])
 
   const ledgerStocksSummaryByMonth = useMemo(() => {
-    let stockExecs = filteredExecutions.filter(
-      ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT',
-    )
-    if (ledgerStockCategoryTab !== 'All') {
-      stockExecs =
-        ledgerStockCategoryTab === 'Uncategorized'
-          ? stockExecs.filter(ex => getStockExecCategory(ex) === '—')
-          : stockExecs.filter(ex => getStockExecCategory(ex) === ledgerStockCategoryTab)
-    }
-    const byMonth = new Map<string, { count: number; notional: number }>()
+    const stockExecs = ledgerStockFilteredExecutions
+    const byMonth = new Map<string, { count: number; notional: number; realizedPnl: number }>()
     for (const ex of stockExecs) {
       const ts = ex.time ?? 0
       const monthStr = ts ? new Date(ts * 1000).toISOString().slice(0, 7) : ''
       if (!monthStr) continue
-      const cur = byMonth.get(monthStr) ?? { count: 0, notional: 0 }
+      const cur = byMonth.get(monthStr) ?? { count: 0, notional: 0, realizedPnl: 0 }
       cur.count += 1
       const q = Number(ex.quantity) || 0
       const p = Number(ex.price) || 0
       cur.notional += Math.abs(q) * p
+      cur.realizedPnl += Number(ex.realized_pnl) || 0
       byMonth.set(monthStr, cur)
     }
     return Array.from(byMonth.entries()).sort(([a], [b]) => b.localeCompare(a))
-  }, [filteredExecutions, ledgerStockCategoryTab, getStockExecCategory])
+  }, [ledgerStockFilteredExecutions])
+
+  const ledgerStocksSummaryTotals = useMemo(() => {
+    let trades = 0
+    let notional = 0
+    let realizedPnl = 0
+    for (const [, d] of ledgerStocksSummaryByMonth) {
+      trades += d.count
+      notional += d.notional
+      realizedPnl += d.realizedPnl
+    }
+    return { trades, notional, realizedPnl }
+  }, [ledgerStocksSummaryByMonth])
+
+  const handleMetricExplainEnter = useCallback(
+    (kind: LedgerMetricExplainKind, id: string, e: MouseEvent) => {
+      e.stopPropagation()
+      const payload = buildLedgerMetricExplainPayload({
+        kind,
+        id,
+        ledgerTabLabel,
+        summaryPeriodModeLabel,
+        ledgerSummaryPeriod,
+        closedOptionGroups,
+        stockFilteredExecutions: ledgerStockFilteredExecutions,
+        closedOptGroupsPnlSum,
+      })
+      setLedgerMetricExplain(prev => {
+        const anchor = prev === null ? { x: e.clientX, y: e.clientY } : prev.anchor
+        return { id, kind, anchor, payload }
+      })
+    },
+    [
+      ledgerTabLabel,
+      summaryPeriodModeLabel,
+      ledgerSummaryPeriod,
+      closedOptionGroups,
+      ledgerStockFilteredExecutions,
+      closedOptGroupsPnlSum,
+    ],
+  )
+
+  const ledgerOptionsSummaryByPeriod = useMemo(
+    () => rollupOptionsFromMonthly(ledgerOptionsSummaryByMonth, ledgerSummaryPeriod),
+    [ledgerOptionsSummaryByMonth, ledgerSummaryPeriod],
+  )
+
+  const ledgerStocksSummaryByPeriod = useMemo(
+    () => rollupStocksFromMonthly(ledgerStocksSummaryByMonth, ledgerSummaryPeriod),
+    [ledgerStocksSummaryByMonth, ledgerSummaryPeriod],
+  )
 
   const hasOptionExecutions = optExecutionGroups.length > 0
   const hasStockExecutions = useMemo(
@@ -676,24 +771,16 @@ export function LedgerView({
   )
 
   const sortedStockExecutions = useMemo(() => {
-    let list = filteredExecutions.filter(
-      ex => (ex.sec_type ?? '').toUpperCase() !== 'OPT',
-    )
-    if (ledgerStockCategoryTab !== 'All') {
-      list =
-        ledgerStockCategoryTab === 'Uncategorized'
-          ? list.filter(ex => getStockExecCategory(ex) === '—')
-          : list.filter(ex => getStockExecCategory(ex) === ledgerStockCategoryTab)
-    }
+    const list = [...ledgerStockFilteredExecutions]
     const { dir } = ledgerStockSort
     const mult = dir === 'asc' ? 1 : -1
-    list = [...list].sort((a, b) => {
+    list.sort((a, b) => {
       const va = (a.trade_date ?? '').trim()
       const vb = (b.trade_date ?? '').trim()
       return mult * va.localeCompare(vb)
     })
     return list
-  }, [filteredExecutions, ledgerStockCategoryTab, ledgerStockSort, getStockExecCategory])
+  }, [ledgerStockFilteredExecutions, ledgerStockSort])
 
   useEffect(() => {
     if (ledgerTab === 'strategy' && !hasOptionExecutions && hasStockExecutions) {
@@ -746,6 +833,13 @@ export function LedgerView({
     loadReplayData()
   }, [loadReplayData])
 
+  useEffect(() => {
+    const acc = ledgerFilterAccount.trim()
+    if (!acc || acc === 'All') return
+    const allowed = new Set(ledgerTradeAccountTabs.map(t => t.id))
+    if (allowed.size === 0 || !allowed.has(acc)) setLedgerFilterAccount('')
+  }, [ledgerFilterAccount, ledgerTradeAccountTabs])
+
   return (
     <>
       <section
@@ -781,14 +875,15 @@ export function LedgerView({
             >
               All
             </button>
-            {executionAccountOptions.map(accId => (
+            {ledgerTradeAccountTabs.map(({ id, label }) => (
               <button
-                key={accId}
+                key={id}
                 type="button"
-                className={`ib-accounts-tab ${ledgerFilterAccount === accId ? 'active' : ''}`}
-                onClick={() => setLedgerFilterAccount(accId)}
+                className={`ib-accounts-tab ${ledgerFilterAccount === id ? 'active' : ''}`}
+                title={id}
+                onClick={() => setLedgerFilterAccount(id)}
               >
-                {accId}
+                {label}
               </button>
             ))}
           </div>
@@ -986,80 +1081,231 @@ export function LedgerView({
           ) : (
             <>
               <section
-                className="replay-ledger-summary"
-                aria-label="Summary by month"
+                className="replay-ledger-summary replay-ledger-summary--period"
+                aria-label="Summary by period"
               >
+                <div className="replay-ledger-summary-period-head">
+                  <span className="replay-ledger-summary-label">Summary</span>
+                  <div
+                    className="replay-ledger-summary-period-tabs"
+                    role="tablist"
+                    aria-label="Summary aggregation period"
+                  >
+                    {LEDGER_SUMMARY_PERIOD_TABS.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={ledgerSummaryPeriod === id}
+                        className={`replay-ledger-summary-period-tab ${ledgerSummaryPeriod === id ? 'active' : ''}`}
+                        onClick={() => setLedgerSummaryPeriod(id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 {ledgerTab === 'options' || ledgerTab === 'strategy' || ledgerTab === 'instance' ? (
-                  <>
-                    <span className="replay-ledger-summary-label">Summary</span>
-                    <span className="replay-ledger-summary-inline">
-                      {ledgerOptionsSummaryByMonth.map(
-                        ([month, { count, realizedPnl }], i) => (
-                          <span key={month}>
-                            {i > 0 && (
-                              <span className="replay-ledger-summary-sep"> | </span>
-                            )}
-                            <span className="replay-ledger-summary-item">
-                              {month}: {count} groups,{' '}
-                              <span
-                                className={
-                                  realizedPnl >= 0
-                                    ? 'replay-pnl-realized'
-                                    : 'replay-pnl-detail-negative'
-                                }
-                              >
-                                {fmtUsd0(realizedPnl)}
-                              </span>
+                  <div className="replay-ledger-summary-period-body">
+                    <ul
+                      className="replay-ledger-summary-calendar-grid"
+                      aria-label="Option closed groups by period"
+                    >
+                      {ledgerOptionsSummaryByPeriod.map(([key, { count, realizedPnl }]) => (
+                        <li key={key} className="replay-ledger-summary-period-cell">
+                          <span className="replay-ledger-summary-period-cell-label">
+                            {formatPeriodLabel(key, ledgerSummaryPeriod)}
+                          </span>
+                          <span className="replay-ledger-summary-period-cell-metrics">
+                            <span>{count} groups</span>
+                            <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                              ·
+                            </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className={`replay-ledger-metric-explain-trigger ${
+                                realizedPnl > 0
+                                  ? 'replay-pnl-realized'
+                                  : realizedPnl < 0
+                                    ? 'replay-pnl-detail-negative'
+                                    : 'replay-ledger-summary-realized-zero'
+                              }`}
+                              aria-label="Open calculation details for this period realized PnL"
+                              onMouseEnter={e =>
+                                handleMetricExplainEnter(
+                                  'options_period_realized',
+                                  `opt-pnl-${key}`,
+                                  e,
+                                )
+                              }
+                              onClick={e => {
+                                e.stopPropagation()
+                                handleMetricExplainEnter(
+                                  'options_period_realized',
+                                  `opt-pnl-${key}`,
+                                  e,
+                                )
+                              }}
+                            >
+                              {fmtUsd0(realizedPnl)}
                             </span>
                           </span>
-                        ),
-                      )}
-                      {ledgerOptionsSummaryByMonth.length > 0 && (
-                        <span className="replay-ledger-summary-sep"> | </span>
-                      )}
-                      <span className="replay-ledger-summary-total">
-                        Total:{' '}
-                        {ledgerOptionsSummaryByMonth.reduce((s, [, d]) => s + d.count, 0)} groups,{' '}
+                        </li>
+                      ))}
+                    </ul>
+                    <div
+                      className="replay-ledger-summary-stocks-total"
+                      aria-label="Option summary totals"
+                    >
+                      <span className="replay-ledger-summary-stocks-total-label">Total</span>
+                      <span className="replay-ledger-summary-stocks-total-metrics">
+                        <span>
+                          {ledgerOptionsSummaryByMonth.reduce((s, [, d]) => s + d.count, 0)} groups
+                        </span>
+                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                          ·
+                        </span>
                         <span
-                          className={
-                            closedOptGroupsPnlSum >= 0
+                          role="button"
+                          tabIndex={0}
+                          className={`replay-ledger-metric-explain-trigger ${
+                            closedOptGroupsPnlSum > 0
                               ? 'replay-pnl-realized'
-                              : 'replay-pnl-detail-negative'
+                              : closedOptGroupsPnlSum < 0
+                                ? 'replay-pnl-detail-negative'
+                                : 'replay-ledger-summary-realized-zero'
+                          }`}
+                          aria-label="Open calculation details for total option realized PnL"
+                          onMouseEnter={e =>
+                            handleMetricExplainEnter('options_total_realized', 'opt-pnl-total', e)
                           }
+                          onClick={e => {
+                            e.stopPropagation()
+                            handleMetricExplainEnter('options_total_realized', 'opt-pnl-total', e)
+                          }}
                         >
                           {fmtUsd0(closedOptGroupsPnlSum)}
                         </span>
                       </span>
-                    </span>
-                  </>
+                    </div>
+                  </div>
                 ) : (
-                  <>
-                    <span className="replay-ledger-summary-label">Summary</span>
-                    <span className="replay-ledger-summary-inline">
-                      {ledgerStocksSummaryByMonth.map(
-                        ([month, { count, notional }], i) => (
-                          <span key={month}>
-                            {i > 0 && (
-                              <span className="replay-ledger-summary-sep"> | </span>
-                            )}
-                            <span className="replay-ledger-summary-item">
-                              {month}: {count} trades, {fmtUsd0(notional)}
+                  <div className="replay-ledger-summary-period-body">
+                    <ul
+                      className="replay-ledger-summary-calendar-grid"
+                      aria-label="Stock trades by period"
+                    >
+                      {ledgerStocksSummaryByPeriod.map(([key, { count, notional, realizedPnl }]) => (
+                        <li key={key} className="replay-ledger-summary-period-cell">
+                          <span className="replay-ledger-summary-period-cell-label">
+                            {formatPeriodLabel(key, ledgerSummaryPeriod)}
+                          </span>
+                          <span className="replay-ledger-summary-period-cell-metrics">
+                            <span>{count} trades</span>
+                            <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                              ·
+                            </span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className={`replay-ledger-metric-explain-trigger ${
+                                realizedPnl > 0
+                                  ? 'replay-pnl-realized'
+                                  : realizedPnl < 0
+                                    ? 'replay-pnl-detail-negative'
+                                    : 'replay-ledger-summary-realized-zero'
+                              }`}
+                              aria-label="Open calculation details for this period stock realized PnL"
+                              onMouseEnter={e =>
+                                handleMetricExplainEnter(
+                                  'stocks_period_realized',
+                                  `stk-rz-${key}`,
+                                  e,
+                                )
+                              }
+                              onClick={e => {
+                                e.stopPropagation()
+                                handleMetricExplainEnter(
+                                  'stocks_period_realized',
+                                  `stk-rz-${key}`,
+                                  e,
+                                )
+                              }}
+                            >
+                              {fmtUsd0(realizedPnl)}
                             </span>
                           </span>
-                        ),
-                      )}
-                      {ledgerStocksSummaryByMonth.length > 0 && (
-                        <span className="replay-ledger-summary-sep"> | </span>
-                      )}
-                      <span className="replay-ledger-summary-total">
-                        Total:{' '}
-                        {ledgerStocksSummaryByMonth.reduce((s, [, d]) => s + d.count, 0)} trades,{' '}
-                        {fmtUsd0(
-                          ledgerStocksSummaryByMonth.reduce((s, [, d]) => s + d.notional, 0),
-                        )}
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="replay-ledger-summary-stocks-notional-line replay-ledger-metric-explain-trigger"
+                            aria-label="Open calculation details for notional in this period"
+                            onMouseEnter={e =>
+                              handleMetricExplainEnter('stocks_period_notional', `stk-nv-${key}`, e)
+                            }
+                            onClick={e => {
+                              e.stopPropagation()
+                              handleMetricExplainEnter('stocks_period_notional', `stk-nv-${key}`, e)
+                            }}
+                          >
+                            Notional {fmtUsd0(notional)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div
+                      className="replay-ledger-summary-stocks-total"
+                      aria-label="Stock summary totals"
+                    >
+                      <span className="replay-ledger-summary-stocks-total-label">Total</span>
+                      <span className="replay-ledger-summary-stocks-total-metrics">
+                        <span>{ledgerStocksSummaryTotals.trades} trades</span>
+                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                          ·
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className={`replay-ledger-metric-explain-trigger ${
+                            ledgerStocksSummaryTotals.realizedPnl > 0
+                              ? 'replay-pnl-realized'
+                              : ledgerStocksSummaryTotals.realizedPnl < 0
+                                ? 'replay-pnl-detail-negative'
+                                : 'replay-ledger-summary-realized-zero'
+                          }`}
+                          aria-label="Open calculation details for total stock realized PnL"
+                          onMouseEnter={e =>
+                            handleMetricExplainEnter('stocks_total_realized', 'stk-total-rz', e)
+                          }
+                          onClick={e => {
+                            e.stopPropagation()
+                            handleMetricExplainEnter('stocks_total_realized', 'stk-total-rz', e)
+                          }}
+                        >
+                          {fmtUsd0(ledgerStocksSummaryTotals.realizedPnl)}
+                        </span>
+                        <span className="replay-ledger-summary-stocks-metric-sep" aria-hidden>
+                          ·
+                        </span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="replay-ledger-summary-stocks-notional replay-ledger-metric-explain-trigger"
+                          aria-label="Open calculation details for total stock notional"
+                          onMouseEnter={e =>
+                            handleMetricExplainEnter('stocks_total_notional', 'stk-total-nv', e)
+                          }
+                          onClick={e => {
+                            e.stopPropagation()
+                            handleMetricExplainEnter('stocks_total_notional', 'stk-total-nv', e)
+                          }}
+                        >
+                          nv {fmtUsd0(ledgerStocksSummaryTotals.notional)}
+                        </span>
                       </span>
-                    </span>
-                  </>
+                    </div>
+                  </div>
                 )}
               </section>
               {ledgerTab === 'strategy' && (
@@ -1768,18 +2014,6 @@ export function LedgerView({
                                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                             </svg>
                                           </button>
-                                          <LinkStrategyIconButton
-                                            title="Assign strategy opportunity and instance"
-                                            onClick={() => {
-                                              setLinkContext({
-                                                account_executions_id:
-                                                  ex.account_executions_id!,
-                                                execution: ex,
-                                              })
-                                              setLinkModalOpen(true)
-                                              setPageError(null)
-                                            }}
-                                          />
                                           <button
                                             type="button"
                                             className="btn btn-icon-small btn-icon-danger"
@@ -1907,18 +2141,6 @@ export function LedgerView({
                                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                             </svg>
                                           </button>
-                                          <LinkStrategyIconButton
-                                            title="Assign strategy opportunity and instance"
-                                            onClick={() => {
-                                              setLinkContext({
-                                                account_executions_id:
-                                                  ex.account_executions_id!,
-                                                execution: ex,
-                                              })
-                                              setLinkModalOpen(true)
-                                              setPageError(null)
-                                            }}
-                                          />
                                           <button
                                             type="button"
                                             className="btn btn-icon-small btn-icon-danger"
@@ -1978,6 +2200,20 @@ export function LedgerView({
           {pageError}
         </p>
       )}
+      {ledgerMetricExplain ? (
+        <DraggableExplainPanel
+          open
+          explanationId={ledgerMetricExplain.id}
+          anchor={ledgerMetricExplain.anchor}
+          onClose={() => setLedgerMetricExplain(null)}
+          title={ledgerMetricExplainTitle(ledgerMetricExplain.kind)}
+        >
+          <LedgerSummaryMetricExplainContent
+            kind={ledgerMetricExplain.kind}
+            payload={ledgerMetricExplain.payload}
+          />
+        </DraggableExplainPanel>
+      ) : null}
       <ExecutionFormModal
         open={addJournalOpen || !!editExec}
         editExec={editExec}
