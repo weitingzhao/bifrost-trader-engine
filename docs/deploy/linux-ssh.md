@@ -86,7 +86,7 @@ Run `./scripts/bifrost_ssh.sh` or `./scripts/bifrost_ssh.sh -i` / `--interactive
 
 1. **SSH password** is not written to disk. The script starts an SSH **ControlMaster** session so you enter the SSH password **once** (unless you use key-based auth), then `rsync` and follow-up `ssh` reuse that socket.
 2. Optionally enter the **remote sudo** password once; it is kept **only in shell memory** for this process and used with `sudo -S` for `systemctl`. Leave empty to be prompted on the TTY when needed, or use **NOPASSWD** sudo for `bifrost-*` on the server.
-3. The screen **redisplays** each turn: **Main menu** on top (order: systemctl one / all → quick deploy-only → quick deploy+restart all → wizard → reconnect SSH → clear sudo → quit), then a **fixed 20-line** block for the **last command’s** output (tail); no full-screen `less` pager. **ANSI colors** when stdout is a TTY. Sub-wizards (e.g. ONE service, Wizard) may scroll until you finish; then the next redraw restores the layout. While a **remote step** runs (SSH, `rsync`, `sudo systemctl`, reconnect), output is **streamed** to the terminal so it does not look stuck; a short **INFO** line explains that SSH/sudo may take a while.
+3. The screen **redisplays** each turn: **Main menu** on top (order: systemctl one / all → quick deploy `1`–`4` Server / Engine / Celery / All, append `R` to restart after deploy → reconnect SSH → clear sudo → quit), then a **fixed 20-line** block for the **last command’s** output (tail); no full-screen `less` pager. **ANSI colors** when stdout is a TTY. Sub-prompts (e.g. ONE service, quick deploy) may scroll until you finish; then the next redraw restores the layout. While a **remote step** runs (SSH, `rsync`, `sudo systemctl`, reconnect), output is **streamed** to the terminal so it does not look stuck; a short **INFO** line explains that SSH/sudo may take a while.
 
 ## Routine deploy / remote systemctl
 
@@ -151,14 +151,43 @@ Example **sudoers** snippet (adjust user; use `visudo`; extend if you use `start
 vision ALL=(ALL) NOPASSWD: /bin/systemctl start bifrost-server, /bin/systemctl stop bifrost-server, /bin/systemctl restart bifrost-server, /bin/systemctl start bifrost-celery, /bin/systemctl stop bifrost-celery, /bin/systemctl restart bifrost-celery, /bin/systemctl start bifrost-engine, /bin/systemctl stop bifrost-engine, /bin/systemctl restart bifrost-engine
 ```
 
+## Nginx reverse proxy (port 80)
+
+`bifrost-server` continues to listen on **127.0.0.1:8765** (see `server.port` in YAML). To serve the same app on **port 80** without running uvicorn as root, use **Nginx** on the Linux host (e.g. `192.168.10.70`).
+
+**Deploying the sample config to the server**
+
+- **`bifrost_ssh.sh` does not install Nginx** — it only **rsyncs the repo** (including `deploy/nginx/`). From your dev machine, sync code first:
+
+  ```bash
+  ./scripts/bifrost_ssh.sh --deploy-only
+  ```
+
+  (`--deploy` with a service action also runs rsync + build.) Set `DEPLOY_PATH` if the remote directory is not `/home/vision/bifrost-trader-engine`.
+
+- **On the server**, install Nginx once, then either run the helper script **or** copy by hand:
+
+  ```bash
+  sudo apt update && sudo apt install -y nginx
+  cd /home/vision/bifrost-trader-engine   # or your DEPLOY_PATH
+  bash deploy/nginx/install_on_server.sh
+  ```
+
+  Helper script: [`deploy/nginx/install_on_server.sh`](../../deploy/nginx/install_on_server.sh) — copies [`deploy/nginx/bifrost-status.conf`](../../deploy/nginx/bifrost-status.conf) into `/etc/nginx/sites-available/`, enables it, **removes Ubuntu’s `sites-enabled/default`** (that default site often causes **HTML 404** on `/status` because it serves static files, not the proxy), runs `nginx -t` and reloads.
+
+- Edit `/etc/nginx/sites-available/bifrost-status` if this host’s LAN IP is not `192.168.10.70` (adjust `server_name`).
+
+- Ensure **`bifrost-server` is running** (`systemctl status bifrost-server`). Nginx only proxies to `127.0.0.1:8765`. Quick check without Nginx: `curl -sS http://127.0.0.1:8765/status`.
+
 ## Verification
 
 ```bash
 curl -sS "http://192.168.10.70:8765/status"
+curl -sS "http://192.168.10.70/status"
 systemctl status bifrost-engine bifrost-server bifrost-celery
 ```
 
-Open `http://192.168.10.70:8765/` in a browser (static UI after `frontend` build on the server).
+Open `http://192.168.10.70/` (port 80 via Nginx) or `http://192.168.10.70:8765/` directly in a browser (static UI after `frontend` build on the server).
 
 ## Changing the deploy path
 

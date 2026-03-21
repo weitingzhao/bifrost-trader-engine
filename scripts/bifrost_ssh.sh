@@ -20,6 +20,7 @@ DEPLOY_PATH="${DEPLOY_PATH:-/home/vision/bifrost-trader-engine}"
 # Set by interactive mode: multiplexed SSH socket (no password file; reuse one authenticated session).
 SSH_CONTROL_PATH=""
 # Optional: remote sudo password for this process only (never written to disk).
+# May be preset via --password / -p / DEPLOY_SUDO_PASSWORD before interactive prompt.
 SUDO_PASSWORD=""
 
 DO_DEPLOY=0
@@ -87,13 +88,10 @@ _colorize_line() {
 
 _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} ONE service ${C_DIM}(one line, e.g. engine restart)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}systemctl:${C_RESET} ALL services ${C_DIM}(start / stop / restart)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Quick:${C_RESET} deploy-only ${C_DIM}(sync + build, no systemctl)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} ${C_BOLD}Quick:${C_RESET} deploy + restart ${C_DIM}ALL${C_RESET} units"
-  echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} ${C_BOLD}Wizard${C_RESET} ${C_DIM}(deploy / units / systemctl)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}6)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}7)${C_RESET} Clear stored sudo password"
+  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} one unit or all ${C_DIM}(units 1–3 + 4=all; e.g. engine restart, ${C_BOLD}43${C_DIM} = all+restart)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(1 Server / 2 Engine / 3 Celery / 4 All; append ${C_BOLD}R${C_DIM} to restart after deploy, e.g. 2R)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Clear stored sudo password"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
@@ -137,8 +135,11 @@ Usage (from repo root):
   ./scripts/bifrost_ssh.sh
   ./scripts/bifrost_ssh.sh -i
   ./scripts/bifrost_ssh.sh --interactive
+  ./scripts/bifrost_ssh.sh --password 'REMOTE_SUDO_SECRET' -i
       Interactive menu: open one SSH session (password once), then run operations in a loop;
-      main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below, or use the wizard.
+      main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
+      With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
+      kept in memory only for this process. Warning: --password may be visible in process listings.
 
   CLI (non-interactive):
 
@@ -162,11 +163,18 @@ Usage (from repo root):
     --migrate                   with --deploy or --deploy-only: run db_refresh_schema.py --prod on remote
     --sync-prod-config          with deploy: also rsync config/config.prod.yaml (overwrites remote)
 
+    --password VALUE | -p VALUE | --password=VALUE
+                                remote sudo password for sudo -S (interactive: skip password prompt;
+                                CLI: non-interactive sudo without NOPASSWD). Same as env DEPLOY_SUDO_PASSWORD.
+                                If sshpass(1) is installed, the same value is also used for SSH/rsync
+                                (non-interactive); otherwise only sudo is automated — use SSH keys or install sshpass.
+
   Environment:
 
     DEPLOY_HOST   (default 192.168.10.70)
     DEPLOY_USER   (default vision)
     DEPLOY_PATH   (default /home/vision/bifrost-trader-engine)
+    DEPLOY_SUDO_PASSWORD  optional; same effect as --password (skips interactive sudo prompt)
 
 Examples:
 
@@ -210,11 +218,26 @@ _set_action() {
 
 # --- SSH / rsync helpers (ControlMaster when SSH_CONTROL_PATH is set) ---
 
+# True when we can feed SSH the same secret as sudo (non-interactive): requires sshpass(1).
+_use_sshpass_for_ssh() {
+  [[ -n "${SUDO_PASSWORD}" ]] && command -v sshpass >/dev/null 2>&1
+}
+
+# Plain ssh (no multiplex socket). With --password/-p + sshpass, uses SSHPASS so SSH/rsync
+# do not re-prompt; without sshpass, only sudo -S is automated (SSH still prompts unless keys).
+_ssh_plain() {
+  if _use_sshpass_for_ssh; then
+    SSHPASS="${SUDO_PASSWORD}" sshpass -e ssh "$@"
+  else
+    ssh "$@"
+  fi
+}
+
 ssh_remote() {
   if [[ -n "${SSH_CONTROL_PATH}" ]]; then
     ssh -S "${SSH_CONTROL_PATH}" "$@"
   else
-    ssh "$@"
+    _ssh_plain "$@"
   fi
 }
 
@@ -240,8 +263,11 @@ _ssh_control_start() {
   fi
   _msg_info "Opening SSH master session to ${remote} (password not saved to disk)."
   echo "${C_DIM}Tip: use SSH keys to skip password prompts.${C_RESET}"
+  if _use_sshpass_for_ssh; then
+    _msg_info "Using sshpass for SSH login (same secret as --password / -p / DEPLOY_SUDO_PASSWORD)."
+  fi
   # -M master, -f background after auth, -N no remote command — session stays for ControlPersist
-  if ! ssh -M -S "${SSH_CONTROL_PATH}" -o ControlPersist=300 -o ConnectTimeout=15 -f -N "${remote}"; then
+  if ! _ssh_plain -M -S "${SSH_CONTROL_PATH}" -o ControlPersist=300 -o ConnectTimeout=15 -f -N "${remote}"; then
     SSH_CONTROL_PATH=""
     _msg_warn "Failed to start SSH master. Continuing without multiplexing (each command may ask for password)."
     return 1
@@ -334,6 +360,12 @@ _run_pipeline() {
           "${RSYNC_EXCLUDES[@]}" \
           "${PROJECT_ROOT}/" \
           "${REMOTE_URL}"
+      elif _use_sshpass_for_ssh; then
+        SSHPASS="${SUDO_PASSWORD}" rsync -avz \
+          -e "sshpass -e ssh" \
+          "${RSYNC_EXCLUDES[@]}" \
+          "${PROJECT_ROOT}/" \
+          "${REMOTE_URL}"
       else
         rsync -avz \
           -e ssh \
@@ -417,72 +449,57 @@ REMOTE_EOF
   return "${_ec}"
 }
 
-_interactive_wizard() {
-  _reset_run_state
+# Interactive: rsync + remote build; optional systemctl restart for selected unit(s). Input: 1–4, optional trailing R.
+_interactive_quick_deploy() {
+  local _raw _norm _digit _want_r
   echo ""
-  echo "${C_BLUE}${C_BOLD}--- Wizard: configure run ---${C_RESET}"
-  echo "${C_DIM}Required / optional steps below.${C_RESET}"
-  echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Include remote build (rsync + pip + npm)? ${C_DIM}[y/N]${C_RESET} "
-  read -r _d
-  case "${_d}" in
-    y|Y|yes|YES)
-      echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Deploy only (no systemctl)? ${C_DIM}[y/N]${C_RESET} "
-      read -r _do
-      case "${_do}" in
-        y|Y|yes|YES) DO_DEPLOY_ONLY=1 ;;
-        *) DO_DEPLOY=1 ;;
-      esac
-      if [[ "${DO_DEPLOY}" == "1" || "${DO_DEPLOY_ONLY}" == "1" ]]; then
-        echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Run DB migrate (db_refresh_schema --prod)? ${C_DIM}[y/N]${C_RESET} "
-        read -r _m
-        case "${_m}" in y|Y|yes|YES) DO_MIGRATE=1 ;; esac
-        echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Include config/config.prod.yaml in rsync? ${C_DIM}[y/N]${C_RESET} "
-        read -r _p
-        case "${_p}" in y|Y|yes|YES) SYNC_PROD_CONFIG=1 ;; esac
-      fi
-      ;;
-  esac
-
-  if [[ "${DO_DEPLOY_ONLY}" != "1" ]]; then
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Targets: ${C_DIM}[a]ll / [s]erver / [e]ngine / [c]elery / se, sec…${C_RESET} "
-    read -r _t
-    _t=$(echo "${_t}" | tr '[:upper:]' '[:lower:]')
-    case "${_t}" in
-      a|all) RESTART_ALL=1 ;;
-      s) _restart_add_unit bifrost-server ;;
-      e) _restart_add_unit bifrost-engine ;;
-      c) _restart_add_unit bifrost-celery ;;
-      *)
-        [[ "${_t}" == *s* ]] && _restart_add_unit bifrost-server
-        [[ "${_t}" == *e* ]] && _restart_add_unit bifrost-engine
-        [[ "${_t}" == *c* ]] && _restart_add_unit bifrost-celery
-        ;;
-    esac
-    if [[ "${RESTART_ALL}" != "1" ]] && [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
-      _msg_warn "No units selected; aborting this run."
-      return 1
+  echo "${C_BLUE}${C_BOLD}--- Quick: Deploy ---${C_RESET}"
+  _msg_info "Remote: rsync + venv pip + npm build. Append R to restart after deploy."
+  echo "  ${C_GREEN}1${C_RESET} = bifrost-server   ${C_GREEN}2${C_RESET} = bifrost-engine   ${C_GREEN}3${C_RESET} = bifrost-celery   ${C_GREEN}4${C_RESET} = all three"
+  echo "  Examples: ${C_DIM}4${C_RESET} = deploy only · ${C_DIM}2R${C_RESET} or ${C_DIM}2 r${C_RESET} = deploy + restart engine"
+  echo "  ${C_DIM}0 = cancel${C_RESET}"
+  while true; do
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-4, optional R]${C_RESET} "
+    read -r _raw
+    _raw=$(echo "${_raw}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ -z "${_raw}" || "${_raw}" == "0" ]]; then
+      _msg_info "Cancelled."
+      return 0
     fi
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} systemctl action: ${C_DIM}stop | start | restart${C_RESET} "
-    read -r _a
-    _a=$(echo "${_a}" | tr '[:upper:]' '[:lower:]')
-    case "${_a}" in
-      stop|start|restart) ACTION="${_a}" ;;
-      *) _msg_err "Invalid action."; return 1 ;;
-    esac
-  fi
-
-  echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Run now? ${C_DIM}[Y/n]${C_RESET} "
-  read -r _go
-  case "${_go}" in n|N|no|NO) _msg_info "Cancelled."; return 0 ;; esac
-  _run_pipeline || true
+    _norm=$(echo "${_raw}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    if [[ ! "${_norm}" =~ ^([1-4])(r)?$ ]]; then
+      _msg_warn "Invalid — enter 1–4, optionally with R (e.g. 2R). Or 0 to cancel."
+      continue
+    fi
+    _digit="${BASH_REMATCH[1]}"
+    _want_r="${BASH_REMATCH[2]}"
+    _reset_run_state
+    if [[ -n "${_want_r}" ]]; then
+      DO_DEPLOY=1
+      ACTION=restart
+      case "${_digit}" in
+        1) _restart_add_unit bifrost-server ;;
+        2) _restart_add_unit bifrost-engine ;;
+        3) _restart_add_unit bifrost-celery ;;
+        4) RESTART_ALL=1 ;;
+      esac
+      echo "${C_CYAN}→ deploy + sudo systemctl restart …${C_RESET}"
+    else
+      DO_DEPLOY_ONLY=1
+      echo "${C_CYAN}→ deploy only (rsync + build, no systemctl)${C_RESET}"
+    fi
+    _run_pipeline || true
+    break
+  done
 }
 
-# Map token -> bifrost unit name (empty if unknown).
+# Map token -> bifrost unit name, or ALL for all three units (empty if unknown).
 _interactive_map_unit_token() {
   case "$1" in
     1|server|s|bifrost-server) echo bifrost-server ;;
     2|engine|e|bifrost-engine) echo bifrost-engine ;;
     3|celery|c|bifrost-celery) echo bifrost-celery ;;
+    4|all|a) echo ALL ;;
     *) echo "" ;;
   esac
 }
@@ -497,15 +514,15 @@ _interactive_map_action_token() {
   esac
 }
 
-# Interactive: systemctl on one bifrost-* unit — one line: "<unit> <action>" (order can be swapped), or "23" = unit 2 + action 3.
+# Interactive: systemctl on one bifrost-* unit or all (same action) — "<unit> <action>" or digit shorthand (unit 1–4, action 1–3).
 _interactive_systemctl_one_service() {
   local _unit _act _t1 _t2 _u _a
   echo ""
-  echo "${C_BLUE}${C_BOLD}--- ONE service (systemctl) ---${C_RESET}"
+  echo "${C_BLUE}${C_BOLD}--- systemctl (one unit or all) ---${C_RESET}"
   _msg_info "Enter unit + action on one line (examples below)."
-  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1|server|s${C_RESET} → bifrost-server  ${C_DIM}2|engine|e${C_RESET} → engine  ${C_DIM}3|celery|c${C_RESET} → celery"
+  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1|server|s${C_RESET} → bifrost-server  ${C_DIM}2|engine|e${C_RESET} → engine  ${C_DIM}3|celery|c${C_RESET} → celery  ${C_DIM}4|all|a${C_RESET} → all three"
   echo "  ${C_GREEN}Action:${C_RESET} ${C_DIM}1${C_RESET}=start ${C_DIM}2${C_RESET}=stop ${C_DIM}3${C_RESET}=restart"
-  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_DIM}first two digits 1–3 (spaces ignored), e.g. ${C_BOLD}23${C_RESET}${C_DIM} = engine+restart${C_RESET}"
+  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_DIM}first two digits: unit ${C_BOLD}1–4${C_DIM} + action ${C_BOLD}1–3${C_RESET} (e.g. ${C_BOLD}23${C_RESET} engine+restart · ${C_BOLD}43${C_RESET} all+restart)"
   echo "  ${C_DIM}0 or empty = cancel${C_RESET}"
   while true; do
     echo -n "${C_GREEN}${C_BOLD}>${C_RESET} "
@@ -516,18 +533,30 @@ _interactive_systemctl_one_service() {
       return 0
     fi
 
-    # Shorthand: take all digits in order, use first two if both are 1–3 (spaces and other chars ignored)
+    # Shorthand: first digit = unit 1–4 (4=all), second = action 1–3
     _digits=$(echo "${_line}" | tr -cd '0-9')
     if [[ ${#_digits} -ge 2 ]]; then
       _d1="${_digits:0:1}"
       _d2="${_digits:1:1}"
-      if [[ "${_d1}" == [123] && "${_d2}" == [123] ]]; then
+      if [[ "${_d1}" == [1234] && "${_d2}" == [123] ]]; then
         _u="$(_interactive_map_unit_token "${_d1}")"
         _a="$(_interactive_map_action_token "${_d2}")"
-        echo "${C_CYAN}→ sudo systemctl ${_a} ${_u}${C_RESET}"
+        if [[ -z "${_u}" || -z "${_a}" ]]; then
+          _msg_warn "Invalid shorthand — use unit 1–4 and action 1–3 (e.g. 43). Or 0 to cancel."
+          continue
+        fi
+        if [[ "${_u}" == "ALL" ]]; then
+          echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server bifrost-celery bifrost-engine${C_RESET}"
+        else
+          echo "${C_CYAN}→ sudo systemctl ${_a} ${_u}${C_RESET}"
+        fi
         _reset_run_state
         ACTION="${_a}"
-        _restart_add_unit "${_u}"
+        if [[ "${_u}" == "ALL" ]]; then
+          RESTART_ALL=1
+        else
+          _restart_add_unit "${_u}"
+        fi
         _run_pipeline || true
         break
       fi
@@ -535,7 +564,7 @@ _interactive_systemctl_one_service() {
 
     set -- ${_line}
     if [[ $# -lt 2 ]]; then
-      _msg_warn "Invalid input — use two words (engine restart) or digit shorthand (23, 2 3). Try again, or 0 to cancel."
+      _msg_warn "Invalid input — use two words (engine restart, all restart) or digit shorthand (23, 43). Try again, or 0 to cancel."
       continue
     fi
     _t1="$1"
@@ -552,41 +581,22 @@ _interactive_systemctl_one_service() {
         _unit="${_u}"
         _act="${_a}"
       else
-        _msg_warn "Could not parse. Try engine restart, 2 3, or 23. Or 0 to cancel."
+        _msg_warn "Could not parse. Try engine restart, all restart, 2 3, or 43. Or 0 to cancel."
         continue
       fi
     fi
-    echo "${C_CYAN}→ sudo systemctl ${_act} ${_unit}${C_RESET}"
+    if [[ "${_unit}" == "ALL" ]]; then
+      echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server bifrost-celery bifrost-engine${C_RESET}"
+    else
+      echo "${C_CYAN}→ sudo systemctl ${_act} ${_unit}${C_RESET}"
+    fi
     _reset_run_state
     ACTION="${_act}"
-    _restart_add_unit "${_unit}"
-    _run_pipeline || true
-    break
-  done
-}
-
-# Interactive: systemctl on all three units (same action).
-_interactive_systemctl_all_services() {
-  local _act _raw
-  echo ""
-  echo "${C_BLUE}${C_BOLD}--- ALL services (same action) ---${C_RESET}"
-  _msg_info "Units: bifrost-server, bifrost-celery, bifrost-engine (one systemctl line)."
-  echo "  ${C_GREEN}1${C_RESET}|start   ${C_GREEN}2${C_RESET}|stop   ${C_GREEN}3${C_RESET}|restart"
-  echo "  ${C_DIM}0 or empty = cancel${C_RESET}"
-  while true; do
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Action ${C_DIM}[1-3]${C_RESET} "
-    read -r _raw
-    _raw=$(echo "${_raw}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')
-    case "${_raw}" in
-      0|'') _msg_info "Cancelled."; return 0 ;;
-      1|start) _act=start ;;
-      2|stop) _act=stop ;;
-      3|restart) _act=restart ;;
-      *) _msg_warn "Invalid — enter 1–3 or start/stop/restart. Or 0 to cancel."; continue ;;
-    esac
-    _reset_run_state
-    RESTART_ALL=1
-    ACTION="${_act}"
+    if [[ "${_unit}" == "ALL" ]]; then
+      RESTART_ALL=1
+    else
+      _restart_add_unit "${_unit}"
+    fi
     _run_pipeline || true
     break
   done
@@ -611,36 +621,30 @@ interactive_mode() {
   : >"${BIFROST_SSH_LAST_LOG}"
   trap '_ssh_control_cleanup; [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]] && rm -f "${BIFROST_SSH_LAST_LOG}"' EXIT INT TERM
 
-  echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Remote sudo password ${C_DIM}(Enter = prompt later / NOPASSWD / skip)${C_RESET}: "
-  read -r -s SUDO_PASSWORD || true
-  echo ""
-  if [[ -z "${SUDO_PASSWORD}" ]]; then
-    _msg_info "No sudo password stored — sudo will prompt on TTY when needed."
+  if [[ -n "${SUDO_PASSWORD}" ]]; then
+    _msg_info "Using sudo password from ${C_DIM}--password / -p / DEPLOY_SUDO_PASSWORD${C_RESET}; skipping prompt (cleared on exit)."
+    if ! command -v sshpass >/dev/null 2>&1; then
+      _msg_warn "sshpass not installed: SSH/rsync may still ask for the ${C_BOLD}login${C_RESET} password (sudo uses -p). Install sshpass to reuse the same secret for SSH, or use SSH keys."
+    fi
   else
-    _msg_info "sudo password will be used with sudo -S this session; cleared on exit."
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Remote sudo password ${C_DIM}(Enter = prompt later / NOPASSWD / skip)${C_RESET}: "
+    read -r -s SUDO_PASSWORD || true
+    echo ""
+    if [[ -z "${SUDO_PASSWORD}" ]]; then
+      _msg_info "No sudo password stored — sudo will prompt on TTY when needed."
+    else
+      _msg_info "sudo password will be used with sudo -S this session; cleared on exit."
+    fi
   fi
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-4|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
       1) _interactive_systemctl_one_service ;;
-      2) _interactive_systemctl_all_services ;;
+      2) _interactive_quick_deploy ;;
       3)
-        _reset_run_state
-        DO_DEPLOY_ONLY=1
-        _run_pipeline || true
-        ;;
-      4)
-        _reset_run_state
-        DO_DEPLOY=1
-        RESTART_ALL=1
-        ACTION=restart
-        _run_pipeline || true
-        ;;
-      5) _interactive_wizard ;;
-      6)
         _msg_info "Reconnecting SSH (output streams below; may take a few seconds)…"
         echo ""
         {
@@ -648,13 +652,13 @@ interactive_mode() {
           SSH_CONTROL_PATH=""
           _ssh_control_start
         } 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
-        _rc6=${PIPESTATUS[0]}
+        _rc4=${PIPESTATUS[0]}
         {
           echo ""
-          echo "--- exit code: ${_rc6} ---"
+          echo "--- exit code: ${_rc4} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
-      7)
+      4)
         SUDO_PASSWORD=""
         echo "[INFO] Stored sudo password cleared." >"${BIFROST_SSH_LAST_LOG}"
         ;;
@@ -663,7 +667,7 @@ interactive_mode() {
         _interactive_paint_full
         break
         ;;
-      *) echo "[WARN] Unknown choice — try 1–7 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
+      *) echo "[WARN] Unknown choice — try 1–4 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
     esac
   done
   _ssh_control_cleanup
@@ -677,6 +681,7 @@ interactive_mode() {
 
 INTERACTIVE_MODE=0
 CLI_ARGS=()
+PRESET_SUDO_PASSWORD=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
@@ -687,12 +692,29 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE_MODE=1
       shift
       ;;
+    --password=*)
+      PRESET_SUDO_PASSWORD="${1#*=}"
+      shift
+      ;;
+    --password|-p)
+      if [[ $# -lt 2 ]]; then
+        usage_error "${1} requires a value"
+      fi
+      PRESET_SUDO_PASSWORD="$2"
+      shift 2
+      ;;
     *)
       CLI_ARGS+=("$1")
       shift
       ;;
   esac
 done
+
+if [[ -n "${PRESET_SUDO_PASSWORD}" ]]; then
+  SUDO_PASSWORD="${PRESET_SUDO_PASSWORD}"
+elif [[ -n "${DEPLOY_SUDO_PASSWORD:-}" ]]; then
+  SUDO_PASSWORD="${DEPLOY_SUDO_PASSWORD}"
+fi
 
 if [[ "${INTERACTIVE_MODE}" == "1" ]] || [[ ${#CLI_ARGS[@]} -eq 0 ]]; then
   interactive_mode
@@ -714,6 +736,19 @@ while [[ $# -gt 0 ]]; do
     --deploy-only) DO_DEPLOY_ONLY=1 ;;
     --migrate) DO_MIGRATE=1 ;;
     --sync-prod-config) SYNC_PROD_CONFIG=1 ;;
+    --password=*)
+      SUDO_PASSWORD="${1#*=}"
+      shift
+      continue
+      ;;
+    --password|-p)
+      if [[ $# -lt 2 ]]; then
+        usage_error "${1} requires a value"
+      fi
+      SUDO_PASSWORD="$2"
+      shift 2
+      continue
+      ;;
     *)
       usage_error "unknown option: $1"
       ;;

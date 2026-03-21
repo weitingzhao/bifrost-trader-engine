@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Execution, OptExecutionGroup, StatusResponse } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
-import { deleteExecution, fetchOpportunities, fetchStrategyInstances } from '../../api'
+import { deleteExecution, fetchOpportunities, fetchStrategyInstances, updateExecution } from '../../api'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
@@ -125,6 +125,7 @@ export function LedgerView({
     confirming: boolean
     exec: Execution | null
   }>({ open: false, title: '', message: '', confirming: false, exec: null })
+  const [syncingAccountExecutionsId, setSyncingAccountExecutionsId] = useState<number | null>(null)
 
   const handleEditExecution = useCallback((ex: Execution) => {
     setEditExec(ex)
@@ -140,6 +141,41 @@ export function LedgerView({
     setLinkModalOpen(true)
     setPageError(null)
   }, [])
+
+  const handleSyncOppositeLegAttribution = useCallback(
+    async (target: Execution, peer: Execution) => {
+      const tid = target.account_executions_id
+      const opp = peer.strategy_opportunity_id
+      const inst = peer.strategy_instance_id
+      if (
+        tid == null ||
+        opp == null ||
+        inst == null ||
+        !Number.isFinite(Number(opp)) ||
+        !Number.isFinite(Number(inst))
+      ) {
+        return
+      }
+      setSyncingAccountExecutionsId(tid)
+      setPageError(null)
+      try {
+        const res = await updateExecution(tid, {
+          strategy_opportunity_id: Number(opp),
+          strategy_instance_id: Number(inst),
+        })
+        if (!res.ok) {
+          setPageError(res.error ?? 'Failed to sync strategy from opposite leg.')
+        } else {
+          await loadReplayData()
+        }
+      } catch (err) {
+        setPageError(err instanceof Error ? err.message : 'Failed to sync strategy from opposite leg.')
+      } finally {
+        setSyncingAccountExecutionsId(null)
+      }
+    },
+    [loadReplayData],
+  )
 
   const handleDeleteExecution = useCallback((ex: Execution) => {
     setPageError(null)
@@ -1162,6 +1198,8 @@ export function LedgerView({
                             onEditExecution={handleEditExecution}
                             onLinkExecution={handleLinkExecution}
                             onDeleteExecution={handleDeleteExecution}
+                            onSyncOppositeLegAttribution={handleSyncOppositeLegAttribution}
+                            syncingAccountExecutionsId={syncingAccountExecutionsId}
                             detailPlaceholder="Click a closed trade row above to load details; then use Link to assign an instance."
                             sectionAriaLabel="No-instance closed option positions and details"
                           />
@@ -1236,6 +1274,8 @@ export function LedgerView({
                         onEditExecution={handleEditExecution}
                         onLinkExecution={handleLinkExecution}
                         onDeleteExecution={handleDeleteExecution}
+                        onSyncOppositeLegAttribution={handleSyncOppositeLegAttribution}
+                        syncingAccountExecutionsId={syncingAccountExecutionsId}
                       />
                       )}
 

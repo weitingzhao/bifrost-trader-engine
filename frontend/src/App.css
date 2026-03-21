@@ -11411,6 +11411,11 @@ th:has(> .coverage-pool-th-held-amt) {
   font-weight: 500;
 }
 
+.ledger-sync-opposite-leg-btn {
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
 /* Instance icon link in Trade History Detail (Contract cell) */
 .ledger-instance-icon-link {
   display: inline-flex;
@@ -11438,12 +11443,12 @@ th:has(> .coverage-pool-th-held-amt) {
   color: var(--color-warning, #ca8a04);
   opacity: 1;
 }
-.ledger-instance-icon-link--different {
-  color: var(--color-danger, #dc2626);
+.ledger-instance-icon-link--multiple {
+  color: var(--color-instance-multi, #7c3aed);
   cursor: default;
 }
-.ledger-instance-icon-link--different:hover {
-  color: var(--color-danger, #dc2626);
+.ledger-instance-icon-link--multiple:hover {
+  color: var(--color-instance-multi, #7c3aed);
   opacity: 1;
 }
 .ledger-instance-icon-link--same {

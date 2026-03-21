@@ -11,7 +11,7 @@ import {
   getContractLabelParts,
 } from '../../utils/format'
 import {
-  getAggregatedInstanceConsistencyState,
+  findOppositeLegAttributionSource,
   getInstanceConsistencyState,
   getOptGroupKey,
 } from './ledgerOptHelpers'
@@ -36,6 +36,36 @@ function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title
   )
 }
 
+function SyncOppositeLegAttributionButton({
+  onClick,
+  title,
+  disabled,
+}: {
+  onClick: () => void
+  title: string
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      className="btn btn-icon-small ledger-sync-opposite-leg-btn"
+      onClick={e => {
+        e.stopPropagation()
+        onClick()
+      }}
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+    >
+      <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M23 4v6h-6" />
+        <path d="M1 20v-6h6" />
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+      </svg>
+    </button>
+  )
+}
+
 export interface LedgerClosedOptionContractsSectionProps {
   sortedClosedGroups: OptExecutionGroup[]
   closedExpandedGroups: OptExecutionGroup[]
@@ -50,6 +80,10 @@ export interface LedgerClosedOptionContractsSectionProps {
   onEditExecution: (ex: Execution) => void
   onLinkExecution: (ex: Execution) => void
   onDeleteExecution: (ex: Execution) => void
+  /** Copy strategy opportunity + instance from opposite-side same-|qty| fill in the group (closed option details). */
+  onSyncOppositeLegAttribution?: (target: Execution, peer: Execution) => void | Promise<void>
+  /** While a sync PATCH is in flight for this execution id */
+  syncingAccountExecutionsId?: number | null
   /** Shown when no row is expanded in the details table */
   detailPlaceholder?: string
   sectionAriaLabel?: string
@@ -67,6 +101,8 @@ export function LedgerClosedOptionContractsSection({
   onEditExecution,
   onLinkExecution,
   onDeleteExecution,
+  onSyncOppositeLegAttribution,
+  syncingAccountExecutionsId = null,
   detailPlaceholder = 'Click a closed trade row above to load details',
   sectionAriaLabel = 'Closed option positions and details',
 }: LedgerClosedOptionContractsSectionProps) {
@@ -199,31 +235,24 @@ export function LedgerClosedOptionContractsSection({
                   <td className="replay-opt-contract">
                     {(() => {
                       const trades = g.trades ?? []
-                      const singleAccountState = getInstanceConsistencyState(trades)
-                      const aggregatedAccountState = getAggregatedInstanceConsistencyState(trades)
-                      const resolvedState =
-                        new Set(trades.map(t => (t.account_id ?? '').trim()).filter(Boolean)).size <= 1
-                          ? singleAccountState
-                          : aggregatedAccountState
-                      const isSameState = resolvedState === 'same'
-                      const isDifferentState = resolvedState === 'different'
-                      const allSameInstance = singleAccountState === 'same'
-                      const singleInstanceId = allSameInstance
-                        ? trades.find(
-                            t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id),
-                          )?.strategy_instance_id ?? null
-                        : null
+                      const resolvedState = getInstanceConsistencyState(trades)
+                      const singleInstanceId =
+                        resolvedState === 'same'
+                          ? trades.find(
+                              t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id),
+                            )?.strategy_instance_id ?? null
+                          : null
                       const p = getContractLabelParts(g.contract_key)
                       const strikeStr = g.strike != null ? ` ${g.strike}` : ''
                       const instanceIcon =
                         resolvedState !== 'none' ? (
-                          isSameState && singleInstanceId != null ? (
+                          resolvedState === 'same' && singleInstanceId != null ? (
                             <a
                               href={`#/strategies/instances/${singleInstanceId}`}
                               className="ledger-instance-icon-link ledger-instance-icon-link--same"
                               target="_blank"
                               rel="noopener noreferrer"
-                              title="Instance consistency is green across accounts (click to open when there is a single shared instance)"
+                              title="All fills share one strategy instance (click to open)"
                               aria-label="View strategy instance"
                               onClick={e => e.stopPropagation()}
                             >
@@ -231,11 +260,11 @@ export function LedgerClosedOptionContractsSection({
                                 <rect x="5" y="5" width="14" height="14" rx="1" />
                               </svg>
                             </a>
-                          ) : isSameState ? (
+                          ) : resolvedState === 'same' ? (
                             <span
                               className="ledger-instance-icon-link ledger-instance-icon-link--same"
-                              title="All accounts are consistent on instance assignment (green)"
-                              aria-label="Instance status is green"
+                              title="All fills share one strategy instance"
+                              aria-label="Single shared instance"
                               onClick={e => e.stopPropagation()}
                               role="img"
                             >
@@ -243,11 +272,11 @@ export function LedgerClosedOptionContractsSection({
                                 <rect x="5" y="5" width="14" height="14" rx="1" />
                               </svg>
                             </span>
-                          ) : isDifferentState ? (
+                          ) : resolvedState === 'multiple' ? (
                             <span
-                              className="ledger-instance-icon-link ledger-instance-icon-link--different"
-                              title="At least one account has different instance IDs in details"
-                              aria-label="Instance status is red"
+                              className="ledger-instance-icon-link ledger-instance-icon-link--multiple"
+                              title="All fills have an instance; more than one distinct instance ID in this group"
+                              aria-label="Multiple distinct instances"
                               onClick={e => e.stopPropagation()}
                               role="img"
                             >
@@ -258,8 +287,8 @@ export function LedgerClosedOptionContractsSection({
                           ) : (
                             <span
                               className="ledger-instance-icon-link ledger-instance-icon-link--mixed"
-                              title="At least one account has mixed or missing instance links in details"
-                              aria-label="Instance status is yellow"
+                              title="At least one fill has no strategy instance in this group"
+                              aria-label="Some fills missing instance"
                               onClick={e => e.stopPropagation()}
                               role="img"
                             >
@@ -372,6 +401,13 @@ export function LedgerClosedOptionContractsSection({
           ) : (
             closedExpandedGroups.flatMap(g =>
               (g.trades ?? []).map((ex, ti) => {
+                const groupTrades = g.trades ?? []
+                const oppositeAttributionPeer = findOppositeLegAttributionSource(groupTrades, ex)
+                const showSyncOppositeAttribution =
+                  onSyncOppositeLegAttribution &&
+                  ex.account_executions_id != null &&
+                  (ex.strategy_instance_id == null || !Number.isFinite(Number(ex.strategy_instance_id))) &&
+                  oppositeAttributionPeer != null
                 const s = (ex.side ?? '').toUpperCase()
                 const sideLabel =
                   s === 'BUY' || s === 'BOT' || s === 'B'
@@ -406,6 +442,7 @@ export function LedgerClosedOptionContractsSection({
                           : instanceId != null
                             ? `View instance #${instanceId}`
                             : ''
+                        const peer = oppositeAttributionPeer
                         return (
                           <>
                             {instanceId != null && (
@@ -438,6 +475,13 @@ export function LedgerClosedOptionContractsSection({
                                 )}
                               </>
                             )}
+                            {showSyncOppositeAttribution && peer && onSyncOppositeLegAttribution ? (
+                              <SyncOppositeLegAttributionButton
+                                disabled={syncingAccountExecutionsId === ex.account_executions_id}
+                                title="Apply strategy opportunity and instance from the opposite-side fill with the same quantity in this group"
+                                onClick={() => onSyncOppositeLegAttribution(ex, peer)}
+                              />
+                            ) : null}
                           </>
                         )
                       })()}

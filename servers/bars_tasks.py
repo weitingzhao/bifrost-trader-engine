@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -26,6 +27,21 @@ from servers.celery_app import WORKER_IB_STATUS_KEY, WORKER_IB_STATUS_TTL_SEC  #
 from servers.celery_app import WORKER_STOP_REQUESTED_KEY  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _config_path_for_bars_task() -> Optional[str]:
+    """Explicit YAML path from argv if present; else None so read_config uses BIFROST_CONFIG (set by run_celery / prod).
+
+    Celery worker argv is like ``worker -l info -Q bars`` — no config file. Previously we always fell back to
+    ``config/config.yaml`` only, missing deep-merge with ``config.prod.yaml`` when postgres/IB live in the overlay.
+    """
+    for a in sys.argv[1:]:
+        if a.startswith("-"):
+            continue
+        candidate = Path(a) if os.path.isabs(a) else _project_root / a
+        if candidate.is_file() and candidate.suffix.lower() in (".yaml", ".yml"):
+            return str(candidate.resolve())
+    return None
 
 
 def _is_bars_skip_ib(status_cfg: Optional[Dict[str, Any]] = None) -> bool:
@@ -444,13 +460,8 @@ def backfill_bars(
         _update_result(job_id, "failed", {"ok": False, "error": str(e)})
         return {"ok": False, "error": str(e)}
 
-    args = [a for a in __import__("sys").argv[1:] if not a.startswith("--")]
-    config_path = args[0] if args else None
-    if config_path and not os.path.isabs(config_path):
-        config_path = os.path.join(_project_root, config_path)
-    elif config_path is None:
-        config_path = os.path.join(_project_root, "config", "config.yaml")
-    if not os.path.isfile(config_path):
+    config_path = _config_path_for_bars_task()
+    if config_path is not None and not os.path.isfile(config_path):
         _update_result(job_id, "failed", {"ok": False, "error": f"Config not found: {config_path}"}, config_path=config_path)
         return {"ok": False, "error": "Config not found"}
 
