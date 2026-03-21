@@ -1,5 +1,37 @@
 import type { Execution, OptExecutionGroup } from '../../types'
 
+/** Instance id(s) attributed to this execution: multi-row splits or single-column strategy_instance_id. */
+export function executionStrategyInstanceIds(ex: Execution): number[] {
+  const allocs = ex.instance_allocations
+  if (allocs && allocs.length > 0) {
+    const out: number[] = []
+    for (const a of allocs) {
+      const id = a.strategy_instance_id
+      if (id != null && Number.isFinite(Number(id))) {
+        out.push(Number(id))
+      }
+    }
+    return out
+  }
+  if (ex.strategy_instance_id != null && Number.isFinite(Number(ex.strategy_instance_id))) {
+    return [Number(ex.strategy_instance_id)]
+  }
+  return []
+}
+
+/** Label for a specific instance on this execution (split row or single-column). */
+export function executionInstanceLabel(ex: Execution, instanceId: number): string | null {
+  const allocs = ex.instance_allocations
+  if (allocs && allocs.length > 0) {
+    const m = allocs.find(a => a.strategy_instance_id === instanceId)
+    const fromAlloc = m?.strategy_instance_label?.trim()
+    if (fromAlloc) return fromAlloc
+  }
+  const col = ex.strategy_instance_label?.trim()
+  if (ex.strategy_instance_id === instanceId && col) return col
+  return null
+}
+
 export function getOptGroupKey(g: OptExecutionGroup): string {
   return `${g.contract_key}-${g.strike}-${g.expiry}`
 }
@@ -14,13 +46,12 @@ export type InstanceConsistencyState = 'none' | 'mixed' | 'same' | 'multiple'
  */
 export function getInstanceConsistencyState(trades: Execution[]): InstanceConsistencyState {
   if (trades.length === 0) return 'none'
-  const instanceIds = trades
-    .map(t => t.strategy_instance_id)
-    .filter((id): id is number => id != null && Number.isFinite(id))
+  const instanceIds: number[] = []
+  for (const t of trades) {
+    instanceIds.push(...executionStrategyInstanceIds(t))
+  }
   if (instanceIds.length === 0) return 'none'
-  const allHaveInstance = trades.every(
-    t => t.strategy_instance_id != null && Number.isFinite(t.strategy_instance_id),
-  )
+  const allHaveInstance = trades.every(t => executionStrategyInstanceIds(t).length > 0)
   if (!allHaveInstance) return 'mixed'
   return new Set(instanceIds).size === 1 ? 'same' : 'multiple'
 }
@@ -58,8 +89,10 @@ export function findOppositeLegAttributionSource(trades: Execution[], ex: Execut
     if (executionAbsQuantity(t) !== exQty) continue
 
     const opp = t.strategy_opportunity_id
-    const inst = t.strategy_instance_id
-    if (opp == null || inst == null || !Number.isFinite(Number(opp)) || !Number.isFinite(Number(inst))) {
+    const instIds = executionStrategyInstanceIds(t)
+    if (instIds.length !== 1) continue
+    const inst = instIds[0]
+    if (opp == null || !Number.isFinite(Number(opp)) || !Number.isFinite(Number(inst))) {
       continue
     }
     return t

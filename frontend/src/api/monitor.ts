@@ -1,6 +1,28 @@
 import type { ControlResponse } from '../types'
 import { API } from './constants'
 
+export interface SseQueueCategory {
+  connection_count: number
+  maxsize: number
+  depths: number[]
+  total_queued: number
+  max_depth: number
+}
+
+export interface SseQueueMetrics {
+  ts: number
+  quotes: SseQueueCategory
+  daemon_logs: SseQueueCategory
+  server_logs: SseQueueCategory
+  celery_logs: SseQueueCategory
+}
+
+export async function fetchSseQueueMetrics(): Promise<SseQueueMetrics> {
+  const r = await fetch(`${API}/api/monitor/sse-queue-metrics`)
+  if (!r.ok) throw new Error(r.statusText)
+  return r.json()
+}
+
 const MONITOR_STOP_FETCH_TIMEOUT_MS = 15000
 
 export async function postMonitorStop(): Promise<ControlResponse & { monitor_enabled?: boolean }> {

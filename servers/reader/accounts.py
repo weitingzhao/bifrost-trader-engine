@@ -28,6 +28,118 @@ logger = logging.getLogger(__name__)
 _JOURNAL_ID_OFFSET = 1000000000
 
 
+def _normalized_signed_qty_from_raw(source: Any, side: Any, quantity: Any) -> float:
+    """Match servers/reader/executions _QTY_NORM for flex/journal (not tws_raw scope)."""
+    try:
+        q = float(quantity)
+    except (TypeError, ValueError):
+        return 0.0
+    src = (str(source or "")).strip().lower()
+    sd = (str(side or "")).strip().upper()
+    if src == "tws_client":
+        return q
+    if sd in ("SELL", "SLD", "S"):
+        return -abs(q)
+    return q
+
+
+def _apply_instance_allocations_on_cursor(
+    cur: Any,
+    account_executions_id: int,
+    raw_tbl: str,
+    pk_col: str,
+    pk_val: int,
+    body_allocations: List[Dict[str, Any]],
+) -> bool:
+    """DELETE + optional INSERT; clear raw strategy columns when non-empty allocations."""
+    cur.execute(
+        f"SELECT account_id, quantity, side, source FROM {raw_tbl} WHERE {pk_col} = %s",
+        (pk_val,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return False
+    acc_id = (row[0] or "").strip()
+    expected = _normalized_signed_qty_from_raw(row[3], row[2], row[1])
+    cur.execute(
+        "DELETE FROM account_execution_instance_allocation WHERE account_executions_id = %s",
+        (int(account_executions_id),),
+    )
+    if not body_allocations:
+        return True
+    total = 0.0
+    inserts: List[Tuple[int, float]] = []
+    for item in body_allocations:
+        if not isinstance(item, dict):
+            return False
+        si_raw = item.get("strategy_instance_id")
+        aq_raw = item.get("allocated_quantity")
+        if si_raw is None or aq_raw is None:
+            return False
+        try:
+            si_id = int(si_raw)
+            aq = float(aq_raw)
+        except (TypeError, ValueError):
+            return False
+        cur.execute(
+            "SELECT account_id FROM strategy_instance WHERE strategy_instance_id = %s",
+            (si_id,),
+        )
+        si_row = cur.fetchone()
+        if not si_row or (si_row[0] or "").strip() != acc_id:
+            return False
+        inserts.append((si_id, aq))
+        total += aq
+    if len({x[0] for x in inserts}) != len(inserts):
+        return False
+    if abs(total - expected) > 1e-5 * max(1.0, abs(expected)):
+        return False
+    for si_id, aq in inserts:
+        cur.execute(
+            """
+            INSERT INTO account_execution_instance_allocation (
+                account_id, account_executions_id, strategy_instance_id, allocated_quantity
+            ) VALUES (%s, %s, %s, %s)
+            """,
+            (acc_id, int(account_executions_id), si_id, aq),
+        )
+    cur.execute(
+        f"UPDATE {raw_tbl} SET strategy_instance_id = NULL, strategy_opportunity_id = NULL WHERE {pk_col} = %s",
+        (pk_val,),
+    )
+    return True
+
+
+def replace_execution_instance_allocations(
+    status_config: dict,
+    account_executions_id: int,
+    body_allocations: Any,
+) -> bool:
+    """Replace or clear account_execution_instance_allocation rows. body_allocations: None=skip, []=delete all, list=replace."""
+    if body_allocations is None:
+        return True
+    if not isinstance(body_allocations, list):
+        return False
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    raw_tbl, pk_col, pk_val = _raw_table_pk_for_account_executions_id(account_executions_id)
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                if not _apply_instance_allocations_on_cursor(cur, account_executions_id, raw_tbl, pk_col, pk_val, body_allocations):
+                    conn.rollback()
+                    return False
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("replace_execution_instance_allocations failed: %s", e)
+        return False
+
+
 def _raw_table_pk_for_account_executions_id(account_executions_id: int) -> Tuple[str, str, int]:
     """
     Map overlay account_executions_id to the row in executions_raw_flex | executions_raw_tws | executions_raw_journal.
@@ -318,23 +430,36 @@ def get_accounts_from_tables(conn: Any) -> Optional[List[Dict[str, Any]]]:
                     with conn.cursor(cursor_factory=RealDictCursor) as cur_sl:
                         cur_sl.execute(
                             f"""
-                            SELECT e.contract_key,
-                                   e.strategy_opportunity_id,
-                                   e.strategy_instance_id,
+                            SELECT u.contract_key,
+                                   u.strategy_opportunity_id,
+                                   u.strategy_instance_id,
                                    so.name AS strategy_opportunity_name,
                                    si.label AS strategy_instance_label
                             FROM (
-                                SELECT DISTINCT ON (contract_key, strategy_opportunity_id, strategy_instance_id)
-                                       contract_key, strategy_opportunity_id, strategy_instance_id
-                                FROM {_exec_tbl}
-                                WHERE account_id = %s
-                                  AND contract_key = ANY(%s::text[])
-                                  AND (strategy_opportunity_id IS NOT NULL OR strategy_instance_id IS NOT NULL)
-                            ) e
-                            LEFT JOIN strategy_opportunity so ON e.strategy_opportunity_id = so.strategy_opportunity_id
-                            LEFT JOIN strategy_instance si ON e.strategy_instance_id = si.strategy_instance_id
+                                SELECT DISTINCT contract_key, strategy_opportunity_id, strategy_instance_id
+                                FROM (
+                                    SELECT contract_key, strategy_opportunity_id, strategy_instance_id
+                                    FROM {_exec_tbl}
+                                    WHERE account_id = %s
+                                      AND contract_key = ANY(%s::text[])
+                                      AND (strategy_opportunity_id IS NOT NULL OR strategy_instance_id IS NOT NULL)
+                                    UNION
+                                    SELECT e.contract_key,
+                                           si.strategy_opportunity_id,
+                                           a.strategy_instance_id
+                                    FROM account_execution_instance_allocation a
+                                    INNER JOIN strategy_instance si ON a.strategy_instance_id = si.strategy_instance_id
+                                    INNER JOIN {_exec_tbl} e
+                                      ON e.account_executions_id = a.account_executions_id
+                                     AND e.account_id IS NOT DISTINCT FROM a.account_id
+                                    WHERE a.account_id = %s
+                                      AND e.contract_key = ANY(%s::text[])
+                                ) x
+                            ) u
+                            LEFT JOIN strategy_opportunity so ON u.strategy_opportunity_id = so.strategy_opportunity_id
+                            LEFT JOIN strategy_instance si ON u.strategy_instance_id = si.strategy_instance_id
                             """,
-                            (acc_id, ck_list),
+                            (acc_id, ck_list, acc_id, ck_list),
                         )
                         for sl_row in cur_sl.fetchall():
                             ck = sl_row.get("contract_key") or ""
@@ -943,6 +1068,15 @@ def insert_one_execution(status_config: dict, body: Dict[str, Any]) -> Optional[
                         """,
                         (exec_id, commission, currency or None, realized_pnl),
                     )
+                if new_id is not None and body.get("instance_allocations") is not None:
+                    ia = body.get("instance_allocations")
+                    if not isinstance(ia, list):
+                        conn.rollback()
+                        return None
+                    rtbl, rpkc, rpkv = _raw_table_pk_for_account_executions_id(new_id)
+                    if not _apply_instance_allocations_on_cursor(cur, new_id, rtbl, rpkc, rpkv, ia):
+                        conn.rollback()
+                        return None
             conn.commit()
             return new_id
         finally:
@@ -1132,8 +1266,19 @@ def update_one_execution(status_config: dict, account_executions_id: int, body: 
                             account_executions_id,
                         )
                         return False
-                elif not any(k in body for k in commission_keys):
+                elif not any(k in body for k in commission_keys) and "instance_allocations" not in body:
                     return False
+                if "instance_allocations" in body:
+                    ia = body.get("instance_allocations")
+                    if ia is not None and not isinstance(ia, list):
+                        conn.rollback()
+                        return False
+                    if ia is not None:
+                        if not _apply_instance_allocations_on_cursor(
+                            cur, account_executions_id, raw_tbl, pk_col, pk_val, ia
+                        ):
+                            conn.rollback()
+                            return False
                 # commission 相关（exec_id 从物理表读取）
                 if any(k in body for k in commission_keys):
                     cur.execute(f"SELECT exec_id FROM {raw_tbl} WHERE {pk_col} = %s", (pk_val,))
@@ -1181,6 +1326,10 @@ def delete_one_execution(status_config: dict, account_executions_id: int) -> boo
                 cur.execute(f"SELECT exec_id FROM {raw_tbl} WHERE {pk_col} = %s", (pk_val,))
                 row = cur.fetchone()
                 exec_id = row[0] if row and row[0] and str(row[0]).strip() else None
+                cur.execute(
+                    "DELETE FROM account_execution_instance_allocation WHERE account_executions_id = %s",
+                    (int(account_executions_id),),
+                )
                 if exec_id:
                     cur.execute("DELETE FROM account_execution_commissions WHERE exec_id = %s", (exec_id,))
                 cur.execute(f"DELETE FROM {raw_tbl} WHERE {pk_col} = %s", (pk_val,))
@@ -1213,6 +1362,13 @@ def batch_update_execution_strategy(
     try:
         with conn.cursor() as cur:
             if execution_ids:
+                cur.execute(
+                    "SELECT 1 FROM account_execution_instance_allocation WHERE account_executions_id = ANY(%s) LIMIT 1",
+                    (execution_ids,),
+                )
+                if cur.fetchone():
+                    conn.rollback()
+                    return -1
                 for eid in execution_ids:
                     try:
                         raw_tbl, pk_col, pk_val = _raw_table_pk_for_account_executions_id(int(eid))
@@ -1229,6 +1385,23 @@ def batch_update_execution_strategy(
                     count += cur.rowcount
             elif contract_key and contract_key.strip():
                 ck = contract_key.strip()
+                cur.execute(
+                    """
+                    SELECT 1 FROM account_execution_instance_allocation a
+                    WHERE a.account_id = %s
+                      AND EXISTS (
+                        SELECT 1 FROM account_executions e
+                        WHERE e.account_executions_id = a.account_executions_id
+                          AND e.account_id IS NOT DISTINCT FROM a.account_id
+                          AND trim(COALESCE(e.contract_key, '')) = trim(COALESCE(%s, ''))
+                      )
+                    LIMIT 1
+                    """,
+                    (acc, ck),
+                )
+                if cur.fetchone():
+                    conn.rollback()
+                    return -1
                 for raw_tbl in ("executions_raw_tws", "executions_raw_flex", "executions_raw_journal"):
                     cur.execute(
                         f"""

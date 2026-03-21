@@ -12896,3 +12896,27 @@ th:has(> .coverage-pool-th-held-amt) {
     flex: 1;
   }
 }
+
+/* SSE queue backlog badges */
+.sse-depths-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.sse-depth-badge {
+  display: inline-block;
+  min-width: 1.6em;
+  text-align: center;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+  background: var(--color-surface-alt, rgba(128,128,128,0.08));
+}
+.sse-depth-badge.warm {
+  background: var(--color-warning-bg, rgba(255,170,0,0.15));
+  color: var(--color-warning, #b08000);
+}
+.sse-depth-badge.hot {
+  background: var(--color-error-bg, rgba(255,60,60,0.15));
+  color: var(--color-error, #c00);
+}

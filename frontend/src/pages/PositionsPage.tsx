@@ -18,6 +18,7 @@ import {
   getContractLabelParts,
   parseOptionContractKey,
 } from '../utils/format'
+import { executionStrategyInstanceIds } from './portfolio/ledgerOptHelpers'
 
 /** Align position vs execution contract_key: OCC local differs in segment 1; OPT|expiry|strike|right match. */
 function optExecutionMatchKey(accountId: string, contractKey: string): string {
@@ -2317,8 +2318,10 @@ export function PositionsPage({
                                                 const execLists = getPositionExecLists(pos)
                                                 const execMatchesInstance = (ex: Execution) =>
                                                   allGroup.strategy_instance_id == null
-                                                    ? ex.strategy_instance_id == null
-                                                    : ex.strategy_instance_id === allGroup.strategy_instance_id
+                                                    ? executionStrategyInstanceIds(ex).length === 0
+                                                    : executionStrategyInstanceIds(ex).includes(
+                                                        Number(allGroup.strategy_instance_id),
+                                                      )
                                                 const scopedFinalExecs = execLists.final.filter(execMatchesInstance)
                                                 const scopedTwsExecs = execLists.tws.filter(execMatchesInstance)
                                                 const execCount = scopedFinalExecs.length + scopedTwsExecs.length

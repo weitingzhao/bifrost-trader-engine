@@ -169,5 +169,7 @@ export {
   postMonitorReleaseIb,
   postCeleryStop,
   postMonitorConnect,
+  fetchSseQueueMetrics,
 } from './monitor'
+export type { SseQueueMetrics, SseQueueCategory } from './monitor'
 export { fetchRiskSummary, fetchPerformance, getTransactions, postTransactionsFetch } from './performance'

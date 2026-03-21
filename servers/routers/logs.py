@@ -11,6 +11,7 @@ from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from servers.routers.deps import DAEMON_LOG_STREAM_KEY, SERVER_LOG_STREAM_KEY, daemon_log_redis_url
+from servers.sse_queue_utils import put_nowait_drop_oldest
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def _daemon_log_reader_loop(app_ref) -> None:
                         loop = getattr(app_ref.state, "_daemon_log_loop", None)
                         for q in queues:
                             if loop and not loop.is_closed():
-                                loop.call_soon_threadsafe(q.put_nowait, line)
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
             except redis.ConnectionError:
                 time.sleep(2)
             except Exception as e:
@@ -66,7 +67,7 @@ def _server_log_reader_loop(app_ref) -> None:
                         loop = getattr(app_ref.state, "_server_log_loop", None)
                         for q in queues:
                             if loop and not loop.is_closed():
-                                loop.call_soon_threadsafe(q.put_nowait, line)
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
             except redis.ConnectionError:
                 time.sleep(2)
             except Exception as e:
@@ -96,7 +97,7 @@ def _celery_log_reader_loop(app_ref) -> None:
                         loop = getattr(app_ref.state, "_celery_log_loop", None)
                         for q in queues:
                             if loop and not loop.is_closed():
-                                loop.call_soon_threadsafe(q.put_nowait, line)
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
             except redis.ConnectionError:
                 time.sleep(2)
             except Exception as e:

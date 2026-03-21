@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -252,6 +252,11 @@ def patch_execution_strategy_attribution(request: Request, body: Dict[str, Any] 
         except (TypeError, ValueError):
             si_id = None
     count = reader.batch_update_execution_strategy(account_id, contract_key, execution_ids, so_id, si_id)
+    if count < 0:
+        raise HTTPException(
+            status_code=409,
+            detail="One or more executions have instance_allocations; clear or edit splits before batch attribution.",
+        )
     if count > 0:
         return {"ok": True, "updated": count}
     return {"ok": False, "error": "No matching executions found or update failed.", "updated": 0}

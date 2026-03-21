@@ -1316,4 +1316,32 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         _log("account_executions_fly(view: TWS minus final-covered contracts, no BAG)")
 
+        # One execution row (unified account_executions_id) may attribute quantity to multiple strategy_instance rows.
+        _log_table(
+            "account_execution_instance_allocation",
+            "Execution to strategy_instance quantity splits (R-A2 extension)",
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_execution_instance_allocation (
+                account_execution_instance_allocation_id bigserial PRIMARY KEY,
+                account_id text NOT NULL,
+                account_executions_id bigint NOT NULL,
+                strategy_instance_id bigint NOT NULL REFERENCES strategy_instance(strategy_instance_id) ON DELETE RESTRICT,
+                allocated_quantity double precision NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (account_executions_id, strategy_instance_id)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_exec_inst_alloc_account_exec_id "
+            "ON account_execution_instance_allocation (account_id, account_executions_id)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS account_exec_inst_alloc_strategy_instance_id "
+            "ON account_execution_instance_allocation (strategy_instance_id)"
+        )
+
         conn.commit()

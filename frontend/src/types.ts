@@ -271,6 +271,14 @@ export interface RiskSummaryResponse {
   ts?: number | null
 }
 
+/** Per-instance quantity split for one execution row (account_execution_instance_allocation). */
+export interface ExecutionInstanceAllocation {
+  strategy_instance_id: number
+  allocated_quantity: number
+  strategy_opportunity_id?: number | null
+  strategy_instance_label?: string | null
+}
+
 /** Account execution/trade (R-A2). Full IB data. */
 export interface Execution {
   account_executions_id?: number
@@ -320,6 +328,8 @@ export interface Execution {
   strategy_instance_label?: string | null
   /** Strategy instance opened_at (Unix seconds, from backend JOIN). */
   strategy_instance_opened_at_epoch?: number | null
+  /** When set, quantity is split across multiple strategy instances (see DATABASE §2.24.11d). */
+  instance_allocations?: ExecutionInstanceAllocation[] | null
 }
 
 /** One row from GET /executions/position-attribution: one (position, instance); open_qty_est = sum of signed exec qty for that instance (final-only or TWS-only per position, see reader). */

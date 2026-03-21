@@ -41,6 +41,7 @@ from servers.reader import (
 )
 from servers.flex_client import parse_trades_xml
 from servers.self_check import derive_daemon_self_check, derive_self_check
+from servers.sse_queue_utils import put_nowait_drop_oldest
 
 try:
     from src.realtime.redis_quotes import (
@@ -114,6 +115,7 @@ def create_app(
         executions_router,
         logs_router,
         market_router,
+        monitor_metrics_router,
         quotes_router,
         research_router,
         status_router,
@@ -132,6 +134,7 @@ def create_app(
     app.include_router(daemon_router)
     app.include_router(config_router)
     app.include_router(strategies_router)
+    app.include_router(monitor_metrics_router)
 
     _root = Path(__file__).resolve().parent.parent
     _dist_assets = _root / "frontend" / "dist" / "assets"
@@ -240,10 +243,8 @@ def create_app(
                 with app.state.sse_lock:
                     queues = list(app.state.sse_queues)
                 for q in queues:
-                    try:
-                        loop.call_soon_threadsafe(q.put_nowait, quote)
-                    except Exception:
-                        pass
+                    # put_nowait runs inside the loop callback; QueueFull must be handled there (put_nowait_drop_oldest).
+                    loop.call_soon_threadsafe(put_nowait_drop_oldest, q, quote)
 
             app.state._redis_subscriber_stop.clear()
             app.state._redis_subscriber_thread = threading.Thread(

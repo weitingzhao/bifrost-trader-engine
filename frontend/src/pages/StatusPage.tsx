@@ -15,7 +15,7 @@ import {
 } from './status/statusLabels'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
 import { useControlAction } from './status/useControlAction'
-import { StatusDaemonPanel, StatusMonitorPanel, StatusCeleryPanel, StatusStrategyPanel } from './status/panels'
+import { StatusDaemonPanel, StatusMonitorPanel, StatusCeleryPanel, StatusStrategyPanel, StatusSseQueuesPanel } from './status/panels'
 
 export interface StatusPageProps {
   status: StatusResponse | null
@@ -801,6 +801,12 @@ export function StatusPage({
             </div>
           </div>
         </div>
+      </div>
+      )}
+
+      {showConsoleSection && (
+      <div className="card process-section system-tabs-wrapper">
+        <StatusSseQueuesPanel className={showAllSystemSections ? 'system-stack-section' : undefined} />
       </div>
       )}
 

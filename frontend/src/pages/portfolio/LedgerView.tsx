@@ -22,7 +22,7 @@ import type { PortfolioView } from './types'
 import { useExecutions } from './useExecutions'
 import { LedgerClosedOptionContractsSection } from './LedgerClosedOptionContractsSection'
 import { LedgerOrphanOpenOptionSection } from './LedgerOrphanOpenOptionSection'
-import { getOptGroupKey } from './ledgerOptHelpers'
+import { executionInstanceLabel, executionStrategyInstanceIds, getOptGroupKey } from './ledgerOptHelpers'
 
 export interface LedgerViewProps {
   status: StatusResponse | null
@@ -318,11 +318,11 @@ export function LedgerView({
   /* ── Instance tab data derivations ── */
 
   const withInstanceExecs = useMemo(
-    () => optionExecutionsBook.filter(e => e.strategy_instance_id != null),
+    () => optionExecutionsBook.filter(e => executionStrategyInstanceIds(e).length > 0),
     [optionExecutionsBook],
   )
   const noInstanceExecs = useMemo(
-    () => optionExecutionsBook.filter(e => e.strategy_instance_id == null),
+    () => optionExecutionsBook.filter(e => executionStrategyInstanceIds(e).length === 0),
     [optionExecutionsBook],
   )
 
@@ -330,16 +330,17 @@ export function LedgerView({
   const instanceGroups = useMemo(() => {
     const byId = new Map<number, Execution[]>()
     for (const e of withInstanceExecs) {
-      const id = e.strategy_instance_id!
-      const arr = byId.get(id)
-      if (arr) arr.push(e)
-      else byId.set(id, [e])
+      for (const id of executionStrategyInstanceIds(e)) {
+        const arr = byId.get(id)
+        if (arr) arr.push(e)
+        else byId.set(id, [e])
+      }
     }
     return Array.from(byId.entries())
       .map(([id, trades]) => {
         const groups = buildOptExecutionGroups(trades)
         const label =
-          trades.find(t => t.strategy_instance_label?.trim())?.strategy_instance_label?.trim() ?? null
+          trades.map(t => executionInstanceLabel(t, id)).find(l => l && l.trim()) ?? null
         const oppName =
           trades.find(t => t.strategy_opportunity_name?.trim())?.strategy_opportunity_name?.trim() ?? null
         return { instanceId: id, label, opportunityName: oppName, groups, trades }

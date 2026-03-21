@@ -1018,7 +1018,7 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 
 - **用途**：将成交归属到**机会策略**（strategy_opportunity）与可选**策略实例**（strategy_instance），便于按策略、按单笔开仓做 PnL 与 Performance calendar；为「按策略盈亏比」提供数据基础。
 - **策略实例**：代表某条机会策略在某账户下的一次开仓；同一实例的多腿（多 contract_key）共享同一 `strategy_instance_id`。
-- **归属原则**：**account_positions 不存策略归属**（一个持仓可能对应多个策略，无法用单一字段表达）。**唯一归属来源为 account_executions**——每条成交可带 strategy_opportunity_id / strategy_instance_id。对持仓展示策略信息时，通过 `(account_id, contract_key)` 从 account_executions 推导 DISTINCT 策略列表（`strategy_links`），一对多。
+- **归属原则**：**account_positions 不存策略归属**（一个持仓可能对应多个策略，无法用单一字段表达）。**主归属来源为 account_executions**（各 raw 表列）**与** §2.24.11d **`account_execution_instance_allocation`**：默认每条成交可带 strategy_opportunity_id / strategy_instance_id；若存在**分摊行**，则以分摊为准，单列 `strategy_instance_id` 应清空（避免双源不一致）。对持仓展示策略信息时，通过 `(account_id, contract_key)` 从 account_executions **并上**分摊表中的实例推导 DISTINCT 策略列表（`strategy_links`），一对多。
 
 ##### 2.24.11a 表 `strategy_instance`（策略实例）
 
@@ -1048,8 +1048,8 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
 
 - **索引**：`(strategy_opportunity_id)`、`(strategy_instance_id)`，便于按策略/实例筛选与 Realized PnL 聚合。
 
-- **读取**：GET /status 的 positions 通过子查询从 account_executions 推导 `strategy_links[]`（DISTINCT strategy_opportunity_id + strategy_instance_id per contract_key），附带 opportunity 名称与 instance label；GET /executions 返回每条成交的 strategy 字段并可按其筛选；**GET /performance**（默认 `source_scope=performance_book`）及 Performance 页相关 executions 请求均从 **`account_executions_final`** 视图读取（仅 flex + journal，不含 TWS 补洞行），无需在 SQL 中按 source 过滤；**Trade ledger（Portfolio → Trade ledger）** 的 **Instance** 与 **Options** 两个顶层 Tab 均通过 `GET /executions?source_scope=performance_book` 拉取 **`account_executions_final`** 构建分组（Instance Tab 按 `strategy_instance_id` 是否存在分为 With instance / No instance，前端分组，无新增 API）；前端不对 `source` 做过滤。GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）。
-- **批量打标**：`PATCH /executions/strategy-attribution`（替代原 `PUT /positions/strategy`）：按 account_id + contract_key 或 execution_ids 批量更新 executions 的 strategy 字段。`PUT /executions/{id}` 支持单条更新。
+- **读取**：GET /status 的 positions 通过子查询从 account_executions **与**分摊表（§2.24.11d）推导 `strategy_links[]`（DISTINCT strategy_opportunity_id + strategy_instance_id per contract_key），附带 opportunity 名称与 instance label；GET /executions 返回每条成交的 strategy 字段、`instance_allocations`（若有），并可按 strategy_instance_id 筛选（命中单列或任一分摊行）；**GET /performance**（默认 `source_scope=performance_book`）及 Performance 页相关 executions 请求均从 **`account_executions_final`** 视图读取（仅 flex + journal，不含 TWS 补洞行），无需在 SQL 中按 source 过滤；**Trade ledger（Portfolio → Trade ledger）** 的 **Instance** 与 **Options** 两个顶层 Tab 均通过 `GET /executions?source_scope=performance_book` 拉取 **`account_executions_final`** 构建分组（Instance Tab 按 `strategy_instance_id` 是否存在分为 With instance / No instance，前端分组，无新增 API）；前端不对 `source` 做过滤。GET /performance 或统计模块按 strategy_opportunity_id、strategy_instance_id 聚合 Realized（executions + commissions）与 Unrealized（positions + quote）；若成交存在分摊，Realized/commission 按各分摊行的 `|allocated_quantity|` 占比拆分至对应实例。
+- **批量打标**：`PATCH /executions/strategy-attribution`（替代原 `PUT /positions/strategy`）：按 account_id + contract_key 或 execution_ids 批量更新 executions 的 strategy 字段（**整笔单列**；若目标成交已有 §2.24.11d 分摊行则拒绝更新）。`PUT /executions/{id}` 支持单条更新，并可写入/替换 `instance_allocations`。
 
 ##### 2.24.11c Position × Instance 归因读模型（净仓近似归因）
 
@@ -1063,6 +1063,26 @@ Type Config UI 通过 GET `/strategies/structure-types/param-kind-options`、`/s
   - 透明度字段：`source_exec_count`, `is_mixed`, `has_unassigned`
 - **前端**：`PositionsPage` 的 Opportunity Sheet 使用归因 API 构建 `instanceGroups` / `instanceAllGroups`，支持同一合约在多个实例下并存展示，并提供 `Attribution` 筛选器（Single / Mixed / Unassigned）。
 - **局限**：净仓近似在频繁开平/滚仓场景存在偏差（与 FIFO lot 引擎相比）。返回的 `method` 字段与 UI 提示 `Estimated attribution (net)` 明确标识估算口径。
+
+##### 2.24.11d 表 `account_execution_instance_allocation`（成交 → 多实例数量分摊）
+
+- **用途**：IB/Flex 上**一笔**成交（`account_executions` 一行）在业务上需拆给**多个** `strategy_instance`（例如同一合约、两个实例各有一部分仓位，到期合并一笔平仓）。物理成交仍一行；本表存每个实例对应的**有符号数量** `allocated_quantity`。
+- **逻辑外键**：`account_executions` 为 VIEW，无法建 FK。使用 `(account_id, account_executions_id)` 与 `executions_raw_*` 中行一致；`account_executions_id` 编码见 `pg_ddl`（Flex 正数、TWS/journal 负数分支）。
+- **列**（无 json/jsonb）：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| account_execution_instance_allocation_id | bigserial PRIMARY KEY | 主键 |
+| account_id | text NOT NULL | 账户 |
+| account_executions_id | bigint NOT NULL | 与统一视图主键一致 |
+| strategy_instance_id | bigint NOT NULL REFERENCES strategy_instance(strategy_instance_id) ON DELETE RESTRICT | 分摊到的实例 |
+| allocated_quantity | double precision NOT NULL | 有符号数量；与 reader 中 flex/journal 的 QTY 规范化（`_QTY_NORM_*`，Sell 为负等）一致，且同一 `account_executions_id` 下各行的 **SUM(allocated_quantity)** 应等于该笔成交的规范化数量（应用层校验） |
+| created_at / updated_at | timestamptz | 维护时间 |
+
+- **唯一约束**：`UNIQUE (account_executions_id, strategy_instance_id)`。
+- **与 §2.24.11b 互斥**：若某 `account_executions_id` 存在至少一行本分摊表记录，则以分摊为准；对应 raw 行上 `strategy_instance_id` 应置 NULL（`strategy_opportunity_id` 可保留或亦清空，由录入约定决定）。
+- **删除**：删除 raw 成交行时一并删除本分摊表中 `account_executions_id` 匹配行。
+- **Performance**：单笔 `realized_pnl`、`commission`（来自 `account_execution_commissions`）按各分摊行 `|allocated_quantity|` 占该笔总 `|allocated_quantity|` 的比例拆分至各实例；若占比为 0 则退回整笔记于单列（若存在）。
 
 ---
 

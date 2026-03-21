@@ -24,6 +24,9 @@ _EXEC_FINAL_TABLE = "account_executions_final"
 # On-the-fly: TWS rows whose (account_id, contract_key) is not in final; excludes BAG (see view DDL).
 _EXEC_FLY_TABLE = "account_executions_fly"
 
+# Multi–strategy_instance splits for one execution row (physical table; see DATABASE §2.24.11d).
+_EXEC_INST_ALLOC_TABLE = "account_execution_instance_allocation"
+
 # Raw TWS table (all rows); same canonical columns as account_executions TWS branch, with synthetic id.
 _EXEC_TWS_RAW_SUBQUERY = (
     "(SELECT -(executions_raw_tws_id) AS account_executions_id, "
@@ -101,6 +104,195 @@ _COMM_NORM_E = (
 )
 
 
+def attach_instance_allocations(conn: Any, executions: List[Dict[str, Any]]) -> None:
+    """Populate instance_allocations on each execution dict (mutates in place)."""
+    if not conn or not executions:
+        return
+    ids: List[int] = []
+    for e in executions:
+        eid = e.get("account_executions_id")
+        if eid is not None:
+            try:
+                ids.append(int(eid))
+            except (TypeError, ValueError):
+                pass
+    if not ids:
+        return
+    uniq = list(dict.fromkeys(ids))
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT a.account_executions_id, a.strategy_instance_id, a.allocated_quantity,
+                       si.label AS strategy_instance_label, si.strategy_opportunity_id
+                FROM {_EXEC_INST_ALLOC_TABLE} a
+                LEFT JOIN strategy_instance si ON a.strategy_instance_id = si.strategy_instance_id
+                WHERE a.account_executions_id = ANY(%s)
+                ORDER BY a.strategy_instance_id
+                """,
+                (uniq,),
+            )
+            rows = cur.fetchall()
+    except Exception as ex:
+        if "does not exist" in str(ex).lower() or "42P01" in str(getattr(ex, "pgcode", "")):
+            return
+        logger.debug("attach_instance_allocations failed: %s", ex)
+        return
+    by_eid: Dict[int, List[Dict[str, Any]]] = {}
+    for r in rows:
+        d = dict(r)
+        eid = d.get("account_executions_id")
+        if eid is None:
+            continue
+        try:
+            ke = int(eid)
+        except (TypeError, ValueError):
+            continue
+        sl = d.get("strategy_instance_label")
+        item = {
+            "strategy_instance_id": int(d["strategy_instance_id"]),
+            "allocated_quantity": float(d["allocated_quantity"]),
+            "strategy_opportunity_id": int(d["strategy_opportunity_id"])
+            if d.get("strategy_opportunity_id") is not None
+            else None,
+        }
+        if sl is not None and str(sl).strip():
+            item["strategy_instance_label"] = str(sl).strip()
+        by_eid.setdefault(ke, []).append(item)
+    for e in executions:
+        eid = e.get("account_executions_id")
+        if eid is None:
+            continue
+        try:
+            ke = int(eid)
+        except (TypeError, ValueError):
+            continue
+        if ke in by_eid:
+            e["instance_allocations"] = by_eid[ke]
+
+
+def weight_realized_for_strategy_instance(execution: Dict[str, Any], strategy_instance_id: int) -> float:
+    """Fraction of this execution's realized_pnl/commission attributed to strategy_instance_id (0..1)."""
+    try:
+        sid = int(strategy_instance_id)
+    except (TypeError, ValueError):
+        return 0.0
+    allocs = execution.get("instance_allocations") or []
+    if allocs:
+        denom = 0.0
+        for a in allocs:
+            try:
+                denom += abs(float(a.get("allocated_quantity") or 0))
+            except (TypeError, ValueError):
+                pass
+        if denom <= 0:
+            return 0.0
+        for a in allocs:
+            try:
+                if int(a.get("strategy_instance_id")) == sid:
+                    return abs(float(a.get("allocated_quantity") or 0)) / denom
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+    si = execution.get("strategy_instance_id")
+    if si is not None and int(si) == sid:
+        return 1.0
+    return 0.0
+
+
+def _add_realized_splits_to_opp_and_inst(
+    e: Dict[str, Any],
+    by_opp: Dict[int, Dict[str, Any]],
+    by_inst: Dict[int, Dict[str, Any]],
+) -> None:
+    """Add one execution's realized_pnl/commission into by_opp and by_inst (handles instance_allocations)."""
+    rp_val = float(e["realized_pnl"]) if e.get("realized_pnl") is not None else 0.0
+    comm_val = float(e["commission"]) if e.get("commission") is not None else 0.0
+    if not math.isfinite(rp_val):
+        rp_val = 0.0
+    if not math.isfinite(comm_val):
+        comm_val = 0.0
+    allocs = e.get("instance_allocations") or []
+    if allocs:
+        denom = 0.0
+        for a in allocs:
+            try:
+                denom += abs(float(a.get("allocated_quantity") or 0))
+            except (TypeError, ValueError):
+                pass
+        if denom <= 0:
+            return
+        opp_trade_bump: set = set()
+        for a in allocs:
+            try:
+                w = abs(float(a.get("allocated_quantity") or 0)) / denom
+                si_id = int(a["strategy_instance_id"])
+                so_id = a.get("strategy_opportunity_id")
+            except (TypeError, ValueError, KeyError):
+                continue
+            rp_part = rp_val * w
+            comm_part = comm_val * w
+            if so_id is not None:
+                so_id = int(so_id)
+                if so_id not in by_opp:
+                    by_opp[so_id] = {
+                        "strategy_opportunity_id": so_id,
+                        "total_pnl": 0.0,
+                        "commission": 0.0,
+                        "net_pnl": 0.0,
+                        "trade_count": 0,
+                    }
+                by_opp[so_id]["total_pnl"] += rp_part
+                by_opp[so_id]["commission"] += comm_part
+                by_opp[so_id]["net_pnl"] += rp_part - comm_part
+                if so_id not in opp_trade_bump:
+                    by_opp[so_id]["trade_count"] += 1
+                    opp_trade_bump.add(so_id)
+            if si_id not in by_inst:
+                by_inst[si_id] = {
+                    "strategy_instance_id": si_id,
+                    "total_pnl": 0.0,
+                    "commission": 0.0,
+                    "net_pnl": 0.0,
+                    "trade_count": 0,
+                }
+            by_inst[si_id]["total_pnl"] += rp_part
+            by_inst[si_id]["commission"] += comm_part
+            by_inst[si_id]["net_pnl"] += rp_part - comm_part
+            by_inst[si_id]["trade_count"] += 1
+        return
+    so_id = e.get("strategy_opportunity_id")
+    si_id = e.get("strategy_instance_id")
+    if so_id is not None:
+        so_id = int(so_id)
+        if so_id not in by_opp:
+            by_opp[so_id] = {
+                "strategy_opportunity_id": so_id,
+                "total_pnl": 0.0,
+                "commission": 0.0,
+                "net_pnl": 0.0,
+                "trade_count": 0,
+            }
+        by_opp[so_id]["total_pnl"] += rp_val
+        by_opp[so_id]["commission"] += comm_val
+        by_opp[so_id]["net_pnl"] += rp_val - comm_val
+        by_opp[so_id]["trade_count"] += 1
+    if si_id is not None:
+        si_id = int(si_id)
+        if si_id not in by_inst:
+            by_inst[si_id] = {
+                "strategy_instance_id": si_id,
+                "total_pnl": 0.0,
+                "commission": 0.0,
+                "net_pnl": 0.0,
+                "trade_count": 0,
+            }
+        by_inst[si_id]["total_pnl"] += rp_val
+        by_inst[si_id]["commission"] += comm_val
+        by_inst[si_id]["net_pnl"] += rp_val - comm_val
+        by_inst[si_id]["trade_count"] += 1
+
+
 def _qty_expr_e_for_scope(source_scope: Optional[str]) -> str:
     """Quantity column for get_executions FROM clause alias `e`.
 
@@ -140,7 +332,12 @@ def get_executions(
             conditions.append("e.strategy_opportunity_id = %s")
             values.append(strategy_opportunity_id)
         if strategy_instance_id is not None:
-            conditions.append("e.strategy_instance_id = %s")
+            conditions.append(
+                f"(e.strategy_instance_id = %s OR EXISTS (SELECT 1 FROM {_EXEC_INST_ALLOC_TABLE} a "
+                f"WHERE a.account_executions_id = e.account_executions_id AND "
+                f"a.account_id IS NOT DISTINCT FROM e.account_id AND a.strategy_instance_id = %s))"
+            )
+            values.append(strategy_instance_id)
             values.append(strategy_instance_id)
         pred_e = _source_scope_predicate_e(source_scope)
         if pred_e:
@@ -212,7 +409,9 @@ def get_executions(
                 else:
                     raise
             rows = cur.fetchall()
-        return _rows_to_executions(rows, None)
+        out = _rows_to_executions(rows, None)
+        attach_instance_allocations(conn, out)
+        return out
     except Exception as e:
         logger.debug("get_executions failed: %s", e)
         return []
@@ -672,7 +871,12 @@ def get_executions_with_opt_pairs_single_query(
         strat_cond += " AND e.strategy_opportunity_id = %s"
         values.append(strategy_opportunity_id)
     if strategy_instance_id is not None:
-        strat_cond += " AND e.strategy_instance_id = %s"
+        strat_cond += (
+            f" AND (e.strategy_instance_id = %s OR EXISTS (SELECT 1 FROM {_EXEC_INST_ALLOC_TABLE} a "
+            f"WHERE a.account_executions_id = e.account_executions_id AND "
+            f"a.account_id IS NOT DISTINCT FROM e.account_id AND a.strategy_instance_id = %s))"
+        )
+        values.append(strategy_instance_id)
         values.append(strategy_instance_id)
     src_frag = _source_scope_sql_fragment(source_scope)
     from_table = _exec_from_for_scope(source_scope)
@@ -682,6 +886,7 @@ def get_executions_with_opt_pairs_single_query(
     if strategy_opportunity_id is not None:
         values2.append(strategy_opportunity_id)
     if strategy_instance_id is not None:
+        values2.append(strategy_instance_id)
         values2.append(strategy_instance_id)
     values2.append(limit)
     sql = f"""
@@ -733,9 +938,19 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                     values_fb: List[Any] = [since_ts, until_ts]
                     if account_id and account_id.strip():
                         values_fb.append(account_id.strip())
+                    if strategy_opportunity_id is not None:
+                        values_fb.append(strategy_opportunity_id)
+                    if strategy_instance_id is not None:
+                        values_fb.append(strategy_instance_id)
+                        values_fb.append(strategy_instance_id)
                     values2_fb: List[Any] = [since_ts, until_ts, since_ts, until_ts]
                     if account_id and account_id.strip():
                         values2_fb.append(account_id.strip())
+                    if strategy_opportunity_id is not None:
+                        values2_fb.append(strategy_opportunity_id)
+                    if strategy_instance_id is not None:
+                        values2_fb.append(strategy_instance_id)
+                        values2_fb.append(strategy_instance_id)
                     values2_fb.append(limit)
                     sql_fallback = f"""
 WITH day_keys AS (
@@ -745,6 +960,7 @@ WITH day_keys AS (
     AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
     {acc_cond}
+    {strat_cond}
     {src_frag}
 ),
 all_legs AS (
@@ -766,6 +982,7 @@ all_legs AS (
     AND e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
     {acc_cond}
+    {strat_cond}
     {src_frag}
 ),
 numbered AS (
@@ -780,7 +997,9 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                 else:
                     raise
             rows = cur.fetchall()
-        return _rows_to_executions(rows, None)
+        out = _rows_to_executions(rows, None)
+        attach_instance_allocations(conn, out)
+        return out
     except Exception as e:
         logger.debug("get_executions_with_opt_pairs_single_query failed: %s", e)
         return []
@@ -905,7 +1124,7 @@ def get_performance_instance_summary_only(
     since_ts: Optional[float] = None,
     until_ts: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Single aggregate query for Instance Detail PnL block (avoids loading thousands of rows)."""
+    """Aggregate realized PnL for one strategy_instance (includes account_execution_instance_allocation splits)."""
     if conn is None:
         return _performance_response_summary_only(
             trade_count=0,
@@ -915,53 +1134,58 @@ def get_performance_instance_summary_only(
             win_count=0,
             loss_count=0,
         )
-    conditions = ["e.strategy_instance_id = %s"]
-    values: List[Any] = [strategy_instance_id]
-    if since_ts is not None:
-        conditions.append("e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
-        values.append(since_ts)
-    if until_ts is not None:
-        conditions.append("e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
-        values.append(until_ts)
-    where_sql = " AND ".join(conditions)
-    comm_sql = (
-        "COALESCE(CASE WHEN lower(trim(COALESCE(e.source, ''))) = 'tws_client' THEN c.commission "
-        "WHEN c.commission IS NOT NULL THEN -c.commission ELSE NULL END, 0)::double precision"
-    )
-    rp_sql = "COALESCE(c.realized_pnl, 0)::double precision"
-    q = f"""
-        SELECT
-            COUNT(*)::int AS trade_count,
-            COALESCE(SUM({rp_sql}), 0)::double precision AS total_realized_pnl,
-            COALESCE(SUM({comm_sql}), 0)::double precision AS total_commission,
-            COALESCE(SUM({rp_sql} - {comm_sql}), 0)::double precision AS net_pnl,
-            COALESCE(SUM(CASE WHEN {rp_sql} > 0 THEN 1 ELSE 0 END), 0)::int AS win_count,
-            COALESCE(SUM(CASE WHEN {rp_sql} < 0 THEN 1 ELSE 0 END), 0)::int AS loss_count
-        FROM {_EXEC_FINAL_TABLE} e
-        LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
-        WHERE {where_sql}
-    """
     try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(q, values)
-            row = cur.fetchone()
-        if not row:
-            return _performance_response_summary_only(
-                trade_count=0,
-                total_realized_pnl=0.0,
-                total_commission=0.0,
-                net_pnl=0.0,
-                win_count=0,
-                loss_count=0,
-            )
-        d = dict(row)
+        sid = int(strategy_instance_id)
+    except (TypeError, ValueError):
         return _performance_response_summary_only(
-            trade_count=int(d.get("trade_count") or 0),
-            total_realized_pnl=float(d.get("total_realized_pnl") or 0),
-            total_commission=float(d.get("total_commission") or 0),
-            net_pnl=float(d.get("net_pnl") or 0),
-            win_count=int(d.get("win_count") or 0),
-            loss_count=int(d.get("loss_count") or 0),
+            trade_count=0,
+            total_realized_pnl=0.0,
+            total_commission=0.0,
+            net_pnl=0.0,
+            win_count=0,
+            loss_count=0,
+        )
+    try:
+        executions = get_executions(
+            conn,
+            since_ts=since_ts,
+            until_ts=until_ts,
+            account_id=None,
+            limit=50000,
+            strategy_opportunity_id=None,
+            strategy_instance_id=sid,
+            source_scope="performance_book",
+        )
+        total_rp = 0.0
+        total_comm = 0.0
+        trade_count = 0
+        win_count = 0
+        loss_count = 0
+        for e in executions:
+            w = weight_realized_for_strategy_instance(e, sid)
+            if w <= 0:
+                continue
+            rp = float(e.get("realized_pnl") or 0) * w
+            comm = float(e.get("commission") or 0) * w
+            if not math.isfinite(rp):
+                rp = 0.0
+            if not math.isfinite(comm):
+                comm = 0.0
+            total_rp += rp
+            total_comm += comm
+            trade_count += 1
+            if rp > 0:
+                win_count += 1
+            elif rp < 0:
+                loss_count += 1
+        net_pnl = total_rp - total_comm
+        return _performance_response_summary_only(
+            trade_count=trade_count,
+            total_realized_pnl=total_rp,
+            total_commission=total_comm,
+            net_pnl=net_pnl,
+            win_count=win_count,
+            loss_count=loss_count,
         )
     except Exception as e:
         logger.debug("get_performance_instance_summary_only failed: %s", e)
@@ -1120,36 +1344,7 @@ def get_performance_stats(
     by_opp: Dict[int, Dict[str, Any]] = {}
     by_inst: Dict[int, Dict[str, Any]] = {}
     for e in executions_sorted:
-        so_id = e.get("strategy_opportunity_id")
-        si_id = e.get("strategy_instance_id")
-        if so_id is not None:
-            so_id = int(so_id)
-            if so_id not in by_opp:
-                by_opp[so_id] = {"strategy_opportunity_id": so_id, "total_pnl": 0.0, "commission": 0.0, "net_pnl": 0.0, "trade_count": 0}
-            rp_val = float(e["realized_pnl"]) if e.get("realized_pnl") is not None else 0.0
-            comm_val = float(e["commission"]) if e.get("commission") is not None else 0.0
-            if not math.isfinite(rp_val):
-                rp_val = 0.0
-            if not math.isfinite(comm_val):
-                comm_val = 0.0
-            by_opp[so_id]["total_pnl"] += rp_val
-            by_opp[so_id]["commission"] += comm_val
-            by_opp[so_id]["net_pnl"] += rp_val - comm_val
-            by_opp[so_id]["trade_count"] += 1
-        if si_id is not None:
-            si_id = int(si_id)
-            if si_id not in by_inst:
-                by_inst[si_id] = {"strategy_instance_id": si_id, "total_pnl": 0.0, "commission": 0.0, "net_pnl": 0.0, "trade_count": 0}
-            rp_val = float(e["realized_pnl"]) if e.get("realized_pnl") is not None else 0.0
-            comm_val = float(e["commission"]) if e.get("commission") is not None else 0.0
-            if not math.isfinite(rp_val):
-                rp_val = 0.0
-            if not math.isfinite(comm_val):
-                comm_val = 0.0
-            by_inst[si_id]["total_pnl"] += rp_val
-            by_inst[si_id]["commission"] += comm_val
-            by_inst[si_id]["net_pnl"] += rp_val - comm_val
-            by_inst[si_id]["trade_count"] += 1
+        _add_realized_splits_to_opp_and_inst(e, by_opp, by_inst)
     realized_by_strategy_opportunity = [{"strategy_opportunity_id": k, "total_pnl": round(v["total_pnl"], 2), "commission": round(v["commission"], 2), "net_pnl": round(v["net_pnl"], 2), "trade_count": v["trade_count"]} for k, v in sorted(by_opp.items())]
     realized_by_strategy_instance = [{"strategy_instance_id": k, "total_pnl": round(v["total_pnl"], 2), "commission": round(v["commission"], 2), "net_pnl": round(v["net_pnl"], 2), "trade_count": v["trade_count"]} for k, v in sorted(by_inst.items())]
     if capital_base and capital_base > 0:
@@ -1412,6 +1607,22 @@ def get_position_instance_attribution(
             INNER JOIN {_EXEC_FINAL_TABLE} e ON p.account_id = e.account_id AND {_POS_EXEC_JOIN_PE}
             INNER JOIN pos_has_final hf ON hf.account_id = p.account_id AND hf.contract_key = p.contract_key
             LEFT JOIN strategy_instance si2 ON e.strategy_instance_id = si2.strategy_instance_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {_EXEC_INST_ALLOC_TABLE} ax
+                WHERE ax.account_executions_id = e.account_executions_id
+                  AND ax.account_id IS NOT DISTINCT FROM e.account_id
+            )
+            UNION ALL
+            SELECT p.account_id, p.contract_key AS pos_contract_key,
+                   a.strategy_instance_id,
+                   COALESCE(si_a.strategy_opportunity_id, e.strategy_opportunity_id) AS strategy_opportunity_id,
+                   a.allocated_quantity AS signed_qty
+            FROM pos p
+            INNER JOIN {_EXEC_FINAL_TABLE} e ON p.account_id = e.account_id AND {_POS_EXEC_JOIN_PE}
+            INNER JOIN pos_has_final hf ON hf.account_id = p.account_id AND hf.contract_key = p.contract_key
+            INNER JOIN {_EXEC_INST_ALLOC_TABLE} a ON a.account_executions_id = e.account_executions_id
+              AND a.account_id IS NOT DISTINCT FROM e.account_id
+            LEFT JOIN strategy_instance si_a ON a.strategy_instance_id = si_a.strategy_instance_id
             UNION ALL
             SELECT p.account_id, p.contract_key AS pos_contract_key,
                    e.strategy_instance_id,
@@ -1420,6 +1631,25 @@ def get_position_instance_attribution(
             FROM pos p
             INNER JOIN executions_raw_tws e ON p.account_id = e.account_id AND {_POS_EXEC_JOIN_PE}
             LEFT JOIN strategy_instance si2 ON e.strategy_instance_id = si2.strategy_instance_id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM pos_has_final hf
+                WHERE hf.account_id = p.account_id AND hf.contract_key = p.contract_key
+            )
+              AND NOT EXISTS (
+                SELECT 1 FROM {_EXEC_INST_ALLOC_TABLE} ax
+                WHERE ax.account_executions_id = -(e.executions_raw_tws_id)
+                  AND ax.account_id IS NOT DISTINCT FROM e.account_id
+            )
+            UNION ALL
+            SELECT p.account_id, p.contract_key AS pos_contract_key,
+                   a.strategy_instance_id,
+                   COALESCE(si_a.strategy_opportunity_id, e.strategy_opportunity_id) AS strategy_opportunity_id,
+                   a.allocated_quantity AS signed_qty
+            FROM pos p
+            INNER JOIN executions_raw_tws e ON p.account_id = e.account_id AND {_POS_EXEC_JOIN_PE}
+            INNER JOIN {_EXEC_INST_ALLOC_TABLE} a ON a.account_executions_id = -(e.executions_raw_tws_id)
+              AND a.account_id IS NOT DISTINCT FROM e.account_id
+            LEFT JOIN strategy_instance si_a ON a.strategy_instance_id = si_a.strategy_instance_id
             WHERE NOT EXISTS (
                 SELECT 1 FROM pos_has_final hf
                 WHERE hf.account_id = p.account_id AND hf.contract_key = p.contract_key

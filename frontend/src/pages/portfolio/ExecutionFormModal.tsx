@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { Execution } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
@@ -71,6 +71,10 @@ export function ExecutionFormModal({
   const [execFormError, setExecFormError] = useState<string | null>(null)
   const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
   const [instances, setInstances] = useState<StrategyInstance[]>([])
+  const [allInstancesForAccount, setAllInstancesForAccount] = useState<StrategyInstance[]>([])
+  const [useInstanceSplits, setUseInstanceSplits] = useState(false)
+  const [splitRows, setSplitRows] = useState<Array<{ uid: string; strategy_instance_id: string; allocated_quantity: string }>>([])
+  const splitSectionId = useId()
 
   useEffect(() => {
     if (open) {
@@ -79,6 +83,17 @@ export function ExecutionFormModal({
         .catch(() => setOpportunities([]))
     }
   }, [open])
+
+  useEffect(() => {
+    const acc = execForm.account_id.trim()
+    if (!open || !acc) {
+      setAllInstancesForAccount([])
+      return
+    }
+    fetchStrategyInstances({ account_id: acc })
+      .then(r => setAllInstancesForAccount(r.items ?? []))
+      .catch(() => setAllInstancesForAccount([]))
+  }, [open, execForm.account_id])
 
   const oppIdForm = execForm.strategy_opportunity_id.trim() ? Number(execForm.strategy_opportunity_id) : null
   useEffect(() => {
@@ -111,6 +126,8 @@ export function ExecutionFormModal({
       } else {
         setExecForm(base)
       }
+      setUseInstanceSplits(false)
+      setSplitRows([])
     }
   }, [open, accountOptions, editExec, initialDraft])
 
@@ -133,6 +150,20 @@ export function ExecutionFormModal({
         strategy_opportunity_id: editExec.strategy_opportunity_id != null ? String(editExec.strategy_opportunity_id) : '',
         strategy_instance_id: editExec.strategy_instance_id != null ? String(editExec.strategy_instance_id) : '',
       })
+      const ia = editExec.instance_allocations
+      if (ia && ia.length > 0) {
+        setUseInstanceSplits(true)
+        setSplitRows(
+          ia.map((a, i) => ({
+            uid: `split-${editExec.account_executions_id ?? 'x'}-${i}`,
+            strategy_instance_id: String(a.strategy_instance_id),
+            allocated_quantity: String(a.allocated_quantity),
+          })),
+        )
+      } else {
+        setUseInstanceSplits(false)
+        setSplitRows([])
+      }
     }
   }, [editExec])
 
@@ -210,6 +241,32 @@ export function ExecutionFormModal({
                 strategy_opportunity_id: execForm.strategy_opportunity_id && Number.isFinite(Number(execForm.strategy_opportunity_id)) ? Number(execForm.strategy_opportunity_id) : undefined,
                 strategy_instance_id: execForm.strategy_instance_id && Number.isFinite(Number(execForm.strategy_instance_id)) ? Number(execForm.strategy_instance_id) : undefined,
               }
+              if (useInstanceSplits) {
+                if (splitRows.length === 0) {
+                  body.instance_allocations = []
+                } else {
+                  const allocs: { strategy_instance_id: number; allocated_quantity: number }[] = []
+                  for (const row of splitRows) {
+                    const si = Number(row.strategy_instance_id)
+                    const aq = Number(row.allocated_quantity)
+                    if (!Number.isFinite(si) || !Number.isFinite(aq)) {
+                      setExecFormError('Each split row needs a valid instance and allocated quantity.')
+                      return
+                    }
+                    allocs.push({ strategy_instance_id: si, allocated_quantity: aq })
+                  }
+                  const sum = allocs.reduce((s, x) => s + x.allocated_quantity, 0)
+                  if (Math.abs(sum - quantityForDb) > 1e-4 * Math.max(1, Math.abs(quantityForDb))) {
+                    setExecFormError(
+                      `Split quantities must sum to the execution quantity (${quantityForDb}).`,
+                    )
+                    return
+                  }
+                  body.instance_allocations = allocs
+                  delete body.strategy_opportunity_id
+                  delete body.strategy_instance_id
+                }
+              }
               const expiryTrimmed = execForm.expiry.trim()
               if (isOpt && expiryTrimmed && /^\d{6,8}$/.test(expiryTrimmed)) {
                 body.expiry = expiryTrimmed
@@ -240,6 +297,32 @@ export function ExecutionFormModal({
                 currency: execForm.currency.trim() || undefined,
                 strategy_opportunity_id: execForm.strategy_opportunity_id && Number.isFinite(Number(execForm.strategy_opportunity_id)) ? Number(execForm.strategy_opportunity_id) : undefined,
                 strategy_instance_id: execForm.strategy_instance_id && Number.isFinite(Number(execForm.strategy_instance_id)) ? Number(execForm.strategy_instance_id) : undefined,
+              }
+              if (useInstanceSplits) {
+                if (splitRows.length === 0) {
+                  body.instance_allocations = []
+                } else {
+                  const allocs: { strategy_instance_id: number; allocated_quantity: number }[] = []
+                  for (const row of splitRows) {
+                    const si = Number(row.strategy_instance_id)
+                    const aq = Number(row.allocated_quantity)
+                    if (!Number.isFinite(si) || !Number.isFinite(aq)) {
+                      setExecFormError('Each split row needs a valid instance and allocated quantity.')
+                      return
+                    }
+                    allocs.push({ strategy_instance_id: si, allocated_quantity: aq })
+                  }
+                  const sum = allocs.reduce((s, x) => s + x.allocated_quantity, 0)
+                  if (Math.abs(sum - quantityForDb) > 1e-4 * Math.max(1, Math.abs(quantityForDb))) {
+                    setExecFormError(
+                      `Split quantities must sum to the execution quantity (${quantityForDb}).`,
+                    )
+                    return
+                  }
+                  body.instance_allocations = allocs
+                  delete body.strategy_opportunity_id
+                  delete body.strategy_instance_id
+                }
               }
               const res = await createExecution(body)
               if (res.ok) {
@@ -303,6 +386,88 @@ export function ExecutionFormModal({
                 </option>
               ))}
             </select>
+          </div>
+          <div className="replay-exec-form-row replay-exec-splits-section">
+            <label id={splitSectionId}>Multi-instance split</label>
+            <div className="replay-exec-splits-controls">
+              <label className="replay-exec-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={useInstanceSplits}
+                  onChange={e => {
+                    const on = e.target.checked
+                    setUseInstanceSplits(on)
+                    if (on && splitRows.length === 0) {
+                      setSplitRows([{ uid: `new-${Date.now()}`, strategy_instance_id: '', allocated_quantity: '' }])
+                    }
+                  }}
+                  aria-describedby={splitSectionId}
+                />
+                Split quantity across instances
+              </label>
+              {useInstanceSplits && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() =>
+                    setSplitRows(rows => [
+                      ...rows,
+                      { uid: `new-${Date.now()}-${rows.length}`, strategy_instance_id: '', allocated_quantity: '' },
+                    ])
+                  }
+                >
+                  Add row
+                </button>
+              )}
+            </div>
+            {useInstanceSplits && (
+              <p className="section-hint">
+                Signed quantities must sum to the execution quantity. Saving with splits enabled and no rows clears
+                allocation rows. Single Strategy / Instance fields are ignored when splits are saved.
+              </p>
+            )}
+            {useInstanceSplits &&
+              splitRows.map(row => (
+                <div key={row.uid} className="replay-exec-form-row replay-exec-split-row">
+                  <select
+                    value={row.strategy_instance_id}
+                    onChange={e =>
+                      setSplitRows(rows =>
+                        rows.map(r => (r.uid === row.uid ? { ...r, strategy_instance_id: e.target.value } : r)),
+                      )
+                    }
+                    aria-label="Instance for split"
+                  >
+                    <option value="">— Instance —</option>
+                    {allInstancesForAccount.map(si => (
+                      <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
+                        {si.label?.trim() ||
+                          `#${si.strategy_instance_id} ${si.opened_at && si.opened_at.length >= 10 ? si.opened_at.slice(0, 10) : si.opened_at ?? ''}`}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="any"
+                    className="replay-exec-split-qty"
+                    value={row.allocated_quantity}
+                    onChange={e =>
+                      setSplitRows(rows =>
+                        rows.map(r => (r.uid === row.uid ? { ...r, allocated_quantity: e.target.value } : r)),
+                      )
+                    }
+                    placeholder="Signed qty"
+                    aria-label="Allocated quantity"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setSplitRows(rows => rows.filter(r => r.uid !== row.uid))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
           </div>
           <div className="replay-exec-form-row">
             <label>Time</label>
