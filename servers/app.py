@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.app.config import get_effective_ib_config
+from src.app.config import config_profile_from_resolved_path, get_effective_ib_config
 from servers.flex_client import fetch_cash_transactions, fetch_trades
 from servers.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
@@ -63,6 +63,7 @@ def create_app(
     data_lag_threshold_ms: Optional[float],
     redis_quotes: Optional[Any] = None,
     status_cfg_for_read: Optional[dict] = None,
+    resolved_config_path: Optional[str] = None,
 ) -> FastAPI:
     """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*).
     status_cfg_for_read: when set, GET /bars/jobs (and GET /bars/jobs/{id}) use this for DB read even if control_via_db is None (e.g. only PGHOST or postgres configured without sink=postgres)."""
@@ -107,6 +108,9 @@ def create_app(
     app.state.control_via_db = control_via_db
     app.state.data_lag_threshold_ms = data_lag_threshold_ms
     app.state.status_cfg_for_read = status_cfg_for_read
+    app.state.bifrost_config_profile = (
+        config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
+    )
 
     from servers.routers import (
         config_router,
@@ -291,7 +295,7 @@ def create_app(
     return app
 
 
-def run_server(config: dict) -> None:
+def run_server(config: dict, resolved_config_path: Optional[str] = None) -> None:
     """Start the status server (host 0.0.0.0, port from config). Control channel: PostgreSQL daemon_control + daemon_run_status (RE-5). No start: daemon is started on trading host only."""
     import os
     import uvicorn
@@ -313,7 +317,14 @@ def run_server(config: dict) -> None:
     redis_quotes = None
     if create_redis_quotes:
         redis_quotes = create_redis_quotes(config)
-    app = create_app(reader, control_via_db, data_lag_ms, redis_quotes=redis_quotes, status_cfg_for_read=status_cfg_for_read)
+    app = create_app(
+        reader,
+        control_via_db,
+        data_lag_ms,
+        redis_quotes=redis_quotes,
+        status_cfg_for_read=status_cfg_for_read,
+        resolved_config_path=resolved_config_path,
+    )
     host = "0.0.0.0"
     logger.info("Status server on %s:%s (control=daemon_control + daemon_run_status; start only on trading host)", host, port)
     uvicorn.run(app, host=host, port=int(port), log_level="info", log_config=None)

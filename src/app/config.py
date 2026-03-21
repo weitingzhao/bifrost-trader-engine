@@ -110,6 +110,18 @@ def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]
     return out
 
 
+def config_profile_from_resolved_path(resolved_path: str) -> Optional[str]:
+    """Return ``dev`` or ``prod`` when the loaded file is ``config.dev.yaml`` / ``config.prod.yaml``.
+
+    Used for UI (e.g. browser tab title). Custom paths or ``config.yaml`` alone return ``None``."""
+    name = Path(resolved_path).name
+    if name == "config.dev.yaml":
+        return "dev"
+    if name == "config.prod.yaml":
+        return "prod"
+    return None
+
+
 def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
     """Load YAML. Returns (config, resolved_path).
 

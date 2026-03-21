@@ -229,7 +229,7 @@ def main() -> None:
         print(f"Could not free port {port}. Run: lsof -i :{port}", file=sys.stderr)
         sys.exit(1)
     from servers.app import run_server
-    run_server(config)
+    run_server(config, resolved_config_path=resolved_config_path)
 
 
 if __name__ == "__main__":

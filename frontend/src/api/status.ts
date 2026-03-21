@@ -15,7 +15,13 @@ export async function fetchOpenOrders(): Promise<{ open_orders: OpenOrder[] }> {
 }
 
 /** Health check: GET /health, 200 means process alive; returns ts as server response Unix seconds. */
-export async function fetchHealth(): Promise<{ status: string; service: string; ts: number }> {
+export async function fetchHealth(): Promise<{
+  status: string
+  service: string
+  ts: number
+  /** Present when server was started with config.dev.yaml or config.prod.yaml (merged overlay file name). */
+  config_profile?: 'dev' | 'prod'
+}> {
   const r = await fetch(`${API}/health`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()

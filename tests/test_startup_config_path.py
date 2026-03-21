@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.app.config import resolve_startup_config_path
+from src.app.config import config_profile_from_resolved_path, resolve_startup_config_path
 
 
 @pytest.fixture
@@ -35,6 +35,13 @@ def test_resolve_explicit_path(project_root: Path) -> None:
     p, rest = resolve_startup_config_path(str(project_root), [explicit])
     assert p.endswith("config.yaml.example")
     assert rest == []
+
+
+def test_config_profile_from_resolved_path() -> None:
+    assert config_profile_from_resolved_path("/x/config/config.dev.yaml") == "dev"
+    assert config_profile_from_resolved_path("/x/config/config.prod.yaml") == "prod"
+    assert config_profile_from_resolved_path("/x/config/config.yaml") is None
+    assert config_profile_from_resolved_path("/custom/other.yaml") is None
 
 
 def test_bifrost_config_env_wins(project_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

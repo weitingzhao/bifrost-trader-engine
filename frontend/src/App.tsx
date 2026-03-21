@@ -3,6 +3,7 @@ import type { IbAccountSnapshot, StatusResponse, Operation, RealtimeQuote } from
 import {
   fetchStatus,
   fetchOperations,
+  fetchHealth,
   postRefreshAccounts,
   fetchQuotes,
   subscribeQuotes,
@@ -136,6 +137,33 @@ function applyTheme(theme: ThemeId) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : '')
 }
 
+const APP_DOC_TITLE = 'Bifrost Trader'
+
+function appDocumentTitle(configProfile: string | undefined | null): string {
+  if (configProfile === 'dev') return `${APP_DOC_TITLE} (Dev)`
+  if (configProfile === 'prod') return `${APP_DOC_TITLE} (Prod)`
+  return APP_DOC_TITLE
+}
+
+function appFaviconHref(configProfile: string | undefined | null): string {
+  if (configProfile === 'dev') return '/favicon-dev.svg'
+  if (configProfile === 'prod') return '/favicon-prod.svg'
+  return '/favicon.svg'
+}
+
+/** Tab title + favicon from status server profile (config.dev.yaml / config.prod.yaml). */
+function applyAppChrome(configProfile: string | undefined | null) {
+  document.title = appDocumentTitle(configProfile)
+  const href = appFaviconHref(configProfile)
+  const link =
+    document.querySelector<HTMLLinkElement>('link[rel="icon"]') ??
+    document.querySelector<HTMLLinkElement>('link[rel="shortcut icon"]')
+  if (link) {
+    link.href = href
+    link.type = 'image/svg+xml'
+  }
+}
+
 type LampId = 'green' | 'yellow' | 'red' | 'none'
 
 export default function App() {
@@ -180,6 +208,22 @@ export default function App() {
     return h.startsWith('settings-system') ? 'system' : 'config'
   }, [])
   const [settingsViewSection, setSettingsViewSection] = useState<'system' | 'config' | null>(null)
+
+  /** Browser tab: title + favicon reflect status server config (config.dev.yaml vs config.prod.yaml) when API is reachable. */
+  useEffect(() => {
+    let cancelled = false
+    fetchHealth()
+      .then((h) => {
+        if (cancelled) return
+        applyAppChrome(h.config_profile ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) applyAppChrome(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (activeTab !== 'settings') {

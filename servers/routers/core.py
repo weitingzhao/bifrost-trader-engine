@@ -2,9 +2,9 @@
 
 import time
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 router = APIRouter(tags=["core"])
@@ -35,15 +35,33 @@ def get_root() -> Union[FileResponse, HTMLResponse]:
     return HTMLResponse(_FALLBACK_INDEX_HTML)
 
 
+def _favicon_file_for_profile(profile: Optional[str]) -> str:
+    if profile == "dev":
+        return "favicon-dev.svg"
+    if profile == "prod":
+        return "favicon-prod.svg"
+    return "favicon.svg"
+
+
 @router.get("/favicon.svg", response_model=None)
-def get_favicon() -> FileResponse:
-    p = _frontend_dist() / "favicon.svg"
+def get_favicon(request: Request) -> FileResponse:
+    """Same path as SPA; file picked from env profile (config.dev.yaml / config.prod.yaml) when known."""
+    dist = _frontend_dist()
+    profile = getattr(request.app.state, "bifrost_config_profile", None)
+    name = _favicon_file_for_profile(profile)
+    p = dist / name
+    if not p.is_file():
+        p = dist / "favicon.svg"
     if not p.is_file():
         raise HTTPException(status_code=404, detail="favicon not found (run npm run build)")
     return FileResponse(p, media_type="image/svg+xml")
 
 
 @router.get("/health")
-def get_health() -> Dict[str, Any]:
+def get_health(request: Request) -> Dict[str, Any]:
     """Health check: 200 when process is alive; returns server timestamp (Unix s) for client to compute time since last check."""
-    return {"status": "ok", "service": "bifrost-monitor", "ts": time.time()}
+    out: Dict[str, Any] = {"status": "ok", "service": "bifrost-monitor", "ts": time.time()}
+    profile = getattr(request.app.state, "bifrost_config_profile", None)
+    if profile is not None:
+        out["config_profile"] = profile
+    return out
