@@ -29,7 +29,10 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(_PROJECT_ROOT)
 
-# Expected schema objects by category (canonical list).
+# Expected schema objects by category (canonical list for reporting / presence check only).
+# Actual DDL is defined in src/sink/pg_ddl.py::_ensure_tables — this dict does NOT limit what gets created.
+# Naming: category "account" = account snapshot tables only; tables named account_* that belong to
+# executions / commissions / splits are listed under "execution".
 # NOTE: `account_executions`, `account_executions_final`, and `account_executions_fly` are VIEWs.
 EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     "account": [
@@ -49,6 +52,7 @@ EXPECTED_TABLES_BY_CATEGORY: Dict[str, List[str]] = {
     ],
     "execution": [
         "account_execution_commissions",
+        "account_execution_instance_allocation",
         "account_executions",
         "account_executions_final",
         "account_executions_fly",

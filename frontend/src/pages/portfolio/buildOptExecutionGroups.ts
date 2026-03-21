@@ -1,5 +1,11 @@
 import type { Execution, OptExecutionGroup } from '../../types'
 
+/**
+ * Net position: |quantity| with `side`. API may return signed qty (sell negative) or positive qty + side
+ * (e.g. tws); abs + side matches both. Pure sign-of-quantity aggregation breaks when all fills are positive.
+ */
+const NET_QTY_EPS = 1e-9
+
 export function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecutionGroup[] {
   const opt = sourceExecutions.filter(e => (e.sec_type ?? '').toUpperCase() === 'OPT')
   const key = (e: Execution) => `${e.contract_key ?? ''}|${e.strike ?? 0}`
@@ -31,8 +37,9 @@ export function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecu
     let sell_value_raw = 0
     let net_qty = 0
     for (const t of trades) {
-      const rawQty = Number(t.quantity) || 0
-      const q = Math.abs(rawQty)
+      const rawQty = Number(t.quantity)
+      const q = Number.isFinite(rawQty) ? Math.abs(rawQty) : 0
+      if (q < NET_QTY_EPS) continue
       const p = Number(t.price) || 0
       const c = Number(t.commission) || 0
       const side = (t.side ?? '').toUpperCase()
@@ -65,7 +72,7 @@ export function buildOptExecutionGroups(sourceExecutions: Execution[]): OptExecu
       buy_cost,
       sell_premium,
       realized_pnl,
-      status: net_qty === 0 ? 'realized' : 'unrealized',
+      status: Math.abs(net_qty) < NET_QTY_EPS ? 'realized' : 'unrealized',
       trades: trades.slice().sort((a, b) => (b.time ?? 0) - (a.time ?? 0)),
     })
   }

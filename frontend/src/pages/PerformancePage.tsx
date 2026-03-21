@@ -24,6 +24,9 @@ import {
   sortExecByTradeDateThenTime,
 } from './performance/performanceUtils'
 
+/** Backend: account_executions_final (official book). Use for all Performance data except the On the fly panel. */
+const PERFORMANCE_EXEC_SOURCE_SCOPE = 'performance_book' as const
+
 interface PerformancePageProps {
   status: StatusResponse | null
   onViewChange?: (view: 'accounts') => void
@@ -94,6 +97,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         granularity: 'day',
         strategy_opportunity_id: strategyOpportunityId ?? undefined,
         strategy_instance_id: strategyInstanceId ?? undefined,
+        source_scope: PERFORMANCE_EXEC_SOURCE_SCOPE,
       })
       setData(res)
     } catch (e) {
@@ -173,7 +177,15 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       const lastDateStr = `${monthKey}-${String(lastDay).padStart(2, '0')}`
       const { since_ts } = getChicagoDayRange(firstDateStr)
       const { until_ts } = getChicagoDayRange(lastDateStr)
-      return fetchExecutions(since_ts, until_ts, 5000, true, strategyOpportunityId ?? undefined, strategyInstanceId ?? undefined)
+      return fetchExecutions(
+          since_ts,
+          until_ts,
+          5000,
+          true,
+          strategyOpportunityId ?? undefined,
+          strategyInstanceId ?? undefined,
+          PERFORMANCE_EXEC_SOURCE_SCOPE,
+        )
         .then((res) => {
           const execs = res.executions ?? []
           const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
@@ -258,7 +270,15 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     const { until_ts } = getChicagoDayRange(lastDateStr)
     setCalendarDayPnLLoading(true)
     setCalendarDayPnL(null)
-    fetchExecutions(since_ts, until_ts, 5000, true, strategyOpportunityId ?? undefined, strategyInstanceId ?? undefined)
+    fetchExecutions(
+        since_ts,
+        until_ts,
+        5000,
+        true,
+        strategyOpportunityId ?? undefined,
+        strategyInstanceId ?? undefined,
+        PERFORMANCE_EXEC_SOURCE_SCOPE,
+      )
       .then((res) => {
         const execs = res.executions ?? []
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
@@ -312,6 +332,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       granularity: 'day',
       strategy_opportunity_id: strategyOpportunityId ?? undefined,
       strategy_instance_id: strategyInstanceId ?? undefined,
+      source_scope: PERFORMANCE_EXEC_SOURCE_SCOPE,
     })
       .then(setCalendarMonthPerformance)
       .catch(() => setCalendarMonthPerformance(null))
@@ -332,7 +353,15 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     const { since_ts: monthStartTs } = getChicagoDayRange(lookBackStart)
     const { until_ts: dayEndTs } = getChicagoDayRange(selectedDay)
     setSelectedDayExecutionsLoading(true)
-    fetchExecutions(monthStartTs, dayEndTs, 5000, true, strategyOpportunityId ?? undefined, strategyInstanceId ?? undefined)
+    fetchExecutions(
+        monthStartTs,
+        dayEndTs,
+        5000,
+        true,
+        strategyOpportunityId ?? undefined,
+        strategyInstanceId ?? undefined,
+        PERFORMANCE_EXEC_SOURCE_SCOPE,
+      )
       .then((res) => {
         setSelectedDayExecutions(res.executions ?? [])
         setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
@@ -1033,7 +1062,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                     Option executions by contract
                                   </h5>
                                   {contractKeys.length === 0 ? (
-                                    <p className="section-hint">No Option executions in DB for this day (exec_time in server Chicago range).</p>
+                                    <p className="section-hint">No Option executions in DB for this trade date.</p>
                                   ) : (
                                     <>
                                       <div className="performance-calendar-pnl-type-tabs system-tabs" role="tablist" aria-label="PnL type">
@@ -1165,7 +1194,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                 <th>Record type</th>
                                                 <th>Id</th>
                                                 <th>Account</th>
-                                                <th>EXEC TIME</th>
+                                                <th>TRADE DATE</th>
                                                 <th>Side</th>
                                                 <th>Qty</th>
                                                 <th>Price</th>
@@ -1178,10 +1207,10 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                 row.type === 'Match' ? (() => {
                                                   const legC = row.p.leg_c_execution_id != null ? execById.get(row.p.leg_c_execution_id) : undefined
                                                   const legP = row.p.leg_p_execution_id != null ? execById.get(row.p.leg_p_execution_id) : undefined
-                                                  const tC = legC?.time != null ? Number(legC.time) : null
-                                                  const tP = legP?.time != null ? Number(legP.time) : null
-                                                  // Show the matched (opening) leg's time/side/price — leg_c is the earlier leg that was matched.
-                                                  const execTimeStr = tC != null ? fmtChicagoTime(tC) : (tP != null ? fmtChicagoTime(tP) : '—')
+                                                  const tdC = (legC?.trade_date ?? '').trim()
+                                                  const tdP = (legP?.trade_date ?? '').trim()
+                                                  const tradeDateStr =
+                                                    tdC !== '' ? tdC : tdP !== '' ? tdP : '—'
                                                   return (
                                                     <tr key={`match-${idx}`} className="performance-calendar-row-match">
                                                       <td>Match</td>
@@ -1191,7 +1220,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                           : '—'}
                                                       </td>
                                                       <td>{row.p.account_id || '—'}</td>
-                                                      <td>{execTimeStr}</td>
+                                                      <td>{tradeDateStr}</td>
                                                       <td>{row.p.c_side}</td>
                                                       <td>{legC?.quantity != null && legP?.quantity != null ? `${legC.quantity} / ${legP.quantity}` : String(row.p.quantity)}</td>
                                                       <td>{fmtUsd(row.p.c_price)}</td>
@@ -1206,7 +1235,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                     <td>Execution</td>
                                                     <td>{row.e.account_executions_id ?? '—'}</td>
                                                     <td>{row.e.account_id ?? '—'}</td>
-                                                    <td>{fmtChicagoTime(row.e.time)}</td>
+                                                    <td>{(row.e.trade_date ?? '').trim() || '—'}</td>
                                                     <td>{row.e.side ?? '—'}</td>
                                                     <td>{row.e.quantity ?? '—'}</td>
                                                     <td>{fmtUsd(row.e.price)}</td>

@@ -2630,14 +2630,13 @@ export function PositionsPage({
                       </table>
                     </div>
                   )}
-                  {(watchlistOptionableCoverageItems.length > 0 || optionUnderlyingPoolItems.length > 0) && (
-                    <div className="coverage-summary-section">
+                  {sortedInstanceAllGroups.length > 0 ? (
+                  <div className="coverage-summary-section">
                       <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
                         Stock Coverage Summary
                         <InfoTooltip text="Optionable symbols only. Positions without tradeable options (Independent Holdings below) are not listed here. Underlying pool = stock left after all current opportunity hedges." />
                       </h6>
                       <div className="coverage-pools-row">
-                        {optionUnderlyingPoolItems.length > 0 && (
                           <div className="coverage-pool-panel">
                             <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
                               Option underlying Pool
@@ -2645,6 +2644,14 @@ export function PositionsPage({
                             <p className="section-hint" style={{ margin: '0 0 0.4rem', fontSize: '0.82em' }}>
                               Long shares not needed for existing opportunity hedges (all scopes); can back additional options.
                             </p>
+                            {optionUnderlyingPoolItems.length === 0 && (
+                              <p
+                                className="section-hint coverage-pool-empty-explanation"
+                                style={{ margin: '0 0 0.5rem', fontSize: '0.85em', lineHeight: 1.45 }}
+                              >
+                                No rows when every long share is already counted toward instance hedges, or when your instances do not require separate underlying stock backup. The table stays here so you can see the column layout when positions do create surplus.
+                              </p>
+                            )}
                             <p className="option-underlying-pool-totals" style={{ margin: '0 0 0.45rem' }}>
                               <span className="option-underlying-pool-total-item">
                                 <span className="option-underlying-pool-total-label">Market Total</span>{' '}
@@ -2704,7 +2711,6 @@ export function PositionsPage({
                               },
                             })}
                           </div>
-                        )}
                         {watchlistOptionableCoverageItems.length > 0 && (
                           <div className="coverage-pool-panel">
                             <p className="section-hint" style={{ margin: '0 0 0.35rem' }}>
@@ -2724,6 +2730,16 @@ export function PositionsPage({
                           </div>
                         )}
                       </div>
+                    </div>
+                  ) : (
+                    <div className="coverage-summary-section coverage-summary-section--placeholder">
+                      <h6 className="replay-sub instance-sheet-sub-heading coverage-summary-heading-row">
+                        Stock Coverage Summary
+                        <InfoTooltip text="Optionable symbols only. Positions without tradeable options (Independent Holdings below) are not listed here. Underlying pool = stock left after all current opportunity hedges." />
+                      </h6>
+                      <p className="section-hint coverage-summary-placeholder-text">
+                        This section is computed from the instance table above. With no instances matching the current filters, there is nothing to show here—so the pools are hidden, not missing. Clear or widen filters to bring instances back and see Option underlying / backing pools.
+                      </p>
                     </div>
                   )}
                   {independentStocks.length > 0 && (

@@ -3,6 +3,7 @@ import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { fmtExpiry, fmtTradeDate, fmtTs, fmtUsd, getContractLabelParts } from '../../utils/format'
 import { getOptGroupKey } from './ledgerOptHelpers'
+import { LedgerStgInsCell } from './LedgerStgInsCell'
 
 function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
   return (
@@ -270,16 +271,31 @@ export function LedgerOrphanOpenOptionSection({
                         ? uniqueSources.map(s => <ExecSourceBadge key={s} source={s} />)
                         : '—'}
                     </td>
-                    <td>
+                    <td className="replay-opt-actions-cell">
                       <button
                         type="button"
-                        className="btn btn-small"
+                        className="btn btn-icon-small"
                         onClick={e => {
                           e.stopPropagation()
                           onExpiredCloseClick(groupKey)
                         }}
+                        title="Close expired position"
+                        aria-label="Close expired position"
                       >
-                        Close
+                        <svg
+                          viewBox="0 0 24 24"
+                          width={16}
+                          height={16}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <path d="m15 9-6 6M9 9l6 6" />
+                        </svg>
                       </button>
                     </td>
                   </tr>
@@ -372,31 +388,7 @@ export function LedgerOrphanOpenOptionSection({
                       <strong>{fmtUsd(g.strike)}</strong>
                     </td>
                     <td>
-                      {(() => {
-                        const strategyName = ex.strategy_opportunity_name?.trim()
-                        const instanceId = ex.strategy_instance_id
-                        if (!strategyName && instanceId == null) return '—'
-                        return (
-                          <span className="replay-stg-ins">
-                            <span className="replay-stg-ins-strategy">{strategyName || '—'}</span>
-                            <span className="replay-stg-ins-sep">/</span>
-                            {instanceId != null ? (
-                              <a
-                                href={`#/strategies/instances/${instanceId}`}
-                                className="replay-stg-ins-link"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={`Open instance #${instanceId}`}
-                                aria-label={`Open instance #${instanceId}`}
-                              >
-                                #{instanceId}
-                              </a>
-                            ) : (
-                              <span className="replay-stg-ins-empty">—</span>
-                            )}
-                          </span>
-                        )
-                      })()}
+                      <LedgerStgInsCell ex={ex} />
                     </td>
                     <td
                       title={[

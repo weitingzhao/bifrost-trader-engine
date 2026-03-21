@@ -15,6 +15,7 @@ import {
   getInstanceConsistencyState,
   getOptGroupKey,
 } from './ledgerOptHelpers'
+import { LedgerStgInsCell } from './LedgerStgInsCell'
 
 function LinkStrategyIconButton({ onClick, title }: { onClick: () => void; title: string }) {
   return (
@@ -491,31 +492,7 @@ export function LedgerClosedOptionContractsSection({
                       <strong>{fmtUsd(g.strike)}</strong>
                     </td>
                     <td>
-                      {(() => {
-                        const strategyName = ex.strategy_opportunity_name?.trim()
-                        const instanceId = ex.strategy_instance_id
-                        if (!strategyName && instanceId == null) return '—'
-                        return (
-                          <span className="replay-stg-ins">
-                            <span className="replay-stg-ins-strategy">{strategyName || '—'}</span>
-                            <span className="replay-stg-ins-sep">/</span>
-                            {instanceId != null ? (
-                              <a
-                                href={`#/strategies/instances/${instanceId}`}
-                                className="replay-stg-ins-link"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={`Open instance #${instanceId}`}
-                                aria-label={`Open instance #${instanceId}`}
-                              >
-                                #{instanceId}
-                              </a>
-                            ) : (
-                              <span className="replay-stg-ins-empty">—</span>
-                            )}
-                          </span>
-                        )
-                      })()}
+                      <LedgerStgInsCell ex={ex} />
                     </td>
                     <td
                       title={[

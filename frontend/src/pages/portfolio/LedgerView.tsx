@@ -22,7 +22,15 @@ import type { PortfolioView } from './types'
 import { useExecutions } from './useExecutions'
 import { LedgerClosedOptionContractsSection } from './LedgerClosedOptionContractsSection'
 import { LedgerOrphanOpenOptionSection } from './LedgerOrphanOpenOptionSection'
-import { executionInstanceLabel, executionStrategyInstanceIds, getOptGroupKey } from './ledgerOptHelpers'
+import {
+  executionInstanceLabel,
+  executionStrategyInstanceIds,
+  executionStrategyOpportunityKey,
+  expandExecutionRowsForStrategyOptView,
+  groupExecutionsByStrategyInstanceId,
+  getOptGroupKey,
+  sliceExecutionForInstanceOptView,
+} from './ledgerOptHelpers'
 
 export interface LedgerViewProps {
   status: StatusResponse | null
@@ -95,12 +103,18 @@ export function LedgerView({
   const [ledgerFilterSymbol, setLedgerFilterSymbol] = useState('')
   const [ledgerFilterExpiryStart, setLedgerFilterExpiryStart] = useState('')
   const [ledgerFilterAccount, setLedgerFilterAccount] = useState<string>('')
-  const [ledgerTab, setLedgerTab] = useState<'instance' | 'options' | 'stocks'>('instance')
+  const [ledgerTab, setLedgerTab] = useState<'strategy' | 'instance' | 'options' | 'stocks'>('strategy')
   const [ledgerOptionSubTab, setLedgerOptionSubTab] = useState<'contracts' | 'orphans'>('contracts')
   const [ledgerInstanceSubTab, setLedgerInstanceSubTab] = useState<'with_instance' | 'no_instance'>('with_instance')
   /** With-instance list: filter by whether the instance has any unrealized (open) contract group. */
   const [instanceContainOpenFilter, setInstanceContainOpenFilter] = useState<'all' | 'yes' | 'no'>('all')
   const [instanceExpandedIds, setInstanceExpandedIds] = useState<Set<number>>(new Set())
+  /** Strategy (opportunity) tab: expanded group keys — `id` or `none`. */
+  const [strategyOppExpandedKeys, setStrategyOppExpandedKeys] = useState<Set<string>>(new Set())
+  /** Strategy tab: per-instance rows under an opportunity — `${oppKey}::${instKey}`, default collapsed. */
+  const [strategyInstanceExpandedKeys, setStrategyInstanceExpandedKeys] = useState<Set<string>>(
+    new Set(),
+  )
   const [ledgerAccordionMode, setLedgerAccordionMode] = useState<boolean>(false)
   const [ledgerStockGroupByPosition, setLedgerStockGroupByPosition] = useState<boolean>(false)
   const [ledgerStockCategoryTab, setLedgerStockCategoryTab] = useState<string>('All')
@@ -338,7 +352,11 @@ export function LedgerView({
     }
     return Array.from(byId.entries())
       .map(([id, trades]) => {
-        const groups = buildOptExecutionGroups(trades)
+        const tradesForGroups = trades.flatMap(t => {
+          const row = sliceExecutionForInstanceOptView(t, id)
+          return row ? [row] : []
+        })
+        const groups = buildOptExecutionGroups(tradesForGroups)
         const label =
           trades.map(t => executionInstanceLabel(t, id)).find(l => l && l.trim()) ?? null
         const oppName =
@@ -347,6 +365,54 @@ export function LedgerView({
       })
       .sort((a, b) => b.instanceId - a.instanceId)
   }, [withInstanceExecs])
+
+  /** Groups OPT book by opportunity, then by instance (allocation-weighted rows → per-instance contract groups). */
+  const strategyOpportunityGroups = useMemo(() => {
+    const byOpp = new Map<number | 'none', Execution[]>()
+    for (const e of optionExecutionsBook) {
+      for (const row of expandExecutionRowsForStrategyOptView(e)) {
+        const key = executionStrategyOpportunityKey(row)
+        const arr = byOpp.get(key)
+        if (arr) arr.push(row)
+        else byOpp.set(key, [row])
+      }
+    }
+    const rows = Array.from(byOpp.entries()).map(([opportunityId, trades]) => {
+      const byInst = groupExecutionsByStrategyInstanceId(trades)
+      const instanceSubgroups = Array.from(byInst.entries())
+        .map(([instanceId, instTrades]) => {
+          const groups = buildOptExecutionGroups(instTrades)
+          const numericId = instanceId === 'none' ? null : instanceId
+          const label =
+            numericId != null
+              ? instTrades.map(t => executionInstanceLabel(t, numericId)).find(l => l && l.trim()) ?? null
+              : null
+          return { instanceId, label, groups, trades: instTrades }
+        })
+        .sort((a, b) => {
+          if (a.instanceId === 'none') return 1
+          if (b.instanceId === 'none') return -1
+          return b.instanceId - a.instanceId
+        })
+      const nameFromTrade =
+        trades.find(t => t.strategy_opportunity_name?.trim())?.strategy_opportunity_name?.trim() ?? null
+      const nameFromList =
+        opportunityId !== 'none'
+          ? opportunities.find(o => o.strategy_opportunity_id === opportunityId)?.name?.trim() ?? null
+          : null
+      const title =
+        nameFromTrade ??
+        nameFromList ??
+        (opportunityId === 'none' ? 'No opportunity' : `Opportunity #${opportunityId}`)
+      return { opportunityId, title, instanceSubgroups }
+    })
+    rows.sort((a, b) => {
+      if (a.opportunityId === 'none') return 1
+      if (b.opportunityId === 'none') return -1
+      return b.opportunityId - a.opportunityId
+    })
+    return rows
+  }, [optionExecutionsBook, opportunities])
 
   const filteredInstanceGroups = useMemo(() => {
     if (instanceContainOpenFilter === 'all') return instanceGroups
@@ -630,6 +696,10 @@ export function LedgerView({
   }, [filteredExecutions, ledgerStockCategoryTab, ledgerStockSort, getStockExecCategory])
 
   useEffect(() => {
+    if (ledgerTab === 'strategy' && !hasOptionExecutions && hasStockExecutions) {
+      setLedgerTab('stocks')
+      return
+    }
     if (ledgerTab === 'instance' && !hasOptionExecutions && hasStockExecutions) {
       setLedgerTab('stocks')
       return
@@ -639,7 +709,7 @@ export function LedgerView({
       return
     }
     if (ledgerTab === 'stocks' && !hasStockExecutions && hasOptionExecutions) {
-      setLedgerTab('instance')
+      setLedgerTab('strategy')
     }
   }, [ledgerTab, hasOptionExecutions, hasStockExecutions])
 
@@ -769,8 +839,20 @@ export function LedgerView({
               <div
                 className="system-tabs replay-portfolio-tabs"
                 role="tablist"
-                aria-label="Instance, option and stock ledger sections"
+                aria-label="Strategy, instance, option and stock ledger sections"
               >
+                <button
+                  type="button"
+                  role="tab"
+                  id="replay-tab-strategy"
+                  aria-selected={ledgerTab === 'strategy'}
+                  aria-controls="replay-panel-strategy"
+                  className={`system-tab ${ledgerTab === 'strategy' ? 'active' : ''}`}
+                  onClick={() => setLedgerTab('strategy')}
+                  disabled={!hasOptionExecutions}
+                >
+                  Strategy
+                </button>
                 <button
                   type="button"
                   role="tab"
@@ -810,7 +892,9 @@ export function LedgerView({
               </div>
             </div>
             <div className="replay-portfolio-filters">
-              {(ledgerTab === 'options' || (ledgerTab === 'instance' && ledgerInstanceSubTab === 'no_instance')) && (
+              {(ledgerTab === 'options' ||
+                ledgerTab === 'strategy' ||
+                (ledgerTab === 'instance' && ledgerInstanceSubTab === 'no_instance')) && (
                 <div
                   className="replay-fetch-range-group"
                   role="radiogroup"
@@ -905,7 +989,7 @@ export function LedgerView({
                 className="replay-ledger-summary"
                 aria-label="Summary by month"
               >
-                {ledgerTab === 'options' || ledgerTab === 'instance' ? (
+                {ledgerTab === 'options' || ledgerTab === 'strategy' || ledgerTab === 'instance' ? (
                   <>
                     <span className="replay-ledger-summary-label">Summary</span>
                     <span className="replay-ledger-summary-inline">
@@ -978,6 +1062,266 @@ export function LedgerView({
                   </>
                 )}
               </section>
+              {ledgerTab === 'strategy' && (
+                <div
+                  id="replay-panel-strategy"
+                  role="tabpanel"
+                  aria-labelledby="replay-tab-strategy"
+                  className="system-tab-panel"
+                >
+                  {hasOptionExecutions ? (
+                    <>
+                      {strategyOpportunityGroups.length === 0 ? (
+                        <p className="section-hint">No option trades under the current filters.</p>
+                      ) : (
+                        <div>
+                          {strategyOpportunityGroups.map(og => {
+                            const closedAll = og.instanceSubgroups.flatMap(sg =>
+                              sg.groups.filter(g => g.status === 'realized'),
+                            )
+                            const openAll = og.instanceSubgroups.flatMap(sg =>
+                              sg.groups.filter(g => g.status === 'unrealized'),
+                            )
+                            const pnl = closedAll.reduce((s, g) => s + (Number(g.realized_pnl) || 0), 0)
+                            const expandKey =
+                              og.opportunityId === 'none' ? 'none' : String(og.opportunityId)
+                            const isExpanded = strategyOppExpandedKeys.has(expandKey)
+                            return (
+                              <div key={expandKey} className="replay-instance-group">
+                                <button
+                                  type="button"
+                                  className="replay-instance-group-header"
+                                  onClick={() =>
+                                    setStrategyOppExpandedKeys(prev => {
+                                      const next = new Set(prev)
+                                      if (next.has(expandKey)) next.delete(expandKey)
+                                      else next.add(expandKey)
+                                      return next
+                                    })
+                                  }
+                                  aria-expanded={isExpanded}
+                                >
+                                  <span
+                                    className={`replay-instance-chevron ${isExpanded ? 'replay-instance-chevron--open' : ''}`}
+                                  >
+                                    ▶
+                                  </span>
+                                  <span className="replay-instance-group-title">{og.title}</span>
+                                  <span className="replay-instance-group-stats">
+                                    <span>Instances: {og.instanceSubgroups.length}</span>
+                                    <span>Closed: {closedAll.length}</span>
+                                    <span>Open: {openAll.length}</span>
+                                    <span
+                                      className={
+                                        pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'
+                                      }
+                                    >
+                                      PnL: {fmtUsd0(pnl)}
+                                    </span>
+                                  </span>
+                                </button>
+                                {isExpanded && (
+                                  <div className="replay-instance-group-body">
+                                    {og.instanceSubgroups.map(sg => {
+                                      const closed = sg.groups.filter(g => g.status === 'realized')
+                                      const open = sg.groups.filter(g => g.status === 'unrealized')
+                                      const sgPnl = closed.reduce(
+                                        (s, g) => s + (Number(g.realized_pnl) || 0),
+                                        0,
+                                      )
+                                      const instKey =
+                                        sg.instanceId === 'none'
+                                          ? 'none'
+                                          : String(sg.instanceId)
+                                      const instanceCompositeKey = `${expandKey}::${instKey}`
+                                      const instExpanded =
+                                        strategyInstanceExpandedKeys.has(instanceCompositeKey)
+                                      return (
+                                        <div
+                                          key={`${expandKey}-inst-${instKey}`}
+                                          className="replay-strategy-instance-nest"
+                                        >
+                                          <div className="replay-strategy-instance-header-row">
+                                            <button
+                                              type="button"
+                                              className="replay-strategy-instance-collapse-header"
+                                              onClick={() =>
+                                                setStrategyInstanceExpandedKeys(prev => {
+                                                  const next = new Set(prev)
+                                                  if (next.has(instanceCompositeKey))
+                                                    next.delete(instanceCompositeKey)
+                                                  else next.add(instanceCompositeKey)
+                                                  return next
+                                                })
+                                              }
+                                              aria-expanded={instExpanded}
+                                            >
+                                              <span
+                                                className={`replay-instance-chevron ${instExpanded ? 'replay-instance-chevron--open' : ''}`}
+                                                aria-hidden
+                                              >
+                                                ▶
+                                              </span>
+                                              <span className="replay-strategy-instance-head-title">
+                                                {sg.instanceId === 'none' ? (
+                                                  'No instance'
+                                                ) : (
+                                                  <>
+                                                    {sg.label ? (
+                                                      <span
+                                                        className="replay-strategy-instance-label"
+                                                        title={sg.label}
+                                                      >
+                                                        {sg.label}
+                                                      </span>
+                                                    ) : null}
+                                                    {sg.label ? ' ' : null}
+                                                    <span className="replay-strategy-instance-id-text">
+                                                      #{sg.instanceId}
+                                                    </span>
+                                                  </>
+                                                )}
+                                              </span>
+                                              <span className="replay-strategy-instance-stats">
+                                                <span>Closed: {closed.length}</span>
+                                                <span>Open: {open.length}</span>
+                                                <span
+                                                  className={
+                                                    sgPnl >= 0
+                                                      ? 'replay-pnl-realized'
+                                                      : 'replay-pnl-detail-negative'
+                                                  }
+                                                >
+                                                  PnL: {fmtUsd0(sgPnl)}
+                                                </span>
+                                              </span>
+                                            </button>
+                                            {sg.instanceId !== 'none' && (
+                                              <a
+                                                href={`#/strategies/instances/${sg.instanceId}`}
+                                                className="replay-stg-ins-link replay-strategy-instance-open-link"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                title={
+                                                  sg.label
+                                                    ? `Open instance #${sg.instanceId} (${sg.label})`
+                                                    : `Open instance #${sg.instanceId}`
+                                                }
+                                              >
+                                                Open
+                                              </a>
+                                            )}
+                                          </div>
+                                          {instExpanded && (
+                                            <div className="replay-strategy-instance-collapse-body">
+                                              {closed.length > 0 && (
+                                                <div className="replay-instance-group-block">
+                                                  <h6 className="replay-instance-subheading">Closed Option</h6>
+                                                  <div className="replay-portfolio-table-wrap">
+                                                    <table className="table-operations replay-opt-groups">
+                                                      <thead>
+                                                        <tr>
+                                                          <th>Contract</th>
+                                                          <th>Expiry</th>
+                                                          <th>Strike</th>
+                                                          <th>Type</th>
+                                                          <th>Buy&nbsp;Qty</th>
+                                                          <th>Sell&nbsp;Qty</th>
+                                                          <th>PnL</th>
+                                                          <th>Trades</th>
+                                                        </tr>
+                                                      </thead>
+                                                      <tbody>
+                                                        {closed.map(g => {
+                                                          const parts = getContractLabelParts(
+                                                            g.contract_key ?? '',
+                                                          )
+                                                          return (
+                                                            <tr key={getOptGroupKey(g)}>
+                                                              <td>{parts.symbol || g.contract_key}</td>
+                                                              <td>{fmtExpiry(g.expiry)}</td>
+                                                              <td>{g.strike ?? '—'}</td>
+                                                              <td>{parts.rightLabel || '—'}</td>
+                                                              <td>{g.buy_volume}</td>
+                                                              <td>{g.sell_volume}</td>
+                                                              <td
+                                                                className={
+                                                                  Number(g.realized_pnl) >= 0
+                                                                    ? 'replay-pnl-realized'
+                                                                    : 'replay-pnl-detail-negative'
+                                                                }
+                                                              >
+                                                                {fmtUsd0(Number(g.realized_pnl))}
+                                                              </td>
+                                                              <td>{g.trades?.length ?? 0}</td>
+                                                            </tr>
+                                                          )
+                                                        })}
+                                                      </tbody>
+                                                    </table>
+                                                  </div>
+                                                </div>
+                                              )}
+                                              {open.length > 0 && (
+                                                <div className="replay-instance-group-block">
+                                                  <h6 className="replay-instance-subheading">Open Option</h6>
+                                                  <div className="replay-portfolio-table-wrap">
+                                                    <table className="table-operations replay-opt-groups">
+                                                      <thead>
+                                                        <tr>
+                                                          <th>Contract</th>
+                                                          <th>Expiry</th>
+                                                          <th>Strike</th>
+                                                          <th>Type</th>
+                                                          <th>Net&nbsp;Qty</th>
+                                                          <th>Trades</th>
+                                                        </tr>
+                                                      </thead>
+                                                      <tbody>
+                                                        {open.map(g => {
+                                                          const parts = getContractLabelParts(
+                                                            g.contract_key ?? '',
+                                                          )
+                                                          return (
+                                                            <tr key={getOptGroupKey(g)}>
+                                                              <td>{parts.symbol || g.contract_key}</td>
+                                                              <td>{fmtExpiry(g.expiry)}</td>
+                                                              <td>{g.strike ?? '—'}</td>
+                                                              <td>{parts.rightLabel || '—'}</td>
+                                                              <td>{g.net_qty ?? '—'}</td>
+                                                              <td>{g.trades?.length ?? 0}</td>
+                                                            </tr>
+                                                          )
+                                                        })}
+                                                      </tbody>
+                                                    </table>
+                                                  </div>
+                                                </div>
+                                              )}
+                                              {closed.length === 0 && open.length === 0 && (
+                                                <p className="section-hint">No contracts for this instance.</p>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    })}
+                                    {og.instanceSubgroups.length === 0 && (
+                                      <p className="section-hint">No grouped contract data for this strategy.</p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="section-hint">No option trades under the current filters.</p>
+                  )}
+                </div>
+              )}
               {ledgerTab === 'instance' && (
                 <div
                   id="replay-panel-instance"
@@ -1065,32 +1409,52 @@ export function LedgerView({
                               const isExpanded = instanceExpandedIds.has(ig.instanceId)
                               return (
                                 <div key={ig.instanceId} className="replay-instance-group">
-                                  <button
-                                    type="button"
-                                    className="replay-instance-group-header"
-                                    onClick={() => setInstanceExpandedIds(prev => {
-                                      const next = new Set(prev)
-                                      if (next.has(ig.instanceId)) next.delete(ig.instanceId)
-                                      else next.add(ig.instanceId)
-                                      return next
-                                    })}
-                                    aria-expanded={isExpanded}
-                                  >
-                                    <span className={`replay-instance-chevron ${isExpanded ? 'replay-instance-chevron--open' : ''}`}>▶</span>
-                                    <span className="replay-instance-group-title">
-                                      {ig.label ?? `Instance #${ig.instanceId}`}
-                                    </span>
-                                    {ig.opportunityName && (
-                                      <span className="replay-instance-group-opp">({ig.opportunityName})</span>
-                                    )}
-                                    <span className="replay-instance-group-stats">
-                                      <span>Closed: {closed.length}</span>
-                                      <span>Open: {open.length}</span>
-                                      <span className={pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
-                                        PnL: {fmtUsd0(pnl)}
+                                  <div className="replay-instance-group-header-row">
+                                    <button
+                                      type="button"
+                                      className="replay-instance-group-header"
+                                      onClick={() => setInstanceExpandedIds(prev => {
+                                        const next = new Set(prev)
+                                        if (next.has(ig.instanceId)) next.delete(ig.instanceId)
+                                        else next.add(ig.instanceId)
+                                        return next
+                                      })}
+                                      aria-expanded={isExpanded}
+                                    >
+                                      <span className={`replay-instance-chevron ${isExpanded ? 'replay-instance-chevron--open' : ''}`}>▶</span>
+                                      <span className="replay-instance-group-title">
+                                        {ig.label ?? `Instance #${ig.instanceId}`}
                                       </span>
-                                    </span>
-                                  </button>
+                                      {ig.opportunityName && (
+                                        <span className="replay-instance-group-opp">({ig.opportunityName})</span>
+                                      )}
+                                      <span className="replay-instance-group-stats">
+                                        <span>Closed: {closed.length}</span>
+                                        <span>Open: {open.length}</span>
+                                        <span className={pnl >= 0 ? 'replay-pnl-realized' : 'replay-pnl-detail-negative'}>
+                                          PnL: {fmtUsd0(pnl)}
+                                        </span>
+                                      </span>
+                                    </button>
+                                    <a
+                                      href={`#/strategies/instances/${ig.instanceId}`}
+                                      className="replay-stg-ins-link replay-instance-detail-link"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={
+                                        ig.label
+                                          ? `Open instance detail (#${ig.instanceId} — ${ig.label})`
+                                          : `Open instance detail (#${ig.instanceId})`
+                                      }
+                                      aria-label={
+                                        ig.label
+                                          ? `Open instance detail for #${ig.instanceId} (${ig.label})`
+                                          : `Open instance detail for #${ig.instanceId}`
+                                      }
+                                    >
+                                      Detail
+                                    </a>
+                                  </div>
                                   {isExpanded && (
                                     <div className="replay-instance-group-body">
                                       {closed.length > 0 && (

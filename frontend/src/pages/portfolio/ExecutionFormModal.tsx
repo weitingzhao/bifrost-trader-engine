@@ -387,87 +387,92 @@ export function ExecutionFormModal({
               ))}
             </select>
           </div>
-          <div className="replay-exec-form-row replay-exec-splits-section">
-            <label id={splitSectionId}>Multi-instance split</label>
-            <div className="replay-exec-splits-controls">
-              <label className="replay-exec-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={useInstanceSplits}
-                  onChange={e => {
-                    const on = e.target.checked
-                    setUseInstanceSplits(on)
-                    if (on && splitRows.length === 0) {
-                      setSplitRows([{ uid: `new-${Date.now()}`, strategy_instance_id: '', allocated_quantity: '' }])
+          <div className="replay-exec-splits-section">
+            <div className="replay-exec-form-row replay-exec-splits-section-header">
+              <label id={splitSectionId}>Multi-instance split</label>
+              <div className="replay-exec-splits-controls">
+                <label className="replay-exec-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={useInstanceSplits}
+                    onChange={e => {
+                      const on = e.target.checked
+                      setUseInstanceSplits(on)
+                      if (on && splitRows.length === 0) {
+                        setSplitRows([{ uid: `new-${Date.now()}`, strategy_instance_id: '', allocated_quantity: '' }])
+                      }
+                    }}
+                    aria-describedby={splitSectionId}
+                  />
+                  Split quantity across instances
+                </label>
+                {useInstanceSplits && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      setSplitRows(rows => [
+                        ...rows,
+                        { uid: `new-${Date.now()}-${rows.length}`, strategy_instance_id: '', allocated_quantity: '' },
+                      ])
                     }
-                  }}
-                  aria-describedby={splitSectionId}
-                />
-                Split quantity across instances
-              </label>
-              {useInstanceSplits && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() =>
-                    setSplitRows(rows => [
-                      ...rows,
-                      { uid: `new-${Date.now()}-${rows.length}`, strategy_instance_id: '', allocated_quantity: '' },
-                    ])
-                  }
-                >
-                  Add row
-                </button>
-              )}
+                  >
+                    Add row
+                  </button>
+                )}
+              </div>
             </div>
             {useInstanceSplits && (
-              <p className="section-hint">
+              <p className="section-hint replay-exec-splits-hint">
                 Signed quantities must sum to the execution quantity. Saving with splits enabled and no rows clears
                 allocation rows. Single Strategy / Instance fields are ignored when splits are saved.
               </p>
             )}
-            {useInstanceSplits &&
-              splitRows.map(row => (
-                <div key={row.uid} className="replay-exec-form-row replay-exec-split-row">
-                  <select
-                    value={row.strategy_instance_id}
-                    onChange={e =>
-                      setSplitRows(rows =>
-                        rows.map(r => (r.uid === row.uid ? { ...r, strategy_instance_id: e.target.value } : r)),
-                      )
-                    }
-                    aria-label="Instance for split"
-                  >
-                    <option value="">— Instance —</option>
-                    {allInstancesForAccount.map(si => (
-                      <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
-                        {si.label?.trim() ||
-                          `#${si.strategy_instance_id} ${si.opened_at && si.opened_at.length >= 10 ? si.opened_at.slice(0, 10) : si.opened_at ?? ''}`}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    step="any"
-                    className="replay-exec-split-qty"
-                    value={row.allocated_quantity}
-                    onChange={e =>
-                      setSplitRows(rows =>
-                        rows.map(r => (r.uid === row.uid ? { ...r, allocated_quantity: e.target.value } : r)),
-                      )
-                    }
-                    placeholder="Signed qty"
-                    aria-label="Allocated quantity"
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setSplitRows(rows => rows.filter(r => r.uid !== row.uid))}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
+            {useInstanceSplits && (
+              <div className="replay-exec-splits-rows">
+                {splitRows.map(row => (
+                  <div key={row.uid} className="replay-exec-split-row">
+                    <select
+                      value={row.strategy_instance_id}
+                      onChange={e =>
+                        setSplitRows(rows =>
+                          rows.map(r => (r.uid === row.uid ? { ...r, strategy_instance_id: e.target.value } : r)),
+                        )
+                      }
+                      aria-label="Instance for split"
+                    >
+                      <option value="">— Instance —</option>
+                      {allInstancesForAccount.map(si => (
+                        <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
+                          {si.label?.trim() ||
+                            `#${si.strategy_instance_id} ${si.opened_at && si.opened_at.length >= 10 ? si.opened_at.slice(0, 10) : si.opened_at ?? ''}`}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      step="any"
+                      className="replay-exec-split-qty"
+                      value={row.allocated_quantity}
+                      onChange={e =>
+                        setSplitRows(rows =>
+                          rows.map(r => (r.uid === row.uid ? { ...r, allocated_quantity: e.target.value } : r)),
+                        )
+                      }
+                      placeholder="Signed qty"
+                      aria-label="Allocated quantity"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm replay-exec-split-remove"
+                      onClick={() => setSplitRows(rows => rows.filter(r => r.uid !== row.uid))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="replay-exec-form-row">
             <label>Time</label>

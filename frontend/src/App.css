@@ -9030,6 +9030,25 @@ th {
   overflow: hidden;
   background: var(--color-surface, var(--bg-card, #1a1a1a));
 }
+.replay-instance-group-header-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  background: var(--color-surface-elevated, var(--bg-surface-subtle, #161616));
+}
+.replay-instance-group-header-row .replay-instance-group-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  background: transparent;
+}
+.replay-instance-detail-link {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 0 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
 .replay-instance-group-header {
   display: flex;
   align-items: center;
@@ -9087,6 +9106,86 @@ th {
   font-weight: 600;
   color: var(--color-text-muted, #8b949e);
 }
+
+/* Trade ledger — Strategy tab: opportunity → nested instance blocks */
+.replay-strategy-instance-nest {
+  margin-top: 0.85rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--color-border, var(--border-subtle, #2a313c));
+}
+.replay-instance-group-body > .replay-strategy-instance-nest:first-child {
+  margin-top: 0;
+}
+.replay-strategy-instance-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+.replay-strategy-instance-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin-bottom: 0.15rem;
+}
+.replay-strategy-instance-collapse-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.35rem;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.replay-strategy-instance-collapse-header:hover {
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.04));
+}
+.replay-strategy-instance-head-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-main, var(--text-primary, #e4e9ef));
+}
+.replay-strategy-instance-id-text {
+  color: var(--color-text-muted, #8b949e);
+  font-weight: 600;
+}
+.replay-strategy-instance-open-link {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+}
+.replay-strategy-instance-collapse-body {
+  padding-top: 0.35rem;
+}
+.replay-strategy-instance-heading {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-text-main, var(--text-primary, #e4e9ef));
+}
+.replay-strategy-instance-label {
+  font-weight: 600;
+}
+.replay-strategy-instance-stats {
+  margin-left: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.85rem;
+  font-size: 0.78rem;
+  color: var(--color-text-muted, #8b949e);
+}
+
 .replay-instance-no-inst-sheet {
   border: 1px solid var(--color-border, var(--border-subtle, #2a313c));
   border-radius: 8px;
@@ -9370,6 +9469,18 @@ th {
 .coverage-summary-section {
   margin-bottom: var(--space-4, 1rem);
   padding: var(--space-2) 0;
+}
+/* Shown when instance filters yield no rows: same heading slot, explanatory copy instead of tables */
+.coverage-summary-section--placeholder {
+  padding: 0.45rem 0.55rem 0.55rem;
+  border-radius: var(--radius-md, 6px);
+  border: 1px dashed var(--color-border, #2a2f38);
+  background: var(--color-surface-raised, rgba(0, 0, 0, 0.06));
+}
+.coverage-summary-placeholder-text {
+  margin: 0.35rem 0 0;
+  max-width: 52rem;
+  line-height: 1.45;
 }
 /* Option underlying + backing pools side-by-side when both exist */
 .coverage-pools-row {
@@ -11359,6 +11470,12 @@ th:has(> .coverage-pool-th-held-amt) {
   gap: var(--space-2);
 }
 
+.replay-opt-actions-cell {
+  vertical-align: middle;
+  white-space: nowrap;
+  width: 1%;
+}
+
 /* Stg/Ins cell styling in Trade History Details tables */
 .replay-stg-ins {
   display: inline-flex;
@@ -11401,6 +11518,83 @@ th:has(> .coverage-pool-th-held-amt) {
 }
 .replay-stg-ins-empty {
   color: var(--color-text-muted);
+}
+
+/* Multi-instance split: strategy line + stacked instance links with qty */
+.replay-stg-ins--split {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  max-width: min(280px, 100%);
+  white-space: normal;
+}
+
+.replay-stg-ins-head {
+  min-width: 0;
+  width: 100%;
+}
+
+.replay-stg-ins--split .replay-stg-ins-strategy {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.replay-stg-ins-alloc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.replay-stg-ins-alloc-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  font-size: var(--text-caption);
+  line-height: 1.35;
+}
+
+.replay-stg-ins-alloc-label {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  max-width: 10rem;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Instance label shown before #id (single-attribution row) */
+.replay-stg-ins-pre-id {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: var(--text-caption);
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replay-stg-ins-alloc-qty {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.replay-stg-ins-link--compact {
+  flex-shrink: 0;
+  padding: 0.06rem 0.38rem;
+  font-size: 0.8125em;
 }
 
 .replay-contract-exec-id {
@@ -11476,8 +11670,8 @@ th:has(> .coverage-pool-th-held-amt) {
   border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: var(--space-4);
-  max-width: 460px;
-  width: 90%;
+  max-width: min(720px, 94vw);
+  width: 92%;
   max-height: 90vh;
   overflow: hidden auto;
   box-sizing: border-box;
@@ -11549,6 +11743,76 @@ th:has(> .coverage-pool-th-held-amt) {
   justify-content: flex-end;
   gap: var(--space-2);
   margin-top: var(--space-3);
+}
+
+.replay-exec-splits-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.replay-exec-splits-section .replay-exec-splits-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.replay-exec-splits-hint {
+  margin: 0;
+}
+
+.replay-exec-splits-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: min(42vh, 320px);
+  overflow-y: auto;
+  padding-right: var(--space-1);
+  min-width: 0;
+}
+
+.replay-exec-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-body);
+  cursor: pointer;
+}
+
+.replay-exec-split-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.replay-exec-split-row select {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: var(--text-body);
+  box-sizing: border-box;
+}
+
+.replay-exec-split-remove {
+  flex-shrink: 0;
+}
+
+.replay-exec-split-row input.replay-exec-split-qty {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 8rem;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: var(--text-body);
+  box-sizing: border-box;
 }
 
 /* Create strategy instance modal (Event Account: Host / Secondary) */

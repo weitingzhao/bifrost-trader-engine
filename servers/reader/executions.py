@@ -5,6 +5,7 @@ import math
 import re
 from datetime import date, datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from psycopg2.extras import RealDictCursor
 
@@ -16,6 +17,14 @@ from servers.reader.accounts_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_CHICAGO = ZoneInfo("America/Chicago")
+
+
+def _unix_ts_to_chicago_date(ts: float) -> date:
+    """Map Unix instant to Chicago calendar date for `trade_date` (DATE) filters."""
+    return datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(_CHICAGO).date()
+
 
 # All-source canonical view (Flex > TWS dedup + journal).
 _EXEC_READ_TABLE = "account_executions"
@@ -204,26 +213,37 @@ def _add_realized_splits_to_opp_and_inst(
     e: Dict[str, Any],
     by_opp: Dict[int, Dict[str, Any]],
     by_inst: Dict[int, Dict[str, Any]],
+    only_strategy_instance_id: Optional[int] = None,
 ) -> None:
-    """Add one execution's realized_pnl/commission into by_opp and by_inst (handles instance_allocations)."""
+    """Add one execution's realized_pnl/commission into by_opp and by_inst (handles instance_allocations).
+
+    When only_strategy_instance_id is set (Performance filter), attribute only to that instance.
+    """
     rp_val = float(e["realized_pnl"]) if e.get("realized_pnl") is not None else 0.0
     comm_val = float(e["commission"]) if e.get("commission") is not None else 0.0
     if not math.isfinite(rp_val):
         rp_val = 0.0
     if not math.isfinite(comm_val):
         comm_val = 0.0
-    allocs = e.get("instance_allocations") or []
-    if allocs:
-        denom = 0.0
-        for a in allocs:
-            try:
-                denom += abs(float(a.get("allocated_quantity") or 0))
-            except (TypeError, ValueError):
-                pass
+    raw_allocs = e.get("instance_allocations") or []
+    full_denom = 0.0
+    for a in raw_allocs:
+        try:
+            full_denom += abs(float(a.get("allocated_quantity") or 0))
+        except (TypeError, ValueError):
+            pass
+    work_allocs = raw_allocs
+    if only_strategy_instance_id is not None and raw_allocs:
+        sid_f = int(only_strategy_instance_id)
+        work_allocs = [a for a in raw_allocs if int(a.get("strategy_instance_id") or -1) == sid_f]
+    if only_strategy_instance_id is not None and raw_allocs and not work_allocs:
+        return
+    if work_allocs:
+        denom = full_denom if full_denom > 0 else 0.0
         if denom <= 0:
             return
         opp_trade_bump: set = set()
-        for a in allocs:
+        for a in work_allocs:
             try:
                 w = abs(float(a.get("allocated_quantity") or 0)) / denom
                 si_id = int(a["strategy_instance_id"])
@@ -263,6 +283,9 @@ def _add_realized_splits_to_opp_and_inst(
         return
     so_id = e.get("strategy_opportunity_id")
     si_id = e.get("strategy_instance_id")
+    if only_strategy_instance_id is not None:
+        if si_id is None or int(si_id) != int(only_strategy_instance_id):
+            return
     if so_id is not None:
         so_id = int(so_id)
         if so_id not in by_opp:
@@ -320,11 +343,11 @@ def get_executions(
         conditions = []
         values: List[Any] = []
         if since_ts is not None:
-            conditions.append("e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
-            values.append(since_ts)
+            conditions.append("e.trade_date >= %s")
+            values.append(_unix_ts_to_chicago_date(since_ts))
         if until_ts is not None:
-            conditions.append("e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date")
-            values.append(until_ts)
+            conditions.append("e.trade_date <= %s")
+            values.append(_unix_ts_to_chicago_date(until_ts))
         if account_id is not None and account_id.strip():
             conditions.append("e.account_id = %s")
             values.append(account_id.strip())
@@ -861,7 +884,9 @@ def get_executions_with_opt_pairs_single_query(
 ) -> List[Dict[str, Any]]:
     if since_ts is None or until_ts is None or conn is None:
         return []
-    values: List[Any] = [since_ts, until_ts]
+    since_d = _unix_ts_to_chicago_date(since_ts)
+    until_d = _unix_ts_to_chicago_date(until_ts)
+    values: List[Any] = [since_d, until_d]
     acc_cond = ""
     if account_id and account_id.strip():
         acc_cond = " AND e.account_id = %s"
@@ -880,7 +905,7 @@ def get_executions_with_opt_pairs_single_query(
         values.append(strategy_instance_id)
     src_frag = _source_scope_sql_fragment(source_scope)
     from_table = _exec_from_for_scope(source_scope)
-    values2: List[Any] = [since_ts, until_ts, since_ts, until_ts]
+    values2: List[Any] = [since_d, until_d, since_d, until_d]
     if account_id and account_id.strip():
         values2.append(account_id.strip())
     if strategy_opportunity_id is not None:
@@ -893,8 +918,8 @@ def get_executions_with_opt_pairs_single_query(
 WITH day_keys AS (
   SELECT DISTINCT e.symbol, e.expiry, COALESCE(e.strike::text,'') AS strike_s, e.account_id
   FROM {from_table} e
-  WHERE e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
-    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+  WHERE e.trade_date >= %s
+    AND e.trade_date <= %s
     AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
     {acc_cond}
     {strat_cond}
@@ -908,15 +933,15 @@ all_legs AS (
          e.expiry, e.strike, e.option_right, e.exchange, e.order_id, e.cum_qty,
          c.realized_pnl, e.contract_key, c.currency, c.yield_, c.yield_redemption_date, e.raw_extra,
          {_CREATED_AT_E},
-         (e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date) AS in_selected_day,
+         (e.trade_date >= %s AND e.trade_date <= %s) AS in_selected_day,
          upper(trim(COALESCE(e.side,''))) AS side_norm
   FROM {from_table} e
   INNER JOIN day_keys k ON e.symbol = k.symbol AND e.expiry = k.expiry
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
   LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
-    AND e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
-    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+    AND e.trade_date >= %s
+    AND e.trade_date <= %s
     {acc_cond}
     {strat_cond}
     {src_frag}
@@ -935,7 +960,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                 cur.execute(sql, values + values2)
             except Exception as col_err:
                 if "does not exist" in str(col_err).lower() or "42703" in str(getattr(col_err, "pgcode", "")):
-                    values_fb: List[Any] = [since_ts, until_ts]
+                    values_fb: List[Any] = [since_d, until_d]
                     if account_id and account_id.strip():
                         values_fb.append(account_id.strip())
                     if strategy_opportunity_id is not None:
@@ -943,7 +968,7 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
                     if strategy_instance_id is not None:
                         values_fb.append(strategy_instance_id)
                         values_fb.append(strategy_instance_id)
-                    values2_fb: List[Any] = [since_ts, until_ts, since_ts, until_ts]
+                    values2_fb: List[Any] = [since_d, until_d, since_d, until_d]
                     if account_id and account_id.strip():
                         values2_fb.append(account_id.strip())
                     if strategy_opportunity_id is not None:
@@ -956,8 +981,8 @@ SELECT * FROM numbered ORDER BY time ASC NULLS LAST LIMIT %s
 WITH day_keys AS (
   SELECT DISTINCT e.symbol, e.expiry, COALESCE(e.strike::text,'') AS strike_s, e.account_id
   FROM {from_table} e
-  WHERE e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
-    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+  WHERE e.trade_date >= %s
+    AND e.trade_date <= %s
     AND upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
     {acc_cond}
     {strat_cond}
@@ -972,15 +997,15 @@ all_legs AS (
          NULL::double precision AS realized_pnl, e.contract_key, NULL::text AS currency,
          NULL::double precision AS yield_, NULL::integer AS yield_redemption_date, e.raw_extra,
          {_CREATED_AT_E},
-         (e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date) AS in_selected_day,
+         (e.trade_date >= %s AND e.trade_date <= %s) AS in_selected_day,
          upper(trim(COALESCE(e.side,''))) AS side_norm
   FROM {from_table} e
   INNER JOIN day_keys k ON e.symbol = k.symbol AND e.expiry = k.expiry
     AND COALESCE(e.strike::text,'') = k.strike_s AND e.account_id = k.account_id
   LEFT JOIN account_execution_commissions c ON e.exec_id = c.exec_id AND e.exec_id IS NOT NULL
   WHERE upper(trim(COALESCE(e.sec_type,''))) = 'OPT'
-    AND e.trade_date >= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
-    AND e.trade_date <= (to_timestamp(%s) AT TIME ZONE 'America/Chicago')::date
+    AND e.trade_date >= %s
+    AND e.trade_date <= %s
     {acc_cond}
     {strat_cond}
     {src_frag}
@@ -1234,6 +1259,11 @@ def get_performance_stats(
     )
     executions_sorted = sorted([e for e in executions if e.get("time") is not None], key=lambda e: float(e["time"]))
 
+    def _perf_inst_weight(ex: Dict[str, Any]) -> float:
+        if strategy_instance_id is None:
+            return 1.0
+        return weight_realized_for_strategy_instance(ex, int(strategy_instance_id))
+
     total_realized_pnl = 0.0
     total_commission = 0.0
     net_pnl = 0.0
@@ -1243,12 +1273,15 @@ def get_performance_stats(
     cumulative_curve: List[Dict[str, Any]] = []
     running_net = 0.0
     for e in executions_sorted:
+        wf = _perf_inst_weight(e)
         rp_val = float(e["realized_pnl"]) if e.get("realized_pnl") is not None and isinstance(e.get("realized_pnl"), (int, float)) else 0.0
         comm_val = float(e["commission"]) if e.get("commission") is not None and isinstance(e.get("commission"), (int, float)) else 0.0
         if not math.isfinite(rp_val):
             rp_val = 0.0
         if not math.isfinite(comm_val):
             comm_val = 0.0
+        rp_val *= wf
+        comm_val *= wf
         net = rp_val - comm_val
         total_realized_pnl += rp_val
         total_commission += comm_val
@@ -1282,6 +1315,7 @@ def get_performance_stats(
 
     by_acc: Dict[str, Dict[str, Any]] = {}
     for e in executions_sorted:
+        wf = _perf_inst_weight(e)
         acc = e.get("account_id") or ""
         if acc not in by_acc:
             by_acc[acc] = {"total_pnl": 0.0, "commission": 0.0, "net_pnl": 0.0, "trade_count": 0}
@@ -1291,6 +1325,8 @@ def get_performance_stats(
             rp_val = 0.0
         if not math.isfinite(comm_val):
             comm_val = 0.0
+        rp_val *= wf
+        comm_val *= wf
         by_acc[acc]["total_pnl"] += rp_val
         by_acc[acc]["commission"] += comm_val
         by_acc[acc]["net_pnl"] += rp_val - comm_val
@@ -1302,6 +1338,7 @@ def get_performance_stats(
 
     by_sec: Dict[str, Dict[str, Any]] = {}
     for e in executions_sorted:
+        wf = _perf_inst_weight(e)
         st = (e.get("sec_type") or "UNKNOWN").strip().upper() or "UNKNOWN"
         if st not in by_sec:
             by_sec[st] = {"total_pnl": 0.0, "commission": 0.0, "net_pnl": 0.0, "trade_count": 0}
@@ -1311,6 +1348,8 @@ def get_performance_stats(
             rp_val = 0.0
         if not math.isfinite(comm_val):
             comm_val = 0.0
+        rp_val *= wf
+        comm_val *= wf
         by_sec[st]["total_pnl"] += rp_val
         by_sec[st]["commission"] += comm_val
         by_sec[st]["net_pnl"] += rp_val - comm_val
@@ -1322,6 +1361,7 @@ def get_performance_stats(
 
     by_acc_sec: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for e in executions_sorted:
+        wf = _perf_inst_weight(e)
         acc, st = e.get("account_id") or "", (e.get("sec_type") or "UNKNOWN").strip().upper() or "UNKNOWN"
         key = (acc, st)
         if key not in by_acc_sec:
@@ -1332,6 +1372,8 @@ def get_performance_stats(
             rp_val = 0.0
         if not math.isfinite(comm_val):
             comm_val = 0.0
+        rp_val *= wf
+        comm_val *= wf
         by_acc_sec[key]["total_pnl"] += rp_val
         by_acc_sec[key]["commission"] += comm_val
         by_acc_sec[key]["net_pnl"] += rp_val - comm_val
@@ -1344,7 +1386,12 @@ def get_performance_stats(
     by_opp: Dict[int, Dict[str, Any]] = {}
     by_inst: Dict[int, Dict[str, Any]] = {}
     for e in executions_sorted:
-        _add_realized_splits_to_opp_and_inst(e, by_opp, by_inst)
+        _add_realized_splits_to_opp_and_inst(
+            e,
+            by_opp,
+            by_inst,
+            only_strategy_instance_id=strategy_instance_id,
+        )
     realized_by_strategy_opportunity = [{"strategy_opportunity_id": k, "total_pnl": round(v["total_pnl"], 2), "commission": round(v["commission"], 2), "net_pnl": round(v["net_pnl"], 2), "trade_count": v["trade_count"]} for k, v in sorted(by_opp.items())]
     realized_by_strategy_instance = [{"strategy_instance_id": k, "total_pnl": round(v["total_pnl"], 2), "commission": round(v["commission"], 2), "net_pnl": round(v["net_pnl"], 2), "trade_count": v["trade_count"]} for k, v in sorted(by_inst.items())]
     if capital_base and capital_base > 0:
@@ -1372,6 +1419,7 @@ def get_performance_stats(
 
     cal_map: Dict[Tuple[float, str], Dict[str, Any]] = {}
     for e in executions_sorted:
+        wf = _perf_inst_weight(e)
         t = e.get("time")
         if t is None:
             continue
@@ -1386,6 +1434,8 @@ def get_performance_stats(
             rp_val = 0.0
         if not math.isfinite(comm_val):
             comm_val = 0.0
+        rp_val *= wf
+        comm_val *= wf
         cal_map[key]["pnl"] += rp_val
         cal_map[key]["commission"] += comm_val
         cal_map[key]["net_pnl"] += rp_val - comm_val
@@ -1406,6 +1456,7 @@ def get_performance_stats(
     opt_calendar = _compute_opt_realized_calendar(executions_sorted, granularity)
     cal_map_by_sec: Dict[Tuple[float, str, str], Dict[str, Any]] = {}
     for e in executions_sorted:
+        wf = _perf_inst_weight(e)
         st = (e.get("sec_type") or "UNKNOWN").strip().upper() or "UNKNOWN"
         if st == "OPT":
             continue
@@ -1423,6 +1474,8 @@ def get_performance_stats(
             rp_val = 0.0
         if not math.isfinite(comm_val):
             comm_val = 0.0
+        rp_val *= wf
+        comm_val *= wf
         cal_map_by_sec[key]["pnl"] += rp_val
         cal_map_by_sec[key]["commission"] += comm_val
         cal_map_by_sec[key]["net_pnl"] += rp_val - comm_val
