@@ -146,6 +146,11 @@ function appDocumentTitle(configProfile: string | undefined | null): string {
 }
 
 function appFaviconHref(configProfile: string | undefined | null): string {
+  // Production is served by FastAPI: only `/favicon.svg` is routed; it returns the correct SVG by server
+  // config_profile. `/favicon-dev.svg` and `/favicon-prod.svg` are not exposed as URLs — linking to them 404s.
+  if (import.meta.env.PROD) {
+    return '/favicon.svg'
+  }
   if (configProfile === 'dev') return '/favicon-dev.svg'
   if (configProfile === 'prod') return '/favicon-prod.svg'
   return '/favicon.svg'

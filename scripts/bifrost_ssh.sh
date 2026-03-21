@@ -5,8 +5,8 @@
 #
 # Bash 3.2 (macOS) + set -u: avoid expanding empty arrays with "${arr[@]}" — use length checks first.
 #
-# Interactive mode (no args, or -i/--interactive): SSH ControlMaster — you enter the SSH password once
-# per session (unless using keys); optional sudo password is kept in memory only for sudo -S.
+# Interactive mode (no args, or -i/--interactive): SSH ControlMaster — SSH login once (unless using keys);
+# sudo password is kept in memory for the whole session (sudo -S) until quit or menu (4) Clear.
 
 set -euo pipefail
 
@@ -22,6 +22,8 @@ SSH_CONTROL_PATH=""
 # Optional: remote sudo password for this process only (never written to disk).
 # May be preset via --password / -p / DEPLOY_SUDO_PASSWORD before interactive prompt.
 SUDO_PASSWORD=""
+# Interactive mode: backup of the sudo password for the whole script run (re-applied before each remote step).
+BIFROST_SESSION_SUDO_PASSWORD=""
 
 DO_DEPLOY=0
 DO_DEPLOY_ONLY=0
@@ -136,8 +138,9 @@ Usage (from repo root):
   ./scripts/bifrost_ssh.sh -i
   ./scripts/bifrost_ssh.sh --interactive
   ./scripts/bifrost_ssh.sh --password 'REMOTE_SUDO_SECRET' -i
-      Interactive menu: open one SSH session (password once), then run operations in a loop;
-      main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
+      Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
+      sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (4) Clear.
+      Main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
       kept in memory only for this process. Warning: --password may be visible in process listings.
 
@@ -266,8 +269,9 @@ _ssh_control_start() {
   if _use_sshpass_for_ssh; then
     _msg_info "Using sshpass for SSH login (same secret as --password / -p / DEPLOY_SUDO_PASSWORD)."
   fi
-  # -M master, -f background after auth, -N no remote command — session stays for ControlPersist
-  if ! _ssh_plain -M -S "${SSH_CONTROL_PATH}" -o ControlPersist=300 -o ConnectTimeout=15 -f -N "${remote}"; then
+  # -M master, -f background after auth, -N no remote command — ControlPersist=yes keeps the master for
+  # the whole interactive session (idle menus included). EXIT trap closes it; avoid 300s drop → re-prompt SSH.
+  if ! _ssh_plain -M -S "${SSH_CONTROL_PATH}" -o ControlPersist=yes -o ConnectTimeout=15 -f -N "${remote}"; then
     SSH_CONTROL_PATH=""
     _msg_warn "Failed to start SSH master. Continuing without multiplexing (each command may ask for password)."
     return 1
@@ -304,7 +308,15 @@ _reset_run_state() {
   RESTART_UNITS=()
 }
 
+# Re-apply sudo password from interactive session backup (defensive; keeps sudo -S working for every menu run).
+_bifrost_restore_session_sudo() {
+  if [[ -n "${BIFROST_SESSION_SUDO_PASSWORD:-}" ]]; then
+    SUDO_PASSWORD="${BIFROST_SESSION_SUDO_PASSWORD}"
+  fi
+}
+
 _run_pipeline() {
+  _bifrost_restore_session_sudo
   # Uses globals: DO_DEPLOY, DO_DEPLOY_ONLY, DO_MIGRATE, SYNC_PROD_CONFIG, ACTION, RESTART_UNITS, RESTART_ALL
   local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
   local REMOTE_URL="${REMOTE}:${DEPLOY_PATH}/"
@@ -414,7 +426,11 @@ REMOTE_EOF
       if [[ -n "${SUDO_PASSWORD}" ]]; then
         printf '%s\n' "${SUDO_PASSWORD}" | ssh_remote "${REMOTE}" "sudo -S systemctl ${ACTION} ${_units_str}"
       else
-        if [[ -t 0 ]]; then
+        # Interactive sudo: must read from the real terminal. A plain `cmd | tee` runs cmd in a subshell
+        # where `ssh -tt` + sudo may not get a usable TTY — use /dev/tty when available.
+        if [[ -r /dev/tty ]]; then
+          ssh_remote -tt "${REMOTE}" "sudo systemctl ${ACTION} ${_units_str}" </dev/tty
+        elif [[ -t 0 ]]; then
           ssh_remote -tt "${REMOTE}" "sudo systemctl ${ACTION} ${_units_str}"
         else
           ssh_remote "${REMOTE}" "sudo -n systemctl ${ACTION} ${_units_str}" 2>/dev/null || \
@@ -432,8 +448,10 @@ REMOTE_EOF
   if [[ "${BIFROST_SSH_TUI:-0}" == "1" ]] && [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
     _msg_info "Running on remote — output streams below (SSH/sudo may take a while; sudo may prompt for password)."
     echo ""
-    _run_pipeline_inner 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
-    _ec=${PIPESTATUS[0]}
+    # Use process substitution so _run_pipeline_inner runs in the current shell, not a pipeline subshell.
+    # Otherwise ssh -tt + sudo interactive password can misbehave or re-prompt.
+    _run_pipeline_inner > >(tee "${BIFROST_SSH_LAST_LOG}") 2>&1
+    _ec=$?
     {
       echo ""
       echo "--- exit code: ${_ec} ---"
@@ -608,8 +626,8 @@ interactive_mode() {
   echo "${C_BLUE}${C_BOLD}  Bifrost SSH ${C_CYAN}(interactive)${C_RESET}"
   echo "${C_BLUE}${C_BOLD}══════════════════════════════════════${C_RESET}"
   _msg_info "Host ${C_BOLD}${DEPLOY_USER}@${DEPLOY_HOST}${C_RESET}  Path ${C_BOLD}${DEPLOY_PATH}${C_RESET}"
-  echo "${C_DIM}SSH: ControlMaster reuses login (password not written to disk).${C_RESET}"
-  echo "${C_DIM}sudo: optional password in memory this session only (sudo -S).${C_RESET}"
+  echo "${C_DIM}SSH: ControlMaster reuses **login** only (that password is not saved).${C_RESET}"
+  echo "${C_DIM}sudo: **separate** from SSH — needed for systemctl on the remote host (often the same password).${C_RESET}"
   echo ""
 
   if ! _ssh_control_start; then
@@ -627,14 +645,17 @@ interactive_mode() {
       _msg_warn "sshpass not installed: SSH/rsync may still ask for the ${C_BOLD}login${C_RESET} password (sudo uses -p). Install sshpass to reuse the same secret for SSH, or use SSH keys."
     fi
   else
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Remote sudo password ${C_DIM}(Enter = prompt later / NOPASSWD / skip)${C_RESET}: "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Remote sudo password (for systemctl; not SSH) ${C_DIM}(Enter = ask when restart runs)${C_RESET}: "
     read -r -s SUDO_PASSWORD || true
     echo ""
     if [[ -z "${SUDO_PASSWORD}" ]]; then
-      _msg_info "No sudo password stored — sudo will prompt on TTY when needed."
+      _msg_info "No sudo password stored — you will be prompted for sudo when a step runs systemctl (e.g. Quick deploy with R)."
     else
-      _msg_info "sudo password will be used with sudo -S this session; cleared on exit."
+      _msg_info "sudo password kept in memory for this session (all menu actions) until you quit or choose (4) Clear."
     fi
+  fi
+  if [[ -n "${SUDO_PASSWORD}" ]]; then
+    BIFROST_SESSION_SUDO_PASSWORD="${SUDO_PASSWORD}"
   fi
 
   while true; do
@@ -660,6 +681,7 @@ interactive_mode() {
         ;;
       4)
         SUDO_PASSWORD=""
+        BIFROST_SESSION_SUDO_PASSWORD=""
         echo "[INFO] Stored sudo password cleared." >"${BIFROST_SSH_LAST_LOG}"
         ;;
       q|Q)
