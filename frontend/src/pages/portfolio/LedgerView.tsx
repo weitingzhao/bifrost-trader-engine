@@ -5,6 +5,9 @@ import type { StrategyInstance } from '../../types'
 import { deleteExecution, fetchOpportunities, fetchStrategyInstances, updateExecution } from '../../api'
 import ExecSourceBadge from '../../components/ExecSourceBadge'
 import { DraggableExplainPanel } from '../../components/DraggableExplainPanel'
+import { LedgerExpiryMonthCombobox } from '../../components/LedgerExpiryMonthCombobox'
+import { LedgerSymbolCombobox } from '../../components/LedgerSymbolCombobox'
+import { StrategyOpportunityCombobox } from '../../components/StrategyOpportunityCombobox'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import {
   fmtExpiry,
@@ -14,6 +17,11 @@ import {
   fmtUsd0,
   getContractLabelParts,
 } from '../../utils/format'
+import {
+  collectExpiryMonthKeys,
+  collectUnderlyingSymbols,
+  fallbackExpiryMonthKeys,
+} from '../../utils/ledgerFilterSuggestions'
 import { buildOptExecutionGroups, isOptionExpired } from './buildOptExecutionGroups'
 import { ExecutionFormModal } from './ExecutionFormModal'
 import { ExpiredCloseModal } from './ExpiredCloseModal'
@@ -93,6 +101,18 @@ export function LedgerView({
     }
     return tabs
   }, [status?.ib_config])
+
+  const ledgerMonthKeyOptions = useMemo(() => {
+    const merged = [...(executions ?? []), ...(executionsBook ?? [])]
+    const fromData = collectExpiryMonthKeys(merged)
+    if (fromData.length > 0) return fromData
+    return fallbackExpiryMonthKeys()
+  }, [executions, executionsBook])
+
+  const ledgerSymbolSuggestions = useMemo(() => {
+    const merged = [...(executions ?? []), ...(executionsBook ?? [])]
+    return collectUnderlyingSymbols(merged)
+  }, [executions, executionsBook])
 
   useEffect(() => {
     fetchOpportunities(true)
@@ -848,85 +868,74 @@ export function LedgerView({
       >
         <div className="replay-filters replay-filters--bar">
           <label className="replay-filter-wrap-symbol">
-            <input
-              type="text"
-              placeholder="e.g. NV → NVDA"
+            <LedgerSymbolCombobox
               value={ledgerFilterSymbol}
-              onChange={e => setLedgerFilterSymbol(e.target.value)}
-              className="replay-filter-input replay-filter-input--symbol"
-              aria-label="Symbol filter"
+              onChange={setLedgerFilterSymbol}
+              suggestions={ledgerSymbolSuggestions}
             />
           </label>
-          <label className="replay-filter-label-month">
-            <span className="replay-filter-label">Exp</span>
-            <input
-              type="month"
+          <div className="ledger-filter-field ledger-filter-field--expiry">
+            <LedgerExpiryMonthCombobox
               value={ledgerFilterExpiryStart}
-              onChange={e => setLedgerFilterExpiryStart(e.target.value)}
-              className="replay-filter-input replay-filter-date"
-              title="Expiry month"
+              onChange={setLedgerFilterExpiryStart}
+              monthKeys={ledgerMonthKeyOptions}
             />
-          </label>
-          <div className="ib-accounts-tabs" role="group" aria-label="Account filter">
-            <button
-              type="button"
-              className={`ib-accounts-tab ${!ledgerFilterAccount || ledgerFilterAccount === 'All' ? 'active' : ''}`}
-              onClick={() => setLedgerFilterAccount('')}
-            >
-              All
-            </button>
-            {ledgerTradeAccountTabs.map(({ id, label }) => (
-              <button
-                key={id}
-                type="button"
-                className={`ib-accounts-tab ${ledgerFilterAccount === id ? 'active' : ''}`}
-                title={id}
-                onClick={() => setLedgerFilterAccount(id)}
-              >
-                {label}
-              </button>
-            ))}
           </div>
-          <label className="replay-filter-label-strategy" title="Strategy (opportunity)">
-            <span className="replay-filter-label">Strategy</span>
-            <select
-              value={ledgerFilterStrategyOpportunityId === '' ? '' : String(ledgerFilterStrategyOpportunityId)}
-              onChange={e => {
-                const v = e.target.value
-                setLedgerFilterStrategyOpportunityId(v === '' ? '' : Number(v))
+          <div className="ledger-filter-account-bubble-group">
+            <div className="ledger-filter-account-bubbles" role="group" aria-label="Account filter">
+              <button
+                type="button"
+                className={`ledger-account-bubble ${
+                  !ledgerFilterAccount || ledgerFilterAccount === 'All' ? 'ledger-account-bubble--active' : ''
+                }`}
+                onClick={() => setLedgerFilterAccount('')}
+              >
+                All
+              </button>
+              {ledgerTradeAccountTabs.map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`ledger-account-bubble ${ledgerFilterAccount === id ? 'ledger-account-bubble--active' : ''}`}
+                  title={id}
+                  onClick={() => setLedgerFilterAccount(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="ledger-filter-field ledger-filter-field--strategy">
+            <StrategyOpportunityCombobox
+              opportunities={opportunities}
+              value={ledgerFilterStrategyOpportunityId}
+              onChange={id => {
+                setLedgerFilterStrategyOpportunityId(id)
                 setLedgerFilterStrategyInstanceId('')
               }}
-              className="replay-filter-input replay-filter-select"
-              aria-label="Strategy filter"
-            >
-              <option value="">All</option>
-              {opportunities.map(o => (
-                <option key={o.strategy_opportunity_id} value={String(o.strategy_opportunity_id)}>
-                  {o.name ?? `#${o.strategy_opportunity_id}`}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="replay-filter-label-instance" title="Instance">
-            <span className="replay-filter-label">Instance</span>
-            <select
-              value={ledgerFilterStrategyInstanceId === '' ? '' : String(ledgerFilterStrategyInstanceId)}
-              onChange={e => {
-                const v = e.target.value
-                setLedgerFilterStrategyInstanceId(v === '' ? '' : Number(v))
-              }}
-              className="replay-filter-input replay-filter-select"
-              aria-label="Instance filter"
-              disabled={ledgerFilterStrategyOpportunityId === ''}
-            >
-              <option value="">All</option>
-              {instances.map(si => (
-                <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
-                  {si.label?.trim() || `#${si.strategy_instance_id}`}
-                </option>
-              ))}
-            </select>
-          </label>
+            />
+          </div>
+          {ledgerFilterStrategyOpportunityId !== '' ? (
+            <label className="replay-filter-label-instance" title="Instance">
+              <span className="replay-filter-label">Instance</span>
+              <select
+                value={ledgerFilterStrategyInstanceId === '' ? '' : String(ledgerFilterStrategyInstanceId)}
+                onChange={e => {
+                  const v = e.target.value
+                  setLedgerFilterStrategyInstanceId(v === '' ? '' : Number(v))
+                }}
+                className="replay-filter-input replay-filter-select"
+                aria-label="Instance filter"
+              >
+                <option value="">All</option>
+                {instances.map(si => (
+                  <option key={si.strategy_instance_id} value={String(si.strategy_instance_id)}>
+                    {si.label?.trim() || `#${si.strategy_instance_id}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
         <div className="replay-portfolio-block">
           <div className="replay-portfolio-header">

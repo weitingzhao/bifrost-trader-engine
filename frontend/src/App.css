@@ -5164,11 +5164,12 @@ button:disabled {
   font-size: var(--text-caption);
   font-weight: normal;
   line-height: 1.4;
-  color: var(--color-text-main);
-  background: var(--color-surface-elevated);
+  color: var(--color-text-muted);
+  /* Match replay filter inputs (e.g. Search symbol) — low-contrast, not a loud card */
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
   white-space: normal;
   opacity: 0;
   pointer-events: none;
@@ -6984,6 +6985,11 @@ th {
   color: var(--color-text-dim);
 }
 
+/* Closed combobox “All …” state — same color as Search symbol placeholder */
+.replay-filter-input.ledger-filter-combobox__value--dim {
+  color: var(--color-text-dim);
+}
+
 .replay-filter-input.replay-filter-date,
 .replay-filters input[type="date"] {
   background: var(--color-bg);
@@ -7029,6 +7035,12 @@ th {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+}
+
+/* Trade ledger filter row — field wrappers without visible labels (copy in combobox) */
+.replay-filters--bar .ledger-filter-field {
+  display: inline-flex;
+  align-items: center;
 }
 
 .replay-filter-clear {
@@ -8800,10 +8812,11 @@ th {
 }
 
 .draggable-explain-panel {
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border-strong);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px var(--color-dashboard-shadow);
+  /* Subtle like filter bar fields — avoid heavy “modal card” look */
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
   max-height: min(88vh, 52rem);
   display: flex;
   flex-direction: column;
@@ -9702,6 +9715,164 @@ th {
   border-color: var(--color-border-strong, #3d4754);
   outline: none;
 }
+
+/* Trade ledger — filter combobox popover (shared) */
+.strategy-opp-combobox {
+  position: relative;
+  min-width: 17rem;
+  max-width: 26rem;
+}
+.strategy-opp-combobox__input {
+  width: 100%;
+  cursor: text;
+  text-overflow: ellipsis;
+}
+.strategy-opp-combobox__input[readonly]:not(:focus) {
+  cursor: pointer;
+}
+.ledger-expiry-combobox {
+  position: relative;
+  min-width: 10rem;
+  max-width: 15rem;
+}
+.ledger-expiry-combobox__input {
+  width: 100%;
+  cursor: text;
+  text-overflow: ellipsis;
+}
+.ledger-expiry-combobox__input[readonly]:not(:focus) {
+  cursor: pointer;
+}
+.ledger-symbol-combobox {
+  position: relative;
+  min-width: 6.5rem;
+  max-width: 11rem;
+}
+.ledger-symbol-combobox__input {
+  width: 100%;
+  cursor: text;
+}
+.ledger-filter-combobox__list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 3px);
+  z-index: 90;
+  margin: 0;
+  padding: var(--space-1, 4px) 0;
+  list-style: none;
+  max-height: min(280px, 45vh);
+  overflow: auto;
+  background: var(--color-surface, #13171d);
+  border: 1px solid var(--color-border, #2a313c);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.ledger-filter-combobox__option {
+  padding: 0.35rem 0.65rem;
+  font-size: var(--text-small, 0.875rem);
+  color: var(--color-text-main, #e4e9ef);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  line-height: 1.25;
+}
+.ledger-filter-combobox__option--symbol {
+  flex-direction: row;
+  align-items: center;
+}
+.ledger-filter-combobox__option:hover,
+.ledger-filter-combobox__option--active {
+  background: var(--color-surface-elevated, #1a1f26);
+}
+.ledger-filter-combobox__option-title {
+  font-weight: 500;
+}
+.ledger-filter-combobox__option-sub {
+  font-size: 0.78em;
+  color: var(--color-text-muted, #8b95a3);
+  word-break: break-word;
+}
+.ledger-filter-combobox__empty {
+  padding: 0.5rem 0.65rem;
+  font-size: var(--text-small, 0.875rem);
+  color: var(--color-text-muted, #8b95a3);
+  cursor: default;
+}
+
+/* Trade ledger — account filter: grouped bubble strip */
+.ledger-filter-account-bubble-group {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border, #2a313c);
+  background: var(--color-surface, #13171d);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.ledger-filter-account-bubbles {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+}
+.ledger-account-bubble {
+  appearance: none;
+  border-radius: 999px;
+  padding: 0.32rem 0.85rem;
+  font-size: var(--text-small, 0.875rem);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted, #8b95a3);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast, 0.15s),
+    border-color var(--transition-fast, 0.15s),
+    color var(--transition-fast, 0.15s),
+    box-shadow var(--transition-fast, 0.15s);
+  box-shadow: none;
+}
+.ledger-filter-account-bubble-group .ledger-account-bubble:hover {
+  border-color: var(--color-border-strong, #3d4754);
+  color: var(--color-text-main, #e4e9ef);
+  background: var(--color-bg, #0c0f14);
+}
+.ledger-account-bubble--active {
+  border-color: var(--color-primary, #2563eb);
+  background: linear-gradient(
+    165deg,
+    rgba(37, 99, 235, 0.28) 0%,
+    rgba(37, 99, 235, 0.12) 100%
+  );
+  color: var(--color-text-main, #e4e9ef);
+  box-shadow:
+    0 0 0 1px rgba(37, 99, 235, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.ledger-account-bubble--active:hover {
+  border-color: var(--color-primary-hover, #1d4ed8);
+  color: #fff;
+}
+
+/* Trade ledger — Add journal (header) */
+.trade-ledger-add-journal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.trade-ledger-add-journal-btn__icon {
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+.trade-ledger-add-journal-btn:hover .trade-ledger-add-journal-btn__icon {
+  opacity: 1;
+}
+
 .instance-sheet-table {
   width: 100%;
 }
