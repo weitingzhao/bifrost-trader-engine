@@ -577,6 +577,11 @@ body::before {
   outline-offset: 0;
 }
 
+/* Nested under System Status row in the header menu (Feed → Massive Option). */
+.app-header-menu-item-massive {
+  padding-left: calc(var(--space-3) + 0.65rem);
+}
+
 .app-header-menu-label {
   font-size: var(--text-tiny);
   font-weight: 600;
@@ -4866,6 +4871,19 @@ button:disabled {
   height: 14px;
 }
 
+.settings-sidebar-link-massive-cap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.settings-sidebar-massive-cap-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-main {
   flex: 1;
   min-width: 0;
@@ -5199,6 +5217,11 @@ button:disabled {
   color: var(--color-lamp-red);
   filter: drop-shadow(0 0 5px var(--color-lamp-red)) drop-shadow(0 0 10px rgba(248, 113, 113, 0.3));
   animation: lamp-pulse-red 1.5s ease-in-out infinite;
+}
+/* Massive Option sidebar: tier / plan limit (same semantic as feed-massive-tab-dot--tier) */
+.title-inline-lamp.tier {
+  color: var(--color-link);
+  filter: drop-shadow(0 0 4px rgba(96, 165, 250, 0.35));
 }
 .title-inline-lamp.none {
   color: var(--color-lamp-none);
@@ -12038,11 +12061,6 @@ th:has(> .coverage-pool-th-held-amt) {
   border-color: var(--color-border-strong);
 }
 
-.feed-massive-card--muted {
-  opacity: 0.92;
-  background: var(--color-bg);
-}
-
 .feed-massive-card-head {
   display: flex;
   flex-wrap: wrap;
@@ -12311,19 +12329,59 @@ th:has(> .coverage-pool-th-held-amt) {
   color: var(--color-text-muted);
 }
 
+/** Capability name (aligned with Settings sidebar); primary label next to menu-style lamp glyph. */
+.feed-massive-svc-cap-name {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+/** Implementation status (Implemented / Partial / …); secondary — capability name is primary. */
+.feed-massive-svc-impl-status {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  background: color-mix(in srgb, var(--color-text-muted) 12%, transparent);
+}
+
 .feed-massive-svc-help-btn {
   margin-left: auto;
   padding: 0.25rem 0.65rem;
   font-size: var(--text-caption);
 }
 
+/** Evidence + Test side-by-side on wide viewports (capability blocks). */
+.feed-massive-svc-work {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .feed-massive-svc-work--split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
 .feed-massive-svc-evidence,
 .feed-massive-svc-test {
-  margin-bottom: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-radius: 6px;
   background: var(--color-dashboard-tile);
   border: 1px solid var(--color-border);
+  min-width: 0;
+}
+
+.feed-massive-svc-work .feed-massive-svc-evidence,
+.feed-massive-svc-work .feed-massive-svc-test {
+  margin-bottom: 0;
+  height: 100%;
 }
 
 .feed-massive-svc-evidence-label,
@@ -12346,6 +12404,26 @@ th:has(> .coverage-pool-th-held-amt) {
 
 .feed-massive-svc-main .feed-massive-card-head {
   margin-top: 0;
+}
+
+/** Section title + description in one row on wide screens. */
+@media (min-width: 640px) {
+  .feed-massive-svc-main {
+    display: grid;
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+    column-gap: var(--space-4);
+    row-gap: var(--space-2);
+    align-items: start;
+  }
+
+  .feed-massive-svc-main .feed-massive-card-head {
+    margin-bottom: 0;
+  }
+
+  .feed-massive-svc-main .feed-massive-card-lead {
+    margin: 0;
+    max-width: none;
+  }
 }
 
 .feed-massive-help-lead {

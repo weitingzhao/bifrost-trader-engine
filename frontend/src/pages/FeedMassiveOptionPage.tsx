@@ -17,7 +17,14 @@ import { fmtTs } from '../utils/format'
 import checklistRows from './massiveFeedChecklistRows'
 import type { ChecklistRow } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
-import { FeedMassiveServiceBlock, FeedMassiveTierLine } from './massive/FeedMassiveServiceBlock'
+import {
+  checklistEffectiveStatusLabel,
+  effectiveChecklistProjectStatus,
+  shortServiceLabel,
+  tierOkForRow,
+  tradesOkForRow,
+} from './massive/massiveChecklistStatus'
+import { FeedMassiveServiceBlock } from './massive/FeedMassiveServiceBlock'
 import type { EffectiveServiceStatus } from './massive/FeedMassiveServiceBlock'
 import {
   parseFeedMassiveSvcFromHash,
@@ -40,25 +47,6 @@ function latestJobForKind(jobs: MassiveJobApiRow[], kind: string): MassiveJobApi
 function jobEvidenceLine(j: MassiveJobApiRow | undefined): string {
   if (!j) return 'No recent job of this kind in the list (refresh Job queue).'
   return `Last job #${j.job_id}: ${j.status ?? '—'} — ${fmtJobResult(j)}`
-}
-
-function feedMassiveTabLabel(row: ChecklistRow): string {
-  const s = row.service.trim()
-  if (s.length <= 22) return s
-  return `${s.slice(0, 20)}…`
-}
-
-function tierOkForRow(
-  row: ChecklistRow,
-  massiveStatus: MassiveStatusResponse | null,
-  configured: boolean,
-): boolean {
-  if (!massiveStatus || !configured) return false
-  return row.tierMin === 'starter' ? true : (massiveStatus.tier || '').toLowerCase() === 'developer'
-}
-
-function tradesOkForRow(row: ChecklistRow, massiveStatus: MassiveStatusResponse | null): boolean {
-  return !row.requiresTrades || Boolean(massiveStatus?.trades_enabled)
 }
 
 interface FeedMassiveOptionPageProps {
@@ -86,25 +74,6 @@ function jobStatusBadgeClass(st: string | undefined): string {
   if (s === 'failed') return 'feed-massive-badge feed-massive-badge--fail'
   if (s === 'running') return 'feed-massive-badge feed-massive-badge--run'
   return 'feed-massive-badge feed-massive-badge--pending'
-}
-
-/** Option trades: when Massive tier / trades_enabled disallow API, show tier — not “not implemented”. */
-function effectiveChecklistProjectStatus(
-  row: ChecklistRow,
-  configured: boolean,
-  tierOk: boolean,
-  tradesOk: boolean,
-): EffectiveServiceStatus {
-  if (row.id !== 'trades') return row.projectStatus
-  if (configured && (!tierOk || !tradesOk)) return 'not-on-tier'
-  return row.projectStatus
-}
-
-function checklistStatusLabel(s: EffectiveServiceStatus): string {
-  if (s === 'implemented') return 'Implemented'
-  if (s === 'partial') return 'Partial'
-  if (s === 'not-on-tier') return 'Not on tier'
-  return 'Not implemented'
 }
 
 function feedMassiveOverviewDotClass(eff: EffectiveServiceStatus): string {
@@ -760,8 +729,8 @@ export function FeedMassiveOptionPage({
                   scrollToSection(row.id)
                 }}
               >
-                <span className={feedMassiveOverviewDotClass(eff)} title={checklistStatusLabel(eff)} aria-hidden />
-                <span className="feed-massive-tab-chip-label">{feedMassiveTabLabel(row)}</span>
+                <span className={feedMassiveOverviewDotClass(eff)} title={checklistEffectiveStatusLabel(eff)} aria-hidden />
+                <span className="feed-massive-tab-chip-label">{shortServiceLabel(row)}</span>
                 {row.id === 'celery-queue' && pendingJobCount > 0 ? (
                   <span className="feed-massive-tab-badge" title="Pending or running jobs">
                     {pendingJobCount > 99 ? '99+' : pendingJobCount}
@@ -787,14 +756,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('reference')}
             effectiveStatus={effRef}
             checklistRow={rRef}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rRef}
-                configured={configured}
-                tierOk={tierOkForRow(rRef, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rRef, massiveStatus)}
-              />
-            }
             evidence={refTestMsg ?? (configured ? 'Run Test to fetch expirations via Massive REST.' : 'Configure Massive API key first.')}
             testArea={
               <div className="feed-massive-inline-actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -839,14 +800,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('snapshot')}
             effectiveStatus={effSnap}
             checklistRow={rSnap}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rSnap}
-                configured={configured}
-                tierOk={tierOkForRow(rSnap, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rSnap, massiveStatus)}
-              />
-            }
             evidence={jobEvidenceLine(latestJobForKind(jobs, 'snapshot'))}
             testArea={
               <div className="feed-massive-inline-actions">
@@ -897,14 +850,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('aggregates')}
             effectiveStatus={effAgg}
             checklistRow={rAgg}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rAgg}
-                configured={configured}
-                tierOk={tierOkForRow(rAgg, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rAgg, massiveStatus)}
-              />
-            }
             evidence={jobEvidenceLine(latestJobForKind(jobs, 'aggregates'))}
             testArea={
               <button
@@ -1034,14 +979,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('greeks-iv')}
             effectiveStatus={effGk}
             checklistRow={rGk}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rGk}
-                configured={configured}
-                tierOk={tierOkForRow(rGk, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rGk, massiveStatus)}
-              />
-            }
             evidence={greeksEvidence}
             testArea={
               <button type="button" className="btn btn-secondary" disabled={verifyLoading} onClick={() => runGreeksSample()}>
@@ -1141,19 +1078,11 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 5. Daily open interest */}
-        <section className="feed-massive-card feed-massive-card--muted" aria-label="Open interest">
+        <section className="feed-massive-card" aria-label="Open interest">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('daily-oi')}
             effectiveStatus={effOi}
             checklistRow={rOi}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rOi}
-                configured={configured}
-                tierOk={tierOkForRow(rOi, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rOi, massiveStatus)}
-              />
-            }
             evidence={oiFetchMsg ?? jobEvidenceLine(latestJobForKind(jobs, 'oi'))}
             testArea={
               <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -1208,14 +1137,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('trades')}
             effectiveStatus={effTr}
             checklistRow={rTr}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rTr}
-                configured={configured}
-                tierOk={tierOkForRow(rTr, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rTr, massiveStatus)}
-              />
-            }
             evidence={tradeCheckMsg ?? 'Use Test to call GET /research/option-trades (403 expected when trades are off).'}
             testArea={
               <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -1250,14 +1171,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('corporate-actions')}
             effectiveStatus={effCorp}
             checklistRow={rCorp}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rCorp}
-                configured={configured}
-                tierOk={tierOkForRow(rCorp, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rCorp, massiveStatus)}
-              />
-            }
             evidence={
               corpRows.length > 0
                 ? `${corpRows.length} row(s) loaded from DB for current query. ${jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))}`
@@ -1339,14 +1252,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('websocket')}
             effectiveStatus={effWs}
             checklistRow={rWs}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rWs}
-                configured={configured}
-                tierOk={tierOkForRow(rWs, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rWs, massiveStatus)}
-              />
-            }
             evidence={
               configured
                 ? 'API key configured. Proof is via CLI (see Test); browser does not open a WS.'
@@ -1376,14 +1281,6 @@ export function FeedMassiveOptionPage({
             anchorId={feedMassiveSvcAnchorId('celery-queue')}
             effectiveStatus={effCel}
             checklistRow={rCel}
-            statusLine={
-              <FeedMassiveTierLine
-                row={rCel}
-                configured={configured}
-                tierOk={tierOkForRow(rCel, massiveStatus, Boolean(configured))}
-                tradesOk={tradesOkForRow(rCel, massiveStatus)}
-              />
-            }
             evidence={celeryEvidence}
             testArea={
               <button

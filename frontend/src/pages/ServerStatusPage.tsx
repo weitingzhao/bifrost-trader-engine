@@ -1,0 +1,170 @@
+import { useEffect, useRef, useState } from 'react'
+import type { StatusResponse } from '../types'
+import {
+  postMonitorStop,
+  postMonitorReleaseIb,
+  postMonitorConnect,
+  fetchHealth,
+  fetchServerLogs,
+  subscribeServerLogs,
+  clearServerLogs,
+} from '../api'
+import { InfoTooltip } from '../components/InfoTooltip'
+import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import {
+  MONITOR_REASON_LABELS,
+  MONITOR_SELF_CHECK_LABELS,
+} from './status/statusLabels'
+import { useControlAction } from './status/useControlAction'
+import { StatusMonitorPanel, StatusSseQueuesPanel } from './status/panels'
+
+export interface ServerStatusPageProps {
+  status: StatusResponse | null
+  loadStatus: () => Promise<StatusResponse | null>
+  embeddedInSettings?: boolean
+  breadcrumbLabel?: string
+}
+
+export function ServerStatusPage({
+  status,
+  loadStatus,
+  embeddedInSettings,
+  breadcrumbLabel = 'System',
+}: ServerStatusPageProps) {
+  const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
+  const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
+  const [healthTick, setHealthTick] = useState(0)
+  const monitorCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const serverConsole = useLogConsole({
+    fetchLogs: fetchServerLogs,
+    subscribeLogs: subscribeServerLogs,
+    clearLogs: clearServerLogs,
+  })
+
+  const runMonitorAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, { onSuccess: loadStatus })
+  const runMonitorStopAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, {})
+
+  useEffect(() => {
+    return () => {
+      if (monitorCtrlMsgClearRef.current != null) clearTimeout(monitorCtrlMsgClearRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchHealth()
+      .then(() => setLastHealthAt(Date.now() / 1000))
+      .catch(() => setLastHealthAt(null))
+  }, [])
+
+  useEffect(() => {
+    if (lastHealthAt == null) return
+    const id = setInterval(() => {
+      const now = Date.now() / 1000
+      setHealthTick(n => n + 1)
+      if (now - lastHealthAt >= 60) {
+        fetchHealth()
+          .then(() => setLastHealthAt(Date.now() / 1000))
+          .catch(() => setLastHealthAt(null))
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [lastHealthAt])
+
+  void healthTick
+
+  const j = status
+  const monitorEnabled = j?.monitor_enabled !== false
+  const monitorStatus = (j?.monitor_ib_status as any) || {}
+  const monitorAccount = monitorStatus.account as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorAccount2 = monitorStatus.account2 as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorMarket = monitorStatus.market as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorHasError = Boolean(monitorAccount?.last_error || monitorAccount2?.last_error || monitorMarket?.last_error)
+  const hasAccount2 = monitorAccount2 !== undefined
+  const allMonitorClientsConnected = hasAccount2
+    ? Boolean(monitorAccount?.connected && monitorAccount2?.connected && monitorMarket?.connected)
+    : Boolean(monitorAccount?.connected && monitorMarket?.connected)
+  const anyMonitorClientConnected = Boolean(monitorAccount?.connected || monitorAccount2?.connected || monitorMarket?.connected)
+  const monitorLamp =
+    !monitorEnabled
+      ? 'red'
+      : monitorHasError
+        ? 'yellow'
+        : hasAccount2 && !allMonitorClientsConnected
+          ? anyMonitorClientConnected ? 'yellow' : 'yellow'
+          : (monitorAccount?.connected || monitorMarket?.connected)
+            ? 'green'
+            : 'yellow'
+  const monitorSelfCheckText =
+    MONITOR_SELF_CHECK_LABELS[j?.monitor_self_check ?? ''] ?? j?.monitor_self_check ?? '--'
+  const monitorBlockReasons = (j?.monitor_block_reasons ?? [])
+    .map(r => MONITOR_REASON_LABELS[r] ?? r)
+    .join('; ') || 'None'
+  const monitorIbGroupLamp =
+    !monitorEnabled
+      ? 'none'
+      : allMonitorClientsConnected
+        ? 'green'
+        : anyMonitorClientConnected
+          ? 'yellow'
+          : 'red'
+  const healthElapsedSec = lastHealthAt != null ? Math.floor(Date.now() / 1000 - lastHealthAt) : null
+  const healthCountdownSec =
+    lastHealthAt != null ? Math.max(0, 60 - (healthElapsedSec! % 60)) : null
+  const apiHealthLamp = lastHealthAt != null ? 'green' : 'red'
+
+  return (
+    <div className={`settings-page-card ${embeddedInSettings ? 'server-status-page server-status-page--embedded' : 'server-status-page'}`}>
+      <div className="settings-page-header">
+        <div className="settings-page-title-group">
+          <h2 className="settings-page-title">
+            {breadcrumbLabel}
+            <InfoTooltip text="System (management process) — API health, IB monitor connections, block reasons, and application log console." />
+          </h2>
+          <p className="settings-page-subtitle">
+            API health, IB monitor connections, block reasons, and process log console.
+          </p>
+        </div>
+      </div>
+
+      <div className="server-groups settings-page-groups">
+        <section className="replay-section" aria-labelledby="server-panel-head">
+          <StatusMonitorPanel
+            status={j}
+            monitorLamp={monitorLamp}
+            monitorEnabled={monitorEnabled}
+            monitorSelfCheckText={monitorSelfCheckText}
+            monitorBlockReasons={monitorBlockReasons}
+            apiHealthLamp={apiHealthLamp}
+            healthCountdownSec={healthCountdownSec}
+            monitorIbGroupLamp={monitorIbGroupLamp}
+            monitorAccount={monitorAccount}
+            monitorAccount2={monitorAccount2}
+            monitorMarket={monitorMarket}
+            onMonitorStop={() => runMonitorStopAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped. Server has exited; refresh the page after restarting.' })}
+            onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested; check status bar for result.' })}
+            onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released. Use Connect to reconnect.' })}
+            monitorCtrlMsg={monitorCtrlMsg}
+          />
+        </section>
+
+        <StatusSseQueuesPanel excludeCategories={['celery_logs']} heading="System SSE backlog" />
+
+        <section className="replay-section" aria-labelledby="server-console-head">
+          <h3 id="server-console-head" className="page-title-with-tooltip">
+            Application log
+            <InfoTooltip text="Real-time log from run_server.py (Redis stream)." />
+          </h3>
+          <LogConsolePanel
+            controller={serverConsole}
+            loadingText="Connecting…"
+            errorText="Unable to load (Redis may be down)."
+            emptyText="No log lines yet. Start server: python scripts/run_server.py"
+            infoTooltipText="Real-time server log (Redis Stream)."
+            resizeAriaLabel="Resize server console height"
+            clearTitle="Clear displayed log and Redis stream"
+          />
+        </section>
+      </div>
+    </div>
+  )
+}

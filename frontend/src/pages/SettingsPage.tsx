@@ -9,7 +9,9 @@ import {
   postMarketHoliday,
   deleteMarketHoliday,
   postCeleryStop,
+  fetchMassiveStatus,
   type MarketHolidayRow,
+  type MassiveStatusResponse,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
@@ -25,11 +27,24 @@ import {
   getDefaultFlexRows,
   IB_CONNECTION_SUBSECTIONS,
   SETTINGS_SECTIONS,
-  STATUS_SECTIONS,
   CONFIG_SECTIONS,
+  FEED_MASSIVE_OPTION_ID,
   FEED_SUBSECTIONS,
 } from './settings/settingsConstants'
+import checklistRows from './massiveFeedChecklistRows'
+import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
+import { isMassiveOptionFeedHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
+import {
+  checklistEffectiveStatusLabel,
+  effectiveChecklistProjectStatus,
+  effectiveStatusToSidebarLamp,
+  massiveFeedParentLamp,
+  shortServiceLabel,
+  tierOkForRow,
+  tradesOkForRow,
+} from './massive/massiveChecklistStatus'
 import { SettingsSectionIcon } from './settings/SettingsSectionIcon'
+import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { HeartbeatSection } from './settings/HeartbeatSection'
 import { IbConnectionSection } from './settings/IbConnectionSection'
 import { HolidaysSection } from './settings/HolidaysSection'
@@ -37,6 +52,8 @@ import { StatusPage } from './StatusPage'
 import { DataPage } from './DataPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
 import { CeleryPage } from './CeleryPage'
+import { DaemonStatusPage } from './DaemonStatusPage'
+import { ServerStatusPage } from './ServerStatusPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 
 export interface SettingsPageProps {
@@ -47,6 +64,10 @@ export interface SettingsPageProps {
   /** Bars backfill queue counts (same source as header; App pollers). */
   barsQueuePending?: number | null
   barsQueueRunning?: number | null
+  /** Aggregated System Status lamp (daemon + monitor + celery worst). */
+  systemLamp?: 'green' | 'yellow' | 'red' | 'none'
+  /** Open the global shutdown confirmation modal (lives in App.tsx). */
+  onOpenShutdownConfirm?: () => void
 }
 
 export function SettingsPage({
@@ -56,6 +77,8 @@ export function SettingsPage({
   onNavigateToStrategy,
   barsQueuePending = null,
   barsQueueRunning = null,
+  systemLamp = 'none',
+  onOpenShutdownConfirm,
 }: SettingsPageProps) {
   const [msg, setMsg] = useState({ text: '', isErr: false })
   const [ibHost, setIbHost] = useState(DEFAULT_HOST)
@@ -170,11 +193,12 @@ export function SettingsPage({
     loadHolidays()
   }, [holidaysYear])
 
-  // Sync sidebar active state with hash (GitHub-style: highlight current section). Map ib-* and flex-preference to settings-ib-connection. Map settings-system-* to settings-system.
   const hashToSectionId = (hash: string) => {
     const h = hash ? hash.slice(1) : ''
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
+    if (h === 'feed-celery') return 'settings-system'
+    if (h && isMassiveOptionFeedHash(`#${h}`)) return 'settings-feed'
     if (h && h.startsWith('feed-')) return 'settings-feed'
     return h || SETTINGS_SECTIONS[0].id
   }
@@ -183,12 +207,40 @@ export function SettingsPage({
     return hashToSectionId(window.location.hash)
   })
   const [ibConnectionExpanded, setIbConnectionExpanded] = useState(true)
+  const [massiveOptionExpanded, setMassiveOptionExpanded] = useState(true)
+  const [systemStatusExpanded, setSystemStatusExpanded] = useState(true)
+  const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [celeryStopBusy, setCeleryStopBusy] = useState(false)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
-  const activeFeedSubId = activeSectionId === 'settings-feed' && FEED_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
-  const isCeleryFeedActive = activeSectionId === 'settings-feed' && currentHash === 'feed-celery'
+  const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
+  const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
   const celeryLamp = celeryMetricsFromStatus(status).celeryLamp
+  const massiveParentLamp = massiveFeedParentLamp(massiveStatus)
+  const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
+  const monitorLamp: 'green' | 'yellow' | 'red' = ((status?.monitor_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
+  const isSystemServerActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-server'
+  const isSystemDaemonActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-daemon'
+  const isSystemCeleryActive = activeSectionId === 'settings-system' && (currentHash === 'settings-system-celery' || currentHash === 'feed-celery')
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      fetchMassiveStatus()
+        .then(s => {
+          if (!cancelled) setMassiveStatus(s)
+        })
+        .catch(() => {
+          if (!cancelled) setMassiveStatus(null)
+        })
+    }
+    load()
+    const t = window.setInterval(load, 20000)
+    return () => {
+      cancelled = true
+      window.clearInterval(t)
+    }
+  }, [])
 
   const onSidebarCeleryStop = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
@@ -210,12 +262,16 @@ export function SettingsPage({
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  /** Legacy: Celery moved from System Status to Feed → Celery */
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (window.location.hash === '#settings-system-celery') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#feed-celery`)
-      setActiveSectionId('settings-feed')
+    const h = window.location.hash
+    if (h === '#settings-system-monitor') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-system-server`)
+      setActiveSectionId('settings-system')
+    }
+    if (h === '#feed-celery') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-system-celery`)
+      setActiveSectionId('settings-system')
     }
   }, [])
 
@@ -286,57 +342,95 @@ export function SettingsPage({
 
   const isSystemSection = activeSectionId === 'settings-system'
   const isFeedSection = activeSectionId === 'settings-feed'
-  const systemHighlightSection =
-    currentHash === 'settings-system-daemon' ? 'daemon' : currentHash === 'settings-system-monitor' ? 'monitor' : undefined
 
   return (
     <div className="settings-page">
       <nav className="settings-sidebar" aria-label="Settings sections">
         <div className="settings-sidebar-group-block" role="group" aria-label="Status and feed">
           <div className="settings-sidebar-group-label">Status</div>
-          {STATUS_SECTIONS.map(({ id, label, icon }) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              className={`settings-sidebar-link ${activeSectionId === id ? 'active' : ''}`}
-            >
-              <SettingsSectionIcon name={icon} />
-              {label}
-            </a>
-          ))}
-          <div className="settings-sidebar-celery-row">
-            <a
-              href="#feed-celery"
-              className={`settings-sidebar-link settings-sidebar-link-celery ${isCeleryFeedActive ? 'active' : ''}`}
-            >
-              <span
-                className={`title-inline-lamp lamp-icon ${celeryLamp}`}
-                title="Celery: red = broker not connected, yellow = no workers, green = OK"
-                aria-hidden
-              >
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-                </svg>
-              </span>
-              Celery
-              {barsQueueActiveTotal != null ? (
-                <span className="settings-sidebar-celery-queue-badge" title="Bars queue: pending + running">
-                  {barsQueueActiveTotal}
+          <div className="settings-sidebar-group">
+            <div className={`settings-sidebar-parent ${activeSectionId === 'settings-system' ? 'active' : ''}`}>
+              <a href="#settings-system" className="settings-sidebar-parent-label">
+                <span
+                  className={`title-inline-lamp lamp-icon ${systemLamp === 'none' ? 'red' : systemLamp}`}
+                  title="Aggregated health of management monitor, Daemon, and Celery (expand for sub-pages)"
+                  aria-hidden
+                >
+                  <SettingsSidebarLampGlyph id="system-status" />
                 </span>
-              ) : null}
-            </a>
-            <button
-              type="button"
-              className="settings-sidebar-celery-stop"
-              onClick={onSidebarCeleryStop}
-              disabled={celeryStopBusy}
-              title="Stop Celery worker"
-              aria-label="Stop Celery worker"
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
+                System
+              </a>
+              <button
+                type="button"
+                className="settings-sidebar-celery-stop"
+                onClick={() => onOpenShutdownConfirm?.()}
+                title="Shutdown entire system"
+                aria-label="Shutdown entire system"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                  <line x1="12" y1="2" x2="12" y2="12" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`settings-sidebar-chevron ${systemStatusExpanded ? 'expanded' : ''}`}
+                onClick={() => setSystemStatusExpanded(e => !e)}
+                aria-expanded={systemStatusExpanded}
+                aria-controls="settings-system-status-subs"
+                aria-label={systemStatusExpanded ? 'Collapse System section' : 'Expand System section'}
+              >
+                ▼
+              </button>
+            </div>
+            <div id="settings-system-status-subs" className="settings-sidebar-subs" hidden={!systemStatusExpanded}>
+              <a
+                href="#settings-system-server"
+                className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemServerActive ? 'active' : ''}`}
+              >
+                <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="System (management / monitor)" aria-hidden>
+                  <SettingsSidebarLampGlyph id="system" />
+                </span>
+                System
+              </a>
+              <a
+                href="#settings-system-daemon"
+                className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemDaemonActive ? 'active' : ''}`}
+              >
+                <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon" aria-hidden>
+                  <SettingsSidebarLampGlyph id="daemon" />
+                </span>
+                Daemon
+              </a>
+              <div className="settings-sidebar-celery-row">
+                <a
+                  href="#settings-system-celery"
+                  className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-celery ${isSystemCeleryActive ? 'active' : ''}`}
+                >
+                  <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery" aria-hidden>
+                    <SettingsSidebarLampGlyph id="celery" />
+                  </span>
+                  Celery
+                  {barsQueueActiveTotal != null ? (
+                    <span className="settings-sidebar-celery-queue-badge" title="Bars queue: pending + running">
+                      {barsQueueActiveTotal}
+                    </span>
+                  ) : null}
+                </a>
+                <button
+                  type="button"
+                  className="settings-sidebar-celery-stop"
+                  onClick={onSidebarCeleryStop}
+                  disabled={celeryStopBusy}
+                  title="Stop Celery worker"
+                  aria-label="Stop Celery worker"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
           <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
           <div className="settings-sidebar-group-label">Feed</div>
@@ -344,12 +438,64 @@ export function SettingsPage({
             <a
               key={sub.id}
               href={`#${sub.id}`}
-              className={`settings-sidebar-link ${activeFeedSubId === sub.id ? 'active' : ''}`}
+              className={`settings-sidebar-link ${activeIbStockFeed ? 'active' : ''}`}
             >
               <SettingsSectionIcon name={sub.icon} />
               {sub.label}
             </a>
           ))}
+          <div className="settings-sidebar-group">
+            <div className={`settings-sidebar-parent ${isMassiveOptionFeedActive ? 'active' : ''}`}>
+              <a href={`#${FEED_MASSIVE_OPTION_ID}`} className="settings-sidebar-parent-label">
+                <span
+                  className={`title-inline-lamp lamp-icon ${massiveParentLamp}`}
+                  title="Massive Option: green = all capabilities OK, yellow = partial/tier limits, red = not configured or missing implementation"
+                  aria-hidden
+                >
+                  <SettingsSidebarLampGlyph id="massive-option" />
+                </span>
+                Massive Option
+              </a>
+              <button
+                type="button"
+                className={`settings-sidebar-chevron ${massiveOptionExpanded ? 'expanded' : ''}`}
+                onClick={() => setMassiveOptionExpanded(e => !e)}
+                aria-expanded={massiveOptionExpanded}
+                aria-controls="settings-feed-massive-subs"
+                aria-label={massiveOptionExpanded ? 'Collapse Massive Option capabilities' : 'Expand Massive Option capabilities'}
+              >
+                ▼
+              </button>
+            </div>
+            <div id="settings-feed-massive-subs" className="settings-sidebar-subs" hidden={!massiveOptionExpanded}>
+              {checklistRows.map(row => {
+                const configured = Boolean(massiveStatus?.configured)
+                const tierOk = tierOkForRow(row, massiveStatus, configured)
+                const tradesOk = tradesOkForRow(row, massiveStatus)
+                const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
+                const lamp = effectiveStatusToSidebarLamp(eff)
+                const anchor = feedMassiveSvcAnchorId(row.id)
+                const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
+                const childActive = currentHash === anchor || fromTab === row.id
+                return (
+                  <a
+                    key={row.id}
+                    href={`#${anchor}`}
+                    className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
+                  >
+                    <span
+                      className={`title-inline-lamp lamp-icon ${lamp}`}
+                      title={checklistEffectiveStatusLabel(eff)}
+                      aria-hidden
+                    >
+                      <SettingsSidebarLampGlyph id={row.id} />
+                    </span>
+                    <span className="settings-sidebar-massive-cap-label">{shortServiceLabel(row)}</span>
+                  </a>
+                )
+              })}
+            </div>
+          </div>
         </div>
         <div className="settings-sidebar-group-block" role="group" aria-label="Configuration">
           <div className="settings-sidebar-group-label">Configuration</div>
@@ -403,29 +549,46 @@ export function SettingsPage({
       </nav>
       <div className="settings-main">
         {isSystemSection ? (
-          <StatusPage
-            status={status}
-            operations={operations}
-            loadStatus={loadStatus}
-            onNavigateToStrategy={onNavigateToStrategy}
-            showSectionTabs={false}
-            showAllSystemSections={true}
-            showSystemSection={true}
-            showConsoleSection={true}
-            showConsoleTabs={true}
-            consoleCardTitle="Console"
-            highlightSection={systemHighlightSection}
-            celeryUiMode="relocated"
-          />
-        ) : isFeedSection ? (
-          currentHash === 'feed-celery' ? (
+          isSystemCeleryActive ? (
             <CeleryPage
               status={status}
               loadStatus={loadStatus}
               embeddedInSettings
               breadcrumbLabel="Celery"
             />
-          ) : currentHash === 'feed-massive-option' ? (
+          ) : isSystemDaemonActive ? (
+            <DaemonStatusPage
+              status={status}
+              loadStatus={loadStatus}
+              operations={operations}
+              onNavigateToStrategy={onNavigateToStrategy}
+              embeddedInSettings
+              breadcrumbLabel="Daemon"
+            />
+          ) : isSystemServerActive ? (
+            <ServerStatusPage
+              status={status}
+              loadStatus={loadStatus}
+              embeddedInSettings
+              breadcrumbLabel="System"
+            />
+          ) : (
+            <StatusPage
+              status={status}
+              operations={operations}
+              loadStatus={loadStatus}
+              onNavigateToStrategy={onNavigateToStrategy}
+              showSectionTabs={false}
+              showAllSystemSections={true}
+              showSystemSection={true}
+              showConsoleSection={true}
+              showConsoleTabs={true}
+              consoleCardTitle="Console"
+              celeryUiMode="relocated"
+            />
+          )
+        ) : isFeedSection ? (
+          isMassiveOptionFeedHash(currentHash) ? (
             <FeedMassiveOptionPage
               status={status}
               onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}

@@ -23,3 +23,14 @@ export function parseFeedMassiveSvcFromHash(hash: string): string | null {
 }
 
 export const FEED_MASSIVE_DEFAULT_TAB_ID = 'reference'
+
+const FEED_MASSIVE_OPTION_PAGE = 'feed-massive-option'
+
+/** True when Settings → Feed should show the Massive Option page (incl. capability anchors). */
+export function isMassiveOptionFeedHash(hash: string): boolean {
+  const h = hash.startsWith('#') ? hash.slice(1) : hash
+  if (h === FEED_MASSIVE_OPTION_PAGE) return true
+  if (h.startsWith('feed-massive-svc-')) return true
+  if (h.startsWith(FEED_MASSIVE_TAB_PREFIX)) return true
+  return false
+}

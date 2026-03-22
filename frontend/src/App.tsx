@@ -33,6 +33,8 @@ import { GatesConfigPage } from './pages/GatesConfigPage'
 import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
+import { isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
+import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import './App.css'
@@ -206,14 +208,16 @@ export default function App() {
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
 
-  /** When on Settings tab: which section is shown (system vs config). Drives header menu highlight. */
-  const hashToSettingsViewSection = useCallback((hash: string): 'system' | 'config' => {
+  /** When on Settings tab: which section is shown (system vs Massive vs config). Drives header menu highlight. */
+  const hashToSettingsViewSection = useCallback((hash: string): 'system' | 'config' | 'massive' => {
     const h = (hash.startsWith('#') ? hash.slice(1) : hash).trim()
     if (!h) return 'system'
+    const hashNorm = hash.startsWith('#') ? hash : `#${hash}`
+    if (isMassiveOptionFeedHash(hashNorm)) return 'massive'
     if (h.startsWith('settings-system') || h.startsWith('feed-')) return 'system'
     return 'config'
   }, [])
-  const [settingsViewSection, setSettingsViewSection] = useState<'system' | 'config' | null>(null)
+  const [settingsViewSection, setSettingsViewSection] = useState<'system' | 'config' | 'massive' | null>(null)
 
   /** Browser tab: title + favicon reflect status server config (config.dev.yaml vs config.prod.yaml) when API is reachable. */
   useEffect(() => {
@@ -449,19 +453,16 @@ export default function App() {
   const hb = j?.daemon_heartbeat
   const strategyLamp: LampId =
     !hb || !hb.daemon_alive ? 'red' : j?.trading_suspended === true ? 'yellow' : 'green'
-  const systemLamp: 'green' | 'yellow' | 'red' | 'none' =
-    dl === 'red' || ml === 'red'
-      ? 'red'
-      : dl === 'yellow' || ml === 'yellow'
-        ? 'yellow'
-        : dl === 'green' && ml === 'green'
-          ? 'green'
-          : 'none'
-
   const celeryLamp: LampId =
     status?.celery_broker_connected
       ? ((status?.celery_workers?.length ?? 0) > 0 ? 'green' : 'yellow')
       : 'red'
+  const cl = celeryLamp as 'green' | 'yellow' | 'red'
+  const systemLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
+    if (dl === 'red' || ml === 'red' || cl === 'red') return 'red'
+    if (dl === 'yellow' || ml === 'yellow' || cl === 'yellow') return 'yellow'
+    return dl === 'green' && ml === 'green' && cl === 'green' ? 'green' : 'none'
+  })()
   const daemonHeartbeat = status?.daemon_heartbeat
   // Market Streams: green only when daemon is alive, subscribed to ticker, and monitor can read Redis quotes
   const liveLamp: LampId =
@@ -705,14 +706,12 @@ export default function App() {
     window.location.hash = '#settings-heartbeat'
   }
 
-  /** Open Settings → System (daemon / monitor) or Feed → Celery for worker status. */
-  const openSystemInSettingsToSection = (section: 'daemon' | 'monitor' | 'celery') => {
+  /** Open Settings → System Status sub-page (System / Daemon / Celery). `#settings-system-server` = System (management monitor). */
+  const openSystemInSettingsToSection = (section: 'system' | 'daemon' | 'celery') => {
     setActiveTab('settings')
-    if (section === 'celery') {
-      window.location.hash = '#feed-celery'
-    } else {
-      window.location.hash = `#settings-system-${section}`
-    }
+    const hashSeg =
+      section === 'system' ? 'server' : section === 'daemon' ? 'daemon' : 'celery'
+    window.location.hash = `#settings-system-${hashSeg}`
   }
 
   const doShutdownAll = async () => {
@@ -963,6 +962,49 @@ export default function App() {
         </div>
         <div className="app-header-right" ref={headerMenuRef}>
           <div className="app-header-system-lamps-wrap" ref={systemLampRef}>
+            <div className="app-header-lamp-stop-group" aria-label="System status">
+              <div
+                className="app-header-lamp-stop-lamp-wrap"
+                onMouseEnter={() => openLampPopover('monitor')}
+                onMouseLeave={closeLampPopover}
+              >
+                <span
+                  className={`lamp-icon ${(status?.monitor_lamp as LampId) ?? 'red'}`}
+                  aria-hidden
+                  title="Management → System"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                    <circle cx="6" cy="6" r="1" fill="currentColor" strokeWidth="0" />
+                    <circle cx="6" cy="18" r="1" fill="currentColor" strokeWidth="0" />
+                  </svg>
+                </span>
+                {lampHoverPopover === 'monitor' && (
+                  <div className="app-header-lamp-popover" role="tooltip">
+                    <button
+                      type="button"
+                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
+                      onClick={() => { openSystemInSettingsToSection('system'); setLampHoverPopover(null) }}
+                      title="Go to System Status → System"
+                    >
+                      Management → System
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="app-header-lamp-switch"
+                onClick={() => runQuickStop(postMonitorStop, 'Stop System')}
+                title="Stop System"
+                aria-label="Stop System"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
             <div className="app-header-lamp-stop-group" aria-label="Daemon status">
               <div
                 className="app-header-lamp-stop-lamp-wrap"
@@ -984,7 +1026,7 @@ export default function App() {
                       type="button"
                       className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
                       onClick={() => { openSystemInSettingsToSection('daemon'); setLampHoverPopover(null) }}
-                      title="Go to System → Daemon"
+                      title="Go to System Status → Daemon"
                     >
                       Daemon
                     </button>
@@ -1003,47 +1045,6 @@ export default function App() {
                 </svg>
               </button>
             </div>
-            <div className="app-header-lamp-stop-group" aria-label="Management status">
-              <div
-                className="app-header-lamp-stop-lamp-wrap"
-                onMouseEnter={() => openLampPopover('monitor')}
-                onMouseLeave={closeLampPopover}
-              >
-                <span
-                  className={`lamp-icon ${(status?.monitor_lamp as LampId) ?? 'red'}`}
-                  aria-hidden
-                  title="Management status"
-                >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                  </svg>
-                </span>
-                {lampHoverPopover === 'monitor' && (
-                  <div className="app-header-lamp-popover" role="tooltip">
-                    <button
-                      type="button"
-                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                      onClick={() => { openSystemInSettingsToSection('monitor'); setLampHoverPopover(null) }}
-                      title="Go to System → Management"
-                    >
-                      Management
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                className="app-header-lamp-switch"
-                onClick={() => runQuickStop(postMonitorStop, 'Stop Management')}
-                title="Stop Management"
-                aria-label="Stop Management"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
             <div className="app-header-lamp-stop-group" aria-label="Celery status">
               <div
                 className="app-header-lamp-stop-lamp-wrap"
@@ -1056,7 +1057,7 @@ export default function App() {
                   aria-hidden
                 >
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
                   </svg>
                 </span>
                 {lampHoverPopover === 'celery' && (
@@ -1065,7 +1066,7 @@ export default function App() {
                       type="button"
                       className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
                       onClick={() => { openSystemInSettingsToSection('celery'); setLampHoverPopover(null) }}
-                      title="Go to Feed → Celery"
+                      title="Go to System Status → Celery"
                     >
                       Celery
                     </button>
@@ -1143,6 +1144,22 @@ export default function App() {
                   </svg>
                 </button>
               </div>
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && settingsViewSection === 'massive' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab('settings')
+                  window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
+                  setHeaderMenuOpen(false)
+                }}
+                title="Settings → Feed → Massive Option"
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+                  <polyline points="22 12 18 12 15 21 9 3 6 9 2 9" />
+                </svg>
+                Massive Option
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -1364,6 +1381,8 @@ export default function App() {
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
           barsQueuePending={workerJobPending}
           barsQueueRunning={workerJobRunning}
+          systemLamp={systemLamp}
+          onOpenShutdownConfirm={() => setShutdownConfirmOpen(true)}
         />
       )}
     </div>
