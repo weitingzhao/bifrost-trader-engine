@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type MouseEvent } from 'react'
 import type { StatusResponse } from '../types'
 import {
   fetchMassiveStatus,
@@ -6,12 +6,60 @@ import {
   fetchMassiveJobsList,
   subscribeMassiveJobEvents,
   fetchOptionSnapshotsPg,
+  fetchCorporateActions,
+  fetchOptionExpirations,
+  fetchResearchOptionOi,
+  fetchResearchOptionTrades,
 } from '../api'
-import type { MassiveStatusResponse, MassiveJobApiRow, OptionSnapshotRow } from '../api'
+import type { MassiveStatusResponse, MassiveJobApiRow, OptionSnapshotRow, CorporateActionRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { DraggableExplainPanel } from '../components/DraggableExplainPanel'
 import { fmtTs } from '../utils/format'
 import checklistRows from './massiveFeedChecklistRows'
 import type { ChecklistRow } from './massiveFeedChecklistRows'
+import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
+import { FeedMassiveServiceBlock, massiveHelpSections } from './massive/FeedMassiveServiceBlock'
+import type { EffectiveServiceStatus } from './massive/FeedMassiveServiceBlock'
+
+const WS_VERIFY_CMD = 'python scripts/verify_massive_options_ws.py --config config/config.dev.yaml'
+
+function checklistRowById(id: string): ChecklistRow {
+  const r = checklistRows.find(x => x.id === id)
+  if (!r) throw new Error(`checklist row ${id}`)
+  return r
+}
+
+function latestJobForKind(jobs: MassiveJobApiRow[], kind: string): MassiveJobApiRow | undefined {
+  const k = kind.toLowerCase()
+  return jobs.find(j => (j.kind || '').toLowerCase() === k)
+}
+
+function jobEvidenceLine(j: MassiveJobApiRow | undefined): string {
+  if (!j) return 'No recent job of this kind in the list (refresh Job queue).'
+  return `Last job #${j.job_id}: ${j.status ?? '—'} — ${fmtJobResult(j)}`
+}
+
+function scrollToFeedMassiveService(serviceId: string) {
+  const elId = feedMassiveSvcAnchorId(serviceId)
+  document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const hash = `#${elId}`
+  if (window.location.hash !== hash) {
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
+  }
+}
+
+function tierOkForRow(
+  row: ChecklistRow,
+  massiveStatus: MassiveStatusResponse | null,
+  configured: boolean,
+): boolean {
+  if (!massiveStatus || !configured) return false
+  return row.tierMin === 'starter' ? true : (massiveStatus.tier || '').toLowerCase() === 'developer'
+}
+
+function tradesOkForRow(row: ChecklistRow, massiveStatus: MassiveStatusResponse | null): boolean {
+  return !row.requiresTrades || Boolean(massiveStatus?.trades_enabled)
+}
 
 interface FeedMassiveOptionPageProps {
   status: StatusResponse | null
@@ -26,6 +74,7 @@ function fmtJobResult(j: MassiveJobApiRow): string {
   const err = r.error
   if (typeof err === 'string') return err
   if (r.rows_written != null) return `rows ${String(r.rows_written)}`
+  if (r.rows_upserted != null) return `upserted ${String(r.rows_upserted)}`
   if (r.bars_upserted != null) return `bars ${String(r.bars_upserted)}`
   if (r.message != null) return String(r.message)
   return '—'
@@ -39,15 +88,29 @@ function jobStatusBadgeClass(st: string | undefined): string {
   return 'feed-massive-badge feed-massive-badge--pending'
 }
 
-function checklistStatusLabel(s: ChecklistRow['projectStatus']): string {
+/** Option trades: when Massive tier / trades_enabled disallow API, show tier — not “not implemented”. */
+function effectiveChecklistProjectStatus(
+  row: ChecklistRow,
+  configured: boolean,
+  tierOk: boolean,
+  tradesOk: boolean,
+): EffectiveServiceStatus {
+  if (row.id !== 'trades') return row.projectStatus
+  if (configured && (!tierOk || !tradesOk)) return 'not-on-tier'
+  return row.projectStatus
+}
+
+function checklistStatusLabel(s: EffectiveServiceStatus): string {
   if (s === 'implemented') return 'Implemented'
   if (s === 'partial') return 'Partial'
+  if (s === 'not-on-tier') return 'Not on tier'
   return 'Not implemented'
 }
 
-function checklistStatusClass(s: ChecklistRow['projectStatus']): string {
+function checklistStatusClass(s: EffectiveServiceStatus): string {
   if (s === 'implemented') return 'feed-massive-badge feed-massive-badge--done'
   if (s === 'partial') return 'feed-massive-badge feed-massive-badge--run'
+  if (s === 'not-on-tier') return 'feed-massive-badge feed-massive-badge--tier'
   return 'feed-massive-badge feed-massive-badge--fail'
 }
 
@@ -75,6 +138,15 @@ function CardIconOi() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="12" cy="12" r="10" />
       <path d="M12 16v-4M12 8h.01" />
+    </svg>
+  )
+}
+
+function CardIconCorpAction() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+      <path d="M16 7V5a4 4 0 0 0-8 0v2" />
     </svg>
   )
 }
@@ -127,6 +199,12 @@ export function FeedMassiveOptionPage({
   const [oiBusy, setOiBusy] = useState(false)
   const [oiErr, setOiErr] = useState<string | null>(null)
 
+  const [corpSymbol, setCorpSymbol] = useState('AAPL')
+  const [corpBusy, setCorpBusy] = useState(false)
+  const [corpErr, setCorpErr] = useState<string | null>(null)
+  const [corpRows, setCorpRows] = useState<CorporateActionRow[]>([])
+  const [corpDbLoading, setCorpDbLoading] = useState(false)
+
   const [verifySymbol, setVerifySymbol] = useState('')
   const [verifyExp, setVerifyExp] = useState('')
   const [verifyStrikes, setVerifyStrikes] = useState('')
@@ -134,6 +212,22 @@ export function FeedMassiveOptionPage({
   const [verifyUnderlying, setVerifyUnderlying] = useState<number | undefined>(undefined)
   const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyErr, setVerifyErr] = useState<string | null>(null)
+
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [helpAnchor, setHelpAnchor] = useState({ x: 120, y: 96 })
+  const [helpRow, setHelpRow] = useState<ChecklistRow | null>(null)
+
+  const [refSymbol, setRefSymbol] = useState('NVDA')
+  const [refTestBusy, setRefTestBusy] = useState(false)
+  const [refTestMsg, setRefTestMsg] = useState<string | null>(null)
+
+  const [tradeSym, setTradeSym] = useState('NVDA')
+  const [tradeCheckBusy, setTradeCheckBusy] = useState(false)
+  const [tradeCheckMsg, setTradeCheckMsg] = useState<string | null>(null)
+
+  const [oiFetchSym, setOiFetchSym] = useState('NVDA')
+  const [oiFetchBusy, setOiFetchBusy] = useState(false)
+  const [oiFetchMsg, setOiFetchMsg] = useState<string | null>(null)
 
   const loadJobs = useCallback(async () => {
     setJobsLoading(true)
@@ -171,6 +265,123 @@ export function FeedMassiveOptionPage({
   useEffect(() => {
     loadJobs()
   }, [loadJobs])
+
+  useEffect(() => {
+    const h = window.location.hash.replace(/^#/, '')
+    if (h.startsWith('feed-massive-svc-')) {
+      const t = window.setTimeout(() => {
+        document.getElementById(h)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
+      return () => window.clearTimeout(t)
+    }
+    return undefined
+  }, [])
+
+  const openHelp = useCallback((row: ChecklistRow, e: MouseEvent<HTMLButtonElement>) => {
+    setHelpRow(row)
+    setHelpAnchor({ x: e.clientX, y: e.clientY })
+    setHelpOpen(true)
+  }, [])
+
+  const runRefExpirationsTest = useCallback(async () => {
+    const sym = refSymbol.trim().toUpperCase()
+    if (!sym) {
+      setRefTestMsg('Symbol required')
+      return
+    }
+    setRefTestBusy(true)
+    setRefTestMsg(null)
+    try {
+      const r = await fetchOptionExpirations(sym, 'massive')
+      if (r.error) setRefTestMsg(r.error)
+      else {
+        setRefTestMsg(
+          `OK: ${r.expirations.length} expirations${r.strikes?.length ? `, ${r.strikes.length} strikes` : ''}.`,
+        )
+      }
+    } catch (err) {
+      setRefTestMsg(err instanceof Error ? err.message : 'Request failed')
+    } finally {
+      setRefTestBusy(false)
+    }
+  }, [refSymbol])
+
+  const runGreeksSample = useCallback(async () => {
+    setVerifyErr(null)
+    setVerifyLoading(true)
+    try {
+      const ex = await fetchOptionExpirations('NVDA', 'massive')
+      const raw = ex.expirations[0]
+      if (!raw || ex.error) {
+        setVerifyErr(ex.error ?? 'No expirations from Massive')
+        setVerifyRows([])
+        return
+      }
+      const expNorm = raw.length >= 8 ? raw.replace(/-/g, '').slice(0, 8) : raw
+      setVerifySymbol('NVDA')
+      setVerifyExp(expNorm)
+      const res = await fetchOptionSnapshotsPg('NVDA', expNorm, undefined, 'massive')
+      setVerifyRows(res.rows)
+      setVerifyUnderlying(res.underlying_price)
+      if (res.error) setVerifyErr(res.error)
+    } catch (err) {
+      setVerifyErr(err instanceof Error ? err.message : 'Failed')
+      setVerifyRows([])
+    } finally {
+      setVerifyLoading(false)
+    }
+  }, [])
+
+  const runTradeApiCheck = useCallback(async () => {
+    const s = tradeSym.trim().toUpperCase()
+    if (!s) {
+      setTradeCheckMsg('Symbol required')
+      return
+    }
+    setTradeCheckBusy(true)
+    setTradeCheckMsg(null)
+    try {
+      const r = await fetchResearchOptionTrades(s, { limit: 5 })
+      if (r.status === 403) {
+        setTradeCheckMsg(r.message ?? 'HTTP 403 — trades disabled (expected on Starter or when trades_enabled is off).')
+      } else if (!r.ok) {
+        setTradeCheckMsg(r.error ?? r.message ?? 'Request failed')
+      } else {
+        setTradeCheckMsg(`HTTP ${r.status}: ${r.trades.length} trade row(s) returned.`)
+      }
+    } catch (err) {
+      setTradeCheckMsg(err instanceof Error ? err.message : 'Failed')
+    } finally {
+      setTradeCheckBusy(false)
+    }
+  }, [tradeSym])
+
+  const runOiApiFetch = useCallback(async () => {
+    const s = oiFetchSym.trim().toUpperCase()
+    if (!s) {
+      setOiFetchMsg('Symbol required')
+      return
+    }
+    setOiFetchBusy(true)
+    setOiFetchMsg(null)
+    try {
+      const r = await fetchResearchOptionOi(s, { limit: 5 })
+      if (r.error) setOiFetchMsg(r.error)
+      else setOiFetchMsg(`OK: ${r.rows.length} row(s) from GET /research/option-oi.`)
+    } catch (err) {
+      setOiFetchMsg(err instanceof Error ? err.message : 'Failed')
+    } finally {
+      setOiFetchBusy(false)
+    }
+  }, [oiFetchSym])
+
+  const copyWsCommand = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(WS_VERIFY_CMD)
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   const trackJob = useCallback((jobId: string, onDone: () => void) => {
     const sub = subscribeMassiveJobEvents(
@@ -296,6 +507,51 @@ export function FeedMassiveOptionPage({
     }
   }, [loadJobs, trackJob])
 
+  const runCorpAction = useCallback(async () => {
+    const sym = corpSymbol.trim().toUpperCase()
+    if (!sym) { setCorpErr('Symbol required'); return }
+    setCorpErr(null)
+    setCorpBusy(true)
+    try {
+      const res = await postMassiveSync('corporate_action', { symbol: sym })
+      if (!res.ok) {
+        setCorpErr(res.error ?? res.message ?? 'Enqueue failed')
+        setCorpBusy(false)
+        return
+      }
+      if (!res.job_id) {
+        setCorpErr('No job_id')
+        setCorpBusy(false)
+        return
+      }
+      const sub = trackJob(res.job_id, () => {
+        sub.close()
+        setCorpBusy(false)
+        loadJobs()
+      })
+    } catch (e) {
+      setCorpErr(e instanceof Error ? e.message : 'Failed')
+      setCorpBusy(false)
+    }
+  }, [corpSymbol, loadJobs, trackJob])
+
+  const loadCorpFromDb = useCallback(async () => {
+    const sym = corpSymbol.trim().toUpperCase()
+    if (!sym) { setCorpErr('Symbol required'); return }
+    setCorpDbLoading(true)
+    setCorpErr(null)
+    try {
+      const res = await fetchCorporateActions(sym, { limit: 50 })
+      if (!res.ok) { setCorpErr(res.error ?? 'Load failed'); setCorpRows([]); return }
+      setCorpRows(res.rows)
+    } catch (e) {
+      setCorpErr(e instanceof Error ? e.message : 'Load failed')
+      setCorpRows([])
+    } finally {
+      setCorpDbLoading(false)
+    }
+  }, [corpSymbol])
+
   const runVerify = useCallback(async () => {
     const s = verifySymbol.trim().toUpperCase()
     const e = verifyExp.trim()
@@ -319,6 +575,85 @@ export function FeedMassiveOptionPage({
   }, [verifySymbol, verifyExp, verifyStrikes])
 
   const configured = massiveStatus?.configured
+
+  const rRef = checklistRowById('reference')
+  const effRef = effectiveChecklistProjectStatus(
+    rRef,
+    Boolean(configured),
+    tierOkForRow(rRef, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rRef, massiveStatus),
+  )
+  const rSnap = checklistRowById('snapshot')
+  const effSnap = effectiveChecklistProjectStatus(
+    rSnap,
+    Boolean(configured),
+    tierOkForRow(rSnap, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rSnap, massiveStatus),
+  )
+  const rAgg = checklistRowById('aggregates')
+  const effAgg = effectiveChecklistProjectStatus(
+    rAgg,
+    Boolean(configured),
+    tierOkForRow(rAgg, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rAgg, massiveStatus),
+  )
+  const rGk = checklistRowById('greeks-iv')
+  const effGk = effectiveChecklistProjectStatus(
+    rGk,
+    Boolean(configured),
+    tierOkForRow(rGk, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rGk, massiveStatus),
+  )
+  const rOi = checklistRowById('daily-oi')
+  const effOi = effectiveChecklistProjectStatus(
+    rOi,
+    Boolean(configured),
+    tierOkForRow(rOi, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rOi, massiveStatus),
+  )
+  const rTr = checklistRowById('trades')
+  const effTr = effectiveChecklistProjectStatus(
+    rTr,
+    Boolean(configured),
+    tierOkForRow(rTr, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rTr, massiveStatus),
+  )
+  const rCorp = checklistRowById('corporate-actions')
+  const effCorp = effectiveChecklistProjectStatus(
+    rCorp,
+    Boolean(configured),
+    tierOkForRow(rCorp, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rCorp, massiveStatus),
+  )
+  const rWs = checklistRowById('websocket')
+  const effWs = effectiveChecklistProjectStatus(
+    rWs,
+    Boolean(configured),
+    tierOkForRow(rWs, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rWs, massiveStatus),
+  )
+  const rCel = checklistRowById('celery-queue')
+  const effCel = effectiveChecklistProjectStatus(
+    rCel,
+    Boolean(configured),
+    tierOkForRow(rCel, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rCel, massiveStatus),
+  )
+
+  const greeksEvidence =
+    verifyRows.length === 0
+      ? 'No rows loaded. Use Test → Load sample or enter Symbol / Expiration in Verify below.'
+      : verifyRows.some(x => x.iv != null || x.delta != null)
+        ? 'IV or greeks present in at least one loaded row.'
+        : 'Loaded rows have no IV/greeks — provider may omit them for these contracts.'
+
+  const celeryEvidence = (() => {
+    const cw = _status?.celery_workers
+    if (!cw?.length) {
+      return 'No Celery workers reported by status API. Start a worker with -Q massive.'
+    }
+    return `Status workers: ${cw.join(', ')}`
+  })()
 
   return (
     <div className="card process-section feed-massive-option-page">
@@ -390,7 +725,7 @@ export function FeedMassiveOptionPage({
           <h3>Massive feed service checklist</h3>
         </div>
         <p className="feed-massive-card-lead">
-          Data capabilities by tier. Status reflects current project implementation.
+          Data capabilities by Massive tier. Project status reflects implementation where your plan includes the capability; otherwise tier limits apply first.
           {_status?.celery_workers && _status.celery_workers.length > 0
             ? null
             : ' No Celery workers detected — start a worker with -Q massive to process sync tasks.'}
@@ -408,16 +743,25 @@ export function FeedMassiveOptionPage({
             </thead>
             <tbody>
               {checklistRows.map(row => {
-                const tierOk =
-                  !massiveStatus || !configured
-                    ? false
-                    : row.tierMin === 'starter'
-                      ? true
-                      : (massiveStatus.tier || '').toLowerCase() === 'developer'
-                const tradesOk = !row.requiresTrades || massiveStatus?.trades_enabled
-                const available = configured && tierOk && tradesOk
+                const tierOk = tierOkForRow(row, massiveStatus, Boolean(configured))
+                const tradesOk = tradesOkForRow(row, massiveStatus)
+                const available = Boolean(configured) && tierOk && tradesOk
+                const effectiveStatus = effectiveChecklistProjectStatus(row, Boolean(configured), tierOk, tradesOk)
                 return (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className="feed-massive-checklist-row-btn"
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Jump to ${row.service} section`}
+                    onClick={() => scrollToFeedMassiveService(row.id)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        scrollToFeedMassiveService(row.id)
+                      }
+                    }}
+                  >
                     <td>
                       <strong>{row.service}</strong>
                       <br />
@@ -430,8 +774,8 @@ export function FeedMassiveOptionPage({
                         : <span className="feed-massive-badge feed-massive-badge--pending">No</span>}
                     </td>
                     <td>
-                      <span className={checklistStatusClass(row.projectStatus)}>
-                        {checklistStatusLabel(row.projectStatus)}
+                      <span className={checklistStatusClass(effectiveStatus)}>
+                        {checklistStatusLabel(effectiveStatus)}
                       </span>
                     </td>
                     <td className="feed-massive-checklist-verify">{row.verification}</td>
@@ -451,39 +795,91 @@ export function FeedMassiveOptionPage({
 
       <div className="feed-massive-layout">
         <div className="feed-massive-col">
-          <section className="feed-massive-card" aria-label="Underlying snapshot">
-            <div className="feed-massive-card-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconSnapshot />
-                </span>
-                <h3>Chain snapshot</h3>
+          <section className="feed-massive-card" aria-label="Reference contracts">
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('reference')}
+              effectiveStatus={effRef}
+              onHelpClick={e => openHelp(rRef, e)}
+              evidence={refTestMsg ?? (configured ? 'Run Test to fetch expirations via Massive REST.' : 'Configure Massive API key first.')}
+              testArea={
+                <div className="feed-massive-inline-actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Symbol</span>
+                    <input
+                      className="form-input"
+                      value={refSymbol}
+                      onChange={e => setRefSymbol(e.target.value)}
+                      disabled={refTestBusy || !configured}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={refTestBusy || !configured}
+                    onClick={() => runRefExpirationsTest()}
+                  >
+                    {refTestBusy ? 'Running…' : 'Run expirations test'}
+                  </button>
+                  {onGoToScreener ? (
+                    <button type="button" className="btn btn-secondary" onClick={onGoToScreener}>
+                      Open Option Discovery
+                    </button>
+                  ) : null}
+                </div>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <h3>Reference / contracts</h3>
               </div>
-            </div>
-            <p className="feed-massive-card-lead">
-              Pull a full option chain snapshot for one underlying and persist rows into{' '}
-              <code style={{ fontSize: '0.85em' }}>option_snapshots</code>.
-            </p>
-            <div className="feed-massive-inline-actions">
-              <label className="feed-massive-field">
-                <span className="form-label">Underlying</span>
-                <input
-                  className="form-input"
-                  value={snapSymbol}
-                  onChange={e => setSnapSymbol(e.target.value)}
-                  disabled={snapBusy || !configured}
-                  autoComplete="off"
-                />
-              </label>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={snapBusy || !configured}
-                onClick={() => runSnapshot()}
-              >
-                {snapBusy ? 'Running…' : 'Enqueue snapshot'}
-              </button>
-            </div>
+              <p className="feed-massive-card-lead">
+                Massive-backed expirations and strikes (same API as Research → Option Discovery when using Massive).
+              </p>
+            </FeedMassiveServiceBlock>
+          </section>
+
+          <section className="feed-massive-card" aria-label="Underlying snapshot">
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('snapshot')}
+              effectiveStatus={effSnap}
+              onHelpClick={e => openHelp(rSnap, e)}
+              evidence={jobEvidenceLine(latestJobForKind(jobs, 'snapshot'))}
+              testArea={
+                <div className="feed-massive-inline-actions">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Underlying</span>
+                    <input
+                      className="form-input"
+                      value={snapSymbol}
+                      onChange={e => setSnapSymbol(e.target.value)}
+                      disabled={snapBusy || !configured}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={snapBusy || !configured}
+                    onClick={() => runSnapshot()}
+                  >
+                    {snapBusy ? 'Running…' : 'Enqueue snapshot'}
+                  </button>
+                </div>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span className="feed-massive-card-icon" aria-hidden>
+                    <CardIconSnapshot />
+                  </span>
+                  <h3>Chain snapshot</h3>
+                </div>
+              </div>
+              <p className="feed-massive-card-lead">
+                Pull a full option chain snapshot for one underlying and persist rows into{' '}
+                <code style={{ fontSize: '0.85em' }}>option_snapshots</code>.
+              </p>
+            </FeedMassiveServiceBlock>
             {snapErr ? (
               <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
                 {snapErr}
@@ -492,17 +888,34 @@ export function FeedMassiveOptionPage({
           </section>
 
           <section className="feed-massive-card" aria-label="Option aggregates">
-            <div className="feed-massive-card-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconBars />
-                </span>
-                <h3>Option aggregates</h3>
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('aggregates')}
+              effectiveStatus={effAgg}
+              onHelpClick={e => openHelp(rAgg, e)}
+              evidence={jobEvidenceLine(latestJobForKind(jobs, 'aggregates'))}
+              testArea={
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={aggBusy || !configured}
+                  onClick={() => runAggregates()}
+                >
+                  {aggBusy ? 'Running…' : 'Enqueue aggregates'}
+                </button>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span className="feed-massive-card-icon" aria-hidden>
+                    <CardIconBars />
+                  </span>
+                  <h3>Option aggregates</h3>
+                </div>
               </div>
-            </div>
-            <p className="feed-massive-card-lead">
-              Per-contract bars from Massive; requires options ticker and a Unix ms window.
-            </p>
+              <p className="feed-massive-card-lead">
+                Per-contract bars from Massive; requires options ticker and a Unix ms window.
+              </p>
+            </FeedMassiveServiceBlock>
             <label className="feed-massive-field" style={{ marginBottom: 'var(--space-3)' }}>
               <span className="form-label">Options ticker</span>
               <input
@@ -595,16 +1008,6 @@ export function FeedMassiveOptionPage({
                 />
               </label>
             </div>
-            <div className="feed-massive-actions-row">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={aggBusy || !configured}
-                onClick={() => runAggregates()}
-              >
-                {aggBusy ? 'Running…' : 'Enqueue aggregates'}
-              </button>
-            </div>
             {aggErr ? (
               <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
                 {aggErr}
@@ -613,17 +1016,41 @@ export function FeedMassiveOptionPage({
           </section>
 
           <section className="feed-massive-card feed-massive-card--muted" aria-label="Open interest">
-            <div className="feed-massive-card-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconOi />
-                </span>
-                <h3>Open interest</h3>
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('daily-oi')}
+              effectiveStatus={effOi}
+              onHelpClick={e => openHelp(rOi, e)}
+              evidence={oiFetchMsg ?? jobEvidenceLine(latestJobForKind(jobs, 'oi'))}
+              testArea={
+                <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Symbol</span>
+                    <input
+                      className="form-input"
+                      value={oiFetchSym}
+                      onChange={e => setOiFetchSym(e.target.value)}
+                      disabled={oiFetchBusy}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button type="button" className="btn btn-secondary" disabled={oiFetchBusy} onClick={() => runOiApiFetch()}>
+                    {oiFetchBusy ? 'Loading…' : 'GET option-oi'}
+                  </button>
+                </div>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span className="feed-massive-card-icon" aria-hidden>
+                    <CardIconOi />
+                  </span>
+                  <h3>Open interest</h3>
+                </div>
               </div>
-            </div>
-            <p className="feed-massive-card-lead">
-              Placeholder job; prefer chain snapshot for OI when available.
-            </p>
+              <p className="feed-massive-card-lead">
+                Placeholder job; prefer chain snapshot for OI when available. Use GET option-oi to read stored daily OI rows.
+              </p>
+            </FeedMassiveServiceBlock>
             <div className="feed-massive-actions-row">
               <button
                 type="button"
@@ -640,28 +1067,177 @@ export function FeedMassiveOptionPage({
               </p>
             ) : null}
           </section>
+
+          <section className="feed-massive-card" aria-label="Corporate actions">
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('corporate-actions')}
+              effectiveStatus={effCorp}
+              onHelpClick={e => openHelp(rCorp, e)}
+              evidence={
+                corpRows.length > 0
+                  ? `${corpRows.length} row(s) loaded from DB for current query. ${jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))}`
+                  : jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))
+              }
+              testArea={
+                <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Underlying</span>
+                    <input
+                      className="form-input"
+                      value={corpSymbol}
+                      onChange={e => setCorpSymbol(e.target.value)}
+                      disabled={corpBusy || !configured}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button type="button" className="btn btn-secondary" disabled={corpBusy || !configured} onClick={() => runCorpAction()}>
+                    {corpBusy ? 'Running…' : 'Enqueue sync'}
+                  </button>
+                  <button type="button" className="btn btn-primary" disabled={corpDbLoading} onClick={() => loadCorpFromDb()}>
+                    {corpDbLoading ? 'Loading…' : 'Load from DB'}
+                  </button>
+                </div>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span className="feed-massive-card-icon" aria-hidden>
+                    <CardIconCorpAction />
+                  </span>
+                  <h3>Corporate actions</h3>
+                </div>
+              </div>
+              <p className="feed-massive-card-lead">
+                Dividends and stock splits via Massive REST. Enter a stock ticker, sync from API, then load persisted rows from PostgreSQL.
+              </p>
+            </FeedMassiveServiceBlock>
+            {corpErr ? (
+              <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+                {corpErr}
+              </p>
+            ) : null}
+            {corpRows.length > 0 ? (
+              <div className="feed-massive-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Symbol</th>
+                      <th scope="col">Type</th>
+                      <th scope="col">Ex date</th>
+                      <th scope="col">Amount</th>
+                      <th scope="col">Ratio</th>
+                      <th scope="col">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {corpRows.map((r, i) => (
+                      <tr key={`${r.symbol}-${r.action_type}-${r.ex_date}-${i}`}>
+                        <td>{r.symbol}</td>
+                        <td><span className={r.action_type === 'dividend' ? 'feed-massive-badge feed-massive-badge--done' : 'feed-massive-badge feed-massive-badge--run'}>{r.action_type}</span></td>
+                        <td>{r.ex_date ?? '—'}</td>
+                        <td>{r.amount != null ? r.amount.toFixed(4) : '—'}</td>
+                        <td>{r.ratio_from != null && r.ratio_to != null ? `${r.ratio_from}:${r.ratio_to}` : '—'}</td>
+                        <td style={{ maxWidth: '14rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description ?? undefined}>
+                          {r.description ?? '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="feed-massive-card" aria-label="WebSocket verification">
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('websocket')}
+              effectiveStatus={effWs}
+              onHelpClick={e => openHelp(rWs, e)}
+              evidence={
+                configured
+                  ? 'API key configured. Proof is via CLI (see Test); browser does not open a WS.'
+                  : 'Configure Massive API key first.'
+              }
+              testArea={
+                <div>
+                  <pre className="feed-massive-ws-cmd">{WS_VERIFY_CMD}</pre>
+                  <button type="button" className="btn btn-secondary" onClick={() => copyWsCommand()}>
+                    Copy command
+                  </button>
+                </div>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <h3>WebSocket streaming</h3>
+              </div>
+              <p className="feed-massive-card-lead">
+                Verify connectivity with the standalone script (delayed/real-time host per plan). No persistent bridge in this app.
+              </p>
+            </FeedMassiveServiceBlock>
+          </section>
+
+          <section className="feed-massive-card" aria-label="Option trades API">
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('trades')}
+              effectiveStatus={effTr}
+              onHelpClick={e => openHelp(rTr, e)}
+              evidence={tradeCheckMsg ?? 'Use Test to call GET /research/option-trades (403 expected when trades are off).'}
+              testArea={
+                <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Symbol</span>
+                    <input
+                      className="form-input"
+                      value={tradeSym}
+                      onChange={e => setTradeSym(e.target.value)}
+                      disabled={tradeCheckBusy}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button type="button" className="btn btn-primary" disabled={tradeCheckBusy} onClick={() => runTradeApiCheck()}>
+                    {tradeCheckBusy ? 'Loading…' : 'Check API'}
+                  </button>
+                </div>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <h3>Option trades</h3>
+              </div>
+              <p className="feed-massive-card-lead">
+                Tick-level trades require Developer tier and trades_enabled. Starter returns 403 by design.
+              </p>
+            </FeedMassiveServiceBlock>
+          </section>
         </div>
 
         <div className="feed-massive-col">
           <section className="feed-massive-card" aria-label="Recent jobs">
-            <div className="feed-massive-card-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconJobs />
-                </span>
-                <h3>Job queue</h3>
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('celery-queue')}
+              effectiveStatus={effCel}
+              onHelpClick={e => openHelp(rCel, e)}
+              evidence={celeryEvidence}
+              testArea={
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => loadJobs()}
+                  disabled={jobsLoading}
+                >
+                  {jobsLoading ? 'Loading…' : 'Refresh job list'}
+                </button>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span className="feed-massive-card-icon" aria-hidden>
+                    <CardIconJobs />
+                  </span>
+                  <h3>Job queue</h3>
+                </div>
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ padding: '0.35rem 0.75rem', fontSize: 'var(--text-caption)' }}
-                onClick={() => loadJobs()}
-                disabled={jobsLoading}
-              >
-                {jobsLoading ? 'Loading…' : 'Refresh'}
-              </button>
-            </div>
-            <p className="feed-massive-card-lead">Latest Massive sync tasks (newest first).</p>
+              <p className="feed-massive-card-lead">Latest Massive sync tasks (newest first).</p>
+            </FeedMassiveServiceBlock>
             {jobsError ? (
               <p className="status-page-msg err" role="alert">
                 {jobsError}
@@ -708,17 +1284,29 @@ export function FeedMassiveOptionPage({
           </section>
 
           <section className="feed-massive-card" aria-label="Verify from database">
-            <div className="feed-massive-card-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconVerify />
-                </span>
-                <h3>Verify in PostgreSQL</h3>
+            <FeedMassiveServiceBlock
+              anchorId={feedMassiveSvcAnchorId('greeks-iv')}
+              effectiveStatus={effGk}
+              onHelpClick={e => openHelp(rGk, e)}
+              evidence={greeksEvidence}
+              testArea={
+                <button type="button" className="btn btn-secondary" disabled={verifyLoading} onClick={() => runGreeksSample()}>
+                  {verifyLoading ? 'Loading…' : 'Load sample (NVDA)'}
+                </button>
+              }
+            >
+              <div className="feed-massive-card-head">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span className="feed-massive-card-icon" aria-hidden>
+                    <CardIconVerify />
+                  </span>
+                  <h3>Greeks / IV &amp; verify in PostgreSQL</h3>
+                </div>
               </div>
-            </div>
-            <p className="feed-massive-card-lead">
-              Read latest stored quotes for Massive source; empty strikes use ATM ladder when daily last exists.
-            </p>
+              <p className="feed-massive-card-lead">
+                Read latest stored Massive snapshot rows; check IV and greeks when the provider returned them. Empty strikes use ATM ladder when daily last exists.
+              </p>
+            </FeedMassiveServiceBlock>
             <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end' }}>
               <label className="feed-massive-field">
                 <span className="form-label">Symbol</span>
@@ -775,6 +1363,8 @@ export function FeedMassiveOptionPage({
                       <th scope="col">Ask</th>
                       <th scope="col">Last</th>
                       <th scope="col">Mid</th>
+                      <th scope="col">IV</th>
+                      <th scope="col">Delta</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -786,6 +1376,8 @@ export function FeedMassiveOptionPage({
                         <td>{row.ask ?? '—'}</td>
                         <td>{row.last ?? '—'}</td>
                         <td>{row.mid ?? '—'}</td>
+                        <td>{row.iv != null && Number.isFinite(row.iv) ? row.iv.toFixed(4) : '—'}</td>
+                        <td>{row.delta != null && Number.isFinite(row.delta) ? row.delta.toFixed(4) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -795,6 +1387,19 @@ export function FeedMassiveOptionPage({
           </section>
         </div>
       </div>
+
+      <DraggableExplainPanel
+        open={helpOpen && helpRow != null}
+        explanationId={helpRow?.id ?? 'closed'}
+        anchor={helpAnchor}
+        onClose={() => {
+          setHelpOpen(false)
+          setHelpRow(null)
+        }}
+        title={helpRow?.service ?? 'Help'}
+      >
+        {helpRow ? massiveHelpSections(helpRow) : null}
+      </DraggableExplainPanel>
     </div>
   )
 }

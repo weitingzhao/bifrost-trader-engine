@@ -1251,6 +1251,12 @@ body::before {
 .status-management-celery-col-celery {
   flex: 2;
 }
+/* When Celery column is hidden (Settings → System Status), let Management span the row */
+.status-management-celery-row--monitor-only .status-management-celery-half,
+.status-management-celery-row--monitor-only .status-management-celery-col-management {
+  flex: 1 1 100%;
+  max-width: 100%;
+}
 .status-management-celery-half > .system-tab-panel,
 .status-management-celery-col > .system-tab-panel {
   flex: 1;
@@ -11952,6 +11958,12 @@ th:has(> .coverage-pool-th-held-amt) {
   border-color: rgba(163, 230, 53, 0.25);
 }
 
+.feed-massive-badge--tier {
+  background: var(--color-dashboard-tile);
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
+}
+
 .feed-massive-empty {
   padding: var(--space-5);
   text-align: center;
@@ -11990,6 +12002,123 @@ th:has(> .coverage-pool-th-held-amt) {
   font-size: var(--text-caption);
   color: var(--color-text-muted);
   max-width: 22rem;
+}
+
+.feed-massive-checklist-row-btn {
+  cursor: pointer;
+  outline: none;
+}
+
+.feed-massive-checklist-row-btn:hover,
+.feed-massive-checklist-row-btn:focus-visible {
+  background: var(--color-surface-elevated);
+}
+
+.feed-massive-service-block {
+  margin-bottom: var(--space-3);
+}
+
+.feed-massive-svc-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.feed-massive-svc-lamp {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
+}
+
+.feed-massive-svc-lamp--ok {
+  background: var(--color-lamp-green);
+}
+
+.feed-massive-svc-lamp--partial {
+  background: var(--color-lamp-yellow);
+}
+
+.feed-massive-svc-lamp--fail {
+  background: var(--color-lamp-red);
+}
+
+.feed-massive-svc-lamp--tier {
+  background: var(--color-link);
+}
+
+.feed-massive-svc-status-label {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.feed-massive-svc-help-btn {
+  margin-left: auto;
+  padding: 0.25rem 0.65rem;
+  font-size: var(--text-caption);
+}
+
+.feed-massive-svc-evidence,
+.feed-massive-svc-test {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 6px;
+  background: var(--color-dashboard-tile);
+  border: 1px solid var(--color-border);
+}
+
+.feed-massive-svc-evidence-label,
+.feed-massive-svc-test-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  margin-bottom: var(--space-1);
+}
+
+.feed-massive-svc-evidence-body,
+.feed-massive-svc-test-body {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+.feed-massive-svc-main .feed-massive-card-head {
+  margin-top: 0;
+}
+
+.feed-massive-help-lead {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--color-text-main);
+}
+
+.feed-massive-help-text {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-small, 0.875rem);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.feed-massive-ws-cmd {
+  display: block;
+  padding: var(--space-2);
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--color-bg);
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-main);
 }
 
 /* Transfer & Pay uses card process-section + title row + replay-section (see TransferPayPage) */

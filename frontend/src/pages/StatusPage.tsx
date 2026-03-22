@@ -16,6 +16,9 @@ import {
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
 import { useControlAction } from './status/useControlAction'
 import { StatusDaemonPanel, StatusMonitorPanel, StatusCeleryPanel, StatusStrategyPanel, StatusSseQueuesPanel } from './status/panels'
+import { celeryMetricsFromStatus, useCeleryStopControl } from './status/celeryMetrics'
+
+export type CeleryUiMode = 'full' | 'relocated'
 
 export interface StatusPageProps {
   status: StatusResponse | null
@@ -38,6 +41,8 @@ export interface StatusPageProps {
   consoleCardDescription?: string
   /** When set, scroll to this system section and add highlight (e.g. from header lamp link). */
   highlightSection?: 'daemon' | 'monitor' | 'celery'
+  /** Settings embed: Celery UI lives under Feed → Celery; hide duplicate Celery column, console tab, and celery_logs SSE row. */
+  celeryUiMode?: CeleryUiMode
 }
 
 export type OperationsSection = 'daemon' | 'monitor' | 'celery' | 'strategy'
@@ -60,11 +65,11 @@ export function StatusPage({
   showConsoleSection = true,
   consoleCardTitle,
   highlightSection,
+  celeryUiMode = 'full',
 }: StatusPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
-  const [celeryCtrlMsg, setCeleryCtrlMsg] = useState({ text: '', isErr: false })
   const [releaseTickerLoading, setReleaseTickerLoading] = useState(false)
   const [syncTickerMsg, setSyncTickerMsg] = useState({ text: '', isErr: false })
   const [tick, setTick] = useState(0)
@@ -83,7 +88,6 @@ export function StatusPage({
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTickerMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const monitorCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const celeryCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const daemonConsole = useLogConsole({
     fetchLogs: fetchDaemonLogs,
     subscribeLogs: subscribeDaemonLogs,
@@ -114,7 +118,7 @@ export function StatusPage({
   const runMonitorAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, { onSuccess: loadStatus })
   /** Monitor Stop exits the server process shortly after 200; do not call loadStatus so the UI does not hang on a GET to a dead server. */
   const runMonitorStopAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, {})
-  const runCeleryAction = useControlAction(setCeleryCtrlMsg, celeryCtrlMsgClearRef, { onSuccess: loadStatus })
+  const { celeryCtrlMsg, onCeleryStop } = useCeleryStopControl(loadStatus)
 
   const j = status
   const hb = j?.daemon_heartbeat
@@ -145,7 +149,6 @@ export function StatusPage({
       if (hedgeCtrlMsgClearRef.current != null) clearTimeout(hedgeCtrlMsgClearRef.current)
       if (syncTickerMsgClearRef.current != null) clearTimeout(syncTickerMsgClearRef.current)
       if (monitorCtrlMsgClearRef.current != null) clearTimeout(monitorCtrlMsgClearRef.current)
-      if (celeryCtrlMsgClearRef.current != null) clearTimeout(celeryCtrlMsgClearRef.current)
     }
   }, [])
 
@@ -174,6 +177,11 @@ export function StatusPage({
     }, 1000)
     return () => clearInterval(id)
   }, [lastHealthAt])
+
+  useEffect(() => {
+    if (celeryUiMode !== 'relocated') return
+    if (consoleTab === 'console') setConsoleTabSelected('daemon-console')
+  }, [celeryUiMode, consoleTab, setConsoleTabSelected])
 
   let daemonLabel = 'Not running (or single-process mode)'
   let daemonHint = 'Run run_engine.py on the trading machine to see "Running" here'
@@ -253,14 +261,14 @@ export function StatusPage({
           ? 'yellow'
           : 'red'
 
-  const celeryBrokerConnected = j?.celery_broker_connected === true
-  const celeryLastTs = j?.celery_worker_last_updated_ts
-  const celeryWorkerIbConnected = j?.celery_worker_ib_connected === true
-  const celeryWorkerIbClientId = j?.celery_worker_ib_client_id ?? null
-  /** Same as Monitor polling: worker alive is determined only by Celery inspect ping in GET /status, not by recent job updates */
-  const celeryWorkersAlive = (j?.celery_workers?.length ?? 0) > 0
-  const celeryLamp =
-    !celeryBrokerConnected ? 'red' : celeryWorkersAlive ? 'green' : 'yellow'
+  const {
+    celeryBrokerConnected,
+    celeryLastTs,
+    celeryWorkerIbConnected,
+    celeryWorkerIbClientId,
+    celeryWorkersAlive,
+    celeryLamp,
+  } = celeryMetricsFromStatus(j)
 
   const healthElapsedSec = lastHealthAt != null ? Math.floor(Date.now() / 1000 - lastHealthAt) : null
   const healthCountdownSec =
@@ -463,11 +471,15 @@ export function StatusPage({
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
             </span>
             <span>Management</span>
-            <span className="status-tab-sep" aria-hidden>/</span>
-            <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery (bars worker) status" aria-hidden>
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
-            </span>
-            <span>Celery</span>
+            {celeryUiMode !== 'relocated' ? (
+              <>
+                <span className="status-tab-sep" aria-hidden>/</span>
+                <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery (bars worker) status" aria-hidden>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+                </span>
+                <span>Celery</span>
+              </>
+            ) : null}
           </button>
         </div>
         )}
@@ -504,7 +516,12 @@ export function StatusPage({
         )}
 
         {(showAllSystemSections || systemTab === 'monitor' || systemTab === 'celery') && (
-          <div className="status-management-celery-row" id="system-panel-monitor-celery" role="tabpanel" aria-labelledby="tab-monitor-celery">
+          <div
+            className={`status-management-celery-row ${celeryUiMode === 'relocated' ? 'status-management-celery-row--monitor-only' : ''}`}
+            id="system-panel-monitor-celery"
+            role="tabpanel"
+            aria-labelledby="tab-monitor-celery"
+          >
             <div
               id="system-section-monitor"
               className={`status-panel-section status-management-celery-col status-management-celery-col-management ${highlightSection === 'monitor' ? 'system-section-highlight' : ''}`}
@@ -528,23 +545,25 @@ export function StatusPage({
                 className={showAllSystemSections ? 'system-stack-section' : undefined}
               />
             </div>
-            <div
-              id="system-section-celery"
-              className={`status-panel-section status-management-celery-col status-management-celery-col-celery ${highlightSection === 'celery' ? 'system-section-highlight' : ''}`}
-            >
-              <StatusCeleryPanel
-                status={j}
-                celeryLamp={celeryLamp}
-                celeryBrokerConnected={celeryBrokerConnected}
-                celeryWorkersAlive={celeryWorkersAlive}
-                celeryLastTs={celeryLastTs}
-                celeryWorkerIbConnected={celeryWorkerIbConnected}
-                celeryWorkerIbClientId={celeryWorkerIbClientId}
-                onCeleryStop={() => runCeleryAction(postCeleryStop, { loading: 'Requesting Celery worker stop…', success: 'Celery worker stop requested; process will exit within a few seconds.' })}
-                celeryCtrlMsg={celeryCtrlMsg}
-                className={showAllSystemSections ? 'system-stack-section' : undefined}
-              />
-            </div>
+            {celeryUiMode !== 'relocated' ? (
+              <div
+                id="system-section-celery"
+                className={`status-panel-section status-management-celery-col status-management-celery-col-celery ${highlightSection === 'celery' ? 'system-section-highlight' : ''}`}
+              >
+                <StatusCeleryPanel
+                  status={j}
+                  celeryLamp={celeryLamp}
+                  celeryBrokerConnected={celeryBrokerConnected}
+                  celeryWorkersAlive={celeryWorkersAlive}
+                  celeryLastTs={celeryLastTs}
+                  celeryWorkerIbConnected={celeryWorkerIbConnected}
+                  celeryWorkerIbClientId={celeryWorkerIbClientId}
+                  onCeleryStop={onCeleryStop}
+                  celeryCtrlMsg={celeryCtrlMsg}
+                  className={showAllSystemSections ? 'system-stack-section' : undefined}
+                />
+              </div>
+            ) : null}
           </div>
         )}
         </div>
@@ -806,7 +825,10 @@ export function StatusPage({
 
       {showConsoleSection && (
       <div className="card process-section system-tabs-wrapper">
-        <StatusSseQueuesPanel className={showAllSystemSections ? 'system-stack-section' : undefined} />
+        <StatusSseQueuesPanel
+          className={showAllSystemSections ? 'system-stack-section' : undefined}
+          excludeCategories={celeryUiMode === 'relocated' ? ['celery_logs'] : undefined}
+        />
       </div>
       )}
 
@@ -843,17 +865,19 @@ export function StatusPage({
           >
             Server Console
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={consoleTab === 'console'}
-            aria-controls="celery-section-panel-console"
-            id="celery-tab-console"
-            className={`system-tab ${consoleTab === 'console' ? 'active' : ''}`}
-            onClick={() => setConsoleTabSelected('console')}
-          >
-            Celery Console
-          </button>
+          {celeryUiMode !== 'relocated' ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={consoleTab === 'console'}
+              aria-controls="celery-section-panel-console"
+              id="celery-tab-console"
+              className={`system-tab ${consoleTab === 'console' ? 'active' : ''}`}
+              onClick={() => setConsoleTabSelected('console')}
+            >
+              Celery Console
+            </button>
+          ) : null}
           <button
             type="button"
             role="tab"
@@ -897,7 +921,7 @@ export function StatusPage({
             />
           </div>
         )}
-        {consoleTab === 'console' && (
+        {celeryUiMode !== 'relocated' && consoleTab === 'console' && (
           <div id="celery-section-panel-console" role="tabpanel" aria-labelledby="celery-tab-console"
             style={{ marginTop: 'var(--space-3)' }}
           >

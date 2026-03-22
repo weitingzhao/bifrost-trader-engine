@@ -285,6 +285,88 @@ export async function fetchOptionSnapshotsPg(
   }
 }
 
+export interface CorporateActionRow {
+  symbol: string
+  action_type: string
+  ex_date: string | null
+  record_date: string | null
+  payment_date: string | null
+  ratio_from: number | null
+  ratio_to: number | null
+  amount: number | null
+  description: string | null
+  source: string | null
+}
+
+/** GET /research/option-oi — daily OI rows when table is populated. */
+export async function fetchResearchOptionOi(
+  symbol: string,
+  options?: { limit?: number },
+): Promise<{ rows: Record<string, unknown>[]; error?: string }> {
+  const s = (symbol || '').trim()
+  if (!s) return { rows: [], error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s })
+  if (options?.limit != null) q.set('limit', String(options.limit))
+  const r = await fetch(`${API}/research/option-oi?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  const rows = Array.isArray(j.rows) ? j.rows : []
+  return { rows, error: typeof j.error === 'string' ? j.error : undefined }
+}
+
+/** GET /research/option-trades — 403 when trades disabled by tier/config. */
+export async function fetchResearchOptionTrades(
+  symbol: string,
+  options?: { limit?: number },
+): Promise<{
+  ok: boolean
+  status: number
+  trades: Record<string, unknown>[]
+  message?: string
+  error?: string
+}> {
+  const s = (symbol || '').trim()
+  if (!s) return { ok: false, status: 0, trades: [], error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s })
+  if (options?.limit != null) q.set('limit', String(options.limit))
+  const r = await fetch(`${API}/research/option-trades?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  const trades = Array.isArray(j.trades) ? j.trades : []
+  return {
+    ok: Boolean(j.ok) && r.ok,
+    status: r.status,
+    trades,
+    message: typeof j.message === 'string' ? j.message : undefined,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function fetchCorporateActions(
+  symbol: string,
+  options?: { action_type?: string; limit?: number },
+): Promise<{ ok: boolean; rows: CorporateActionRow[]; error?: string }> {
+  const q = new URLSearchParams({ symbol: (symbol || '').trim() })
+  if (options?.action_type) q.set('action_type', options.action_type)
+  if (options?.limit != null) q.set('limit', String(options.limit))
+  const r = await fetch(`${API}/research/massive/corporate-actions?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  if (!j.ok) return { ok: false, rows: [], error: typeof j.error === 'string' ? j.error : 'Request failed' }
+  const rows: CorporateActionRow[] = Array.isArray(j.rows)
+    ? j.rows.map((row: Record<string, unknown>) => ({
+        symbol: String(row.symbol ?? ''),
+        action_type: String(row.action_type ?? ''),
+        ex_date: typeof row.ex_date === 'string' ? row.ex_date : null,
+        record_date: typeof row.record_date === 'string' ? row.record_date : null,
+        payment_date: typeof row.payment_date === 'string' ? row.payment_date : null,
+        ratio_from: row.ratio_from != null ? Number(row.ratio_from) : null,
+        ratio_to: row.ratio_to != null ? Number(row.ratio_to) : null,
+        amount: row.amount != null ? Number(row.amount) : null,
+        description: typeof row.description === 'string' ? row.description : null,
+        source: typeof row.source === 'string' ? row.source : null,
+      }))
+    : []
+  return { ok: true, rows }
+}
+
 export async function pollMassiveJobUntilDone(
   jobId: string,
   options?: { maxAttempts?: number; intervalMs?: number },

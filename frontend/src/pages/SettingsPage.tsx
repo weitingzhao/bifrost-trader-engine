@@ -35,6 +35,7 @@ import { HolidaysSection } from './settings/HolidaysSection'
 import { StatusPage } from './StatusPage'
 import { DataPage } from './DataPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
+import { CeleryPage } from './CeleryPage'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -180,6 +181,15 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  /** Legacy: Celery moved from System Status to Feed → Celery */
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.location.hash === '#settings-system-celery') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#feed-celery`)
+      setActiveSectionId('settings-feed')
+    }
+  }, [])
+
   const onAddHoliday = async () => {
     const d = addDate.trim().slice(0, 10)
     if (!d) {
@@ -243,13 +253,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
   const isSystemSection = activeSectionId === 'settings-system'
   const isFeedSection = activeSectionId === 'settings-feed'
   const systemHighlightSection =
-    currentHash === 'settings-system-daemon'
-      ? 'daemon'
-      : currentHash === 'settings-system-monitor'
-        ? 'monitor'
-        : currentHash === 'settings-system-celery'
-          ? 'celery'
-          : undefined
+    currentHash === 'settings-system-daemon' ? 'daemon' : currentHash === 'settings-system-monitor' ? 'monitor' : undefined
 
   return (
     <div className="settings-page">
@@ -343,9 +347,17 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
             showConsoleTabs={true}
             consoleCardTitle="Console"
             highlightSection={systemHighlightSection}
+            celeryUiMode="relocated"
           />
         ) : isFeedSection ? (
-          currentHash === 'feed-massive-option' ? (
+          currentHash === 'feed-celery' ? (
+            <CeleryPage
+              status={status}
+              loadStatus={loadStatus}
+              embeddedInSettings
+              breadcrumbLabel="Celery"
+            />
+          ) : currentHash === 'feed-massive-option' ? (
             <FeedMassiveOptionPage
               status={status}
               onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}

@@ -58,8 +58,11 @@ export {
   fetchMassiveJob,
   fetchOptionSnapshotsPg,
   pollMassiveJobUntilDone,
+  fetchCorporateActions,
+  fetchResearchOptionOi,
+  fetchResearchOptionTrades,
 } from './research'
-export type { OptionSnapshotRow, MassiveStatusResponse, MassiveJobApiRow } from './research'
+export type { OptionSnapshotRow, MassiveStatusResponse, MassiveJobApiRow, CorporateActionRow } from './research'
 export {
   postSetHeartbeatInterval,
   postIbConfig,

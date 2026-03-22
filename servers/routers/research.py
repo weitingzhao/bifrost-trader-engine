@@ -474,6 +474,31 @@ def get_massive_job(request: Request, job_id: str) -> Dict[str, Any]:
     return {"ok": True, "job": _massive_job_to_api(job)}
 
 
+@router.get("/research/massive/corporate-actions")
+def get_massive_corporate_actions(
+    request: Request,
+    symbol: str = Query(..., description="Stock ticker (e.g. AAPL)"),
+    action_type: Optional[str] = Query(None, description="dividend | split"),
+    limit: int = Query(50, ge=1, le=500),
+) -> Dict[str, Any]:
+    """Corporate actions persisted by Massive sync (dividends, splits)."""
+    from servers.reader.massive_jobs import get_corporate_actions
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "rows": [], "error": "PostgreSQL not configured"}
+    rows = get_corporate_actions(db, symbol, action_type=action_type, limit=limit)
+    serialised = []
+    for r in rows:
+        row = dict(r)
+        for k in ("ex_date", "record_date", "payment_date", "created_at"):
+            v = row.get(k)
+            if hasattr(v, "isoformat"):
+                row[k] = v.isoformat()
+        serialised.append(row)
+    return {"ok": True, "rows": serialised}
+
+
 @router.get("/research/option-oi")
 def get_research_option_oi(
     request: Request,

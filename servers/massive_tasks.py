@@ -233,6 +233,76 @@ def _apply_aggs(
     return n
 
 
+def _apply_corporate_actions(
+    conn: Any,
+    client: Any,
+    symbol: str,
+) -> int:
+    """Fetch dividends + splits from Massive/Polygon and upsert into massive_corporate_action."""
+    total = 0
+    with conn.cursor() as cur:
+        divs = client.fetch_dividends(symbol)
+        for d in divs.get("results") or []:
+            if not isinstance(d, dict):
+                continue
+            ex = d.get("ex_dividend_date") or ""
+            if not ex:
+                continue
+            cur.execute(
+                """
+                INSERT INTO massive_corporate_action
+                  (symbol, action_type, ex_date, record_date, payment_date,
+                   amount, description, source, created_at)
+                VALUES (%s, 'dividend', %s, %s, %s, %s, %s, 'massive', now())
+                ON CONFLICT (symbol, action_type, ex_date, source)
+                DO UPDATE SET
+                  record_date   = EXCLUDED.record_date,
+                  payment_date  = EXCLUDED.payment_date,
+                  amount        = EXCLUDED.amount,
+                  description   = EXCLUDED.description
+                """,
+                (
+                    symbol,
+                    ex,
+                    d.get("record_date"),
+                    d.get("pay_date"),
+                    float(d["cash_amount"]) if d.get("cash_amount") is not None else None,
+                    d.get("description") or d.get("dividend_type") or None,
+                ),
+            )
+            total += 1
+
+        splits = client.fetch_splits(symbol)
+        for s in splits.get("results") or []:
+            if not isinstance(s, dict):
+                continue
+            ex = s.get("execution_date") or ""
+            if not ex:
+                continue
+            cur.execute(
+                """
+                INSERT INTO massive_corporate_action
+                  (symbol, action_type, ex_date, ratio_from, ratio_to,
+                   description, source, created_at)
+                VALUES (%s, 'split', %s, %s, %s, %s, 'massive', now())
+                ON CONFLICT (symbol, action_type, ex_date, source)
+                DO UPDATE SET
+                  ratio_from  = EXCLUDED.ratio_from,
+                  ratio_to    = EXCLUDED.ratio_to,
+                  description = EXCLUDED.description
+                """,
+                (
+                    symbol,
+                    ex,
+                    float(s["split_from"]) if s.get("split_from") is not None else None,
+                    float(s["split_to"]) if s.get("split_to") is not None else None,
+                    f'{s.get("split_from")}:{s.get("split_to")}',
+                ),
+            )
+            total += 1
+    return total
+
+
 @app.task(bind=True, name="servers.massive_tasks.run_massive_job")
 def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     """Execute one job_massive_backfill row."""
@@ -313,8 +383,17 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 return result
 
             if kind == "oi":
-                # Placeholder: OI often included in snapshot; dedicated daily endpoint can be added later.
                 result = {"ok": True, "kind": kind, "message": "Use snapshot job to populate OI from chain data"}
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
+            if kind == "corporate_action":
+                sym = (payload.get("symbol") or "").strip().upper()
+                if not sym:
+                    raise ValueError("payload.symbol required")
+                count = _apply_corporate_actions(conn, client, sym)
+                conn.commit()
+                result = {"ok": True, "kind": kind, "rows_upserted": count}
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 

@@ -337,6 +337,50 @@ def get_option_snapshots_latest(
         return []
 
 
+def get_corporate_actions(
+    status_config: dict,
+    symbol: str,
+    action_type: Optional[str] = None,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """Corporate actions from massive_corporate_action, newest ex_date first."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return []
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                conditions = ["symbol = %s"]
+                args: list = [sym]
+                if action_type and action_type.strip():
+                    conditions.append("action_type = %s")
+                    args.append(action_type.strip().lower())
+                where = " AND ".join(conditions)
+                args.append(max(1, min(500, limit)))
+                cur.execute(
+                    f"""
+                    SELECT symbol, action_type, ex_date, record_date, payment_date,
+                           ratio_from, ratio_to, amount, description, source, created_at
+                    FROM massive_corporate_action
+                    WHERE {where}
+                    ORDER BY ex_date DESC
+                    LIMIT %s
+                    """,
+                    tuple(args),
+                )
+                rows = cur.fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_corporate_actions failed: %s", e)
+        return []
+
+
 def _norm_expiry_db(expiry: str) -> str:
     e = (expiry or "").strip()
     if len(e) >= 10 and e[4] == "-":

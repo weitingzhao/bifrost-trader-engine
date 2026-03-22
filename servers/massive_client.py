@@ -174,5 +174,39 @@ class MassiveClient:
             return {"results": [], "error": err}
         return data if isinstance(data, dict) else {"results": []}
 
+    # ── Corporate actions (Stocks REST) ──
+
+    def fetch_dividends(
+        self, ticker: str, limit: int = 1000
+    ) -> Dict[str, Any]:
+        """GET /v3/reference/dividends?ticker=…  (Polygon Stocks reference)."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        status, data = self._get(
+            "/v3/reference/dividends",
+            {"ticker": ticker, "limit": limit, "order": "desc", "sort": "ex_dividend_date"},
+        )
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_splits(
+        self, ticker: str, limit: int = 1000
+    ) -> Dict[str, Any]:
+        """GET /v3/reference/splits?ticker=…  (Polygon Stocks reference)."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        status, data = self._get(
+            "/v3/reference/splits",
+            {"ticker": ticker, "limit": limit, "order": "desc", "sort": "execution_date"},
+        )
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
     def sleep_backoff(self, attempt: int) -> None:
         time.sleep(min(2.0 ** attempt, 30.0))

@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import type { SseQueueMetrics, SseQueueCategory } from '../../../api/monitor'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
+
+export type SseQueueCategoryKey = 'quotes' | 'daemon_logs' | 'server_logs' | 'celery_logs'
+
+const ALL_CATEGORY_KEYS: SseQueueCategoryKey[] = ['quotes', 'daemon_logs', 'server_logs', 'celery_logs']
 
 function categoryLamp(cat: SseQueueCategory): Lamp {
   if (cat.connection_count === 0) return 'none'
@@ -11,27 +15,53 @@ function categoryLamp(cat: SseQueueCategory): Lamp {
   return 'green'
 }
 
-function overallLamp(m: SseQueueMetrics | null): Lamp {
+function overallLamp(m: SseQueueMetrics | null, visibleKeys: SseQueueCategoryKey[]): Lamp {
   if (!m) return 'none'
-  const lamps = [m.quotes, m.daemon_logs, m.server_logs, m.celery_logs].map(categoryLamp)
+  const lamps = visibleKeys.map((k) => categoryLamp(m[k]))
   if (lamps.includes('red')) return 'red'
   if (lamps.includes('yellow')) return 'yellow'
-  if (lamps.every(l => l === 'none')) return 'none'
+  if (lamps.every((l) => l === 'none')) return 'none'
   return 'green'
 }
 
-const CATEGORIES: { key: keyof Pick<SseQueueMetrics, 'quotes' | 'daemon_logs' | 'server_logs' | 'celery_logs'>; label: string }[] = [
+const CATEGORIES: { key: SseQueueCategoryKey; label: string }[] = [
   { key: 'quotes', label: 'Quotes' },
   { key: 'daemon_logs', label: 'Daemon logs' },
   { key: 'server_logs', label: 'Server logs' },
   { key: 'celery_logs', label: 'Celery logs' },
 ]
 
-export interface StatusSseQueuesPanelProps {
-  className?: string
+function resolveVisibleKeys(
+  categoryKeys: SseQueueCategoryKey[] | undefined,
+  excludeCategories: SseQueueCategoryKey[] | undefined,
+): SseQueueCategoryKey[] {
+  if (categoryKeys != null && categoryKeys.length > 0) {
+    const set = new Set(categoryKeys)
+    return ALL_CATEGORY_KEYS.filter((k) => set.has(k))
+  }
+  if (excludeCategories != null && excludeCategories.length > 0) {
+    const ex = new Set(excludeCategories)
+    return ALL_CATEGORY_KEYS.filter((k) => !ex.has(k))
+  }
+  return [...ALL_CATEGORY_KEYS]
 }
 
-export function StatusSseQueuesPanel({ className }: StatusSseQueuesPanelProps) {
+export interface StatusSseQueuesPanelProps {
+  className?: string
+  /** If set, only these stream rows are shown. Takes precedence over excludeCategories. */
+  categoryKeys?: SseQueueCategoryKey[]
+  /** Hide these streams (ignored when categoryKeys is set). */
+  excludeCategories?: SseQueueCategoryKey[]
+  /** Panel heading (default: SSE Backlogs). */
+  heading?: string
+}
+
+export function StatusSseQueuesPanel({
+  className,
+  categoryKeys,
+  excludeCategories,
+  heading = 'SSE Backlogs',
+}: StatusSseQueuesPanelProps) {
   const [metrics, setMetrics] = useState<SseQueueMetrics | null>(null)
   const [error, setError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -52,7 +82,15 @@ export function StatusSseQueuesPanel({ className }: StatusSseQueuesPanelProps) {
     return () => { cancelled = true; if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
 
-  const lamp = overallLamp(metrics)
+  const visibleKeys = useMemo(
+    () => resolveVisibleKeys(categoryKeys, excludeCategories),
+    [categoryKeys, excludeCategories],
+  )
+  const lamp = overallLamp(metrics, visibleKeys)
+  const categoriesRows = useMemo(
+    () => CATEGORIES.filter((c) => visibleKeys.includes(c.key)),
+    [visibleKeys],
+  )
 
   return (
     <div className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
@@ -64,7 +102,7 @@ export function StatusSseQueuesPanel({ className }: StatusSseQueuesPanelProps) {
                 <path d="M22 12h-4l-3 9L9 3 6 12H2" />
               </svg>
             </span>
-            SSE Backlogs
+            {heading}
             <InfoTooltip text="Per-connection asyncio queue depth for quotes and log SSE streams. High values indicate a slow browser or network." />
           </h2>
         </div>
@@ -87,7 +125,7 @@ export function StatusSseQueuesPanel({ className }: StatusSseQueuesPanelProps) {
             </tr>
           </thead>
           <tbody>
-            {CATEGORIES.map(({ key, label }) => {
+            {categoriesRows.map(({ key, label }) => {
               const cat = metrics[key]
               const cLamp = categoryLamp(cat)
               return (

@@ -705,10 +705,14 @@ export default function App() {
     window.location.hash = '#settings-heartbeat'
   }
 
-  /** Open Settings → System and scroll to a specific section (daemon / monitor / celery). */
+  /** Open Settings → System (daemon / monitor) or Feed → Celery for worker status. */
   const openSystemInSettingsToSection = (section: 'daemon' | 'monitor' | 'celery') => {
     setActiveTab('settings')
-    window.location.hash = `#settings-system-${section}`
+    if (section === 'celery') {
+      window.location.hash = '#feed-celery'
+    } else {
+      window.location.hash = `#settings-system-${section}`
+    }
   }
 
   const doShutdownAll = async () => {
@@ -1061,7 +1065,7 @@ export default function App() {
                       type="button"
                       className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
                       onClick={() => { openSystemInSettingsToSection('celery'); setLampHoverPopover(null) }}
-                      title="Go to System → Celery"
+                      title="Go to Feed → Celery"
                     >
                       Celery
                     </button>
