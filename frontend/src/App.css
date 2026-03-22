@@ -463,6 +463,19 @@ body::before {
   width: 14px;
   height: 14px;
 }
+/* Massive Option: same glyph + lamp colors as Settings → Feed → Massive Option */
+.app-header-menu-item-massive .app-header-menu-massive-lamp {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-header-menu-item-massive .app-header-menu-massive-lamp svg {
+  width: 14px;
+  height: 14px;
+}
 .app-header-menu-shutdown {
   flex-shrink: 0;
   width: 28px;
@@ -11880,6 +11893,28 @@ th:has(> .coverage-pool-th-held-amt) {
   margin-bottom: var(--space-2);
 }
 
+/* Same “sheet” treatment as .feed-massive-status-strip (rounded panel + gradient + border). */
+.feed-massive-cap-sheet {
+  padding: var(--space-4);
+  border-radius: var(--feed-massive-radius);
+  border: 1px solid var(--color-border);
+  background: linear-gradient(
+    135deg,
+    var(--color-surface-elevated) 0%,
+    var(--color-bg) 100%
+  );
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+[data-theme="light"] .feed-massive-cap-sheet {
+  background: linear-gradient(135deg, #ffffff 0%, var(--color-surface-elevated) 100%);
+  box-shadow: 0 1px 2px var(--color-dashboard-shadow);
+}
+
+.feed-massive-cap-sheet .feed-massive-tab-chip {
+  background: var(--color-surface);
+}
+
 .feed-massive-cap-hint {
   margin: 0 0 var(--space-3);
   font-size: var(--text-caption);
@@ -11902,11 +11937,10 @@ th:has(> .coverage-pool-th-held-amt) {
   top: 0;
   z-index: 5;
   background: var(--color-bg);
-  padding-block: var(--space-3);
+  padding-block: var(--space-2);
   margin-inline: calc(-1 * var(--space-4));
   padding-inline: var(--space-4);
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .feed-massive-tab-chip {

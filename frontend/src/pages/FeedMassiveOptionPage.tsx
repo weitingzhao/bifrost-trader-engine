@@ -708,37 +708,39 @@ export function FeedMassiveOptionPage({
       </section>
 
       <nav className="feed-massive-tab-nav-section feed-massive-cap-nav-sticky" aria-label="Massive capabilities">
-        <p className="feed-massive-cap-hint">
-          All capabilities are shown below. Click a chip to jump to its section.
-          {_status?.celery_workers && _status.celery_workers.length > 0
-            ? ''
-            : ' No Celery workers detected — start a worker with -Q massive to process sync tasks.'}
-        </p>
-        <div className="feed-massive-cap-summary">
-          {checklistRows.map(row => {
-            const tierOk = tierOkForRow(row, massiveStatus, Boolean(configured))
-            const tradesOk = tradesOkForRow(row, massiveStatus)
-            const eff = effectiveChecklistProjectStatus(row, Boolean(configured), tierOk, tradesOk)
-            return (
-              <a
-                key={row.id}
-                href={`#${feedMassiveSvcAnchorId(row.id)}`}
-                className="feed-massive-tab-chip"
-                onClick={e => {
-                  e.preventDefault()
-                  scrollToSection(row.id)
-                }}
-              >
-                <span className={feedMassiveOverviewDotClass(eff)} title={checklistEffectiveStatusLabel(eff)} aria-hidden />
-                <span className="feed-massive-tab-chip-label">{shortServiceLabel(row)}</span>
-                {row.id === 'celery-queue' && pendingJobCount > 0 ? (
-                  <span className="feed-massive-tab-badge" title="Pending or running jobs">
-                    {pendingJobCount > 99 ? '99+' : pendingJobCount}
-                  </span>
-                ) : null}
-              </a>
-            )
-          })}
+        <div className="feed-massive-cap-sheet">
+          <p className="feed-massive-cap-hint">
+            All capabilities are shown below. Click a chip to jump to its section.
+            {_status?.celery_workers && _status.celery_workers.length > 0
+              ? ''
+              : ' No Celery workers detected — start a worker with -Q massive to process sync tasks.'}
+          </p>
+          <div className="feed-massive-cap-summary">
+            {checklistRows.map(row => {
+              const tierOk = tierOkForRow(row, massiveStatus, Boolean(configured))
+              const tradesOk = tradesOkForRow(row, massiveStatus)
+              const eff = effectiveChecklistProjectStatus(row, Boolean(configured), tierOk, tradesOk)
+              return (
+                <a
+                  key={row.id}
+                  href={`#${feedMassiveSvcAnchorId(row.id)}`}
+                  className="feed-massive-tab-chip"
+                  onClick={e => {
+                    e.preventDefault()
+                    scrollToSection(row.id)
+                  }}
+                >
+                  <span className={feedMassiveOverviewDotClass(eff)} title={checklistEffectiveStatusLabel(eff)} aria-hidden />
+                  <span className="feed-massive-tab-chip-label">{shortServiceLabel(row)}</span>
+                  {row.id === 'celery-queue' && pendingJobCount > 0 ? (
+                    <span className="feed-massive-tab-badge" title="Pending or running jobs">
+                      {pendingJobCount > 99 ? '99+' : pendingJobCount}
+                    </span>
+                  ) : null}
+                </a>
+              )
+            })}
+          </div>
         </div>
       </nav>
 
