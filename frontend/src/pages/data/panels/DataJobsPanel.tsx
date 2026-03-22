@@ -1,5 +1,6 @@
 import { InfoTooltip } from '../../../components/InfoTooltip'
 import { fmtTs } from '../../../utils/format'
+import { barsJobResultTitle, formatBarsJobResult } from '../barsJobFormat'
 
 export interface BarsJobRow {
   job_id: string
@@ -169,11 +170,8 @@ export function DataJobsPanel({
                 <td>
                   <span className={`status-badge status-${j.status}`}>{j.status}</span>
                 </td>
-                <td title={j.result?.error || j.result?.message}>
-                  {j.status === 'done' && j.result?.count != null ? `${j.result.count} bars` : null}
-                  {j.status === 'failed' && j.result?.error ? j.result.error.slice(0, 40) + (j.result.error.length > 40 ? '…' : '') : null}
-                  {j.status === 'done' && j.result?.message && j.result?.count == null ? j.result.message.slice(0, 30) + '…' : null}
-                  {!j.result && j.status !== 'pending' && j.status !== 'running' ? '—' : null}
+                <td title={barsJobResultTitle(j)}>
+                  {formatBarsJobResult(j)}
                 </td>
                 <td>{j.created_ts != null ? fmtTs(j.created_ts) : '—'}</td>
                 <td>{j.updated_ts != null ? fmtTs(j.updated_ts) : '—'}</td>

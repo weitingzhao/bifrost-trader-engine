@@ -4669,6 +4669,66 @@ button:disabled {
   display: block;
 }
 
+.settings-sidebar-celery-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  margin-bottom: 2px;
+}
+
+.settings-sidebar-celery-row .settings-sidebar-link-celery {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-sidebar-celery-row .title-inline-lamp {
+  flex-shrink: 0;
+}
+
+.settings-sidebar-celery-queue-badge {
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: 999px;
+  background: rgba(99, 179, 237, 0.18);
+  color: var(--color-text-main);
+  border: 1px solid rgba(99, 179, 237, 0.35);
+}
+
+.settings-sidebar-celery-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.25rem;
+  align-self: stretch;
+  margin-bottom: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-sidebar-celery-stop:hover:not(:disabled) {
+  color: var(--color-text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-sidebar-celery-stop:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-sidebar-celery-stop:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 /* Flat split between System Status and Feed (same link style, no nested subs). */
 .settings-sidebar-inline-split {
   height: 0;
@@ -4818,6 +4878,46 @@ button:disabled {
   background: transparent;
   border: none;
   box-shadow: none;
+}
+
+/* Celery page: responsive grid (wide: status | SSE, log full width, massive | bars, config full width) */
+.celery-page-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+@media (min-width: 960px) {
+  .celery-page-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      'celery-status celery-sse'
+      'celery-log celery-log'
+      'celery-massive celery-bars'
+      'celery-config celery-config';
+    gap: var(--space-5);
+    align-items: start;
+  }
+
+  .celery-page-cell--status {
+    grid-area: celery-status;
+  }
+  .celery-page-cell--sse {
+    grid-area: celery-sse;
+  }
+  .celery-page-cell--log {
+    grid-area: celery-log;
+  }
+  .celery-page-cell--massive {
+    grid-area: celery-massive;
+  }
+  .celery-page-cell--bars {
+    grid-area: celery-bars;
+  }
+  .celery-page-cell--config {
+    grid-area: celery-config;
+  }
 }
 
 .settings-page-header {
@@ -11750,6 +11850,160 @@ th:has(> .coverage-pool-th-held-amt) {
   font-size: var(--text-caption);
   color: var(--color-text-muted);
   line-height: 1.45;
+}
+
+.feed-massive-tab-nav-section {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.feed-massive-cap-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  max-width: 48rem;
+}
+
+/* Capability summary grid: wrapping chips, no horizontal scroll */
+.feed-massive-cap-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+}
+
+/* Sticky overview bar for long pages */
+.feed-massive-cap-nav-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-bg);
+  padding-block: var(--space-3);
+  margin-inline: calc(-1 * var(--space-4));
+  padding-inline: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-3);
+}
+
+.feed-massive-tab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: min(14rem, 85vw);
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.feed-massive-tab-chip:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-accent-soft);
+}
+
+.feed-massive-tab-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.feed-massive-tab-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.feed-massive-tab-dot--ok {
+  background: var(--color-lamp-green);
+}
+
+.feed-massive-tab-dot--partial {
+  background: var(--color-lamp-yellow);
+}
+
+.feed-massive-tab-dot--fail {
+  background: var(--color-lamp-red);
+}
+
+.feed-massive-tab-dot--tier {
+  background: var(--color-link);
+}
+
+.feed-massive-tab-badge {
+  min-width: 1.1rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.2;
+  background: var(--color-lamp-yellow);
+  color: var(--color-bg, #111);
+}
+
+.feed-massive-tab-panel {
+  margin-top: var(--space-3);
+  min-width: 0;
+}
+
+.feed-massive-tab-panel > .feed-massive-card + .feed-massive-card {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.feed-massive-svc-status-line-wrap {
+  margin-bottom: var(--space-2);
+}
+
+.feed-massive-svc-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.feed-massive-svc-status-meta strong {
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.feed-massive-svc-verification {
+  margin-top: var(--space-3);
+  padding: 0;
+  border-radius: 8px;
+  border: 1px dashed var(--color-border);
+  background: var(--color-dashboard-tile);
+}
+
+.feed-massive-svc-verification-summary {
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  list-style: none;
+}
+
+.feed-massive-svc-verification-summary::-webkit-details-marker {
+  display: none;
+}
+
+.feed-massive-svc-verification-body {
+  padding: 0 var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.06));
 }
 
 .feed-massive-layout {

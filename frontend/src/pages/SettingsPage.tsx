@@ -8,6 +8,7 @@ import {
   fetchMarketHolidays,
   postMarketHoliday,
   deleteMarketHoliday,
+  postCeleryStop,
   type MarketHolidayRow,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
@@ -36,15 +37,26 @@ import { StatusPage } from './StatusPage'
 import { DataPage } from './DataPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
 import { CeleryPage } from './CeleryPage'
+import { celeryMetricsFromStatus } from './status/celeryMetrics'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
   operations?: Operation[]
   onNavigateToStrategy?: () => void
+  /** Bars backfill queue counts (same source as header; App pollers). */
+  barsQueuePending?: number | null
+  barsQueueRunning?: number | null
 }
 
-export function SettingsPage({ status, loadStatus, operations = [], onNavigateToStrategy }: SettingsPageProps) {
+export function SettingsPage({
+  status,
+  loadStatus,
+  operations = [],
+  onNavigateToStrategy,
+  barsQueuePending = null,
+  barsQueueRunning = null,
+}: SettingsPageProps) {
   const [msg, setMsg] = useState({ text: '', isErr: false })
   const [ibHost, setIbHost] = useState(DEFAULT_HOST)
   const [ibPortType, setIbPortType] = useState<'tws_live' | 'tws_paper' | 'gateway'>(DEFAULT_PORT_TYPE)
@@ -171,9 +183,26 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
     return hashToSectionId(window.location.hash)
   })
   const [ibConnectionExpanded, setIbConnectionExpanded] = useState(true)
+  const [celeryStopBusy, setCeleryStopBusy] = useState(false)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   const activeFeedSubId = activeSectionId === 'settings-feed' && FEED_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
+  const isCeleryFeedActive = activeSectionId === 'settings-feed' && currentHash === 'feed-celery'
+  const celeryLamp = celeryMetricsFromStatus(status).celeryLamp
+
+  const onSidebarCeleryStop = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (celeryStopBusy) return
+    setCeleryStopBusy(true)
+    try {
+      await postCeleryStop()
+      await loadStatus()
+    } finally {
+      setCeleryStopBusy(false)
+    }
+  }
+
   useEffect(() => {
     const onHashChange = () => setActiveSectionId(hashToSectionId(window.location.hash))
     window.addEventListener('hashchange', onHashChange)
@@ -250,6 +279,11 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
     }
   }
 
+  const barsQueueActiveTotal =
+    barsQueuePending != null || barsQueueRunning != null
+      ? (barsQueuePending ?? 0) + (barsQueueRunning ?? 0)
+      : null
+
   const isSystemSection = activeSectionId === 'settings-system'
   const isFeedSection = activeSectionId === 'settings-feed'
   const systemHighlightSection =
@@ -270,6 +304,40 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
               {label}
             </a>
           ))}
+          <div className="settings-sidebar-celery-row">
+            <a
+              href="#feed-celery"
+              className={`settings-sidebar-link settings-sidebar-link-celery ${isCeleryFeedActive ? 'active' : ''}`}
+            >
+              <span
+                className={`title-inline-lamp lamp-icon ${celeryLamp}`}
+                title="Celery: red = broker not connected, yellow = no workers, green = OK"
+                aria-hidden
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                </svg>
+              </span>
+              Celery
+              {barsQueueActiveTotal != null ? (
+                <span className="settings-sidebar-celery-queue-badge" title="Bars queue: pending + running">
+                  {barsQueueActiveTotal}
+                </span>
+              ) : null}
+            </a>
+            <button
+              type="button"
+              className="settings-sidebar-celery-stop"
+              onClick={onSidebarCeleryStop}
+              disabled={celeryStopBusy}
+              title="Stop Celery worker"
+              aria-label="Stop Celery worker"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
           <div className="settings-sidebar-group-label">Feed</div>
           {FEED_SUBSECTIONS.map((sub) => (

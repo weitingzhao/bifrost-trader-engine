@@ -202,7 +202,7 @@ export default function App() {
   >({})
   /** Celery bars worker queue counts (polled every 3s for dashboard) */
   const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
-  const [, setWorkerJobRunning] = useState<number | null>(null)
+  const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
 
@@ -1362,6 +1362,8 @@ export default function App() {
           loadStatus={loadStatus}
           operations={operations}
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
+          barsQueuePending={workerJobPending}
+          barsQueueRunning={workerJobRunning}
         />
       )}
     </div>

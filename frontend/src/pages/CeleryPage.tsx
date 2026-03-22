@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { fetchBarsJobs, fetchMassiveJobsList, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs } from '../api'
-import type { MassiveJobApiRow } from '../api'
+import type { BarsJob, MassiveJobApiRow } from '../api'
+import { barsJobResultTitle, formatBarsJobResult } from './data/barsJobFormat'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { fmtTs } from '../utils/format'
@@ -54,9 +55,7 @@ export function CeleryPage({
   const [massiveJobsLoading, setMassiveJobsLoading] = useState(false)
   const [massiveJobsError, setMassiveJobsError] = useState<string | null>(null)
 
-  const [barsJobs, setBarsJobs] = useState<
-    Array<{ job_id: string; symbol: string; period: string; status: string; updated_ts?: number }>
-  >([])
+  const [barsJobs, setBarsJobs] = useState<BarsJob[]>([])
   const [barsJobsLoading, setBarsJobsLoading] = useState(false)
   const [barsJobsError, setBarsJobsError] = useState<string | null>(null)
 
@@ -113,8 +112,8 @@ export function CeleryPage({
         </div>
       </div>
 
-      <div className="daemon-groups settings-page-groups">
-        <section className="replay-section" aria-labelledby="celery-status-head">
+      <div className="celery-page-grid settings-page-groups">
+        <section className="replay-section celery-page-cell celery-page-cell--status" aria-labelledby="celery-status-head">
           <h3 id="celery-status-head" className="page-title-with-tooltip">
             Worker status
             <InfoTooltip text="Broker (Redis), worker processes, and optional IB connection used by the market worker." />
@@ -132,7 +131,11 @@ export function CeleryPage({
           />
         </section>
 
-        <section className="replay-section" aria-labelledby="celery-console-head">
+        <div className="celery-page-cell celery-page-cell--sse">
+          <StatusSseQueuesPanel categoryKeys={['celery_logs']} heading="Celery log SSE backlog" />
+        </div>
+
+        <section className="replay-section celery-page-cell celery-page-cell--log" aria-labelledby="celery-console-head">
           <h3 id="celery-console-head" className="page-title-with-tooltip">
             Worker log
             <InfoTooltip text="Real-time Celery worker log (Redis stream). Start worker: python scripts/run_celery.py" />
@@ -148,9 +151,7 @@ export function CeleryPage({
           />
         </section>
 
-        <StatusSseQueuesPanel categoryKeys={['celery_logs']} heading="Celery log SSE backlog" />
-
-        <section className="replay-section" aria-labelledby="celery-massive-jobs-head">
+        <section className="replay-section celery-page-cell celery-page-cell--massive" aria-labelledby="celery-massive-jobs-head">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
             <h3 id="celery-massive-jobs-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
               Massive queue
@@ -206,7 +207,7 @@ export function CeleryPage({
           </div>
         </section>
 
-        <section className="replay-section" aria-labelledby="celery-bars-jobs-head">
+        <section className="replay-section celery-page-cell celery-page-cell--bars" aria-labelledby="celery-bars-jobs-head">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
             <h3 id="celery-bars-jobs-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
               Bars backfill queue
@@ -217,44 +218,60 @@ export function CeleryPage({
               {barsJobsLoading ? 'Loading…' : 'Refresh'}
             </button>
           </div>
+          <p className="section-hint" style={{ marginBottom: '0.5rem' }}>
+            Watchlist EOD dry-run preview and full job management: <a href="#feed-ib-stock">IB Stock → Data</a>.
+          </p>
           {barsJobsError ? (
             <p className="status-page-msg err" role="alert">
               {barsJobsError}
             </p>
           ) : null}
-          <table className="table-operations" style={{ fontSize: 'var(--font-size-sm, 0.8125rem)' }}>
-            <thead>
-              <tr>
-                <th>Job ID</th>
-                <th>Symbol</th>
-                <th>Period</th>
-                <th>Status</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {barsJobs.length === 0 && !barsJobsLoading ? (
+          <div className="feed-massive-table-wrap">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <td colSpan={5}>
-                    <span className="section-hint">No recent jobs.</span>
-                  </td>
+                  <th scope="col">Job ID</th>
+                  <th scope="col">Symbol</th>
+                  <th scope="col">Period</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Result</th>
+                  <th scope="col">Updated</th>
                 </tr>
-              ) : (
-                barsJobs.map((row) => (
-                  <tr key={row.job_id}>
-                    <td>{row.job_id}</td>
-                    <td>{row.symbol}</td>
-                    <td>{row.period}</td>
-                    <td>{row.status}</td>
-                    <td>{row.updated_ts != null ? fmtTs(row.updated_ts) : '—'}</td>
+              </thead>
+              <tbody>
+                {barsJobs.length === 0 && !barsJobsLoading ? (
+                  <tr>
+                    <td colSpan={6}>
+                      <div className="feed-massive-empty">No recent jobs.</div>
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  barsJobs.map((row) => (
+                    <tr key={row.job_id}>
+                      <td>
+                        <span className="feed-massive-job-id">{row.job_id}</span>
+                      </td>
+                      <td>{row.symbol}</td>
+                      <td>{row.period}</td>
+                      <td>
+                        <span className={jobStatusBadgeClass(row.status)}>{row.status}</span>
+                      </td>
+                      <td
+                        style={{ maxWidth: '12rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={barsJobResultTitle(row)}
+                      >
+                        {formatBarsJobResult(row) || '—'}
+                      </td>
+                      <td>{row.updated_ts != null ? fmtTs(row.updated_ts) : '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <section className="replay-section" aria-labelledby="celery-config-head">
+        <section className="replay-section celery-page-cell celery-page-cell--config" aria-labelledby="celery-config-head">
           <h3 id="celery-config-head" className="page-title-with-tooltip">
             Configure
             <InfoTooltip text="Celery worker_market client ID is stored in IB configuration (YAML-backed)." />

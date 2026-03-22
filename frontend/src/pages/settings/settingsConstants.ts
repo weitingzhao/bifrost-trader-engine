@@ -25,7 +25,6 @@ export const CONFIG_SECTIONS = [
 export const FEED_SUBSECTIONS = [
   { id: 'feed-ib-stock', label: 'IB Stock', icon: 'feed-ib' as const },
   { id: 'feed-massive-option', label: 'Massive Option', icon: 'feed-massive' as const },
-  { id: 'feed-celery', label: 'Celery', icon: 'feed-celery' as const },
 ] as const
 
 /** All sections in sidebar order (Status first, then Configuration). Used for hash fallback etc. */
