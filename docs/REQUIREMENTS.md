@@ -21,6 +21,7 @@
 | | **R-M4** | 操作可查：能查询执行过的操作，尤其涉及持仓变化的操作（对冲下单、成交、撤单等）。 | §2.3 |
 | | **R-M5** | 监控 Web 界面：操作者通过浏览器访问监控应用，直观查看守护进程运行状态（红绿灯、自检、状态摘要、操作列表），并通过界面发起停止等控制。 | §2.4 |
 | | **R-M7** | 复盘与风控分析页面：独立于实时监控的复盘与风控分析页面（账户执行交易、辅助行情、风控评估）。 | §2.5 |
+| | **R-M8** | 组合级模型化回报与风险：在明确假设下基于当前持仓与账户摘要，计算理论盈亏边界、CAR/DTE 年化、Delta、压力矩阵等；与会计绩效（R-M7）区分展示。 | §2.6 |
 | **c. 金融数据采集** | **R-A1** | 账户与持仓可获取：从 IB 获取当前账户基本信息与当前持仓，作为自动交易对冲的基本能力。 | §3.1 |
 | | **R-A4** | 双 IB 账户与统一 Portfolio：支持两账户；主账户自动+行情，第二账户仅手动；统一 Portfolio 展示与管理。 | §3.1.1 |
 | | **R-A2** | 账户执行交易可获取：从 IB 获取账户执行/成交记录（含手动与机器），用于事后复盘与风控。 | §3.3 |
@@ -35,7 +36,7 @@
 | **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | §6 |
 | | **R-RM2** | 事件订阅所得行情写入 Redis 缓存；唯一写入方为守护进程，监控不写 Redis 行情。 | §6 |
 | | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | §6 |
-| **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；第一步为 UI 与占位 API。 | §2.6 |
+| **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；第一步为 UI 与占位 API。 | §2.7 |
 | **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离：独立 database，各进程仅连本环境库，settings 与业务数据不跨环境混用。 | §7 |
 | | **R-DV2** | 生产在 Linux 服务器部署完整运行栈（Engine、Server、Redis、Celery）；开发在本机连 Dev 库。 | §7 |
 | | **R-DV3** | IB/TWS 为共享基础设施（两台 Mac Mini）；Dev/Prod 通过不同 client_id 或 TWS 端口区分；同一 IB 账户同一时刻仅一个 Engine 下单。 | §7 |
@@ -96,8 +97,15 @@
 - **（扩展）按策略归属**：支持将交易结果归属到**机会策略**与**策略实例**，Performance 与复盘可按策略、按策略实例展示 PnL 与汇总。**归属仅存于 account_executions**（每条成交可带 strategy_opportunity_id / strategy_instance_id）；account_positions 不存策略字段——一个持仓可对应多个策略，通过 executions 推导 strategy_links。Realized PnL 按 execution 归属聚合；Unrealized 按标的展示时附带策略维度（strategy_links）。产品边界见 [STRATEGY_INSTANCE_PAGE.md](plans/STRATEGY_INSTANCE_PAGE.md)。
 - **策略实例独立页面（扩展）**：提供**策略实例**独立入口（列表 + 详情），用于按「单笔开仓」聚合展示：所属机会策略与结构、该实例的盈亏（Realized/Unrealized）、后续可扩展的风险与回测、资金占用等；与「按账户」的 Portfolio、「按策略定义」的 Strategy 页并列，形成「按实例」的分析视角。产品边界见 [STRATEGY_INSTANCE_PAGE.md](plans/STRATEGY_INSTANCE_PAGE.md)。
 - **与分步计划**：阶段 3（与 R-A2、R-A3 数据能力一并交付）。
+- **与 R-M8 的边界**：R-M7 的 Performance、Realized/Unrealized 等为**会计与市值口径**；**模型化**理论回报、CAR、压力测试等见 **§2.6（R-M8）** 与专项文档 [PORTFOLIO_RISK_RETURN.md](plans/PORTFOLIO_RISK_RETURN.md)。
 
-### 2.6 期权发现入口（R-OD1）
+### 2.6 组合级模型化回报与风险（R-M8）
+
+- **目标**：在**单一选中 IB 账户**、**当前真实持仓**（无假设开仓）前提下，提供组合级 **Model Analysis**：到期 payoff 意义上的 max gain / max loss（含 Unbounded 处理）、**Capital at risk（CAR）**、**按 DTE 的简单年化**、**Delta 与 Delta 美元等价**、固定档的**压力测试矩阵**（标的 ±5%/±10%、IV ±5 vol，含数据降级）；账户摘要中的 **Buying Power / Cash / Net Liquidation** 仅作**展示**（不自研 margin 引擎）。
+- **范围**：须与 R-M7 的 REAL PERFORMANCE **UI 与数据层分离**（英文区块标题、Disclaimer、警告样式）；**禁止**输出无公式支撑的任意收益区间；详细定义、分阶段（V1 / V1.5 / V2）、CAR 聚合与多到期规则见 [PORTFOLIO_RISK_RETURN.md](plans/PORTFOLIO_RISK_RETURN.md)。
+- **实现**：**服务端单一真源**计算并对外 API；独立 risk 进程为可选演进，非 V1 强制。
+
+### 2.7 期权发现入口（R-OD1）
 
 - **目标**：在 Research 下提供 **Option Discovery** 子页，作为按到期询价与机会发现的入口；操作者可选择标的（来自 Watchlist STK）与到期日，后续步骤展示该到期下的期权报价与 IV 等。
 - **范围**：第一步为 **UI 与占位 API**——Research 二级菜单新增「Option Discovery」、新页面含标的选择（Watchlist STK）、到期选择（占位）、占位表格/说明；后端提供 `GET /research/option-expirations?symbol=...`，可返回空列表或 mock 到期。后续步骤：接入 IB reqSecDefOptParams 返回真实到期与行权价、期权快照与发现逻辑。

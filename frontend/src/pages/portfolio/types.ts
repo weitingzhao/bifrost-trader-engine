@@ -1,7 +1,7 @@
 import type { Execution, IbPositionRow, OptExecutionGroup } from '../../types'
 import type { RiskProfile } from '../../utils/riskProfile'
 
-export type PortfolioView = 'overview' | 'open' | 'ledger' | 'performance' | 'accounts' | 'transfer'
+export type PortfolioView = 'overview' | 'open' | 'ledger' | 'performance' | 'accounts' | 'transfer' | 'model-analysis'
 
 export type LivePositionRow = IbPositionRow & {
   account_id: string

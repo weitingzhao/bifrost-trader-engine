@@ -120,6 +120,7 @@ def create_app(
         logs_router,
         market_router,
         monitor_metrics_router,
+        portfolio_model_router,
         quotes_router,
         research_router,
         status_router,
@@ -139,6 +140,7 @@ def create_app(
     app.include_router(config_router)
     app.include_router(strategies_router)
     app.include_router(monitor_metrics_router)
+    app.include_router(portfolio_model_router)
 
     _root = Path(__file__).resolve().parent.parent
     _dist_assets = _root / "frontend" / "dist" / "assets"

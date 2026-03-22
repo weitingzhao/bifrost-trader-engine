@@ -12,6 +12,7 @@ from servers.routers.daemon import router as daemon_router
 from servers.routers.config import router as config_router
 from servers.routers.strategies import router as strategies_router
 from servers.routers.monitor_metrics import router as monitor_metrics_router
+from servers.routers.portfolio_model import router as portfolio_model_router
 
 __all__ = [
     "core_router",
@@ -26,4 +27,5 @@ __all__ = [
     "config_router",
     "strategies_router",
     "monitor_metrics_router",
+    "portfolio_model_router",
 ]

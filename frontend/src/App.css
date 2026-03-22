@@ -13736,3 +13736,359 @@ th:has(> .coverage-pool-th-held-amt) {
   background: var(--color-error-bg, rgba(255,60,60,0.15));
   color: var(--color-error, #c00);
 }
+
+/* ---------- Model Analysis (R-M8) — theme-aware (dark / light) ---------- */
+
+.bifrost-model-analysis {
+  color: var(--color-text-main);
+}
+
+.model-analysis-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.model-analysis-title {
+  margin: 0;
+  font-size: var(--text-headline);
+  color: var(--color-text-main);
+}
+
+.model-analysis-hypothetical-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+}
+
+[data-theme="light"] .model-analysis-hypothetical-badge {
+  border-color: rgba(202, 138, 4, 0.35);
+}
+
+.model-analysis-header-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.model-analysis-account-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-analysis-config-hint {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  font-size: var(--text-tiny);
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  max-width: 42rem;
+}
+
+.model-analysis-disclaimer {
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  font-size: var(--text-caption);
+  line-height: 1.45;
+  background: var(--color-warning-soft);
+  color: var(--color-text-main);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+}
+
+[data-theme="light"] .model-analysis-disclaimer {
+  border-color: rgba(202, 138, 4, 0.3);
+}
+
+.model-analysis-error {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  font-size: var(--text-caption);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
+.model-analysis-summary {
+  display: flex;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.model-analysis-summary-label {
+  font-size: var(--text-tiny);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.model-analysis-stress-details {
+  margin-bottom: var(--space-4);
+}
+
+.model-analysis-stress-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--text-body);
+  color: var(--color-link);
+  list-style: none;
+}
+
+.model-analysis-stress-summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-analysis-stress-details[open] .model-analysis-stress-summary {
+  margin-bottom: var(--space-2);
+}
+
+.model-analysis-table-wrap {
+  margin-bottom: var(--space-4);
+}
+
+.model-analysis-main-table {
+  font-size: var(--text-caption);
+}
+
+.model-analysis-table {
+  margin-top: var(--space-2);
+  max-width: 520px;
+}
+
+/* Expandable detail row: surface slightly above main rows, no light-gray flash in dark theme */
+.model-analysis-detail-row .model-analysis-detail-cell {
+  background: var(--color-surface-elevated);
+  border-top: 1px solid var(--color-border-strong);
+  color: var(--color-text-main);
+  padding: var(--space-4);
+  vertical-align: top;
+}
+
+.model-analysis-detail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.model-analysis-detail-meta {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  font-size: var(--text-caption);
+}
+
+.model-analysis-muted {
+  color: var(--color-text-muted);
+}
+
+.model-analysis-scenario-line {
+  font-size: var(--text-tiny);
+  color: var(--color-text-main);
+}
+
+.model-analysis-detail-section {
+  margin-top: var(--space-1);
+}
+
+.model-analysis-detail-section-title {
+  font-size: var(--text-caption);
+  color: var(--color-text-main);
+}
+
+.model-analysis-iv-note {
+  font-size: var(--text-tiny);
+  margin-left: var(--space-2);
+}
+
+.model-analysis-nested-table {
+  margin-top: var(--space-2);
+  max-width: 520px;
+  font-size: var(--text-tiny);
+}
+
+.model-analysis-stress-total {
+  font-weight: 600;
+}
+
+.model-analysis-pnl-pos {
+  color: var(--color-success);
+}
+
+.model-analysis-pnl-neg {
+  color: var(--color-danger);
+}
+
+.model-analysis-risk-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.model-analysis-risk-badge--defined {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.model-analysis-risk-badge--unlimited {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.model-analysis-empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-caption);
+}
+
+/* Nested tables inside detail: inherit theme (Bootstrap .table defaults fight dark bg) */
+.bifrost-model-analysis .model-analysis-detail-cell .table-operations thead th {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+.bifrost-model-analysis .model-analysis-detail-cell .table-operations tbody td {
+  color: var(--color-text-main);
+  border-color: var(--color-border);
+}
+
+.bifrost-model-analysis .model-analysis-main-table tbody tr:hover {
+  background: rgba(163, 230, 53, 0.06);
+}
+
+[data-theme="light"] .bifrost-model-analysis .model-analysis-main-table tbody tr:hover {
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.model-analysis-subheading {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.model-analysis-prose {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-tiny);
+  line-height: 1.5;
+  color: var(--color-text-main);
+  max-width: 52rem;
+}
+
+.model-analysis-car-section {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.model-analysis-car-effective {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-caption);
+}
+
+.model-analysis-car-explain-block {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+}
+
+.model-analysis-car-explain-title {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-accent);
+  margin-bottom: var(--space-1);
+}
+
+.model-analysis-car-explain-body {
+  margin: 0;
+}
+
+.model-analysis-code-ref {
+  margin-top: var(--space-2);
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+}
+
+.model-analysis-car-legs-caption {
+  margin-bottom: var(--space-1);
+  font-size: var(--text-tiny);
+}
+
+.model-analysis-car-legs-table {
+  max-width: 100%;
+  font-size: 11px;
+}
+
+.model-analysis-car-desc-cell {
+  line-height: 1.35;
+  max-width: min(22rem, 40vw);
+}
+
+.model-analysis-leg-type,
+.model-analysis-method-code {
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  color: var(--color-text-muted);
+}
+
+.model-analysis-methodology-block {
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  max-width: 52rem;
+}
+
+.model-analysis-methodology-block--nested {
+  margin-top: var(--space-2);
+}
+
+.model-analysis-methodology-lead {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-tiny);
+  line-height: 1.45;
+  color: var(--color-text-main);
+}
+
+.model-analysis-methodology-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: var(--text-tiny);
+  line-height: 1.5;
+  color: var(--color-text-main);
+}
+
+.model-analysis-methodology-list li {
+  margin-bottom: var(--space-2);
+}
+
+.model-analysis-account-stress-note {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-tiny);
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  max-width: 48rem;
+}

@@ -22,6 +22,7 @@ export default defineConfig({
       '/watchlist': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/position-categories': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/positions': { target: 'http://127.0.0.1:8765', changeOrigin: true },
+      '/portfolio': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/control': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/strategies': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/api': { target: 'http://127.0.0.1:8765', changeOrigin: true },

@@ -32,6 +32,7 @@
 | **19** | **一键平敞口** | R-C3，阶段 5 | ❌ 未实现 | 红或紧急时一键平掉主账户本策略对冲敞口；仅主账户，不碰第二账户。 |
 | **20** | **自动下单（终极目标）** | 阶段 5 | ❌ 未实现 | 守护进程在满足策略与风控时自动发单；依赖 1–11 及 17–19 等能力齐备。 |
 | **21** | **交易归属与策略实例（按策略 PnL）** | 阶段 3 扩展 | ❌ 未实现 | strategy_instance 表；execution 归属 strategy_opportunity 与 strategy_instance（position 不存策略，从 executions 推导 strategy_links）；Performance/复盘按策略与实例聚合；**策略实例独立页面**（列表 + 详情：策略、盈亏、风险/回测/资金占用等）。产品边界见 [STRATEGY_INSTANCE_PAGE.md](STRATEGY_INSTANCE_PAGE.md)。实现后可按策略、按单笔开仓查看 PnL 与盈亏比，补齐 R-M7/R-H2 的按策略维度。 |
+| **22** | **组合级模型化回报与风险（Model Analysis）** | R-M8 | ⏳ V1 已实现 | V1 完成：服务端 payoff envelope + CAR + DTE 年化 + BS Delta + stress matrix（`GET /portfolio/model-analysis`）；前端 Model Analysis 页（Disclaimer、per-underlying 表、drill-down、account stress matrix）。V1.5/V2 待做：Expected Return/POP、多账户合并、独立 risk 进程。专项见 [PORTFOLIO_RISK_RETURN.md](PORTFOLIO_RISK_RETURN.md)。 |
 
 ---
 

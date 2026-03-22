@@ -567,6 +567,19 @@ class StatusReader:
         self._end_read_txn()
         return result
 
+    # --- Portfolio model analysis (R-M8) ---
+    def get_model_analysis(self, account_id: str) -> Optional[Dict[str, Any]]:
+        if not self._connect():
+            return None
+        from servers.portfolio_model import compute_model_analysis
+        try:
+            result = compute_model_analysis(self._conn, account_id)
+        except Exception as exc:
+            logger.exception("get_model_analysis failed for %s: %s", account_id, exc)
+            result = None
+        self._end_read_txn()
+        return result
+
     # --- Executions / transactions / performance (delegate to executions module) ---
     def get_executions(
         self,

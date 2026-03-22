@@ -23,6 +23,7 @@ import { PerformancePage } from './pages/PerformancePage'
 import { ResearchRiskAnalysisPage } from './pages/ResearchRiskAnalysisPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TransferPayPage } from './pages/TransferPayPage'
+import { ModelAnalysisPage } from './pages/ModelAnalysisPage'
 import { BacktestPage } from './pages/BacktestPage'
 import { OptionDiscoveryPage } from './pages/OptionDiscoveryPage'
 import { StrategyStructurePage } from './pages/StrategyStructurePage'
@@ -680,6 +681,7 @@ export default function App() {
         { id: 'accounts', label: 'Accounts' },
         { id: 'open', label: 'Positions' },
         { id: 'performance', label: 'Performance' },
+        { id: 'model-analysis', label: 'Model Analysis' },
       ],
     },
     {
@@ -1240,6 +1242,8 @@ export default function App() {
             />
           ) : portfolioView === 'performance' ? (
             <PerformancePage status={status} onViewChange={setPortfolioView} />
+          ) : portfolioView === 'model-analysis' ? (
+            <ModelAnalysisPage status={status} onViewChange={setPortfolioView} />
           ) : portfolioView === 'transfer' ? (
             <TransferPayPage status={status} onViewChange={setPortfolioView} />
           ) : portfolioView === 'ledger' ? (
