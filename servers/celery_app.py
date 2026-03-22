@@ -2,6 +2,7 @@
 
 Usage:
   celery -A servers.celery_app worker -l info -Q bars --pool=solo
+  celery -A servers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon option sync (no IB)
 
 Or: python scripts/run_celery.py [config_path]
 
@@ -59,14 +60,17 @@ app = Celery(
     "bifrost.bars",
     broker=broker_url,
     backend=result_backend,
-    include=["servers.bars_tasks"],
+    include=["servers.bars_tasks", "servers.massive_tasks"],
 )
 app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
     task_default_queue="bars",
-    task_routes={"servers.bars_tasks.backfill_bars": {"queue": "bars"}},
+    task_routes={
+        "servers.bars_tasks.backfill_bars": {"queue": "bars"},
+        "servers.massive_tasks.run_massive_job": {"queue": "massive"},
+    },
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,

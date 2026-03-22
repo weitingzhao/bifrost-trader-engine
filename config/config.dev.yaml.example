@@ -1,0 +1,44 @@
+# Copy to config.dev.yaml and fill in real values. Do not commit secrets.
+
+postgres:
+  host: "127.0.0.1"
+  port: 5432
+  database: "bifrost"
+  user: "bifrost"
+  password: "" # or PGPASSWORD env
+
+ib:
+  connect_timeout: 60.0
+  host:
+    ip: "127.0.0.1"
+    port_type: "tws_live"
+    client_id:
+      daemon: 110
+      listener: 101
+      account: 120
+      markets: 130
+      worker_market: 140
+  secondary:
+    ip: "127.0.0.1"
+    port_type: "tws_live"
+    client_id:
+      listener: 11
+      account: 120
+
+redis:
+  enabled: true
+  host: "127.0.0.1"
+  port: 6379
+
+frontend:
+  port: 5173
+
+# Massive / Polygon options research (REST + Celery queue `massive`). Do not commit real API keys.
+# Prefer env: MASSIVE_API_KEY or POLYGON_API_KEY
+massive:
+  api_key: "" # placeholder
+  tier: "starter" # starter | developer
+  rest_base: "https://api.polygon.io"
+  ws_url: "wss://socket.polygon.io/options"
+  features:
+    trades_enabled: false # Developer tier can set true

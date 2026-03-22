@@ -27,6 +27,7 @@
 | | **R-A2** | 账户执行交易可获取：从 IB 获取账户执行/成交记录（含手动与机器），用于事后复盘与风控。 | §3.3 |
 | | **R-A5** | 未成交订单可观测（事件驱动）：以事件驱动方式获取并展示当前未成交订单（Limit 挂单等）。 | §3.3.1 |
 | | **R-A3** | 复盘辅助行情可获取：为复盘与风控分析提供辅助行情数据（如 K 线、历史 tick 等）。 | §3.4 |
+| | **R-A6** | Massive 期权研究数据：从 Massive（Polygon）获取期权链、快照、聚合 K 线、Greeks/IV、日终 OI、参考数据与公司行动等，作为期权研究主力数据源；分级能力（Starter / Developer）。 | §3.5 |
 | | **R-M6** | 标的与持仓当前市价可获取：监控页须能获取并展示交易标的与持仓的当前市价（spot/last/mid 等），供评估持仓盈亏、期权虚实与风险。 | §3.2 |
 | **d. 策略编辑、回测与历史统计** | **R-H2** | 历史统计：基于历史数据做胜率、盈亏分布、按日/周/月汇总、对冲次数与滑点等。 | §4.1 |
 | | **R-B1** | 策略 PnL 优化：在历史数据上对比不同参数的理论 P&L、收益曲线、回撤等，优化策略回报。 | §4.2 |
@@ -36,7 +37,7 @@
 | **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | §6 |
 | | **R-RM2** | 事件订阅所得行情写入 Redis 缓存；唯一写入方为守护进程，监控不写 Redis 行情。 | §6 |
 | | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | §6 |
-| **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；第一步为 UI 与占位 API。 | §2.7 |
+| **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；主力数据源为 Massive（R-A6），IB 作交叉校验或降级路径。 | §2.7 |
 | **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离：独立 database，各进程仅连本环境库，settings 与业务数据不跨环境混用。 | §7 |
 | | **R-DV2** | 生产在 Linux 服务器部署完整运行栈（Engine、Server、Redis、Celery）；开发在本机连 Dev 库。 | §7 |
 | | **R-DV3** | IB/TWS 为共享基础设施（两台 Mac Mini）；Dev/Prod 通过不同 client_id 或 TWS 端口区分；同一 IB 账户同一时刻仅一个 Engine 下单。 | §7 |
@@ -107,8 +108,10 @@
 
 ### 2.7 期权发现入口（R-OD1）
 
-- **目标**：在 Research 下提供 **Option Discovery** 子页，作为按到期询价与机会发现的入口；操作者可选择标的（来自 Watchlist STK）与到期日，后续步骤展示该到期下的期权报价与 IV 等。
-- **范围**：第一步为 **UI 与占位 API**——Research 二级菜单新增「Option Discovery」、新页面含标的选择（Watchlist STK）、到期选择（占位）、占位表格/说明；后端提供 `GET /research/option-expirations?symbol=...`，可返回空列表或 mock 到期。后续步骤：接入 IB reqSecDefOptParams 返回真实到期与行权价、期权快照与发现逻辑。
+- **目标**：在 Research 下提供 **Option Discovery** 子页，作为按到期询价与机会发现的入口；操作者可选择标的（来自 Watchlist STK）与到期日，展示该到期下的期权报价、Greeks/IV、日终 OI 等。
+- **主力数据源**：**Massive（Polygon）**（R-A6）为 Option Discovery 的**主力研究数据源**——链与到期、Snapshot 快照、延迟 Greeks/IV、日终 Open Interest 等均优先从 Massive 获取；**IB** 作交叉校验或在 Massive 不可用（如 API Key 未配置、Management 模式）时的**降级路径**（可选、分阶段）。
+- **延迟披露**：Massive Starter 订阅为 **15 分钟延迟**数据，界面须在相关数据区域标注 `Massive · 15 min delayed`，避免与 IB 实盘行情混淆或误用于自动下单决策。
+- **范围**：第一步为 **UI 与占位 API**——Research 二级菜单新增「Option Discovery」、新页面含标的选择（Watchlist STK）、到期选择（占位）、占位表格/说明；后端提供 `GET /research/option-expirations?symbol=...&provider=massive|ib|auto`，可返回空列表或 mock 到期。后续步骤：接入 Massive / IB 返回真实到期与行权价、期权快照与发现逻辑。
 - **能力进度**：见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
 ---
@@ -157,12 +160,37 @@
 - **目标**：为**复盘与风控分析**、**策略回测**提供**辅助行情数据**（**K 线**、报价等），便于在复盘时结合成交记录查看当时行情与风险模型评估；支持**股票与期权**。
 - **范围**：
   - **标的**：除当前持仓外，支持 **Watchlist**（自选/待操作标的，可含股票与期权，含当前持仓、未持仓与曾持仓）；Watchlist 落库持久化，服务重启不丢失。
-  - **数据源**：当前阶段仅 **IB**；按标的与周期从 IB 拉取并写入库，减少重复请求。
+  - **数据源**：**IB** 为复盘/回测用 K 线的既有来源；**期权研究专用**数据（链、Snapshot、分钟/秒聚合 K 线、Greeks/IV、日终 Open Interest）以 **Massive（Polygon）** 为**优先回填与展示来源**（R-A6）。写入 option_day / option_min 等表时附带 `source` 列（`ib` 或 `massive`）区分来源。按标的与周期从对应数据源拉取并写入库，减少重复请求。
   - **K 线**：股票与期权**分表存储**——股票日线 **stock_day**、股票分钟/小时线 **stock_min**（周期 1 min、5 mins、1 hour）；期权日线 **option_day**、期权分钟/小时线 **option_min**。日 K 为主；分钟/小时线供复盘与短期回测。
   - **拉取策略**：首次按标的拉取时可请求**全部历史**；后续根据**最新一根 K 线距离当前的时间**智能决定请求的 duration，避免重复拉取已入库区间。
   - **报价**：持仓与 Watchlist 标的的**当前报价**（bid/ask/last/mid）可获取；Watchlist 的报价在拉取后**写入 contract_quote_live**（与持仓共用），供前端统一展示与后续使用。
   - **参考指数（Reference Indices）**：为与 Watchlist 股票对比，支持**美股大盘指数**（如 S&P 500 ^GSPC、Dow 30 ^DJI、Nasdaq ^IXIC）的日线数据。数据源为 **TradingView（tvDatafeed）**；在 config 中配置 `reference_indices`（symbol、label、tv_symbol、tv_exchange）；**定时任务**（脚本或 Celery）按配置拉取日线并 UPSERT 写入 **stock_day**（同一 symbol 同一 bar_time 覆盖，保证头部为最终值）；服务重启后可**补齐缺失区间**（gap-fill）。更新频率与请求间隔遵守数据源限流（如 2s 间隔、每日或每数小时一次）。GET /status 返回 `reference_indices` 供前端展示「大盘」行；现有 `/bars/benchmark` 支持传入指数 symbol 获取最新日线。
 - **与分步计划**：阶段 3（数据获取）；回测与复盘策略的具体形态可后续阶段再细化。
+
+### 3.5 Massive 期权研究数据（R-A6）
+
+- **目标**：从 **Massive（Polygon）** 获取**美股期权**的研究级数据，作为 Option Discovery（R-OD1）与期权分析的**主力数据源**，补充 IB 在历史期权数据上的不足。**IB/TWS 仍为执行、账户真源与实盘行情**（与 R-A1/R-A2/R-M6 等一致）；Massive 定位为**研究专用、可复现批处理**。
+- **订阅分级**：
+  - **Options Starter（当前）**：全美股期权代码、无限 API 调用、2 年历史数据、100% 市场覆盖、**15 分钟延迟**、无限文件下载、参考数据（Reference Data）、公司行动（Corporate Actions）、技术指标（Technical Indicators）、**实时 Greeks 与 IV**（延迟语境下）、日终 Open Interest、分钟聚合（Minute Aggregates）、秒聚合（Second Aggregates）、WebSocket、Snapshot。
+  - **Options Developer（$79，未来升级）**：在 Starter 基础上增加 **Trades**（逐笔成交数据）。
+- **分级实现**：需求、架构与数据库中**写清分级能力**；数据库**预留** Trades 相关表（如 `option_trades`），Starter 阶段仅建表不写入；**API 与 UI 通过 feature flag**（配置项 `massive.tier` 或 `massive.features.trades_enabled`）控制 Trades 功能的暴露与写入，升级后仅需修改配置即可启用。
+- **数据覆盖**（Starter 可用）：
+  - **期权链与到期**（合约参考、行权价列表）
+  - **Snapshot 快照**（bid/ask/last/mid + Greeks/IV）
+  - **聚合 K 线**（分钟与秒级 OHLCV）
+  - **日终 Open Interest**
+  - **参考数据**（标的信息、合约元数据）
+  - **公司行动**（拆股、股息等）
+  - **WebSocket 延迟流**（quote/snapshot 通道）
+- **数据覆盖（Developer 增量）**：
+  - **Trades（逐笔成交）**：含价格、数量、交易所、成交条件等
+  - **WebSocket Trades 通道**
+- **延迟与边界**：Starter 订阅的数据**延迟 15 分钟**，界面须明确标注；**不得**将 Massive 延迟数据作为 ExecutionGuard 或自动下单决策的输入（仅 IB 实盘行情可作为交易决策依据）。
+- **非功能**：
+  - **API Key 安全**：仅存于 `config.yaml`（`massive.api_key`）或环境变量，不入库明文、不在前端暴露。
+  - **限流**：即使 Massive 标称 unlimited API 调用，Worker 仍应在请求间留退避间隔（429/5xx 指数退避），遵守供应商 ToS。
+  - **前端不直连 Massive**：密钥保护与 CORS 限制，所有请求经后端代理或落库后读取。
+- **与分步计划**：纳入期权研究阶段；具体实现顺序见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ---
 
@@ -276,6 +304,7 @@
 | | R-A2 | 账户执行交易可获取（复盘与风控） |
 | | R-A5 | 未成交订单可观测（事件驱动） |
 | | R-A3 | 复盘辅助行情可获取（如 K 线） |
+| | R-A6 | Massive 期权研究数据（链/快照/Greeks/OI/聚合等） |
 | | R-M6 | 标的与持仓当前市价可获取 |
 | d. 策略编辑、回测与历史统计 | R-H2 | 历史统计 |
 | | R-B1、R-B2 | 回测（策略 PnL 优化 + Guard 验证） |
@@ -293,4 +322,4 @@
 
 ---
 
-*最后更新：2026-03-19，新增 R-DV1–3 环境与部署约束（§7）、§8 小结表。*
+*最后更新：2026-03-21，新增 R-A6 Massive 期权研究数据（§3.5）、R-OD1 扩展为 Massive 主力源（§2.7）、R-A3 数据源分层（§3.4）。*

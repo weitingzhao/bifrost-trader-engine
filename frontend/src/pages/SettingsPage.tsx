@@ -26,12 +26,15 @@ import {
   SETTINGS_SECTIONS,
   STATUS_SECTIONS,
   CONFIG_SECTIONS,
+  FEED_SUBSECTIONS,
 } from './settings/settingsConstants'
 import { SettingsSectionIcon } from './settings/SettingsSectionIcon'
 import { HeartbeatSection } from './settings/HeartbeatSection'
 import { IbConnectionSection } from './settings/IbConnectionSection'
 import { HolidaysSection } from './settings/HolidaysSection'
 import { StatusPage } from './StatusPage'
+import { DataPage } from './DataPage'
+import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -159,6 +162,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
     const h = hash ? hash.slice(1) : ''
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
+    if (h && h.startsWith('feed-')) return 'settings-feed'
     return h || SETTINGS_SECTIONS[0].id
   }
   const [activeSectionId, setActiveSectionId] = useState<string>(() => {
@@ -168,6 +172,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
   const [ibConnectionExpanded, setIbConnectionExpanded] = useState(true)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
+  const activeFeedSubId = activeSectionId === 'settings-feed' && FEED_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   useEffect(() => {
     const onHashChange = () => setActiveSectionId(hashToSectionId(window.location.hash))
     window.addEventListener('hashchange', onHashChange)
@@ -236,6 +241,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
   }
 
   const isSystemSection = activeSectionId === 'settings-system'
+  const isFeedSection = activeSectionId === 'settings-feed'
   const systemHighlightSection =
     currentHash === 'settings-system-daemon'
       ? 'daemon'
@@ -248,7 +254,7 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
   return (
     <div className="settings-page">
       <nav className="settings-sidebar" aria-label="Settings sections">
-        <div className="settings-sidebar-group-block" role="group" aria-label="Status">
+        <div className="settings-sidebar-group-block" role="group" aria-label="Status and feed">
           <div className="settings-sidebar-group-label">Status</div>
           {STATUS_SECTIONS.map(({ id, label, icon }) => (
             <a
@@ -258,6 +264,18 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
             >
               <SettingsSectionIcon name={icon} />
               {label}
+            </a>
+          ))}
+          <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
+          <div className="settings-sidebar-group-label">Feed</div>
+          {FEED_SUBSECTIONS.map((sub) => (
+            <a
+              key={sub.id}
+              href={`#${sub.id}`}
+              className={`settings-sidebar-link ${activeFeedSubId === sub.id ? 'active' : ''}`}
+            >
+              <SettingsSectionIcon name={sub.icon} />
+              {sub.label}
             </a>
           ))}
         </div>
@@ -326,6 +344,24 @@ export function SettingsPage({ status, loadStatus, operations = [], onNavigateTo
             consoleCardTitle="Console"
             highlightSection={systemHighlightSection}
           />
+        ) : isFeedSection ? (
+          currentHash === 'feed-massive-option' ? (
+            <FeedMassiveOptionPage
+              status={status}
+              onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
+              onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
+              breadcrumbLabel="Massive Option"
+            />
+          ) : (
+            <DataPage
+              status={status}
+              embeddedInSettings
+              onBreadcrumbParent={() => { window.location.hash = '#settings-system' }}
+              breadcrumbParentLabel="Settings"
+              onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
+              breadcrumbLabel="IB Stock"
+            />
+          )
         ) : (
         <div className="settings-page-card">
           <div className="settings-page-header">

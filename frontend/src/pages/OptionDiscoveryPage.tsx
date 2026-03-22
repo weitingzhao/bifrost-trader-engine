@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { StatusResponse, WatchlistItem } from '../types'
-import { fetchWatchlist, fetchOptionExpirations, fetchOptionSnapshot, fetchBarsBenchmark, postWatchlist } from '../api'
+import {
+  fetchWatchlist,
+  fetchOptionExpirations,
+  fetchOptionSnapshot,
+  fetchBarsBenchmark,
+  postWatchlist,
+  fetchMassiveStatus,
+  postMassiveSync,
+  fetchOptionSnapshotsPg,
+  pollMassiveJobUntilDone,
+} from '../api'
+import type { MassiveStatusResponse } from '../api'
 import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
@@ -61,6 +72,11 @@ function useWatchlistStkSymbols(): string[] {
   }, [items])
 }
 
+function fmtOptNum(v: number | null | undefined, digits = 4): string {
+  if (v == null || !Number.isFinite(v)) return '—'
+  return v.toFixed(digits)
+}
+
 /** Parse expiration string (YYYYMMDD or YYYY-MM-DD) and return days from today. Returns "x day" / "x days". */
 function expirationDaysFromToday(expiration: string): string {
   const s = (expiration || '').trim()
@@ -99,6 +115,8 @@ export function OptionDiscoveryPage({
   breadcrumbLabel = 'Option Discovery',
 }: OptionDiscoveryPageProps) {
   const stkSymbols = useWatchlistStkSymbols()
+  const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
+  const [quoteSource, setQuoteSource] = useState<'ib' | 'massive'>('ib')
   const [selectedSymbol, setSelectedSymbol] = useState('')
   const [expirations, setExpirations] = useState<string[]>([])
   const [strikes, setStrikes] = useState<number[]>([])
@@ -117,6 +135,23 @@ export function OptionDiscoveryPage({
   const [multiSelectStrikes, setMultiSelectStrikes] = useState<number[]>([])
   const [symbolDailyPrices, setSymbolDailyPrices] = useState<Record<string, number | null>>({})
   const otmCallWrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchMassiveStatus()
+      .then(s => {
+        if (!cancelled) {
+          setMassiveStatus(s)
+          if (s.configured) setQuoteSource('massive')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMassiveStatus(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const stdDevValue = useMemo(() => {
     if (stdDevOption === 'custom') {
@@ -169,7 +204,7 @@ export function OptionDiscoveryPage({
     return () => { cancelled = true }
   }, [stkSymbols.join(',')])
 
-  const loadExpirations = useCallback(async (symbol: string) => {
+  const loadExpirations = useCallback(async (symbol: string, source: 'ib' | 'massive' = quoteSource) => {
     const s = (symbol || '').trim()
     if (!s) {
       setExpirations([])
@@ -182,7 +217,9 @@ export function OptionDiscoveryPage({
     setExpirationsLoading(true)
     setExpirationsError(null)
     try {
-      const res = await fetchOptionExpirations(s)
+      const provider: 'auto' | 'ib' | 'massive' =
+        source === 'massive' && massiveStatus?.configured ? 'massive' : source === 'ib' ? 'ib' : 'auto'
+      const res = await fetchOptionExpirations(s, provider)
       setExpirations(res.expirations || [])
       setStrikes(res.strikes ?? [])
       setStockDayLastPrice(res.last_price ?? null)
@@ -199,7 +236,9 @@ export function OptionDiscoveryPage({
     } finally {
       setExpirationsLoading(false)
     }
-  }, [])
+  }, [quoteSource, massiveStatus?.configured])
+
+  const prevQuoteSourceRef = useRef(quoteSource)
 
   useEffect(() => {
     setMultiSelectStrikes([])
@@ -217,6 +256,13 @@ export function OptionDiscoveryPage({
     }
   }, [selectedSymbol, loadExpirations])
 
+  useEffect(() => {
+    if (prevQuoteSourceRef.current === quoteSource) return
+    prevQuoteSourceRef.current = quoteSource
+    const sym = selectedSymbol.trim()
+    if (sym) loadExpirations(sym, quoteSource)
+  }, [quoteSource, selectedSymbol, loadExpirations])
+
   const loadQuotes = useCallback(async () => {
     const sym = selectedSymbol.trim()
     const exp = selectedExpiration.trim()
@@ -226,10 +272,33 @@ export function OptionDiscoveryPage({
     setSnapshotError(null)
     setAddWatchlistFeedback(null)
     try {
-      const res = await fetchOptionSnapshot(sym, exp, strikesToSend)
-      setSnapshotRows(res.rows ?? [])
-      setUnderlyingPrice(res.underlying_price ?? null)
-      setSnapshotError(res.error ?? null)
+      if (quoteSource === 'ib') {
+        const res = await fetchOptionSnapshot(sym, exp, strikesToSend)
+        setSnapshotRows(res.rows ?? [])
+        setUnderlyingPrice(res.underlying_price ?? null)
+        setSnapshotError(res.error ?? null)
+        return
+      }
+      const sync = await postMassiveSync('snapshot', { underlying: sym })
+      if (!sync.ok || !sync.job_id) {
+        setSnapshotError(sync.error ?? sync.message ?? 'Massive sync failed')
+        setSnapshotRows([])
+        setUnderlyingPrice(null)
+        return
+      }
+      const polled = await pollMassiveJobUntilDone(sync.job_id, { maxAttempts: 120, intervalMs: 1000 })
+      if (!polled.ok) {
+        setSnapshotError(polled.error ?? 'Massive job failed')
+        setSnapshotRows([])
+        setUnderlyingPrice(null)
+        return
+      }
+      const strikesCsv =
+        strikesToSend && strikesToSend.length > 0 ? strikesToSend.map(x => String(x)).join(',') : undefined
+      const sn = await fetchOptionSnapshotsPg(sym, exp, strikesCsv, 'massive')
+      setSnapshotRows(sn.rows ?? [])
+      setUnderlyingPrice(sn.underlying_price ?? null)
+      setSnapshotError(sn.error ?? null)
     } catch (e) {
       setSnapshotError(e instanceof Error ? e.message : 'Failed to load quotes')
       setSnapshotRows([])
@@ -237,7 +306,7 @@ export function OptionDiscoveryPage({
     } finally {
       setSnapshotLoading(false)
     }
-  }, [selectedSymbol, selectedExpiration, effectiveStrikes])
+  }, [selectedSymbol, selectedExpiration, effectiveStrikes, quoteSource])
 
   const handleAddToWatchlist = useCallback(
     async (row: OptionSnapshotRow) => {
@@ -283,7 +352,16 @@ export function OptionDiscoveryPage({
         ) : (
           <>{breadcrumbLabel}{' '}</>
         )}
-        <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration; expirations and strikes from IB. Next: option quotes and IV by expiration." />
+        <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration. Expirations use Massive when configured (auto), else IB. Quotes: IB live or Massive delayed snapshot sync + PostgreSQL." />
+        {massiveStatus?.configured && (
+          <span
+            className="section-hint"
+            style={{ marginLeft: '0.5rem', fontWeight: 600 }}
+            title={massiveStatus.delay_notice}
+          >
+            Massive · 15 min delayed
+          </span>
+        )}
       </h2>
 
       <section className="replay-section option-discovery-conditions-section" aria-label="Option chain selection conditions">
@@ -616,8 +694,28 @@ export function OptionDiscoveryPage({
       <section className="replay-section" aria-labelledby="option-discovery-table-head">
         <h3 id="option-discovery-table-head">
           By expiration – Option quotes
-          <InfoTooltip text="Bid/ask may be empty outside regular trading hours (RTH); TWS may show cached or last price. Data is live from IB API." />
+          <InfoTooltip text="IB: live quotes from TWS. Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
         </h3>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+            <span className="section-hint">Quote source</span>
+            <select
+              value={quoteSource}
+              onChange={e => setQuoteSource(e.target.value as 'ib' | 'massive')}
+              aria-label="Quote source"
+            >
+              <option value="ib">IB (live)</option>
+              <option value="massive" disabled={!massiveStatus?.configured}>
+                Massive (delayed)
+              </option>
+            </select>
+          </label>
+          {quoteSource === 'massive' && massiveStatus && !massiveStatus.trades_enabled && (
+            <span className="section-hint" style={{ maxWidth: '42rem' }}>
+              Tape (last trades) is not available on this tier. Enable trades in Massive config for Developer.
+            </span>
+          )}
+        </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', marginBottom: '1rem' }}>
           <button
             type="button"
@@ -656,6 +754,16 @@ export function OptionDiscoveryPage({
                   <th>Ask</th>
                   <th>Last</th>
                   <th>Mid</th>
+                  {quoteSource === 'massive' && (
+                    <>
+                      <th>IV</th>
+                      <th>Δ</th>
+                      <th>Γ</th>
+                      <th>Θ</th>
+                      <th>ν</th>
+                      <th>OI</th>
+                    </>
+                  )}
                   <th aria-label="Add to Watchlist" />
                 </tr>
               </thead>
@@ -668,6 +776,16 @@ export function OptionDiscoveryPage({
                     <td>{row.ask != null ? fmtUsd(row.ask) : '—'}</td>
                     <td>{row.last != null ? fmtUsd(row.last) : '—'}</td>
                     <td>{row.mid != null ? fmtUsd(row.mid) : '—'}</td>
+                    {quoteSource === 'massive' && (
+                      <>
+                        <td>{fmtOptNum(row.iv, 4)}</td>
+                        <td>{fmtOptNum(row.delta, 4)}</td>
+                        <td>{fmtOptNum(row.gamma, 4)}</td>
+                        <td>{fmtOptNum(row.theta, 4)}</td>
+                        <td>{fmtOptNum(row.vega, 4)}</td>
+                        <td>{row.open_interest != null ? String(row.open_interest) : '—'}</td>
+                      </>
+                    )}
                     <td>
                       <button
                         type="button"

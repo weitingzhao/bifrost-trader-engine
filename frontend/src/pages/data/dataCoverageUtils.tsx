@@ -12,11 +12,67 @@ export function coverageCell(p: { count: number; min_ts: number | null; max_ts: 
   return range ? `${p.count} bars (${range})` : `${p.count} bars`
 }
 
-export function coverageRange(p: { count: number; min_ts: number | null; max_ts: number | null }): string {
+const COVERAGE_DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}
+
+function toCoverageDate(ts: number): Date {
+  const sec = Number(ts)
+  return new Date(Number.isFinite(sec) ? (sec > 1e12 ? sec : sec * 1000) : NaN)
+}
+
+/** One date line; when `highlightDay`, only the calendar day digits are emphasized (latest end in range). */
+function CoverageDateLine({ ts, highlightDay }: { ts: number; highlightDay: boolean }) {
+  const d = toCoverageDate(ts)
+  if (Number.isNaN(d.getTime())) {
+    return <span className="data-coverage-range-line">—</span>
+  }
+  if (!highlightDay) {
+    return <span className="data-coverage-range-line">{fmtDate(ts)}</span>
+  }
+  const parts = new Intl.DateTimeFormat(undefined, COVERAGE_DATE_FMT).formatToParts(d)
+  return (
+    <span className="data-coverage-range-line">
+      {parts.map((part, i) =>
+        part.type === 'day' ? (
+          <span key={i} className="data-coverage-range-day-highlight">
+            {part.value}
+          </span>
+        ) : (
+          <span key={i}>{part.value}</span>
+        ),
+      )}
+    </span>
+  )
+}
+
+/** Range column: two lines (start / end) to keep column narrow vs one long "a ~ b" row. */
+export function coverageRange(p: { count: number; min_ts: number | null; max_ts: number | null }): ReactNode {
   if (p.count === 0 || (p.min_ts == null && p.max_ts == null)) return '—'
-  if (p.min_ts != null && p.max_ts != null) return `${fmtDate(p.min_ts)} ~ ${fmtDate(p.max_ts)}`
-  if (p.min_ts != null) return fmtDate(p.min_ts) + ' ~ —'
-  return '— ~ ' + fmtDate(p.max_ts!)
+  if (p.min_ts != null && p.max_ts != null) {
+    return (
+      <span className="data-coverage-range-stack">
+        <CoverageDateLine ts={p.min_ts} highlightDay={false} />
+        <CoverageDateLine ts={p.max_ts} highlightDay />
+      </span>
+    )
+  }
+  if (p.min_ts != null) {
+    return (
+      <span className="data-coverage-range-stack">
+        <CoverageDateLine ts={p.min_ts} highlightDay />
+        <span className="data-coverage-range-line">—</span>
+      </span>
+    )
+  }
+  return (
+    <span className="data-coverage-range-stack">
+      <span className="data-coverage-range-line">—</span>
+      <CoverageDateLine ts={p.max_ts!} highlightDay />
+    </span>
+  )
 }
 
 /** Bars column: show count only, or count + (end) when needPull and trading day. */

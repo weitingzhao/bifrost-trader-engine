@@ -385,8 +385,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 low double precision,
                 close double precision,
                 volume double precision,
+                source text NOT NULL DEFAULT 'ib',
                 created_at timestamptz DEFAULT now(),
-                UNIQUE(symbol, expiry, strike, option_right, bar_time)
+                UNIQUE(symbol, expiry, strike, option_right, bar_time, source)
             )
         """
         )
@@ -409,8 +410,9 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 low double precision,
                 close double precision,
                 volume double precision,
+                source text NOT NULL DEFAULT 'ib',
                 created_at timestamptz DEFAULT now(),
-                UNIQUE(symbol, expiry, strike, option_right, period, bar_time)
+                UNIQUE(symbol, expiry, strike, option_right, period, bar_time, source)
             )
         """
         )
@@ -428,6 +430,7 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 expiry text NOT NULL,
                 strike double precision NOT NULL,
                 option_right text NOT NULL,
+                massive_option_ticker text,
                 created_at timestamptz DEFAULT now()
             )
             """
@@ -449,12 +452,93 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 bid double precision,
                 ask double precision,
                 mid double precision,
+                iv double precision,
+                delta double precision,
+                gamma double precision,
+                theta double precision,
+                vega double precision,
+                open_interest integer,
+                underlying_price double precision,
+                source text NOT NULL DEFAULT 'ib',
                 created_at timestamptz DEFAULT now()
             )
             """
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_snapshots_contract_key_ts ON option_snapshots (contract_key, snapshot_ts DESC)"
+        )
+        _log("migrate option_* tables for Massive (R-A6): source column, snapshots greeks")
+        cur.execute(
+            """
+            DO $migrate_opt$
+            BEGIN
+              IF to_regclass('public.option_day') IS NOT NULL THEN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_day' AND column_name = 'source'
+                ) THEN
+                  ALTER TABLE option_day ADD COLUMN source text NOT NULL DEFAULT 'ib';
+                END IF;
+                IF EXISTS (
+                  SELECT 1 FROM pg_constraint WHERE conname = 'option_day_symbol_expiry_strike_option_right_bar_time_key'
+                ) THEN
+                  ALTER TABLE option_day DROP CONSTRAINT option_day_symbol_expiry_strike_option_right_bar_time_key;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint WHERE conname = 'option_day_bar_uidx'
+                ) THEN
+                  ALTER TABLE option_day ADD CONSTRAINT option_day_bar_uidx
+                    UNIQUE (symbol, expiry, strike, option_right, bar_time, source);
+                END IF;
+              END IF;
+
+              IF to_regclass('public.option_min') IS NOT NULL THEN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_min' AND column_name = 'source'
+                ) THEN
+                  ALTER TABLE option_min ADD COLUMN source text NOT NULL DEFAULT 'ib';
+                END IF;
+                IF EXISTS (
+                  SELECT 1 FROM pg_constraint WHERE conname = 'option_min_symbol_expiry_strike_option_right_period_bar_time_key'
+                ) THEN
+                  ALTER TABLE option_min DROP CONSTRAINT option_min_symbol_expiry_strike_option_right_period_bar_time_key;
+                END IF;
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint WHERE conname = 'option_min_bar_uidx'
+                ) THEN
+                  ALTER TABLE option_min ADD CONSTRAINT option_min_bar_uidx
+                    UNIQUE (symbol, expiry, strike, option_right, period, bar_time, source);
+                END IF;
+              END IF;
+
+              IF to_regclass('public.option_contracts') IS NOT NULL THEN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_contracts' AND column_name = 'massive_option_ticker'
+                ) THEN
+                  ALTER TABLE option_contracts ADD COLUMN massive_option_ticker text;
+                END IF;
+              END IF;
+
+              IF to_regclass('public.option_snapshots') IS NOT NULL THEN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_snapshots' AND column_name = 'iv'
+                ) THEN
+                  ALTER TABLE option_snapshots ADD COLUMN iv double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN delta double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN gamma double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN theta double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN vega double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN open_interest integer;
+                  ALTER TABLE option_snapshots ADD COLUMN underlying_price double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN source text NOT NULL DEFAULT 'ib';
+                END IF;
+              END IF;
+            END
+            $migrate_opt$;
+            """
         )
         conn.commit()
         _log("preference_position_categories, preference_position_category_tags")
@@ -948,6 +1032,102 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS job_bars_backfill_status_created ON job_bars_backfill (status, created_at)"
+        )
+
+        _log("job_massive_backfill, option_open_interest_daily, option_trades, massive_corporate_action (R-A6)")
+        _log_table("job_massive_backfill", "Massive async sync job queue")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS job_massive_backfill (
+                job_massive_backfill_id bigserial PRIMARY KEY,
+                kind text NOT NULL,
+                payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+                status text NOT NULL DEFAULT 'pending',
+                result jsonb,
+                celery_task_id text,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now()
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS job_massive_backfill_status_created ON job_massive_backfill (status, created_at)"
+        )
+        _log_table("option_open_interest_daily", "Option daily open interest (Massive)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS option_open_interest_daily (
+                option_open_interest_daily_id bigserial PRIMARY KEY,
+                contract_key text NOT NULL,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                strike double precision NOT NULL,
+                option_right text NOT NULL,
+                trade_date date NOT NULL,
+                open_interest integer NOT NULL,
+                source text NOT NULL DEFAULT 'massive',
+                created_at timestamptz DEFAULT now(),
+                UNIQUE (contract_key, trade_date, source)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_oi_daily_contract_date ON option_open_interest_daily (contract_key, trade_date DESC)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_oi_daily_symbol_date ON option_open_interest_daily (symbol, trade_date DESC)"
+        )
+        _log_table("option_trades", "Option trades ticks (Massive Developer tier)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS option_trades (
+                option_trades_id bigserial PRIMARY KEY,
+                contract_key text NOT NULL,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                strike double precision NOT NULL,
+                option_right text NOT NULL,
+                trade_ts timestamptz NOT NULL,
+                price double precision NOT NULL,
+                size integer NOT NULL,
+                exchange text,
+                conditions text,
+                massive_trade_id text NOT NULL,
+                source text NOT NULL DEFAULT 'massive',
+                created_at timestamptz DEFAULT now(),
+                UNIQUE (massive_trade_id)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_trades_contract_ts ON option_trades (contract_key, trade_ts DESC)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_trades_symbol_ts ON option_trades (symbol, trade_ts DESC)"
+        )
+        _log_table("massive_corporate_action", "Corporate actions cache (Massive)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS massive_corporate_action (
+                massive_corporate_action_id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                action_type text NOT NULL,
+                ex_date date,
+                record_date date,
+                payment_date date,
+                ratio_from double precision,
+                ratio_to double precision,
+                amount double precision,
+                currency text,
+                description text,
+                source text NOT NULL DEFAULT 'massive',
+                created_at timestamptz DEFAULT now(),
+                UNIQUE (symbol, action_type, ex_date, source)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS massive_corp_action_symbol_ex ON massive_corporate_action (symbol, ex_date DESC)"
         )
 
         # ── Executions: raw tables + account_executions view ──

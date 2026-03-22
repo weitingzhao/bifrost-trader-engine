@@ -79,7 +79,8 @@ export function DataBarsPreviewPanel({
       {bars.length === 0 ? (
         <div className="replay-placeholder">No bars. Enter symbol, click Load, or run Backfill for a symbol above.</div>
       ) : (
-        <table className="table-operations">
+        <div className="data-table-scroll-wrap">
+          <table className="table-operations">
           <thead>
             <tr>
               <th>
@@ -112,7 +113,8 @@ export function DataBarsPreviewPanel({
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
     </section>
   )

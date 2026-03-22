@@ -106,7 +106,8 @@ export function DataJobsPanel({
       {sortedBarsJobs.length === 0 && !barsJobsLoading ? (
         <div className="replay-placeholder">No pull jobs yet. Run Pull for a symbol above.</div>
       ) : (
-        <table className="table-operations">
+        <div className="data-table-scroll-wrap">
+          <table className="table-operations">
           <thead>
             <tr>
               <th>
@@ -190,7 +191,8 @@ export function DataJobsPanel({
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       )}
     </section>
   )

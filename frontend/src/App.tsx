@@ -15,7 +15,6 @@ import { postMonitorStop, postCeleryStop } from './api/monitor'
 import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
-import { DataPage } from './pages/DataPage'
 import { PositionsPage } from './pages/PositionsPage'
 import { TradeHistoryPage } from './pages/TradeHistoryPage'
 import type { PortfolioView } from './pages/portfolio/types'
@@ -183,7 +182,7 @@ export default function App() {
   const [shutdownAllMsg, setShutdownAllMsg] = useState({ text: '', isErr: false })
   const [quickCtrlMsg, setQuickCtrlMsg] = useState({ text: '', isErr: false })
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
-  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'data' | 'backtest' | 'options'>('risk')
+  const [researchView, setResearchView] = useState<'risk' | 'screener' | 'backtest' | 'options'>('risk')
   const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'>('structure')
   /** Instance id from URL hash #/strategies/instances/:id; drives Strategy Instances detail view and back/forward. */
   const [urlStrategyInstanceId, setUrlStrategyInstanceId] = useState<number | null>(null)
@@ -211,7 +210,8 @@ export default function App() {
   const hashToSettingsViewSection = useCallback((hash: string): 'system' | 'config' => {
     const h = (hash.startsWith('#') ? hash.slice(1) : hash).trim()
     if (!h) return 'system'
-    return h.startsWith('settings-system') ? 'system' : 'config'
+    if (h.startsWith('settings-system') || h.startsWith('feed-')) return 'system'
+    return 'config'
   }, [])
   const [settingsViewSection, setSettingsViewSection] = useState<'system' | 'config' | null>(null)
 
@@ -620,7 +620,7 @@ export default function App() {
   const researchSubmenuGroups: {
     id: string
     label: string
-    items: { id: 'risk' | 'screener' | 'data' | 'backtest' | 'options'; label: string }[]
+    items: { id: 'risk' | 'screener' | 'backtest' | 'options'; label: string }[]
   }[] = [
     {
       id: 'discovery',
@@ -635,7 +635,6 @@ export default function App() {
       label: 'Risk & tools',
       items: [
         { id: 'risk', label: 'Risk Model' },
-        { id: 'data', label: 'Data' },
         { id: 'backtest', label: 'Backtest' },
       ],
     },
@@ -1275,14 +1274,6 @@ export default function App() {
           status={status}
           onGoToScreener={() => setResearchView('screener')}
           breadcrumbLabel="Screener"
-        />
-      )}
-
-      {activeTab === 'research' && researchView === 'data' && (
-        <DataPage
-          status={status}
-          onGoToScreener={() => setResearchView('screener')}
-          breadcrumbLabel="Data"
         />
       )}
 

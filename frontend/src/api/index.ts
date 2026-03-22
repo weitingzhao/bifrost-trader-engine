@@ -48,8 +48,18 @@ export {
   deleteWatchlist,
 } from './watchlist'
 export type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from './watchlist'
-export { fetchOptionExpirations, fetchOptionSnapshot } from './research'
-export type { OptionSnapshotRow } from './research'
+export {
+  fetchOptionExpirations,
+  fetchOptionSnapshot,
+  fetchMassiveStatus,
+  postMassiveSync,
+  fetchMassiveJobsList,
+  subscribeMassiveJobEvents,
+  fetchMassiveJob,
+  fetchOptionSnapshotsPg,
+  pollMassiveJobUntilDone,
+} from './research'
+export type { OptionSnapshotRow, MassiveStatusResponse, MassiveJobApiRow } from './research'
 export {
   postSetHeartbeatInterval,
   postIbConfig,

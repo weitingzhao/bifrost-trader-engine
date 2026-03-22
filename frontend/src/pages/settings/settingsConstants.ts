@@ -21,6 +21,12 @@ export const CONFIG_SECTIONS = [
   { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' as const },
 ] as const
 
+/** Feed data-source pages nested under Status group (collapsible). */
+export const FEED_SUBSECTIONS = [
+  { id: 'feed-ib-stock', label: 'IB Stock', icon: 'feed-ib' as const },
+  { id: 'feed-massive-option', label: 'Massive Option', icon: 'feed-massive' as const },
+] as const
+
 /** All sections in sidebar order (Status first, then Configuration). Used for hash fallback etc. */
 export const SETTINGS_SECTIONS = [...STATUS_SECTIONS, ...CONFIG_SECTIONS] as const
 

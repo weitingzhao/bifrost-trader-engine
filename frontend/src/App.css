@@ -4663,6 +4663,14 @@ button:disabled {
   display: block;
 }
 
+/* Flat split between System Status and Feed (same link style, no nested subs). */
+.settings-sidebar-inline-split {
+  height: 0;
+  margin: var(--space-3) 0 var(--space-2);
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
 .settings-sidebar-link {
   display: flex;
   align-items: center;
@@ -5912,8 +5920,83 @@ th {
   min-width: 0;
 }
 
+/* Horizontal scroll for wide tables (IB Stock in Settings, etc.) */
+.data-table-scroll-wrap {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  margin-left: calc(-1 * var(--space-1));
+  margin-right: calc(-1 * var(--space-1));
+  padding-bottom: var(--space-1);
+}
+
+/* IB Stock (DataPage) under Settings — fit settings-main width */
+.market-data-page--settings-embed {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin-bottom: var(--space-2);
+  padding: var(--space-3) var(--space-3);
+}
+
+.market-data-page--settings-embed .replay-section {
+  min-width: 0;
+}
+
+.market-data-page--settings-embed .data-coverage-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  margin-left: calc(-1 * var(--space-1));
+  margin-right: calc(-1 * var(--space-1));
+}
+
+.market-data-page--settings-embed .replay-toolbar.data-backfill-options {
+  gap: var(--space-2) var(--space-3);
+}
+
+.market-data-page--settings-embed .replay-bar-symbol-row {
+  gap: var(--space-2) var(--space-3);
+}
+
+.market-data-page--settings-embed .data-bars-chart-container {
+  padding: var(--space-2);
+}
+
+.market-data-page--settings-embed .data-jobs-toolbar {
+  gap: var(--space-2);
+}
+
 .data-coverage-table .data-coverage-bars { white-space: nowrap; }
-.data-coverage-table .data-coverage-range { white-space: nowrap; font-size: 0.9em; color: var(--color-text-muted); }
+/* Range: two-line stack (start/end) — narrower than one long "min ~ max" row */
+.data-coverage-table .data-coverage-range {
+  font-size: 0.82em;
+  color: var(--color-text-muted);
+  vertical-align: top;
+  line-height: 1.2;
+  max-width: 6rem;
+}
+
+.data-coverage-range-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+}
+
+.data-coverage-range-line {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Latest (end) date — emphasize calendar day */
+.data-coverage-range-day-highlight {
+  font-weight: 700;
+  color: var(--color-accent);
+}
 .data-coverage-bars-btn {
   background: none;
   border: none;
@@ -11555,6 +11638,358 @@ th:has(> .coverage-pool-th-held-amt) {
 }
 .replay-last-strike-pct.pnl-negative {
   color: var(--color-danger);
+}
+
+/* ---------- Feed → Massive Option (data pipeline UI) ---------- */
+.feed-massive-option-page {
+  --feed-massive-radius: 10px;
+  --feed-massive-card-bg: var(--color-surface-elevated);
+  max-width: 72rem;
+}
+
+.feed-massive-option-page .feed-massive-title-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.feed-massive-option-page .feed-massive-title-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.feed-massive-option-page .feed-massive-delay-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+[data-theme="light"] .feed-massive-option-page .feed-massive-delay-pill {
+  color: #a16207;
+}
+
+.feed-massive-status-strip {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  border-radius: var(--feed-massive-radius);
+  border: 1px solid var(--color-border);
+  background: linear-gradient(
+    135deg,
+    var(--color-surface-elevated) 0%,
+    var(--color-bg) 100%
+  );
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+[data-theme="light"] .feed-massive-status-strip {
+  background: linear-gradient(135deg, #ffffff 0%, var(--color-surface-elevated) 100%);
+  box-shadow: 0 1px 2px var(--color-dashboard-shadow);
+}
+
+.feed-massive-status-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.feed-massive-status-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.feed-massive-status-key {
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+.feed-massive-status-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--color-text-main);
+}
+
+.feed-massive-status-value--ok {
+  color: var(--color-lamp-green);
+}
+
+.feed-massive-status-value--bad {
+  color: var(--color-lamp-red);
+}
+
+.feed-massive-status-note {
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+.feed-massive-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+}
+
+@media (min-width: 960px) {
+  .feed-massive-layout {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.feed-massive-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.feed-massive-card {
+  padding: var(--space-4);
+  border-radius: var(--feed-massive-radius);
+  border: 1px solid var(--color-border);
+  background: var(--feed-massive-card-bg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.feed-massive-card:hover {
+  border-color: var(--color-border-strong);
+}
+
+.feed-massive-card--muted {
+  opacity: 0.92;
+  background: var(--color-bg);
+}
+
+.feed-massive-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.feed-massive-card-head h3 {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text-main);
+}
+
+.feed-massive-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 8px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.feed-massive-card-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.feed-massive-card-lead {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  max-width: 42rem;
+}
+
+.feed-massive-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.feed-massive-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.feed-massive-field .form-label {
+  font-size: var(--text-tiny);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+}
+
+.feed-massive-field .form-input {
+  min-width: 6rem;
+}
+
+.feed-massive-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.feed-massive-form-grid--wide {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 520px) {
+  .feed-massive-form-grid--wide {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.feed-massive-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.feed-massive-table-wrap {
+  margin-top: var(--space-3);
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.feed-massive-table-wrap .data-table {
+  margin: 0;
+  font-size: var(--text-caption);
+}
+
+.feed-massive-table-wrap .data-table th {
+  font-size: var(--text-tiny);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-dim);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.feed-massive-table-wrap .data-table td {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+}
+
+.feed-massive-table-wrap .data-table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+[data-theme="light"] .feed-massive-table-wrap .data-table tbody tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.feed-massive-job-id {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--color-link);
+}
+
+.feed-massive-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.feed-massive-badge--done {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.feed-massive-badge--fail {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.feed-massive-badge--pending {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  border-color: rgba(234, 179, 8, 0.35);
+}
+
+.feed-massive-badge--run {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: rgba(163, 230, 53, 0.25);
+}
+
+.feed-massive-empty {
+  padding: var(--space-5);
+  text-align: center;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.feed-massive-verify-meta {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 6px;
+  background: var(--color-dashboard-tile);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.feed-massive-verify-meta strong {
+  font-family: var(--font-mono);
+  color: var(--color-text-main);
+}
+
+.feed-massive-checklist {
+  margin-bottom: var(--space-5);
+}
+
+.feed-massive-checklist .data-table td {
+  vertical-align: top;
+}
+
+.feed-massive-checklist-desc {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.feed-massive-checklist-verify {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  max-width: 22rem;
 }
 
 /* Transfer & Pay uses card process-section + title row + replay-section (see TransferPayPage) */

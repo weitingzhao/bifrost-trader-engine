@@ -252,6 +252,29 @@ class StatusReader:
         self._end_read_txn()
         return result
 
+    def get_option_bars(
+        self,
+        symbol: str,
+        expiry: str,
+        strike: float,
+        option_right: str,
+        period: str = "1 min",
+        source: str = "massive",
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        from servers.reader import massive_jobs as massive_jobs_module
+
+        return massive_jobs_module.get_option_bars(
+            self._config,
+            symbol,
+            expiry,
+            strike,
+            option_right,
+            period=period,
+            source=source,
+            limit=limit,
+        )
+
     def get_bars_coverage(self, symbols: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         if not self._connect():
             return []

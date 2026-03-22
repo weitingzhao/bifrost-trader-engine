@@ -113,6 +113,96 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **Redis 地址**：若 Management 主机需要读取另一台（如 192.168.10.70）上 Daemon 写入的行情，将 `redis.host` 指向该服务器 IP。
 - **可选**：`server.skip_monitor_ib: true`（config 中），启用后 `run_server.py` **不**校验 YAML 中的 `ib` 段，且 `startup_event` 不初始化 `AccountIbClient` / `MarketIbClient`，避免 Management 机器连接 IB。正常运行 Status Server（与 Engine 同栈或需监控 IB）时应提供完整 `ib:`，勿依赖此项。
 
+### 2.10 外部研究数据源：Massive / Polygon（R-A6）
+
+**定位**：**Massive（Polygon）** 为期权研究与发现（R-OD1、R-A6）的**主力数据源**，通过 HTTPS REST 与 WebSocket 获取延迟期权数据。**与 IB/TWS 完全独立**——不占用 `client_id`，不经过 Mac Mini，不受 IB Pacing 限制。
+
+**配置**（`config.yaml` 或环境变量）：
+- `massive.api_key`（或 `MASSIVE_API_KEY`）：API 密钥，不入库、不暴露给前端。
+- `massive.tier`：`starter` | `developer`（默认 `starter`），驱动 feature flag。
+- `massive.features.trades_enabled`：布尔，`developer` 时可设 true，启用 Trades 写入与 API。
+- 可选 `massive.rest_base`、`massive.ws_url`（默认取官方 endpoint）。
+
+**进程划分**：
+- **REST 入队类任务**（历史聚合回填、日终 OI 拉取、批量快照等）：与现有 `job_bars_backfill` 模式一致，新增 **`job_massive_backfill`** 任务表，由 **Celery Worker**（独立 queue `massive`）串行执行拉取与落库。**与 IB bars queue 分离**——两个 Worker 可独立扩缩容，互不影响限速策略。
+- **WebSocket 长连接**（延迟 quote/snapshot 流）：**不宜**放在短生命周期 Celery task 内。采用 **独立 asyncio 长驻进程**（如 `scripts/run_massive_ws.py`）或 Status Server 内**受控后台任务**，消费 Massive WS → 写 Redis（最新报价 ring）+ 可选 PG 抽样 → 经现有 SSE 或应用层 WebSocket 推前端。**Starter** 仅开延迟 quote/snapshot 通道；**Developer** 增开 trades 通道（与 REST 同 feature flag）。
+- **前端不直连 Massive**（密钥保护与 CORS），所有数据通过后端落库或代理。
+
+**延迟边界**：Massive Starter 数据**延迟 15 分钟**。全链路标注 **15m delay**，与守护进程实时 IB 行情严格区分。**禁止**将 Massive 数据作为 ExecutionGuard 或自动下单决策的输入——仅 IB 实盘行情可进入交易决策链路。
+
+**限流与幂等**：即使 Massive 标称 unlimited API 调用，Worker 在请求间留退避间隔（429/5xx 指数退避）；写入按供应商唯一 ID（`massive_trade_id`、bar 唯一键）做 UPSERT，保证幂等。
+
+```
+┌──────────────────────────────────────────────────┐
+│  Massive（Polygon）REST / WebSocket               │
+│  (HTTPS 出网，不经 Mac Mini / TWS)                │
+└────────────┬──────────────────────┬───────────────┘
+             │ REST                 │ WebSocket
+             ▼                     ▼
+┌────────────────────┐  ┌──────────────────────────┐
+│  Celery massive    │  │  WS Ingest 进程           │
+│  queue (Worker)    │  │  (asyncio 长驻 / Server)  │
+│  历史回填/OI/快照  │  │  延迟 quote/trades → Redis │
+└──────────┬─────────┘  └──────────┬───────────────┘
+           │ PG write              │ Redis + PG
+           ▼                      ▼
+┌──────────────────────────────────────────────────┐
+│  PostgreSQL (option_day/min/OI/snapshots/trades) │
+│  Redis (最新报价 ring, 短期缓存)                  │
+└──────────────────────────────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────┐
+│  Status Server (FastAPI)                          │
+│  GET /research/... → 读 PG                        │
+│  SSE / WS 推前端 (从 Redis 转发)                   │
+└──────────────────────────────────────────────────┘
+```
+
+#### 2.10.1 REST API 行为约定
+
+| 路径 | 说明 | Starter | Developer |
+|------|------|---------|-----------|
+| `GET /research/massive/status` | 是否配置 key、tier、延迟说明；不返回密钥。 | 可用 | 可用 |
+| `GET /research/option-expirations?symbol=...&provider=massive\|ib\|auto` | 链与到期；默认 `auto`（Massive 优先，不可用时退 IB）。 | 可用 | 可用 |
+| `GET /research/option-snapshots?...` | 从 DB 读最新落地快照或 Massive 透传缓存；限制单次合约数。 | 可用 | 可用 |
+| `GET /bars?...&source=massive` | 历史聚合柱线；`source` 参数可选；响应带 `source` 字段。 | 可用 | 可用 |
+| `GET /research/option-oi?...` | 日终 Open Interest 读取。 | 可用 | 可用 |
+| `GET /research/option-trades?...` | 逐笔成交（分页 + 时间范围）。**仅当** `massive.features.trades_enabled=true` 时返回数据，否则 403 或空列表 + 说明 tier。 | 不可用 | 可用 |
+| `POST /research/massive/sync` | 入队异步拉取任务，返回 `job_id`；kind 参数指定任务类型。 | 可用（trades 除外） | 全部 |
+| `GET /research/massive/jobs/{id}` | 查询异步任务状态与结果。 | 可用 | 可用 |
+
+#### 2.10.2 WebSocket 行为约定
+
+- **上游**：Massive 官方 WebSocket（期权 quotes/trades 等，以文档为准）。
+- **本项目**：**Ingest 进程**消费上游 → 写 Redis（最新报价 ring）+ 可选 PG 抽样；**前端**不直连 Massive（密钥保护与 CORS），通过 **SSE（现有模式）** 或 **服务端 WebSocket** 转发摘要字段（contract_key、mid、iv、greeks、ts）。
+- **Starter**：仅开**延迟 quote/snapshot** 通道。
+- **Developer**：增开 **trades** 通道（与 REST 同 feature flag）。
+
+#### 2.10.3 UI 行为约定
+
+- **Research → Option Discovery**：展示数据源 badge **Massive · 15 min delayed**；表格列：strike、bid/ask、last、IV、Greeks（来自落地快照）、OI（日终）。
+- **Trades Tab/列**：无 Developer tier 时**隐藏**「Tape/Trades」Tab 或列，或显示升级提示（英文文案 `Trades data requires Options Developer subscription`）。
+- **Settings / About**（可选）：展示当前 `tier` 与能力列表。
+- **所有 UI 文案使用英文**（遵守 workspace rule）。
+
+#### 2.10.4 Worker 行为约定
+
+- **Celery queue**：`massive`（与 IB `bars` 分离）；`concurrency` 按 Massive 限流设 1–N。
+- **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
+- **重试与幂等**：429/5xx 指数退避；写入按供应商唯一 ID（`massive_trade_id`、bar 唯一键）UPSERT。
+- **启动**：`celery -A servers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
+
+#### 2.10.5 Feature flag 约定
+
+配置项 `massive.tier`（`starter` | `developer`）驱动 `massive.features.trades_enabled` 默认值；也可单独覆盖。
+
+| feature flag | Starter 默认 | Developer 默认 | 影响范围 |
+|--------------|-------------|----------------|----------|
+| `trades_enabled` | `false` | `true` | API：`GET /research/option-trades` 是否返回数据；Worker：trades kind 任务是否入队与执行；UI：Trades Tab 是否展示；WS Ingest：trades 通道是否订阅。 |
+
+升级后仅修改配置并重启相关进程（Server + Worker + 可选 WS Ingest），无需 schema 迁移。
+
 ---
 
 系统由三部分组成，对应上文 §2.2，缺一不可：
@@ -184,7 +274,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | **读 sink** | 优先读 SQLite 当前视图（或文件），GET /status → JSON；可含 **自检结果**（self_check），供控制台展示与告警。 | 阶段 2.1 |
 | **控制** | POST /control/stop（一键停止，R-C1）；POST /control/flatten（一键平敞口，R-C3）；可选 pause/resume（R-C2）；可选触发自检（守护进程写回 sink）。 | 阶段 2.1（stop、flatten）；细粒度 3.2（pause） |
 
-监控前端 Research 子页包含 Screener、Risk Model、Data、Backtest 与 **Option Discovery**（R-OD1）；Option Discovery 第一步为入口页与占位 API，后续接入期权到期/询价数据。
+监控前端 Research 子页包含 Screener、Risk Model、Data、Backtest 与 **Option Discovery**（R-OD1）；Option Discovery 主力数据源为 **Massive**（R-A6），后续接入期权到期/询价/Greeks/OI 等数据；IB 作交叉校验或降级路径。
 
 ### 4.4 非实时市场数据拉取（Worker）
 
@@ -194,13 +284,23 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A servers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
 | **API 入队与查询** | POST /bars/backfill（或等效）入队并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态。 | 阶段 3 |
 
-### 4.5 历史与统计（只读消费 sink 数据）
+### 4.5 Massive 期权研究数据（R-A6）
+
+| 组件 | 说明 | 交付 |
+|------|------|------|
+| **MassiveClient（REST）** | 封装 Massive REST API 调用（链/到期、snapshot、聚合 bars、OI、参考、trades 等）；统一限流、重试、API key 注入。 | 期权研究阶段 |
+| **Massive Celery Worker** | 独立 queue `massive`（与 IB `bars` 分离）；任务类型：历史聚合回填、日 OI、批量快照、Trades 回填（flag 控制）；文件下载可作独立 task 解压导入。concurrency 按 Massive 限流设置。 | 期权研究阶段 |
+| **Massive WS Ingest** | 独立 asyncio 进程或 Server 后台任务；消费 Massive WebSocket 延迟 quote/trades → Redis 最新报价 ring + 可选 PG 抽样；通过 SSE 或应用层 WS 转发前端。 | 可选后置 |
+| **Research 路由扩展** | `GET /research/massive/status`（key/tier/延迟）、`GET /research/option-expirations?provider=...`、`GET /research/option-trades?...`（flag 控制）、`POST /research/massive/sync`（入队返回 job_id）、`GET /research/massive/jobs/{id}`。 | 期权研究阶段 |
+| **Feature flag** | 配置 `massive.tier` / `massive.features.trades_enabled`；API/UI 按 flag 控制 Trades 可见性与写入；升级后仅改配置。 | 期权研究阶段 |
+
+### 4.6 历史与统计（只读消费 sink 数据）
 
 | 组件 | 说明 | 交付 |
 |------|------|------|
 | **历史统计脚本/模块** | 只读历史表，聚合：胜率、盈亏分布、按日/周/月、对冲次数、滑点等；**不跑** FSM/Guard。 | 阶段 3 |
 
-### 4.6 回测（策略 PnL 优化与安全边界验证）
+### 4.7 回测（策略 PnL 优化与安全边界验证）
 
 | 组件 | 说明 | 交付 |
 |------|------|------|
@@ -356,6 +456,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | **Dev/Prod 环境隔离（R-DV1/R-DV2/R-DV3）** | 配置分环境（`postgres.database` 等）、部署文档、运维纪律；TWS 共享 + client_id 隔离 | 与架构修订同步 |
 | 多消费者/远程存储可选 | RedisSink/PostgreSQLSink | 按需 |
 | **非实时市场数据拉取（R-A3 扩展）** | 队列（PG 表或 Redis+RQ）+ **独立 Worker 进程**；API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id}；串行+间隔满足 IB Pacing | 阶段 3 |
+| **Massive 期权研究数据（R-A6）** | MassiveClient REST + Celery Worker（queue `massive`）+ 可选 WS Ingest；Research 路由扩展；feature flag 控制 Trades；不占 IB client_id，不进入 ExecutionGuard | 期权研究阶段 |
 | **实时行情与联动（R-RM*）** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端 | 见 REQUIREMENTS §6 |
 | **未成交订单可观测（R-A5）** | Open Orders 事件订阅（orderStatusEvent、openOrderEvent、可选 execDetailsEvent）；维护 open orders 并写 sink 或推送；GET /open-orders；可选 reqAllOpenOrders | 阶段 3 或「实时行情与联动」步骤 |
 

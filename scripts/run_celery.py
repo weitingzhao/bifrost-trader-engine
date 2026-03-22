@@ -9,6 +9,8 @@ Requires Redis (config.redis or REDIS_* env) and postgres. Usage:
 
 Before starting, kills any existing Celery worker process for this app (same script or celery -A servers.celery_app worker -Q bars)
 so the port/process is not left occupied. Uses --pool=solo (single process) so Stop button and IB connection work reliably.
+Massive/Polygon option sync uses a separate queue (no IB):
+  celery -A servers.celery_app worker -l info -Q massive --pool=solo
 Or run Celery directly:
   celery -A servers.celery_app worker -l info -Q bars --pool=solo
 
@@ -69,4 +71,4 @@ if __name__ == "__main__":
     _kill_existing_celery_workers()
     from servers.celery_app import app
     # Solo pool: single process, no fork; stop-poll started in worker_init. Prefork would need worker_process_init.
-    app.worker_main(argv=["worker", "-l", "info", "-Q", "bars", "--pool=solo"])
+    app.worker_main(argv=["worker", "-l", "info", "-Q", "bars,massive", "--pool=solo"])

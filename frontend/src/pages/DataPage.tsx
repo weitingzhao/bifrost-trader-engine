@@ -12,11 +12,23 @@ import { DataCoveragePanel, DataBarsPreviewPanel, DataJobsPanel } from './data/p
 interface DataPageProps {
   status: StatusResponse | null
   onGoToScreener?: () => void
+  /** When set, first breadcrumb uses this label and click handler (e.g. Feed). Falls back to `onGoToScreener`. */
+  onBreadcrumbParent?: () => void
+  breadcrumbParentLabel?: string
   breadcrumbLabel?: string
+  /** Wider layout tweaks when rendered under Settings main (narrower column vs full app tab). */
+  embeddedInSettings?: boolean
 }
 
 /** Data page: backfill per symbol from coverage, inspect bars. */
-export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: DataPageProps) {
+export function DataPage({
+  status,
+  onGoToScreener,
+  onBreadcrumbParent,
+  breadcrumbParentLabel = 'Research',
+  breadcrumbLabel = 'IB Stock',
+  embeddedInSettings = false,
+}: DataPageProps) {
   const [bars, setBars] = useState<Bar[]>([])
   const [barsLoading, setBarsLoading] = useState(false)
   const [barSymbol, setBarSymbol] = useState('')
@@ -350,16 +362,18 @@ export function DataPage({ status, onGoToScreener, breadcrumbLabel = 'Data' }: D
   )
 
   return (
-    <div className="card process-section market-data-page">
-      {onGoToScreener && (
+    <div
+      className={`card process-section market-data-page${embeddedInSettings ? ' market-data-page--settings-embed' : ''}`}
+    >
+      {(onGoToScreener || onBreadcrumbParent) && (
         <h2 className="page-title-with-tooltip" style={{ marginBottom: 'var(--space-2)' }}>
           <button
             type="button"
             className="page-title-breadcrumb-link"
-            onClick={onGoToScreener}
-            aria-label="Go to Screener"
+            onClick={onBreadcrumbParent ?? onGoToScreener}
+            aria-label={`Go to ${breadcrumbParentLabel}`}
           >
-            Research
+            {breadcrumbParentLabel}
           </button>
           {' / '}
           {breadcrumbLabel}

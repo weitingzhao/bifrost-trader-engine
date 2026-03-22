@@ -141,12 +141,54 @@ def get_bars(
     symbol: Optional[str] = Query(None, description="Symbol, e.g. NVDA"),
     period: Optional[str] = Query("1 D", description="Bar period (e.g. 1 min, 1 D)"),
     limit: int = Query(100, ge=1, le=500),
+    asset: str = Query("stock", description="stock | option"),
+    source: Optional[str] = Query(None, description="For option bars: ib | massive (default ib)"),
+    expiry: Optional[str] = Query(None, description="Option expiry YYYYMMDD (with asset=option)"),
+    strike: Optional[float] = Query(None, description="Option strike (with asset=option)"),
+    option_right: Optional[str] = Query(None, description="C or P (with asset=option)"),
 ) -> Dict[str, Any]:
-    """K-line/OHLC bars for replay (R-A3). Reads from stock_day (1 D) or stock_min."""
+    """K-line/OHLC bars for replay (R-A3). Stock: stock_day / stock_min. Option: option_day / option_min with source."""
     reader = request.app.state.reader
     sym = (symbol or "").strip()
     if not sym:
         return {"bars": [], "message": "Missing symbol parameter."}
+    asset_l = (asset or "stock").strip().lower()
+    if asset_l == "option":
+        if expiry is None or strike is None or option_right is None:
+            return {
+                "bars": [],
+                "message": "Option bars require expiry, strike, and option_right.",
+                "asset": "option",
+            }
+        src = (source or "ib").strip().lower()
+        if src not in ("ib", "massive"):
+            src = "ib"
+        per = (period or "1 min").strip()
+        if not hasattr(reader, "get_option_bars"):
+            return {"bars": [], "message": "Option bars not available.", "asset": "option"}
+        items = reader.get_option_bars(
+            sym,
+            expiry.strip(),
+            float(strike),
+            (option_right or "C").strip(),
+            period=per,
+            source=src,
+            limit=limit,
+        )
+        bars = [
+            {
+                "time": float(r["time"]) if r.get("time") is not None else 0,
+                "open": float(r["open"]) if r.get("open") is not None else 0,
+                "high": float(r["high"]) if r.get("high") is not None else 0,
+                "low": float(r["low"]) if r.get("low") is not None else 0,
+                "close": float(r["close"]) if r.get("close") is not None else 0,
+                "volume": float(r["volume"]) if r.get("volume") is not None else 0,
+                "source": (r.get("source") or src),
+            }
+            for r in items
+        ]
+        return {"bars": bars, "source": src, "asset": "option"}
+
     per = (period or "1 D").strip()
     items = reader.get_bars(symbol=sym, period=per, limit=limit)
     bars = [
@@ -160,7 +202,10 @@ def get_bars(
         }
         for r in items
     ]
-    return {"bars": bars}
+    out: Dict[str, Any] = {"bars": bars, "asset": "stock"}
+    if source:
+        out["source"] = source
+    return out
 
 
 @router.get("/bars/latest")

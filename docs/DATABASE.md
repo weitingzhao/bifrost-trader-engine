@@ -373,7 +373,7 @@
 ### 2.15 表 `option_day`（阶段 3 R-A3 扩展：期权日 K 线）
 
 - **用途**：存**期权**的**日线** OHLC 数据；期权按标的+到期+行权价+权利区分合约。
-- **写入**：监控端按期权合约从 IB 拉取日线并 UPSERT；同一 (symbol, expiry, strike, option_right, bar_time) 仅保留一行。
+- **写入**：监控端按期权合约从 IB 或 Massive（R-A6）拉取日线并 UPSERT；同一 (symbol, expiry, strike, option_right, bar_time, source) 仅保留一行。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -389,15 +389,16 @@
 | low | double precision | 低 |
 | close | double precision | 收 |
 | volume | double precision | 成交量（可选） |
+| source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, bar_time)`。
+- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, bar_time, source)`。
 - **索引**：建议 `(symbol, expiry, strike, option_right, bar_time DESC)`。
-- **读取**：GET /bars?sec_type=OPT&period=1 D 并传 symbol+expiry+strike+right 或 contract_key 查询。
+- **读取**：GET /bars?sec_type=OPT&period=1 D 并传 symbol+expiry+strike+right 或 contract_key 查询；可选 `source` 参数筛选。
 
-### 2.16 表 `option_min`（阶段 3 R-A3 扩展：期权分钟/小时 K 线）
+### 2.16 表 `option_min`（阶段 3 R-A3 扩展：期权分钟/小时/秒 K 线）
 
-- **用途**：存**期权**的**分钟线、小时线**（1 min、5 mins、1 hour）。
+- **用途**：存**期权**的**分钟线、小时线**（1 min、5 mins、1 hour）以及 Massive 的**秒级聚合**（1 sec）。
 - **列**：
 
 | 列名 | 类型 | 说明 |
@@ -407,27 +408,144 @@
 | expiry | text NOT NULL | 到期（YYYYMM 或 YYYYMMDD） |
 | strike | double precision NOT NULL | 行权价 |
 | option_right | text NOT NULL | 权利 C/CALL 或 P/PUT |
-| period | text NOT NULL | 周期：'1 min' \| '5 mins' \| '1 hour' |
+| period | text NOT NULL | 周期：'1 sec' \| '1 min' \| '5 mins' \| '1 hour' |
 | bar_time | timestamptz NOT NULL | K 线周期起始时间 |
 | open | double precision | 开 |
 | high | double precision | 高 |
 | low | double precision | 低 |
 | close | double precision | 收 |
 | volume | double precision | 成交量（可选） |
+| source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
-- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, period, bar_time)`。
+- **唯一约束**：`UNIQUE(symbol, expiry, strike, option_right, period, bar_time, source)`。
 - **索引**：建议 `(symbol, expiry, strike, option_right, period, bar_time DESC)`。
 
 ### 2.16.1 表 `option_contracts`（期权合约定义）
 
 - **用途**：期权合约定义，按 contract_key（与 account_positions、contract_quote_live 一致）唯一标识。
-- **列**：`option_contracts_id` (bigserial PK)、`contract_key` (text NOT NULL UNIQUE)、`symbol`、`expiry`、`strike`、`option_right`、`created_at`。索引 `(contract_key)`、`(symbol, expiry, strike, option_right)`。
+- **列**：`option_contracts_id` (bigserial PK)、`contract_key` (text NOT NULL UNIQUE)、`symbol`、`expiry`、`strike`、`option_right`、`massive_option_ticker` (text, 可选, Massive/Polygon 供应商期权代码如 `O:NVDA250620C00120000`，便于 API 往返)、`created_at`。索引 `(contract_key)`、`(symbol, expiry, strike, option_right)`。
 
-### 2.16.2 表 `option_snapshots`（期权时点快照）
+### 2.16.2 表 `option_snapshots`（期权时点快照，含 Greeks/IV）
 
-- **用途**：期权某时点报价快照（last/bid/ask/mid）。
-- **列**：`option_snapshots_id` (bigserial PK)、`contract_key`、`snapshot_ts`、`last`/`bid`/`ask`/`mid`、`created_at`。索引 `(contract_key, snapshot_ts DESC)`。
+- **用途**：期权某时点报价快照（last/bid/ask/mid）及可选 Greeks/IV（Massive Starter 可获取延迟 Greeks/IV）。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| option_snapshots_id | bigserial | 自增主键 |
+| contract_key | text NOT NULL | 合约唯一键 |
+| snapshot_ts | timestamptz NOT NULL | 快照时间戳 |
+| last | double precision | 最新价 |
+| bid | double precision | 买一 |
+| ask | double precision | 卖一 |
+| mid | double precision | 中间价 |
+| iv | double precision | 隐含波动率（可空） |
+| delta | double precision | Delta（可空） |
+| gamma | double precision | Gamma（可空） |
+| theta | double precision | Theta（可空） |
+| vega | double precision | Vega（可空） |
+| open_interest | integer | 快照时点的 OI（可空，若随报价一并返回） |
+| underlying_price | double precision | 标的价格（可空，快照时标的 spot） |
+| source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **索引**：`(contract_key, snapshot_ts DESC)`。
+
+### 2.16.3 表 `option_open_interest_daily`（R-A6：期权日终 Open Interest）
+
+- **用途**：存**期权合约的日终 Open Interest**，供期权分析（OI 变化、多空博弈等）。数据来源为 Massive（Starter 可获取日终 OI）。
+- **写入**：Massive Worker 按标的/日期拉取日终 OI 后 UPSERT；同一 (contract_key, trade_date, source) 仅保留一行。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| option_open_interest_daily_id | bigserial | 自增主键（符合「表名_id」约定） |
+| contract_key | text NOT NULL | 合约唯一键（与 option_contracts / account_positions 一致） |
+| symbol | text NOT NULL | 标的代码（underlying） |
+| expiry | text NOT NULL | 到期 |
+| strike | double precision NOT NULL | 行权价 |
+| option_right | text NOT NULL | 权利 C/P |
+| trade_date | date NOT NULL | 交易日（OI 截止日） |
+| open_interest | integer NOT NULL | 日终持仓量 |
+| source | text NOT NULL DEFAULT 'massive' | 数据来源 |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(contract_key, trade_date, source)`。
+- **索引**：`(contract_key, trade_date DESC)`、`(symbol, trade_date DESC)`。
+- **读取**：GET /research/option-oi 或嵌入 Option Discovery 表格的 OI 列。
+
+### 2.16.4 表 `option_trades`（R-A6 Developer：期权逐笔成交，预留）
+
+- **用途**：存**期权逐笔成交**数据，仅在 Massive **Options Developer** 订阅下可用（feature flag `massive.features.trades_enabled`）。**Starter 阶段仅建表不写入**。
+- **写入**：Massive Worker 拉取 Trades 后 UPSERT；按 `massive_trade_id` 去重保证幂等。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| option_trades_id | bigserial | 自增主键（符合「表名_id」约定） |
+| contract_key | text NOT NULL | 合约唯一键 |
+| symbol | text NOT NULL | 标的代码（underlying） |
+| expiry | text NOT NULL | 到期 |
+| strike | double precision NOT NULL | 行权价 |
+| option_right | text NOT NULL | 权利 C/P |
+| trade_ts | timestamptz NOT NULL | 成交时间戳（纳秒精度可截断到微秒） |
+| price | double precision NOT NULL | 成交价 |
+| size | integer NOT NULL | 成交量（合约数） |
+| exchange | text | 成交交易所（可空） |
+| conditions | text | 成交条件代码（可空，Massive 条件 ID 数组序列化为文本） |
+| massive_trade_id | text NOT NULL | Massive 供应商唯一成交 ID |
+| source | text NOT NULL DEFAULT 'massive' | 数据来源 |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(massive_trade_id)`。
+- **索引**：`(contract_key, trade_ts DESC)`、`(symbol, trade_ts DESC)`。
+- **读取**：`GET /research/option-trades?...` 仅当 feature flag 启用时返回数据；分页 + 时间范围。
+
+### 2.16.5 表 `job_massive_backfill`（R-A6：Massive 异步任务队列）
+
+- **用途**：Massive 数据拉取的**异步任务队列**，模式与 `job_bars_backfill`（§2.18）一致。API 入队时 INSERT，Massive Celery Worker 取 pending 任务执行，完成后 UPDATE status 与 result。表名采用 **`job_`** 前缀（database-design.mdc 约定）。
+- **写入**：监控 API 在 `POST /research/massive/sync` 时 INSERT 一行 status='pending'；Worker 取任务时 UPDATE status='running'，执行结束后 UPDATE status='done'\|'failed' 与 result。
+- **消费语义**：与 `job_bars_backfill` 一致——`SELECT ... WHERE status='pending' ORDER BY job_massive_backfill_id LIMIT 1 FOR UPDATE SKIP LOCKED`。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| job_massive_backfill_id | bigserial | 自增主键（作为 job_id 返回给客户端） |
+| kind | text NOT NULL | 任务类型：`aggregates` \| `snapshot` \| `oi` \| `trades` \| `reference` \| `corporate_action` |
+| payload | jsonb NOT NULL | 任务参数（如 { symbol, expiry, start_date, end_date } 等，仅参数） |
+| status | text NOT NULL | pending \| running \| done \| failed |
+| result | jsonb | 执行结果：{ ok, count?, message? } 或 { ok: false, error } |
+| celery_task_id | text | Celery 任务 ID（可选，便于关联） |
+| created_at | timestamptz | 创建时间（默认 now()） |
+| updated_at | timestamptz | 最后更新时间（默认 now()） |
+
+- **索引**：`(status, created_at)` 便于 Worker 取最旧 pending 任务；GET /research/massive/jobs 按 job_massive_backfill_id DESC 分页。
+- **Trim**：可选保留最近 200 条。
+
+### 2.16.6 表 `massive_corporate_action`（R-A6：公司行动缓存）
+
+- **用途**：缓存 Massive 返回的**公司行动**数据（拆股、股息等），供期权分析时对照历史价格与合约调整。轻量缓存表，按需拉取。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| massive_corporate_action_id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 标的代码 |
+| action_type | text NOT NULL | 行动类型：split \| dividend \| spinoff \| rights 等 |
+| ex_date | date | 除权日 |
+| record_date | date | 登记日（可空） |
+| payment_date | date | 支付日（可空） |
+| ratio_from | double precision | 拆分比例分子（如 4:1 中的 4），可空 |
+| ratio_to | double precision | 拆分比例分母（如 4:1 中的 1），可空 |
+| amount | double precision | 股息金额或等价，可空 |
+| currency | text | 币种，可空 |
+| description | text | 说明文本，可空 |
+| source | text NOT NULL DEFAULT 'massive' | 数据来源 |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(symbol, action_type, ex_date, source)`。
+- **索引**：`(symbol, ex_date DESC)`。
 
 ### 2.17 表 `watchlist`（阶段 3 R-A3 扩展：自选/待操作标的）
 
@@ -1248,6 +1366,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-19 Position×Instance 归因读模型 | §2.24.11c：净仓近似归因——GET /executions/position-attribution 将持仓按实例拆分（net_estimated），返回 open_qty_est / attribution_ratio / unrealized_pnl_est / is_mixed / has_unassigned；前端 PositionsPage Opportunity Sheet 改用该 API，同一合约可在多个实例下并存展示；新增 Attribution 筛选器（Single / Mixed / Unassigned）。实时读模型（不落表），见 servers/reader/executions.py。 | 阶段 3 扩展 |
 | 2026-03-19 Executions 分源迁移 | 三张原始源表：`executions_raw_tws`（TWS/manual 源）、`executions_raw_flex`（Flex 源权威成交）、`executions_raw_journal`（journal_closed 人工会计调整）。`account_executions` 为统一只读视图（UNION ALL，Flex 优先覆盖 TWS，Journal 独立流）。**`account_executions_final`**：仅 UNION `executions_raw_flex` + `executions_raw_journal`（不含 TWS 补洞行），列与主键编码规则与全量视图中对应两分支一致。**`account_executions_fly`**：源为 `executions_raw_tws`，`account_executions_id = -(executions_raw_tws_id)`；排除 `sec_type = BAG`（多腿组合占位）；排除在 **`account_executions_final` 中已出现相同 `(account_id, contract_key)`（非空、trim 后相等）** 的 TWS 行。**GET /executions**、**GET /performance** 在 `source_scope=on_the_fly` 时读此视图。回填脚本 `scripts/db_backfill_executions_raw.py`。 | 阶段 3 扩展 |
 | 2026-03-20 settings 移除 IB 连接列 | `settings` 表不再包含 `ib_host`、`ib_port_type`、`ib_client_id_*`、`ib2_*` 等列；IB 连接与 client_id 以 YAML `ib.host` / `ib.secondary` 为唯一真源；`pg_ddl` 新建库不含上述列。§2.9。 | 阶段 2 |
+| 2026-03-21 Massive 期权研究数据（R-A6） | option_day / option_min 增加 `source` 列（text, DEFAULT 'ib'）并调整 UNIQUE 包含 source；option_min 周期增加 '1 sec'（Massive 秒聚合）；option_contracts 增加 `massive_option_ticker`（可选）；option_snapshots 扩展为含 Greeks/IV（iv/delta/gamma/theta/vega）+ OI + underlying_price + source；新增表 option_open_interest_daily（§2.16.3）、option_trades（§2.16.4，预留）、job_massive_backfill（§2.16.5）、massive_corporate_action（§2.16.6）。 | 期权研究阶段 |
 
 ---
 
