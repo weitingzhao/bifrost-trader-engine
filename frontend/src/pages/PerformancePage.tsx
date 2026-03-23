@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, Fragment } from 'react'
+import { useCallback, useEffect, useMemo, useState, Fragment } from 'react'
 import type { Execution, PerformanceResponse, StatusResponse } from '../types'
 import type { BackendOptPair } from '../types'
 import type { StrategyOpportunity } from '../api'
@@ -16,11 +16,13 @@ import {
   execPnl,
   getChicagoDayRange,
   getTimeRangeDates,
+  ledgerOptionExecutionDisplayPnl,
   listDateStrings,
   listMonthKeysInRange,
   matchPnl,
   normalizeStrike,
   optionRightToFull,
+  sortExecByExecutionDateThenTime,
   sortExecByTradeDateThenTime,
 } from './performance/performanceUtils'
 
@@ -65,8 +67,20 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
   const [onTheFlyOpen, setOnTheFlyOpen] = useState(false)
   const [onTheFlyPerf, setOnTheFlyPerf] = useState<PerformanceResponse | null>(null)
   const [onTheFlyExecs, setOnTheFlyExecs] = useState<Execution[]>([])
+  const [onTheFlyOptPairs, setOnTheFlyOptPairs] = useState<BackendOptPair[] | null>(null)
+  const [onTheFlySecTab, setOnTheFlySecTab] = useState<'all' | 'OPT' | 'STK'>('all')
   const [onTheFlyLoading, setOnTheFlyLoading] = useState(false)
   const [onTheFlyError, setOnTheFlyError] = useState<string | null>(null)
+
+  const onTheFlyComputed = useMemo(() => {
+    if (onTheFlyExecs.length === 0) return null
+    const sortExec = sortExecByExecutionDateThenTime
+    const optPairs = onTheFlyOptPairs != null && onTheFlyOptPairs.length > 0 ? onTheFlyOptPairs : null
+    const optAg = computeDayRealizedUnrealized(onTheFlyExecs, optPairs, sortExec)
+    const stkExecsOnly = onTheFlyExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'STK')
+    const stkAg = computeDayRealizedUnrealizedStock(stkExecsOnly, sortExec)
+    return { opt: optAg, stk: stkAg }
+  }, [onTheFlyExecs, onTheFlyOptPairs])
 
   useEffect(() => {
     fetchOpportunities(true)
@@ -132,7 +146,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
           since_ts,
           until_ts,
           5000,
-          false,
+          true,
           strategyOpportunityId ?? undefined,
           strategyInstanceId ?? undefined,
           'on_the_fly',
@@ -140,11 +154,16 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       ])
       setOnTheFlyPerf(perf)
       const raw = exRes.executions ?? []
-      setOnTheFlyExecs([...raw].sort((a, b) => sortExecByTradeDateThenTime(a, b)).reverse())
+      const pairs = 'opt_pairs' in exRes && Array.isArray((exRes as { opt_pairs?: BackendOptPair[] }).opt_pairs)
+        ? (exRes as { opt_pairs: BackendOptPair[] }).opt_pairs
+        : null
+      setOnTheFlyOptPairs(pairs)
+      setOnTheFlyExecs([...raw].sort((a, b) => sortExecByExecutionDateThenTime(a, b)).reverse())
     } catch (e) {
       setOnTheFlyError(e instanceof Error ? e.message : 'Failed to load on-the-fly data')
       setOnTheFlyPerf(null)
       setOnTheFlyExecs([])
+      setOnTheFlyOptPairs(null)
     } finally {
       setOnTheFlyLoading(false)
     }
@@ -1294,7 +1313,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
             {onTheFlyLoading && <p className="section-hint">Loading…</p>}
             {onTheFlyError && <p className="section-hint tone-negative">{onTheFlyError}</p>}
             {!onTheFlyLoading && !onTheFlyError && onTheFlyPerf?.summary != null && (
-              <div className="performance-on-the-fly-summary" aria-label="On the fly summary">
+              <div className="performance-on-the-fly-summary" aria-label="On the fly summary total">
                 <span className="performance-on-the-fly-summary-kv">
                   Trades <strong>{onTheFlyPerf.summary.trade_count ?? 0}</strong>
                 </span>
@@ -1314,52 +1333,156 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                 </span>
               </div>
             )}
+            {!onTheFlyLoading && !onTheFlyError && onTheFlyComputed != null && onTheFlyExecs.length > 0 && (() => {
+              const optExecs = onTheFlyExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
+              const stkExecs = onTheFlyExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'STK')
+              const optComm = optExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
+              const stkComm = stkExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
+              const { opt: oAg, stk: sAg } = onTheFlyComputed
+              const kvClass = (n: number) => (Math.abs(n) < 0.005 ? '' : n >= 0 ? 'tone-positive' : 'tone-negative')
+              return (
+                <div className="performance-on-the-fly-by-sec" aria-label="On the fly by sec type">
+                  <div className="performance-on-the-fly-summary performance-on-the-fly-summary-sec">
+                    <span className="performance-on-the-fly-summary-sec-label">Options (OPT)</span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Trades <strong>{optExecs.length}</strong>
+                    </span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Realized (FIFO){' '}
+                      <strong className={kvClass(oAg.realized)}>{fmtPnl(oAg.realized)}</strong>
+                    </span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Unrealized (open){' '}
+                      <strong className={kvClass(oAg.unrealized)}>{fmtPnl(oAg.unrealized)}</strong>
+                      <InfoTooltip text="Option legs use the same per-execution cash flow as Trade Ledger → Options → Details (PnL column). Pairing uses backend opt pairs when available, else FIFO by contract. Trade date falls back to exec date when Flex trade_date is missing." />
+                    </span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Commission <strong>{fmtUsd(optComm)}</strong>
+                    </span>
+                  </div>
+                  <div className="performance-on-the-fly-summary performance-on-the-fly-summary-sec">
+                    <span className="performance-on-the-fly-summary-sec-label">Stocks (STK)</span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Trades <strong>{stkExecs.length}</strong>
+                    </span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Realized (FIFO){' '}
+                      <strong className={kvClass(sAg.realized)}>{fmtPnl(sAg.realized)}</strong>
+                    </span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Unrealized (open){' '}
+                      <strong className={kvClass(sAg.unrealized)}>{fmtPnl(sAg.unrealized)}</strong>
+                      <InfoTooltip text="Stock FIFO realized/unrealized from fills in range (shares × price, no contract multiplier). Trade date uses exec date when trade_date is missing." />
+                    </span>
+                    <span className="performance-on-the-fly-summary-kv">
+                      Commission <strong>{fmtUsd(stkComm)}</strong>
+                    </span>
+                  </div>
+                </div>
+              )
+            })()}
             {!onTheFlyLoading && !onTheFlyError && onTheFlyExecs.length === 0 && (
               <p className="section-hint">No on-the-fly executions in this range.</p>
             )}
             {!onTheFlyLoading && onTheFlyExecs.length > 0 && (
-              <div className="table-wrap performance-on-the-fly-table-wrap">
-                <table className="data-table performance-on-the-fly-table">
-                  <thead>
-                    <tr>
-                      <th>Execution ID</th>
-                      <th>Trade date</th>
-                      <th>Time</th>
-                      <th>Account</th>
-                      <th>Symbol</th>
-                      <th>Side</th>
-                      <th>Qty</th>
-                      <th>Price</th>
-                      <th>Source</th>
-                      <th>Realized PnL</th>
-                      <th>Commission</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {onTheFlyExecs.map((e) => {
-                      const rp = e.realized_pnl
-                      const rpNum = rp != null && typeof rp === 'number' && Number.isFinite(rp) ? rp : null
-                      return (
-                        <tr key={e.account_executions_id ?? `${e.account_id}-${e.time}-${e.symbol}`}>
-                          <td>{e.account_executions_id ?? '—'}</td>
-                          <td>{e.trade_date?.trim() || '—'}</td>
-                          <td>{fmtChicagoTime(e.time)}</td>
-                          <td>{e.account_id ?? '—'}</td>
-                          <td>{e.symbol ?? '—'}</td>
-                          <td>{e.side ?? '—'}</td>
-                          <td>{e.quantity ?? '—'}</td>
-                          <td>{fmtUsd(e.price)}</td>
-                          <td><ExecSourceBadge source={e.source} /></td>
-                          <td className={rpNum == null ? '' : rpNum >= 0 ? 'tone-positive' : 'tone-negative'}>
-                            {rpNum == null ? '—' : fmtPnl(rpNum)}
-                          </td>
-                          <td>{fmtUsd(e.commission)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <div className="performance-on-the-fly-sec-tabs" role="tablist" aria-label="On the fly sec type">
+                  {(['all', 'OPT', 'STK'] as const).map((tab) => {
+                    const count =
+                      tab === 'all'
+                        ? onTheFlyExecs.length
+                        : tab === 'OPT'
+                          ? onTheFlyExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT').length
+                          : onTheFlyExecs.filter((e) => (e.sec_type ?? '').toUpperCase() === 'STK').length
+                    const label = tab === 'all' ? 'All' : tab === 'OPT' ? 'OPT' : 'STK'
+                    return (
+                      <button
+                        key={tab}
+                        type="button"
+                        role="tab"
+                        aria-selected={onTheFlySecTab === tab}
+                        className={`performance-on-the-fly-sec-tab ${onTheFlySecTab === tab ? 'active' : ''}`}
+                        onClick={() => setOnTheFlySecTab(tab)}
+                      >
+                        {label}
+                        <span className="performance-on-the-fly-sec-tab-count">{count}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="table-wrap performance-on-the-fly-table-wrap">
+                  <table className="data-table performance-on-the-fly-table">
+                    <thead>
+                      <tr>
+                        <th>Sec</th>
+                        <th>Execution ID</th>
+                        <th>Trade date</th>
+                        <th>Time</th>
+                        <th>Account</th>
+                        <th>Symbol</th>
+                        <th>Expiry</th>
+                        <th>Strike</th>
+                        <th>Right</th>
+                        <th>Side</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Source</th>
+                        <th>PnL</th>
+                        <th>Realized PnL</th>
+                        <th>Commission</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {onTheFlyExecs
+                        .filter((e) => {
+                          if (onTheFlySecTab === 'all') return true
+                          return (e.sec_type ?? '').toUpperCase() === onTheFlySecTab
+                        })
+                        .map((e) => {
+                          const rp = e.realized_pnl
+                          const rpNum = rp != null && typeof rp === 'number' && Number.isFinite(rp) ? rp : null
+                          const isOpt = (e.sec_type ?? '').toUpperCase() === 'OPT'
+                          const tradeDateDisplay = (e.trade_date ?? '').trim() || executionDateStr(e) || '—'
+                          const ledgerPnl = isOpt ? ledgerOptionExecutionDisplayPnl(e) : null
+                          const ledgerPnlClass =
+                            ledgerPnl == null || !isOpt
+                              ? ''
+                              : Math.abs(ledgerPnl) < 0.005
+                                ? ''
+                                : ledgerPnl >= 0
+                                  ? 'tone-positive'
+                                  : 'tone-negative'
+                          return (
+                            <tr key={e.account_executions_id ?? `${e.account_id}-${e.time}-${e.symbol}`}>
+                              <td>{e.sec_type ?? '—'}</td>
+                              <td>{e.account_executions_id ?? '—'}</td>
+                              <td title={(e.trade_date ?? '').trim() ? undefined : 'Exec date (Chicago) — no Flex trade_date on this row'}>
+                                {tradeDateDisplay}
+                              </td>
+                              <td>{fmtChicagoTime(e.time)}</td>
+                              <td>{e.account_id ?? '—'}</td>
+                              <td>{e.symbol ?? '—'}</td>
+                              <td>{isOpt ? (e.expiry ?? '—') : '—'}</td>
+                              <td>{isOpt ? (e.strike != null ? String(e.strike) : '—') : '—'}</td>
+                              <td>{isOpt ? optionRightToFull(e.option_right) : '—'}</td>
+                              <td>{e.side ?? '—'}</td>
+                              <td>{e.quantity ?? '—'}</td>
+                              <td>{fmtUsd(e.price)}</td>
+                              <td><ExecSourceBadge source={e.source} /></td>
+                              <td className={ledgerPnlClass}>
+                                {isOpt && ledgerPnl != null ? fmtPnl(ledgerPnl) : '—'}
+                              </td>
+                              <td className={rpNum == null ? '' : rpNum >= 0 ? 'tone-positive' : 'tone-negative'}>
+                                {rpNum == null ? '—' : fmtPnl(rpNum)}
+                              </td>
+                              <td>{fmtUsd(e.commission)}</td>
+                            </tr>
+                          )
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </>
         )}

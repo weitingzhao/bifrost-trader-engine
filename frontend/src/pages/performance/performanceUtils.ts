@@ -22,6 +22,36 @@ export function sortExecByTradeDateThenTime(a: Execution, b: Execution): number 
   return (a.time ?? 0) - (b.time ?? 0)
 }
 
+/** Sort by Flex trade_date if present, else Chicago exec date (for TWS-only rows without trade_date). */
+export function sortExecByExecutionDateThenTime(a: Execution, b: Execution): number {
+  const da = executionDateStr(a)
+  const db = executionDateStr(b)
+  if (da !== db) return da.localeCompare(db)
+  return (a.time ?? 0) - (b.time ?? 0)
+}
+
+/** Signed cash flow for one option leg — same base as Trade Ledger Options Details (per execution). */
+export function ledgerOptionExecutionCashFlowSigned(e: Execution): number {
+  const s = (e.side ?? '').toUpperCase()
+  const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+  const q = Math.abs(Number(e.quantity) || 0)
+  const p = Number(e.price) || 0
+  const c = Number(e.commission) || 0
+  const value = q * p * 100 - c
+  return isBuy ? -value : value
+}
+
+/** Per-row display PnL (ledger Details table): Sell uses abs for display. */
+export function ledgerOptionExecutionDisplayPnl(e: Execution): number {
+  const s = (e.side ?? '').toUpperCase()
+  const isBuy = s === 'BUY' || s === 'BOT' || s === 'B'
+  const isSell = s === 'SELL' || s === 'SLD' || s === 'S'
+  const raw = ledgerOptionExecutionCashFlowSigned(e)
+  if (isSell) return Math.abs(raw)
+  if (isBuy) return raw
+  return raw
+}
+
 export function execPnl(e: Execution): number {
   const qty = Number(e.quantity) || 0
   const price = Number(e.price) || 0
@@ -140,6 +170,7 @@ export function listMonthKeysInRange(sinceStr: string, untilStr: string): string
 
 export function computeOptPairsFromExecutions(
   executions: Execution[],
+  sortExec: (a: Execution, b: Execution) => number = sortExecByTradeDateThenTime,
 ): { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] {
   const opt = executions.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
   const byKey: Record<string, Execution[]> = {}
@@ -157,7 +188,7 @@ export function computeOptPairsFromExecutions(
   }
   const pairs: { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] = []
   for (const list of Object.values(byKey)) {
-    const sorted = [...list].sort(sortExecByTradeDateThenTime)
+    const sorted = [...list].sort(sortExec)
     const buyQueue: { q: number; p: number; c: number; side: string }[] = []
     const sellQueue: { q: number; p: number; c: number; side: string }[] = []
     const sym = sorted[0]?.symbol ?? ''
@@ -241,6 +272,7 @@ export function computeOptPairsFromExecutions(
 export function computeDayRealizedUnrealized(
   executions: Execution[],
   optPairs: BackendOptPair[] | null,
+  sortExec: (a: Execution, b: Execution) => number = sortExecByTradeDateThenTime,
 ): { realized: number; unrealized: number; symbolsRealized: string[]; symbolsUnrealized: string[] } {
   type DayPair = {
     account_id: string
@@ -275,7 +307,7 @@ export function computeDayRealizedUnrealized(
       leg_c_execution_id: p.leg_c_execution_id,
       leg_p_execution_id: p.leg_p_execution_id,
     }))
-    : computeOptPairsFromExecutions(allExecs).map((p) => ({
+    : computeOptPairsFromExecutions(allExecs, sortExec).map((p) => ({
       ...p,
       leg_c_execution_id: undefined,
       leg_p_execution_id: undefined,
@@ -342,7 +374,7 @@ export function computeDayRealizedUnrealized(
     const first = execs[0]
     const firstPair = pairs[0]
     const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
-    const sortedExecs = [...execs].sort(sortExecByTradeDateThenTime)
+    const sortedExecs = [...execs].sort(sortExec)
     const pairedExecIds = new Set<number>()
     for (const p of pairs) {
       if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
@@ -350,7 +382,7 @@ export function computeDayRealizedUnrealized(
     }
     const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
     const groupSumPnl =
-      unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
+      unmatchedExecs.reduce((s, e) => s + ledgerOptionExecutionCashFlowSigned(e), 0) +
       pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
     if (pairs.length > 0) {
       totalRealizedSum += groupSumPnl
@@ -370,6 +402,7 @@ export function computeDayRealizedUnrealized(
 
 export function computeDayRealizedUnrealizedStock(
   executions: Execution[],
+  sortExec: (a: Execution, b: Execution) => number = sortExecByTradeDateThenTime,
 ): { realized: number; unrealized: number } {
   const stk = executions.filter((e) => (e.sec_type ?? '').toUpperCase() === 'STK')
   const byKey: Record<string, Execution[]> = {}
@@ -383,7 +416,7 @@ export function computeDayRealizedUnrealizedStock(
   let totalRealized = 0
   let totalUnrealized = 0
   for (const list of Object.values(byKey)) {
-    const sorted = [...list].sort(sortExecByTradeDateThenTime)
+    const sorted = [...list].sort(sortExec)
     const buyQueue: { q: number; p: number; c: number }[] = []
     const sellQueue: { q: number; p: number; c: number }[] = []
 
@@ -402,8 +435,8 @@ export function computeDayRealizedUnrealizedStock(
           if (qMatch <= 0) break
           const bAlloc = (qMatch / q) * comm
           const sAlloc = (qMatch / ss.q) * ss.c
-          const legB = -qMatch * p * 100 - bAlloc
-          const legS = qMatch * ss.p * 100 - sAlloc
+          const legB = -qMatch * p - bAlloc
+          const legS = qMatch * ss.p - sAlloc
           totalRealized += legB + legS
           remaining -= qMatch
           if (qMatch >= ss.q) sellQueue.shift()
@@ -418,8 +451,8 @@ export function computeDayRealizedUnrealizedStock(
           if (qMatch <= 0) break
           const bAlloc = (qMatch / bb.q) * bb.c
           const sAlloc = (qMatch / q) * comm
-          const legB = -qMatch * bb.p * 100 - bAlloc
-          const legS = qMatch * p * 100 - sAlloc
+          const legB = -qMatch * bb.p - bAlloc
+          const legS = qMatch * p - sAlloc
           totalRealized += legB + legS
           remaining -= qMatch
           if (qMatch >= bb.q) buyQueue.shift()
@@ -428,8 +461,8 @@ export function computeDayRealizedUnrealizedStock(
         if (remaining > 0) sellQueue.push({ q: remaining, p, c: (remaining / q) * comm })
       }
     }
-    for (const b of buyQueue) totalUnrealized += -b.q * b.p * 100 - b.c
-    for (const s of sellQueue) totalUnrealized += s.q * s.p * 100 - s.c
+    for (const b of buyQueue) totalUnrealized += -b.q * b.p - b.c
+    for (const s of sellQueue) totalUnrealized += s.q * s.p - s.c
   }
   return { realized: totalRealized, unrealized: totalUnrealized }
 }
