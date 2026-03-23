@@ -1,9 +1,22 @@
 import { API } from './constants'
 
+/** Per-page Massive REST debug for option-expirations (redacted URLs; full response JSON). */
+export interface MassiveOptionExpirationsDebug {
+  pages: Array<{
+    page_index: number
+    request: { method: string; url: string }
+    response_status: number
+    response: Record<string, unknown>
+  }>
+  contract_samples: Record<string, unknown>[]
+  contract_samples_truncated?: boolean
+}
+
 /** R-OD1: Option expirations and strikes (IB and/or Massive REST). Includes last_price from stock_day when available. */
 export async function fetchOptionExpirations(
   symbol: string,
   provider: 'auto' | 'ib' | 'massive' = 'auto',
+  options?: { debug?: boolean },
 ): Promise<{
   symbol: string
   expirations: string[]
@@ -11,11 +24,13 @@ export async function fetchOptionExpirations(
   last_price?: number
   error?: string
   provider?: string
+  massive_debug?: MassiveOptionExpirationsDebug
 }> {
   const s = (symbol || '').trim()
   if (!s) return { symbol: '', expirations: [], error: 'symbol is required' }
+  const dbg = options?.debug ? '&debug=1' : ''
   const r = await fetch(
-    `${API}/research/option-expirations?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}`,
+    `${API}/research/option-expirations?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}${dbg}`,
   )
   const j = await r.json().catch(() => ({}))
   const strikes: number[] | undefined = Array.isArray(j.strikes)
@@ -23,6 +38,11 @@ export async function fetchOptionExpirations(
     : undefined
   const last_price =
     j.last_price != null && Number.isFinite(Number(j.last_price)) ? Number(j.last_price) : undefined
+  const md = j.massive_debug
+  const massive_debug =
+    md && typeof md === 'object' && Array.isArray((md as MassiveOptionExpirationsDebug).pages)
+      ? (md as MassiveOptionExpirationsDebug)
+      : undefined
   return {
     symbol: j.symbol ?? s,
     expirations: Array.isArray(j.expirations) ? j.expirations : [],
@@ -30,6 +50,7 @@ export async function fetchOptionExpirations(
     ...(last_price !== undefined ? { last_price } : {}),
     error: j.error,
     provider: typeof j.provider === 'string' ? j.provider : undefined,
+    ...(massive_debug ? { massive_debug } : {}),
   }
 }
 
@@ -172,6 +193,39 @@ export async function fetchMassiveJobsList(options?: {
     updated_ts: typeof row.updated_ts === 'number' ? row.updated_ts : undefined,
   }))
   return { ok: true, jobs }
+}
+
+export async function deleteMassiveJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/research/massive/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: typeof j.error === 'string' ? j.error : undefined }
+}
+
+export async function deleteAllMassiveJobs(status?: string | null): Promise<{
+  ok: boolean
+  deleted: number
+  error?: string
+}> {
+  const params = new URLSearchParams()
+  if (status && status !== 'all') params.set('status', status)
+  const r = await fetch(`${API}/research/massive/jobs?${params}`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    deleted: typeof j.deleted === 'number' ? j.deleted : 0,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function trimMassiveJobs(keep: number): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  const params = new URLSearchParams({ keep: String(keep) })
+  const r = await fetch(`${API}/research/massive/jobs/trim?${params}`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    deleted: typeof j.deleted === 'number' ? j.deleted : 0,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
 }
 
 /** SSE until job reaches done/failed or stream errors. */

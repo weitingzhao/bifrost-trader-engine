@@ -108,6 +108,17 @@ export async function deleteAllBarsJobs(status?: string | null): Promise<{ ok: b
   }
 }
 
+export async function trimBarsJobs(keep: number): Promise<{ ok: boolean; deleted: number; error?: string }> {
+  const params = new URLSearchParams({ keep: String(keep) })
+  const r = await fetch(`${API}/bars/jobs/trim?${params}`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    deleted: typeof j.deleted === 'number' ? j.deleted : 0,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
 export async function fetchBars(symbol?: string, period = '1 D', limit = 100): Promise<BarsResponse> {
   const params = new URLSearchParams()
   if (symbol) params.set('symbol', symbol)

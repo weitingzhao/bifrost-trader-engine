@@ -143,6 +143,94 @@ def list_job_massive_backfill(
         return []
 
 
+_VALID_MASSIVE_JOB_STATUS = frozenset({"pending", "running", "done", "failed"})
+
+
+def delete_job_massive_backfill(status_config: dict, job_id: Any) -> bool:
+    """Delete one job_massive_backfill row by id. Returns True if deleted or not found."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return False
+    try:
+        jid = int(job_id)
+    except (TypeError, ValueError):
+        return False
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM job_massive_backfill WHERE job_massive_backfill_id = %s",
+                    (jid,),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_job_massive_backfill failed: %s", e)
+        return False
+
+
+def delete_all_job_massive_backfill(status_config: dict, status_filter: Optional[str] = None) -> int:
+    """Delete all Massive jobs, or only rows matching status. Returns number of rows deleted."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return 0
+    sf = (status_filter or "").strip().lower()
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                if sf in _VALID_MASSIVE_JOB_STATUS:
+                    cur.execute(
+                        "DELETE FROM job_massive_backfill WHERE status = %s",
+                        (sf,),
+                    )
+                else:
+                    cur.execute("DELETE FROM job_massive_backfill")
+                deleted = cur.rowcount
+            conn.commit()
+            return int(deleted)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("delete_all_job_massive_backfill failed: %s", e)
+        return 0
+
+
+def trim_job_massive_backfill(status_config: dict, keep: int = 200) -> int:
+    """Keep the newest `keep` rows by job_massive_backfill_id; delete older. Returns deleted count."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return 0
+    k = max(1, min(int(keep), 50_000))
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH kept AS (
+                        SELECT job_massive_backfill_id FROM job_massive_backfill
+                        ORDER BY job_massive_backfill_id DESC
+                        LIMIT %s
+                    )
+                    DELETE FROM job_massive_backfill
+                    WHERE job_massive_backfill_id NOT IN (SELECT job_massive_backfill_id FROM kept)
+                    """,
+                    (k,),
+                )
+                deleted = cur.rowcount
+            conn.commit()
+            return int(deleted)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("trim_job_massive_backfill failed: %s", e)
+        return 0
+
+
 def _publish_massive_job_redis(job_id: int, status: str, result: Optional[Dict[str, Any]] = None) -> None:
     """Optional: notify subscribers (e.g. future WS) when a job reaches a terminal state."""
     try:

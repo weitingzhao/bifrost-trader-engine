@@ -693,3 +693,16 @@ def delete_all_bars_jobs(
         return {"ok": False, "error": "No DB", "deleted": 0}
     deleted = delete_all_job_bars_backfill(control_via_db, status_filter=status)
     return {"ok": True, "deleted": deleted}
+
+
+@router.post("/bars/jobs/trim")
+def trim_bars_jobs(
+    request: Request,
+    keep: int = Query(200, ge=1, le=50000, description="Keep newest N bars backfill jobs by id; delete older rows"),
+) -> Dict[str, Any]:
+    """Trim job_bars_backfill to the newest `keep` rows."""
+    control_via_db = request.app.state.control_via_db
+    if not control_via_db:
+        return {"ok": False, "error": "No DB", "deleted": 0}
+    deleted = trim_job_bars_backfill(control_via_db, keep=keep)
+    return {"ok": True, "deleted": deleted}

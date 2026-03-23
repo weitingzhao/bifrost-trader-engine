@@ -6,7 +6,7 @@
 # Bash 3.2 (macOS) + set -u: avoid expanding empty arrays with "${arr[@]}" — use length checks first.
 #
 # Interactive mode (no args, or -i/--interactive): SSH ControlMaster — SSH login once (unless using keys);
-# sudo password is kept in memory for the whole session (sudo -S) until quit or menu (4) Clear.
+# sudo password is kept in memory for the whole session (sudo -S) until quit or menu (5) Clear.
 
 set -euo pipefail
 
@@ -31,12 +31,16 @@ DO_MIGRATE=0
 SYNC_PROD_CONFIG="${DEPLOY_SYNC_PROD_CONFIG:-0}"
 RESTART_ALL=0
 ACTION=""
+DO_STATUS=0
 declare -a RESTART_UNITS=()
 
 # Interactive full-screen TUI: menu on top, last N lines of command output below.
 BIFROST_SSH_TUI=0
 BIFROST_SSH_LAST_LOG=""
 BIFROST_SSH_RESULT_LINES=20
+# Interactive: systemd snapshot for header (menu 3 refreshes all bifrost-* on DEPLOY_HOST).
+BIFROST_INTERACTIVE_STATUS_RAW=""
+BIFROST_INTERACTIVE_STATUS_AT=""
 
 # --- ANSI colors (stdout TTY only; avoids garbage in piped/CI logs) ---
 if [[ -t 1 ]]; then
@@ -88,12 +92,94 @@ _colorize_line() {
   esac
 }
 
+# Print one line per unit: "bifrost-…: RUNNING (SubState=…)" or NOT RUNNING (…)
+# Args: $1 = space-separated systemd unit names. Uses SUDO_PASSWORD, ssh_remote, DEPLOY_*.
+_bifrost_remote_print_unit_status() {
+  local _units_str="$1"
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  if [[ -n "${SUDO_PASSWORD}" ]]; then
+    {
+      printf '%s\n' "${SUDO_PASSWORD}"
+      cat <<EOF
+set -euo pipefail
+for u in ${_units_str}; do
+  printf '%s: ' "\$u"
+  act=\$(systemctl is-active "\$u" 2>/dev/null || true)
+  sub=\$(systemctl show "\$u" -p SubState --value 2>/dev/null || true)
+  if [[ "\$act" == "active" ]]; then
+    echo "RUNNING (SubState=\${sub:-?})"
+  elif [[ -n "\$act" ]]; then
+    echo "NOT RUNNING (ActiveState=\$act\${sub:+, SubState=\$sub})"
+  else
+    echo "NOT RUNNING (could not query unit — check name or permissions)"
+  fi
+done
+EOF
+        } | ssh_remote_stdin_pipe "${REMOTE}" "sudo -S -p '' bash -s"
+  else
+    ssh_remote_stdin_pipe "${REMOTE}" bash -s <<EOF
+set -euo pipefail
+for u in ${_units_str}; do
+  printf '%s: ' "\$u"
+  act=\$(systemctl is-active "\$u" 2>/dev/null || true)
+  sub=\$(systemctl show "\$u" -p SubState --value 2>/dev/null || true)
+  if [[ "\$act" == "active" ]]; then
+    echo "RUNNING (SubState=\${sub:-?})"
+  elif [[ -n "\$act" ]]; then
+    echo "NOT RUNNING (ActiveState=\$act\${sub:+, SubState=\$sub})"
+  else
+    echo "NOT RUNNING (could not query unit — try --password if this host requires sudo for systemctl)"
+  fi
+done
+EOF
+  fi
+}
+
+# Paint Server / Engine / Celery rows under the banner (fixed order). Uses BIFROST_INTERACTIVE_STATUS_*.
+_interactive_paint_remote_status_block() {
+  local u label line rest
+  if [[ -z "${BIFROST_INTERACTIVE_STATUS_RAW:-}" ]]; then
+    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads Server, Engine, Celery status from ${DEPLOY_HOST}.)${C_RESET}"
+    return 0
+  fi
+  echo "${C_BLUE}${C_BOLD}  Units on ${DEPLOY_HOST}${C_RESET} ${C_DIM}· refreshed ${BIFROST_INTERACTIVE_STATUS_AT:-?}${C_RESET}"
+  # sudo may prefix stderr merged into capture (2>&1); lines may look like "[sudo] … bifrost-server: RUNNING …"
+  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|celery):'; then
+    echo "${C_YELLOW}  $(echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | head -n 1)${C_RESET}"
+  fi
+  for u in bifrost-server bifrost-engine bifrost-celery; do
+    case "$u" in
+      bifrost-server) label="Server" ;;
+      bifrost-engine) label="Engine" ;;
+      bifrost-celery) label="Celery" ;;
+      *) label="$u" ;;
+    esac
+    # grep returns 1 when no match — with pipefail + set -e, bare $(...) would abort the script.
+    # Strip any prefix (e.g. "[sudo] password for vision: " merged from stderr) so line starts with "${u}: ".
+    line=$(echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -F "${u}:" | head -n 1 || true)
+    if [[ -n "${line}" ]]; then
+      line=$(echo "${line}" | sed -E "s/^.*(${u}:.*)/\\1/")
+    fi
+    if [[ -z "${line}" ]]; then
+      printf '  %b %b%-7s%b  %b%s%b\n' "${C_YELLOW}" "${C_BOLD}" "${label}" "${C_RESET}" "${C_DIM}" "(no line — SSH or parse error)" "${C_RESET}"
+      continue
+    fi
+    rest="${line#"${u}: "}"
+    if [[ "${rest}" == RUNNING* ]]; then
+      printf '  %b●%b %b%-7s%b  %b%s%b\n' "${C_GREEN}${C_BOLD}" "${C_RESET}" "${C_BOLD}" "${label}" "${C_RESET}" "${C_GREEN}" "${rest}" "${C_RESET}"
+    else
+      printf '  %b●%b %b%-7s%b  %b%s%b\n' "${C_RED}${C_BOLD}" "${C_RESET}" "${C_BOLD}" "${label}" "${C_RESET}" "${C_RED}" "${rest}" "${C_RESET}"
+    fi
+  done
+}
+
 _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} one unit or all ${C_DIM}(units 1–3 + 4=all; e.g. engine restart, ${C_BOLD}43${C_DIM} = all+restart)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(1 Server / 2 Engine / 3 Celery / 4 All; append ${C_BOLD}R${C_DIM} to restart after deploy, e.g. 2R)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Clear stored sudo password"
+  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}Server + Engine + Celery on host (colored summary above)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} Clear stored sudo password"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
@@ -124,6 +210,8 @@ _interactive_paint_full() {
   echo "${C_BLUE}${C_BOLD}══════════════════════════════════════${C_RESET}"
   echo "${C_BLUE}${C_BOLD}  Bifrost SSH ${C_CYAN}(interactive)${C_RESET}  ${C_DIM}${DEPLOY_USER}@${DEPLOY_HOST}  ${DEPLOY_PATH}${C_RESET}"
   echo "${C_BLUE}${C_BOLD}══════════════════════════════════════${C_RESET}"
+  _interactive_paint_remote_status_block
+  echo ""
   _interactive_paint_main_menu
   _interactive_paint_result_block
 }
@@ -139,15 +227,15 @@ Usage (from repo root):
   ./scripts/bifrost_ssh.sh --interactive
   ./scripts/bifrost_ssh.sh --password 'REMOTE_SUDO_SECRET' -i
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
-      sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (4) Clear.
+      sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (5) Clear.
       Main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
       kept in memory only for this process. Warning: --password may be visible in process listings.
 
   CLI (non-interactive):
 
-  Required — pick services (one or more, or --all) AND exactly one action,
-  unless you use --deploy-only:
+  Required — pick services (one or more, or --all) AND exactly one of start/stop/restart,
+  OR use --status (with services), OR use --deploy-only alone:
 
     --server | -server          systemd unit bifrost-server
     --engine | -engine          systemd unit bifrost-engine
@@ -157,6 +245,9 @@ Usage (from repo root):
     --stop | -stop              sudo systemctl stop …
     --start | -start            sudo systemctl start …
     --restart | -restart        sudo systemctl restart …
+    --status | -status          query ActiveState via systemctl is-active (+ SubState); combine with
+                                --server / --engine / --celery / --all (no start/stop/restart required).
+                                May be combined with --deploy / --restart to print status after those steps.
 
   Optional:
 
@@ -185,8 +276,11 @@ Examples:
   ./scripts/bifrost_ssh.sh -engine -restart -deploy
   ./scripts/bifrost_ssh.sh -server -celery --stop
   ./scripts/bifrost_ssh.sh --all --restart -deploy
+  ./scripts/bifrost_ssh.sh --all --status
+  ./scripts/bifrost_ssh.sh -server -engine --status
 
 systemctl over SSH uses ssh -t when stdin is a TTY so sudo can prompt; non-interactive needs NOPASSWD for systemctl.
+With --password, --status uses sudo -S like start/stop/restart; without it, status runs as the SSH user (often sufficient for is-active).
 USAGE_EOF
 }
 
@@ -241,6 +335,20 @@ ssh_remote() {
     ssh -S "${SSH_CONTROL_PATH}" "$@"
   else
     _ssh_plain "$@"
+  fi
+}
+
+# ssh -T: do not allocate a PTY. Required when piping the sudo password to `sudo -S` while stdout is
+# redirected (e.g. interactive TUI + tee); otherwise the remote may fall back to a tty sudo prompt.
+ssh_remote_stdin_pipe() {
+  if [[ -n "${SSH_CONTROL_PATH}" ]]; then
+    ssh -T -S "${SSH_CONTROL_PATH}" "$@"
+  else
+    if _use_sshpass_for_ssh; then
+      SSHPASS="${SUDO_PASSWORD}" sshpass -e ssh -T "$@"
+    else
+      ssh -T "$@"
+    fi
   fi
 }
 
@@ -305,13 +413,14 @@ _reset_run_state() {
   SYNC_PROD_CONFIG="${DEPLOY_SYNC_PROD_CONFIG:-0}"
   RESTART_ALL=0
   ACTION=""
+  DO_STATUS=0
   RESTART_UNITS=()
 }
 
 # Re-apply sudo password from interactive session backup (defensive; keeps sudo -S working for every menu run).
 _bifrost_restore_session_sudo() {
   if [[ -n "${BIFROST_SESSION_SUDO_PASSWORD:-}" ]]; then
-    SUDO_PASSWORD="${BIFROST_SESSION_SUDO_PASSWORD}"
+    SUDO_PASSWORD="${BIFROST_SESSION_SUDO_PASSWORD//$'\r'/}"
   fi
 }
 
@@ -329,8 +438,10 @@ _run_pipeline() {
 
   if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
     DO_SYSTEMCTL=0
-  else
+  elif [[ -n "${ACTION}" ]]; then
     DO_SYSTEMCTL=1
+  else
+    DO_SYSTEMCTL=0
   fi
 
   if [[ "${DO_DEPLOY}" == "1" || "${DO_DEPLOY_ONLY}" == "1" ]]; then
@@ -340,6 +451,7 @@ _run_pipeline() {
   # Nested so we can run the same body with tee (TUI) or capture-only (non-TUI).
   _run_pipeline_inner() {
     set -e
+    _bifrost_restore_session_sudo
     if [[ "${DO_SYNC}" == "1" ]]; then
       echo "Deploying ${PROJECT_ROOT} -> ${REMOTE_URL}"
       if [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
@@ -424,7 +536,7 @@ REMOTE_EOF
       _units_str="${RESTART_UNITS[*]}"
       echo "Running: sudo systemctl ${ACTION} ${_units_str}"
       if [[ -n "${SUDO_PASSWORD}" ]]; then
-        printf '%s\n' "${SUDO_PASSWORD}" | ssh_remote "${REMOTE}" "sudo -S systemctl ${ACTION} ${_units_str}"
+        printf '%s\n' "${SUDO_PASSWORD}" | ssh_remote_stdin_pipe "${REMOTE}" "sudo -S -p '' systemctl ${ACTION} ${_units_str}"
       else
         # Interactive sudo: must read from the real terminal. A plain `cmd | tee` runs cmd in a subshell
         # where `ssh -tt` + sudo may not get a usable TTY — use /dev/tty when available.
@@ -439,6 +551,12 @@ REMOTE_EOF
       fi
     elif [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
       echo "Deploy-only finished (no systemctl)."
+    fi
+
+    if [[ "${DO_STATUS}" == "1" ]]; then
+      _units_str="${RESTART_UNITS[*]}"
+      echo "Remote: systemctl status check (is-active + SubState) for: ${_units_str}"
+      _bifrost_remote_print_unit_status "${_units_str}"
     fi
   }
 
@@ -509,6 +627,28 @@ _interactive_quick_deploy() {
     _run_pipeline || true
     break
   done
+}
+
+# Interactive menu 3: always query all bifrost units on DEPLOY_HOST; store colored summary for banner (no sub-prompt).
+_interactive_show_status() {
+  local _raw _ec
+  _bifrost_restore_session_sudo
+  _msg_info "Fetching systemd status (Server, Engine, Celery) on ${DEPLOY_HOST} …"
+  echo ""
+  set +e
+  _raw="$(_bifrost_remote_print_unit_status "bifrost-server bifrost-celery bifrost-engine" 2>&1)"
+  _ec=$?
+  set -e
+  BIFROST_INTERACTIVE_STATUS_RAW="${_raw}"
+  BIFROST_INTERACTIVE_STATUS_AT="$(date '+%Y-%m-%d %H:%M:%S')"
+  if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
+    {
+      echo "--- Status refresh (${BIFROST_INTERACTIVE_STATUS_AT}) exit ${_ec} ---"
+      echo "${_raw}"
+    } >"${BIFROST_SSH_LAST_LOG}"
+  fi
+  _msg_info "Status refresh finished (exit ${_ec}). Redrawing menu…"
+  return 0
 }
 
 # Map token -> bifrost unit name, or ALL for all three units (empty if unknown).
@@ -647,11 +787,12 @@ interactive_mode() {
   else
     echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Remote sudo password (for systemctl; not SSH) ${C_DIM}(Enter = ask when restart runs)${C_RESET}: "
     read -r -s SUDO_PASSWORD || true
+    SUDO_PASSWORD="${SUDO_PASSWORD//$'\r'/}"
     echo ""
     if [[ -z "${SUDO_PASSWORD}" ]]; then
       _msg_info "No sudo password stored — you will be prompted for sudo when a step runs systemctl (e.g. Quick deploy with R)."
     else
-      _msg_info "sudo password kept in memory for this session (all menu actions) until you quit or choose (4) Clear."
+      _msg_info "sudo password kept in memory for this session (all menu actions) until you quit or choose (5) Clear."
     fi
   fi
   if [[ -n "${SUDO_PASSWORD}" ]]; then
@@ -660,12 +801,13 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-4|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-5|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
       1) _interactive_systemctl_one_service ;;
       2) _interactive_quick_deploy ;;
-      3)
+      3) _interactive_show_status ;;
+      4)
         _msg_info "Reconnecting SSH (output streams below; may take a few seconds)…"
         echo ""
         {
@@ -679,7 +821,7 @@ interactive_mode() {
           echo "--- exit code: ${_rc4} ---"
         } >>"${BIFROST_SSH_LAST_LOG}"
         ;;
-      4)
+      5)
         SUDO_PASSWORD=""
         BIFROST_SESSION_SUDO_PASSWORD=""
         echo "[INFO] Stored sudo password cleared." >"${BIFROST_SSH_LAST_LOG}"
@@ -689,7 +831,7 @@ interactive_mode() {
         _interactive_paint_full
         break
         ;;
-      *) echo "[WARN] Unknown choice — try 1–4 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
+      *) echo "[WARN] Unknown choice — try 1–5 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
     esac
   done
   _ssh_control_cleanup
@@ -733,9 +875,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "${PRESET_SUDO_PASSWORD}" ]]; then
-  SUDO_PASSWORD="${PRESET_SUDO_PASSWORD}"
+  SUDO_PASSWORD="${PRESET_SUDO_PASSWORD//$'\r'/}"
 elif [[ -n "${DEPLOY_SUDO_PASSWORD:-}" ]]; then
-  SUDO_PASSWORD="${DEPLOY_SUDO_PASSWORD}"
+  SUDO_PASSWORD="${DEPLOY_SUDO_PASSWORD//$'\r'/}"
+fi
+# Persist for menu actions (restore uses BIFROST_SESSION_SUDO_PASSWORD before every remote sudo).
+if [[ -n "${SUDO_PASSWORD}" ]]; then
+  BIFROST_SESSION_SUDO_PASSWORD="${SUDO_PASSWORD}"
 fi
 
 if [[ "${INTERACTIVE_MODE}" == "1" ]] || [[ ${#CLI_ARGS[@]} -eq 0 ]]; then
@@ -754,12 +900,14 @@ while [[ $# -gt 0 ]]; do
     --stop|-stop) _set_action stop ;;
     --start|-start) _set_action start ;;
     --restart|-restart) _set_action restart ;;
+    --status|-status) DO_STATUS=1 ;;
     --deploy|-deploy) DO_DEPLOY=1 ;;
     --deploy-only) DO_DEPLOY_ONLY=1 ;;
     --migrate) DO_MIGRATE=1 ;;
     --sync-prod-config) SYNC_PROD_CONFIG=1 ;;
     --password=*)
       SUDO_PASSWORD="${1#*=}"
+      SUDO_PASSWORD="${SUDO_PASSWORD//$'\r'/}"
       shift
       continue
       ;;
@@ -767,7 +915,7 @@ while [[ $# -gt 0 ]]; do
       if [[ $# -lt 2 ]]; then
         usage_error "${1} requires a value"
       fi
-      SUDO_PASSWORD="$2"
+      SUDO_PASSWORD="${2//$'\r'/}"
       shift 2
       continue
       ;;
@@ -782,8 +930,18 @@ if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
   if [[ "${DO_DEPLOY}" == "1" ]]; then
     usage_error "use either --deploy or --deploy-only, not both."
   fi
-  if [[ -n "${ACTION}" ]] || [[ "${RESTART_ALL}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]]; then
-    usage_error "--deploy-only cannot be combined with --server/--engine/--celery/--all or --stop/--start/--restart."
+  if [[ -n "${ACTION}" ]]; then
+    usage_error "--deploy-only cannot be combined with --stop/--start/--restart."
+  fi
+  if [[ "${RESTART_ALL}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]]; then
+    if [[ "${DO_STATUS}" != "1" ]]; then
+      usage_error "--deploy-only cannot be combined with --server/--engine/--celery/--all unless --status is also set."
+    fi
+  fi
+  if [[ "${DO_STATUS}" == "1" ]]; then
+    if [[ "${RESTART_ALL}" != "1" ]] && [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
+      usage_error "--deploy-only --status requires --server, --engine, --celery, or --all."
+    fi
   fi
 fi
 
@@ -792,11 +950,16 @@ if [[ "${RESTART_ALL}" == "1" ]]; then
 fi
 
 if [[ "${DO_DEPLOY_ONLY}" != "1" ]]; then
-  if [[ -z "${ACTION}" ]]; then
-    usage_error "missing action: specify exactly one of --stop, --start, or --restart (or use --deploy-only to sync code only)."
+  if [[ -z "${ACTION}" && "${DO_STATUS}" != "1" ]]; then
+    usage_error "missing action: specify --stop, --start, or --restart, or use --status, or --deploy-only."
   fi
-  if [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
-    usage_error "missing service: specify at least one of --server, --engine, --celery, or --all."
+  if [[ "${DO_DEPLOY}" == "1" && -z "${ACTION}" ]]; then
+    usage_error "--deploy requires --stop, --start, or --restart."
+  fi
+  if [[ -n "${ACTION}" || "${DO_STATUS}" == "1" ]]; then
+    if [[ "${RESTART_ALL}" != "1" ]] && [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
+      usage_error "missing service: specify at least one of --server, --engine, --celery, or --all."
+    fi
   fi
 fi
 

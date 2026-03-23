@@ -205,8 +205,8 @@ export function StatusDaemonPanel({
             <span className="daemon-group-title">Event</span>
           </div>
           <div className="daemon-group-body">
-            <p className="section-hint">
-              Current: <span>{runStatusLabel}</span>
+            <p className="section-hint daemon-event-run-status-hint">
+              Current: <span>{runStatusLabel}</span>{' '}
               (set by monitor; daemon syncs via PostgreSQL)
             </p>
           </div>

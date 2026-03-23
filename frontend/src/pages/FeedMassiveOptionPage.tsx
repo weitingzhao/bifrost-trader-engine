@@ -148,6 +148,8 @@ export function FeedMassiveOptionPage({
   const [jobs, setJobs] = useState<MassiveJobApiRow[]>([])
   const [jobsLoading, setJobsLoading] = useState(false)
   const [jobsError, setJobsError] = useState<string | null>(null)
+  /** Which capability section is focused after chip click or hash deep-link (border highlight). */
+  const [highlightedCapabilityId, setHighlightedCapabilityId] = useState<string | null>(null)
 
   const [snapSymbol, setSnapSymbol] = useState('NVDA')
   const [snapBusy, setSnapBusy] = useState(false)
@@ -232,6 +234,7 @@ export function FeedMassiveOptionPage({
   }, [loadJobs])
 
   const scrollToSection = useCallback((id: string) => {
+    setHighlightedCapabilityId(id)
     const el = document.getElementById(feedMassiveSvcAnchorId(id))
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -251,6 +254,7 @@ export function FeedMassiveOptionPage({
     const onHashChange = () => {
       const id = resolveIdFromHash(window.location.hash)
       if (id) scrollToSection(id)
+      else setHighlightedCapabilityId(null)
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
@@ -642,6 +646,9 @@ export function FeedMassiveOptionPage({
     return s === 'pending' || s === 'running'
   }).length
 
+  const capCardClass = (capId: string) =>
+    `feed-massive-card${highlightedCapabilityId === capId ? ' feed-massive-card--cap-active' : ''}`
+
   return (
     <div className="card process-section feed-massive-option-page">
       <div className="feed-massive-title-block">
@@ -724,7 +731,8 @@ export function FeedMassiveOptionPage({
                 <a
                   key={row.id}
                   href={`#${feedMassiveSvcAnchorId(row.id)}`}
-                  className="feed-massive-tab-chip"
+                  className={`feed-massive-tab-chip${highlightedCapabilityId === row.id ? ' feed-massive-tab-chip--active' : ''}`}
+                  aria-current={highlightedCapabilityId === row.id ? 'location' : undefined}
                   onClick={e => {
                     e.preventDefault()
                     scrollToSection(row.id)
@@ -753,7 +761,7 @@ export function FeedMassiveOptionPage({
       <div className="feed-massive-tab-panel">
 
         {/* 1. Reference / contracts */}
-        <section className="feed-massive-card" aria-label="Reference contracts">
+        <section className={capCardClass('reference')} aria-label="Reference contracts">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('reference')}
             effectiveStatus={effRef}
@@ -797,7 +805,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 2. Chain snapshot */}
-        <section className="feed-massive-card" aria-label="Underlying snapshot">
+        <section className={capCardClass('snapshot')} aria-label="Underlying snapshot">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('snapshot')}
             effectiveStatus={effSnap}
@@ -847,7 +855,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 3. Option aggregates */}
-        <section className="feed-massive-card" aria-label="Option aggregates">
+        <section className={capCardClass('aggregates')} aria-label="Option aggregates">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('aggregates')}
             effectiveStatus={effAgg}
@@ -976,7 +984,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 4. Greeks / IV (moved here to match checklistRows order) */}
-        <section className="feed-massive-card" aria-label="Verify from database">
+        <section className={capCardClass('greeks-iv')} aria-label="Verify from database">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('greeks-iv')}
             effectiveStatus={effGk}
@@ -1080,7 +1088,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 5. Daily open interest */}
-        <section className="feed-massive-card" aria-label="Open interest">
+        <section className={capCardClass('daily-oi')} aria-label="Open interest">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('daily-oi')}
             effectiveStatus={effOi}
@@ -1134,7 +1142,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 6. Option trades */}
-        <section className="feed-massive-card" aria-label="Option trades API">
+        <section className={capCardClass('trades')} aria-label="Option trades API">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('trades')}
             effectiveStatus={effTr}
@@ -1168,7 +1176,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 7. Corporate actions */}
-        <section className="feed-massive-card" aria-label="Corporate actions">
+        <section className={capCardClass('corporate-actions')} aria-label="Corporate actions">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('corporate-actions')}
             effectiveStatus={effCorp}
@@ -1249,7 +1257,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 8. WebSocket streaming */}
-        <section className="feed-massive-card" aria-label="WebSocket verification">
+        <section className={capCardClass('websocket')} aria-label="WebSocket verification">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('websocket')}
             effectiveStatus={effWs}
@@ -1278,7 +1286,7 @@ export function FeedMassiveOptionPage({
         </section>
 
         {/* 9. Celery massive queue */}
-        <section className="feed-massive-card" aria-label="Recent jobs">
+        <section className={capCardClass('celery-queue')} aria-label="Recent jobs">
           <FeedMassiveServiceBlock
             anchorId={feedMassiveSvcAnchorId('celery-queue')}
             effectiveStatus={effCel}

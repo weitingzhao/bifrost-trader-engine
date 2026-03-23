@@ -9,11 +9,12 @@ export function celeryMetricsFromStatus(j: StatusResponse | null) {
   const celeryWorkerIbConnected = j?.celery_worker_ib_connected === true
   const celeryWorkerIbClientId = j?.celery_worker_ib_client_id ?? null
   const celeryWorkersAlive = (j?.celery_workers?.length ?? 0) > 0
+  /** Green only when broker reachable and at least one worker responds to inspect ping. No yellow “idle” — stopped worker = red. */
   const celeryLamp: 'green' | 'yellow' | 'red' | 'none' = !celeryBrokerConnected
     ? 'red'
     : celeryWorkersAlive
       ? 'green'
-      : 'yellow'
+      : 'red'
   return {
     celeryBrokerConnected,
     celeryLastTs,

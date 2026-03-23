@@ -29,6 +29,13 @@ export function StatusCeleryPanel({
   celeryCtrlMsg,
   className,
 }: StatusCeleryPanelProps) {
+  const workersCount = j?.celery_workers?.length ?? 0
+  /** Redis up but no Celery process: yellow (infra OK, service down). Both down: red. */
+  const brokerLamp: Lamp =
+    !celeryBrokerConnected ? 'red' : workersCount > 0 ? 'green' : 'yellow'
+  /** No ping response = not running — red (not yellow). */
+  const workerLamp: Lamp = workersCount > 0 ? 'green' : 'red'
+
   return (
     <div id="system-panel-celery" role="tabpanel" aria-labelledby="tab-celery" className={className ? `system-tab-panel ${className}` : 'system-tab-panel'}>
       <div className="daemon-header">
@@ -41,7 +48,16 @@ export function StatusCeleryPanel({
               Celery
             </h2>
             <div>
-              <strong>Status: {j ? (celeryBrokerConnected ? (celeryWorkersAlive ? 'Running (OK)' : 'Broker connected, no workers (start: python scripts/run_celery.py)') : 'Broker not connected') : 'Fetch failed'}</strong>
+              <strong>
+                Status:{' '}
+                {j
+                  ? !celeryBrokerConnected
+                    ? 'Broker not connected'
+                    : celeryWorkersAlive
+                      ? 'Running (OK)'
+                      : 'No worker process (start: python scripts/run_celery.py)'
+                  : 'Fetch failed'}
+              </strong>
             </div>
           </div>
         </div>
@@ -62,7 +78,7 @@ export function StatusCeleryPanel({
       <div className="daemon-groups">
         <div className="daemon-group">
           <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${celeryBrokerConnected ? 'green' : 'red'}`} title="Celery broker (Redis) status" aria-hidden>
+            <span className={`title-inline-lamp lamp-icon ${brokerLamp}`} title="Celery broker (Redis) status" aria-hidden>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
             </span>
             <span className="daemon-group-title">Broker (Redis)</span>
@@ -70,9 +86,15 @@ export function StatusCeleryPanel({
           </div>
           <div className="daemon-group-body">
             {celeryBrokerConnected ? (
-              <p className="section-hint countdown-line">
-                <span className="countdown-num">Connected</span> <span>(bars queue available)</span>
-              </p>
+              workersCount > 0 ? (
+                <p className="section-hint countdown-line">
+                  <span className="countdown-num">Connected</span> <span>(bars queue available)</span>
+                </p>
+              ) : (
+                <p className="section-hint">
+                  Redis reachable — <strong>no worker process</strong> (start: python scripts/run_celery.py)
+                </p>
+              )
             ) : (
               <p className="section-hint">Not connected or Redis not configured</p>
             )}
@@ -80,7 +102,7 @@ export function StatusCeleryPanel({
         </div>
         <div className="daemon-group">
           <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${(j?.celery_workers?.length ?? 0) > 0 ? 'green' : celeryBrokerConnected ? 'yellow' : 'none'}`} title="Celery workers responding to ping" aria-hidden>
+            <span className={`title-inline-lamp lamp-icon ${workerLamp}`} title="Celery workers responding to inspect ping" aria-hidden>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
             </span>
             <span className="daemon-group-title">Celery Workers</span>

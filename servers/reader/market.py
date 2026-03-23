@@ -818,10 +818,11 @@ def update_job_bars_backfill_result(
         return False
 
 
-def trim_job_bars_backfill(status_config: dict, keep: int = 200) -> None:
-    """Keep only the most recent keep jobs; delete older ones."""
+def trim_job_bars_backfill(status_config: dict, keep: int = 200) -> int:
+    """Keep only the most recent keep jobs; delete older ones. Returns number of rows deleted."""
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
-        return
+        return 0
+    k = max(1, min(int(keep), 50_000))
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -832,13 +833,16 @@ def trim_job_bars_backfill(status_config: dict, keep: int = 200) -> None:
                     WITH kept AS (SELECT job_bars_backfill_id FROM job_bars_backfill ORDER BY job_bars_backfill_id DESC LIMIT %s)
                     DELETE FROM job_bars_backfill WHERE job_bars_backfill_id NOT IN (SELECT job_bars_backfill_id FROM kept)
                     """,
-                    (max(1, keep),),
+                    (k,),
                 )
+                deleted = cur.rowcount
             conn.commit()
+            return int(deleted)
         finally:
             conn.close()
     except Exception as e:
         logger.warning("trim_job_bars_backfill failed: %s", e)
+        return 0
 
 
 def get_job_bars_backfill_last_updated(status_config: dict) -> Optional[float]:

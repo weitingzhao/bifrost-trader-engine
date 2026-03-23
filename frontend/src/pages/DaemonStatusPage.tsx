@@ -425,29 +425,31 @@ export function DaemonStatusPage({
             Recent operations
             <InfoTooltip text="Recent automated trading operations executed by the daemon." />
           </h3>
-          <table className="table-operations">
-            <thead>
-              <tr>
-                <th>Time</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {operations.length === 0 ? (
-                <tr><td colSpan={6}>None</td></tr>
-              ) : (
-                operations.map((op, i) => (
-                  <tr key={op.daemon_auto_operations_id ?? `op-${op.ts}-${i}`}>
-                    <td>{fmtTs(op.ts)}</td>
-                    <td>{op.type ?? ''}</td>
-                    <td>{op.side ?? ''}</td>
-                    <td>{op.quantity ?? ''}</td>
-                    <td>{fmtUsd(op.price)}</td>
-                    <td>{op.state_reason ?? ''}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          <div className="table-scroll-x">
+            <table className="table-operations">
+              <thead>
+                <tr>
+                  <th>Time</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {operations.length === 0 ? (
+                  <tr><td colSpan={6}>None</td></tr>
+                ) : (
+                  operations.map((op, i) => (
+                    <tr key={op.daemon_auto_operations_id ?? `op-${op.ts}-${i}`}>
+                      <td>{fmtTs(op.ts)}</td>
+                      <td>{op.type ?? ''}</td>
+                      <td>{op.side ?? ''}</td>
+                      <td>{op.quantity ?? ''}</td>
+                      <td>{fmtUsd(op.price)}</td>
+                      <td>{op.state_reason ?? ''}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
       </div>
     </div>

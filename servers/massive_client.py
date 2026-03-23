@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import ssl
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,6 +15,13 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 DEFAULT_REST_BASE = "https://api.polygon.io"
+
+
+def _redact_url_api_key(url: str) -> str:
+    """Replace apiKey / apikey query values with *** for logs and API responses."""
+    if not url:
+        return url
+    return re.sub(r"([?&])(apiKey|apikey)=([^&]*)", r"\1\2=***", url, flags=re.I)
 
 
 def _norm_expiry(s: str) -> str:
@@ -59,6 +67,12 @@ class MassiveClient:
     def configured(self) -> bool:
         return bool(self._api_key)
 
+    def _redacted_get_url(self, path: str, params: Optional[Dict[str, Any]] = None) -> str:
+        q = dict(params or {})
+        q["apiKey"] = "***"
+        url = f"{self._base}{path}"
+        return f"{url}?{urlencode(q)}" if q else url
+
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Tuple[int, Any]:
         """Return (http_status, parsed_json_or_none)."""
         q = dict(params or {})
@@ -86,7 +100,12 @@ class MassiveClient:
             return 0, {"error": str(e)}
 
     def fetch_expirations_and_strikes(
-        self, underlying: str, max_pages: int = 20
+        self,
+        underlying: str,
+        max_pages: int = 20,
+        *,
+        include_debug: bool = False,
+        max_contract_samples: int = 200,
     ) -> Dict[str, Any]:
         """Paginate /v3/reference/options/contracts; return expirations, strikes, tickers map."""
         underlying = (underlying or "").strip().upper()
@@ -94,6 +113,8 @@ class MassiveClient:
             return {"expirations": [], "strikes": [], "error": "symbol or api key missing"}
         expirations: set = set()
         strikes: set = set()
+        debug_pages: List[Dict[str, Any]] = []
+        contract_samples: List[Dict[str, Any]] = []
         next_url: Optional[str] = None
         path = "/v3/reference/options/contracts"
         params: Dict[str, Any] = {"underlying_ticker": underlying, "limit": 250}
@@ -106,27 +127,61 @@ class MassiveClient:
                 if "apiKey=" not in url and "apikey=" not in url.lower():
                     sep = "&" if "?" in url else "?"
                     url = f"{url}{sep}apiKey={self._api_key}"
+                url_redacted = _redact_url_api_key(url)
                 req = Request(url, headers={"Accept": "application/json"}, method="GET")
                 try:
                     with urlopen(req, timeout=60, context=self._ssl) as resp:
                         body = resp.read().decode("utf-8", errors="replace")
+                        http_st = int(getattr(resp, "status", 200) or 200)
                         data = json.loads(body)
                 except Exception as e:
-                    return {"expirations": sorted(expirations), "strikes": sorted(strikes), "error": str(e)}
+                    out_e: Dict[str, Any] = {
+                        "expirations": sorted(expirations),
+                        "strikes": sorted(strikes),
+                        "error": str(e),
+                    }
+                    if include_debug:
+                        out_e["massive_debug"] = {"pages": debug_pages, "contract_samples": contract_samples}
+                    return out_e
+                if include_debug:
+                    debug_pages.append(
+                        {
+                            "page_index": pages,
+                            "request": {"method": "GET", "url": url_redacted},
+                            "response_status": http_st,
+                            "response": data if isinstance(data, dict) else {"_non_object": data},
+                        }
+                    )
             else:
+                url_redacted = self._redacted_get_url(path, params)
                 status, data = self._get(path, params)
+                if include_debug:
+                    debug_pages.append(
+                        {
+                            "page_index": pages,
+                            "request": {"method": "GET", "url": url_redacted},
+                            "response_status": int(status),
+                            "response": data if isinstance(data, dict) else {"_non_object": data},
+                        }
+                    )
                 if status >= 400:
-                    return {
+                    err_body = data.get("error", data) if isinstance(data, dict) else str(data)
+                    out_err: Dict[str, Any] = {
                         "expirations": [],
                         "strikes": [],
-                        "error": data.get("error", data) if isinstance(data, dict) else str(data),
+                        "error": err_body,
                     }
+                    if include_debug:
+                        out_err["massive_debug"] = {"pages": debug_pages, "contract_samples": []}
+                    return out_err
             results = data.get("results") if isinstance(data, dict) else None
             if not results:
                 break
             for r in results:
                 if not isinstance(r, dict):
                     continue
+                if include_debug and len(contract_samples) < max_contract_samples:
+                    contract_samples.append(dict(r))
                 ed = r.get("expiration_date") or r.get("expiration")
                 if ed:
                     expirations.add(_norm_expiry(str(ed)[:10]))
@@ -139,10 +194,17 @@ class MassiveClient:
             next_url = data.get("next_url") if isinstance(data, dict) else None
             if not next_url:
                 break
-        return {
+        out: Dict[str, Any] = {
             "expirations": sorted(expirations),
             "strikes": sorted(strikes),
         }
+        if include_debug:
+            out["massive_debug"] = {
+                "pages": debug_pages,
+                "contract_samples": contract_samples,
+                "contract_samples_truncated": len(contract_samples) >= max_contract_samples,
+            }
+        return out
 
     def fetch_options_snapshot(self, underlying: str) -> Dict[str, Any]:
         """GET /v3/snapshot/options/{underlying}."""

@@ -480,9 +480,7 @@ export default function App() {
   const strategyLamp: LampId =
     !hb || !hb.daemon_alive ? 'red' : j?.trading_suspended === true ? 'yellow' : 'green'
   const celeryLamp: LampId =
-    status?.celery_broker_connected
-      ? ((status?.celery_workers?.length ?? 0) > 0 ? 'green' : 'yellow')
-      : 'red'
+    status?.celery_broker_connected && (status?.celery_workers?.length ?? 0) > 0 ? 'green' : 'red'
   const cl = celeryLamp as 'green' | 'yellow' | 'red'
   const systemLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
     if (dl === 'red' || ml === 'red' || cl === 'red') return 'red'

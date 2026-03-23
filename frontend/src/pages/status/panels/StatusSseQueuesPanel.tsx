@@ -113,6 +113,7 @@ export function StatusSseQueuesPanel({
       )}
 
       {metrics && (
+        <div className="table-scroll-x">
         <table className="table-operations" style={{ fontSize: 'var(--font-size-sm, 0.8125rem)' }}>
           <thead>
             <tr>
@@ -156,6 +157,7 @@ export function StatusSseQueuesPanel({
             })}
           </tbody>
         </table>
+        </div>
       )}
 
       {!metrics && !error && (

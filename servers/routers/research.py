@@ -171,6 +171,11 @@ async def get_option_expirations(
         "auto",
         description="massive: REST only; ib: IB only; auto: Massive if key + data, else IB",
     ),
+    debug: bool = Query(
+        False,
+        description="If true and provider uses Massive REST, include redacted request URLs, "
+        "per-page JSON responses, and a sample of contract objects (no DB writes).",
+    ),
 ) -> Dict[str, Any]:
     """R-OD1: Expirations and strikes from IB and/or Massive REST."""
     symbol = (symbol or "").strip()
@@ -208,7 +213,7 @@ async def get_option_expirations(
                 "provider": "massive",
             }
         client = MassiveClient(ms["api_key"], ms["rest_base"])
-        result = client.fetch_expirations_and_strikes(symbol)
+        result = client.fetch_expirations_and_strikes(symbol, include_debug=debug)
         expirations = result.get("expirations") or []
         strikes_raw: List[float] = result.get("strikes") or []
         strikes = _filter_option_strikes(strikes_raw, last_price)
@@ -223,6 +228,9 @@ async def get_option_expirations(
         err = result.get("error")
         if err:
             out["error"] = err
+        md = result.get("massive_debug")
+        if debug and isinstance(md, dict):
+            out["massive_debug"] = md
         return out
 
     # auto: Massive first when configured and successful
@@ -232,7 +240,7 @@ async def get_option_expirations(
     ms = get_massive_settings(config)
     if ms["api_key"]:
         client = MassiveClient(ms["api_key"], ms["rest_base"])
-        result = client.fetch_expirations_and_strikes(symbol)
+        result = client.fetch_expirations_and_strikes(symbol, include_debug=debug)
         err = result.get("error")
         exps = result.get("expirations") or []
         strikes_raw = result.get("strikes") or []
@@ -246,6 +254,9 @@ async def get_option_expirations(
             }
             if last_price is not None:
                 out["last_price"] = last_price
+            md = result.get("massive_debug")
+            if debug and isinstance(md, dict):
+                out["massive_debug"] = md
             return out
 
     ib_out = await _option_expirations_ib(request, symbol)
@@ -418,6 +429,36 @@ def list_massive_jobs(
     return {"ok": True, "jobs": jobs}
 
 
+@router.post("/research/massive/jobs/trim")
+def trim_massive_jobs(
+    request: Request,
+    keep: int = Query(200, ge=1, le=50000, description="Keep newest N jobs by id; delete older rows"),
+) -> Dict[str, Any]:
+    """Trim Massive job table to the newest `keep` rows (same idea as bars trim)."""
+    from servers.reader.massive_jobs import trim_job_massive_backfill
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "No DB", "deleted": 0}
+    deleted = trim_job_massive_backfill(db, keep=keep)
+    return {"ok": True, "deleted": deleted}
+
+
+@router.delete("/research/massive/jobs")
+def delete_all_massive_jobs(
+    request: Request,
+    status: Optional[str] = Query(None, description="If set, only delete jobs with this status"),
+) -> Dict[str, Any]:
+    """Delete all Massive jobs, or only those matching status."""
+    from servers.reader.massive_jobs import delete_all_job_massive_backfill
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "No DB", "deleted": 0}
+    deleted = delete_all_job_massive_backfill(db, status_filter=status)
+    return {"ok": True, "deleted": deleted}
+
+
 @router.get("/research/massive/jobs/{job_id}/events")
 async def stream_massive_job_events(
     request: Request,
@@ -472,6 +513,19 @@ def get_massive_job(request: Request, job_id: str) -> Dict[str, Any]:
     if job is None:
         return {"ok": False, "error": "Job not found"}
     return {"ok": True, "job": _massive_job_to_api(job)}
+
+
+@router.delete("/research/massive/jobs/{job_id}")
+def delete_massive_job(request: Request, job_id: str) -> Dict[str, Any]:
+    """Delete one Massive sync job row."""
+    from servers.reader.massive_jobs import delete_job_massive_backfill
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "No DB"}
+    if delete_job_massive_backfill(db, job_id):
+        return {"ok": True}
+    return {"ok": False, "error": "Delete failed"}
 
 
 @router.get("/research/massive/corporate-actions")

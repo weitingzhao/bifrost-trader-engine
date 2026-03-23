@@ -1808,8 +1808,9 @@ body::before {
   white-space: pre-wrap;
   word-break: break-word;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
-  scrollbar-color: var(--color-border-strong) var(--color-surface);
-  scrollbar-width: thin;
+  /* Hide vertical scrollbar by default; wheel / trackpad still scrolls. Show thin bar on hover or focus. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .celery-console-resize-handle {
@@ -1830,27 +1831,58 @@ body::before {
 }
 
 .celery-console-terminal::-webkit-scrollbar {
-  width: 8px;
+  width: 0;
+  height: 0;
 }
 
-.celery-console-terminal::-webkit-scrollbar-track {
-  background: var(--color-surface);
+.celery-console-wrap:hover .celery-console-terminal,
+.celery-console-terminal:focus-within {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar,
+.celery-console-terminal:focus-within::-webkit-scrollbar {
+  width: 5px;
+  height: 0;
+}
+
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-track,
+.celery-console-terminal:focus-within::-webkit-scrollbar-track {
+  background: transparent;
   border-radius: 0 8px 8px 0;
 }
 
-.celery-console-terminal::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
-  border-radius: 4px;
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb,
+.celery-console-terminal:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
 }
 
-.celery-console-terminal::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-dim);
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb:hover,
+.celery-console-terminal:focus-within::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
 }
 
 [data-theme="light"] .celery-console-terminal {
   --console-bg: var(--color-surface-elevated);
   --console-border: var(--color-border);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal,
+[data-theme="light"] .celery-console-terminal:focus-within {
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+
+[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb,
+[data-theme="light"] .celery-console-terminal:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+}
+
+[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] .celery-console-terminal:focus-within::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.5);
 }
 
 .celery-console-terminal pre {
@@ -2955,14 +2987,17 @@ tr:hover .realtime-quote-drag-handle {
 [data-theme="light"] .settings-sidebar-subs {
   border-left-color: rgba(14, 165, 233, 0.2);
 }
-[data-theme="light"] .settings-page-groups .daemon-group {
+[data-theme="light"] .settings-page-groups > .daemon-group,
+[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group {
   background: var(--color-surface);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
-[data-theme="light"] .settings-page-groups .daemon-group::before {
+[data-theme="light"] .settings-page-groups > .daemon-group::before,
+[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group::before {
   background: var(--color-accent);
 }
-[data-theme="light"] .settings-page-groups .daemon-group:hover {
+[data-theme="light"] .settings-page-groups > .daemon-group:hover,
+[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 [data-theme="light"] .settings-ib-config-table-wrap,
@@ -4647,7 +4682,8 @@ button:disabled {
 .settings-page {
   display: flex;
   width: 100%;
-  max-width: none;
+  max-width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 0;
   gap: 0;
@@ -4900,8 +4936,76 @@ button:disabled {
 .settings-main {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   padding: var(--space-5) var(--space-6);
   padding-left: var(--space-6);
+  /* Avoid a second horizontal scrollbar: wide tables/logs scroll inside their own wrappers */
+  overflow-x: hidden;
+}
+
+/* Embedded Daemon/Celery under Settings: don’t let grid/flex min-content widen the whole page */
+.settings-main > .settings-page-card.celery-page--embedded,
+.settings-main > .settings-page-card.daemon-status-page--embedded {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.celery-page-grid > * {
+  min-width: 0;
+}
+
+.daemon-status-page--embedded .daemon-groups,
+.daemon-status-page--embedded .status-management-celery-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.daemon-status-page--embedded .status-management-celery-row > .status-panel-section {
+  min-width: 0;
+}
+
+/* Event Subscribe subscription labels may nowrap; allow wrap when Daemon is embedded in Settings */
+.daemon-status-page--embedded .table-event-subscribe .event-subscribe-col-subscription {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* Daemon Event card + compact strategy: long status lines wrap instead of stretching layout */
+.daemon-group-event .daemon-group-body .section-hint,
+.daemon-event-run-status-hint,
+.strategy-compact-status {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.daemon-header-main > div {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* Wide status tables: scroll horizontally instead of stretching the page */
+.table-scroll-x {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+.table-scroll-x::-webkit-scrollbar {
+  height: 5px;
+}
+.table-scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+.table-scroll-x::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+.table-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
 }
 
 .settings-page-card {
@@ -4916,6 +5020,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
+  min-width: 0;
 }
 
 @media (min-width: 960px) {
@@ -4925,7 +5030,7 @@ button:disabled {
     grid-template-areas:
       'celery-status celery-sse'
       'celery-log celery-log'
-      'celery-massive celery-bars'
+      'celery-queues celery-queues'
       'celery-config celery-config';
     gap: var(--space-5);
     align-items: start;
@@ -4940,15 +5045,165 @@ button:disabled {
   .celery-page-cell--log {
     grid-area: celery-log;
   }
-  .celery-page-cell--massive {
-    grid-area: celery-massive;
-  }
-  .celery-page-cell--bars {
-    grid-area: celery-bars;
+  .celery-page-cell--queues {
+    grid-area: celery-queues;
   }
   .celery-page-cell--config {
     grid-area: celery-config;
   }
+}
+
+/* Settings sidebar layout: prevent grid tracks / Worker log from expanding past main column */
+.celery-page--embedded .celery-page-grid {
+  width: 100%;
+  max-width: 100%;
+}
+@media (min-width: 960px) {
+  .celery-page--embedded .celery-page-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+.celery-page--embedded .celery-page-cell--log,
+.celery-page--embedded .celery-page-cell--log.replay-section {
+  min-width: 0;
+  max-width: 100%;
+}
+.celery-page--embedded .celery-console-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.celery-page--embedded .celery-console-terminal {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Celery page: Massive + Bars queues (tabs, toolbar, confirm) */
+.celery-queue-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.celery-queue-tab {
+  padding: 0.4rem 0.85rem;
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+}
+.celery-queue-tab:hover {
+  color: var(--color-text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+.celery-queue-tab--active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+.celery-queue-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.celery-queue-toolbar-spacer {
+  flex: 1;
+  min-width: 0.5rem;
+}
+.celery-queue-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.celery-queue-field-label {
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-dim);
+}
+.celery-queue-select {
+  min-width: 8rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  font-size: var(--text-small);
+}
+.celery-queue-keep-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+.celery-queue-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+.celery-queue-keep-input {
+  width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  font-size: var(--text-small);
+}
+.celery-queue-hint {
+  margin-top: 0;
+  margin-bottom: var(--space-2);
+}
+.celery-queue-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.celery-queue-confirm-dialog {
+  max-width: 26rem;
+  width: 100%;
+  padding: var(--space-5);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+.celery-queue-confirm-title {
+  margin: 0 0 var(--space-3);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.celery-queue-confirm-message {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.celery-queue-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Contain stray overflow so nested scroll regions don’t stack with Settings main */
+.celery-page--embedded {
+  overflow-x: hidden;
 }
 
 .settings-page-header {
@@ -5100,7 +5355,9 @@ button:disabled {
   gap: var(--space-5);
 }
 
-.settings-page-groups .daemon-group {
+/* Only top-level Settings configuration cards — not nested StatusDaemonPanel / StatusCeleryPanel rows */
+.settings-page-groups > .daemon-group,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group {
   flex: none;
   min-width: 0;
   background: var(--color-surface);
@@ -5110,7 +5367,8 @@ button:disabled {
   position: relative;
   transition: border-color var(--transition-fast), box-shadow var(--transition-normal);
 }
-.settings-page-groups .daemon-group::before {
+.settings-page-groups > .daemon-group::before,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group::before {
   content: '';
   position: absolute;
   top: var(--space-4);
@@ -5122,30 +5380,36 @@ button:disabled {
   opacity: 0.5;
   transition: opacity var(--transition-fast);
 }
-.settings-page-groups .daemon-group:hover {
+.settings-page-groups > .daemon-group:hover,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group:hover {
   border-color: var(--color-border-strong);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
-.settings-page-groups .daemon-group:hover::before {
+.settings-page-groups > .daemon-group:hover::before,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group:hover::before {
   opacity: 1;
 }
-.settings-page-groups .daemon-group .daemon-group-header {
+.settings-page-groups > .daemon-group .daemon-group-header,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-header {
   margin-bottom: var(--space-4);
   padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--color-border);
 }
-.settings-page-groups .daemon-group .daemon-group-title {
+.settings-page-groups > .daemon-group .daemon-group-title,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-title {
   font-size: var(--text-caption);
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--color-text-main);
 }
-.settings-page-groups .daemon-group .daemon-group-body {
+.settings-page-groups > .daemon-group .daemon-group-body,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-body {
   padding: 0;
 }
 
 /* Scroll margin so anchor targets aren't under header */
-.settings-page-groups .daemon-group[id] {
+.settings-page-groups > .daemon-group[id],
+.settings-page-groups > .settings-ib-connection-group > .daemon-group[id] {
   scroll-margin-top: 1rem;
 }
 
@@ -12095,6 +12359,42 @@ th:has(> .coverage-pool-th-held-amt) {
   border-color: var(--color-border-strong);
 }
 
+.feed-massive-card.feed-massive-card--cap-active {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px var(--color-accent-soft),
+    0 8px 28px rgba(0, 0, 0, 0.12);
+}
+
+.feed-massive-card.feed-massive-card--cap-active:hover {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px var(--color-accent-soft),
+    0 10px 32px rgba(0, 0, 0, 0.14);
+}
+
+[data-theme="light"] .feed-massive-card.feed-massive-card--cap-active {
+  box-shadow:
+    0 0 0 2px var(--color-accent-soft),
+    0 6px 20px var(--color-dashboard-shadow);
+}
+
+.feed-massive-tab-chip.feed-massive-tab-chip--active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.feed-massive-cap-sheet .feed-massive-tab-chip.feed-massive-tab-chip--active {
+  background: var(--color-accent-soft);
+}
+
+.feed-massive-tab-chip.feed-massive-tab-chip--active:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
 .feed-massive-card-head {
   display: flex;
   flex-wrap: wrap;
@@ -12191,8 +12491,26 @@ th:has(> .coverage-pool-th-held-amt) {
   margin-top: var(--space-3);
   border-radius: 8px;
   border: 1px solid var(--color-border);
-  overflow: hidden;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: var(--color-bg);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+.feed-massive-table-wrap::-webkit-scrollbar {
+  height: 5px;
+}
+.feed-massive-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+.feed-massive-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+.feed-massive-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
 }
 
 .feed-massive-table-wrap .data-table {
