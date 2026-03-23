@@ -76,6 +76,8 @@ export {
   fetchMassiveLastTrade,
   fetchMassiveHistQuotes,
   fetchMassiveHistTrades,
+  fetchLiquiditySummary,
+  fetchRelativeValue,
 } from './research'
 export type {
   OptionSnapshotRow,
@@ -88,6 +90,8 @@ export type {
   MassiveMarketHolidaysResponse,
   TechnicalIndicatorParams,
   TechnicalIndicatorResponse,
+  LiquiditySummaryResponse,
+  RelativeValueResponse,
 } from './research'
 export {
   postSetHeartbeatInterval,

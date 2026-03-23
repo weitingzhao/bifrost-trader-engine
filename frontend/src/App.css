@@ -6478,6 +6478,303 @@ th {
   text-align: center;
 }
 
+/* ── Option Discovery: Contract Detail Panel (P0–P3) ── */
+
+.od-quotes-table tbody tr.od-quote-row { cursor: pointer; transition: background 0.1s; }
+.od-quotes-table tbody tr.od-quote-row:hover { background: var(--color-surface-elevated); }
+.od-quotes-table tbody tr.od-quote-row--selected { background: var(--color-accent-soft); outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
+.od-moneyness-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.od-moneyness-badge--itm { background: var(--color-success-soft, rgba(52,199,89,.15)); color: var(--color-success); }
+.od-moneyness-badge--atm { background: var(--color-accent-soft, rgba(88,166,255,.15)); color: var(--color-accent); }
+.od-moneyness-badge--otm { background: var(--color-surface-elevated); color: var(--color-text-muted); }
+.od-moneyness-badge--— { display: none; }
+
+/* Event context warnings (P3) */
+.od-event-warnings {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(210, 153, 34, 0.08);
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 8px;
+  font-size: var(--text-caption);
+  color: #d29922;
+}
+.od-event-warning-item::before { content: '⚠ '; }
+.od-event-warning-item + .od-event-warning-item { margin-top: 0.2rem; }
+
+/* Contract detail panel */
+.od-contract-detail {
+  margin-top: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.od-detail-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.od-detail-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+}
+
+.od-detail-expiry {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.od-detail-delayed {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #d29922;
+  white-space: nowrap;
+}
+
+.od-detail-close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  line-height: 1;
+}
+.od-detail-close:hover { background: var(--color-surface-elevated); color: var(--color-text); }
+
+/* Tabs */
+.od-detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  overflow-x: auto;
+}
+
+.od-detail-tab {
+  padding: 0.45rem 1rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.od-detail-tab:hover { color: var(--color-text); }
+.od-detail-tab--active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+
+/* Tab body */
+.od-detail-body { padding: var(--space-3); }
+
+/* Card grid: 2-4 columns responsive */
+.od-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-3);
+}
+
+.od-card-section {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-elevated);
+}
+
+.od-card-section-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+
+.od-kv-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.od-kv-k { color: var(--color-text-muted); font-weight: 500; white-space: nowrap; }
+.od-kv-v { color: var(--color-text); font-weight: 600; }
+.od-kv-dim { color: var(--color-text-muted); font-weight: 400; font-size: 0.7rem; }
+
+/* Quality badge */
+.od-quality-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  font-size: 0.7rem;
+}
+
+.od-quality-badge-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.od-quality-item {
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* Tradability score */
+.od-tradability-score {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-bottom: var(--space-2);
+}
+
+.od-tradability-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.od-tradability-good { color: var(--color-success); }
+.od-tradability-fair { color: #d29922; }
+.od-tradability-poor { color: var(--color-danger); }
+.od-tradability-label { font-size: 0.8rem; color: var(--color-text-muted); }
+
+.od-tradability-factors { display: flex; flex-direction: column; gap: 0.15rem; }
+.od-tradability-factor { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--text-caption); }
+
+/* Scenario table */
+.od-scenario-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+.od-scenario-table th {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.od-scenario-table td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.od-pnl-pos { color: var(--color-success); font-weight: 700; }
+.od-pnl-neg { color: var(--color-danger); font-weight: 700; }
+
+/* Relative Value label */
+.od-rv-label { font-weight: 800 !important; }
+.od-rv-label--rich { color: var(--color-danger) !important; }
+.od-rv-label--cheap { color: var(--color-success) !important; }
+.od-rv-label--neutral { color: var(--color-accent) !important; }
+.od-rv-label--— { color: var(--color-text-muted) !important; }
+
+/* IV Curve mini chart */
+.od-iv-curve {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 6rem;
+  padding-top: var(--space-1);
+}
+.od-iv-bar-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+}
+.od-iv-bar-wrap--active .od-iv-bar { background: var(--color-accent); }
+.od-iv-bar {
+  width: 100%;
+  max-width: 1.2rem;
+  background: var(--color-border-strong);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.2s;
+}
+.od-iv-bar-label {
+  font-size: 0.55rem;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  max-height: 2.5rem;
+  overflow: hidden;
+}
+.od-iv-bar-wrap--active .od-iv-bar-label { color: var(--color-accent); font-weight: 700; }
+
+/* Execution guidance chips (P3) */
+.od-exec-guidance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  font-size: 0.7rem;
+}
+
+.od-exec-guidance-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  margin-right: var(--space-1);
+}
+
+.od-exec-chip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.od-exec-chip--ok { background: rgba(52,199,89,.12); color: var(--color-success); }
+.od-exec-chip--warn { background: rgba(210,153,34,.12); color: #d29922; }
+.od-exec-chip--danger { background: rgba(248,81,73,.12); color: var(--color-danger); }
+
 /* Trade records section: prevent wide tables from pushing the section (Detail view / Accordion stays in view) */
 .replay-section-trade-records {
   max-width: 100%;

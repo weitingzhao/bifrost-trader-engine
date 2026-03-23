@@ -409,6 +409,122 @@ def get_option_snapshots_pg(
     return out
 
 
+@router.get("/research/option-contract/liquidity-summary")
+def get_option_contract_liquidity_summary(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+    expiration: str = Query(..., description="Expiration YYYYMMDD or YYYY-MM-DD"),
+    strike: float = Query(..., description="Strike price"),
+    right: str = Query(..., description="C or P"),
+    source: str = Query("massive", description="massive | ib"),
+) -> Dict[str, Any]:
+    """P1: Aggregate liquidity stats for a single contract — spread percentile, OI rank, snapshot freshness."""
+    from servers.massive_client import contract_key_from_parts
+    from servers.reader.massive_jobs import get_option_snapshots_latest
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    sym = (symbol or "").strip().upper()
+    exp_norm = _norm_expiry_key((expiration or "").strip())
+    r = (right or "").strip().upper()
+    if not sym or not exp_norm or r not in ("C", "P"):
+        return {"ok": False, "error": "symbol, expiration, strike, and right (C/P) are required"}
+    src = (source or "massive").strip().lower()
+    if src not in ("massive", "ib"):
+        src = "massive"
+
+    reader = getattr(request.app.state, "reader", None)
+    last_price: Optional[float] = None
+    if reader and hasattr(reader, "get_stock_day_fallback_price"):
+        fallback = reader.get_stock_day_fallback_price(sym)
+        if fallback and fallback[0] is not None and fallback[0] > 0:
+            last_price = float(fallback[0])
+    strikes_list = _strikes_around_spot(last_price) if last_price else [strike]
+
+    all_keys: List[str] = []
+    for st in strikes_list:
+        for rt in ("C", "P"):
+            all_keys.append(contract_key_from_parts(sym, exp_norm, float(st), rt))
+    target_key = contract_key_from_parts(sym, exp_norm, float(strike), r)
+    if target_key not in all_keys:
+        all_keys.append(target_key)
+
+    rows = get_option_snapshots_latest(db, all_keys, source=src)
+    spreads_same_right: List[float] = []
+    oi_same_right: List[int] = []
+    target_row: Optional[dict] = None
+    for row in rows:
+        ck = row.get("contract_key") or ""
+        bid = row.get("bid")
+        ask = row.get("ask")
+        mid_val = row.get("mid")
+        oi_val = row.get("open_interest")
+        r_part = ck.rsplit("|", 1)[-1] if "|" in ck else ""
+        if r_part == r:
+            if bid is not None and ask is not None and mid_val is not None:
+                try:
+                    mid_f = float(mid_val)
+                    if mid_f > 0:
+                        spreads_same_right.append((float(ask) - float(bid)) / mid_f * 100)
+                except (TypeError, ValueError):
+                    pass
+            if oi_val is not None:
+                try:
+                    oi_same_right.append(int(oi_val))
+                except (TypeError, ValueError):
+                    pass
+        if ck == target_key:
+            target_row = row
+
+    spread_pct: Optional[float] = None
+    spread_percentile: Optional[float] = None
+    if target_row:
+        bid = target_row.get("bid")
+        ask = target_row.get("ask")
+        mid_v = target_row.get("mid")
+        if bid is not None and ask is not None and mid_v is not None:
+            try:
+                mid_f = float(mid_v)
+                if mid_f > 0:
+                    spread_pct = (float(ask) - float(bid)) / mid_f * 100
+            except (TypeError, ValueError):
+                pass
+    if spread_pct is not None and len(spreads_same_right) > 1:
+        rank = sum(1 for s in spreads_same_right if s <= spread_pct)
+        spread_percentile = (rank / len(spreads_same_right)) * 100
+
+    oi_percentile: Optional[float] = None
+    target_oi = target_row.get("open_interest") if target_row else None
+    if target_oi is not None and len(oi_same_right) > 1:
+        try:
+            toi = int(target_oi)
+            rank = sum(1 for o in oi_same_right if o <= toi)
+            oi_percentile = (rank / len(oi_same_right)) * 100
+        except (TypeError, ValueError):
+            pass
+
+    snapshot_ts: Optional[str] = None
+    if target_row and target_row.get("snapshot_ts"):
+        ts = target_row["snapshot_ts"]
+        snapshot_ts = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+
+    return {
+        "ok": True,
+        "symbol": sym,
+        "expiration": exp_norm,
+        "strike": strike,
+        "right": r,
+        "source": src,
+        "spread_pct": round(spread_pct, 2) if spread_pct is not None else None,
+        "spread_percentile": round(spread_percentile, 1) if spread_percentile is not None else None,
+        "oi": int(target_oi) if target_oi is not None else None,
+        "oi_percentile": round(oi_percentile, 1) if oi_percentile is not None else None,
+        "contracts_compared": len(spreads_same_right),
+        "snapshot_ts": snapshot_ts,
+    }
+
+
 @router.get("/research/massive/greeks-coverage")
 def get_massive_greeks_coverage(
     request: Request,
@@ -509,6 +625,100 @@ def get_massive_greeks_coverage(
             conn.close()
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+@router.get("/research/option-contract/relative-value")
+def get_option_contract_relative_value(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+    expiration: str = Query(..., description="Expiration YYYYMMDD or YYYY-MM-DD"),
+    strike: float = Query(..., description="Strike price"),
+    right: str = Query(..., description="C or P"),
+    source: str = Query("massive", description="massive | ib"),
+) -> Dict[str, Any]:
+    """P2: IV relative value — z-score vs same-right contracts in same expiry."""
+    from servers.massive_client import contract_key_from_parts
+    from servers.reader.massive_jobs import get_option_snapshots_latest
+    import math
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    sym = (symbol or "").strip().upper()
+    exp_norm = _norm_expiry_key((expiration or "").strip())
+    r = (right or "").strip().upper()
+    if not sym or not exp_norm or r not in ("C", "P"):
+        return {"ok": False, "error": "symbol, expiration, strike, and right (C/P) are required"}
+    src = (source or "massive").strip().lower()
+    if src not in ("massive", "ib"):
+        src = "massive"
+
+    reader = getattr(request.app.state, "reader", None)
+    last_price: Optional[float] = None
+    if reader and hasattr(reader, "get_stock_day_fallback_price"):
+        fallback = reader.get_stock_day_fallback_price(sym)
+        if fallback and fallback[0] is not None and fallback[0] > 0:
+            last_price = float(fallback[0])
+    wide_strikes = _strikes_around_spot(last_price, count=30) if last_price else [strike]
+
+    keys: List[str] = []
+    for st in wide_strikes:
+        keys.append(contract_key_from_parts(sym, exp_norm, float(st), r))
+    target_key = contract_key_from_parts(sym, exp_norm, float(strike), r)
+    if target_key not in keys:
+        keys.append(target_key)
+
+    rows = get_option_snapshots_latest(db, keys, source=src)
+    ivs: List[float] = []
+    target_iv: Optional[float] = None
+    iv_curve: List[Dict[str, Any]] = []
+    for row in rows:
+        iv = row.get("iv")
+        if iv is None:
+            continue
+        try:
+            iv_f = float(iv)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(iv_f):
+            continue
+        ck = row.get("contract_key") or ""
+        parts = ck.split("|")
+        row_strike = float(parts[3]) if len(parts) > 3 else 0
+        ivs.append(iv_f)
+        iv_curve.append({"strike": row_strike, "iv": round(iv_f, 6)})
+        if ck == target_key:
+            target_iv = iv_f
+
+    if target_iv is None or len(ivs) < 3:
+        return {
+            "ok": True,
+            "label": None,
+            "iv_zscore": None,
+            "this_iv": target_iv,
+            "avg_iv": None,
+            "contracts_compared": len(ivs),
+            "iv_curve": sorted(iv_curve, key=lambda x: x["strike"]),
+        }
+
+    mean = sum(ivs) / len(ivs)
+    std = math.sqrt(sum((v - mean) ** 2 for v in ivs) / len(ivs))
+    if std < 1e-8:
+        z = 0.0
+    else:
+        z = (target_iv - mean) / std
+    label = "Rich" if z > 1 else ("Cheap" if z < -1 else "Neutral")
+
+    return {
+        "ok": True,
+        "label": label,
+        "iv_zscore": round(z, 3),
+        "this_iv": round(target_iv, 6),
+        "avg_iv": round(mean, 6),
+        "std_iv": round(std, 6),
+        "contracts_compared": len(ivs),
+        "iv_curve": sorted(iv_curve, key=lambda x: x["strike"]),
+    }
 
 
 @router.get("/research/massive/contracts-coverage")

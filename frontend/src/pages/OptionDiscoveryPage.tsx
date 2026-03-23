@@ -10,8 +10,13 @@ import {
   postMassiveSync,
   fetchOptionSnapshotsPg,
   pollMassiveJobUntilDone,
+  fetchMassiveLastTrade,
+  fetchMassiveHistQuotes,
+  fetchGreeksCoverage,
+  fetchLiquiditySummary,
+  fetchRelativeValue,
 } from '../api'
-import type { MassiveStatusResponse } from '../api'
+import type { MassiveStatusResponse, GreeksCoverageResponse, LiquiditySummaryResponse, RelativeValueResponse } from '../api'
 import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
@@ -78,6 +83,199 @@ function fmtOptNum(v: number | null | undefined, digits = 4): string {
   return v.toFixed(digits)
 }
 
+// ── P0–P3: Contract detail types & derived metric helpers ──
+
+type ContractDetailTab = 'overview' | 'liquidity' | 'risk' | 'relative'
+
+interface DerivedMetrics {
+  spread: number | null
+  spreadPct: number | null
+  intrinsic: number | null
+  extrinsic: number | null
+  breakeven: number | null
+  moneyness: number | null
+  moneynessLabel: 'ITM' | 'ATM' | 'OTM' | '—'
+}
+
+function computeDerivedMetrics(
+  row: OptionSnapshotRow,
+  underlying: number | null,
+): DerivedMetrics {
+  const bid = row.bid
+  const ask = row.ask
+  const mid = row.mid
+  const strike = row.strike
+  const isCall = row.right === 'C'
+
+  const spread = bid != null && ask != null && Number.isFinite(bid) && Number.isFinite(ask)
+    ? ask - bid : null
+  const spreadPct = spread != null && mid != null && mid > 0 ? (spread / mid) * 100 : null
+
+  let intrinsic: number | null = null
+  let extrinsic: number | null = null
+  let breakeven: number | null = null
+  let moneyness: number | null = null
+  let moneynessLabel: 'ITM' | 'ATM' | 'OTM' | '—' = '—'
+
+  if (underlying != null && Number.isFinite(underlying) && underlying > 0) {
+    intrinsic = isCall
+      ? Math.max(0, underlying - strike)
+      : Math.max(0, strike - underlying)
+    const premium = mid ?? (bid != null && ask != null ? (bid + ask) / 2 : null)
+    if (premium != null && Number.isFinite(premium)) {
+      extrinsic = Math.max(0, premium - intrinsic)
+      breakeven = isCall ? strike + premium : strike - premium
+    }
+    moneyness = ((underlying - strike) / underlying) * 100 * (isCall ? 1 : -1)
+    const threshold = 0.5
+    if (Math.abs(moneyness) < threshold) moneynessLabel = 'ATM'
+    else if (moneyness > 0) moneynessLabel = 'ITM'
+    else moneynessLabel = 'OTM'
+  }
+
+  return { spread, spreadPct, intrinsic, extrinsic, breakeven, moneyness, moneynessLabel }
+}
+
+function parseDteNumeric(expiration: string): number | null {
+  const s = (expiration || '').trim()
+  if (!s) return null
+  let y = 0, m = 0, d = 0
+  if (/^\d{8}$/.test(s)) {
+    y = parseInt(s.slice(0, 4), 10)
+    m = parseInt(s.slice(4, 6), 10) - 1
+    d = parseInt(s.slice(6, 8), 10)
+  } else {
+    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (match) { y = parseInt(match[1], 10); m = parseInt(match[2], 10) - 1; d = parseInt(match[3], 10) }
+    else return null
+  }
+  const expDate = new Date(y, m, d)
+  if (Number.isNaN(expDate.getTime())) return null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  expDate.setHours(0, 0, 0, 0)
+  const days = Math.round((expDate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000))
+  return days >= 0 ? days : null
+}
+
+// ── P1: Tradability Score (rule-based, client-side) ──
+
+interface TradabilityResult {
+  score: number
+  factors: { label: string; contribution: number; detail: string }[]
+}
+
+function computeTradabilityScore(
+  row: OptionSnapshotRow,
+  _allRows: OptionSnapshotRow[],
+  lastTradeAge: number | null,
+  quoteUpdateCount: number | null,
+): TradabilityResult {
+  const factors: TradabilityResult['factors'] = []
+  let total = 0
+
+  const bid = row.bid
+  const ask = row.ask
+  const mid = row.mid
+  if (bid != null && ask != null && mid != null && mid > 0) {
+    const spreadPct = ((ask - bid) / mid) * 100
+    const spreadScore = spreadPct < 2 ? 30 : spreadPct < 5 ? 22 : spreadPct < 10 ? 14 : spreadPct < 20 ? 6 : 0
+    factors.push({ label: 'Spread', contribution: spreadScore, detail: `${spreadPct.toFixed(1)}%` })
+    total += spreadScore
+  } else {
+    factors.push({ label: 'Spread', contribution: 0, detail: 'No bid/ask' })
+  }
+
+  const oi = row.open_interest
+  if (oi != null && Number.isFinite(oi)) {
+    const oiScore = oi >= 1000 ? 25 : oi >= 500 ? 20 : oi >= 100 ? 14 : oi >= 10 ? 7 : 2
+    factors.push({ label: 'Open Interest', contribution: oiScore, detail: String(oi) })
+    total += oiScore
+  } else {
+    factors.push({ label: 'Open Interest', contribution: 0, detail: 'N/A' })
+  }
+
+  if (quoteUpdateCount != null) {
+    const qScore = quoteUpdateCount >= 20 ? 20 : quoteUpdateCount >= 10 ? 15 : quoteUpdateCount >= 5 ? 10 : quoteUpdateCount >= 1 ? 5 : 0
+    factors.push({ label: 'Quote Activity', contribution: qScore, detail: `${quoteUpdateCount} updates` })
+    total += qScore
+  } else {
+    factors.push({ label: 'Quote Activity', contribution: 5, detail: 'Unknown' })
+    total += 5
+  }
+
+  if (lastTradeAge != null) {
+    const ageMin = lastTradeAge / 60
+    const tScore = ageMin < 5 ? 25 : ageMin < 30 ? 18 : ageMin < 120 ? 10 : ageMin < 1440 ? 4 : 0
+    factors.push({ label: 'Last Trade', contribution: tScore, detail: ageMin < 60 ? `${Math.round(ageMin)}m ago` : `${(ageMin / 60).toFixed(1)}h ago` })
+    total += tScore
+  } else {
+    factors.push({ label: 'Last Trade', contribution: 3, detail: 'Unknown' })
+    total += 3
+  }
+
+  return { score: Math.min(100, Math.max(0, total)), factors: factors.sort((a, b) => b.contribution - a.contribution) }
+}
+
+// ── P2: Scenario PnL estimation (Delta/Gamma/Vega first/second order) ──
+
+interface ScenarioResult {
+  label: string
+  pnl: number | null
+  detail: string
+}
+
+function computeScenarios(
+  row: OptionSnapshotRow,
+  underlying: number | null,
+): ScenarioResult[] {
+  if (underlying == null || !Number.isFinite(underlying) || underlying <= 0) return []
+  const d = row.delta, g = row.gamma, v = row.vega
+  if (d == null || !Number.isFinite(d)) return []
+
+  const results: ScenarioResult[] = []
+  const multiplier = 100
+
+  const upPct = 0.01
+  const upMove = underlying * upPct
+  const pnlUp = (d * upMove + (g != null && Number.isFinite(g) ? 0.5 * g * upMove * upMove : 0)) * multiplier
+  results.push({ label: 'S +1%', pnl: pnlUp, detail: `ΔS=$${upMove.toFixed(2)}` })
+
+  const downPct = -0.01
+  const downMove = underlying * downPct
+  const ivBump = 2
+  const pnlDown = (d * downMove + (g != null && Number.isFinite(g) ? 0.5 * g * downMove * downMove : 0)
+    + (v != null && Number.isFinite(v) ? v * (ivBump / 100) : 0)) * multiplier
+  results.push({ label: 'S -1%, IV +2pt', pnl: pnlDown, detail: `ΔS=$${downMove.toFixed(2)}, Δσ=+2pt` })
+
+  return results
+}
+
+// ── P2: Relative Value (IV z-score vs neighbors in same expiry) ──
+
+interface RelativeValueResult {
+  label: 'Rich' | 'Cheap' | 'Neutral' | '—'
+  ivZScore: number | null
+  neighborAvgIv: number | null
+  neighborCount: number
+}
+
+function computeRelativeValue(
+  row: OptionSnapshotRow,
+  allRows: OptionSnapshotRow[],
+): RelativeValueResult {
+  if (row.iv == null || !Number.isFinite(row.iv)) return { label: '—', ivZScore: null, neighborAvgIv: null, neighborCount: 0 }
+  const sameRight = allRows.filter(r => r.right === row.right && r.iv != null && Number.isFinite(r.iv!))
+  if (sameRight.length < 3) return { label: '—', ivZScore: null, neighborAvgIv: null, neighborCount: sameRight.length }
+  const ivs = sameRight.map(r => r.iv!)
+  const mean = ivs.reduce((s, v) => s + v, 0) / ivs.length
+  const std = Math.sqrt(ivs.reduce((s, v) => s + (v - mean) ** 2, 0) / ivs.length)
+  if (std < 1e-8) return { label: 'Neutral', ivZScore: 0, neighborAvgIv: mean, neighborCount: sameRight.length }
+  const z = (row.iv! - mean) / std
+  const label = z > 1 ? 'Rich' : z < -1 ? 'Cheap' : 'Neutral'
+  return { label, ivZScore: z, neighborAvgIv: mean, neighborCount: sameRight.length }
+}
+
 /** Parse expiration string (YYYYMMDD or YYYY-MM-DD) and return days from today. Returns "x day" / "x days". */
 function expirationDaysFromToday(expiration: string): string {
   const s = (expiration || '').trim()
@@ -137,6 +335,27 @@ export function OptionDiscoveryPage({
   const [multiSelectStrikes, setMultiSelectStrikes] = useState<number[]>([])
   const [symbolDailyPrices, setSymbolDailyPrices] = useState<Record<string, number | null>>({})
   const otmCallWrapRef = useRef<HTMLDivElement>(null)
+
+  // P0–P3: Contract detail panel state
+  const [selectedContractIdx, setSelectedContractIdx] = useState<number | null>(null)
+  const [contractDetailTab, setContractDetailTab] = useState<ContractDetailTab>('overview')
+
+  // P1: Liquidity async data
+  const [liquidityLastTrade, setLiquidityLastTrade] = useState<Record<string, unknown> | null>(null)
+  const [liquidityQuoteCount, setLiquidityQuoteCount] = useState<number | null>(null)
+  const [liquidityLoading, setLiquidityLoading] = useState(false)
+
+  // P1: Server-side liquidity summary
+  const [serverLiquidity, setServerLiquidity] = useState<LiquiditySummaryResponse | null>(null)
+
+  // P2: Greeks coverage for quality badge
+  const [greeksCoverage, setGreeksCoverage] = useState<GreeksCoverageResponse | null>(null)
+
+  // P2: Server-side relative value
+  const [serverRelativeValue, setServerRelativeValue] = useState<RelativeValueResponse | null>(null)
+
+  // P3: Event context
+  const [eventContextWarnings, setEventContextWarnings] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -315,6 +534,7 @@ export function OptionDiscoveryPage({
     setSnapshotLoading(true)
     setSnapshotError(null)
     setAddWatchlistFeedback(null)
+    setSelectedContractIdx(null)
     try {
       if (quoteSource === 'ib') {
         const res = await fetchOptionSnapshot(sym, exp, strikesToSend)
@@ -373,6 +593,102 @@ export function OptionDiscoveryPage({
     },
     [selectedSymbol, selectedExpiration],
   )
+
+  // P1: Load liquidity data when a contract is selected (Massive source only)
+  useEffect(() => {
+    if (selectedContractIdx == null || quoteSource !== 'massive') {
+      setLiquidityLastTrade(null)
+      setLiquidityQuoteCount(null)
+      setServerLiquidity(null)
+      return
+    }
+    const row = snapshotRows[selectedContractIdx]
+    if (!row) return
+    const sym = selectedSymbol.trim()
+    const exp = selectedExpiration.trim().replace(/-/g, '')
+    if (!sym || !exp) return
+    const strikeStr = String(Math.round(row.strike * 1000)).padStart(8, '0')
+    const optTicker = `O:${sym}${exp}${row.right}${strikeStr}`
+    let cancelled = false
+    setLiquidityLoading(true)
+    Promise.allSettled([
+      fetchMassiveLastTrade(optTicker),
+      fetchMassiveHistQuotes(optTicker, { limit: 50 }),
+      fetchLiquiditySummary(sym, selectedExpiration.trim(), row.strike, row.right, 'massive'),
+    ]).then(([tradeRes, quotesRes, liqRes]) => {
+      if (cancelled) return
+      if (tradeRes.status === 'fulfilled' && tradeRes.value.ok && tradeRes.value.results) {
+        setLiquidityLastTrade(tradeRes.value.results)
+      } else {
+        setLiquidityLastTrade(null)
+      }
+      if (quotesRes.status === 'fulfilled' && quotesRes.value.ok && quotesRes.value.count != null) {
+        setLiquidityQuoteCount(quotesRes.value.count)
+      } else {
+        setLiquidityQuoteCount(null)
+      }
+      if (liqRes.status === 'fulfilled' && liqRes.value.ok) {
+        setServerLiquidity(liqRes.value)
+      } else {
+        setServerLiquidity(null)
+      }
+      setLiquidityLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [selectedContractIdx, snapshotRows, selectedSymbol, selectedExpiration, quoteSource])
+
+  // P2: Load greeks coverage when quotes arrive (Massive source only)
+  useEffect(() => {
+    if (quoteSource !== 'massive' || snapshotRows.length === 0) {
+      setGreeksCoverage(null)
+      return
+    }
+    const sym = selectedSymbol.trim()
+    const exp = selectedExpiration.trim()
+    if (!sym) return
+    let cancelled = false
+    fetchGreeksCoverage(sym, exp, 'massive').then(r => {
+      if (!cancelled) setGreeksCoverage(r)
+    }).catch(() => { if (!cancelled) setGreeksCoverage(null) })
+    return () => { cancelled = true }
+  }, [snapshotRows.length, selectedSymbol, selectedExpiration, quoteSource])
+
+  // P2: Load server-side relative value when contract selected
+  useEffect(() => {
+    if (selectedContractIdx == null || quoteSource !== 'massive') {
+      setServerRelativeValue(null)
+      return
+    }
+    const row = snapshotRows[selectedContractIdx]
+    if (!row) return
+    const sym = selectedSymbol.trim()
+    const exp = selectedExpiration.trim()
+    if (!sym || !exp) return
+    let cancelled = false
+    fetchRelativeValue(sym, exp, row.strike, row.right, 'massive').then(r => {
+      if (!cancelled) setServerRelativeValue(r)
+    }).catch(() => { if (!cancelled) setServerRelativeValue(null) })
+    return () => { cancelled = true }
+  }, [selectedContractIdx, snapshotRows, selectedSymbol, selectedExpiration, quoteSource])
+
+  // P3: Build event context warnings
+  useEffect(() => {
+    const warnings: string[] = []
+    const dte = parseDteNumeric(selectedExpiration)
+    if (dte != null && dte <= 3) warnings.push(`DTE is ${dte} — high theta decay, exercise/assignment risk.`)
+    if (dte != null && dte === 0) warnings.push('Expiration day — avoid market orders, liquidity may vanish.')
+    if (greeksCoverage?.freshness?.stale_rows != null && greeksCoverage.freshness.stale_rows > 0) {
+      warnings.push(`${greeksCoverage.freshness.stale_rows} stale snapshot row(s) older than 24h.`)
+    }
+    setEventContextWarnings(warnings)
+  }, [selectedExpiration, greeksCoverage])
+
+  // Derived: selected row and its metrics
+  const selectedRow = selectedContractIdx != null ? snapshotRows[selectedContractIdx] ?? null : null
+  const selectedDerived = useMemo(() => {
+    if (!selectedRow) return null
+    return computeDerivedMetrics(selectedRow, underlyingPrice)
+  }, [selectedRow, underlyingPrice])
 
   const canLoadQuotes = selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && !snapshotLoading
 
@@ -790,7 +1106,7 @@ export function OptionDiscoveryPage({
         )}
         {snapshotRows.length > 0 && !snapshotLoading && (
           <div className="table-wrapper" style={{ overflowX: 'auto' }}>
-            <table className="data-table" aria-label="Option quotes by strike and type">
+            <table className="data-table od-quotes-table" aria-label="Option quotes by strike and type">
               <thead>
                 <tr>
                   <th>Strike</th>
@@ -809,40 +1125,58 @@ export function OptionDiscoveryPage({
                       <th>OI</th>
                     </>
                   )}
-                  <th aria-label="Add to Watchlist" />
+                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
-                {snapshotRows.map((row, idx) => (
-                  <tr key={`${row.strike}-${row.right}-${idx}`}>
-                    <td>{row.strike.toFixed(2)}</td>
-                    <td>{row.right === 'C' ? 'Call' : 'Put'}</td>
-                    <td>{row.bid != null ? fmtUsd(row.bid) : '—'}</td>
-                    <td>{row.ask != null ? fmtUsd(row.ask) : '—'}</td>
-                    <td>{row.last != null ? fmtUsd(row.last) : '—'}</td>
-                    <td>{row.mid != null ? fmtUsd(row.mid) : '—'}</td>
-                    {quoteSource === 'massive' && (
-                      <>
-                        <td>{fmtOptNum(row.iv, 4)}</td>
-                        <td>{fmtOptNum(row.delta, 4)}</td>
-                        <td>{fmtOptNum(row.gamma, 4)}</td>
-                        <td>{fmtOptNum(row.theta, 4)}</td>
-                        <td>{fmtOptNum(row.vega, 4)}</td>
-                        <td>{row.open_interest != null ? String(row.open_interest) : '—'}</td>
-                      </>
-                    )}
-                    <td>
-                      <button
-                        type="button"
-                        className="button button-secondary button-sm"
-                        onClick={() => handleAddToWatchlist(row)}
-                        aria-label={`Add ${row.right === 'C' ? 'Call' : 'Put'} ${row.strike} to Watchlist`}
-                      >
-                        Add to Watchlist
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {snapshotRows.map((row, idx) => {
+                  const isSelected = selectedContractIdx === idx
+                  const rowDerived = computeDerivedMetrics(row, underlyingPrice)
+                  return (
+                    <tr
+                      key={`${row.strike}-${row.right}-${idx}`}
+                      className={`od-quote-row${isSelected ? ' od-quote-row--selected' : ''}`}
+                      onClick={() => setSelectedContractIdx(isSelected ? null : idx)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedContractIdx(isSelected ? null : idx) } }}
+                      aria-pressed={isSelected}
+                    >
+                      <td>{row.strike.toFixed(2)}</td>
+                      <td>
+                        {row.right === 'C' ? 'Call' : 'Put'}
+                        {' '}
+                        <span className={`od-moneyness-badge od-moneyness-badge--${rowDerived.moneynessLabel.toLowerCase()}`}>
+                          {rowDerived.moneynessLabel}
+                        </span>
+                      </td>
+                      <td>{row.bid != null ? fmtUsd(row.bid) : '—'}</td>
+                      <td>{row.ask != null ? fmtUsd(row.ask) : '—'}</td>
+                      <td>{row.last != null ? fmtUsd(row.last) : '—'}</td>
+                      <td>{row.mid != null ? fmtUsd(row.mid) : '—'}</td>
+                      {quoteSource === 'massive' && (
+                        <>
+                          <td>{fmtOptNum(row.iv, 4)}</td>
+                          <td>{fmtOptNum(row.delta, 4)}</td>
+                          <td>{fmtOptNum(row.gamma, 4)}</td>
+                          <td>{fmtOptNum(row.theta, 4)}</td>
+                          <td>{fmtOptNum(row.vega, 4)}</td>
+                          <td>{row.open_interest != null ? String(row.open_interest) : '—'}</td>
+                        </>
+                      )}
+                      <td>
+                        <button
+                          type="button"
+                          className="button button-secondary button-sm"
+                          onClick={e => { e.stopPropagation(); handleAddToWatchlist(row) }}
+                          aria-label={`Add ${row.right === 'C' ? 'Call' : 'Put'} ${row.strike} to Watchlist`}
+                        >
+                          + Watchlist
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -851,6 +1185,402 @@ export function OptionDiscoveryPage({
           <p className="section-hint">Select symbol and expiration, then click Load quotes.</p>
         )}
       </section>
+
+      {/* ── P3: Event context warnings ── */}
+      {eventContextWarnings.length > 0 && selectedRow && (
+        <div className="od-event-warnings" role="alert">
+          {eventContextWarnings.map((w, i) => (
+            <div key={i} className="od-event-warning-item">{w}</div>
+          ))}
+        </div>
+      )}
+
+      {/* ── P0–P3: Contract detail panel ── */}
+      {selectedRow && selectedDerived && (
+        <section className="replay-section od-contract-detail" aria-label="Contract detail">
+          <div className="od-detail-header">
+            <h3 className="od-detail-title">
+              {selectedSymbol} {selectedRow.right === 'C' ? 'Call' : 'Put'} {selectedRow.strike.toFixed(2)}
+              {' '}
+              <span className="od-detail-expiry">{selectedExpiration} · {expirationDaysFromToday(selectedExpiration)} DTE</span>
+              {' '}
+              <span className={`od-moneyness-badge od-moneyness-badge--${selectedDerived.moneynessLabel.toLowerCase()}`}>
+                {selectedDerived.moneynessLabel}
+              </span>
+            </h3>
+            {quoteSource === 'massive' && (
+              <span className="od-detail-delayed">Massive · 15 min delayed</span>
+            )}
+            <button
+              type="button"
+              className="od-detail-close"
+              onClick={() => setSelectedContractIdx(null)}
+              aria-label="Close contract detail"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Tab bar */}
+          <div className="od-detail-tabs" role="tablist">
+            {([
+              ['overview', 'Overview'],
+              ['liquidity', 'Liquidity'],
+              ['risk', 'Risk'],
+              ['relative', 'Relative Value'],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                className={`od-detail-tab${contractDetailTab === id ? ' od-detail-tab--active' : ''}`}
+                aria-selected={contractDetailTab === id}
+                onClick={() => setContractDetailTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Tab: Overview (P0) ── */}
+          {contractDetailTab === 'overview' && (
+            <div className="od-detail-body">
+              <div className="od-card-grid">
+                <div className="od-card-section">
+                  <div className="od-card-section-title">Price</div>
+                  <div className="od-kv-grid">
+                    <span className="od-kv-k">Bid</span><span className="od-kv-v">{selectedRow.bid != null ? fmtUsd(selectedRow.bid) : '—'}</span>
+                    <span className="od-kv-k">Ask</span><span className="od-kv-v">{selectedRow.ask != null ? fmtUsd(selectedRow.ask) : '—'}</span>
+                    <span className="od-kv-k">Last</span><span className="od-kv-v">{selectedRow.last != null ? fmtUsd(selectedRow.last) : '—'}</span>
+                    <span className="od-kv-k">Mid</span><span className="od-kv-v">{selectedRow.mid != null ? fmtUsd(selectedRow.mid) : '—'}</span>
+                    <span className="od-kv-k">Spread</span>
+                    <span className="od-kv-v">
+                      {selectedDerived.spread != null ? `${fmtUsd(selectedDerived.spread)}` : '—'}
+                      {selectedDerived.spreadPct != null && <span className="od-kv-dim"> ({selectedDerived.spreadPct.toFixed(1)}%)</span>}
+                    </span>
+                  </div>
+                </div>
+                <div className="od-card-section">
+                  <div className="od-card-section-title">Value Decomposition</div>
+                  <div className="od-kv-grid">
+                    <span className="od-kv-k">Intrinsic</span><span className="od-kv-v">{selectedDerived.intrinsic != null ? fmtUsd(selectedDerived.intrinsic) : '—'}</span>
+                    <span className="od-kv-k">Extrinsic</span><span className="od-kv-v">{selectedDerived.extrinsic != null ? fmtUsd(selectedDerived.extrinsic) : '—'}</span>
+                    <span className="od-kv-k">Breakeven</span><span className="od-kv-v">{selectedDerived.breakeven != null ? fmtUsd(selectedDerived.breakeven) : '—'}</span>
+                    <span className="od-kv-k">Moneyness</span>
+                    <span className="od-kv-v">
+                      {selectedDerived.moneyness != null ? `${selectedDerived.moneyness > 0 ? '+' : ''}${selectedDerived.moneyness.toFixed(2)}%` : '—'}
+                    </span>
+                  </div>
+                </div>
+                <div className="od-card-section">
+                  <div className="od-card-section-title">Underlying</div>
+                  <div className="od-kv-grid">
+                    <span className="od-kv-k">Symbol</span><span className="od-kv-v">{selectedSymbol}</span>
+                    <span className="od-kv-k">Price</span><span className="od-kv-v">{underlyingPrice != null ? fmtUsd(underlyingPrice) : '—'}</span>
+                    <span className="od-kv-k">Strike</span><span className="od-kv-v">{fmtUsd(selectedRow.strike)}</span>
+                    <span className="od-kv-k">DTE</span><span className="od-kv-v">{expirationDaysFromToday(selectedExpiration)}</span>
+                  </div>
+                </div>
+                {quoteSource === 'massive' && (
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">Greeks</div>
+                    <div className="od-kv-grid">
+                      <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
+                      <span className="od-kv-k">Delta</span><span className="od-kv-v">{fmtOptNum(selectedRow.delta, 4)}</span>
+                      <span className="od-kv-k">Gamma</span><span className="od-kv-v">{fmtOptNum(selectedRow.gamma, 4)}</span>
+                      <span className="od-kv-k">Theta</span><span className="od-kv-v">{fmtOptNum(selectedRow.theta, 4)}</span>
+                      <span className="od-kv-k">Vega</span><span className="od-kv-v">{fmtOptNum(selectedRow.vega, 4)}</span>
+                      <span className="od-kv-k">OI</span><span className="od-kv-v">{selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* P2: Data Quality Badge */}
+              {greeksCoverage?.ok && greeksCoverage.total != null && greeksCoverage.total > 0 && (
+                <div className="od-quality-badge">
+                  <span className="od-quality-badge-title">Data Quality</span>
+                  <span className="od-quality-item" title="Percentage of contracts with IV data">
+                    IV {greeksCoverage.coverage?.iv_pct ?? 0}%
+                  </span>
+                  <span className="od-quality-item" title="Percentage with full greeks (Δ,Γ,Θ,ν)">
+                    Greeks {greeksCoverage.coverage?.full_greeks_pct ?? 0}%
+                  </span>
+                  {greeksCoverage.freshness?.newest_ts && (
+                    <span className="od-quality-item" title="Most recent snapshot timestamp">
+                      Fresh: {new Date(greeksCoverage.freshness.newest_ts).toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Tab: Liquidity (P1) ── */}
+          {contractDetailTab === 'liquidity' && (() => {
+            const lastTradeTs = liquidityLastTrade?.sip_timestamp != null
+              ? Number(liquidityLastTrade.sip_timestamp) / 1e9
+              : null
+            const lastTradeAge = lastTradeTs != null ? (Date.now() / 1000) - lastTradeTs : null
+            const tradability = computeTradabilityScore(selectedRow, snapshotRows, lastTradeAge, liquidityQuoteCount)
+            const spreadRows = snapshotRows
+              .filter(r => r.right === selectedRow.right && r.bid != null && r.ask != null && r.mid != null && r.mid! > 0)
+              .map(r => ((r.ask! - r.bid!) / r.mid!) * 100)
+              .sort((a, b) => a - b)
+            const curSpreadPct = selectedDerived?.spreadPct
+            let spreadPercentile: number | null = null
+            if (curSpreadPct != null && spreadRows.length > 1) {
+              const rank = spreadRows.filter(s => s <= curSpreadPct).length
+              spreadPercentile = (rank / spreadRows.length) * 100
+            }
+            return (
+              <div className="od-detail-body">
+                {liquidityLoading && <p className="section-hint">Loading liquidity data…</p>}
+                {quoteSource !== 'massive' && (
+                  <p className="section-hint">Liquidity details are available with Massive quote source.</p>
+                )}
+                <div className="od-card-grid">
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">Tradability Score</div>
+                    <div className="od-tradability-score">
+                      <span className={`od-tradability-value od-tradability-${tradability.score >= 60 ? 'good' : tradability.score >= 30 ? 'fair' : 'poor'}`}>
+                        {tradability.score}
+                      </span>
+                      <span className="od-tradability-label">/ 100</span>
+                    </div>
+                    <div className="od-tradability-factors">
+                      {tradability.factors.map(f => (
+                        <div key={f.label} className="od-tradability-factor">
+                          <span className="od-kv-k">{f.label}</span>
+                          <span className="od-kv-v">+{f.contribution} <span className="od-kv-dim">({f.detail})</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">Spread Analysis</div>
+                    <div className="od-kv-grid">
+                      <span className="od-kv-k">Spread ($)</span><span className="od-kv-v">{selectedDerived?.spread != null ? fmtUsd(selectedDerived.spread) : '—'}</span>
+                      <span className="od-kv-k">Spread (%)</span>
+                      <span className="od-kv-v">
+                        {serverLiquidity?.spread_pct != null ? `${serverLiquidity.spread_pct.toFixed(1)}%` : selectedDerived?.spreadPct != null ? `${selectedDerived.spreadPct.toFixed(1)}%` : '—'}
+                      </span>
+                      <span className="od-kv-k">Percentile</span>
+                      <span className="od-kv-v">
+                        {serverLiquidity?.spread_percentile != null
+                          ? `${serverLiquidity.spread_percentile.toFixed(0)}th`
+                          : spreadPercentile != null ? `${spreadPercentile.toFixed(0)}th` : '—'}
+                        <span className="od-kv-dim"> (vs {serverLiquidity?.contracts_compared ?? spreadRows.length} same-side contracts)</span>
+                      </span>
+                      <span className="od-kv-k">OI</span>
+                      <span className="od-kv-v">{serverLiquidity?.oi != null ? String(serverLiquidity.oi) : selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
+                      {serverLiquidity?.oi_percentile != null && (
+                        <>
+                          <span className="od-kv-k">OI Percentile</span>
+                          <span className="od-kv-v">{serverLiquidity.oi_percentile.toFixed(0)}th</span>
+                        </>
+                      )}
+                      {serverLiquidity?.snapshot_ts && (
+                        <>
+                          <span className="od-kv-k">Snapshot</span>
+                          <span className="od-kv-v od-kv-dim">{new Date(serverLiquidity.snapshot_ts).toLocaleString()}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">Last Trade</div>
+                    {liquidityLastTrade ? (
+                      <div className="od-kv-grid">
+                        <span className="od-kv-k">Price</span><span className="od-kv-v">{fmtUsd(Number(liquidityLastTrade.price))}</span>
+                        <span className="od-kv-k">Size</span><span className="od-kv-v">{String(liquidityLastTrade.size ?? '—')}</span>
+                        <span className="od-kv-k">Age</span>
+                        <span className="od-kv-v">
+                          {lastTradeAge != null ? (lastTradeAge < 3600 ? `${Math.round(lastTradeAge / 60)}m ago` : `${(lastTradeAge / 3600).toFixed(1)}h ago`) : '—'}
+                        </span>
+                        <span className="od-kv-k">Exchange</span><span className="od-kv-v">{String(liquidityLastTrade.exchange ?? '—')}</span>
+                      </div>
+                    ) : (
+                      <p className="section-hint">{liquidityLoading ? 'Loading…' : 'No last trade data available.'}</p>
+                    )}
+                  </div>
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">Quote Activity</div>
+                    <div className="od-kv-grid">
+                      <span className="od-kv-k">Recent Quotes</span>
+                      <span className="od-kv-v">{liquidityQuoteCount != null ? `${liquidityQuoteCount} updates` : '—'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* P3: Execution guidance */}
+                <div className="od-exec-guidance">
+                  <span className="od-exec-guidance-title">Execution Notes</span>
+                  {selectedDerived?.spreadPct != null && selectedDerived.spreadPct > 10 && (
+                    <span className="od-exec-chip od-exec-chip--warn">Wide spread — use limit near mid</span>
+                  )}
+                  {selectedDerived?.spreadPct != null && selectedDerived.spreadPct <= 3 && (
+                    <span className="od-exec-chip od-exec-chip--ok">Tight spread</span>
+                  )}
+                  {(selectedRow.open_interest == null || selectedRow.open_interest < 10) && (
+                    <span className="od-exec-chip od-exec-chip--warn">Low OI — thin liquidity</span>
+                  )}
+                  {lastTradeAge != null && lastTradeAge > 3600 && (
+                    <span className="od-exec-chip od-exec-chip--warn">Stale tape — last trade &gt;1h</span>
+                  )}
+                  {selectedRow.bid == null && selectedRow.ask == null && (
+                    <span className="od-exec-chip od-exec-chip--danger">No bid/ask — market closed or illiquid</span>
+                  )}
+                  {tradability.score >= 60 && selectedDerived?.spreadPct != null && selectedDerived.spreadPct <= 5 && (
+                    <span className="od-exec-chip od-exec-chip--ok">Good tradability</span>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* ── Tab: Risk (P2) ── */}
+          {contractDetailTab === 'risk' && (() => {
+            const scenarios = computeScenarios(selectedRow, underlyingPrice)
+            const hasGreeks = selectedRow.delta != null && Number.isFinite(selectedRow.delta!)
+            return (
+              <div className="od-detail-body">
+                {!hasGreeks && (
+                  <p className="section-hint">Greeks not available for this contract. Risk scenarios require at least delta.</p>
+                )}
+                <div className="od-card-grid">
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">Greeks (per contract)</div>
+                    <div className="od-kv-grid">
+                      <span className="od-kv-k">Delta (Δ)</span><span className="od-kv-v">{fmtOptNum(selectedRow.delta, 4)}</span>
+                      <span className="od-kv-k">Gamma (Γ)</span><span className="od-kv-v">{fmtOptNum(selectedRow.gamma, 4)}</span>
+                      <span className="od-kv-k">Theta (Θ)</span><span className="od-kv-v">{fmtOptNum(selectedRow.theta, 4)}</span>
+                      <span className="od-kv-k">Vega (ν)</span><span className="od-kv-v">{fmtOptNum(selectedRow.vega, 4)}</span>
+                      <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
+                    </div>
+                  </div>
+                  {scenarios.length > 0 && (
+                    <div className="od-card-section">
+                      <div className="od-card-section-title">Scenario Analysis (1 contract = 100 shares)</div>
+                      <table className="od-scenario-table">
+                        <thead>
+                          <tr>
+                            <th>Scenario</th>
+                            <th>Est. PnL</th>
+                            <th>Detail</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scenarios.map(s => (
+                            <tr key={s.label}>
+                              <td>{s.label}</td>
+                              <td className={s.pnl != null && s.pnl >= 0 ? 'od-pnl-pos' : 'od-pnl-neg'}>
+                                {s.pnl != null ? `${s.pnl >= 0 ? '+' : ''}${fmtUsd(s.pnl)}` : '—'}
+                              </td>
+                              <td className="od-kv-dim">{s.detail}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">Exposure Summary</div>
+                    <div className="od-kv-grid">
+                      <span className="od-kv-k">Delta $ (per 1 lot)</span>
+                      <span className="od-kv-v">
+                        {selectedRow.delta != null && underlyingPrice != null
+                          ? fmtUsd(selectedRow.delta * underlyingPrice * 100)
+                          : '—'}
+                      </span>
+                      <span className="od-kv-k">Theta $ / day</span>
+                      <span className="od-kv-v">
+                        {selectedRow.theta != null ? fmtUsd(selectedRow.theta * 100) : '—'}
+                      </span>
+                      <span className="od-kv-k">Vega $ / 1pt IV</span>
+                      <span className="od-kv-v">
+                        {selectedRow.vega != null ? fmtUsd(selectedRow.vega * 100 * 0.01) : '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* ── Tab: Relative Value (P2) ── */}
+          {contractDetailTab === 'relative' && (() => {
+            const clientRv = computeRelativeValue(selectedRow, snapshotRows)
+            const hasServer = serverRelativeValue?.ok && serverRelativeValue.label != null
+            const rvLabel = hasServer ? serverRelativeValue!.label! : clientRv.label
+            const rvZScore = hasServer ? serverRelativeValue!.iv_zscore : clientRv.ivZScore
+            const rvAvgIv = hasServer ? serverRelativeValue!.avg_iv : clientRv.neighborAvgIv
+            const rvCount = hasServer ? serverRelativeValue!.contracts_compared : clientRv.neighborCount
+            const serverCurve = serverRelativeValue?.iv_curve
+            const sameRight = snapshotRows.filter(r => r.right === selectedRow.right && r.iv != null && Number.isFinite(r.iv!))
+            const curveData = serverCurve && serverCurve.length >= 3
+              ? serverCurve
+              : sameRight.sort((a, b) => a.strike - b.strike).map(r => ({ strike: r.strike, iv: r.iv! }))
+            const maxIv = curveData.length > 0 ? Math.max(...curveData.map(c => c.iv)) : 1
+            return (
+              <div className="od-detail-body">
+                <div className="od-card-grid">
+                  <div className="od-card-section">
+                    <div className="od-card-section-title">IV Relative Value {hasServer && <span className="od-kv-dim">(server)</span>}</div>
+                    <div className="od-kv-grid">
+                      <span className="od-kv-k">Label</span>
+                      <span className={`od-kv-v od-rv-label od-rv-label--${rvLabel.toLowerCase()}`}>
+                        {rvLabel}
+                      </span>
+                      <span className="od-kv-k">IV z-score</span>
+                      <span className="od-kv-v">{rvZScore != null ? Number(rvZScore).toFixed(2) : '—'}</span>
+                      <span className="od-kv-k">This IV</span>
+                      <span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
+                      <span className="od-kv-k">Avg IV (same side)</span>
+                      <span className="od-kv-v">{rvAvgIv != null ? Number(rvAvgIv).toFixed(4) : '—'}</span>
+                      {serverRelativeValue?.std_iv != null && (
+                        <>
+                          <span className="od-kv-k">Std IV</span>
+                          <span className="od-kv-v">{Number(serverRelativeValue.std_iv).toFixed(4)}</span>
+                        </>
+                      )}
+                      <span className="od-kv-k">Contracts compared</span>
+                      <span className="od-kv-v">{rvCount ?? 0}</span>
+                    </div>
+                  </div>
+                  {curveData.length >= 3 && (
+                    <div className="od-card-section">
+                      <div className="od-card-section-title">IV Curve (same expiry, {selectedRow.right === 'C' ? 'Calls' : 'Puts'})</div>
+                      <div className="od-iv-curve">
+                        {curveData.map(c => {
+                          const isThis = c.strike === selectedRow.strike
+                          const barH = Math.max(2, Math.min(100, (c.iv / maxIv) * 100))
+                          return (
+                            <div key={c.strike} className={`od-iv-bar-wrap${isThis ? ' od-iv-bar-wrap--active' : ''}`} title={`${c.strike}: IV ${c.iv.toFixed(4)}`}>
+                              <div className="od-iv-bar" style={{ height: `${barH}%` }} />
+                              <div className="od-iv-bar-label">{c.strike}</div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* P2: Data Quality Badge */}
+                {greeksCoverage?.ok && greeksCoverage.total != null && greeksCoverage.total > 0 && (
+                  <div className="od-quality-badge">
+                    <span className="od-quality-badge-title">Data Quality</span>
+                    <span className="od-quality-item">IV {greeksCoverage.coverage?.iv_pct ?? 0}%</span>
+                    <span className="od-quality-item">Greeks {greeksCoverage.coverage?.full_greeks_pct ?? 0}%</span>
+                    <span className="od-quality-item">OI {greeksCoverage.coverage?.with_oi ?? 0} contracts</span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+        </section>
+      )}
     </div>
   )
 }

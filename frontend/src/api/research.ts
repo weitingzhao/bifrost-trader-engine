@@ -743,3 +743,97 @@ export async function pollMassiveJobUntilDone(
   }
   return { ok: false, error: 'Job poll timed out' }
 }
+
+// ── P1: Liquidity Summary ──
+
+export interface LiquiditySummaryResponse {
+  ok: boolean
+  symbol?: string
+  expiration?: string
+  strike?: number
+  right?: string
+  source?: string
+  spread_pct?: number | null
+  spread_percentile?: number | null
+  oi?: number | null
+  oi_percentile?: number | null
+  contracts_compared?: number
+  snapshot_ts?: string | null
+  error?: string
+}
+
+export async function fetchLiquiditySummary(
+  symbol: string,
+  expiration: string,
+  strike: number,
+  right: string,
+  source: 'massive' | 'ib' = 'massive',
+): Promise<LiquiditySummaryResponse> {
+  const q = new URLSearchParams({
+    symbol: (symbol || '').trim(),
+    expiration: (expiration || '').trim(),
+    strike: String(strike),
+    right: (right || '').trim(),
+    source,
+  })
+  const r = await fetch(`${API}/research/option-contract/liquidity-summary?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    symbol: j.symbol,
+    expiration: j.expiration,
+    strike: j.strike,
+    right: j.right,
+    source: j.source,
+    spread_pct: j.spread_pct ?? null,
+    spread_percentile: j.spread_percentile ?? null,
+    oi: j.oi ?? null,
+    oi_percentile: j.oi_percentile ?? null,
+    contracts_compared: j.contracts_compared,
+    snapshot_ts: j.snapshot_ts ?? null,
+    error: j.error,
+  }
+}
+
+// ── P2: Relative Value ──
+
+export interface RelativeValueResponse {
+  ok: boolean
+  label?: string | null
+  iv_zscore?: number | null
+  this_iv?: number | null
+  avg_iv?: number | null
+  std_iv?: number | null
+  contracts_compared?: number
+  iv_curve?: { strike: number; iv: number }[]
+  error?: string
+}
+
+export async function fetchRelativeValue(
+  symbol: string,
+  expiration: string,
+  strike: number,
+  right: string,
+  source: 'massive' | 'ib' = 'massive',
+): Promise<RelativeValueResponse> {
+  const q = new URLSearchParams({
+    symbol: (symbol || '').trim(),
+    expiration: (expiration || '').trim(),
+    strike: String(strike),
+    right: (right || '').trim(),
+    source,
+  })
+  const r = await fetch(`${API}/research/option-contract/relative-value?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    label: j.label ?? null,
+    iv_zscore: j.iv_zscore ?? null,
+    this_iv: j.this_iv ?? null,
+    avg_iv: j.avg_iv ?? null,
+    std_iv: j.std_iv ?? null,
+    contracts_compared: j.contracts_compared,
+    iv_curve: Array.isArray(j.iv_curve) ? j.iv_curve : undefined,
+    error: j.error,
+  }
+}
