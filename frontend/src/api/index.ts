@@ -73,6 +73,9 @@ export {
   fetchMassiveMarketHolidays,
   fetchMassiveMarketStatus,
   fetchTechnicalIndicator,
+  fetchMassiveLastTrade,
+  fetchMassiveHistQuotes,
+  fetchMassiveHistTrades,
 } from './research'
 export type {
   OptionSnapshotRow,

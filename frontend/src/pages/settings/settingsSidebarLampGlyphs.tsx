@@ -26,10 +26,21 @@ export type SettingsSidebarLampGlyphId =
   | 'aggregates'
   | 'greeks-iv'
   | 'daily-oi'
-  | 'trades'
+  | 'trades-quotes'
   | 'corporate-actions'
   | 'websocket'
-  | 'celery-queue'
+  | 'ws-aggregates-s'
+  | 'ws-aggregates-m'
+  | 'ws-quotes'
+  | 'ws-trades'
+  | 'fmv'
+  | 'contracts'
+  | 'market-ops'
+  | 'technical-indicators'
+  | 'flat-file-day-aggs'
+  | 'flat-file-minute-aggs'
+  | 'flat-file-quotes'
+  | 'flat-file-trades'
 
 export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphId | string }) {
   const k = id as SettingsSidebarLampGlyphId
@@ -120,8 +131,8 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
           <path d="M12 8h.01" />
         </svg>
       )
-    /** Option trades: bidirectional exchange */
-    case 'trades':
+    /** Trades & Quotes: bidirectional exchange */
+    case 'trades-quotes':
       return (
         <svg {...SVG_COMMON}>
           <path d="M16 3h5v5" />
@@ -138,6 +149,33 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
           <path d="M16 7V5a4 4 0 0 0-8 0v2" />
         </svg>
       )
+    /** Contracts: document with check */
+    case 'contracts':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <polyline points="9 14 11 16 15 12" />
+        </svg>
+      )
+    /** Market Ops: globe */
+    case 'market-ops':
+      return (
+        <svg {...SVG_COMMON}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18" />
+          <path d="M12 3a14 14 0 0 1 0 18" />
+          <path d="M12 3a14 14 0 0 0 0 18" />
+        </svg>
+      )
+    /** Technical Indicators: line chart */
+    case 'technical-indicators':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M3 3v18h18" />
+          <path d="m7 15 3-4 3 2 4-6" />
+        </svg>
+      )
     /** WebSocket: radiating signal */
     case 'websocket':
       return (
@@ -147,14 +185,74 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
           <circle cx="12" cy="20" r="1.5" />
         </svg>
       )
-    /** Massive job queue: numbered list */
-    case 'celery-queue':
+    /** WS aggregates /s and /m */
+    case 'ws-aggregates-s':
+    case 'ws-aggregates-m':
       return (
         <svg {...SVG_COMMON}>
-          <path d="M8 6h13M8 12h13M8 18h13" />
-          <circle cx="4" cy="6" r="1.25" fill="currentColor" strokeWidth="0" />
-          <circle cx="4" cy="12" r="1.25" fill="currentColor" strokeWidth="0" />
-          <circle cx="4" cy="18" r="1.25" fill="currentColor" strokeWidth="0" />
+          <line x1="18" y1="20" x2="18" y2="10" />
+          <line x1="12" y1="20" x2="12" y2="4" />
+          <line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+      )
+    /** WS quotes and trades */
+    case 'ws-quotes':
+    case 'ws-trades':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M16 3h5v5" />
+          <path d="M8 21H3v-5" />
+          <path d="M21 3 14 10" />
+          <path d="M3 21l7-7" />
+        </svg>
+      )
+    /** FMV: diamond (fair market value) */
+    case 'fmv':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M6 3h12l4 6-10 12L2 9l4-6z" />
+          <path d="M2 9h20" />
+          <path d="M10 3l-4 6 6 12 6-12-4-6" />
+        </svg>
+      )
+    /** Flat Files: day aggregates */
+    case 'flat-file-day-aggs':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="15" x2="16" y2="15" />
+          <line x1="8" y1="18" x2="16" y2="18" />
+        </svg>
+      )
+    /** Flat Files: minute aggregates */
+    case 'flat-file-minute-aggs':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <circle cx="12" cy="16" r="3" />
+          <path d="M12 16V14.5" />
+        </svg>
+      )
+    /** Flat Files: quotes */
+    case 'flat-file-quotes':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <path d="M8 17h8" />
+          <path d="M9 14h6" />
+        </svg>
+      )
+    /** Flat Files: trades */
+    case 'flat-file-trades':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <path d="M8 17h8" />
+          <path d="m10 13 2 2 2-2" />
         </svg>
       )
     default:

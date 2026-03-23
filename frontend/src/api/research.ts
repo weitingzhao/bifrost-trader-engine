@@ -649,6 +649,77 @@ export async function fetchTechnicalIndicator(
   }
 }
 
+// ── Trades & Quotes (read-only REST) ──
+
+export async function fetchMassiveLastTrade(
+  optionsTicker: string,
+): Promise<{ ok: boolean; results?: Record<string, unknown>; error?: string }> {
+  const ot = (optionsTicker || '').trim()
+  if (!ot) return { ok: false, error: 'options_ticker is required' }
+  const r = await fetch(`${API}/research/massive/trades-quotes/last-trade/${encodeURIComponent(ot)}`)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    results: j.results,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function fetchMassiveHistQuotes(
+  optionsTicker: string,
+  options?: {
+    timestamp_gte?: string
+    timestamp_lte?: string
+    limit?: number
+    sort?: string
+  },
+): Promise<{ ok: boolean; results?: Record<string, unknown>[]; count?: number; error?: string }> {
+  const ot = (optionsTicker || '').trim()
+  if (!ot) return { ok: false, error: 'options_ticker is required' }
+  const q = new URLSearchParams()
+  if (options?.timestamp_gte) q.set('timestamp_gte', options.timestamp_gte)
+  if (options?.timestamp_lte) q.set('timestamp_lte', options.timestamp_lte)
+  if (options?.limit) q.set('limit', String(options.limit))
+  if (options?.sort) q.set('order', options.sort)
+  const r = await fetch(`${API}/research/massive/trades-quotes/quotes/${encodeURIComponent(ot)}?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    results: Array.isArray(j.results) ? j.results : undefined,
+    count: typeof j.count === 'number' ? j.count : undefined,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function fetchMassiveHistTrades(
+  optionsTicker: string,
+  options?: {
+    timestamp_gte?: string
+    timestamp_lte?: string
+    limit?: number
+    sort?: string
+  },
+): Promise<{ ok: boolean; results?: Record<string, unknown>[]; count?: number; error?: string }> {
+  const ot = (optionsTicker || '').trim()
+  if (!ot) return { ok: false, error: 'options_ticker is required' }
+  const q = new URLSearchParams()
+  if (options?.timestamp_gte) q.set('timestamp_gte', options.timestamp_gte)
+  if (options?.timestamp_lte) q.set('timestamp_lte', options.timestamp_lte)
+  if (options?.limit) q.set('limit', String(options.limit))
+  if (options?.sort) q.set('order', options.sort)
+  const r = await fetch(`${API}/research/massive/trades-quotes/trades/${encodeURIComponent(ot)}?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  if (r.status === 403) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : 'Developer tier required' }
+  }
+  return {
+    ok: Boolean(j.ok),
+    results: Array.isArray(j.results) ? j.results : undefined,
+    count: typeof j.count === 'number' ? j.count : undefined,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
 export async function pollMassiveJobUntilDone(
   jobId: string,
   options?: { maxAttempts?: number; intervalMs?: number },

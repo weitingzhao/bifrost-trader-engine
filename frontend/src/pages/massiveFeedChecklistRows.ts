@@ -1,8 +1,19 @@
+export type CapabilityGroup = 'rest' | 'ws' | 'flat'
+
+export const CAPABILITY_GROUP_LABELS: Record<CapabilityGroup, string> = {
+  rest: 'REST API',
+  ws: 'WebSocket',
+  flat: 'Flat Files',
+}
+
+export const CAPABILITY_GROUP_ORDER: CapabilityGroup[] = ['rest', 'ws', 'flat']
+
 export interface ChecklistRow {
   id: string
   service: string
+  group: CapabilityGroup
   description: string
-  tierMin: 'starter' | 'developer'
+  tierMin: 'starter' | 'developer' | 'business'
   requiresTrades?: boolean
   projectStatus: 'implemented' | 'partial' | 'not-implemented'
   verification: string
@@ -18,6 +29,7 @@ const rows: ChecklistRow[] = [
   {
     id: 'reference',
     service: 'Reference / contracts',
+    group: 'rest',
     description: 'Expirations and strikes for an underlying',
     tierMin: 'starter',
     projectStatus: 'implemented',
@@ -29,6 +41,7 @@ const rows: ChecklistRow[] = [
   {
     id: 'snapshot',
     service: 'Chain snapshot',
+    group: 'rest',
     description: 'Full option chain quotes persisted to option_snapshots',
     tierMin: 'starter',
     projectStatus: 'implemented',
@@ -40,20 +53,22 @@ const rows: ChecklistRow[] = [
   {
     id: 'aggregates',
     service: 'Option aggregates',
+    group: 'rest',
     description:
-      'Five aggregate endpoints: REST Custom Bars (OHLCV over custom range), Daily Ticker Summary (open/close for a date), Previous Day Bar (last trading day OHLC); WebSocket per-second (A) and per-minute (AM) streams.',
+      'Three REST aggregate endpoints: Custom Bars (OHLCV over custom range), Daily Ticker Summary (open/close for a date), and Previous Day Bar (last trading day OHLC).',
     tierMin: 'starter',
     projectStatus: 'implemented',
     verification:
-      'REST: Enqueue aggregates with mode custom_bars | open_close | prev → check Job queue result. WS: run verify script with --channel "A.O:…" or "AM.O:…".',
+      'REST: Enqueue aggregates with mode custom_bars | open_close | prev → check Job queue result.',
     purpose:
-      'Custom Bars backfills per-contract bars for charting and backtesting. Daily Summary provides single-day open/close + pre/after-hours. Previous Day gives a quick baseline without calendar math. WS A/AM deliver real-time second/minute bars for live monitoring.',
+      'Custom Bars backfills per-contract bars for charting and backtesting. Daily Summary provides single-day open/close + pre/after-hours. Previous Day gives a quick baseline without calendar math.',
     helpVerification:
-      'Custom Bars: Enqueue aggregates (mode custom_bars or omit mode) with options_ticker, symbol, expiry, strike, right, start_ms, end_ms. Open/Close: mode open_close with options_ticker + date (YYYY-MM-DD). Previous Day: mode prev with options_ticker. WS: copy the verify command from the Option aggregates section and run in a terminal.',
+      'Custom Bars: Enqueue aggregates (mode custom_bars or omit mode) with options_ticker, symbol, expiry, strike, right, start_ms, end_ms. Open/Close: mode open_close with options_ticker + date (YYYY-MM-DD). Previous Day: mode prev with options_ticker.',
   },
   {
     id: 'greeks-iv',
     service: 'Greeks / IV',
+    group: 'rest',
     description:
       'IV, delta, gamma, theta, vega, and open interest from chain, contract, and unified snapshot endpoints. DB Verify tab shows per-row quality; chain snapshot reports coverage stats.',
     tierMin: 'starter',
@@ -71,6 +86,7 @@ const rows: ChecklistRow[] = [
   {
     id: 'daily-oi',
     service: 'Daily open interest',
+    group: 'rest',
     description: 'Historical daily OI backfill into option_open_interest_daily',
     tierMin: 'starter',
     projectStatus: 'partial',
@@ -80,22 +96,27 @@ const rows: ChecklistRow[] = [
       'GET /research/option-oi?symbol=… returns rows from option_open_interest_daily when populated. The OI enqueue job is a placeholder; chain snapshot may include OI when available.',
   },
   {
-    id: 'trades',
-    service: 'Option trades',
+    id: 'trades-quotes',
+    service: 'Trades & Quotes',
+    group: 'rest',
     description:
-      'Per Massive: not included on Starter; Developer tier may include trade ticks (see trades_enabled). This is a plan/tier limit, not a missing app feature when your tier excludes it.',
-    tierMin: 'developer',
-    requiresTrades: true,
-    projectStatus: 'not-implemented',
+      'Three REST endpoints: Last Trade, Historical Quotes, Historical Trades. '
+      + 'Last trade and historical quotes are available on Starter tier; historical trades require Developer tier and trades_enabled.',
+    tierMin: 'starter',
+    projectStatus: 'implemented',
     verification:
-      'GET /research/option-trades — 403 when not entitled per Massive tier; when entitled, Celery sync is not wired yet in this app.',
-    purpose: 'Optional tick-level option trades ingestion when your plan enables trades_enabled.',
+      'Trades & Quotes section: Last Trade / Historical Quotes / Historical Trades (REST tabs). Trades-specific tab shows tier gate when trades_enabled is off.',
+    purpose:
+      'Query and verify option trade and quote data from Massive REST. Last Trade gives the most recent fill; Historical Quotes retrieves BBO history; Historical Trades provides tick-level fills.',
     helpVerification:
-      'Call GET /research/option-trades?symbol=… . HTTP 403 with a message means trades are disabled by tier or config. When entitled, stored rows appear in option_trades after sync is implemented.',
+      '1) Last Trade tab: enter an options ticker, click Fetch. Returns the most recent trade price/size/exchange/timestamp. '
+      + '2) Historical Quotes tab: enter an options ticker + optional timestamp range, click Fetch. Returns BBO quote history. '
+      + '3) Historical Trades tab: enter an options ticker + optional timestamp range, click Fetch. Requires Developer tier.',
   },
   {
     id: 'corporate-actions',
     service: 'Corporate actions',
+    group: 'rest',
     description:
       'Dividends and splits synced via Massive REST to massive_corporate_action table.',
     tierMin: 'starter',
@@ -109,6 +130,7 @@ const rows: ChecklistRow[] = [
   {
     id: 'websocket',
     service: 'WebSocket streaming',
+    group: 'ws',
     description:
       'Options Starter includes WS access. A standalone verification script is provided; the engine does not maintain a persistent WS bridge.',
     tierMin: 'starter',
@@ -121,20 +143,66 @@ const rows: ChecklistRow[] = [
     testHint: 'Browser cannot run the Python script; copy the command to a terminal.',
   },
   {
-    id: 'celery-queue',
-    service: 'Celery massive queue',
-    description: 'Worker consuming the dedicated `massive` task queue',
+    id: 'ws-aggregates-s',
+    service: 'Aggregates /s',
+    group: 'ws',
+    description: 'WebSocket per-second aggregate bars for options channel A.O:{optionsTicker}.',
     tierMin: 'starter',
-    projectStatus: 'implemented',
+    projectStatus: 'partial',
     verification:
-      'Settings → Feed → Celery (Massive queue table) or Feed → Massive Option — POST /research/massive/sync + GET /research/massive/jobs; worker needs -Q massive',
-    purpose: 'Background execution of Massive sync jobs so the API server stays responsive.',
+      'WebSocket → Aggregates /s: copy verify command with --channel "A.O:…" and run in terminal.',
+    purpose: 'Stream second-by-second OHLCV bars for a single options contract in real time.',
     helpVerification:
-      'Start a Celery worker with -Q massive. Enqueue any sync job; GET /research/massive/jobs should show pending → running → done. Use Settings → Feed → Celery for the same job list shortcut.',
+      'Open WebSocket → Aggregates /s, copy command, run python scripts/verify_massive_options_ws.py --config ... --channel "A.O:...".',
+    testHint: 'Browser cannot run the Python script; copy the command to a terminal.',
+  },
+  {
+    id: 'ws-aggregates-m',
+    service: 'Aggregates /m',
+    group: 'ws',
+    description: 'WebSocket per-minute aggregate bars for options channel AM.O:{optionsTicker}.',
+    tierMin: 'starter',
+    projectStatus: 'partial',
+    verification:
+      'WebSocket → Aggregates /m: copy verify command with --channel "AM.O:…" and run in terminal.',
+    purpose: 'Stream minute-by-minute OHLCV bars for a single options contract in real time.',
+    helpVerification:
+      'Open WebSocket → Aggregates /m, copy command, run python scripts/verify_massive_options_ws.py --config ... --channel "AM.O:...".',
+    testHint: 'Browser cannot run the Python script; copy the command to a terminal.',
+  },
+  {
+    id: 'ws-quotes',
+    service: 'Quotes',
+    group: 'ws',
+    description: 'WebSocket real-time BBO quotes for options channel Q.O:{optionsTicker}.',
+    tierMin: 'starter',
+    projectStatus: 'partial',
+    verification:
+      'WebSocket → Quotes: copy verify command with --channel "Q.O:…" and run in terminal.',
+    purpose: 'Stream top-of-book bid/ask updates for a single options contract.',
+    helpVerification:
+      'Open WebSocket → Quotes, copy command, run python scripts/verify_massive_options_ws.py --config ... --channel "Q.O:...".',
+    testHint: 'Browser cannot run the Python script; copy the command to a terminal.',
+  },
+  {
+    id: 'ws-trades',
+    service: 'Trades',
+    group: 'ws',
+    description: 'WebSocket tick-level trades for options channel T.O:{optionsTicker}. Requires Developer tier and trades_enabled.',
+    tierMin: 'developer',
+    requiresTrades: true,
+    projectStatus: 'partial',
+    verification:
+      'WebSocket → Trades: copy verify command with --channel "T.O:…" and run in terminal.',
+    purpose: 'Stream tick-by-tick trade prints for a single options contract.',
+    helpVerification:
+      'Open WebSocket → Trades, copy command, run python scripts/verify_massive_options_ws.py --config ... --channel "T.O:...".',
+    testHint: 'Browser cannot run the Python script; copy the command to a terminal.',
   },
   {
     id: 'contracts',
     service: 'Contracts',
+    group: 'rest',
     description:
       'Option contract reference listing, single-contract detail lookup, DB coverage verification, and contract-to-snapshot linking via Massive REST.',
     tierMin: 'starter',
@@ -152,6 +220,7 @@ const rows: ChecklistRow[] = [
   {
     id: 'market-ops',
     service: 'Market Ops',
+    group: 'rest',
     description:
       'Read-only reference data: trade/quote condition codes, exchange listings, upcoming market holidays (with local calendar comparison), and real-time market trading status.',
     tierMin: 'starter',
@@ -169,6 +238,7 @@ const rows: ChecklistRow[] = [
   {
     id: 'technical-indicators',
     service: 'Technical Indicators',
+    group: 'rest',
     description:
       'Read-only cross-asset technical indicators from Massive REST: SMA, EMA, RSI, MACD. Supports both option tickers (O: prefix) and stock/index tickers with customizable window, timespan, and series type.',
     tierMin: 'starter',
@@ -182,6 +252,71 @@ const rows: ChecklistRow[] = [
       + '2) EMA tab: same flow, EMA weights recent prices more heavily. '
       + '3) RSI tab: same flow, values between 0-100 (>70 overbought, <30 oversold). '
       + '4) MACD tab: configure short/long/signal windows, click Fetch. Expect value, signal, and histogram columns.',
+  },
+  {
+    id: 'fmv',
+    service: 'FMV',
+    group: 'ws',
+    description:
+      'Fair Market Value streaming via WebSocket channel FMV.O:{optionsTicker}. '
+      + 'Delivers real-time fair market value estimates for option contracts. Requires Business tier.',
+    tierMin: 'business',
+    projectStatus: 'partial',
+    verification:
+      'FMV section: WS FMV Channel tab provides a one-click copy of the verify command '
+      + 'for python scripts/verify_massive_options_ws.py with --channel "FMV.O:…". '
+      + 'Tier & Delivery tab explains entitlement and latency semantics.',
+    purpose:
+      'Stream real-time fair market value estimates for option contracts via Massive WebSocket. '
+      + 'FMV provides a single consolidated price that reflects the best available fair value.',
+    helpVerification:
+      '1) WS FMV Channel tab: enter an options ticker, copy the verify command, run in a terminal. '
+      + 'Expect auth success, subscription confirmation, and FMV messages during market hours. '
+      +       '2) Tier & Delivery tab: informational; describes Business tier requirement, latency, and delivery semantics.',
+  },
+  {
+    id: 'flat-file-day-aggs',
+    service: 'Day aggregates',
+    group: 'flat',
+    description: 'Daily OHLCV across all US options as downloadable S3 flat file.',
+    tierMin: 'starter',
+    projectStatus: 'not-implemented',
+    verification: 'N/A — bulk download not yet integrated.',
+    purpose: 'Bulk download of daily aggregates for all US options from S3. Alternative to REST per-contract aggregates.',
+    helpVerification: 'Not yet available in this project. See Massive documentation for S3 flat file access.',
+  },
+  {
+    id: 'flat-file-minute-aggs',
+    service: 'Minute aggregates',
+    group: 'flat',
+    description: 'Minute-level OHLCV across all US options as downloadable S3 flat file.',
+    tierMin: 'starter',
+    projectStatus: 'not-implemented',
+    verification: 'N/A — bulk download not yet integrated.',
+    purpose: 'Bulk download of minute-level aggregates for all US options from S3.',
+    helpVerification: 'Not yet available in this project. See Massive documentation for S3 flat file access.',
+  },
+  {
+    id: 'flat-file-quotes',
+    service: 'Quotes',
+    group: 'flat',
+    description: 'Top-of-book quotes with nanosecond timestamps as downloadable S3 flat file.',
+    tierMin: 'starter',
+    projectStatus: 'not-implemented',
+    verification: 'N/A — bulk download not yet integrated.',
+    purpose: 'Bulk download of top-of-book option quotes from S3 for historical analysis.',
+    helpVerification: 'Not yet available in this project. See Massive documentation for S3 flat file access.',
+  },
+  {
+    id: 'flat-file-trades',
+    service: 'Trades',
+    group: 'flat',
+    description: 'Tick-level trades with nanosecond timestamps as downloadable S3 flat file. Requires Developer tier.',
+    tierMin: 'developer',
+    projectStatus: 'not-implemented',
+    verification: 'N/A — bulk download not yet integrated.',
+    purpose: 'Bulk download of tick-level option trades from S3 for detailed historical analysis.',
+    helpVerification: 'Not yet available in this project. Requires Developer tier. See Massive documentation for S3 flat file access.',
   },
 ]
 

@@ -769,6 +769,102 @@ def get_massive_technical_indicator(
     }
 
 
+# ── Trades & Quotes (Options REST, read-only) ──
+
+@router.get("/research/massive/trades-quotes/last-trade/{options_ticker}")
+def get_massive_last_trade(request: Request, options_ticker: str) -> Dict[str, Any]:
+    """GET /v2/last/trade/{optionsTicker} — most recent trade for a contract (read-only, Starter)."""
+    from servers.massive_config import get_massive_settings
+    from servers.massive_client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_last_trade(options_ticker)
+    if data.get("error"):
+        return {"ok": False, "error": data["error"]}
+    return {"ok": True, **data}
+
+
+@router.get("/research/massive/trades-quotes/quotes/{options_ticker}")
+def get_massive_hist_quotes(
+    request: Request,
+    options_ticker: str,
+    timestamp_gte: Optional[str] = Query(None, description="Nanosecond timestamp lower bound"),
+    timestamp_lte: Optional[str] = Query(None, description="Nanosecond timestamp upper bound"),
+    limit: int = Query(100, ge=1, le=50000),
+    sort: str = Query("timestamp"),
+    order: str = Query("asc"),
+) -> Dict[str, Any]:
+    """GET /v3/quotes/{optionsTicker} — historical BBO quotes (read-only, Starter)."""
+    from servers.massive_config import get_massive_settings
+    from servers.massive_client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_option_quotes(
+        options_ticker,
+        timestamp_gte=timestamp_gte,
+        timestamp_lte=timestamp_lte,
+        limit=limit,
+        sort=sort,
+        order=order,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": data["error"]}
+    results = data.get("results") or []
+    return {"ok": True, "count": len(results) if isinstance(results, list) else 0, **data}
+
+
+@router.get("/research/massive/trades-quotes/trades/{options_ticker}")
+def get_massive_hist_trades(
+    request: Request,
+    options_ticker: str,
+    timestamp_gte: Optional[str] = Query(None, description="Nanosecond timestamp lower bound"),
+    timestamp_lte: Optional[str] = Query(None, description="Nanosecond timestamp upper bound"),
+    limit: int = Query(100, ge=1, le=50000),
+    sort: str = Query("timestamp"),
+    order: str = Query("asc"),
+) -> Any:
+    """GET /v3/trades/{optionsTicker} — tick-level trades (read-only, Developer tier gate)."""
+    from servers.massive_config import get_massive_settings
+    from servers.massive_client import MassiveClient
+
+    reader = getattr(request.app.state, "reader", None)
+    cfg = reader._config if reader else {}
+    ms = get_massive_settings(cfg)
+    if not ms["trades_enabled"]:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "ok": False,
+                "error": "Historical trades API requires Developer tier and trades_enabled.",
+            },
+        )
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    data = client.fetch_option_trades(
+        options_ticker,
+        timestamp_gte=timestamp_gte,
+        timestamp_lte=timestamp_lte,
+        limit=limit,
+        sort=sort,
+        order=order,
+    )
+    if data.get("error"):
+        return {"ok": False, "error": data["error"]}
+    results = data.get("results") or []
+    return {"ok": True, "count": len(results) if isinstance(results, list) else 0, **data}
+
+
 @router.post("/research/massive/sync")
 def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Enqueue Celery job on queue `massive`. Body: kind + payload."""
@@ -783,7 +879,7 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     kind = (body.get("kind") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     allowed = frozenset(
-        {"aggregates", "snapshot", "oi", "reference", "corporate_action", "trades", "contracts"}
+        {"aggregates", "snapshot", "oi", "reference", "corporate_action", "trades", "trades_quotes", "contracts"}
     )
     if kind not in allowed:
         return {"ok": False, "error": f"Invalid kind; allowed: {sorted(allowed)}"}
@@ -796,6 +892,16 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
                 "message": "Option trades sync is disabled. Enable massive.features.trades_enabled or use Developer tier.",
             },
         )
+    if kind == "trades_quotes":
+        mode = (payload.get("mode") or "").strip().lower()
+        if mode == "trades" and not ms["trades_enabled"]:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "ok": False,
+                    "message": "Historical trades require Developer tier and trades_enabled.",
+                },
+            )
 
     db = _db_config(request)
     if not db:

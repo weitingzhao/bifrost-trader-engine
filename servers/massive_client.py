@@ -597,5 +597,76 @@ class MassiveClient:
             "macd", ticker, extra=extra, **kwargs,
         )
 
+    # ── Trades & Quotes (Options REST) ──
+
+    def fetch_last_trade(self, options_ticker: str) -> Dict[str, Any]:
+        """GET /v2/last/trade/{optionsTicker} — most recent trade for a contract."""
+        ot = (options_ticker or "").strip()
+        if not ot or not self._api_key:
+            return {"results": {}, "error": "options_ticker or api key missing"}
+        status, data = self._get(f"/v2/last/trade/{ot}")
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": {}, "error": err}
+        return data if isinstance(data, dict) else {"results": {}}
+
+    def fetch_option_quotes(
+        self,
+        options_ticker: str,
+        *,
+        timestamp_gte: Optional[str] = None,
+        timestamp_lte: Optional[str] = None,
+        limit: int = 100,
+        sort: str = "timestamp",
+        order: str = "asc",
+    ) -> Dict[str, Any]:
+        """GET /v3/quotes/{optionsTicker} — historical BBO quotes for a contract."""
+        ot = (options_ticker or "").strip()
+        if not ot or not self._api_key:
+            return {"results": [], "error": "options_ticker or api key missing"}
+        params: Dict[str, Any] = {
+            "limit": min(int(limit), 50000),
+            "sort": sort,
+            "order": order,
+        }
+        if timestamp_gte:
+            params["timestamp.gte"] = timestamp_gte
+        if timestamp_lte:
+            params["timestamp.lte"] = timestamp_lte
+        status, data = self._get(f"/v3/quotes/{ot}", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_option_trades(
+        self,
+        options_ticker: str,
+        *,
+        timestamp_gte: Optional[str] = None,
+        timestamp_lte: Optional[str] = None,
+        limit: int = 100,
+        sort: str = "timestamp",
+        order: str = "asc",
+    ) -> Dict[str, Any]:
+        """GET /v3/trades/{optionsTicker} — tick-level trade data for a contract."""
+        ot = (options_ticker or "").strip()
+        if not ot or not self._api_key:
+            return {"results": [], "error": "options_ticker or api key missing"}
+        params: Dict[str, Any] = {
+            "limit": min(int(limit), 50000),
+            "sort": sort,
+            "order": order,
+        }
+        if timestamp_gte:
+            params["timestamp.gte"] = timestamp_gte
+        if timestamp_lte:
+            params["timestamp.lte"] = timestamp_lte
+        status, data = self._get(f"/v3/trades/{ot}", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
     def sleep_backoff(self, attempt: int) -> None:
         time.sleep(min(2.0 ** attempt, 30.0))

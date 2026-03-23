@@ -673,6 +673,87 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
+            if kind == "trades_quotes":
+                mode = (payload.get("mode") or "last_trade").strip().lower()
+                ot = (payload.get("options_ticker") or "").strip()
+                if not ot:
+                    raise ValueError("payload.options_ticker required")
+
+                if mode == "last_trade":
+                    data = client.fetch_last_trade(ot)
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+                    res_obj = data.get("results") if isinstance(data.get("results"), dict) else {}
+                    result = {
+                        "ok": True, "kind": kind, "mode": mode,
+                        "summary": {
+                            "options_ticker": ot,
+                            "price": res_obj.get("p") or res_obj.get("price"),
+                            "size": res_obj.get("s") or res_obj.get("size"),
+                            "exchange": res_obj.get("x") or res_obj.get("exchange"),
+                            "sip_timestamp": res_obj.get("t") or res_obj.get("sip_timestamp"),
+                        },
+                        "content": data,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if mode == "quotes":
+                    ts_gte = (payload.get("timestamp_gte") or "").strip() or None
+                    ts_lte = (payload.get("timestamp_lte") or "").strip() or None
+                    lim = int(payload.get("limit") or 100)
+                    sort_order = (payload.get("sort") or "asc").strip()
+                    data = client.fetch_option_quotes(
+                        ot, timestamp_gte=ts_gte, timestamp_lte=ts_lte,
+                        limit=lim, order=sort_order,
+                    )
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+                    raw = data.get("results") or []
+                    if not isinstance(raw, list):
+                        raw = []
+                    content_items = raw[:100]
+                    result = {
+                        "ok": True, "kind": kind, "mode": mode,
+                        "summary": {
+                            "options_ticker": ot,
+                            "results_count": len(raw),
+                        },
+                        "content": content_items,
+                        "content_truncated": len(raw) > 100,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if mode == "trades":
+                    ts_gte = (payload.get("timestamp_gte") or "").strip() or None
+                    ts_lte = (payload.get("timestamp_lte") or "").strip() or None
+                    lim = int(payload.get("limit") or 100)
+                    sort_order = (payload.get("sort") or "asc").strip()
+                    data = client.fetch_option_trades(
+                        ot, timestamp_gte=ts_gte, timestamp_lte=ts_lte,
+                        limit=lim, order=sort_order,
+                    )
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+                    raw = data.get("results") or []
+                    if not isinstance(raw, list):
+                        raw = []
+                    content_items = raw[:100]
+                    result = {
+                        "ok": True, "kind": kind, "mode": mode,
+                        "summary": {
+                            "options_ticker": ot,
+                            "results_count": len(raw),
+                        },
+                        "content": content_items,
+                        "content_truncated": len(raw) > 100,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                raise ValueError(f"unknown trades_quotes mode: {mode}")
+
             raise ValueError(f"unknown kind: {kind}")
         except Exception as e:
             conn.rollback()

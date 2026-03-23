@@ -10,7 +10,6 @@ import {
   fetchCorporateActions,
   fetchOptionExpirations,
   fetchResearchOptionOi,
-  fetchResearchOptionTrades,
   fetchGreeksCoverage,
   fetchContractsCoverage,
   fetchMassiveMarketConditions,
@@ -18,6 +17,9 @@ import {
   fetchMassiveMarketHolidays,
   fetchMassiveMarketStatus,
   fetchTechnicalIndicator,
+  fetchMassiveLastTrade,
+  fetchMassiveHistQuotes,
+  fetchMassiveHistTrades,
 } from '../api'
 import type {
   MassiveStatusResponse,
@@ -31,13 +33,14 @@ import type {
   TechnicalIndicatorResponse,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { fmtTs } from '../utils/format'
 import checklistRows from './massiveFeedChecklistRows'
 import type { ChecklistRow } from './massiveFeedChecklistRows'
+import { CAPABILITY_GROUP_LABELS } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
 import {
   checklistEffectiveStatusLabel,
   effectiveChecklistProjectStatus,
+  groupedChecklistRows,
   shortServiceLabel,
   tierOkForRow,
   tradesOkForRow,
@@ -105,14 +108,6 @@ function fmtJobResult(j: MassiveJobApiRow): string {
   return '—'
 }
 
-function jobStatusBadgeClass(st: string | undefined): string {
-  const s = (st || '').toLowerCase()
-  if (s === 'done') return 'feed-massive-badge feed-massive-badge--done'
-  if (s === 'failed') return 'feed-massive-badge feed-massive-badge--fail'
-  if (s === 'running') return 'feed-massive-badge feed-massive-badge--run'
-  return 'feed-massive-badge feed-massive-badge--pending'
-}
-
 function feedMassiveOverviewDotClass(eff: EffectiveServiceStatus): string {
   if (eff === 'implemented') return 'feed-massive-tab-dot feed-massive-tab-dot--ok'
   if (eff === 'partial') return 'feed-massive-tab-dot feed-massive-tab-dot--partial'
@@ -157,19 +152,32 @@ function CardIconCorpAction() {
   )
 }
 
-function CardIconJobs() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-    </svg>
-  )
-}
-
 function CardIconVerify() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
       <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  )
+}
+
+function CardIconTrades() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M16 3h5v5" />
+      <path d="M8 21H3v-5" />
+      <path d="M21 3 14 10" />
+      <path d="M3 21l7-7" />
+    </svg>
+  )
+}
+
+function CardIconFmv() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M6 3h12l4 6-10 12L2 9l4-6z" />
+      <path d="M2 9h20" />
+      <path d="M10 3l-4 6 6 12 6-12-4-6" />
     </svg>
   )
 }
@@ -246,8 +254,8 @@ export function FeedMassiveOptionPage({
 }: FeedMassiveOptionPageProps) {
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [jobs, setJobs] = useState<MassiveJobApiRow[]>([])
-  const [jobsLoading, setJobsLoading] = useState(false)
-  const [jobsError, setJobsError] = useState<string | null>(null)
+  const [_jobsLoading, setJobsLoading] = useState(false)
+  const [_jobsError, setJobsError] = useState<string | null>(null)
   /** Which capability section is focused after chip click or hash deep-link (border highlight). */
   const [highlightedCapabilityId, setHighlightedCapabilityId] = useState<string | null>(null)
   /** Per-capability body expanded; default collapsed. */
@@ -313,7 +321,7 @@ export function FeedMassiveOptionPage({
 
   /** Which aggregate sub-API tab is active under Option aggregates. */
   const [aggSubTab, setAggSubTab] = useState<
-    'custom_bars' | 'open_close' | 'prev' | 'ws_a' | 'ws_am'
+    'custom_bars' | 'open_close' | 'prev'
   >('custom_bars')
 
   /** Which Greeks/IV sub-tab is active. */
@@ -389,6 +397,9 @@ export function FeedMassiveOptionPage({
   const [tiErr, setTiErr] = useState<string | null>(null)
   const [tiResult, setTiResult] = useState<TechnicalIndicatorResponse | null>(null)
 
+  const [fmvSubTab, setFmvSubTab] = useState<'ws-fmv' | 'tier-delivery'>('ws-fmv')
+  const [fmvTicker, setFmvTicker] = useState('O:SPY251219C00600000')
+
   const [oiBusy, setOiBusy] = useState(false)
   const [oiErr, setOiErr] = useState<string | null>(null)
 
@@ -414,9 +425,33 @@ export function FeedMassiveOptionPage({
   const [refTestStrikes, setRefTestStrikes] = useState<number[]>([])
   const [refTestDebug, setRefTestDebug] = useState<MassiveOptionExpirationsDebug | null>(null)
 
-  const [tradeSym, setTradeSym] = useState('NVDA')
-  const [tradeCheckBusy, setTradeCheckBusy] = useState(false)
-  const [tradeCheckMsg, setTradeCheckMsg] = useState<string | null>(null)
+
+  /** Which Trades & Quotes sub-tab is active. */
+  const [tqSubTab, setTqSubTab] = useState<
+    'last_trade' | 'hist_quotes' | 'hist_trades' | 'flat_quotes' | 'flat_trades'
+  >('last_trade')
+  const [tqLastTradeTicker, setTqLastTradeTicker] = useState('')
+  const [tqLastTradeBusy, setTqLastTradeBusy] = useState(false)
+  const [tqLastTradeErr, setTqLastTradeErr] = useState<string | null>(null)
+  const [tqLastTradeResult, setTqLastTradeResult] = useState<Record<string, unknown> | null>(null)
+
+  const [tqHistQuotesTicker, setTqHistQuotesTicker] = useState('')
+  const [tqHistQuotesFrom, setTqHistQuotesFrom] = useState('')
+  const [tqHistQuotesTo, setTqHistQuotesTo] = useState('')
+  const [tqHistQuotesLimit, setTqHistQuotesLimit] = useState('100')
+  const [tqHistQuotesSort, setTqHistQuotesSort] = useState<'asc' | 'desc'>('asc')
+  const [tqHistQuotesBusy, setTqHistQuotesBusy] = useState(false)
+  const [tqHistQuotesErr, setTqHistQuotesErr] = useState<string | null>(null)
+  const [tqHistQuotesResult, setTqHistQuotesResult] = useState<Record<string, unknown> | null>(null)
+
+  const [tqHistTradesTicker, setTqHistTradesTicker] = useState('')
+  const [tqHistTradesFrom, setTqHistTradesFrom] = useState('')
+  const [tqHistTradesTo, setTqHistTradesTo] = useState('')
+  const [tqHistTradesLimit, setTqHistTradesLimit] = useState('100')
+  const [tqHistTradesSort, setTqHistTradesSort] = useState<'asc' | 'desc'>('asc')
+  const [tqHistTradesBusy, setTqHistTradesBusy] = useState(false)
+  const [tqHistTradesErr, setTqHistTradesErr] = useState<string | null>(null)
+  const [tqHistTradesResult, setTqHistTradesResult] = useState<Record<string, unknown> | null>(null)
 
   const [oiFetchSym, setOiFetchSym] = useState('NVDA')
   const [oiFetchBusy, setOiFetchBusy] = useState(false)
@@ -853,29 +888,66 @@ export function FeedMassiveOptionPage({
     finally { setTiBusy(false) }
   }, [tiTicker, tiSubTab, tiTimespan, tiWindow, tiSeriesType, tiLimit, tiMacdShort, tiMacdLong, tiMacdSignal])
 
-  const runTradeApiCheck = useCallback(async () => {
-    const s = tradeSym.trim().toUpperCase()
-    if (!s) {
-      setTradeCheckMsg('Symbol required')
-      return
-    }
-    setTradeCheckBusy(true)
-    setTradeCheckMsg(null)
+  const runTqLastTrade = useCallback(async () => {
+    const t = tqLastTradeTicker.trim()
+    if (!t) { setTqLastTradeErr('Options ticker required'); return }
+    setTqLastTradeErr(null)
+    setTqLastTradeResult(null)
+    setTqLastTradeBusy(true)
     try {
-      const r = await fetchResearchOptionTrades(s, { limit: 5 })
-      if (r.status === 403) {
-        setTradeCheckMsg(r.message ?? 'HTTP 403 — trades disabled (expected on Starter or when trades_enabled is off).')
-      } else if (!r.ok) {
-        setTradeCheckMsg(r.error ?? r.message ?? 'Request failed')
-      } else {
-        setTradeCheckMsg(`HTTP ${r.status}: ${r.trades.length} trade row(s) returned.`)
-      }
-    } catch (err) {
-      setTradeCheckMsg(err instanceof Error ? err.message : 'Failed')
+      const r = await fetchMassiveLastTrade(t)
+      if (r.error) { setTqLastTradeErr(r.error); return }
+      setTqLastTradeResult(r)
+    } catch (e) {
+      setTqLastTradeErr(e instanceof Error ? e.message : 'Failed')
     } finally {
-      setTradeCheckBusy(false)
+      setTqLastTradeBusy(false)
     }
-  }, [tradeSym])
+  }, [tqLastTradeTicker])
+
+  const runTqHistQuotes = useCallback(async () => {
+    const t = tqHistQuotesTicker.trim()
+    if (!t) { setTqHistQuotesErr('Options ticker required'); return }
+    setTqHistQuotesErr(null)
+    setTqHistQuotesResult(null)
+    setTqHistQuotesBusy(true)
+    try {
+      const r = await fetchMassiveHistQuotes(t, {
+        timestamp_gte: tqHistQuotesFrom.trim() || undefined,
+        timestamp_lte: tqHistQuotesTo.trim() || undefined,
+        limit: parseInt(tqHistQuotesLimit, 10) || 100,
+        sort: tqHistQuotesSort,
+      })
+      if (r.error) { setTqHistQuotesErr(r.error); return }
+      setTqHistQuotesResult(r)
+    } catch (e) {
+      setTqHistQuotesErr(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setTqHistQuotesBusy(false)
+    }
+  }, [tqHistQuotesTicker, tqHistQuotesFrom, tqHistQuotesTo, tqHistQuotesLimit, tqHistQuotesSort])
+
+  const runTqHistTrades = useCallback(async () => {
+    const t = tqHistTradesTicker.trim()
+    if (!t) { setTqHistTradesErr('Options ticker required'); return }
+    setTqHistTradesErr(null)
+    setTqHistTradesResult(null)
+    setTqHistTradesBusy(true)
+    try {
+      const r = await fetchMassiveHistTrades(t, {
+        timestamp_gte: tqHistTradesFrom.trim() || undefined,
+        timestamp_lte: tqHistTradesTo.trim() || undefined,
+        limit: parseInt(tqHistTradesLimit, 10) || 100,
+        sort: tqHistTradesSort,
+      })
+      if (r.error) { setTqHistTradesErr(r.error); return }
+      setTqHistTradesResult(r)
+    } catch (e) {
+      setTqHistTradesErr(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setTqHistTradesBusy(false)
+    }
+  }, [tqHistTradesTicker, tqHistTradesFrom, tqHistTradesTo, tqHistTradesLimit, tqHistTradesSort])
 
   const runOiApiFetch = useCallback(async () => {
     const s = oiFetchSym.trim().toUpperCase()
@@ -1232,7 +1304,7 @@ export function FeedMassiveOptionPage({
     tierOkForRow(rOi, massiveStatus, Boolean(configured)),
     tradesOkForRow(rOi, massiveStatus),
   )
-  const rTr = checklistRowById('trades')
+  const rTr = checklistRowById('trades-quotes')
   const effTr = effectiveChecklistProjectStatus(
     rTr,
     Boolean(configured),
@@ -1253,12 +1325,33 @@ export function FeedMassiveOptionPage({
     tierOkForRow(rWs, massiveStatus, Boolean(configured)),
     tradesOkForRow(rWs, massiveStatus),
   )
-  const rCel = checklistRowById('celery-queue')
-  const effCel = effectiveChecklistProjectStatus(
-    rCel,
+  const rWsAggS = checklistRowById('ws-aggregates-s')
+  const effWsAggS = effectiveChecklistProjectStatus(
+    rWsAggS,
     Boolean(configured),
-    tierOkForRow(rCel, massiveStatus, Boolean(configured)),
-    tradesOkForRow(rCel, massiveStatus),
+    tierOkForRow(rWsAggS, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rWsAggS, massiveStatus),
+  )
+  const rWsAggM = checklistRowById('ws-aggregates-m')
+  const effWsAggM = effectiveChecklistProjectStatus(
+    rWsAggM,
+    Boolean(configured),
+    tierOkForRow(rWsAggM, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rWsAggM, massiveStatus),
+  )
+  const rWsQuotes = checklistRowById('ws-quotes')
+  const effWsQuotes = effectiveChecklistProjectStatus(
+    rWsQuotes,
+    Boolean(configured),
+    tierOkForRow(rWsQuotes, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rWsQuotes, massiveStatus),
+  )
+  const rWsTrades = checklistRowById('ws-trades')
+  const effWsTrades = effectiveChecklistProjectStatus(
+    rWsTrades,
+    Boolean(configured),
+    tierOkForRow(rWsTrades, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rWsTrades, massiveStatus),
   )
   const rCt = checklistRowById('contracts')
   const effCt = effectiveChecklistProjectStatus(
@@ -1330,13 +1423,27 @@ export function FeedMassiveOptionPage({
     return 'No indicator data loaded. Select a tab and fetch.'
   })()
 
-  const celeryEvidence = (() => {
-    const cw = _status?.celery_workers
-    if (!cw?.length) {
-      return 'No Celery workers reported by status API. Start a worker with -Q massive.'
-    }
-    return `Status workers: ${cw.join(', ')}`
+  const rFmv = checklistRowById('fmv')
+  const effFmv = effectiveChecklistProjectStatus(
+    rFmv,
+    Boolean(configured),
+    tierOkForRow(rFmv, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rFmv, massiveStatus),
+  )
+
+  const fmvEvidence = (() => {
+    if (effFmv === 'not-on-tier') return 'Business tier required. Verify command available for reference.'
+    return 'Copy the WS verify command to test FMV.O channel connectivity.'
   })()
+
+  const flatFileRows = checklistRows.filter(r => r.group === 'flat')
+  const flatFileEffMap = Object.fromEntries(
+    flatFileRows.map(r => [r.id, effectiveChecklistProjectStatus(
+      r, Boolean(configured),
+      tierOkForRow(r, massiveStatus, Boolean(configured)),
+      tradesOkForRow(r, massiveStatus),
+    )])
+  )
 
   const pendingJobCount = jobs.filter(j => {
     const s = (j.status || '').toLowerCase()
@@ -1479,39 +1586,51 @@ export function FeedMassiveOptionPage({
 
       <nav className="feed-massive-tab-nav-section feed-massive-cap-nav-sticky" aria-label="Massive capabilities">
         <div className="feed-massive-cap-sheet">
-          <p className="feed-massive-cap-hint">
-            Each capability below is collapsible (default collapsed). Click a chip to jump and expand that section.
-            {_status?.celery_workers && _status.celery_workers.length > 0
-              ? ''
-              : ' No Celery workers detected — start a worker with -Q massive to process sync tasks.'}
-          </p>
-          <div className="feed-massive-cap-summary">
-            {checklistRows.map(row => {
-              const tierOk = tierOkForRow(row, massiveStatus, Boolean(configured))
-              const tradesOk = tradesOkForRow(row, massiveStatus)
-              const eff = effectiveChecklistProjectStatus(row, Boolean(configured), tierOk, tradesOk)
-              return (
-                <a
-                  key={row.id}
-                  href={`#${feedMassiveSvcAnchorId(row.id)}`}
-                  className={`feed-massive-tab-chip${highlightedCapabilityId === row.id ? ' feed-massive-tab-chip--active' : ''}`}
-                  aria-current={highlightedCapabilityId === row.id ? 'location' : undefined}
-                  onClick={e => {
-                    e.preventDefault()
-                    scrollToSection(row.id)
-                  }}
-                >
-                  <span className={feedMassiveOverviewDotClass(eff)} title={checklistEffectiveStatusLabel(eff)} aria-hidden />
-                  <span className="feed-massive-tab-chip-label">{shortServiceLabel(row)}</span>
-                  {row.id === 'celery-queue' && pendingJobCount > 0 ? (
-                    <span className="feed-massive-tab-badge" title="Pending or running jobs">
-                      {pendingJobCount > 99 ? '99+' : pendingJobCount}
-                    </span>
-                  ) : null}
-                </a>
-              )
-            })}
+          <div className="feed-massive-queue-summary">
+            <span className="feed-massive-queue-summary-label">Queue</span>
+            <span className="feed-massive-queue-summary-stat">
+              Workers: <strong>{_status?.celery_workers?.length ?? 0}</strong>
+            </span>
+            {pendingJobCount > 0 ? (
+              <span className="feed-massive-queue-summary-stat">
+                Active jobs: <strong>{pendingJobCount > 99 ? '99+' : pendingJobCount}</strong>
+              </span>
+            ) : null}
+            <a href="#feed-celery" className="feed-massive-queue-summary-link">Celery queue details</a>
+            {!_status?.celery_workers?.length ? (
+              <span className="feed-massive-queue-summary-warn">No workers — start with -Q massive</span>
+            ) : null}
           </div>
+          <p className="feed-massive-cap-hint">
+            Capabilities grouped by delivery channel. Click a chip to jump and expand that section.
+          </p>
+          {groupedChecklistRows().map(({ group, rows: groupRows }) => (
+            <div key={group} className="feed-massive-cap-group">
+              <span className="feed-massive-cap-group-label">{CAPABILITY_GROUP_LABELS[group]}</span>
+              <div className="feed-massive-cap-summary">
+                {groupRows.map(row => {
+                  const tierOk = tierOkForRow(row, massiveStatus, Boolean(configured))
+                  const tradesOk = tradesOkForRow(row, massiveStatus)
+                  const eff = effectiveChecklistProjectStatus(row, Boolean(configured), tierOk, tradesOk)
+                  return (
+                    <a
+                      key={row.id}
+                      href={`#${feedMassiveSvcAnchorId(row.id)}`}
+                      className={`feed-massive-tab-chip${highlightedCapabilityId === row.id ? ' feed-massive-tab-chip--active' : ''}`}
+                      aria-current={highlightedCapabilityId === row.id ? 'location' : undefined}
+                      onClick={e => {
+                        e.preventDefault()
+                        scrollToSection(row.id)
+                      }}
+                    >
+                      <span className={feedMassiveOverviewDotClass(eff)} title={checklistEffectiveStatusLabel(eff)} aria-hidden />
+                      <span className="feed-massive-tab-chip-label">{shortServiceLabel(row)}</span>
+                    </a>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </nav>
 
@@ -1523,7 +1642,9 @@ export function FeedMassiveOptionPage({
 
       <div className="feed-massive-tab-panel">
 
-        {/* 1. Reference / contracts */}
+        <h3 className="feed-massive-group-header" id="feed-massive-group-rest">REST API</h3>
+
+        {/* Reference / contracts */}
         <FeedMassiveCapabilityPanel
           capId="reference"
           checklistRow={rRef}
@@ -1622,7 +1743,7 @@ export function FeedMassiveOptionPage({
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
 
-        {/* 2. Snapshot workbench (Chain / Contract / Unified) */}
+        {/* Snapshot workbench (Chain / Contract / Unified) */}
         <FeedMassiveCapabilityPanel
           capId="snapshot"
           checklistRow={rSnap}
@@ -1930,7 +2051,7 @@ export function FeedMassiveOptionPage({
           ) : null}
         </FeedMassiveCapabilityPanel>
 
-        {/* 3. Option aggregates — 5 sub-blocks: 3 REST + 2 WS */}
+        {/* Option aggregates — 5 sub-blocks: 3 REST + 2 WS */}
         <FeedMassiveCapabilityPanel
           capId="aggregates"
           checklistRow={rAgg}
@@ -1999,30 +2120,6 @@ export function FeedMassiveOptionPage({
               >
                 Previous day
                 <span className="feed-massive-agg-tab-badge">REST</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                id="feed-massive-agg-tab-wsa"
-                className={`feed-massive-agg-tab${aggSubTab === 'ws_a' ? ' feed-massive-agg-tab--active' : ''}`}
-                aria-selected={aggSubTab === 'ws_a'}
-                tabIndex={aggSubTab === 'ws_a' ? 0 : -1}
-                onClick={() => setAggSubTab('ws_a')}
-              >
-                Per second (A)
-                <span className="feed-massive-agg-tab-badge">WS</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                id="feed-massive-agg-tab-wsam"
-                className={`feed-massive-agg-tab${aggSubTab === 'ws_am' ? ' feed-massive-agg-tab--active' : ''}`}
-                aria-selected={aggSubTab === 'ws_am'}
-                tabIndex={aggSubTab === 'ws_am' ? 0 : -1}
-                onClick={() => setAggSubTab('ws_am')}
-              >
-                Per minute (AM)
-                <span className="feed-massive-agg-tab-badge">WS</span>
               </button>
             </div>
 
@@ -2157,64 +2254,11 @@ export function FeedMassiveOptionPage({
                 </div>
               ) : null}
 
-              {aggSubTab === 'ws_a' ? (
-                <div
-                  className="feed-massive-agg-tab-panel"
-                  role="tabpanel"
-                  id="feed-massive-agg-panel-wsa"
-                  aria-labelledby="feed-massive-agg-tab-wsa"
-                >
-                  <div className="feed-massive-agg-sub-doc">
-                    <p><strong>Use case:</strong> Stream second-by-second OHLCV bars for an options contract via <code>WS /options/A</code>. Each bar is built from qualifying trades; no bar is emitted if no eligible trades occur.</p>
-                    <p><strong>When to use:</strong> Ultra-fine intraday monitoring, dynamic sub-minute charting, or automated strategies that react to second-level price changes during market hours.</p>
-                    <p className="feed-massive-agg-sub-endpoint"><code>WS channel: A.O:&#123;optionsTicker&#125;</code></p>
-                    <p style={{ marginTop: 'var(--space-2)' }}>Run the verify script in a terminal to test this channel:</p>
-                    <div className="feed-massive-ws-cmd-row">
-                      <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;A.O:SPY251219C00600000&quot;</code>
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-secondary"
-                        aria-label="Copy WebSocket verify command for per-second aggregates"
-                        onClick={() => copyWsCommand('A.O:SPY251219C00600000')}
-                      >
-                        {wsCopied === 'A.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {aggSubTab === 'ws_am' ? (
-                <div
-                  className="feed-massive-agg-tab-panel"
-                  role="tabpanel"
-                  id="feed-massive-agg-panel-wsam"
-                  aria-labelledby="feed-massive-agg-tab-wsam"
-                >
-                  <div className="feed-massive-agg-sub-doc">
-                    <p><strong>Use case:</strong> Stream minute-by-minute OHLCV bars for an options contract via <code>WS /options/AM</code>. Constructed from qualifying trades; gaps indicate no trading activity.</p>
-                    <p><strong>When to use:</strong> Real-time 1-minute candlestick charting, intraday strategy development, or live dashboards that need a steady stream of price summaries without polling REST.</p>
-                    <p className="feed-massive-agg-sub-endpoint"><code>WS channel: AM.O:&#123;optionsTicker&#125;</code></p>
-                    <p style={{ marginTop: 'var(--space-2)' }}>Run the verify script in a terminal to test this channel:</p>
-                    <div className="feed-massive-ws-cmd-row">
-                      <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;AM.O:SPY251219C00600000&quot;</code>
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-secondary"
-                        aria-label="Copy WebSocket verify command for per-minute aggregates"
-                        onClick={() => copyWsCommand('AM.O:SPY251219C00600000')}
-                      >
-                        {wsCopied === 'AM.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
             </div>
           </div>
         </FeedMassiveCapabilityPanel>
 
-        {/* 4. Greeks / IV — Chain, Contract, DB Verify, Unified tabs */}
+        {/* Greeks / IV — Chain, Contract, DB Verify, Unified tabs */}
         <FeedMassiveCapabilityPanel
           capId="greeks-iv"
           checklistRow={rGk}
@@ -2587,7 +2631,7 @@ export function FeedMassiveOptionPage({
           </div>
         </FeedMassiveCapabilityPanel>
 
-        {/* 5. Daily open interest */}
+        {/* Daily open interest */}
         <FeedMassiveCapabilityPanel
           capId="daily-oi"
           checklistRow={rOi}
@@ -2648,48 +2692,332 @@ export function FeedMassiveOptionPage({
           ) : null}
         </FeedMassiveCapabilityPanel>
 
-        {/* 6. Option trades */}
+        {/* Trades & Quotes — 5 sub-tabs: 3 REST + 2 Flat Files */}
         <FeedMassiveCapabilityPanel
-          capId="trades"
+          capId="trades-quotes"
           checklistRow={rTr}
           effectiveStatus={effTr}
-          expanded={capExpanded.trades === true}
-          onToggle={() => toggleCap('trades')}
-          highlight={highlightedCapabilityId === 'trades'}
-          ariaLabel="Option trades API"
+          expanded={capExpanded['trades-quotes'] === true}
+          onToggle={() => toggleCap('trades-quotes')}
+          highlight={highlightedCapabilityId === 'trades-quotes'}
+          ariaLabel="Trades & Quotes"
         >
           <FeedMassiveServiceBlock
             effectiveStatus={effTr}
             checklistRow={rTr}
-            evidence={tradeCheckMsg ?? 'Use Test to call GET /research/option-trades (403 expected when trades are off).'}
-            testArea={
-              <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <label className="feed-massive-field">
-                  <span className="form-label">Symbol</span>
-                  <input
-                    className="form-input"
-                    value={tradeSym}
-                    onChange={e => setTradeSym(e.target.value)}
-                    disabled={tradeCheckBusy}
-                    autoComplete="off"
-                  />
-                </label>
-                <button type="button" className="btn btn-primary" disabled={tradeCheckBusy} onClick={() => runTradeApiCheck()}>
-                  {tradeCheckBusy ? 'Loading…' : 'Check API'}
-                </button>
-              </div>
+            evidence={
+              tqLastTradeResult
+                ? `Last trade fetched. ${tqHistQuotesResult ? `Quotes: ${tqHistQuotesResult.count ?? '?'} row(s). ` : ''}${tqHistTradesResult ? `Trades: ${tqHistTradesResult.count ?? '?'} row(s).` : ''}`
+                : 'Use the tabs below to query Massive Trades & Quotes endpoints.'
             }
           >
             <div className="feed-massive-card-head">
-              <h3>Option trades</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden>
+                  <CardIconTrades />
+                </span>
+                <h3>Trades &amp; Quotes</h3>
+              </div>
             </div>
             <p className="feed-massive-card-lead">
-              Tick-level trades require Developer tier and trades_enabled. Starter returns 403 by design.
+              Option trade and quote data from Massive REST and Flat Files. Quotes (last trade, historical BBO, flat file quotes) are available on Starter.
+              Trades (historical ticks, flat file trades) require Developer tier and trades_enabled.
             </p>
           </FeedMassiveServiceBlock>
+
+          <div className="feed-massive-agg-tabs-wrap">
+            <div
+              className="feed-massive-agg-tabs"
+              role="tablist"
+              aria-label="Trades & Quotes API variants"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-tq-tab-last-trade"
+                className={`feed-massive-agg-tab${tqSubTab === 'last_trade' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={tqSubTab === 'last_trade'}
+                tabIndex={tqSubTab === 'last_trade' ? 0 : -1}
+                onClick={() => setTqSubTab('last_trade')}
+              >
+                Last Trade
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-tq-tab-hist-quotes"
+                className={`feed-massive-agg-tab${tqSubTab === 'hist_quotes' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={tqSubTab === 'hist_quotes'}
+                tabIndex={tqSubTab === 'hist_quotes' ? 0 : -1}
+                onClick={() => setTqSubTab('hist_quotes')}
+              >
+                Historical Quotes
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-tq-tab-hist-trades"
+                className={`feed-massive-agg-tab${tqSubTab === 'hist_trades' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={tqSubTab === 'hist_trades'}
+                tabIndex={tqSubTab === 'hist_trades' ? 0 : -1}
+                onClick={() => setTqSubTab('hist_trades')}
+              >
+                Historical Trades
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-tq-tab-flat-quotes"
+                className={`feed-massive-agg-tab${tqSubTab === 'flat_quotes' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={tqSubTab === 'flat_quotes'}
+                tabIndex={tqSubTab === 'flat_quotes' ? 0 : -1}
+                onClick={() => setTqSubTab('flat_quotes')}
+              >
+                Flat Quotes
+                <span className="feed-massive-agg-tab-badge">File</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-tq-tab-flat-trades"
+                className={`feed-massive-agg-tab${tqSubTab === 'flat_trades' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={tqSubTab === 'flat_trades'}
+                tabIndex={tqSubTab === 'flat_trades' ? 0 : -1}
+                onClick={() => setTqSubTab('flat_trades')}
+              >
+                Flat Trades
+                <span className="feed-massive-agg-tab-badge">File</span>
+              </button>
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+              {/* --- Last Trade (REST, Starter) --- */}
+              {tqSubTab === 'last_trade' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-tq-panel-last-trade"
+                  aria-labelledby="feed-massive-tq-tab-last-trade"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve the most recent trade for a specific options contract — price, size, exchange, conditions, and SIP timestamp.</p>
+                    <p><strong>When to use:</strong> Quick check of the latest execution for a contract before placing an order, confirming fills, or building real-time trade tickers.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v2/last/trade/&#123;optionsTicker&#125;</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Options ticker</span>
+                      <input
+                        className="form-input"
+                        value={tqLastTradeTicker}
+                        onChange={e => setTqLastTradeTicker(e.target.value)}
+                        disabled={tqLastTradeBusy || !configured}
+                        placeholder="O:SPY251219C00600000"
+                        autoComplete="off"
+                      />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={tqLastTradeBusy || !configured} onClick={() => runTqLastTrade()}>
+                      {tqLastTradeBusy ? 'Fetching\u2026' : 'Fetch Last Trade'}
+                    </button>
+                  </div>
+                  {tqLastTradeErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqLastTradeErr}</p> : null}
+                  {tqLastTradeResult ? (
+                    <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                      <summary>Result</summary>
+                      <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
+                        {JSON.stringify(tqLastTradeResult, null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* --- Historical Quotes (REST, Starter) --- */}
+              {tqSubTab === 'hist_quotes' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-tq-panel-hist-quotes"
+                  aria-labelledby="feed-massive-tq-tab-hist-quotes"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve historical NBBO quotes (best bid/ask) for an options contract over a time range with nanosecond timestamps.</p>
+                    <p><strong>When to use:</strong> Analyzing bid-ask spread dynamics, measuring liquidity over time, backtesting fill-price assumptions, or auditing quote-level market microstructure.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/quotes/&#123;optionsTicker&#125;</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Options ticker</span>
+                      <input
+                        className="form-input"
+                        value={tqHistQuotesTicker}
+                        onChange={e => setTqHistQuotesTicker(e.target.value)}
+                        disabled={tqHistQuotesBusy || !configured}
+                        placeholder="O:SPY251219C00600000"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Timestamp (from, ns)</span>
+                      <input className="form-input" value={tqHistQuotesFrom} onChange={e => setTqHistQuotesFrom(e.target.value)} disabled={tqHistQuotesBusy || !configured} placeholder="optional" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Timestamp (to, ns)</span>
+                      <input className="form-input" value={tqHistQuotesTo} onChange={e => setTqHistQuotesTo(e.target.value)} disabled={tqHistQuotesBusy || !configured} placeholder="optional" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Limit</span>
+                      <input className="form-input" value={tqHistQuotesLimit} onChange={e => setTqHistQuotesLimit(e.target.value)} disabled={tqHistQuotesBusy || !configured} placeholder="100" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Sort</span>
+                      <select className="form-input" value={tqHistQuotesSort} onChange={e => setTqHistQuotesSort(e.target.value as 'asc' | 'desc')} disabled={tqHistQuotesBusy || !configured}>
+                        <option value="asc">Ascending</option>
+                        <option value="desc">Descending</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={tqHistQuotesBusy || !configured} onClick={() => runTqHistQuotes()}>
+                      {tqHistQuotesBusy ? 'Fetching\u2026' : 'Fetch Quotes'}
+                    </button>
+                  </div>
+                  {tqHistQuotesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistQuotesErr}</p> : null}
+                  {tqHistQuotesResult ? (
+                    <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                      <summary>
+                        Result{Array.isArray(tqHistQuotesResult.results) ? ` — ${tqHistQuotesResult.results.length} quote(s)` : ''}
+                      </summary>
+                      <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '32rem' }}>
+                        {JSON.stringify(tqHistQuotesResult, null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* --- Historical Trades (REST, Developer) --- */}
+              {tqSubTab === 'hist_trades' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-tq-panel-hist-trades"
+                  aria-labelledby="feed-massive-tq-tab-hist-trades"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve tick-level trade data for an options contract over a time range — price, size, exchange, conditions, and SIP timestamp.</p>
+                    <p><strong>When to use:</strong> Granular trade analysis, building VWAP from ticks, verifying executions against the tape, or microstructure research.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/trades/&#123;optionsTicker&#125;</code></p>
+                    {!massiveStatus?.trades_enabled ? (
+                      <p className="feed-massive-tier-gate-notice">
+                        <strong>Developer tier required.</strong> This endpoint requires <code>trades_enabled</code>. Your current configuration does not enable option trades.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Options ticker</span>
+                      <input
+                        className="form-input"
+                        value={tqHistTradesTicker}
+                        onChange={e => setTqHistTradesTicker(e.target.value)}
+                        disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled}
+                        placeholder="O:SPY251219C00600000"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Timestamp (from, ns)</span>
+                      <input className="form-input" value={tqHistTradesFrom} onChange={e => setTqHistTradesFrom(e.target.value)} disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled} placeholder="optional" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Timestamp (to, ns)</span>
+                      <input className="form-input" value={tqHistTradesTo} onChange={e => setTqHistTradesTo(e.target.value)} disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled} placeholder="optional" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Limit</span>
+                      <input className="form-input" value={tqHistTradesLimit} onChange={e => setTqHistTradesLimit(e.target.value)} disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled} placeholder="100" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Sort</span>
+                      <select className="form-input" value={tqHistTradesSort} onChange={e => setTqHistTradesSort(e.target.value as 'asc' | 'desc')} disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled}>
+                        <option value="asc">Ascending</option>
+                        <option value="desc">Descending</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={tqHistTradesBusy || !configured || !massiveStatus?.trades_enabled} onClick={() => runTqHistTrades()}>
+                      {tqHistTradesBusy ? 'Fetching\u2026' : 'Fetch Trades'}
+                    </button>
+                  </div>
+                  {tqHistTradesErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tqHistTradesErr}</p> : null}
+                  {tqHistTradesResult ? (
+                    <details className="feed-massive-details-debug" open style={{ marginTop: 'var(--space-3)' }}>
+                      <summary>
+                        Result{Array.isArray(tqHistTradesResult.results) ? ` — ${tqHistTradesResult.results.length} trade(s)` : ''}
+                      </summary>
+                      <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '32rem' }}>
+                        {JSON.stringify(tqHistTradesResult, null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
+
+
+              {/* --- Flat Files Quotes (Starter) --- */}
+              {tqSubTab === 'flat_quotes' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-tq-panel-flat-quotes"
+                  aria-labelledby="feed-massive-tq-tab-flat-quotes"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Download bulk top-of-book BBO quote data for all US options as flat files (S3). Files contain nanosecond-precision timestamps and are suitable for large-scale backtesting or data warehousing.</p>
+                    <p><strong>When to use:</strong> Full-market historical quote research, building local quote databases, or any use case where REST pagination is too slow for the data volume needed.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>S3 flat file download — Options Quotes</code></p>
+                    <p style={{ marginTop: 'var(--space-2)', color: 'var(--text-muted)' }}>
+                      Flat file downloads are managed via the Polygon Files API or dashboard. This tab is informational — use the Polygon dashboard to access S3 download links for options quote files.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* --- Flat Files Trades (Developer) --- */}
+              {tqSubTab === 'flat_trades' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-tq-panel-flat-trades"
+                  aria-labelledby="feed-massive-tq-tab-flat-trades"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Download bulk tick-level trade data for all US options as flat files (S3). Files contain nanosecond-precision timestamps, exchange codes, and trade conditions.</p>
+                    <p><strong>When to use:</strong> Full-market historical trade research, VWAP computation across the entire options universe, or any use case requiring comprehensive trade tape data.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>S3 flat file download — Options Trades</code></p>
+                    {!massiveStatus?.trades_enabled ? (
+                      <p className="feed-massive-tier-gate-notice">
+                        <strong>Developer tier likely required.</strong> Trades flat files may not be available on Starter plans.
+                      </p>
+                    ) : null}
+                    <p style={{ marginTop: 'var(--space-2)', color: 'var(--text-muted)' }}>
+                      Flat file downloads are managed via the Polygon Files API or dashboard. This tab is informational — use the Polygon dashboard to access S3 download links for options trade files.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
         </FeedMassiveCapabilityPanel>
 
-        {/* 7. Corporate actions */}
+        {/* Corporate actions */}
         <FeedMassiveCapabilityPanel
           capId="corporate-actions"
           checklistRow={rCorp}
@@ -2777,7 +3105,9 @@ export function FeedMassiveOptionPage({
           ) : null}
         </FeedMassiveCapabilityPanel>
 
-        {/* 8. WebSocket streaming */}
+        <h3 className="feed-massive-group-header" id="feed-massive-group-ws">WebSocket</h3>
+
+        {/* WebSocket streaming */}
         <FeedMassiveCapabilityPanel
           capId="websocket"
           checklistRow={rWs}
@@ -2813,90 +3143,134 @@ export function FeedMassiveOptionPage({
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
 
-        {/* 9. Celery massive queue */}
         <FeedMassiveCapabilityPanel
-          capId="celery-queue"
-          checklistRow={rCel}
-          effectiveStatus={effCel}
-          expanded={capExpanded['celery-queue'] === true}
-          onToggle={() => toggleCap('celery-queue')}
-          highlight={highlightedCapabilityId === 'celery-queue'}
-          ariaLabel="Recent jobs"
+          capId="ws-aggregates-s"
+          checklistRow={rWsAggS}
+          effectiveStatus={effWsAggS}
+          expanded={capExpanded['ws-aggregates-s'] === true}
+          onToggle={() => toggleCap('ws-aggregates-s')}
+          highlight={highlightedCapabilityId === 'ws-aggregates-s'}
+          ariaLabel="WebSocket aggregates per second"
         >
           <FeedMassiveServiceBlock
-            effectiveStatus={effCel}
-            checklistRow={rCel}
-            evidence={celeryEvidence}
-            testArea={
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => loadJobs()}
-                disabled={jobsLoading}
-              >
-                {jobsLoading ? 'Loading…' : 'Refresh job list'}
-              </button>
-            }
+            effectiveStatus={effWsAggS}
+            checklistRow={rWsAggS}
+            evidence="Copy command to verify channel A.O"
           >
             <div className="feed-massive-card-head">
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconJobs />
-                </span>
-                <h3>Job queue</h3>
+                <span className="feed-massive-card-icon" aria-hidden><CardIconBars /></span>
+                <h3>Aggregates /s</h3>
               </div>
             </div>
-            <p className="feed-massive-card-lead">
-              Latest Massive sync tasks (newest first).{' '}
-              <a href="#feed-celery">See all Celery queues (Feed → Celery)</a>.
-            </p>
+            <p className="feed-massive-card-lead">Stream per-second OHLCV bars for one options contract.</p>
+            <p className="feed-massive-agg-sub-endpoint"><code>WS channel: A.O:&#123;optionsTicker&#125;</code></p>
+            <div className="feed-massive-ws-cmd-row">
+              <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;A.O:SPY251219C00600000&quot;</code>
+              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('A.O:SPY251219C00600000')}>
+                {wsCopied === 'A.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
           </FeedMassiveServiceBlock>
-          {jobsError ? (
-            <p className="status-page-msg err" role="alert">
-              {jobsError}
-            </p>
-          ) : null}
-          <div className="feed-massive-table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">ID</th>
-                  <th scope="col">Kind</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Created</th>
-                  <th scope="col">Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.length === 0 && !jobsLoading ? (
-                  <tr>
-                    <td colSpan={5}>
-                      <div className="feed-massive-empty">No jobs yet.</div>
-                    </td>
-                  </tr>
-                ) : (
-                  jobs.map(j => (
-                    <tr key={j.job_id}>
-                      <td>
-                        <span className="feed-massive-job-id">{j.job_id}</span>
-                      </td>
-                      <td>{j.kind ?? '—'}</td>
-                      <td>
-                        <span className={jobStatusBadgeClass(j.status)}>{j.status ?? '—'}</span>
-                      </td>
-                      <td>{j.created_ts != null ? fmtTs(j.created_ts) : '—'}</td>
-                      <td style={{ maxWidth: '12rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fmtJobResult(j)}>
-                        {fmtJobResult(j)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
         </FeedMassiveCapabilityPanel>
 
-        {/* 10. Contracts */}
+        <FeedMassiveCapabilityPanel
+          capId="ws-aggregates-m"
+          checklistRow={rWsAggM}
+          effectiveStatus={effWsAggM}
+          expanded={capExpanded['ws-aggregates-m'] === true}
+          onToggle={() => toggleCap('ws-aggregates-m')}
+          highlight={highlightedCapabilityId === 'ws-aggregates-m'}
+          ariaLabel="WebSocket aggregates per minute"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effWsAggM}
+            checklistRow={rWsAggM}
+            evidence="Copy command to verify channel AM.O"
+          >
+            <div className="feed-massive-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden><CardIconBars /></span>
+                <h3>Aggregates /m</h3>
+              </div>
+            </div>
+            <p className="feed-massive-card-lead">Stream per-minute OHLCV bars for one options contract.</p>
+            <p className="feed-massive-agg-sub-endpoint"><code>WS channel: AM.O:&#123;optionsTicker&#125;</code></p>
+            <div className="feed-massive-ws-cmd-row">
+              <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;AM.O:SPY251219C00600000&quot;</code>
+              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('AM.O:SPY251219C00600000')}>
+                {wsCopied === 'AM.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </FeedMassiveServiceBlock>
+        </FeedMassiveCapabilityPanel>
+
+        <FeedMassiveCapabilityPanel
+          capId="ws-quotes"
+          checklistRow={rWsQuotes}
+          effectiveStatus={effWsQuotes}
+          expanded={capExpanded['ws-quotes'] === true}
+          onToggle={() => toggleCap('ws-quotes')}
+          highlight={highlightedCapabilityId === 'ws-quotes'}
+          ariaLabel="WebSocket quotes"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effWsQuotes}
+            checklistRow={rWsQuotes}
+            evidence="Copy command to verify channel Q.O"
+          >
+            <div className="feed-massive-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden><CardIconTrades /></span>
+                <h3>Quotes</h3>
+              </div>
+            </div>
+            <p className="feed-massive-card-lead">Stream BBO quote updates for one options contract.</p>
+            <p className="feed-massive-agg-sub-endpoint"><code>WS channel: Q.O:&#123;optionsTicker&#125;</code></p>
+            <div className="feed-massive-ws-cmd-row">
+              <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;Q.O:SPY251219C00600000&quot;</code>
+              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('Q.O:SPY251219C00600000')}>
+                {wsCopied === 'Q.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </FeedMassiveServiceBlock>
+        </FeedMassiveCapabilityPanel>
+
+        <FeedMassiveCapabilityPanel
+          capId="ws-trades"
+          checklistRow={rWsTrades}
+          effectiveStatus={effWsTrades}
+          expanded={capExpanded['ws-trades'] === true}
+          onToggle={() => toggleCap('ws-trades')}
+          highlight={highlightedCapabilityId === 'ws-trades'}
+          ariaLabel="WebSocket trades"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effWsTrades}
+            checklistRow={rWsTrades}
+            evidence="Copy command to verify channel T.O"
+          >
+            <div className="feed-massive-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden><CardIconTrades /></span>
+                <h3>Trades</h3>
+              </div>
+            </div>
+            <p className="feed-massive-card-lead">Stream tick-by-tick trade prints for one options contract.</p>
+            <p className="feed-massive-agg-sub-endpoint"><code>WS channel: T.O:&#123;optionsTicker&#125;</code></p>
+            {!massiveStatus?.trades_enabled ? (
+              <div className="feed-massive-tier-gate-notice">Developer tier required for T.O channel access.</div>
+            ) : null}
+            <div className="feed-massive-ws-cmd-row">
+              <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;T.O:SPY251219C00600000&quot;</code>
+              <button type="button" className="btn btn-xs btn-secondary" onClick={() => copyWsCommand('T.O:SPY251219C00600000')}>
+                {wsCopied === 'T.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </FeedMassiveServiceBlock>
+        </FeedMassiveCapabilityPanel>
+
+        {/* Contracts */}
         <FeedMassiveCapabilityPanel
           capId="contracts"
           checklistRow={rCt}
@@ -3562,6 +3936,146 @@ export function FeedMassiveOptionPage({
           </div>
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
+
+        {/* ── FMV (Fair Market Value) ── */}
+        <FeedMassiveCapabilityPanel
+          capId="fmv"
+          checklistRow={rFmv}
+          effectiveStatus={effFmv}
+          expanded={capExpanded.fmv === true}
+          onToggle={() => toggleCap('fmv')}
+          highlight={highlightedCapabilityId === 'fmv'}
+          ariaLabel="FMV"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effFmv}
+            checklistRow={rFmv}
+            evidence={fmvEvidence}
+          >
+            <div className="feed-massive-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden>
+                  <CardIconFmv />
+                </span>
+                <h3>FMV (Fair Market Value)</h3>
+              </div>
+            </div>
+            <p className="feed-massive-card-lead">
+              Real-time fair market value estimates for option contracts via Massive WebSocket.
+              FMV provides a consolidated price reflecting the best available fair value. Requires Business tier.
+            </p>
+          </FeedMassiveServiceBlock>
+
+          <div className="feed-massive-agg-tabs-wrap">
+            <div className="feed-massive-agg-tabs" role="tablist">
+              {([
+                { key: 'ws-fmv' as const, label: 'WS FMV Channel', badge: 'WS' },
+                { key: 'tier-delivery' as const, label: 'Tier & Delivery', badge: 'Info' },
+              ]).map(t => (
+                <button
+                  key={t.key}
+                  role="tab"
+                  aria-selected={fmvSubTab === t.key}
+                  className={`feed-massive-agg-tab${fmvSubTab === t.key ? ' active' : ''}`}
+                  onClick={() => setFmvSubTab(t.key)}
+                >
+                  {t.label}
+                  <span className="feed-massive-agg-tab-badge">{t.badge}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+              <div className="feed-massive-agg-tab-panel" role="tabpanel">
+                {fmvSubTab === 'ws-fmv' ? (
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Stream real-time fair market value (FMV) estimates for a specific option contract. FMV consolidates bid/ask information into a single fair value price, useful for mark-to-market, risk monitoring, and order placement decisions.</p>
+                    <p style={{ fontSize: '0.78rem', opacity: 0.75, marginTop: 'var(--space-1)' }}><strong>When to use:</strong> Subscribe during market hours for live FMV updates. Ideal for real-time portfolio valuation and automated trading systems that need a single reference price.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>WS: wss://socket.polygon.io/options → FMV.O:&#123;optionsTicker&#125;</code></p>
+                    <div className="feed-massive-tier-gate-notice">
+                      Business tier required for FMV channel access.
+                    </div>
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <label className="feed-massive-field" style={{ maxWidth: '26rem' }}>
+                        <span className="form-label">Options ticker (for verify command)</span>
+                        <input
+                          className="form-input"
+                          value={fmvTicker}
+                          onChange={e => setFmvTicker(e.target.value)}
+                          placeholder="O:SPY251219C00600000"
+                          autoComplete="off"
+                        />
+                      </label>
+                    </div>
+                    <div style={{ marginTop: 'var(--space-2)' }}>
+                      <div className="feed-massive-ws-sub-block">
+                        <pre className="feed-massive-ws-cmd">{`python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel "FMV.${fmvTicker.trim() || 'O:SPY251219C00600000'}"`}</pre>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-secondary"
+                          aria-label="Copy WebSocket verify command for FMV"
+                          onClick={() => copyWsCommand(`FMV.${fmvTicker.trim() || 'O:SPY251219C00600000'}`)}
+                        >
+                          {wsCopied === `FMV.${fmvTicker.trim() || 'O:SPY251219C00600000'}` ? 'Copied' : 'Copy'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Tier requirement:</strong> The FMV WebSocket channel (<code>FMV.O:*</code>) is available exclusively on the <strong>Business</strong> tier. Starter and Developer plans do not include FMV access.</p>
+                    <p style={{ marginTop: 'var(--space-2)' }}><strong>Delivery semantics:</strong> FMV messages are pushed in real-time via the Polygon Options WebSocket. Each message contains a fair market value estimate computed from the current order book. During market hours, expect updates as order book conditions change.</p>
+                    <p style={{ marginTop: 'var(--space-2)' }}><strong>Latency:</strong> Business tier provides real-time WebSocket delivery with no artificial delay. FMV values reflect the latest available market data at the time of computation.</p>
+                    <p style={{ marginTop: 'var(--space-2)' }}><strong>Engine integration:</strong> The current project provides a verification entry point (CLI script). No persistent FMV bridge or database persistence is implemented — FMV data is consumed ephemerally via the verify script.</p>
+                    <div className="feed-massive-tier-gate-notice" style={{ marginTop: 'var(--space-3)' }}>
+                      Business tier required. Current plan does not include FMV entitlement.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </FeedMassiveCapabilityPanel>
+
+        <h3 className="feed-massive-group-header" id="feed-massive-group-flat">Flat Files</h3>
+
+        {flatFileRows.map(row => {
+          const eff = flatFileEffMap[row.id] ?? row.projectStatus
+          return (
+            <FeedMassiveCapabilityPanel
+              key={row.id}
+              capId={row.id}
+              checklistRow={row}
+              effectiveStatus={eff}
+              expanded={capExpanded[row.id] === true}
+              onToggle={() => toggleCap(row.id)}
+              highlight={highlightedCapabilityId === row.id}
+              ariaLabel={row.service}
+            >
+              <FeedMassiveServiceBlock
+                effectiveStatus={eff}
+                checklistRow={row}
+                evidence={row.projectStatus === 'not-implemented'
+                  ? 'Not yet integrated. S3 flat file download is available from Massive directly.'
+                  : 'Flat file access configured.'}
+              >
+                <div className="feed-massive-card-head">
+                  <h3>{row.service}</h3>
+                </div>
+                <p className="feed-massive-card-lead">{row.description}</p>
+                <p className="feed-massive-flat-delivery-note">
+                  <strong>Delivery:</strong> S3 bulk download. Files cover all US options for a given date.
+                  See <a className="feed-massive-flat-doc-link" href="https://polygon.io/flat-files" target="_blank" rel="noopener noreferrer">Massive flat file documentation</a> for access details.
+                </p>
+                {row.tierMin !== 'starter' ? (
+                  <div className="feed-massive-tier-gate-notice">
+                    {row.tierMin === 'developer' ? 'Developer' : 'Business'} tier required.
+                  </div>
+                ) : null}
+              </FeedMassiveServiceBlock>
+            </FeedMassiveCapabilityPanel>
+          )
+        })}
 
       </div>
     </div>

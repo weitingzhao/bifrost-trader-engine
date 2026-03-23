@@ -1,9 +1,12 @@
 import type { MassiveStatusResponse } from '../../api'
 import checklistRows from '../massiveFeedChecklistRows'
-import type { ChecklistRow } from '../massiveFeedChecklistRows'
+import type { ChecklistRow, CapabilityGroup } from '../massiveFeedChecklistRows'
+import { CAPABILITY_GROUP_ORDER } from '../massiveFeedChecklistRows'
 
 /** Effective project status for a capability (tier may override trades). */
 export type EffectiveServiceStatus = ChecklistRow['projectStatus'] | 'not-on-tier'
+
+const TIER_RANK: Record<string, number> = { starter: 0, developer: 1, business: 2 }
 
 export function tierOkForRow(
   row: ChecklistRow,
@@ -11,22 +14,34 @@ export function tierOkForRow(
   configured: boolean,
 ): boolean {
   if (!massiveStatus || !configured) return false
-  return row.tierMin === 'starter' ? true : (massiveStatus.tier || '').toLowerCase() === 'developer'
+  const actual = (massiveStatus.tier || 'starter').toLowerCase()
+  return (TIER_RANK[actual] ?? 0) >= (TIER_RANK[row.tierMin] ?? 0)
 }
 
 export function tradesOkForRow(row: ChecklistRow, massiveStatus: MassiveStatusResponse | null): boolean {
   return !row.requiresTrades || Boolean(massiveStatus?.trades_enabled)
 }
 
-/** Option trades: when Massive tier / trades_enabled disallow API, show tier — not "not implemented". */
+/** Tier-sensitive capabilities: trades-quotes gates on trades_enabled;
+ *  fmv gates on Business tier. Legacy 'trades' id kept as fallback. */
 export function effectiveChecklistProjectStatus(
   row: ChecklistRow,
   configured: boolean,
   tierOk: boolean,
   tradesOk: boolean,
 ): EffectiveServiceStatus {
-  if (row.id !== 'trades') return row.projectStatus
-  if (configured && (!tierOk || !tradesOk)) return 'not-on-tier'
+  if (row.requiresTrades) {
+    if (configured && (!tierOk || !tradesOk)) return 'not-on-tier'
+    return row.projectStatus
+  }
+  if (row.id === 'trades-quotes' || row.id === 'trades') {
+    if (configured && (!tierOk || !tradesOk)) return 'not-on-tier'
+    return row.projectStatus
+  }
+  if (row.id === 'fmv') {
+    if (configured && !tierOk) return 'not-on-tier'
+    return row.projectStatus
+  }
   return row.projectStatus
 }
 
@@ -65,4 +80,12 @@ export function checklistEffectiveStatusLabel(eff: EffectiveServiceStatus): stri
   if (eff === 'partial') return 'Partial'
   if (eff === 'not-on-tier') return 'Not on tier'
   return 'Not implemented'
+}
+
+/** Group rows by CapabilityGroup in display order. */
+export function groupedChecklistRows(): { group: CapabilityGroup; rows: ChecklistRow[] }[] {
+  return CAPABILITY_GROUP_ORDER.map(g => ({
+    group: g,
+    rows: checklistRows.filter(r => r.group === g),
+  })).filter(g => g.rows.length > 0)
 }

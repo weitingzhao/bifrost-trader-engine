@@ -31,13 +31,14 @@ import {
   FEED_MASSIVE_OPTION_ID,
   FEED_SUBSECTIONS,
 } from './settings/settingsConstants'
-import checklistRows from './massiveFeedChecklistRows'
+import { CAPABILITY_GROUP_LABELS } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
 import { isMassiveOptionFeedHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
 import {
   checklistEffectiveStatusLabel,
   effectiveChecklistProjectStatus,
   effectiveStatusToSidebarLamp,
+  groupedChecklistRows,
   massiveFeedParentLamp,
   shortServiceLabel,
   tierOkForRow,
@@ -468,32 +469,37 @@ export function SettingsPage({
               </button>
             </div>
             <div id="settings-feed-massive-subs" className="settings-sidebar-subs" hidden={!massiveOptionExpanded}>
-              {checklistRows.map(row => {
-                const configured = Boolean(massiveStatus?.configured)
-                const tierOk = tierOkForRow(row, massiveStatus, configured)
-                const tradesOk = tradesOkForRow(row, massiveStatus)
-                const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
-                const lamp = effectiveStatusToSidebarLamp(eff)
-                const anchor = feedMassiveSvcAnchorId(row.id)
-                const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
-                const childActive = currentHash === anchor || fromTab === row.id
-                return (
-                  <a
-                    key={row.id}
-                    href={`#${anchor}`}
-                    className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
-                  >
-                    <span
-                      className={`title-inline-lamp lamp-icon ${lamp}`}
-                      title={checklistEffectiveStatusLabel(eff)}
-                      aria-hidden
-                    >
-                      <SettingsSidebarLampGlyph id={row.id} />
-                    </span>
-                    <span className="settings-sidebar-massive-cap-label">{shortServiceLabel(row)}</span>
-                  </a>
-                )
-              })}
+              {groupedChecklistRows().map(({ group, rows: groupRows }) => (
+                <div key={group} className="settings-sidebar-massive-group">
+                  <span className="settings-sidebar-massive-group-label">{CAPABILITY_GROUP_LABELS[group]}</span>
+                  {groupRows.map(row => {
+                    const configured = Boolean(massiveStatus?.configured)
+                    const tierOk = tierOkForRow(row, massiveStatus, configured)
+                    const tradesOk = tradesOkForRow(row, massiveStatus)
+                    const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
+                    const lamp = effectiveStatusToSidebarLamp(eff)
+                    const anchor = feedMassiveSvcAnchorId(row.id)
+                    const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
+                    const childActive = currentHash === anchor || fromTab === row.id
+                    return (
+                      <a
+                        key={row.id}
+                        href={`#${anchor}`}
+                        className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
+                      >
+                        <span
+                          className={`title-inline-lamp lamp-icon ${lamp}`}
+                          title={checklistEffectiveStatusLabel(eff)}
+                          aria-hidden
+                        >
+                          <SettingsSidebarLampGlyph id={row.id} />
+                        </span>
+                        <span className="settings-sidebar-massive-cap-label">{shortServiceLabel(row)}</span>
+                      </a>
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           </div>
         </div>
