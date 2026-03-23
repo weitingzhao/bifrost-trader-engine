@@ -10,6 +10,7 @@ import {
   postMassiveSync,
   fetchOptionSnapshotsPg,
   pollMassiveJobUntilDone,
+  fetchMassiveJob,
   fetchMassiveLastTrade,
   fetchMassiveHistQuotes,
   fetchGreeksCoverage,
@@ -55,6 +56,7 @@ function computeStrikesFromPreset(
 interface OptionDiscoveryPageProps {
   status: StatusResponse | null
   onGoToScreener?: () => void
+  onOpenMassiveFeed?: () => void
   breadcrumbLabel?: string
 }
 
@@ -311,6 +313,7 @@ function expirationDaysFromToday(expiration: string): string {
 export function OptionDiscoveryPage({
   status: _status,
   onGoToScreener,
+  onOpenMassiveFeed,
   breadcrumbLabel = 'Option Discovery',
 }: OptionDiscoveryPageProps) {
   const stkSymbols = useWatchlistStkSymbols()
@@ -326,7 +329,18 @@ export function OptionDiscoveryPage({
   const [strikesLoading, setStrikesLoading] = useState(false)
   const [snapshotRows, setSnapshotRows] = useState<OptionSnapshotRow[]>([])
   const [snapshotLoading, setSnapshotLoading] = useState(false)
-  const [snapshotError, setSnapshotError] = useState<string | null>(null)
+  const [snapshotFeedback, setSnapshotFeedback] = useState<{
+    level: 'error' | 'warning' | 'info'
+    title?: string
+    body: string
+  } | null>(null)
+  /** True after user clicked Load quotes at least once (avoids misleading empty hint). */
+  const [snapshotLoadAttempted, setSnapshotLoadAttempted] = useState(false)
+  /** After a Massive warning, poll PG until rows appear or timeout (no extra Celery enqueue). */
+  const [snapshotPgWatching, setSnapshotPgWatching] = useState(false)
+  const [snapshotPgWatchSecondsLeft, setSnapshotPgWatchSecondsLeft] = useState<number | null>(null)
+  const snapshotWatchIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const snapshotWatchGenRef = useRef(0)
   const [underlyingPrice, setUnderlyingPrice] = useState<number | null>(null)
   const [addWatchlistFeedback, setAddWatchlistFeedback] = useState<string | null>(null)
   const [strikeCountOption, setStrikeCountOption] = useState<StrikeCountOption>(30)
@@ -392,6 +406,12 @@ export function OptionDiscoveryPage({
     if (multiSelectStrikes.length > 0) return multiSelectStrikes
     return computedStrikes
   }, [multiSelectStrikes, computedStrikes])
+
+  /** Stable key for PG watch cleanup when strike selection changes. */
+  const strikesWatchKey = useMemo(
+    () => effectiveStrikes.map(x => String(x)).join(','),
+    [effectiveStrikes],
+  )
 
   useEffect(() => {
     const el = otmCallWrapRef.current
@@ -509,6 +529,11 @@ export function OptionDiscoveryPage({
   }, [selectedSymbol, loadExpirations])
 
   useEffect(() => {
+    setSnapshotLoadAttempted(false)
+    setSnapshotFeedback(null)
+  }, [selectedSymbol, selectedExpiration, quoteSource])
+
+  useEffect(() => {
     if (prevQuoteSourceRef.current === quoteSource) return
     prevQuoteSourceRef.current = quoteSource
     const sym = selectedSymbol.trim()
@@ -526,33 +551,124 @@ export function OptionDiscoveryPage({
     }
   }, [selectedExpiration, selectedSymbol, loadStrikesForExpiration])
 
+  const stopSnapshotPgWatch = useCallback(() => {
+    snapshotWatchGenRef.current += 1
+    if (snapshotWatchIntervalRef.current != null) {
+      clearInterval(snapshotWatchIntervalRef.current)
+      snapshotWatchIntervalRef.current = null
+    }
+    setSnapshotPgWatching(false)
+    setSnapshotPgWatchSecondsLeft(null)
+  }, [])
+
+  /** Poll PostgreSQL only (no new Celery job) until rows exist or timeout. */
+  const startSnapshotPgWatch = useCallback((sym: string, exp: string, strikesCsv: string | undefined) => {
+    if (snapshotWatchIntervalRef.current != null) {
+      clearInterval(snapshotWatchIntervalRef.current)
+      snapshotWatchIntervalRef.current = null
+    }
+    const gen = ++snapshotWatchGenRef.current
+    const intervalMs = 3000
+    const maxMs = 120_000
+    const deadline = Date.now() + maxMs
+    setSnapshotPgWatching(true)
+    setSnapshotPgWatchSecondsLeft(Math.ceil(maxMs / 1000))
+
+    const runTick = async () => {
+      if (snapshotWatchGenRef.current !== gen) return
+      const leftSec = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      setSnapshotPgWatchSecondsLeft(leftSec)
+      if (leftSec <= 0) {
+        if (snapshotWatchGenRef.current === gen) {
+          if (snapshotWatchIntervalRef.current != null) {
+            clearInterval(snapshotWatchIntervalRef.current)
+            snapshotWatchIntervalRef.current = null
+          }
+          setSnapshotPgWatching(false)
+          setSnapshotPgWatchSecondsLeft(null)
+        }
+        return
+      }
+      try {
+        const sn = await fetchOptionSnapshotsPg(sym, exp, strikesCsv, 'massive')
+        if (snapshotWatchGenRef.current !== gen) return
+        const rows = sn.rows ?? []
+        if (rows.length > 0) {
+          setSnapshotRows(rows)
+          if (sn.underlying_price != null && Number.isFinite(Number(sn.underlying_price))) {
+            setUnderlyingPrice(Number(sn.underlying_price))
+          }
+          setSnapshotFeedback(null)
+          if (snapshotWatchIntervalRef.current != null) {
+            clearInterval(snapshotWatchIntervalRef.current)
+            snapshotWatchIntervalRef.current = null
+          }
+          setSnapshotPgWatching(false)
+          setSnapshotPgWatchSecondsLeft(null)
+        }
+      } catch {
+        /* ignore transient errors while watching */
+      }
+    }
+
+    void runTick()
+    snapshotWatchIntervalRef.current = setInterval(() => { void runTick() }, intervalMs)
+  }, [])
+
+  useEffect(() => {
+    stopSnapshotPgWatch()
+  }, [selectedSymbol, selectedExpiration, quoteSource, strikesWatchKey, stopSnapshotPgWatch])
+
+  useEffect(() => () => { stopSnapshotPgWatch() }, [stopSnapshotPgWatch])
+
   const loadQuotes = useCallback(async () => {
     const sym = selectedSymbol.trim()
     const exp = selectedExpiration.trim()
     if (!sym || !exp) return
     const strikesToSend = effectiveStrikes.length > 0 ? effectiveStrikes : undefined
+    stopSnapshotPgWatch()
     setSnapshotLoading(true)
-    setSnapshotError(null)
+    setSnapshotFeedback(null)
     setAddWatchlistFeedback(null)
     setSelectedContractIdx(null)
+    setSnapshotLoadAttempted(true)
     try {
       if (quoteSource === 'ib') {
         const res = await fetchOptionSnapshot(sym, exp, strikesToSend)
         setSnapshotRows(res.rows ?? [])
         setUnderlyingPrice(res.underlying_price ?? null)
-        setSnapshotError(res.error ?? null)
+        if (res.error) {
+          setSnapshotFeedback({ level: 'error', body: res.error })
+        } else if ((res.rows ?? []).length === 0) {
+          setSnapshotFeedback({ level: 'info', body: 'No option quotes returned from IB for the selected expiration/strikes.' })
+        }
         return
       }
-      const sync = await postMassiveSync('snapshot', { underlying: sym })
+
+      // ── Massive path ──
+      // Chain snapshot must match UI expiry/strikes: default API is ~10 rows with no filters (wrong contracts).
+      const massiveChainPayload: Record<string, unknown> = {
+        underlying: sym,
+        snapshot_type: 'chain',
+        expiration_date: exp,
+        limit: 250,
+      }
+      if (strikesToSend && strikesToSend.length > 0) {
+        const mn = Math.min(...strikesToSend)
+        const mx = Math.max(...strikesToSend)
+        massiveChainPayload.strike_price_gte = mn
+        massiveChainPayload.strike_price_lte = mx
+      }
+      const sync = await postMassiveSync('snapshot', massiveChainPayload)
       if (!sync.ok || !sync.job_id) {
-        setSnapshotError(sync.error ?? sync.message ?? 'Massive sync failed')
+        setSnapshotFeedback({ level: 'error', title: 'Sync failed', body: sync.error ?? sync.message ?? 'Massive sync failed' })
         setSnapshotRows([])
         setUnderlyingPrice(null)
         return
       }
       const polled = await pollMassiveJobUntilDone(sync.job_id, { maxAttempts: 120, intervalMs: 1000 })
       if (!polled.ok) {
-        setSnapshotError(polled.error ?? 'Massive job failed')
+        setSnapshotFeedback({ level: 'error', title: 'Job failed', body: polled.error ?? 'Massive job failed' })
         setSnapshotRows([])
         setUnderlyingPrice(null)
         return
@@ -560,17 +676,57 @@ export function OptionDiscoveryPage({
       const strikesCsv =
         strikesToSend && strikesToSend.length > 0 ? strikesToSend.map(x => String(x)).join(',') : undefined
       const sn = await fetchOptionSnapshotsPg(sym, exp, strikesCsv, 'massive')
-      setSnapshotRows(sn.rows ?? [])
+      const rows = sn.rows ?? []
+      setSnapshotRows(rows)
       setUnderlyingPrice(sn.underlying_price ?? null)
-      setSnapshotError(sn.error ?? null)
+
+      if (rows.length > 0) {
+        setSnapshotFeedback(null)
+        return
+      }
+
+      // rows empty — determine the right feedback level
+      if (sn.error) {
+        setSnapshotFeedback({ level: 'error', body: sn.error })
+        return
+      }
+      if (sn.warning) {
+        setSnapshotFeedback({ level: 'warning', title: 'No snapshot rows matched', body: sn.warning })
+        startSnapshotPgWatch(sym, exp, strikesCsv)
+        return
+      }
+
+      // Neither error nor warning from backend — inspect job result
+      const jobRes = await fetchMassiveJob(sync.job_id)
+      const result = jobRes.job?.result as Record<string, unknown> | undefined
+      const rw = result?.rows_written
+      if (typeof rw === 'number' && rw === 0) {
+        setSnapshotFeedback({
+          level: 'warning',
+          title: 'Snapshot wrote 0 rows',
+          body: 'Massive chain snapshot completed but wrote 0 rows. The API may have returned empty data, or the Celery worker skipped inserts. Check Massive API key, symbol validity, and Celery logs.',
+        })
+      } else if (typeof rw === 'number' && rw > 0) {
+        setSnapshotFeedback({
+          level: 'warning',
+          title: 'Contract key mismatch',
+          body: `${rw} rows were written to PostgreSQL but none matched this expiration/strikes. Verify that the selected expiry and strikes exist in the Massive chain data.`,
+        })
+      } else {
+        setSnapshotFeedback({
+          level: 'warning',
+          body: 'No quotes returned. Ensure Celery worker is running and consuming the Massive snapshot queue.',
+        })
+      }
+      startSnapshotPgWatch(sym, exp, strikesCsv)
     } catch (e) {
-      setSnapshotError(e instanceof Error ? e.message : 'Failed to load quotes')
+      setSnapshotFeedback({ level: 'error', body: e instanceof Error ? e.message : 'Failed to load quotes' })
       setSnapshotRows([])
       setUnderlyingPrice(null)
     } finally {
       setSnapshotLoading(false)
     }
-  }, [selectedSymbol, selectedExpiration, effectiveStrikes, quoteSource])
+  }, [selectedSymbol, selectedExpiration, effectiveStrikes, quoteSource, stopSnapshotPgWatch, startSnapshotPgWatch])
 
   const handleAddToWatchlist = useCallback(
     async (row: OptionSnapshotRow) => {
@@ -1096,13 +1252,47 @@ export function OptionDiscoveryPage({
             </span>
           )}
         </div>
+        {quoteSource === 'massive' && (
+          <p className="section-hint" style={{ marginBottom: 'var(--space-2)' }}>
+            Massive quotes are 15-min delayed snapshots stored in PostgreSQL via Celery async workers.
+          </p>
+        )}
         {snapshotLoading && (
           <p className="section-hint">Fetching option quotes (may take ~10s)…</p>
         )}
-        {snapshotError != null && !snapshotLoading && (
-          <p className="section-hint" style={{ color: 'var(--color-danger, #c00)' }} role="alert">
-            {snapshotError}
-          </p>
+        {snapshotFeedback != null && !snapshotLoading && (
+          <div
+            className={`od-snapshot-feedback od-snapshot-feedback--${snapshotFeedback.level}`}
+            role={snapshotFeedback.level === 'error' ? 'alert' : 'status'}
+          >
+            {snapshotFeedback.title && <strong>{snapshotFeedback.title}</strong>}
+            <span>{snapshotFeedback.body}</span>
+            {snapshotFeedback.level !== 'error' && quoteSource === 'massive' && (
+              <div className="od-feedback-actions">
+                <button
+                  type="button"
+                  className="button button-secondary button-sm"
+                  onClick={() => void loadQuotes()}
+                  disabled={!canLoadQuotes}
+                  aria-label="Enqueue Massive snapshot job and reload quotes from PostgreSQL"
+                >
+                  Pull now
+                </button>
+                {onOpenMassiveFeed && (
+                  <button type="button" className="button-feedback-nav" onClick={onOpenMassiveFeed}>
+                    Open Massive Option
+                  </button>
+                )}
+              </div>
+            )}
+            {snapshotPgWatching && quoteSource === 'massive' && (
+              <p className="od-snapshot-watch-hint" role="status">
+                Watching PostgreSQL for new snapshots… ~{snapshotPgWatchSecondsLeft ?? 0}s left. Matching rows will appear
+                automatically when data is available. Use Pull now to enqueue another chain snapshot if the worker was not
+                running.
+              </p>
+            )}
+          </div>
         )}
         {snapshotRows.length > 0 && !snapshotLoading && (
           <div className="table-wrapper" style={{ overflowX: 'auto' }}>
@@ -1181,8 +1371,12 @@ export function OptionDiscoveryPage({
             </table>
           </div>
         )}
-        {snapshotRows.length === 0 && !snapshotLoading && !snapshotError && (
-          <p className="section-hint">Select symbol and expiration, then click Load quotes.</p>
+        {snapshotRows.length === 0 && !snapshotLoading && !snapshotFeedback && (
+          <p className="section-hint" role="status">
+            {!snapshotLoadAttempted
+              ? 'Select symbol and expiration, then click Load quotes.'
+              : 'No quotes returned. Check Massive job queue, Celery worker, and PostgreSQL option_snapshots.'}
+          </p>
         )}
       </section>
 

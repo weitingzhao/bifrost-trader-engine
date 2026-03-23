@@ -64,7 +64,9 @@ def contract_key_from_parts(
         r = "C"
     if r in ("PUT",):
         r = "P"
-    return f"{sym}|OPT|{exp}|{strike}|{r}"
+    # Normalize strike so query keys match rows written from Polygon strike_price (avoids float drift).
+    sk = round(float(strike), 8)
+    return f"{sym}|OPT|{exp}|{sk}|{r}"
 
 
 class MassiveClient:

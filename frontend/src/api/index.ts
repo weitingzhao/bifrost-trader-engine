@@ -92,6 +92,7 @@ export type {
   TechnicalIndicatorResponse,
   LiquiditySummaryResponse,
   RelativeValueResponse,
+  OptionSnapshotsPgResult,
 } from './research'
 export {
   postSetHeartbeatInterval,

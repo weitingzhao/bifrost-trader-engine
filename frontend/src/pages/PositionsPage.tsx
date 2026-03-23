@@ -610,6 +610,216 @@ export function PositionsPage({
     return s
   }, [executionsCanonical])
 
+  const renderOpenOptionExecutionRow = useCallback(
+    (
+      pos: OpenOptionPosition,
+      posKey: string,
+      ex: Execution,
+      ei: number,
+      book: 'final' | 'tws',
+      finalRows: Execution[],
+      twsRows: Execution[],
+      includeAttrColumn: boolean,
+    ) => {
+      const crossBookMatch =
+        book === 'final' ? findMatchingTwsForFinal(ex, twsRows) : findMatchingFinalForTws(ex, finalRows)
+      const es = (ex.side ?? '').toUpperCase()
+      const eSideLabel =
+        es === 'BUY' || es === 'BOT' || es === 'B'
+          ? 'Buy'
+          : es === 'SELL' || es === 'SLD' || es === 'S'
+            ? 'Sell'
+            : (ex.side ?? '—')
+      const eQty = Math.abs(Number(ex.quantity) || 0)
+      const ePrice = Number(ex.price) || 0
+      const eComm = Number(ex.commission) || 0
+      const eTs = ex.time != null ? Number(ex.time) : null
+      const isOffTrack = pos.kind === 'offtrack'
+      const execInstanceId = ex.strategy_instance_id
+      const bookLabel = book === 'final' ? '[Final]' : '[TWS client]'
+      const rowKey = `${posKey}-exec-${book}-${ex.account_executions_id ?? ei}`
+      const twsContractKey = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
+      const hasCanonicalContractRow = canonicalOptContractKeySet.has(twsContractKey)
+      const showSyncTws =
+        book === 'tws' &&
+        hasCanonicalContractRow &&
+        crossBookMatch != null &&
+        twsNeedsStrategySyncFromFinal(ex, crossBookMatch)
+      const showSyncFinal =
+        book === 'final' &&
+        hasCanonicalContractRow &&
+        crossBookMatch != null &&
+        finalNeedsStrategySyncFromTws(ex, crossBookMatch)
+      const syncBusyTws = syncingTwsAttributionKey === String(ex.account_executions_id ?? '')
+      const syncBusyFinal = syncingFinalAttributionKey === String(ex.account_executions_id ?? '')
+      return (
+        <tr key={rowKey} className="detail-execution-row">
+          <td className="replay-opt-expand-col" />
+          <td className="detail-exec-indent replay-muted detail-exec-indent--stack" colSpan={2}>
+            <div className="detail-exec-indent-stack">
+              <div className="detail-exec-line-primary">
+                ↳ {bookLabel} exec #{ex.account_executions_id ?? '?'}
+                {execInstanceId != null ? (
+                  <>
+                    {' '}
+                    <span className="replay-muted">·</span>{' '}
+                    <a
+                      href={`#/strategies/instances/${execInstanceId}`}
+                      className="ledger-instance-icon-link"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`strategy_instance_id ${execInstanceId}`}
+                      aria-label={`View instance #${execInstanceId}`}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      instance #{execInstanceId}
+                    </a>
+                  </>
+                ) : null}
+              </div>
+              {showSyncTws && crossBookMatch != null ? (
+                <div className="detail-exec-line-sync">
+                  <button
+                    type="button"
+                    className="btn btn-icon-small detail-exec-sync-btn"
+                    title="Apply strategy opportunity and instance from the final book row"
+                    aria-label="Sync strategy attribution from final book"
+                    disabled={syncBusyTws}
+                    onClick={e => {
+                      e.stopPropagation()
+                      handleSyncTwsStrategyFromFinal(ex, crossBookMatch)
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
+                      <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
+                    </svg>
+                  </button>
+                </div>
+              ) : null}
+              {showSyncFinal && crossBookMatch != null ? (
+                <div className="detail-exec-line-sync">
+                  <button
+                    type="button"
+                    className="btn btn-icon-small detail-exec-sync-btn"
+                    title="Apply strategy opportunity and instance from the TWS client row"
+                    aria-label="Sync strategy attribution from TWS client book"
+                    disabled={syncBusyFinal}
+                    onClick={e => {
+                      e.stopPropagation()
+                      handleSyncFinalStrategyFromTws(ex, crossBookMatch)
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
+                      <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
+                    </svg>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </td>
+          <td>
+            <ExecSourceBadge source={ex.source} />
+          </td>
+          <td />
+          <td>
+            {eSideLabel} {eQty || '—'}
+          </td>
+          <td>{fmtUsd(ePrice)}</td>
+          <td />
+          <td>
+            {eTs != null && Number.isFinite(eTs) ? (
+              <>
+                {fmtDate(eTs)}
+                {fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}
+              </>
+            ) : (
+              '—'
+            )}
+          </td>
+          <td>{eComm ? fmtUsd(eComm) : '—'}</td>
+          <td className="replay-muted" />
+          {includeAttrColumn ? <td className="replay-muted" /> : null}
+          <td className="replay-muted">{ex.account_id ?? '—'}</td>
+          <StrategyAttributionCells ex={ex} />
+          <td>
+            <span className="replay-exec-row-actions">
+              <button
+                type="button"
+                className="btn btn-icon-small"
+                onClick={e => {
+                  e.stopPropagation()
+                  setPageError(null)
+                  setEditExecConfirmState({ open: true, exec: ex })
+                }}
+                title="Edit"
+                aria-label="Edit execution"
+              >
+                <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+              {ex.account_executions_id != null ? (
+                <LinkStrategyIconButton
+                  title="Assign strategy opportunity and instance"
+                  onClick={() => {
+                    setLinkContext({ account_executions_id: ex.account_executions_id!, execution: ex })
+                    setLinkModalOpen(true)
+                    setPageError(null)
+                  }}
+                />
+              ) : null}
+              {isOffTrack ? (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  onClick={e => {
+                    e.stopPropagation()
+                    setCloseAgainstExec(ex)
+                    setPageError(null)
+                  }}
+                >
+                  Close
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-icon-small btn-icon-danger"
+                onClick={e => {
+                  e.stopPropagation()
+                  setPageError(null)
+                  setDeleteConfirmState({
+                    open: true,
+                    title: 'Delete execution',
+                    message: 'This will permanently remove this execution from the trade ledger. This cannot be undone.',
+                    confirming: false,
+                    exec: ex,
+                  })
+                }}
+                title="Delete"
+                aria-label="Delete execution"
+              >
+                <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </button>
+            </span>
+          </td>
+        </tr>
+      )
+    },
+    [
+      canonicalOptContractKeySet,
+      handleSyncFinalStrategyFromTws,
+      handleSyncTwsStrategyFromFinal,
+      syncingFinalAttributionKey,
+      syncingTwsAttributionKey,
+    ],
+  )
+
   const openOffTrackBaseExecutions = useMemo(() => {
     let list = [...executionsFinal, ...executionsTws]
     list = list.filter(e => (e.account_id ?? '').trim() === OFF_TRACK_ACCOUNT_ID)
@@ -2306,6 +2516,8 @@ export function PositionsPage({
                                                 <th>Pool</th>
                                                 <th>Attr</th>
                                                 <th>Account</th>
+                                                <th>Opportunity</th>
+                                                <th>Actions</th>
                                               </tr>
                                             </thead>
                                             <tbody>
@@ -2399,94 +2611,38 @@ export function PositionsPage({
                                                       )}
                                                     </td>
                                                     <td>{pos.account_id || '—'}</td>
+                                                    <td className="replay-strategy-opp-cell">
+                                                      {execCount === 0 ? '—' : (
+                                                        <span className="replay-muted">{execCount} execution{execCount > 1 ? 's' : ''} ↓</span>
+                                                      )}
+                                                    </td>
+                                                    <td>—</td>
                                                   </tr>,
                                                   ...(isPosExpanded ? [
-                                                    ...scopedFinalExecs.map((ex, ei) => {
-                                                      const es = (ex.side ?? '').toUpperCase()
-                                                      const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
-                                                      const eQty = Math.abs(Number(ex.quantity) || 0)
-                                                      const ePrice = Number(ex.price) || 0
-                                                      const eComm = Number(ex.commission) || 0
-                                                      const eTs = ex.time != null ? Number(ex.time) : null
-                                                      return (
-                                                        <tr key={`${posKey}-exec-final-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
-                                                          <td className="replay-opt-expand-col" />
-                                                          <td className="detail-exec-indent replay-muted" colSpan={2}>
-                                                            ↳ [Final] exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} />
-                                                            {ex.strategy_instance_id != null ? (
-                                                              <>
-                                                                {' '}
-                                                                <span className="replay-muted">·</span>{' '}
-                                                                <a
-                                                                  href={`#/strategies/instances/${ex.strategy_instance_id}`}
-                                                                  className="ledger-instance-icon-link"
-                                                                  target="_blank"
-                                                                  rel="noopener noreferrer"
-                                                                  title={`strategy_instance_id ${ex.strategy_instance_id}`}
-                                                                  aria-label={`View instance #${ex.strategy_instance_id}`}
-                                                                  onClick={e => e.stopPropagation()}
-                                                                >
-                                                                  instance #{ex.strategy_instance_id}
-                                                                </a>
-                                                              </>
-                                                            ) : null}
-                                                          </td>
-                                                          <td />
-                                                          <td />
-                                                          <td>{eSideLabel} {eQty || '—'}</td>
-                                                          <td>{fmtUsd(ePrice)}</td>
-                                                          <td />
-                                                          <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
-                                                          <td>{eComm ? fmtUsd(eComm) : '—'}</td>
-                                                          <td />
-                                                          <td />
-                                                          <td className="replay-muted">{ex.account_id ?? '—'}</td>
-                                                        </tr>
-                                                      )
-                                                    }),
-                                                    ...scopedTwsExecs.map((ex, ei) => {
-                                                      const es = (ex.side ?? '').toUpperCase()
-                                                      const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
-                                                      const eQty = Math.abs(Number(ex.quantity) || 0)
-                                                      const ePrice = Number(ex.price) || 0
-                                                      const eComm = Number(ex.commission) || 0
-                                                      const eTs = ex.time != null ? Number(ex.time) : null
-                                                      return (
-                                                        <tr key={`${posKey}-exec-tws-${ex.account_executions_id ?? ei}`} className="detail-execution-row">
-                                                          <td className="replay-opt-expand-col" />
-                                                          <td className="detail-exec-indent replay-muted" colSpan={2}>
-                                                            ↳ [TWS client] exec #{ex.account_executions_id ?? '?'} <ExecSourceBadge source={ex.source} />
-                                                            {ex.strategy_instance_id != null ? (
-                                                              <>
-                                                                {' '}
-                                                                <span className="replay-muted">·</span>{' '}
-                                                                <a
-                                                                  href={`#/strategies/instances/${ex.strategy_instance_id}`}
-                                                                  className="ledger-instance-icon-link"
-                                                                  target="_blank"
-                                                                  rel="noopener noreferrer"
-                                                                  title={`strategy_instance_id ${ex.strategy_instance_id}`}
-                                                                  aria-label={`View instance #${ex.strategy_instance_id}`}
-                                                                  onClick={e => e.stopPropagation()}
-                                                                >
-                                                                  instance #{ex.strategy_instance_id}
-                                                                </a>
-                                                              </>
-                                                            ) : null}
-                                                          </td>
-                                                          <td />
-                                                          <td />
-                                                          <td>{eSideLabel} {eQty || '—'}</td>
-                                                          <td>{fmtUsd(ePrice)}</td>
-                                                          <td />
-                                                          <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
-                                                          <td>{eComm ? fmtUsd(eComm) : '—'}</td>
-                                                          <td />
-                                                          <td />
-                                                          <td className="replay-muted">{ex.account_id ?? '—'}</td>
-                                                        </tr>
-                                                      )
-                                                    }),
+                                                    ...scopedFinalExecs.map((ex, ei) =>
+                                                      renderOpenOptionExecutionRow(
+                                                        pos,
+                                                        posKey,
+                                                        ex,
+                                                        ei,
+                                                        'final',
+                                                        scopedFinalExecs,
+                                                        scopedTwsExecs,
+                                                        true,
+                                                      ),
+                                                    ),
+                                                    ...scopedTwsExecs.map((ex, ei) =>
+                                                      renderOpenOptionExecutionRow(
+                                                        pos,
+                                                        posKey,
+                                                        ex,
+                                                        ei,
+                                                        'tws',
+                                                        scopedFinalExecs,
+                                                        scopedTwsExecs,
+                                                        true,
+                                                      ),
+                                                    ),
                                                   ] : []),
                                                 ]
                                               })}
@@ -3022,133 +3178,13 @@ export function PositionsPage({
                                 <td>—</td>
                               </tr>
                             )
-                            const renderOptsExecRow = (ex: Execution, ei: number, book: 'final' | 'tws', crossBookMatch: Execution | null) => {
-                              const es = (ex.side ?? '').toUpperCase()
-                              const eSideLabel = es === 'BUY' || es === 'BOT' || es === 'B' ? 'Buy' : es === 'SELL' || es === 'SLD' || es === 'S' ? 'Sell' : (ex.side ?? '—')
-                              const eQty = Math.abs(Number(ex.quantity) || 0)
-                              const ePrice = Number(ex.price) || 0
-                              const eComm = Number(ex.commission) || 0
-                              const eTs = ex.time != null ? Number(ex.time) : null
-                              const isOffTrack = pos.kind === 'offtrack'
-                              const execInstanceId = ex.strategy_instance_id
-                              const bookLabel = book === 'final' ? '[Final]' : '[TWS client]'
-                              const rowKey = `${posKey}-exec-${book}-${ex.account_executions_id ?? ei}`
-                              const twsContractKey = optExecutionMatchKey(ex.account_id ?? '', ex.contract_key ?? '')
-                              const hasCanonicalContractRow = canonicalOptContractKeySet.has(twsContractKey)
-                              const showSyncTws =
-                                book === 'tws' &&
-                                hasCanonicalContractRow &&
-                                crossBookMatch != null &&
-                                twsNeedsStrategySyncFromFinal(ex, crossBookMatch)
-                              const showSyncFinal =
-                                book === 'final' &&
-                                hasCanonicalContractRow &&
-                                crossBookMatch != null &&
-                                finalNeedsStrategySyncFromTws(ex, crossBookMatch)
-                              const syncBusyTws = syncingTwsAttributionKey === String(ex.account_executions_id ?? '')
-                              const syncBusyFinal = syncingFinalAttributionKey === String(ex.account_executions_id ?? '')
-                              return (
-                                <tr key={rowKey} className="detail-execution-row">
-                                  <td className="replay-opt-expand-col" />
-                                  <td className="detail-exec-indent replay-muted detail-exec-indent--stack">
-                                    <div className="detail-exec-indent-stack">
-                                      <div className="detail-exec-line-primary">
-                                        ↳ {bookLabel} exec #{ex.account_executions_id ?? '?'}
-                                        {execInstanceId != null ? (
-                                          <>
-                                            {' '}
-                                            <span className="replay-muted">·</span>{' '}
-                                            <a
-                                              href={`#/strategies/instances/${execInstanceId}`}
-                                              className="ledger-instance-icon-link"
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              title={`strategy_instance_id ${execInstanceId}`}
-                                              aria-label={`View instance #${execInstanceId}`}
-                                              onClick={e => e.stopPropagation()}
-                                            >
-                                              instance #{execInstanceId}
-                                            </a>
-                                          </>
-                                        ) : null}
-                                      </div>
-                                      {showSyncTws && crossBookMatch != null ? (
-                                        <div className="detail-exec-line-sync">
-                                          <button
-                                            type="button"
-                                            className="btn btn-icon-small detail-exec-sync-btn"
-                                            title="Apply strategy opportunity and instance from the final book row"
-                                            aria-label="Sync strategy attribution from final book"
-                                            disabled={syncBusyTws}
-                                            onClick={e => {
-                                              e.stopPropagation()
-                                              handleSyncTwsStrategyFromFinal(ex, crossBookMatch)
-                                            }}
-                                          >
-                                            <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
-                                              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      ) : null}
-                                      {showSyncFinal && crossBookMatch != null ? (
-                                        <div className="detail-exec-line-sync">
-                                          <button
-                                            type="button"
-                                            className="btn btn-icon-small detail-exec-sync-btn"
-                                            title="Apply strategy opportunity and instance from the TWS client row"
-                                            aria-label="Sync strategy attribution from TWS client book"
-                                            disabled={syncBusyFinal}
-                                            onClick={e => {
-                                              e.stopPropagation()
-                                              handleSyncFinalStrategyFromTws(ex, crossBookMatch)
-                                            }}
-                                          >
-                                            <svg viewBox="0 0 24 24" width={14} height={14} fill="currentColor" aria-hidden>
-                                              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 9.02 4 10.48 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                  </td>
-                                  <td><ExecSourceBadge source={ex.source} /></td>
-                                  <td />
-                                  <td />
-                                  <td>{eSideLabel} {eQty || '—'}</td>
-                                  <td>{fmtUsd(ePrice)}</td>
-                                  <td />
-                                  <td>{eTs != null && Number.isFinite(eTs) ? <>{fmtDate(eTs)}{fmtDaysAgo(eTs) ? <span className="replay-time-ago"> {fmtDaysAgo(eTs)}</span> : null}</> : '—'}</td>
-                                  <td>{eComm ? fmtUsd(eComm) : '—'}</td>
-                                  <td className="replay-muted" />
-                                  <td className="replay-muted">{ex.account_id ?? '—'}</td>
-                                  <StrategyAttributionCells ex={ex} />
-                                  <td>
-                                    <span className="replay-exec-row-actions">
-                                      <button type="button" className="btn btn-icon-small" onClick={e => { e.stopPropagation(); setPageError(null); setEditExecConfirmState({ open: true, exec: ex }) }} title="Edit" aria-label="Edit execution">
-                                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-                                      </button>
-                                      {ex.account_executions_id != null ? (
-                                        <LinkStrategyIconButton title="Assign strategy opportunity and instance" onClick={() => { setLinkContext({ account_executions_id: ex.account_executions_id!, execution: ex }); setLinkModalOpen(true); setPageError(null) }} />
-                                      ) : null}
-                                      {isOffTrack ? (
-                                        <button type="button" className="btn btn-small" onClick={e => { e.stopPropagation(); setCloseAgainstExec(ex); setPageError(null) }}>Close</button>
-                                      ) : null}
-                                      <button type="button" className="btn btn-icon-small btn-icon-danger" onClick={e => { e.stopPropagation(); setPageError(null); setDeleteConfirmState({ open: true, title: 'Delete execution', message: 'This will permanently remove this execution from the trade ledger. This cannot be undone.', confirming: false, exec: ex }) }} title="Delete" aria-label="Delete execution">
-                                        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
-                                      </button>
-                                    </span>
-                                  </td>
-                                </tr>
-                              )
-                            }
                             const execRows = isPosExpanded
                               ? [
                                   ...execLists.final.map((ex, ei) =>
-                                    renderOptsExecRow(ex, ei, 'final', findMatchingTwsForFinal(ex, execLists.tws)),
+                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'final', execLists.final, execLists.tws, false),
                                   ),
                                   ...execLists.tws.map((ex, ei) =>
-                                    renderOptsExecRow(ex, ei, 'tws', findMatchingFinalForTws(ex, execLists.final)),
+                                    renderOpenOptionExecutionRow(pos, posKey, ex, ei, 'tws', execLists.final, execLists.tws, false),
                                   ),
                                 ]
                               : []

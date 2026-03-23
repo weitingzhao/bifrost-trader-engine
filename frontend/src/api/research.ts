@@ -318,19 +318,22 @@ export async function fetchMassiveJob(jobId: string): Promise<{
   }
 }
 
+export interface OptionSnapshotsPgResult {
+  symbol: string
+  expiration: string
+  underlying_price?: number
+  rows: OptionSnapshotRow[]
+  error?: string
+  warning?: string
+}
+
 /** Latest option_snapshots from PostgreSQL (after Massive sync). */
 export async function fetchOptionSnapshotsPg(
   symbol: string,
   expiration: string,
   strikesCsv?: string,
   source: 'massive' | 'ib' = 'massive',
-): Promise<{
-  symbol: string
-  expiration: string
-  underlying_price?: number
-  rows: OptionSnapshotRow[]
-  error?: string
-}> {
+): Promise<OptionSnapshotsPgResult> {
   const s = (symbol || '').trim()
   const e = (expiration || '').trim()
   const q = new URLSearchParams({ symbol: s, expiration: e, source })
@@ -363,7 +366,8 @@ export async function fetchOptionSnapshotsPg(
       ? { underlying_price: Number(j.underlying_price) }
       : {}),
     rows,
-    error: j.error,
+    error: typeof j.error === 'string' ? j.error : undefined,
+    warning: typeof j.warning === 'string' ? j.warning : undefined,
   }
 }
 

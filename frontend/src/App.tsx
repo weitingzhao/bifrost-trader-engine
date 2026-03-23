@@ -1339,6 +1339,10 @@ export default function App() {
         <OptionDiscoveryPage
           status={status}
           onGoToScreener={() => setResearchView('screener')}
+          onOpenMassiveFeed={() => {
+            setActiveTab('settings')
+            window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
+          }}
           breadcrumbLabel="Option Discovery"
         />
       )}

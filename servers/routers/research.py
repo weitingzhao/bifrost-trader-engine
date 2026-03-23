@@ -3,6 +3,7 @@
 import asyncio
 import json
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -406,6 +407,11 @@ def get_option_snapshots_pg(
         out["underlying_price"] = underlying_price
     elif last_price is not None:
         out["underlying_price"] = last_price
+    if not out_rows and keys:
+        out["warning"] = (
+            "No rows in option_snapshots for the requested contract keys. "
+            "Run Load quotes again after a successful Massive chain snapshot, or verify expiry/strikes match the chain."
+        )
     return out
 
 
