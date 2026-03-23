@@ -22,7 +22,10 @@ type StrikeCountOption = (typeof STRIKE_COUNT_OPTIONS)[number]
 const STD_DEV_OPTIONS = [1, 1.5, 2, 2.5, 'custom'] as const
 type StdDevOption = (typeof STD_DEV_OPTIONS)[number]
 
-/** Preset strikes: count (or all), half below and half above spot. Std dev filters range (spot ± stdDev * 0.1 * spot). */
+/**
+ * Select a window of strikes around spot from a reference set (real listed contracts).
+ * When spot is unknown, use the median of the reference set as a proxy.
+ */
 function computeStrikesFromPreset(
   allStrikes: number[],
   spot: number | null,
@@ -31,18 +34,16 @@ function computeStrikesFromPreset(
 ): number[] {
   if (allStrikes.length === 0) return []
   const sorted = [...allStrikes].sort((a, b) => a - b)
-  if (spot == null || spot <= 0) {
-    const n = strikeCount === 'all' ? sorted.length : Math.min(Number(strikeCount), sorted.length)
-    return sorted.slice(0, n)
-  }
-  const halfWidth = stdDevValue * 0.1 * spot
-  const inRange = sorted.filter(s => s >= spot - halfWidth && s <= spot + halfWidth)
+  const effectiveSpot =
+    spot != null && spot > 0 ? spot : sorted[Math.floor(sorted.length / 2)]
+  const halfWidth = stdDevValue * 0.1 * effectiveSpot
+  const inRange = sorted.filter(s => s >= effectiveSpot - halfWidth && s <= effectiveSpot + halfWidth)
   if (strikeCount === 'all') return inRange
   const n = Math.min(Number(strikeCount), inRange.length)
   const half = Math.floor(n / 2)
-  const below = inRange.filter(s => s < spot).sort((a, b) => (spot - a) - (spot - b)).slice(0, half)
-  const above = inRange.filter(s => s > spot).sort((a, b) => (a - spot) - (b - spot)).slice(0, n - half)
-  const at = inRange.filter(s => s === spot)
+  const below = inRange.filter(s => s < effectiveSpot).sort((a, b) => (effectiveSpot - a) - (effectiveSpot - b)).slice(0, half)
+  const above = inRange.filter(s => s > effectiveSpot).sort((a, b) => (a - effectiveSpot) - (b - effectiveSpot)).slice(0, n - half)
+  const at = inRange.filter(s => s === effectiveSpot)
   return [...new Set([...below, ...at, ...above])].sort((a, b) => a - b)
 }
 
@@ -124,6 +125,7 @@ export function OptionDiscoveryPage({
   const [expirationsError, setExpirationsError] = useState<string | null>(null)
   const [selectedExpiration, setSelectedExpiration] = useState('')
   const [expirationsLoading, setExpirationsLoading] = useState(false)
+  const [strikesLoading, setStrikesLoading] = useState(false)
   const [snapshotRows, setSnapshotRows] = useState<OptionSnapshotRow[]>([])
   const [snapshotLoading, setSnapshotLoading] = useState(false)
   const [snapshotError, setSnapshotError] = useState<string | null>(null)
@@ -204,6 +206,12 @@ export function OptionDiscoveryPage({
     return () => { cancelled = true }
   }, [stkSymbols.join(',')])
 
+  const providerForSource = useCallback(
+    (source: 'ib' | 'massive'): 'auto' | 'ib' | 'massive' =>
+      source === 'massive' && massiveStatus?.configured ? 'massive' : source === 'ib' ? 'ib' : 'auto',
+    [massiveStatus?.configured],
+  )
+
   const loadExpirations = useCallback(async (symbol: string, source: 'ib' | 'massive' = quoteSource) => {
     const s = (symbol || '').trim()
     if (!s) {
@@ -217,16 +225,20 @@ export function OptionDiscoveryPage({
     setExpirationsLoading(true)
     setExpirationsError(null)
     try {
-      const provider: 'auto' | 'ib' | 'massive' =
-        source === 'massive' && massiveStatus?.configured ? 'massive' : source === 'ib' ? 'ib' : 'auto'
+      const provider = providerForSource(source)
       const res = await fetchOptionExpirations(s, provider)
       setExpirations(res.expirations || [])
-      setStrikes(res.strikes ?? [])
       setStockDayLastPrice(res.last_price ?? null)
       setExpirationsError(res.error ?? null)
-      setSelectedExpiration(
-        (res.expirations && res.expirations.length > 0 ? res.expirations[0] : '') || ''
-      )
+      const firstExp = (res.expirations && res.expirations.length > 0 ? res.expirations[0] : '') || ''
+      setSelectedExpiration(firstExp)
+      // For IB the union strikes are usable (IB returns per-underlying, not per-expiry);
+      // for Massive/auto we'll load per-expiry strikes separately via loadStrikesForExpiration.
+      if (provider === 'ib') {
+        setStrikes(res.strikes ?? [])
+      } else {
+        setStrikes([])
+      }
     } catch {
       setExpirations([])
       setStrikes([])
@@ -236,7 +248,28 @@ export function OptionDiscoveryPage({
     } finally {
       setExpirationsLoading(false)
     }
-  }, [quoteSource, massiveStatus?.configured])
+  }, [quoteSource, providerForSource])
+
+  const loadStrikesForExpiration = useCallback(async (symbol: string, expiration: string) => {
+    const s = (symbol || '').trim()
+    const e = (expiration || '').trim()
+    if (!s || !e) {
+      setStrikes([])
+      return
+    }
+    const provider = providerForSource(quoteSource)
+    if (provider === 'ib') return
+    setStrikesLoading(true)
+    try {
+      const res = await fetchOptionExpirations(s, provider, { expiration: e })
+      setStrikes(res.strikes ?? [])
+      if (res.last_price != null) setStockDayLastPrice(res.last_price)
+    } catch {
+      setStrikes([])
+    } finally {
+      setStrikesLoading(false)
+    }
+  }, [quoteSource, providerForSource])
 
   const prevQuoteSourceRef = useRef(quoteSource)
 
@@ -262,6 +295,17 @@ export function OptionDiscoveryPage({
     const sym = selectedSymbol.trim()
     if (sym) loadExpirations(sym, quoteSource)
   }, [quoteSource, selectedSymbol, loadExpirations])
+
+  useEffect(() => {
+    setMultiSelectStrikes([])
+    const sym = selectedSymbol.trim()
+    const exp = selectedExpiration.trim()
+    if (sym && exp) {
+      loadStrikesForExpiration(sym, exp)
+    } else {
+      setStrikes([])
+    }
+  }, [selectedExpiration, selectedSymbol, loadStrikesForExpiration])
 
   const loadQuotes = useCallback(async () => {
     const sym = selectedSymbol.trim()
@@ -463,7 +507,9 @@ export function OptionDiscoveryPage({
 
         <section className="replay-section option-discovery-strikes" aria-label="Strikes">
           <div className="option-discovery-strikes-content" style={{ flex: 1, minWidth: 0 }}>
-        {computedStrikes.length > 0 && (() => {
+        {strikesLoading ? (
+          <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Loading strikes for selected expiration…</p>
+        ) : computedStrikes.length > 0 ? (() => {
           const spot = stockDayLastPrice ?? undefined
           const below = spot != null ? computedStrikes.filter(s => s < spot).sort((a, b) => b - a) : []
           const at = spot != null ? computedStrikes.filter(s => s === spot) : []
@@ -680,12 +726,11 @@ export function OptionDiscoveryPage({
               )}
             </div>
           )
-        })()}
-        {computedStrikes.length === 0 && strikes.length > 0 ? (
+        })() : strikes.length > 0 ? (
           <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol with daily data or adjust count/std dev.</p>
-        ) : computedStrikes.length === 0 ? (
+        ) : (
           <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol and expiration to see strikes.</p>
-        ) : null}
+        )}
           </div>
         </section>
         </div>

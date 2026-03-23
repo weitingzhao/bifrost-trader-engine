@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "sync:massive-coverage": "mkdir -p public/plans && cp ../docs/plans/massive_api_coverage.html public/plans/massive_api_coverage.html",
+    "build": "npm run sync:massive-coverage && tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

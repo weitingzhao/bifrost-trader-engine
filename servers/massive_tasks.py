@@ -345,19 +345,208 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
         conn = psycopg2.connect(**params)
         try:
             if kind == "snapshot":
+                snapshot_type = (payload.get("snapshot_type") or "chain").strip().lower()
+
+                if snapshot_type == "contract":
+                    u = (payload.get("underlying") or "").strip().upper()
+                    oc = (payload.get("option_contract") or "").strip()
+                    if not u or not oc:
+                        raise ValueError("payload.underlying and payload.option_contract required for contract snapshot")
+                    snap = client.fetch_option_contract_snapshot(u, oc)
+                    if snap.get("error"):
+                        raise RuntimeError(str(snap.get("error")))
+                    res_obj = snap.get("results") if isinstance(snap.get("results"), dict) else {}
+                    greeks = res_obj.get("greeks") if isinstance(res_obj.get("greeks"), dict) else {}
+                    det = res_obj.get("details") if isinstance(res_obj.get("details"), dict) else {}
+                    result = {
+                        "ok": True, "kind": kind, "snapshot_type": "contract",
+                        "summary": {
+                            "underlying": u,
+                            "option_contract": oc,
+                            "contract_type": det.get("contract_type"),
+                            "expiration_date": det.get("expiration_date"),
+                            "strike_price": det.get("strike_price"),
+                            "break_even_price": res_obj.get("break_even_price"),
+                            "implied_volatility": res_obj.get("implied_volatility"),
+                            "open_interest": res_obj.get("open_interest"),
+                            "has_greeks": bool(greeks),
+                            "has_last_trade": isinstance(res_obj.get("last_trade"), dict),
+                            "has_last_quote": isinstance(res_obj.get("last_quote"), dict),
+                        },
+                        "content": res_obj,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if snapshot_type == "unified":
+                    tickers = (payload.get("tickers") or "").strip()
+                    asset_type = (payload.get("asset_type") or "").strip() or None
+                    lim = payload.get("limit")
+                    sort_f = (payload.get("sort") or "").strip() or None
+                    order_f = (payload.get("order") or "").strip() or None
+                    snap = client.fetch_unified_snapshot(
+                        tickers=tickers or None,
+                        asset_type=asset_type,
+                        limit=int(lim) if lim else None,
+                        sort=sort_f,
+                        order=order_f,
+                    )
+                    if snap.get("error"):
+                        raise RuntimeError(str(snap.get("error")))
+                    results_list = snap.get("results") or []
+                    if not isinstance(results_list, list):
+                        results_list = []
+                    asset_types = sorted(set(
+                        r.get("type", "unknown") for r in results_list if isinstance(r, dict)
+                    ))
+                    per_ticker_errors = [
+                        {"ticker": r.get("ticker"), "error": r.get("error"), "message": r.get("message")}
+                        for r in results_list if isinstance(r, dict) and r.get("error")
+                    ]
+                    content_items = results_list[:100]
+                    result = {
+                        "ok": True, "kind": kind, "snapshot_type": "unified",
+                        "summary": {
+                            "tickers_requested": tickers,
+                            "results_count": len(results_list),
+                            "asset_types": asset_types,
+                            "has_next_page": bool(snap.get("next_url")),
+                            "errors": per_ticker_errors,
+                        },
+                        "content": content_items,
+                        "content_truncated": len(results_list) > 100,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                # Default: chain snapshot (backward compatible)
                 u = (payload.get("underlying") or payload.get("symbol") or "").strip().upper()
                 if not u:
                     raise ValueError("payload.underlying required")
-                snap = client.fetch_options_snapshot(u)
+                chain_kwargs: Dict[str, Any] = {}
+                for fk in ("strike_price", "strike_price_gte", "strike_price_lte"):
+                    v = payload.get(fk)
+                    if v is not None:
+                        try:
+                            chain_kwargs[fk] = float(v)
+                        except (TypeError, ValueError):
+                            pass
+                for fk in ("expiration_date", "expiration_date_gte", "expiration_date_lte"):
+                    v = payload.get(fk)
+                    if v:
+                        chain_kwargs[fk] = str(v)
+                if payload.get("contract_type"):
+                    chain_kwargs["contract_type"] = str(payload["contract_type"])
+                if payload.get("limit"):
+                    try:
+                        chain_kwargs["limit"] = int(payload["limit"])
+                    except (TypeError, ValueError):
+                        pass
+                if payload.get("sort"):
+                    chain_kwargs["sort"] = str(payload["sort"])
+                if payload.get("order"):
+                    chain_kwargs["order"] = str(payload["order"])
+
+                snap = client.fetch_options_snapshot(u, **chain_kwargs)
                 if snap.get("error"):
                     raise RuntimeError(str(snap.get("error")))
                 count = _apply_snapshot(conn, u, snap)
                 conn.commit()
-                result = {"ok": True, "kind": kind, "rows_written": count}
+                raw_results = snap.get("results") or []
+                if not isinstance(raw_results, list):
+                    raw_results = []
+                content_items = raw_results[:100]
+                rows_with_iv = 0
+                rows_with_any_greeks = 0
+                rows_with_full_greeks = 0
+                for _item in raw_results:
+                    if not isinstance(_item, dict):
+                        continue
+                    _g = _item.get("greeks") if isinstance(_item.get("greeks"), dict) else {}
+                    _iv = _g.get("iv") if _g else None
+                    if _iv is None:
+                        _iv = _item.get("implied_volatility")
+                    if _iv is not None:
+                        rows_with_iv += 1
+                    _has = [_g.get(k) is not None for k in ("delta", "gamma", "theta", "vega")] if _g else []
+                    if any(_has):
+                        rows_with_any_greeks += 1
+                    if all(_has):
+                        rows_with_full_greeks += 1
+                result = {
+                    "ok": True, "kind": kind, "snapshot_type": "chain",
+                    "rows_written": count,
+                    "summary": {
+                        "underlying": u,
+                        "results_count": len(raw_results),
+                        "rows_written": count,
+                        "has_next_page": bool(snap.get("next_url")),
+                        "filters": dict(chain_kwargs) if chain_kwargs else {},
+                        "rows_with_iv": rows_with_iv,
+                        "rows_with_any_greeks": rows_with_any_greeks,
+                        "rows_with_full_greeks": rows_with_full_greeks,
+                    },
+                    "content": content_items,
+                    "content_truncated": len(raw_results) > 100,
+                }
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
             if kind == "aggregates":
+                mode = (payload.get("mode") or "custom_bars").strip()
+
+                if mode == "open_close":
+                    ot = (payload.get("options_ticker") or "").strip()
+                    date_str = (payload.get("date") or "").strip()
+                    if not ot:
+                        raise ValueError("payload.options_ticker required")
+                    if not date_str:
+                        raise ValueError("payload.date required (YYYY-MM-DD)")
+                    data = client.fetch_option_open_close(ot, date_str)
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+                    result = {
+                        "ok": True, "kind": kind, "mode": mode,
+                        "endpoint": f"/v1/open-close/{ot}/{date_str}",
+                        "summary": {
+                            "options_ticker": ot, "date": date_str,
+                            "open": data.get("open"), "high": data.get("high"),
+                            "low": data.get("low"), "close": data.get("close"),
+                            "volume": data.get("volume"),
+                            "preMarket": data.get("preMarket"),
+                            "afterHours": data.get("afterHours"),
+                        },
+                        "content": data,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                if mode == "prev":
+                    ot = (payload.get("options_ticker") or "").strip()
+                    if not ot:
+                        raise ValueError("payload.options_ticker required")
+                    data = client.fetch_option_previous_day(ot)
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+                    bars = data.get("results") or []
+                    bar = bars[0] if bars else {}
+                    result = {
+                        "ok": True, "kind": kind, "mode": mode,
+                        "endpoint": f"/v2/aggs/ticker/{ot}/prev",
+                        "summary": {
+                            "options_ticker": ot,
+                            "open": bar.get("o"), "high": bar.get("h"),
+                            "low": bar.get("l"), "close": bar.get("c"),
+                            "volume": bar.get("v"), "vwap": bar.get("vw"),
+                            "transactions": bar.get("n"),
+                            "timestamp": bar.get("t"),
+                        },
+                        "content": data,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                # default: custom_bars (backward-compatible)
                 ot = (payload.get("options_ticker") or "").strip()
                 if not ot:
                     raise ValueError("payload.options_ticker required")
@@ -378,7 +567,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     raise RuntimeError(str(aggs.get("error")))
                 count = _apply_aggs(conn, sym, exp, strike, opt_right, period, aggs)
                 conn.commit()
-                result = {"ok": True, "kind": kind, "bars_upserted": count}
+                result = {"ok": True, "kind": kind, "mode": "custom_bars", "bars_upserted": count}
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
@@ -394,6 +583,93 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 count = _apply_corporate_actions(conn, client, sym)
                 conn.commit()
                 result = {"ok": True, "kind": kind, "rows_upserted": count}
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
+            if kind == "contracts":
+                mode = (payload.get("mode") or "list").strip().lower()
+                if mode == "detail":
+                    ot = (payload.get("options_ticker") or "").strip()
+                    if not ot:
+                        raise ValueError("payload.options_ticker required")
+                    data = client.fetch_option_contract_detail(ot)
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+                    res_obj = data.get("results") if isinstance(data.get("results"), dict) else {}
+                    result = {
+                        "ok": True, "kind": kind, "mode": "detail",
+                        "summary": {
+                            "options_ticker": ot,
+                            "ticker": res_obj.get("ticker"),
+                            "underlying_ticker": res_obj.get("underlying_ticker"),
+                            "expiration_date": res_obj.get("expiration_date"),
+                            "strike_price": res_obj.get("strike_price"),
+                            "contract_type": res_obj.get("contract_type"),
+                            "exercise_style": res_obj.get("exercise_style"),
+                            "shares_per_contract": res_obj.get("shares_per_contract"),
+                        },
+                        "content": res_obj,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+
+                u = (payload.get("underlying") or payload.get("symbol") or "").strip().upper()
+                if not u:
+                    raise ValueError("payload.underlying required")
+                list_kwargs: Dict[str, Any] = {}
+                if payload.get("expiration_date"):
+                    list_kwargs["expiration_date"] = str(payload["expiration_date"])
+                if payload.get("contract_type"):
+                    list_kwargs["contract_type"] = str(payload["contract_type"])
+                for fk in ("limit",):
+                    v = payload.get(fk)
+                    if v is not None:
+                        try:
+                            list_kwargs[fk] = int(v)
+                        except (TypeError, ValueError):
+                            pass
+                for fk in ("sort", "order"):
+                    v = payload.get(fk)
+                    if v:
+                        list_kwargs[fk] = str(v)
+                for fk in ("strike_price", "strike_price_gte", "strike_price_lte"):
+                    v = payload.get(fk)
+                    if v is not None:
+                        try:
+                            list_kwargs[fk] = float(v)
+                        except (TypeError, ValueError):
+                            pass
+                data = client.fetch_option_contracts_list(u, **list_kwargs)
+                if data.get("error"):
+                    raise RuntimeError(str(data["error"]))
+                raw_results = data.get("results") or []
+                if not isinstance(raw_results, list):
+                    raw_results = []
+                contracts_total = len(raw_results)
+                contracts_with_ticker = sum(
+                    1 for c in raw_results if isinstance(c, dict) and c.get("ticker")
+                )
+                contracts_with_identity = sum(
+                    1 for c in raw_results if isinstance(c, dict)
+                    and c.get("underlying_ticker")
+                    and c.get("expiration_date")
+                    and c.get("strike_price") is not None
+                    and c.get("contract_type")
+                )
+                content_items = raw_results[:100]
+                result = {
+                    "ok": True, "kind": kind, "mode": "list",
+                    "summary": {
+                        "underlying": u,
+                        "results_count": contracts_total,
+                        "has_next_page": bool(data.get("next_url")),
+                        "filters": dict(list_kwargs) if list_kwargs else {},
+                        "contracts_with_ticker": contracts_with_ticker,
+                        "contracts_with_complete_identity": contracts_with_identity,
+                    },
+                    "content": content_items,
+                    "content_truncated": len(raw_results) > 100,
+                }
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 

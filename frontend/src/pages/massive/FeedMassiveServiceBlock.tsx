@@ -59,8 +59,8 @@ export function massiveHelpSections(row: ChecklistRow) {
 }
 
 export interface FeedMassiveServiceBlockProps {
-  /** Section anchor id (e.g. feed-massive-svc-snapshot). */
-  anchorId: string
+  /** Section anchor id (e.g. feed-massive-svc-snapshot). Omit when the parent section owns the fragment id. */
+  anchorId?: string
   effectiveStatus: EffectiveServiceStatus
   evidence: ReactNode
   testArea?: ReactNode
@@ -105,7 +105,7 @@ export function FeedMassiveServiceBlock({
   const statusWords = checklistEffectiveStatusLabel(effectiveStatus)
 
   return (
-    <div id={anchorId} className="feed-massive-service-block">
+    <div {...(anchorId ? { id: anchorId } : {})} className="feed-massive-service-block">
       <div className="feed-massive-svc-toolbar">
         {checklistRow ? (
           <>

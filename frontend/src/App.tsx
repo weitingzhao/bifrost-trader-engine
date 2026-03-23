@@ -42,6 +42,7 @@ import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
 import './App.css'
+import './styles/settings-celery.css'
 
 const THEME_KEY = 'bifrost-monitor-theme'
 
@@ -730,7 +731,7 @@ export default function App() {
     window.location.hash = '#settings-heartbeat'
   }
 
-  /** Open Settings → System Status sub-page (System / Daemon / Celery). `#settings-system-server` = System (management monitor). */
+  /** Open Settings → System Status sub-page (Server / Daemon / Celery). `#settings-system-server` = management monitor (API / IB). */
   const openSystemInSettingsToSection = (section: 'system' | 'daemon' | 'celery') => {
     setActiveTab('settings')
     const hashSeg =
@@ -749,9 +750,9 @@ export default function App() {
       setShutdownAllMsg({ text: 'Stopping Daemon…', isErr: false })
       const r1 = await postStop()
       if (!r1.ok) errors.push(`Daemon: ${r1.error ?? r1.statusText ?? 'failed'}`)
-      setShutdownAllMsg({ text: 'Stopping Management…', isErr: false })
+      setShutdownAllMsg({ text: 'Stopping Server…', isErr: false })
       const r2 = await postMonitorStop()
-      if (!r2.ok) errors.push(`Management: ${r2.error ?? r2.statusText ?? 'failed'}`)
+      if (!r2.ok) errors.push(`Server: ${r2.error ?? r2.statusText ?? 'failed'}`)
       setShutdownAllMsg({
         text: errors.length === 0 ? 'All systems shut down.' : `Shut down requested; some failed: ${errors.join('; ')}`,
         isErr: errors.length > 0,
@@ -809,7 +810,7 @@ export default function App() {
           <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
             <h3 id="shutdown-modal-title">Shutdown entire system?</h3>
             <p>
-              Celery, then Daemon, then Management will be stopped in order. This cannot be undone.
+              Celery, then Daemon, then Server will be stopped in order. This cannot be undone.
             </p>
             <div className="data-reset-modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
@@ -995,7 +996,7 @@ export default function App() {
                 <span
                   className={`lamp-icon ${(status?.monitor_lamp as LampId) ?? 'red'}`}
                   aria-hidden
-                  title="Management → System"
+                  title="Server"
                 >
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
@@ -1010,9 +1011,9 @@ export default function App() {
                       type="button"
                       className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
                       onClick={() => { openSystemInSettingsToSection('system'); setLampHoverPopover(null) }}
-                      title="Go to System Status → System"
+                      title="Go to System Status → Server"
                     >
-                      Management → System
+                      Server
                     </button>
                   </div>
                 )}

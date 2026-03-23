@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { StatusResponse } from '../types'
 import {
   fetchMassiveStatus,
   postMassiveSync,
+  postMassiveApiCoverageSync,
   fetchMassiveJobsList,
   subscribeMassiveJobEvents,
   fetchOptionSnapshotsPg,
@@ -10,8 +11,25 @@ import {
   fetchOptionExpirations,
   fetchResearchOptionOi,
   fetchResearchOptionTrades,
+  fetchGreeksCoverage,
+  fetchContractsCoverage,
+  fetchMassiveMarketConditions,
+  fetchMassiveMarketExchanges,
+  fetchMassiveMarketHolidays,
+  fetchMassiveMarketStatus,
+  fetchTechnicalIndicator,
 } from '../api'
-import type { MassiveStatusResponse, MassiveJobApiRow, OptionSnapshotRow, CorporateActionRow } from '../api'
+import type {
+  MassiveStatusResponse,
+  MassiveJobApiRow,
+  OptionSnapshotRow,
+  CorporateActionRow,
+  MassiveOptionExpirationsDebug,
+  GreeksCoverageResponse,
+  ContractsCoverageResponse,
+  MassiveMarketHolidaysResponse,
+  TechnicalIndicatorResponse,
+} from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtTs } from '../utils/format'
 import checklistRows from './massiveFeedChecklistRows'
@@ -61,7 +79,26 @@ function fmtJobResult(j: MassiveJobApiRow): string {
   if (!r || typeof r !== 'object') return '—'
   const err = r.error
   if (typeof err === 'string') return err
-  if (r.rows_written != null) return `rows ${String(r.rows_written)}`
+  const mode = r.mode as string | undefined
+  if (mode === 'open_close' || mode === 'prev') {
+    const s = r.summary as Record<string, unknown> | undefined
+    if (s) {
+      const parts: string[] = []
+      if (s.open != null) parts.push(`O ${s.open}`)
+      if (s.close != null) parts.push(`C ${s.close}`)
+      if (s.high != null) parts.push(`H ${s.high}`)
+      if (s.low != null) parts.push(`L ${s.low}`)
+      if (s.volume != null) parts.push(`V ${s.volume}`)
+      return parts.length ? `${mode}: ${parts.join(' / ')}` : mode
+    }
+    return mode
+  }
+  if (r.rows_written != null) {
+    const s = r.summary as Record<string, unknown> | undefined
+    const ivInfo = s?.rows_with_iv != null ? `, IV ${s.rows_with_iv}/${s.results_count ?? r.rows_written}` : ''
+    const gkInfo = s?.rows_with_full_greeks != null ? `, full greeks ${s.rows_with_full_greeks}` : ''
+    return `rows ${String(r.rows_written)}${ivInfo}${gkInfo}`
+  }
   if (r.rows_upserted != null) return `upserted ${String(r.rows_upserted)}`
   if (r.bars_upserted != null) return `bars ${String(r.bars_upserted)}`
   if (r.message != null) return String(r.message)
@@ -137,6 +174,69 @@ function CardIconVerify() {
   )
 }
 
+interface FeedMassiveCapabilityPanelProps {
+  capId: string
+  checklistRow: ChecklistRow
+  effectiveStatus: EffectiveServiceStatus
+  expanded: boolean
+  onToggle: () => void
+  highlight: boolean
+  ariaLabel: string
+  children: ReactNode
+}
+
+function FeedMassiveCapabilityPanel({
+  capId,
+  checklistRow,
+  effectiveStatus,
+  expanded,
+  onToggle,
+  highlight,
+  ariaLabel,
+  children,
+}: FeedMassiveCapabilityPanelProps) {
+  const statusWords = checklistEffectiveStatusLabel(effectiveStatus)
+  return (
+    <section
+      id={feedMassiveSvcAnchorId(capId)}
+      className={`feed-massive-card feed-massive-cap-section${expanded ? ' feed-massive-cap-section--expanded' : ' feed-massive-cap-section--collapsed'}${highlight ? ' feed-massive-card--cap-active' : ''}`}
+      aria-label={ariaLabel}
+    >
+      <div className="feed-massive-cap-panel-header">
+        <button
+          type="button"
+          className="feed-massive-cap-panel-toggle"
+          aria-expanded={expanded}
+          aria-controls={`feed-massive-cap-body-${capId}`}
+          id={`feed-massive-cap-head-${capId}`}
+          onClick={onToggle}
+        >
+          <span
+            className={`feed-massive-cap-panel-chevron${expanded ? ' feed-massive-cap-panel-chevron--open' : ''}`}
+            aria-hidden
+          />
+          <span className="feed-massive-cap-panel-title">{shortServiceLabel(checklistRow)}</span>
+          <span
+            className={feedMassiveOverviewDotClass(effectiveStatus)}
+            title={statusWords}
+            aria-label={`Status: ${statusWords}`}
+          />
+        </button>
+      </div>
+      {expanded ? (
+        <div
+          id={`feed-massive-cap-body-${capId}`}
+          className="feed-massive-cap-panel-body"
+          role="region"
+          aria-labelledby={`feed-massive-cap-head-${capId}`}
+        >
+          {children}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 /** Massive option sync: Celery jobs, PostgreSQL snapshots (delayed chain data). */
 export function FeedMassiveOptionPage({
   status: _status,
@@ -150,10 +250,35 @@ export function FeedMassiveOptionPage({
   const [jobsError, setJobsError] = useState<string | null>(null)
   /** Which capability section is focused after chip click or hash deep-link (border highlight). */
   const [highlightedCapabilityId, setHighlightedCapabilityId] = useState<string | null>(null)
+  /** Per-capability body expanded; default collapsed. */
+  const [capExpanded, setCapExpanded] = useState<Record<string, boolean>>({})
 
+  const [snapType, setSnapType] = useState<'chain' | 'contract' | 'unified'>('chain')
   const [snapSymbol, setSnapSymbol] = useState('NVDA')
   const [snapBusy, setSnapBusy] = useState(false)
   const [snapErr, setSnapErr] = useState<string | null>(null)
+  const [snapResult, setSnapResult] = useState<{ summary: Record<string, unknown>; content: unknown; content_truncated?: boolean } | null>(null)
+
+  // Chain optional filters
+  const [chainExpDate, setChainExpDate] = useState('')
+  const [chainExpDateGte, setChainExpDateGte] = useState('')
+  const [chainExpDateLte, setChainExpDateLte] = useState('')
+  const [chainStrike, setChainStrike] = useState('')
+  const [chainStrikeGte, setChainStrikeGte] = useState('')
+  const [chainStrikeLte, setChainStrikeLte] = useState('')
+  const [chainContractType, setChainContractType] = useState<'' | 'call' | 'put'>('')
+  const [chainLimit, setChainLimit] = useState('250')
+  const [chainSort, setChainSort] = useState('')
+  const [chainOrder, setChainOrder] = useState<'' | 'asc' | 'desc'>('')
+
+  // Contract snapshot params
+  const [contractUnderlying, setContractUnderlying] = useState('AAPL')
+  const [contractTicker, setContractTicker] = useState('')
+
+  // Unified snapshot params
+  const [unifiedTickers, setUnifiedTickers] = useState('')
+  const [unifiedAssetType, setUnifiedAssetType] = useState<'' | 'stocks' | 'options' | 'fx' | 'crypto' | 'indices'>('')
+  const [unifiedLimit, setUnifiedLimit] = useState('10')
 
   const [aggTicker, setAggTicker] = useState('')
   const [aggSymbol, setAggSymbol] = useState('')
@@ -166,6 +291,103 @@ export function FeedMassiveOptionPage({
   const [aggMult, setAggMult] = useState('1')
   const [aggBusy, setAggBusy] = useState(false)
   const [aggErr, setAggErr] = useState<string | null>(null)
+
+  // Open/Close aggregates
+  const [ocTicker, setOcTicker] = useState('')
+  const [ocDate, setOcDate] = useState('')
+  const [ocBusy, setOcBusy] = useState(false)
+  const [ocErr, setOcErr] = useState<string | null>(null)
+
+  // Previous day aggregates
+  const [prevTicker, setPrevTicker] = useState('')
+  const [prevBusy, setPrevBusy] = useState(false)
+  const [prevErr, setPrevErr] = useState<string | null>(null)
+
+  // WS copy feedback
+  const [wsCopied, setWsCopied] = useState<string | null>(null)
+
+  /** Embedded official API vs project coverage sheet (static HTML from public/plans). */
+  const [apiCoverageOpen, setApiCoverageOpen] = useState(false)
+  const [apiCoverageSyncBusy, setApiCoverageSyncBusy] = useState(false)
+  const [apiCoverageSyncMsg, setApiCoverageSyncMsg] = useState<string | null>(null)
+
+  /** Which aggregate sub-API tab is active under Option aggregates. */
+  const [aggSubTab, setAggSubTab] = useState<
+    'custom_bars' | 'open_close' | 'prev' | 'ws_a' | 'ws_am'
+  >('custom_bars')
+
+  /** Which Greeks/IV sub-tab is active. */
+  const [gkSubTab, setGkSubTab] = useState<
+    'chain_snapshot' | 'contract_snapshot' | 'db_verify' | 'unified_snapshot'
+  >('db_verify')
+  const [gkChainSymbol, setGkChainSymbol] = useState('NVDA')
+  const [gkChainBusy, setGkChainBusy] = useState(false)
+  const [gkChainErr, setGkChainErr] = useState<string | null>(null)
+  const [gkContractUnderlying, setGkContractUnderlying] = useState('AAPL')
+  const [gkContractTicker, setGkContractTicker] = useState('')
+  const [gkContractBusy, setGkContractBusy] = useState(false)
+  const [gkContractErr, setGkContractErr] = useState<string | null>(null)
+  const [gkContractResult, setGkContractResult] = useState<Record<string, unknown> | null>(null)
+  const [gkUnifiedTickers, setGkUnifiedTickers] = useState('')
+  const [gkUnifiedBusy, setGkUnifiedBusy] = useState(false)
+  const [gkUnifiedErr, setGkUnifiedErr] = useState<string | null>(null)
+  const [gkUnifiedResult, setGkUnifiedResult] = useState<Record<string, unknown> | null>(null)
+  const [gkCoverage, setGkCoverage] = useState<GreeksCoverageResponse | null>(null)
+  const [gkCoverageBusy, setGkCoverageBusy] = useState(false)
+
+  const [ctSubTab, setCtSubTab] = useState<
+    'contracts_list' | 'contract_detail' | 'db_verify' | 'snapshot_link'
+  >('contracts_list')
+  const [ctListSymbol, setCtListSymbol] = useState('NVDA')
+  const [ctListExpDate, setCtListExpDate] = useState('')
+  const [ctListContractType, setCtListContractType] = useState<'' | 'call' | 'put'>('')
+  const [ctListLimit, setCtListLimit] = useState('100')
+  const [ctListBusy, setCtListBusy] = useState(false)
+  const [ctListErr, setCtListErr] = useState<string | null>(null)
+  const [ctDetailTicker, setCtDetailTicker] = useState('')
+  const [ctDetailBusy, setCtDetailBusy] = useState(false)
+  const [ctDetailErr, setCtDetailErr] = useState<string | null>(null)
+  const [ctDetailResult, setCtDetailResult] = useState<Record<string, unknown> | null>(null)
+  const [ctSnapTicker, setCtSnapTicker] = useState('')
+  const [ctSnapUnderlying, setCtSnapUnderlying] = useState('AAPL')
+  const [ctSnapBusy, setCtSnapBusy] = useState(false)
+  const [ctSnapErr, setCtSnapErr] = useState<string | null>(null)
+  const [ctSnapResult, setCtSnapResult] = useState<Record<string, unknown> | null>(null)
+  const [ctCoverage, setCtCoverage] = useState<ContractsCoverageResponse | null>(null)
+  const [ctCoverageBusy, setCtCoverageBusy] = useState(false)
+
+  const [moSubTab, setMoSubTab] = useState<
+    'conditions' | 'exchanges' | 'market_holidays' | 'market_status'
+  >('conditions')
+  const [moCondAsset, setMoCondAsset] = useState('')
+  const [moCondDataType, setMoCondDataType] = useState('')
+  const [moCondBusy, setMoCondBusy] = useState(false)
+  const [moCondErr, setMoCondErr] = useState<string | null>(null)
+  const [moCondResults, setMoCondResults] = useState<Record<string, unknown>[] | null>(null)
+  const [moExchAsset, setMoExchAsset] = useState('')
+  const [moExchLocale, setMoExchLocale] = useState('')
+  const [moExchBusy, setMoExchBusy] = useState(false)
+  const [moExchErr, setMoExchErr] = useState<string | null>(null)
+  const [moExchResults, setMoExchResults] = useState<Record<string, unknown>[] | null>(null)
+  const [moHolBusy, setMoHolBusy] = useState(false)
+  const [moHolErr, setMoHolErr] = useState<string | null>(null)
+  const [moHolData, setMoHolData] = useState<MassiveMarketHolidaysResponse | null>(null)
+  const [moStatusBusy, setMoStatusBusy] = useState(false)
+  const [moStatusErr, setMoStatusErr] = useState<string | null>(null)
+  const [moStatusData, setMoStatusData] = useState<Record<string, unknown> | null>(null)
+
+  const [tiSubTab, setTiSubTab] = useState<'sma' | 'ema' | 'rsi' | 'macd'>('sma')
+  const [tiTicker, setTiTicker] = useState('O:SPY251219C00600000')
+  const [tiWindow, setTiWindow] = useState('14')
+  const [tiTimespan, setTiTimespan] = useState('day')
+  const [tiSeriesType, setTiSeriesType] = useState('close')
+  const [tiLimit, setTiLimit] = useState('50')
+  const [tiMacdShort, setTiMacdShort] = useState('12')
+  const [tiMacdLong, setTiMacdLong] = useState('26')
+  const [tiMacdSignal, setTiMacdSignal] = useState('9')
+  const [tiBusy, setTiBusy] = useState(false)
+  const [tiErr, setTiErr] = useState<string | null>(null)
+  const [tiResult, setTiResult] = useState<TechnicalIndicatorResponse | null>(null)
 
   const [oiBusy, setOiBusy] = useState(false)
   const [oiErr, setOiErr] = useState<string | null>(null)
@@ -187,6 +409,10 @@ export function FeedMassiveOptionPage({
   const [refSymbol, setRefSymbol] = useState('NVDA')
   const [refTestBusy, setRefTestBusy] = useState(false)
   const [refTestMsg, setRefTestMsg] = useState<string | null>(null)
+  /** Full lists from last successful GET /research/option-expirations (same as Evidence counts). */
+  const [refTestExpirations, setRefTestExpirations] = useState<string[]>([])
+  const [refTestStrikes, setRefTestStrikes] = useState<number[]>([])
+  const [refTestDebug, setRefTestDebug] = useState<MassiveOptionExpirationsDebug | null>(null)
 
   const [tradeSym, setTradeSym] = useState('NVDA')
   const [tradeCheckBusy, setTradeCheckBusy] = useState(false)
@@ -233,8 +459,13 @@ export function FeedMassiveOptionPage({
     loadJobs()
   }, [loadJobs])
 
+  const toggleCap = useCallback((id: string) => {
+    setCapExpanded(prev => ({ ...prev, [id]: !prev[id] }))
+  }, [])
+
   const scrollToSection = useCallback((id: string) => {
     setHighlightedCapabilityId(id)
+    setCapExpanded(prev => ({ ...prev, [id]: true }))
     const el = document.getElementById(feedMassiveSvcAnchorId(id))
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -277,10 +508,16 @@ export function FeedMassiveOptionPage({
     }
     setRefTestBusy(true)
     setRefTestMsg(null)
+    setRefTestExpirations([])
+    setRefTestStrikes([])
+    setRefTestDebug(null)
     try {
-      const r = await fetchOptionExpirations(sym, 'massive')
+      const r = await fetchOptionExpirations(sym, 'massive', { debug: true })
+      if (r.massive_debug) setRefTestDebug(r.massive_debug)
       if (r.error) setRefTestMsg(r.error)
       else {
+        setRefTestExpirations(r.expirations)
+        setRefTestStrikes(Array.isArray(r.strikes) ? r.strikes : [])
         setRefTestMsg(
           `OK: ${r.expirations.length} expirations${r.strikes?.length ? `, ${r.strikes.length} strikes` : ''}.`,
         )
@@ -317,6 +554,304 @@ export function FeedMassiveOptionPage({
       setVerifyLoading(false)
     }
   }, [])
+
+  const loadGkCoverage = useCallback(async (sym: string) => {
+    if (!sym.trim()) return
+    setGkCoverageBusy(true)
+    try {
+      const res = await fetchGreeksCoverage(sym.trim())
+      setGkCoverage(res)
+    } catch {
+      setGkCoverage(null)
+    } finally {
+      setGkCoverageBusy(false)
+    }
+  }, [])
+
+  const runGkChainSnapshot = useCallback(async () => {
+    const u = gkChainSymbol.trim().toUpperCase()
+    if (!u) { setGkChainErr('Underlying symbol required'); return }
+    setGkChainErr(null)
+    setGkChainBusy(true)
+    try {
+      const res = await postMassiveSync('snapshot', { snapshot_type: 'chain', underlying: u })
+      if (!res.ok) { setGkChainErr(res.error ?? res.message ?? 'Enqueue failed'); setGkChainBusy(false); return }
+      if (!res.job_id) { setGkChainErr('No job_id'); setGkChainBusy(false); return }
+      const sub = subscribeMassiveJobEvents(
+        res.job_id,
+        ev => {
+          if (!ev.ok) { setGkChainErr(ev.error || 'SSE error'); setGkChainBusy(false); sub.close(); return }
+          const st = ev.job?.status
+          if (st === 'done' || st === 'failed') {
+            if (st === 'failed') {
+              const jr = ev.job?.result as Record<string, unknown> | undefined
+              setGkChainErr((jr?.error as string) || 'Job failed')
+            } else {
+              loadGkCoverage(u)
+            }
+            setGkChainBusy(false)
+            sub.close()
+            loadJobs()
+          }
+        },
+        { timeoutSec: 240 },
+      )
+    } catch (e) {
+      setGkChainErr(e instanceof Error ? e.message : 'Failed')
+      setGkChainBusy(false)
+    }
+  }, [gkChainSymbol, loadJobs, loadGkCoverage])
+
+  const runGkContractSnapshot = useCallback(async () => {
+    const u = gkContractUnderlying.trim().toUpperCase()
+    const oc = gkContractTicker.trim()
+    if (!u || !oc) { setGkContractErr('Underlying and option contract ticker required'); return }
+    setGkContractErr(null)
+    setGkContractResult(null)
+    setGkContractBusy(true)
+    try {
+      const res = await postMassiveSync('snapshot', { snapshot_type: 'contract', underlying: u, option_contract: oc })
+      if (!res.ok) { setGkContractErr(res.error ?? res.message ?? 'Enqueue failed'); setGkContractBusy(false); return }
+      if (!res.job_id) { setGkContractErr('No job_id'); setGkContractBusy(false); return }
+      const sub = subscribeMassiveJobEvents(
+        res.job_id,
+        ev => {
+          if (!ev.ok) { setGkContractErr(ev.error || 'SSE error'); setGkContractBusy(false); sub.close(); return }
+          const st = ev.job?.status
+          if (st === 'done' || st === 'failed') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            if (st === 'done' && jr?.content) {
+              setGkContractResult(jr.content as Record<string, unknown>)
+            } else if (st === 'failed') {
+              setGkContractErr((jr?.error as string) || 'Job failed')
+            }
+            setGkContractBusy(false)
+            sub.close()
+            loadJobs()
+          }
+        },
+        { timeoutSec: 240 },
+      )
+    } catch (e) {
+      setGkContractErr(e instanceof Error ? e.message : 'Failed')
+      setGkContractBusy(false)
+    }
+  }, [gkContractUnderlying, gkContractTicker, loadJobs])
+
+  const runGkUnifiedSnapshot = useCallback(async () => {
+    const t = gkUnifiedTickers.trim()
+    if (!t) { setGkUnifiedErr('At least one ticker required'); return }
+    setGkUnifiedErr(null)
+    setGkUnifiedResult(null)
+    setGkUnifiedBusy(true)
+    try {
+      const res = await postMassiveSync('snapshot', { snapshot_type: 'unified', tickers: t, asset_type: 'options' })
+      if (!res.ok) { setGkUnifiedErr(res.error ?? res.message ?? 'Enqueue failed'); setGkUnifiedBusy(false); return }
+      if (!res.job_id) { setGkUnifiedErr('No job_id'); setGkUnifiedBusy(false); return }
+      const sub = subscribeMassiveJobEvents(
+        res.job_id,
+        ev => {
+          if (!ev.ok) { setGkUnifiedErr(ev.error || 'SSE error'); setGkUnifiedBusy(false); sub.close(); return }
+          const st = ev.job?.status
+          if (st === 'done' || st === 'failed') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            if (st === 'done' && jr?.summary) {
+              setGkUnifiedResult(jr as Record<string, unknown>)
+            } else if (st === 'failed') {
+              setGkUnifiedErr((jr?.error as string) || 'Job failed')
+            }
+            setGkUnifiedBusy(false)
+            sub.close()
+            loadJobs()
+          }
+        },
+        { timeoutSec: 240 },
+      )
+    } catch (e) {
+      setGkUnifiedErr(e instanceof Error ? e.message : 'Failed')
+      setGkUnifiedBusy(false)
+    }
+  }, [gkUnifiedTickers, loadJobs])
+
+  const loadCtCoverage = useCallback(async (sym?: string) => {
+    const s = (sym || ctListSymbol || '').trim().toUpperCase()
+    if (!s) return
+    setCtCoverageBusy(true)
+    try {
+      const r = await fetchContractsCoverage(s)
+      setCtCoverage(r)
+    } catch { /* ignore */ } finally { setCtCoverageBusy(false) }
+  }, [ctListSymbol])
+
+  const runCtContractsList = useCallback(async () => {
+    const s = ctListSymbol.trim().toUpperCase()
+    if (!s) { setCtListErr('Underlying symbol required'); return }
+    setCtListErr(null)
+    setCtListBusy(true)
+    try {
+      const payload: Record<string, unknown> = { underlying: s }
+      if (ctListExpDate.trim()) payload.expiration_date = ctListExpDate.trim()
+      if (ctListContractType) payload.contract_type = ctListContractType
+      const lim = parseInt(ctListLimit, 10)
+      if (lim > 0) payload.limit = lim
+      const res = await postMassiveSync('contracts', payload)
+      if (!res.ok) { setCtListErr(res.error ?? res.message ?? 'Enqueue failed'); setCtListBusy(false); return }
+      if (!res.job_id) { setCtListErr('No job_id'); setCtListBusy(false); return }
+      const sub = subscribeMassiveJobEvents(
+        res.job_id,
+        ev => {
+          if (!ev.ok) { setCtListErr(ev.error || 'SSE error'); setCtListBusy(false); sub.close(); return }
+          const st = ev.job?.status
+          if (st === 'done' || st === 'failed') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            if (st === 'failed') setCtListErr((jr?.error as string) || 'Job failed')
+            setCtListBusy(false)
+            sub.close()
+            loadJobs()
+            loadCtCoverage(s)
+          }
+        },
+        { timeoutSec: 240 },
+      )
+    } catch (e) {
+      setCtListErr(e instanceof Error ? e.message : 'Failed')
+      setCtListBusy(false)
+    }
+  }, [ctListSymbol, ctListExpDate, ctListContractType, ctListLimit, loadJobs, loadCtCoverage])
+
+  const runCtContractDetail = useCallback(async () => {
+    const t = ctDetailTicker.trim()
+    if (!t) { setCtDetailErr('Options ticker required'); return }
+    setCtDetailErr(null)
+    setCtDetailResult(null)
+    setCtDetailBusy(true)
+    try {
+      const res = await postMassiveSync('contracts', { mode: 'detail', options_ticker: t })
+      if (!res.ok) { setCtDetailErr(res.error ?? res.message ?? 'Enqueue failed'); setCtDetailBusy(false); return }
+      if (!res.job_id) { setCtDetailErr('No job_id'); setCtDetailBusy(false); return }
+      const sub = subscribeMassiveJobEvents(
+        res.job_id,
+        ev => {
+          if (!ev.ok) { setCtDetailErr(ev.error || 'SSE error'); setCtDetailBusy(false); sub.close(); return }
+          const st = ev.job?.status
+          if (st === 'done' || st === 'failed') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            if (st === 'done' && jr?.content) setCtDetailResult(jr.content as Record<string, unknown>)
+            else if (st === 'failed') setCtDetailErr((jr?.error as string) || 'Job failed')
+            setCtDetailBusy(false)
+            sub.close()
+            loadJobs()
+          }
+        },
+        { timeoutSec: 240 },
+      )
+    } catch (e) {
+      setCtDetailErr(e instanceof Error ? e.message : 'Failed')
+      setCtDetailBusy(false)
+    }
+  }, [ctDetailTicker, loadJobs])
+
+  const runCtSnapshotLink = useCallback(async () => {
+    const u = ctSnapUnderlying.trim().toUpperCase()
+    const t = ctSnapTicker.trim()
+    if (!u || !t) { setCtSnapErr('Both underlying and option ticker required'); return }
+    setCtSnapErr(null)
+    setCtSnapResult(null)
+    setCtSnapBusy(true)
+    try {
+      const res = await postMassiveSync('snapshot', { snapshot_type: 'contract', underlying: u, option_contract: t })
+      if (!res.ok) { setCtSnapErr(res.error ?? res.message ?? 'Enqueue failed'); setCtSnapBusy(false); return }
+      if (!res.job_id) { setCtSnapErr('No job_id'); setCtSnapBusy(false); return }
+      const sub = subscribeMassiveJobEvents(
+        res.job_id,
+        ev => {
+          if (!ev.ok) { setCtSnapErr(ev.error || 'SSE error'); setCtSnapBusy(false); sub.close(); return }
+          const st = ev.job?.status
+          if (st === 'done' || st === 'failed') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            if (st === 'done') setCtSnapResult(jr ?? null)
+            else setCtSnapErr((jr?.error as string) || 'Job failed')
+            setCtSnapBusy(false)
+            sub.close()
+            loadJobs()
+          }
+        },
+        { timeoutSec: 240 },
+      )
+    } catch (e) {
+      setCtSnapErr(e instanceof Error ? e.message : 'Failed')
+      setCtSnapBusy(false)
+    }
+  }, [ctSnapUnderlying, ctSnapTicker, loadJobs])
+
+  const runMoConditions = useCallback(async () => {
+    setMoCondBusy(true); setMoCondErr(null)
+    try {
+      const res = await fetchMassiveMarketConditions({
+        asset_class: moCondAsset || undefined,
+        data_type: moCondDataType || undefined,
+      })
+      if (!res.ok) { setMoCondErr(res.error ?? 'Failed'); return }
+      setMoCondResults(res.results)
+    } catch (e: unknown) { setMoCondErr(e instanceof Error ? e.message : String(e)) }
+    finally { setMoCondBusy(false) }
+  }, [moCondAsset, moCondDataType])
+
+  const runMoExchanges = useCallback(async () => {
+    setMoExchBusy(true); setMoExchErr(null)
+    try {
+      const res = await fetchMassiveMarketExchanges({
+        asset_class: moExchAsset || undefined,
+        locale: moExchLocale || undefined,
+      })
+      if (!res.ok) { setMoExchErr(res.error ?? 'Failed'); return }
+      setMoExchResults(res.results)
+    } catch (e: unknown) { setMoExchErr(e instanceof Error ? e.message : String(e)) }
+    finally { setMoExchBusy(false) }
+  }, [moExchAsset, moExchLocale])
+
+  const runMoHolidays = useCallback(async () => {
+    setMoHolBusy(true); setMoHolErr(null)
+    try {
+      const res = await fetchMassiveMarketHolidays()
+      if (!res.ok) { setMoHolErr(res.error ?? 'Failed'); return }
+      setMoHolData(res)
+    } catch (e: unknown) { setMoHolErr(e instanceof Error ? e.message : String(e)) }
+    finally { setMoHolBusy(false) }
+  }, [])
+
+  const runMoStatus = useCallback(async () => {
+    setMoStatusBusy(true); setMoStatusErr(null)
+    try {
+      const res = await fetchMassiveMarketStatus()
+      if (!res.ok) { setMoStatusErr(res.error ?? 'Failed'); return }
+      setMoStatusData(res.status ?? null)
+    } catch (e: unknown) { setMoStatusErr(e instanceof Error ? e.message : String(e)) }
+    finally { setMoStatusBusy(false) }
+  }, [])
+
+  const runTiIndicator = useCallback(async () => {
+    setTiBusy(true); setTiErr(null); setTiResult(null)
+    try {
+      const p: Record<string, unknown> = {
+        ticker: tiTicker.trim(),
+        indicator: tiSubTab,
+        timespan: tiTimespan,
+        window: Number(tiWindow) || 14,
+        series_type: tiSeriesType,
+        limit: Number(tiLimit) || 50,
+      }
+      if (tiSubTab === 'macd') {
+        p.short_window = Number(tiMacdShort) || 12
+        p.long_window = Number(tiMacdLong) || 26
+        p.signal_window = Number(tiMacdSignal) || 9
+      }
+      const res = await fetchTechnicalIndicator(p as unknown as Parameters<typeof fetchTechnicalIndicator>[0])
+      if (!res.ok) { setTiErr(res.error ?? 'Failed'); return }
+      setTiResult(res)
+    } catch (e: unknown) { setTiErr(e instanceof Error ? e.message : String(e)) }
+    finally { setTiBusy(false) }
+  }, [tiTicker, tiSubTab, tiTimespan, tiWindow, tiSeriesType, tiLimit, tiMacdShort, tiMacdLong, tiMacdSignal])
 
   const runTradeApiCheck = useCallback(async () => {
     const s = tradeSym.trim().toUpperCase()
@@ -361,12 +896,14 @@ export function FeedMassiveOptionPage({
     }
   }, [oiFetchSym])
 
-  const copyWsCommand = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(WS_VERIFY_CMD)
-    } catch {
-      /* ignore */
-    }
+  const copyWsCommand = useCallback((channel?: string) => {
+    const cmd = channel
+      ? `python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel "${channel}"`
+      : WS_VERIFY_CMD
+    navigator.clipboard.writeText(cmd).then(
+      () => { setWsCopied(channel ?? '_default'); setTimeout(() => setWsCopied(null), 2000) },
+      () => { /* ignore */ },
+    )
   }, [])
 
   const trackJob = useCallback((jobId: string, onDone: () => void) => {
@@ -388,35 +925,72 @@ export function FeedMassiveOptionPage({
   }, [])
 
   const runSnapshot = useCallback(async () => {
-    const u = snapSymbol.trim().toUpperCase()
-    if (!u) {
-      setSnapErr('Underlying symbol required')
-      return
+    let payload: Record<string, unknown> = {}
+    if (snapType === 'chain') {
+      const u = snapSymbol.trim().toUpperCase()
+      if (!u) { setSnapErr('Underlying symbol required'); return }
+      payload = { snapshot_type: 'chain', underlying: u }
+      if (chainExpDate.trim()) payload.expiration_date = chainExpDate.trim()
+      if (chainExpDateGte.trim()) payload.expiration_date_gte = chainExpDateGte.trim()
+      if (chainExpDateLte.trim()) payload.expiration_date_lte = chainExpDateLte.trim()
+      if (chainStrike.trim()) payload.strike_price = parseFloat(chainStrike)
+      if (chainStrikeGte.trim()) payload.strike_price_gte = parseFloat(chainStrikeGte)
+      if (chainStrikeLte.trim()) payload.strike_price_lte = parseFloat(chainStrikeLte)
+      if (chainContractType) payload.contract_type = chainContractType
+      if (chainLimit.trim()) payload.limit = parseInt(chainLimit, 10)
+      if (chainSort.trim()) payload.sort = chainSort.trim()
+      if (chainOrder) payload.order = chainOrder
+    } else if (snapType === 'contract') {
+      const u = contractUnderlying.trim().toUpperCase()
+      const oc = contractTicker.trim()
+      if (!u || !oc) { setSnapErr('Underlying and option contract ticker required'); return }
+      payload = { snapshot_type: 'contract', underlying: u, option_contract: oc }
+    } else {
+      const t = unifiedTickers.trim()
+      if (!t) { setSnapErr('At least one ticker required'); return }
+      payload = { snapshot_type: 'unified', tickers: t }
+      if (unifiedAssetType) payload.asset_type = unifiedAssetType
+      if (unifiedLimit.trim()) payload.limit = parseInt(unifiedLimit, 10)
     }
     setSnapErr(null)
+    setSnapResult(null)
     setSnapBusy(true)
     try {
-      const res = await postMassiveSync('snapshot', { underlying: u })
+      const res = await postMassiveSync('snapshot', payload)
       if (!res.ok) {
         setSnapErr(res.error ?? res.message ?? 'Enqueue failed')
         setSnapBusy(false)
         return
       }
-      if (!res.job_id) {
-        setSnapErr('No job_id')
-        setSnapBusy(false)
-        return
-      }
-      const sub = trackJob(res.job_id, () => {
-        sub.close()
-        setSnapBusy(false)
-        loadJobs()
-      })
+      if (!res.job_id) { setSnapErr('No job_id'); setSnapBusy(false); return }
+      const sub = subscribeMassiveJobEvents(
+        res.job_id,
+        ev => {
+          if (!ev.ok) { setSnapErr(ev.error || 'SSE error'); setSnapBusy(false); sub.close(); return }
+          const st = ev.job?.status
+          if (st === 'done' || st === 'failed') {
+            const jr = ev.job?.result as Record<string, unknown> | undefined
+            if (st === 'done' && jr?.summary) {
+              setSnapResult({
+                summary: jr.summary as Record<string, unknown>,
+                content: jr.content,
+                content_truncated: Boolean(jr.content_truncated),
+              })
+            } else if (st === 'failed') {
+              setSnapErr((jr?.error as string) || 'Job failed')
+            }
+            setSnapBusy(false)
+            sub.close()
+            loadJobs()
+          }
+        },
+        { timeoutSec: 240 },
+      )
     } catch (e) {
       setSnapErr(e instanceof Error ? e.message : 'Failed')
       setSnapBusy(false)
     }
-  }, [snapSymbol, loadJobs, trackJob])
+  }, [snapType, snapSymbol, chainExpDate, chainExpDateGte, chainExpDateLte, chainStrike, chainStrikeGte, chainStrikeLte, chainContractType, chainLimit, chainSort, chainOrder, contractUnderlying, contractTicker, unifiedTickers, unifiedAssetType, unifiedLimit, loadJobs])
 
   const runAggregates = useCallback(async () => {
     setAggErr(null)
@@ -466,6 +1040,67 @@ export function FeedMassiveOptionPage({
     loadJobs,
     trackJob,
   ])
+
+  const runOpenClose = useCallback(async () => {
+    setOcErr(null)
+    setOcBusy(true)
+    try {
+      const payload: Record<string, unknown> = {
+        options_ticker: ocTicker.trim(),
+        date: ocDate.trim(),
+        mode: 'open_close',
+      }
+      const res = await postMassiveSync('aggregates', payload)
+      if (!res.ok) {
+        setOcErr(res.error ?? res.message ?? 'Enqueue failed')
+        setOcBusy(false)
+        return
+      }
+      if (!res.job_id) {
+        setOcErr('No job_id')
+        setOcBusy(false)
+        return
+      }
+      const sub = trackJob(res.job_id, () => {
+        sub.close()
+        setOcBusy(false)
+        loadJobs()
+      })
+    } catch (e) {
+      setOcErr(e instanceof Error ? e.message : 'Failed')
+      setOcBusy(false)
+    }
+  }, [ocTicker, ocDate, loadJobs, trackJob])
+
+  const runPrevDay = useCallback(async () => {
+    setPrevErr(null)
+    setPrevBusy(true)
+    try {
+      const payload: Record<string, unknown> = {
+        options_ticker: prevTicker.trim(),
+        mode: 'prev',
+      }
+      const res = await postMassiveSync('aggregates', payload)
+      if (!res.ok) {
+        setPrevErr(res.error ?? res.message ?? 'Enqueue failed')
+        setPrevBusy(false)
+        return
+      }
+      if (!res.job_id) {
+        setPrevErr('No job_id')
+        setPrevBusy(false)
+        return
+      }
+      const sub = trackJob(res.job_id, () => {
+        sub.close()
+        setPrevBusy(false)
+        loadJobs()
+      })
+    } catch (e) {
+      setPrevErr(e instanceof Error ? e.message : 'Failed')
+      setPrevBusy(false)
+    }
+  }, [prevTicker, loadJobs, trackJob])
 
   const runOi = useCallback(async () => {
     setOiErr(null)
@@ -625,13 +1260,75 @@ export function FeedMassiveOptionPage({
     tierOkForRow(rCel, massiveStatus, Boolean(configured)),
     tradesOkForRow(rCel, massiveStatus),
   )
+  const rCt = checklistRowById('contracts')
+  const effCt = effectiveChecklistProjectStatus(
+    rCt,
+    Boolean(configured),
+    tierOkForRow(rCt, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rCt, massiveStatus),
+  )
+
+  const greeksQuality = (() => {
+    if (verifyRows.length === 0) return null
+    const total = verifyRows.length
+    const withIv = verifyRows.filter(r => r.iv != null).length
+    const withAnyGreek = verifyRows.filter(r => r.delta != null || r.gamma != null || r.theta != null || r.vega != null).length
+    const withFullGreeks = verifyRows.filter(r => r.delta != null && r.gamma != null && r.theta != null && r.vega != null).length
+    const withOi = verifyRows.filter(r => r.open_interest != null).length
+    return {
+      total, withIv, withAnyGreek, withFullGreeks, withOi,
+      ivPct: total > 0 ? Math.round((withIv / total) * 100) : 0,
+      greeksPct: total > 0 ? Math.round((withFullGreeks / total) * 100) : 0,
+    }
+  })()
 
   const greeksEvidence =
     verifyRows.length === 0
-      ? 'No rows loaded. Use Test → Load sample or enter Symbol / Expiration in Verify below.'
-      : verifyRows.some(x => x.iv != null || x.delta != null)
-        ? 'IV or greeks present in at least one loaded row.'
+      ? 'No rows loaded. Use Test → Load sample or DB Verify tab.'
+      : greeksQuality && greeksQuality.withIv > 0
+        ? `IV in ${greeksQuality.withIv}/${greeksQuality.total} rows (${greeksQuality.ivPct}%), full greeks in ${greeksQuality.withFullGreeks} (${greeksQuality.greeksPct}%).`
         : 'Loaded rows have no IV/greeks — provider may omit them for these contracts.'
+
+  const contractsEvidence = (() => {
+    const cov = ctCoverage
+    if (!cov || !cov.ok || !cov.total) {
+      const latest = latestJobForKind(jobs, 'contracts')
+      return latest ? jobEvidenceLine(latest) : 'No contracts data loaded. Use Contracts List tab to fetch.'
+    }
+    const c = cov.coverage
+    return `${cov.total} contracts in DB for ${cov.symbol}. Ticker mapped: ${c?.with_massive_ticker ?? 0} (${c?.ticker_pct ?? 0}%). ${c?.distinct_expirations ?? 0} expirations, ${c?.distinct_strikes ?? 0} strikes.`
+  })()
+
+  const rMo = checklistRowById('market-ops')
+  const effMo = effectiveChecklistProjectStatus(
+    rMo,
+    Boolean(configured),
+    tierOkForRow(rMo, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rMo, massiveStatus),
+  )
+
+  const marketOpsEvidence = (() => {
+    if (moCondResults && moCondResults.length > 0) return `Conditions: ${moCondResults.length} results.`
+    if (moExchResults && moExchResults.length > 0) return `Exchanges: ${moExchResults.length} results.`
+    if (moHolData?.ok) return `Massive holidays: ${moHolData.massive_count ?? 0}, local: ${moHolData.local_count ?? 0}.`
+    if (moStatusData) return `Market status loaded.`
+    return 'No data loaded. Use any tab to fetch.'
+  })()
+
+  const rTi = checklistRowById('technical-indicators')
+  const effTi = effectiveChecklistProjectStatus(
+    rTi,
+    Boolean(configured),
+    tierOkForRow(rTi, massiveStatus, Boolean(configured)),
+    tradesOkForRow(rTi, massiveStatus),
+  )
+
+  const tiEvidence = (() => {
+    if (tiResult?.ok && tiResult.count != null) {
+      return `${tiResult.indicator?.toUpperCase()} for ${tiResult.ticker}: ${tiResult.count} data point(s).`
+    }
+    return 'No indicator data loaded. Select a tab and fetch.'
+  })()
 
   const celeryEvidence = (() => {
     const cw = _status?.celery_workers
@@ -645,9 +1342,6 @@ export function FeedMassiveOptionPage({
     const s = (j.status || '').toLowerCase()
     return s === 'pending' || s === 'running'
   }).length
-
-  const capCardClass = (capId: string) =>
-    `feed-massive-card${highlightedCapabilityId === capId ? ' feed-massive-card--cap-active' : ''}`
 
   return (
     <div className="card process-section feed-massive-option-page">
@@ -714,10 +1408,79 @@ export function FeedMassiveOptionPage({
         ) : null}
       </section>
 
+      <section
+        className="feed-massive-api-coverage-banner"
+        id="feed-massive-api-coverage"
+        aria-label="Massive API coverage sheet"
+      >
+        <div className="feed-massive-api-coverage-banner-row">
+          <div className="feed-massive-api-coverage-copy">
+            <div className="feed-massive-api-coverage-title">Official API vs project coverage</div>
+            <p className="feed-massive-api-coverage-desc">
+              Massive / Polygon Options endpoints, use cases, checklist mapping, and pytest status. Same viewer is
+              available under MkDocs Research → Massive API coverage.
+            </p>
+          </div>
+          <div className="feed-massive-api-coverage-actions">
+            <a
+              href="/plans/massive_api_coverage.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary"
+            >
+              Open in new tab
+            </a>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={apiCoverageSyncBusy}
+              onClick={async () => {
+                setApiCoverageSyncBusy(true)
+                setApiCoverageSyncMsg(null)
+                try {
+                  const res = await postMassiveApiCoverageSync()
+                  if (res.ok) {
+                    setApiCoverageSyncMsg('Synced coverage HTML to frontend/public/plans.')
+                  } else {
+                    setApiCoverageSyncMsg(res.error ?? 'Sync failed')
+                  }
+                } catch (e) {
+                  setApiCoverageSyncMsg(e instanceof Error ? e.message : 'Sync failed')
+                } finally {
+                  setApiCoverageSyncBusy(false)
+                }
+              }}
+            >
+              {apiCoverageSyncBusy ? 'Syncing…' : 'Sync HTML'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setApiCoverageOpen(v => !v)}
+              aria-expanded={apiCoverageOpen}
+            >
+              {apiCoverageOpen ? 'Hide embedded viewer' : 'Show embedded viewer'}
+            </button>
+          </div>
+        </div>
+        {apiCoverageSyncMsg ? (
+          <p className="feed-massive-api-coverage-sync-msg">{apiCoverageSyncMsg}</p>
+        ) : null}
+        {apiCoverageOpen ? (
+          <div className="feed-massive-api-coverage-frame-wrap">
+            <iframe
+              title="Massive API coverage sheet"
+              src="/plans/massive_api_coverage.html?embed=1"
+              className="feed-massive-api-coverage-iframe"
+            />
+          </div>
+        ) : null}
+      </section>
+
       <nav className="feed-massive-tab-nav-section feed-massive-cap-nav-sticky" aria-label="Massive capabilities">
         <div className="feed-massive-cap-sheet">
           <p className="feed-massive-cap-hint">
-            All capabilities are shown below. Click a chip to jump to its section.
+            Each capability below is collapsible (default collapsed). Click a chip to jump and expand that section.
             {_status?.celery_workers && _status.celery_workers.length > 0
               ? ''
               : ' No Celery workers detected — start a worker with -Q massive to process sync tasks.'}
@@ -761,9 +1524,16 @@ export function FeedMassiveOptionPage({
       <div className="feed-massive-tab-panel">
 
         {/* 1. Reference / contracts */}
-        <section className={capCardClass('reference')} aria-label="Reference contracts">
+        <FeedMassiveCapabilityPanel
+          capId="reference"
+          checklistRow={rRef}
+          effectiveStatus={effRef}
+          expanded={capExpanded.reference === true}
+          onToggle={() => toggleCap('reference')}
+          highlight={highlightedCapabilityId === 'reference'}
+          ariaLabel="Reference contracts"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('reference')}
             effectiveStatus={effRef}
             checklistRow={rRef}
             evidence={refTestMsg ?? (configured ? 'Run Test to fetch expirations via Massive REST.' : 'Configure Massive API key first.')}
@@ -800,38 +1570,81 @@ export function FeedMassiveOptionPage({
             </div>
             <p className="feed-massive-card-lead">
               Massive-backed expirations and strikes (same API as Research → Option Discovery when using Massive).
+              Read-only: no rows are written to PostgreSQL (
+              <code style={{ fontSize: '0.85em' }}>option_snapshots</code> or other tables). After a successful run,
+              expand <strong>Expirations</strong> and <strong>Strikes</strong> below for the full lists.
             </p>
+            {refTestExpirations.length > 0 || refTestStrikes.length > 0 ? (
+              <div className="feed-massive-ref-lists">
+                {refTestExpirations.length > 0 ? (
+                  <details className="feed-massive-details-debug" open>
+                    <summary>Expirations ({refTestExpirations.length})</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0}>
+                      {refTestExpirations.join('\n')}
+                    </pre>
+                  </details>
+                ) : null}
+                {refTestStrikes.length > 0 ? (
+                  <details className="feed-massive-details-debug" open>
+                    <summary>Strikes ({refTestStrikes.length})</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0}>
+                      {refTestStrikes.map(s => String(s)).join('\n')}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+            {refTestDebug ? (
+              <div className="feed-massive-ref-debug" style={{ marginTop: 'var(--space-3)' }}>
+                <details className="feed-massive-details-debug">
+                  <summary>
+                    Contract samples ({refTestDebug.contract_samples.length}
+                    {refTestDebug.contract_samples_truncated ? ', truncated' : ''})
+                  </summary>
+                  <pre
+                    className="feed-massive-pre-json"
+                    tabIndex={0}
+                  >
+                    {JSON.stringify(refTestDebug.contract_samples, null, 2)}
+                  </pre>
+                </details>
+                <details className="feed-massive-details-debug">
+                  <summary>Raw requests and responses ({refTestDebug.pages.length} page(s))</summary>
+                  <pre
+                    className="feed-massive-pre-json"
+                    tabIndex={0}
+                  >
+                    {JSON.stringify(refTestDebug.pages, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            ) : null}
           </FeedMassiveServiceBlock>
-        </section>
+        </FeedMassiveCapabilityPanel>
 
-        {/* 2. Chain snapshot */}
-        <section className={capCardClass('snapshot')} aria-label="Underlying snapshot">
+        {/* 2. Snapshot workbench (Chain / Contract / Unified) */}
+        <FeedMassiveCapabilityPanel
+          capId="snapshot"
+          checklistRow={rSnap}
+          effectiveStatus={effSnap}
+          expanded={capExpanded.snapshot === true}
+          onToggle={() => toggleCap('snapshot')}
+          highlight={highlightedCapabilityId === 'snapshot'}
+          ariaLabel="Snapshot workbench"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('snapshot')}
             effectiveStatus={effSnap}
             checklistRow={rSnap}
             evidence={jobEvidenceLine(latestJobForKind(jobs, 'snapshot'))}
             testArea={
-              <div className="feed-massive-inline-actions">
-                <label className="feed-massive-field">
-                  <span className="form-label">Underlying</span>
-                  <input
-                    className="form-input"
-                    value={snapSymbol}
-                    onChange={e => setSnapSymbol(e.target.value)}
-                    disabled={snapBusy || !configured}
-                    autoComplete="off"
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={snapBusy || !configured}
-                  onClick={() => runSnapshot()}
-                >
-                  {snapBusy ? 'Running…' : 'Enqueue snapshot'}
-                </button>
-              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={snapBusy || !configured}
+                onClick={() => runSnapshot()}
+              >
+                {snapBusy ? 'Running…' : `Enqueue ${snapType} snapshot`}
+              </button>
             }
           >
             <div className="feed-massive-card-head">
@@ -839,38 +1652,298 @@ export function FeedMassiveOptionPage({
                 <span className="feed-massive-card-icon" aria-hidden>
                   <CardIconSnapshot />
                 </span>
-                <h3>Chain snapshot</h3>
+                <h3>Snapshot workbench</h3>
               </div>
             </div>
             <p className="feed-massive-card-lead">
-              Pull a full option chain snapshot for one underlying and persist rows into{' '}
-              <code style={{ fontSize: '0.85em' }}>option_snapshots</code>.
+              Test three Massive <strong>REST</strong> snapshot endpoints via Celery. Chain persists to{' '}
+              <code style={{ fontSize: '0.85em' }}>option_snapshots</code>; Contract and Unified return data without writing.
             </p>
           </FeedMassiveServiceBlock>
+
+          <div className="feed-massive-agg-tabs-wrap">
+            <div
+              className="feed-massive-agg-tabs"
+              role="tablist"
+              aria-label="Snapshot API variant"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-snap-tab-chain"
+                className={`feed-massive-agg-tab${snapType === 'chain' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={snapType === 'chain'}
+                tabIndex={snapType === 'chain' ? 0 : -1}
+                disabled={snapBusy}
+                onClick={() => {
+                  setSnapType('chain')
+                  setSnapErr(null)
+                  setSnapResult(null)
+                }}
+              >
+                Option Chain
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-snap-tab-contract"
+                className={`feed-massive-agg-tab${snapType === 'contract' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={snapType === 'contract'}
+                tabIndex={snapType === 'contract' ? 0 : -1}
+                disabled={snapBusy}
+                onClick={() => {
+                  setSnapType('contract')
+                  setSnapErr(null)
+                  setSnapResult(null)
+                }}
+              >
+                Option Contract
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-snap-tab-unified"
+                className={`feed-massive-agg-tab${snapType === 'unified' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={snapType === 'unified'}
+                tabIndex={snapType === 'unified' ? 0 : -1}
+                disabled={snapBusy}
+                onClick={() => {
+                  setSnapType('unified')
+                  setSnapErr(null)
+                  setSnapResult(null)
+                }}
+              >
+                Unified
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+          {/* ── Chain form ── */}
+          {snapType === 'chain' ? (
+            <div
+              className="snap-wb-form feed-massive-agg-tab-panel"
+              role="tabpanel"
+              id="feed-massive-snap-panel-chain"
+              aria-labelledby="feed-massive-snap-tab-chain"
+            >
+              <div className="snap-wb-scenario">
+                <p className="snap-wb-scenario-title">Use cases</p>
+                <p className="snap-wb-scenario-text">
+                  Market overview for an entire underlying — compare all strikes and expirations at once.
+                  Strategy comparison across the full chain. Research and modeling with greeks, IV, and OI.
+                  Portfolio refinement by filtering specific expiration ranges or strike zones.
+                </p>
+                <p className="snap-wb-scenario-title">Documentation purpose</p>
+                <p className="snap-wb-scenario-text">
+                  <code>GET /v3/snapshot/options/{'{underlyingAsset}'}</code> — returns paginated snapshots for all contracts
+                  of a given underlying, including pricing, greeks, IV, OI, last trade and quote.
+                  Supports server-side filtering by strike price, expiration date, and contract type.
+                  Persists rows into <code>option_contracts</code> and <code>option_snapshots</code>.
+                </p>
+              </div>
+              <div className="feed-massive-form-grid">
+                <label className="feed-massive-field">
+                  <span className="form-label">Underlying *</span>
+                  <input className="form-input" value={snapSymbol} onChange={e => setSnapSymbol(e.target.value)} disabled={snapBusy || !configured} autoComplete="off" placeholder="NVDA" />
+                </label>
+                <label className="feed-massive-field">
+                  <span className="form-label">Contract type</span>
+                  <select className="form-input" value={chainContractType} onChange={e => setChainContractType(e.target.value as '' | 'call' | 'put')} disabled={snapBusy || !configured}>
+                    <option value="">All</option>
+                    <option value="call">Call</option>
+                    <option value="put">Put</option>
+                  </select>
+                </label>
+                <label className="feed-massive-field">
+                  <span className="form-label">Limit</span>
+                  <input className="form-input" value={chainLimit} onChange={e => setChainLimit(e.target.value)} disabled={snapBusy || !configured} placeholder="250" />
+                </label>
+                <label className="feed-massive-field">
+                  <span className="form-label">Order</span>
+                  <select className="form-input" value={chainOrder} onChange={e => setChainOrder(e.target.value as '' | 'asc' | 'desc')} disabled={snapBusy || !configured}>
+                    <option value="">Default</option>
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </label>
+              </div>
+              <details className="snap-wb-adv-filters">
+                <summary>Advanced filters</summary>
+                <div className="feed-massive-form-grid" style={{ marginTop: 'var(--space-2)' }}>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Expiration (exact)</span>
+                    <input className="form-input" value={chainExpDate} onChange={e => setChainExpDate(e.target.value)} disabled={snapBusy || !configured} placeholder="YYYY-MM-DD" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Expiration &ge;</span>
+                    <input className="form-input" value={chainExpDateGte} onChange={e => setChainExpDateGte(e.target.value)} disabled={snapBusy || !configured} placeholder="YYYY-MM-DD" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Expiration &le;</span>
+                    <input className="form-input" value={chainExpDateLte} onChange={e => setChainExpDateLte(e.target.value)} disabled={snapBusy || !configured} placeholder="YYYY-MM-DD" />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Strike (exact)</span>
+                    <input className="form-input" value={chainStrike} onChange={e => setChainStrike(e.target.value)} disabled={snapBusy || !configured} />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Strike &ge;</span>
+                    <input className="form-input" value={chainStrikeGte} onChange={e => setChainStrikeGte(e.target.value)} disabled={snapBusy || !configured} />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Strike &le;</span>
+                    <input className="form-input" value={chainStrikeLte} onChange={e => setChainStrikeLte(e.target.value)} disabled={snapBusy || !configured} />
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Sort field</span>
+                    <input className="form-input" value={chainSort} onChange={e => setChainSort(e.target.value)} disabled={snapBusy || !configured} placeholder="e.g. strike_price" />
+                  </label>
+                </div>
+              </details>
+            </div>
+          ) : null}
+
+          {/* ── Contract form ── */}
+          {snapType === 'contract' ? (
+            <div
+              className="snap-wb-form feed-massive-agg-tab-panel"
+              role="tabpanel"
+              id="feed-massive-snap-panel-contract"
+              aria-labelledby="feed-massive-snap-tab-contract"
+            >
+              <div className="snap-wb-scenario">
+                <p className="snap-wb-scenario-title">Use cases</p>
+                <p className="snap-wb-scenario-text">
+                  Evaluate a single contract before placing a trade — see break-even, greeks, IV, and OI in one call.
+                  Risk assessment for an existing position by checking current market snapshot.
+                  Strategy refinement when comparing a shortlist of specific contracts.
+                </p>
+                <p className="snap-wb-scenario-title">Documentation purpose</p>
+                <p className="snap-wb-scenario-text">
+                  <code>GET /v3/snapshot/options/{'{underlyingAsset}'}/{'{optionContract}'}</code> — returns a single contract snapshot
+                  with break-even price, greeks, implied volatility, open interest, last quote and trade, and underlying asset info.
+                  No server-side filtering needed; you target exactly one contract by its OPRA-style ticker.
+                </p>
+              </div>
+              <div className="feed-massive-form-grid">
+                <label className="feed-massive-field">
+                  <span className="form-label">Underlying *</span>
+                  <input className="form-input" value={contractUnderlying} onChange={e => setContractUnderlying(e.target.value)} disabled={snapBusy || !configured} autoComplete="off" placeholder="AAPL" />
+                </label>
+                <label className="feed-massive-field" style={{ gridColumn: '1 / -1' }}>
+                  <span className="form-label">Option contract ticker *</span>
+                  <input className="form-input" value={contractTicker} onChange={e => setContractTicker(e.target.value)} disabled={snapBusy || !configured} autoComplete="off" placeholder="O:AAPL251219C00200000" />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+          {/* ── Unified form ── */}
+          {snapType === 'unified' ? (
+            <div
+              className="snap-wb-form feed-massive-agg-tab-panel"
+              role="tabpanel"
+              id="feed-massive-snap-panel-unified"
+              aria-labelledby="feed-massive-snap-tab-unified"
+            >
+              <div className="snap-wb-scenario">
+                <p className="snap-wb-scenario-title">Use cases</p>
+                <p className="snap-wb-scenario-text">
+                  Cross-market analysis — compare stocks, options, forex, and crypto snapshots in a single request.
+                  Diversified portfolio monitoring with one API call covering all held asset types.
+                  Multi-asset trading strategies that need a unified view of current conditions across markets.
+                </p>
+                <p className="snap-wb-scenario-title">Documentation purpose</p>
+                <p className="snap-wb-scenario-text">
+                  <code>GET /v3/snapshot</code> — retrieves unified market data snapshots for multiple tickers
+                  across asset classes (stocks, options, forex, crypto, indices).
+                  Accepts a comma-separated ticker list (up to 250) via <code>ticker.any_of</code> and optional <code>type</code> filter.
+                  Response includes last trade, last quote, session OHLCV, greeks (for options), and per-ticker errors for unresolvable tickers.
+                </p>
+              </div>
+              <div className="feed-massive-form-grid">
+                <label className="feed-massive-field" style={{ gridColumn: '1 / -1' }}>
+                  <span className="form-label">Tickers (comma separated) *</span>
+                  <input className="form-input" value={unifiedTickers} onChange={e => setUnifiedTickers(e.target.value)} disabled={snapBusy || !configured} autoComplete="off" placeholder="AAPL,O:AAPL251219C00200000,C:BTC-USD" />
+                </label>
+                <label className="feed-massive-field">
+                  <span className="form-label">Asset type</span>
+                  <select className="form-input" value={unifiedAssetType} onChange={e => setUnifiedAssetType(e.target.value as typeof unifiedAssetType)} disabled={snapBusy || !configured}>
+                    <option value="">All</option>
+                    <option value="stocks">Stocks</option>
+                    <option value="options">Options</option>
+                    <option value="fx">Forex</option>
+                    <option value="crypto">Crypto</option>
+                    <option value="indices">Indices</option>
+                  </select>
+                </label>
+                <label className="feed-massive-field">
+                  <span className="form-label">Limit</span>
+                  <input className="form-input" value={unifiedLimit} onChange={e => setUnifiedLimit(e.target.value)} disabled={snapBusy || !configured} placeholder="10" />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
+            </div>
+          </div>
+
+          {/* Error */}
           {snapErr ? (
             <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
               {snapErr}
             </p>
           ) : null}
-        </section>
 
-        {/* 3. Option aggregates */}
-        <section className={capCardClass('aggregates')} aria-label="Option aggregates">
+          {/* Result: Summary + Content */}
+          {snapResult ? (
+            <div className="snap-wb-result">
+              <div className="snap-wb-summary">
+                <h4 className="snap-wb-summary-title">Summary</h4>
+                <div className="snap-wb-summary-grid">
+                  {Object.entries(snapResult.summary).map(([k, v]) => (
+                    <div key={k} className="snap-wb-summary-item">
+                      <span className="snap-wb-summary-key">{k.replace(/_/g, ' ')}</span>
+                      <span className="snap-wb-summary-val">
+                        {typeof v === 'boolean' ? (v ? 'Yes' : 'No')
+                          : Array.isArray(v) ? (v.length === 0 ? '—' : v.map(x => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(', '))
+                          : typeof v === 'object' && v !== null ? JSON.stringify(v)
+                          : v == null ? '—' : String(v)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <details className="feed-massive-details-debug" open>
+                <summary>
+                  Content{snapResult.content_truncated ? ' (truncated to 100 items)' : ''}
+                  {Array.isArray(snapResult.content) ? ` — ${(snapResult.content as unknown[]).length} item(s)` : ''}
+                </summary>
+                <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '32rem' }}>
+                  {JSON.stringify(snapResult.content, null, 2)}
+                </pre>
+              </details>
+            </div>
+          ) : null}
+        </FeedMassiveCapabilityPanel>
+
+        {/* 3. Option aggregates — 5 sub-blocks: 3 REST + 2 WS */}
+        <FeedMassiveCapabilityPanel
+          capId="aggregates"
+          checklistRow={rAgg}
+          effectiveStatus={effAgg}
+          expanded={capExpanded.aggregates === true}
+          onToggle={() => toggleCap('aggregates')}
+          highlight={highlightedCapabilityId === 'aggregates'}
+          ariaLabel="Option aggregates"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('aggregates')}
             effectiveStatus={effAgg}
             checklistRow={rAgg}
             evidence={jobEvidenceLine(latestJobForKind(jobs, 'aggregates'))}
-            testArea={
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={aggBusy || !configured}
-                onClick={() => runAggregates()}
-              >
-                {aggBusy ? 'Running…' : 'Enqueue aggregates'}
-              </button>
-            }
           >
             <div className="feed-massive-card-head">
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
@@ -881,112 +1954,277 @@ export function FeedMassiveOptionPage({
               </div>
             </div>
             <p className="feed-massive-card-lead">
-              Per-contract bars from Massive; requires options ticker and a Unix ms window.
+              Per-contract OHLCV bars, daily summaries, and previous-day snapshots from Massive REST; plus real-time WebSocket aggregate streams.
             </p>
           </FeedMassiveServiceBlock>
-          <label className="feed-massive-field" style={{ marginBottom: 'var(--space-3)' }}>
-            <span className="form-label">Options ticker</span>
-            <input
-              className="form-input"
-              style={{ maxWidth: '100%' }}
-              value={aggTicker}
-              onChange={e => setAggTicker(e.target.value)}
-              disabled={aggBusy || !configured}
-              placeholder="O:…"
-              autoComplete="off"
-            />
-          </label>
-          <div className="feed-massive-form-grid">
-            <label className="feed-massive-field">
-              <span className="form-label">Symbol</span>
-              <input
-                className="form-input"
-                value={aggSymbol}
-                onChange={e => setAggSymbol(e.target.value)}
-                disabled={aggBusy || !configured}
-              />
-            </label>
-            <label className="feed-massive-field">
-              <span className="form-label">Expiry</span>
-              <input
-                className="form-input"
-                value={aggExpiry}
-                onChange={e => setAggExpiry(e.target.value)}
-                disabled={aggBusy || !configured}
-                placeholder="YYYYMMDD"
-              />
-            </label>
-            <label className="feed-massive-field">
-              <span className="form-label">Strike</span>
-              <input
-                className="form-input"
-                value={aggStrike}
-                onChange={e => setAggStrike(e.target.value)}
-                disabled={aggBusy || !configured}
-              />
-            </label>
-            <label className="feed-massive-field">
-              <span className="form-label">Right</span>
-              <select
-                className="form-input"
-                value={aggRight}
-                onChange={e => setAggRight(e.target.value as 'C' | 'P')}
-                disabled={aggBusy || !configured}
-              >
-                <option value="C">Call</option>
-                <option value="P">Put</option>
-              </select>
-            </label>
-          </div>
-          <div className="feed-massive-form-grid feed-massive-form-grid--wide">
-            <label className="feed-massive-field">
-              <span className="form-label">Start (ms)</span>
-              <input
-                className="form-input"
-                value={aggStartMs}
-                onChange={e => setAggStartMs(e.target.value)}
-                disabled={aggBusy || !configured}
-              />
-            </label>
-            <label className="feed-massive-field">
-              <span className="form-label">End (ms)</span>
-              <input
-                className="form-input"
-                value={aggEndMs}
-                onChange={e => setAggEndMs(e.target.value)}
-                disabled={aggBusy || !configured}
-              />
-            </label>
-            <label className="feed-massive-field">
-              <span className="form-label">Timespan</span>
-              <input
-                className="form-input"
-                value={aggTimespan}
-                onChange={e => setAggTimespan(e.target.value)}
-                disabled={aggBusy || !configured}
-              />
-            </label>
-            <label className="feed-massive-field">
-              <span className="form-label">Multiplier</span>
-              <input
-                className="form-input"
-                value={aggMult}
-                onChange={e => setAggMult(e.target.value)}
-                disabled={aggBusy || !configured}
-              />
-            </label>
-          </div>
-          {aggErr ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
-              {aggErr}
-            </p>
-          ) : null}
-        </section>
 
-        {/* 4. Greeks / IV (moved here to match checklistRows order) */}
-        <section className={capCardClass('greeks-iv')} aria-label="Verify from database">
+          <div className="feed-massive-agg-tabs-wrap">
+            <div
+              className="feed-massive-agg-tabs"
+              role="tablist"
+              aria-label="Option aggregate API variants"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-agg-tab-custom"
+                className={`feed-massive-agg-tab${aggSubTab === 'custom_bars' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={aggSubTab === 'custom_bars'}
+                tabIndex={aggSubTab === 'custom_bars' ? 0 : -1}
+                onClick={() => setAggSubTab('custom_bars')}
+              >
+                Custom Bars
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-agg-tab-openclose"
+                className={`feed-massive-agg-tab${aggSubTab === 'open_close' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={aggSubTab === 'open_close'}
+                tabIndex={aggSubTab === 'open_close' ? 0 : -1}
+                onClick={() => setAggSubTab('open_close')}
+              >
+                Open / Close
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-agg-tab-prev"
+                className={`feed-massive-agg-tab${aggSubTab === 'prev' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={aggSubTab === 'prev'}
+                tabIndex={aggSubTab === 'prev' ? 0 : -1}
+                onClick={() => setAggSubTab('prev')}
+              >
+                Previous day
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-agg-tab-wsa"
+                className={`feed-massive-agg-tab${aggSubTab === 'ws_a' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={aggSubTab === 'ws_a'}
+                tabIndex={aggSubTab === 'ws_a' ? 0 : -1}
+                onClick={() => setAggSubTab('ws_a')}
+              >
+                Per second (A)
+                <span className="feed-massive-agg-tab-badge">WS</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-agg-tab-wsam"
+                className={`feed-massive-agg-tab${aggSubTab === 'ws_am' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={aggSubTab === 'ws_am'}
+                tabIndex={aggSubTab === 'ws_am' ? 0 : -1}
+                onClick={() => setAggSubTab('ws_am')}
+              >
+                Per minute (AM)
+                <span className="feed-massive-agg-tab-badge">WS</span>
+              </button>
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+              {aggSubTab === 'custom_bars' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-agg-panel-custom"
+                  aria-labelledby="feed-massive-agg-tab-custom"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve aggregated historical OHLCV data for a specific options contract over a custom date range and time interval (second / minute / hour / day). Bars are constructed from qualifying trades only.</p>
+                    <p><strong>When to use:</strong> Backfilling per-contract price bars for charting, technical analysis, or strategy backtesting. This is the primary aggregate endpoint for historical research.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v2/aggs/ticker/&#123;optionsTicker&#125;/range/&#123;multiplier&#125;/&#123;timespan&#125;/&#123;from&#125;/&#123;to&#125;</code></p>
+                  </div>
+                  <label className="feed-massive-field" style={{ marginBottom: 'var(--space-3)' }}>
+                    <span className="form-label">Options ticker</span>
+                    <input
+                      className="form-input"
+                      style={{ maxWidth: '100%' }}
+                      value={aggTicker}
+                      onChange={e => setAggTicker(e.target.value)}
+                      disabled={aggBusy || !configured}
+                      placeholder="O:SPY251219C00600000"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Symbol</span>
+                      <input className="form-input" value={aggSymbol} onChange={e => setAggSymbol(e.target.value)} disabled={aggBusy || !configured} />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Expiry</span>
+                      <input className="form-input" value={aggExpiry} onChange={e => setAggExpiry(e.target.value)} disabled={aggBusy || !configured} placeholder="YYYYMMDD" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Strike</span>
+                      <input className="form-input" value={aggStrike} onChange={e => setAggStrike(e.target.value)} disabled={aggBusy || !configured} />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Right</span>
+                      <select className="form-input" value={aggRight} onChange={e => setAggRight(e.target.value as 'C' | 'P')} disabled={aggBusy || !configured}>
+                        <option value="C">Call</option>
+                        <option value="P">Put</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="feed-massive-form-grid feed-massive-form-grid--wide">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Start (ms)</span>
+                      <input className="form-input" value={aggStartMs} onChange={e => setAggStartMs(e.target.value)} disabled={aggBusy || !configured} />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">End (ms)</span>
+                      <input className="form-input" value={aggEndMs} onChange={e => setAggEndMs(e.target.value)} disabled={aggBusy || !configured} />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Timespan</span>
+                      <input className="form-input" value={aggTimespan} onChange={e => setAggTimespan(e.target.value)} disabled={aggBusy || !configured} />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Multiplier</span>
+                      <input className="form-input" value={aggMult} onChange={e => setAggMult(e.target.value)} disabled={aggBusy || !configured} />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={aggBusy || !configured} onClick={() => runAggregates()}>
+                      {aggBusy ? 'Running\u2026' : 'Enqueue Custom Bars'}
+                    </button>
+                  </div>
+                  {aggErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{aggErr}</p> : null}
+                </div>
+              ) : null}
+
+              {aggSubTab === 'open_close' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-agg-panel-openclose"
+                  aria-labelledby="feed-massive-agg-tab-openclose"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve the opening and closing prices for a specific options contract on a given date, including pre-market and after-hours trade prices.</p>
+                    <p><strong>When to use:</strong> Daily performance analysis, historical end-of-day archiving, after-hours price review, or portfolio tracking where a single-day summary per contract is sufficient.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v1/open-close/&#123;optionsTicker&#125;/&#123;date&#125;</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Options ticker</span>
+                      <input className="form-input" value={ocTicker} onChange={e => setOcTicker(e.target.value)} disabled={ocBusy || !configured} placeholder="O:SPY251219C00600000" autoComplete="off" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Date (YYYY-MM-DD)</span>
+                      <input className="form-input" value={ocDate} onChange={e => setOcDate(e.target.value)} disabled={ocBusy || !configured} placeholder="2025-12-19" />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={ocBusy || !configured} onClick={() => runOpenClose()}>
+                      {ocBusy ? 'Running\u2026' : 'Enqueue Open/Close'}
+                    </button>
+                  </div>
+                  {ocErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ocErr}</p> : null}
+                </div>
+              ) : null}
+
+              {aggSubTab === 'prev' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-agg-panel-prev"
+                  aria-labelledby="feed-massive-agg-tab-prev"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve the previous trading day&apos;s OHLC, volume, and VWAP for a specified option contract in a single call — no need to calculate the previous trading date yourself.</p>
+                    <p><strong>When to use:</strong> Baseline comparison for today&apos;s price action, quick daily reporting, or building overnight change metrics without maintaining a trading calendar.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v2/aggs/ticker/&#123;optionsTicker&#125;/prev</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Options ticker</span>
+                      <input className="form-input" value={prevTicker} onChange={e => setPrevTicker(e.target.value)} disabled={prevBusy || !configured} placeholder="O:SPY251219C00600000" autoComplete="off" />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={prevBusy || !configured} onClick={() => runPrevDay()}>
+                      {prevBusy ? 'Running\u2026' : 'Enqueue Previous Day'}
+                    </button>
+                  </div>
+                  {prevErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{prevErr}</p> : null}
+                </div>
+              ) : null}
+
+              {aggSubTab === 'ws_a' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-agg-panel-wsa"
+                  aria-labelledby="feed-massive-agg-tab-wsa"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Stream second-by-second OHLCV bars for an options contract via <code>WS /options/A</code>. Each bar is built from qualifying trades; no bar is emitted if no eligible trades occur.</p>
+                    <p><strong>When to use:</strong> Ultra-fine intraday monitoring, dynamic sub-minute charting, or automated strategies that react to second-level price changes during market hours.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>WS channel: A.O:&#123;optionsTicker&#125;</code></p>
+                    <p style={{ marginTop: 'var(--space-2)' }}>Run the verify script in a terminal to test this channel:</p>
+                    <div className="feed-massive-ws-cmd-row">
+                      <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;A.O:SPY251219C00600000&quot;</code>
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-secondary"
+                        aria-label="Copy WebSocket verify command for per-second aggregates"
+                        onClick={() => copyWsCommand('A.O:SPY251219C00600000')}
+                      >
+                        {wsCopied === 'A.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {aggSubTab === 'ws_am' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-agg-panel-wsam"
+                  aria-labelledby="feed-massive-agg-tab-wsam"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Stream minute-by-minute OHLCV bars for an options contract via <code>WS /options/AM</code>. Constructed from qualifying trades; gaps indicate no trading activity.</p>
+                    <p><strong>When to use:</strong> Real-time 1-minute candlestick charting, intraday strategy development, or live dashboards that need a steady stream of price summaries without polling REST.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>WS channel: AM.O:&#123;optionsTicker&#125;</code></p>
+                    <p style={{ marginTop: 'var(--space-2)' }}>Run the verify script in a terminal to test this channel:</p>
+                    <div className="feed-massive-ws-cmd-row">
+                      <code className="feed-massive-ws-cmd">python scripts/verify_massive_options_ws.py --config config/config.dev.yaml --channel &quot;AM.O:SPY251219C00600000&quot;</code>
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-secondary"
+                        aria-label="Copy WebSocket verify command for per-minute aggregates"
+                        onClick={() => copyWsCommand('AM.O:SPY251219C00600000')}
+                      >
+                        {wsCopied === 'AM.O:SPY251219C00600000' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </FeedMassiveCapabilityPanel>
+
+        {/* 4. Greeks / IV — Chain, Contract, DB Verify, Unified tabs */}
+        <FeedMassiveCapabilityPanel
+          capId="greeks-iv"
+          checklistRow={rGk}
+          effectiveStatus={effGk}
+          expanded={capExpanded['greeks-iv'] === true}
+          onToggle={() => toggleCap('greeks-iv')}
+          highlight={highlightedCapabilityId === 'greeks-iv'}
+          ariaLabel="Greeks / IV"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('greeks-iv')}
             effectiveStatus={effGk}
             checklistRow={rGk}
             evidence={greeksEvidence}
@@ -1001,96 +2239,365 @@ export function FeedMassiveOptionPage({
                 <span className="feed-massive-card-icon" aria-hidden>
                   <CardIconVerify />
                 </span>
-                <h3>Greeks / IV &amp; verify in PostgreSQL</h3>
+                <h3>Greeks / IV</h3>
               </div>
             </div>
             <p className="feed-massive-card-lead">
-              Read latest stored Massive snapshot rows; check IV and greeks when the provider returned them. Empty strikes use ATM ladder when daily last exists.
+              Implied volatility, delta, gamma, theta, vega, and open interest from Massive snapshot endpoints.
+              Chain snapshots persist to PostgreSQL; contract and unified return data without writing.
             </p>
           </FeedMassiveServiceBlock>
-          <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end' }}>
-            <label className="feed-massive-field">
-              <span className="form-label">Symbol</span>
-              <input
-                className="form-input"
-                value={verifySymbol}
-                onChange={e => setVerifySymbol(e.target.value)}
-                disabled={verifyLoading}
-                autoComplete="off"
-              />
-            </label>
-            <label className="feed-massive-field">
-              <span className="form-label">Expiration</span>
-              <input
-                className="form-input"
-                value={verifyExp}
-                onChange={e => setVerifyExp(e.target.value)}
-                placeholder="YYYYMMDD"
-                disabled={verifyLoading}
-              />
-            </label>
-            <label className="feed-massive-field" style={{ flex: '1 1 12rem', minWidth: '10rem' }}>
-              <span className="form-label">Strikes (CSV)</span>
-              <input
-                className="form-input"
-                value={verifyStrikes}
-                onChange={e => setVerifyStrikes(e.target.value)}
-                disabled={verifyLoading}
-                placeholder="Optional"
-              />
-            </label>
-            <button type="button" className="btn btn-primary" disabled={verifyLoading} onClick={() => runVerify()}>
-              {verifyLoading ? 'Loading…' : 'Load'}
-            </button>
+
+          <div className="feed-massive-agg-tabs-wrap">
+            <div
+              className="feed-massive-agg-tabs"
+              role="tablist"
+              aria-label="Greeks / IV API variants"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-gk-tab-chain"
+                className={`feed-massive-agg-tab${gkSubTab === 'chain_snapshot' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={gkSubTab === 'chain_snapshot'}
+                tabIndex={gkSubTab === 'chain_snapshot' ? 0 : -1}
+                onClick={() => setGkSubTab('chain_snapshot')}
+              >
+                Chain Snapshot
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-gk-tab-contract"
+                className={`feed-massive-agg-tab${gkSubTab === 'contract_snapshot' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={gkSubTab === 'contract_snapshot'}
+                tabIndex={gkSubTab === 'contract_snapshot' ? 0 : -1}
+                onClick={() => setGkSubTab('contract_snapshot')}
+              >
+                Contract Snapshot
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-gk-tab-verify"
+                className={`feed-massive-agg-tab${gkSubTab === 'db_verify' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={gkSubTab === 'db_verify'}
+                tabIndex={gkSubTab === 'db_verify' ? 0 : -1}
+                onClick={() => setGkSubTab('db_verify')}
+              >
+                DB Verify
+                <span className="feed-massive-agg-tab-badge">PG</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="feed-massive-gk-tab-unified"
+                className={`feed-massive-agg-tab${gkSubTab === 'unified_snapshot' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={gkSubTab === 'unified_snapshot'}
+                tabIndex={gkSubTab === 'unified_snapshot' ? 0 : -1}
+                onClick={() => setGkSubTab('unified_snapshot')}
+              >
+                Unified
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+              {gkSubTab === 'chain_snapshot' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-gk-panel-chain"
+                  aria-labelledby="feed-massive-gk-tab-chain"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Fetch the full option chain for an underlying, persisting bid/ask/last, greeks (delta, gamma, theta, vega), IV, and open interest into <code>option_snapshots</code>. Use this to populate or refresh Greeks/IV data for subsequent verification.</p>
+                    <p><strong>When to use:</strong> Initial data population, periodic refresh of Greeks quality, or after market close to capture end-of-day snapshots with greeks.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/snapshot/options/&#123;underlyingAsset&#125;</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Underlying *</span>
+                      <input className="form-input" value={gkChainSymbol} onChange={e => setGkChainSymbol(e.target.value)} disabled={gkChainBusy || !configured} autoComplete="off" placeholder="NVDA" />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-primary" disabled={gkChainBusy || !configured} onClick={() => runGkChainSnapshot()}>
+                      {gkChainBusy ? 'Running\u2026' : 'Enqueue Chain Snapshot'}
+                    </button>
+                    <button type="button" className="btn btn-secondary" disabled={gkCoverageBusy || !gkChainSymbol.trim()} onClick={() => loadGkCoverage(gkChainSymbol)} style={{ marginLeft: 'var(--space-2)' }}>
+                      {gkCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
+                    </button>
+                  </div>
+                  {gkChainErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkChainErr}</p> : null}
+                  {gkCoverageBusy ? (
+                    <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-caption)', color: 'var(--color-text-muted)' }}>Loading coverage stats…</p>
+                  ) : null}
+                  {gkCoverage?.ok && gkCoverage.total != null && gkCoverage.total > 0 ? (
+                    <div className="gk-quality-summary" style={{ marginTop: 'var(--space-3)' }}>
+                      <div style={{ marginBottom: 'var(--space-2)', fontSize: 'var(--text-tiny)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)' }}>
+                        Coverage for {gkCoverage.symbol} ({gkCoverage.total} contracts, source: {gkCoverage.source})
+                      </div>
+                      <div className="gk-quality-summary-grid">
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">Total</span>
+                          <span className="gk-quality-summary-value">{gkCoverage.total}</span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">With IV</span>
+                          <span className="gk-quality-summary-value">{gkCoverage.coverage?.with_iv ?? 0} <span className="gk-quality-summary-pct">({gkCoverage.coverage?.iv_pct ?? 0}%)</span></span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">Full greeks</span>
+                          <span className="gk-quality-summary-value">{gkCoverage.coverage?.with_full_greeks ?? 0} <span className="gk-quality-summary-pct">({gkCoverage.coverage?.full_greeks_pct ?? 0}%)</span></span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">With OI</span>
+                          <span className="gk-quality-summary-value">{gkCoverage.coverage?.with_oi ?? 0}</span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">Stale (&gt;24h)</span>
+                          <span className="gk-quality-summary-value">{gkCoverage.freshness?.stale_rows ?? 0}</span>
+                        </div>
+                        {gkCoverage.freshness?.newest_ts ? (
+                          <div className="gk-quality-summary-item">
+                            <span className="gk-quality-summary-label">Newest</span>
+                            <span className="gk-quality-summary-value" style={{ fontSize: 'var(--text-tiny)' }}>{gkCoverage.freshness.newest_ts}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {gkSubTab === 'contract_snapshot' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-gk-panel-contract"
+                  aria-labelledby="feed-massive-gk-tab-contract"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve a single contract snapshot with full greeks (delta, gamma, theta, vega), implied volatility, break-even price, open interest, and last trade/quote. Ideal for evaluating a specific position or contract before trading.</p>
+                    <p><strong>When to use:</strong> Pre-trade analysis of a specific contract, risk assessment for an existing position, or comparing greeks across a shortlist of contracts.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/snapshot/options/&#123;underlyingAsset&#125;/&#123;optionContract&#125;</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Underlying *</span>
+                      <input className="form-input" value={gkContractUnderlying} onChange={e => setGkContractUnderlying(e.target.value)} disabled={gkContractBusy || !configured} autoComplete="off" placeholder="AAPL" />
+                    </label>
+                    <label className="feed-massive-field" style={{ gridColumn: '1 / -1' }}>
+                      <span className="form-label">Option contract ticker *</span>
+                      <input className="form-input" value={gkContractTicker} onChange={e => setGkContractTicker(e.target.value)} disabled={gkContractBusy || !configured} autoComplete="off" placeholder="O:AAPL251219C00200000" />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-primary" disabled={gkContractBusy || !configured} onClick={() => runGkContractSnapshot()}>
+                      {gkContractBusy ? 'Running\u2026' : 'Enqueue Contract Snapshot'}
+                    </button>
+                  </div>
+                  {gkContractErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkContractErr}</p> : null}
+                  {gkContractResult ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <div className="snap-wb-summary">
+                        <h4 className="snap-wb-summary-title">Greeks / IV</h4>
+                        <div className="snap-wb-summary-grid">
+                          {(() => {
+                            const r = gkContractResult as Record<string, unknown>
+                            const g = (typeof r.greeks === 'object' && r.greeks != null ? r.greeks : {}) as Record<string, unknown>
+                            const entries: [string, unknown][] = [
+                              ['IV', r.implied_volatility],
+                              ['Delta', g.delta],
+                              ['Gamma', g.gamma],
+                              ['Theta', g.theta],
+                              ['Vega', g.vega],
+                              ['Open interest', r.open_interest],
+                              ['Break-even', r.break_even_price],
+                            ]
+                            return entries.map(([k, v]) => (
+                              <div key={k} className="snap-wb-summary-item">
+                                <span className="snap-wb-summary-key">{k}</span>
+                                <span className="snap-wb-summary-val">
+                                  {v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(6) : '\u2014'}
+                                </span>
+                              </div>
+                            ))
+                          })()}
+                        </div>
+                      </div>
+                      <details className="feed-massive-details-debug">
+                        <summary>Full contract response</summary>
+                        <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
+                          {JSON.stringify(gkContractResult, null, 2)}
+                        </pre>
+                      </details>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {gkSubTab === 'db_verify' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-gk-panel-verify"
+                  aria-labelledby="feed-massive-gk-tab-verify"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Read latest stored snapshot rows from PostgreSQL and verify IV, greeks, and open interest coverage. The quality summary shows how many rows have each field populated.</p>
+                    <p><strong>When to use:</strong> After a chain snapshot completes, to confirm greeks data quality. Also useful for ongoing monitoring of data freshness and completeness.</p>
+                  </div>
+                  <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end' }}>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Symbol</span>
+                      <input className="form-input" value={verifySymbol} onChange={e => setVerifySymbol(e.target.value)} disabled={verifyLoading} autoComplete="off" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Expiration</span>
+                      <input className="form-input" value={verifyExp} onChange={e => setVerifyExp(e.target.value)} placeholder="YYYYMMDD" disabled={verifyLoading} />
+                    </label>
+                    <label className="feed-massive-field" style={{ flex: '1 1 12rem', minWidth: '10rem' }}>
+                      <span className="form-label">Strikes (CSV)</span>
+                      <input className="form-input" value={verifyStrikes} onChange={e => setVerifyStrikes(e.target.value)} disabled={verifyLoading} placeholder="Optional" />
+                    </label>
+                    <button type="button" className="btn btn-primary" disabled={verifyLoading} onClick={() => runVerify()}>
+                      {verifyLoading ? 'Loading\u2026' : 'Load'}
+                    </button>
+                  </div>
+                  {verifyUnderlying != null ? (
+                    <div className="feed-massive-verify-meta">
+                      Underlying (row / fallback): <strong>{verifyUnderlying.toFixed(2)}</strong>
+                    </div>
+                  ) : null}
+                  {verifyErr ? (
+                    <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{verifyErr}</p>
+                  ) : null}
+                  {greeksQuality ? (
+                    <div className="gk-quality-summary">
+                      <div className="gk-quality-summary-grid">
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">Total rows</span>
+                          <span className="gk-quality-summary-value">{greeksQuality.total}</span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">With IV</span>
+                          <span className="gk-quality-summary-value">{greeksQuality.withIv} <span className="gk-quality-summary-pct">({greeksQuality.ivPct}%)</span></span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">Any greek</span>
+                          <span className="gk-quality-summary-value">{greeksQuality.withAnyGreek}</span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">Full greeks</span>
+                          <span className="gk-quality-summary-value">{greeksQuality.withFullGreeks} <span className="gk-quality-summary-pct">({greeksQuality.greeksPct}%)</span></span>
+                        </div>
+                        <div className="gk-quality-summary-item">
+                          <span className="gk-quality-summary-label">With OI</span>
+                          <span className="gk-quality-summary-value">{greeksQuality.withOi}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {verifyRows.length > 0 ? (
+                    <div className="feed-massive-table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Strike</th>
+                            <th scope="col">Right</th>
+                            <th scope="col">Bid</th>
+                            <th scope="col">Ask</th>
+                            <th scope="col">Last</th>
+                            <th scope="col">Mid</th>
+                            <th scope="col">IV</th>
+                            <th scope="col">Delta</th>
+                            <th scope="col">Gamma</th>
+                            <th scope="col">Theta</th>
+                            <th scope="col">Vega</th>
+                            <th scope="col">OI</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {verifyRows.map((row, i) => (
+                            <tr key={`${row.strike}-${row.right}-${i}`}>
+                              <td>{row.strike}</td>
+                              <td>{row.right}</td>
+                              <td>{row.bid ?? '\u2014'}</td>
+                              <td>{row.ask ?? '\u2014'}</td>
+                              <td>{row.last ?? '\u2014'}</td>
+                              <td>{row.mid ?? '\u2014'}</td>
+                              <td>{row.iv != null && Number.isFinite(row.iv) ? row.iv.toFixed(4) : '\u2014'}</td>
+                              <td>{row.delta != null && Number.isFinite(row.delta) ? row.delta.toFixed(4) : '\u2014'}</td>
+                              <td>{row.gamma != null && Number.isFinite(row.gamma) ? row.gamma.toFixed(6) : '\u2014'}</td>
+                              <td>{row.theta != null && Number.isFinite(row.theta) ? row.theta.toFixed(4) : '\u2014'}</td>
+                              <td>{row.vega != null && Number.isFinite(row.vega) ? row.vega.toFixed(4) : '\u2014'}</td>
+                              <td>{row.open_interest != null ? row.open_interest : '\u2014'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {gkSubTab === 'unified_snapshot' ? (
+                <div
+                  className="feed-massive-agg-tab-panel"
+                  role="tabpanel"
+                  id="feed-massive-gk-panel-unified"
+                  aria-labelledby="feed-massive-gk-tab-unified"
+                >
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve unified market data snapshots for multiple option tickers in a single request. Includes greeks and IV alongside quotes when available.</p>
+                    <p><strong>When to use:</strong> Cross-contract greeks comparison, portfolio-wide IV monitoring, or multi-ticker analysis combining several option snapshots.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/snapshot</code> (type=options)</p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field" style={{ gridColumn: '1 / -1' }}>
+                      <span className="form-label">Tickers (comma separated) *</span>
+                      <input className="form-input" value={gkUnifiedTickers} onChange={e => setGkUnifiedTickers(e.target.value)} disabled={gkUnifiedBusy || !configured} autoComplete="off" placeholder="O:AAPL251219C00200000,O:NVDA251219C00150000" />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-primary" disabled={gkUnifiedBusy || !configured} onClick={() => runGkUnifiedSnapshot()}>
+                      {gkUnifiedBusy ? 'Running\u2026' : 'Enqueue Unified Snapshot'}
+                    </button>
+                  </div>
+                  {gkUnifiedErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{gkUnifiedErr}</p> : null}
+                  {gkUnifiedResult ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <details className="feed-massive-details-debug" open>
+                        <summary>
+                          Result{Array.isArray((gkUnifiedResult as Record<string, unknown>).content) ? ` \u2014 ${((gkUnifiedResult as Record<string, unknown>).content as unknown[]).length} item(s)` : ''}
+                        </summary>
+                        <pre className="feed-massive-pre-json" tabIndex={0} style={{ maxHeight: '24rem' }}>
+                          {JSON.stringify(gkUnifiedResult, null, 2)}
+                        </pre>
+                      </details>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
-          {verifyUnderlying != null ? (
-            <div className="feed-massive-verify-meta">
-              Underlying (row / fallback): <strong>{verifyUnderlying.toFixed(2)}</strong>
-            </div>
-          ) : null}
-          {verifyErr ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
-              {verifyErr}
-            </p>
-          ) : null}
-          {verifyRows.length > 0 ? (
-            <div className="feed-massive-table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Strike</th>
-                    <th scope="col">Right</th>
-                    <th scope="col">Bid</th>
-                    <th scope="col">Ask</th>
-                    <th scope="col">Last</th>
-                    <th scope="col">Mid</th>
-                    <th scope="col">IV</th>
-                    <th scope="col">Delta</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {verifyRows.map((row, i) => (
-                    <tr key={`${row.strike}-${row.right}-${i}`}>
-                      <td>{row.strike}</td>
-                      <td>{row.right}</td>
-                      <td>{row.bid ?? '—'}</td>
-                      <td>{row.ask ?? '—'}</td>
-                      <td>{row.last ?? '—'}</td>
-                      <td>{row.mid ?? '—'}</td>
-                      <td>{row.iv != null && Number.isFinite(row.iv) ? row.iv.toFixed(4) : '—'}</td>
-                      <td>{row.delta != null && Number.isFinite(row.delta) ? row.delta.toFixed(4) : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </section>
+        </FeedMassiveCapabilityPanel>
 
         {/* 5. Daily open interest */}
-        <section className={capCardClass('daily-oi')} aria-label="Open interest">
+        <FeedMassiveCapabilityPanel
+          capId="daily-oi"
+          checklistRow={rOi}
+          effectiveStatus={effOi}
+          expanded={capExpanded['daily-oi'] === true}
+          onToggle={() => toggleCap('daily-oi')}
+          highlight={highlightedCapabilityId === 'daily-oi'}
+          ariaLabel="Open interest"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('daily-oi')}
             effectiveStatus={effOi}
             checklistRow={rOi}
             evidence={oiFetchMsg ?? jobEvidenceLine(latestJobForKind(jobs, 'oi'))}
@@ -1139,12 +2646,19 @@ export function FeedMassiveOptionPage({
               {oiErr}
             </p>
           ) : null}
-        </section>
+        </FeedMassiveCapabilityPanel>
 
         {/* 6. Option trades */}
-        <section className={capCardClass('trades')} aria-label="Option trades API">
+        <FeedMassiveCapabilityPanel
+          capId="trades"
+          checklistRow={rTr}
+          effectiveStatus={effTr}
+          expanded={capExpanded.trades === true}
+          onToggle={() => toggleCap('trades')}
+          highlight={highlightedCapabilityId === 'trades'}
+          ariaLabel="Option trades API"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('trades')}
             effectiveStatus={effTr}
             checklistRow={rTr}
             evidence={tradeCheckMsg ?? 'Use Test to call GET /research/option-trades (403 expected when trades are off).'}
@@ -1173,12 +2687,19 @@ export function FeedMassiveOptionPage({
               Tick-level trades require Developer tier and trades_enabled. Starter returns 403 by design.
             </p>
           </FeedMassiveServiceBlock>
-        </section>
+        </FeedMassiveCapabilityPanel>
 
         {/* 7. Corporate actions */}
-        <section className={capCardClass('corporate-actions')} aria-label="Corporate actions">
+        <FeedMassiveCapabilityPanel
+          capId="corporate-actions"
+          checklistRow={rCorp}
+          effectiveStatus={effCorp}
+          expanded={capExpanded['corporate-actions'] === true}
+          onToggle={() => toggleCap('corporate-actions')}
+          highlight={highlightedCapabilityId === 'corporate-actions'}
+          ariaLabel="Corporate actions"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('corporate-actions')}
             effectiveStatus={effCorp}
             checklistRow={rCorp}
             evidence={
@@ -1254,12 +2775,19 @@ export function FeedMassiveOptionPage({
               </table>
             </div>
           ) : null}
-        </section>
+        </FeedMassiveCapabilityPanel>
 
         {/* 8. WebSocket streaming */}
-        <section className={capCardClass('websocket')} aria-label="WebSocket verification">
+        <FeedMassiveCapabilityPanel
+          capId="websocket"
+          checklistRow={rWs}
+          effectiveStatus={effWs}
+          expanded={capExpanded.websocket === true}
+          onToggle={() => toggleCap('websocket')}
+          highlight={highlightedCapabilityId === 'websocket'}
+          ariaLabel="WebSocket verification"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('websocket')}
             effectiveStatus={effWs}
             checklistRow={rWs}
             evidence={
@@ -1283,12 +2811,19 @@ export function FeedMassiveOptionPage({
               Verify connectivity with the standalone script (delayed/real-time host per plan). No persistent bridge in this app.
             </p>
           </FeedMassiveServiceBlock>
-        </section>
+        </FeedMassiveCapabilityPanel>
 
         {/* 9. Celery massive queue */}
-        <section className={capCardClass('celery-queue')} aria-label="Recent jobs">
+        <FeedMassiveCapabilityPanel
+          capId="celery-queue"
+          checklistRow={rCel}
+          effectiveStatus={effCel}
+          expanded={capExpanded['celery-queue'] === true}
+          onToggle={() => toggleCap('celery-queue')}
+          highlight={highlightedCapabilityId === 'celery-queue'}
+          ariaLabel="Recent jobs"
+        >
           <FeedMassiveServiceBlock
-            anchorId={feedMassiveSvcAnchorId('celery-queue')}
             effectiveStatus={effCel}
             checklistRow={rCel}
             evidence={celeryEvidence}
@@ -1359,7 +2894,674 @@ export function FeedMassiveOptionPage({
               </tbody>
             </table>
           </div>
-        </section>
+        </FeedMassiveCapabilityPanel>
+
+        {/* 10. Contracts */}
+        <FeedMassiveCapabilityPanel
+          capId="contracts"
+          checklistRow={rCt}
+          effectiveStatus={effCt}
+          expanded={capExpanded.contracts === true}
+          onToggle={() => toggleCap('contracts')}
+          highlight={highlightedCapabilityId === 'contracts'}
+          ariaLabel="Contracts"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effCt}
+            checklistRow={rCt}
+            evidence={contractsEvidence}
+          >
+            <div className="feed-massive-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="3" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M6 7h8M6 10h5M6 13h7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                </span>
+                <h3>Contracts</h3>
+              </div>
+            </div>
+            <p className="feed-massive-card-lead">
+              Reference contract metadata from Massive: list contracts by underlying with filters, inspect single contract details, verify local mapping consistency, and link to contract-level snapshots.
+            </p>
+          </FeedMassiveServiceBlock>
+
+          <div className="feed-massive-agg-tabs-wrap">
+            <div className="feed-massive-agg-tabs" role="tablist" aria-label="Contracts API variants">
+              <button
+                type="button" role="tab"
+                id="feed-massive-ct-tab-list"
+                className={`feed-massive-agg-tab${ctSubTab === 'contracts_list' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={ctSubTab === 'contracts_list'}
+                tabIndex={ctSubTab === 'contracts_list' ? 0 : -1}
+                onClick={() => setCtSubTab('contracts_list')}
+              >
+                Contracts List
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button" role="tab"
+                id="feed-massive-ct-tab-detail"
+                className={`feed-massive-agg-tab${ctSubTab === 'contract_detail' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={ctSubTab === 'contract_detail'}
+                tabIndex={ctSubTab === 'contract_detail' ? 0 : -1}
+                onClick={() => setCtSubTab('contract_detail')}
+              >
+                Contract Detail
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+              <button
+                type="button" role="tab"
+                id="feed-massive-ct-tab-verify"
+                className={`feed-massive-agg-tab${ctSubTab === 'db_verify' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={ctSubTab === 'db_verify'}
+                tabIndex={ctSubTab === 'db_verify' ? 0 : -1}
+                onClick={() => setCtSubTab('db_verify')}
+              >
+                DB Verify
+                <span className="feed-massive-agg-tab-badge">PG</span>
+              </button>
+              <button
+                type="button" role="tab"
+                id="feed-massive-ct-tab-snap"
+                className={`feed-massive-agg-tab${ctSubTab === 'snapshot_link' ? ' feed-massive-agg-tab--active' : ''}`}
+                aria-selected={ctSubTab === 'snapshot_link'}
+                tabIndex={ctSubTab === 'snapshot_link' ? 0 : -1}
+                onClick={() => setCtSubTab('snapshot_link')}
+              >
+                Snapshot Link
+                <span className="feed-massive-agg-tab-badge">REST</span>
+              </button>
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+
+              {ctSubTab === 'contracts_list' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel" id="feed-massive-ct-panel-list" aria-labelledby="feed-massive-ct-tab-list">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> List option contracts for an underlying with optional filters on expiration, strike range, and contract type. Returns reference metadata (ticker, expiry, strike, right, exercise style).</p>
+                    <p><strong>When to use:</strong> Discover available contracts before running snapshots, verify contract universe coverage, or populate the local <code>option_contracts</code> reference table.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/reference/options/contracts</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Underlying</span>
+                      <input className="form-input" value={ctListSymbol} onChange={e => setCtListSymbol(e.target.value)} disabled={ctListBusy || !configured} autoComplete="off" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Expiration</span>
+                      <input className="form-input" value={ctListExpDate} onChange={e => setCtListExpDate(e.target.value)} disabled={ctListBusy || !configured} placeholder="YYYY-MM-DD" autoComplete="off" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Type</span>
+                      <select className="form-input" value={ctListContractType} onChange={e => setCtListContractType(e.target.value as '' | 'call' | 'put')} disabled={ctListBusy || !configured}>
+                        <option value="">All</option>
+                        <option value="call">Call</option>
+                        <option value="put">Put</option>
+                      </select>
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Limit</span>
+                      <input className="form-input" type="number" value={ctListLimit} onChange={e => setCtListLimit(e.target.value)} disabled={ctListBusy || !configured} min={1} max={250} />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                    <button type="button" className="btn btn-secondary" disabled={ctListBusy || !configured} onClick={() => runCtContractsList()}>
+                      {ctListBusy ? 'Running\u2026' : 'Fetch Contracts'}
+                    </button>
+                    <button type="button" className="btn btn-primary" disabled={ctCoverageBusy} onClick={() => loadCtCoverage()}>
+                      {ctCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
+                    </button>
+                  </div>
+                  {ctListErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctListErr}</p> : null}
+                  {ctCoverage && ctCoverage.ok && ctCoverage.total != null && ctCoverage.total > 0 ? (
+                    <div className="gk-quality-summary-strip" style={{ marginTop: 'var(--space-3)' }}>
+                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.total}</span><span className="gk-quality-summary-lbl">Contracts</span></div>
+                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.with_massive_ticker ?? 0}</span><span className="gk-quality-summary-lbl">With Ticker</span></div>
+                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.ticker_pct ?? 0}%</span><span className="gk-quality-summary-lbl">Ticker %</span></div>
+                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.distinct_expirations ?? 0}</span><span className="gk-quality-summary-lbl">Expirations</span></div>
+                      <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val">{ctCoverage.coverage?.distinct_strikes ?? 0}</span><span className="gk-quality-summary-lbl">Strikes</span></div>
+                      {ctCoverage.coverage?.mapping_mismatch != null && ctCoverage.coverage.mapping_mismatch > 0 ? (
+                        <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val" style={{ color: 'var(--clr-warning)' }}>{ctCoverage.coverage.mapping_mismatch}</span><span className="gk-quality-summary-lbl">Mismatches</span></div>
+                      ) : null}
+                      {ctCoverage.freshness?.stale_rows != null && ctCoverage.freshness.stale_rows > 0 ? (
+                        <div className="gk-quality-summary-cell"><span className="gk-quality-summary-val" style={{ color: 'var(--clr-warning)' }}>{ctCoverage.freshness.stale_rows}</span><span className="gk-quality-summary-lbl">Stale (&gt;7d)</span></div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {ctSubTab === 'contract_detail' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel" id="feed-massive-ct-panel-detail" aria-labelledby="feed-massive-ct-tab-detail">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve full metadata for a single option contract by its Polygon option ticker. Returns underlying, expiry, strike, right, exercise style, shares per contract, and more.</p>
+                    <p><strong>When to use:</strong> Verify a specific contract&apos;s canonical metadata, inspect exercise style or shares per contract, or confirm local mapping accuracy against the API source of truth.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/reference/options/contracts/&#123;options_ticker&#125;</code></p>
+                  </div>
+                  <label className="feed-massive-field" style={{ marginBottom: 'var(--space-3)' }}>
+                    <span className="form-label">Options ticker</span>
+                    <input
+                      className="form-input" style={{ maxWidth: '100%' }}
+                      value={ctDetailTicker} onChange={e => setCtDetailTicker(e.target.value)}
+                      disabled={ctDetailBusy || !configured}
+                      placeholder="O:SPY251219C00600000" autoComplete="off"
+                    />
+                  </label>
+                  <button type="button" className="btn btn-secondary" disabled={ctDetailBusy || !configured} onClick={() => runCtContractDetail()}>
+                    {ctDetailBusy ? 'Running\u2026' : 'Fetch Detail'}
+                  </button>
+                  {ctDetailErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctDetailErr}</p> : null}
+                  {ctDetailResult ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <table className="status-page-table" style={{ fontSize: '0.82rem' }}>
+                        <tbody>
+                          {(['ticker', 'underlying_ticker', 'expiration_date', 'strike_price', 'contract_type', 'exercise_style', 'shares_per_contract', 'primary_exchange', 'cfi'] as const).map(key => (
+                            <tr key={key}>
+                              <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{key}</td>
+                              <td>{ctDetailResult[key] != null ? String(ctDetailResult[key]) : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {ctSubTab === 'db_verify' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel" id="feed-massive-ct-panel-verify" aria-labelledby="feed-massive-ct-tab-verify">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Verify local <code>option_contracts</code> table coverage and mapping consistency against the Massive API. Shows how many contracts have a Polygon ticker mapped, identity completeness, and freshness.</p>
+                    <p><strong>When to use:</strong> After running chain snapshots (which populate <code>option_contracts</code>), use this to audit data quality and identify gaps before downstream analysis.</p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Symbol</span>
+                      <input className="form-input" value={ctListSymbol} onChange={e => setCtListSymbol(e.target.value)} disabled={ctCoverageBusy} autoComplete="off" />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-primary" disabled={ctCoverageBusy} onClick={() => loadCtCoverage()}>
+                      {ctCoverageBusy ? 'Loading\u2026' : 'Check Coverage'}
+                    </button>
+                  </div>
+                  {ctCoverage && ctCoverage.ok && ctCoverage.total != null && ctCoverage.total > 0 ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <table className="status-page-table" style={{ fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr>
+                            <th>Metric</th>
+                            <th>Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr><td>Total contracts</td><td>{ctCoverage.total}</td></tr>
+                          <tr><td>With Massive ticker</td><td>{ctCoverage.coverage?.with_massive_ticker ?? 0} ({ctCoverage.coverage?.ticker_pct ?? 0}%)</td></tr>
+                          <tr><td>Complete identity</td><td>{ctCoverage.coverage?.with_complete_identity ?? 0} ({ctCoverage.coverage?.identity_pct ?? 0}%)</td></tr>
+                          <tr><td>Mapping mismatches</td><td>{ctCoverage.coverage?.mapping_mismatch ?? 0}</td></tr>
+                          <tr><td>Distinct expirations</td><td>{ctCoverage.coverage?.distinct_expirations ?? 0}</td></tr>
+                          <tr><td>Distinct strikes</td><td>{ctCoverage.coverage?.distinct_strikes ?? 0}</td></tr>
+                          <tr><td>Oldest entry</td><td>{ctCoverage.freshness?.oldest_ts ?? '—'}</td></tr>
+                          <tr><td>Newest entry</td><td>{ctCoverage.freshness?.newest_ts ?? '—'}</td></tr>
+                          <tr><td>Stale (&gt;7 days)</td><td>{ctCoverage.freshness?.stale_rows ?? 0}</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : ctCoverage && ctCoverage.ok && ctCoverage.total === 0 ? (
+                    <p className="status-page-msg" style={{ marginTop: 'var(--space-3)' }}>No contracts found in <code>option_contracts</code> for this symbol. Run a chain snapshot first to populate.</p>
+                  ) : ctCoverage && !ctCoverage.ok ? (
+                    <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctCoverage.error ?? 'Failed to load coverage'}</p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {ctSubTab === 'snapshot_link' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel" id="feed-massive-ct-panel-snap" aria-labelledby="feed-massive-ct-tab-snap">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> From a known contract ticker, trigger a single-contract snapshot to verify live quote data (bid/ask/greeks/IV) end-to-end. Completes the contract → snapshot verification loop.</p>
+                    <p><strong>When to use:</strong> After discovering a contract via list/detail tabs, verify its live market data through the snapshot pipeline.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>GET /v3/snapshot/options/&#123;underlyingAsset&#125;/&#123;optionContract&#125;</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Underlying</span>
+                      <input className="form-input" value={ctSnapUnderlying} onChange={e => setCtSnapUnderlying(e.target.value)} disabled={ctSnapBusy || !configured} autoComplete="off" />
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Options ticker</span>
+                      <input className="form-input" value={ctSnapTicker} onChange={e => setCtSnapTicker(e.target.value)} disabled={ctSnapBusy || !configured} placeholder="O:SPY251219C00600000" autoComplete="off" />
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={ctSnapBusy || !configured} onClick={() => runCtSnapshotLink()}>
+                      {ctSnapBusy ? 'Running\u2026' : 'Fetch Contract Snapshot'}
+                    </button>
+                  </div>
+                  {ctSnapErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{ctSnapErr}</p> : null}
+                  {ctSnapResult ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <details>
+                        <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem' }}>Snapshot result</summary>
+                        <pre style={{ maxHeight: '20rem', overflow: 'auto', fontSize: '0.75rem', marginTop: 'var(--space-2)', padding: 'var(--space-2)', borderRadius: 'var(--radius-sm)', background: 'var(--surface-2, #f5f5f5)' }}>
+                          {JSON.stringify(ctSnapResult, null, 2)}
+                        </pre>
+                      </details>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+            </div>
+          </div>
+        </FeedMassiveCapabilityPanel>
+
+        {/* ── Market Ops ── */}
+        <FeedMassiveCapabilityPanel
+          capId="market-ops"
+          checklistRow={rMo}
+          effectiveStatus={effMo}
+          expanded={capExpanded['market-ops'] === true}
+          onToggle={() => toggleCap('market-ops')}
+          highlight={highlightedCapabilityId === 'market-ops'}
+          ariaLabel="Market Ops"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effMo}
+            evidence={marketOpsEvidence}
+            checklistRow={rMo}
+          >
+          <div className="feed-massive-agg-tabs-wrap">
+            <div className="feed-massive-agg-tabs" role="tablist">
+              {(['conditions', 'exchanges', 'market_holidays', 'market_status'] as const).map(t => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={moSubTab === t}
+                  className={`feed-massive-agg-tab${moSubTab === t ? ' active' : ''}`}
+                  onClick={() => setMoSubTab(t)}
+                >
+                  {t === 'conditions' ? 'Conditions' : t === 'exchanges' ? 'Exchanges' : t === 'market_holidays' ? 'Market Holidays' : 'Market Status'}
+                  <span className="feed-massive-agg-tab-badge">REST</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+
+              {moSubTab === 'conditions' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Look up trade/quote condition codes and their meanings across asset classes. Essential for interpreting raw trade & quote data flags.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v3/reference/conditions</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Asset class</span>
+                      <select className="form-input" value={moCondAsset} onChange={e => setMoCondAsset(e.target.value)} disabled={moCondBusy}>
+                        <option value="">All</option>
+                        <option value="stocks">Stocks</option>
+                        <option value="options">Options</option>
+                        <option value="crypto">Crypto</option>
+                        <option value="fx">FX</option>
+                      </select>
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Data type</span>
+                      <select className="form-input" value={moCondDataType} onChange={e => setMoCondDataType(e.target.value)} disabled={moCondBusy}>
+                        <option value="">All</option>
+                        <option value="trade">Trade</option>
+                        <option value="bbo">BBO</option>
+                        <option value="nbbo">NBBO</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={moCondBusy || !configured} onClick={runMoConditions}>
+                      {moCondBusy ? 'Loading\u2026' : 'Fetch Conditions'}
+                    </button>
+                  </div>
+                  {moCondErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moCondErr}</p> : null}
+                  {moCondResults ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <p style={{ fontSize: '0.82rem', marginBottom: 'var(--space-2)' }}><strong>{moCondResults.length}</strong> condition(s) returned</p>
+                      <div style={{ maxHeight: '22rem', overflow: 'auto', border: '1px solid var(--border-color, #ddd)', borderRadius: 'var(--radius-sm)' }}>
+                        <table className="feed-massive-table" style={{ width: '100%', fontSize: '0.78rem' }}>
+                          <thead><tr><th>ID</th><th>Type</th><th>Name</th><th>Asset Class</th><th>Data Types</th><th>Description</th></tr></thead>
+                          <tbody>
+                            {moCondResults.map((c, i) => (
+                              <tr key={i}>
+                                <td>{String(c.id ?? '')}</td>
+                                <td>{String(c.type ?? '')}</td>
+                                <td>{String(c.name ?? '')}</td>
+                                <td>{String(c.asset_class ?? '')}</td>
+                                <td>{Array.isArray(c.data_types) ? (c.data_types as string[]).join(', ') : String(c.data_types ?? '')}</td>
+                                <td style={{ maxWidth: '24rem', whiteSpace: 'normal' }}>{String(c.description ?? '')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {moSubTab === 'exchanges' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> List known exchanges and their metadata (MIC, type, locale). Useful for understanding where trades and quotes originate.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v3/reference/exchanges</code></p>
+                  </div>
+                  <div className="feed-massive-form-grid">
+                    <label className="feed-massive-field">
+                      <span className="form-label">Asset class</span>
+                      <select className="form-input" value={moExchAsset} onChange={e => setMoExchAsset(e.target.value)} disabled={moExchBusy}>
+                        <option value="">All</option>
+                        <option value="stocks">Stocks</option>
+                        <option value="options">Options</option>
+                        <option value="crypto">Crypto</option>
+                        <option value="fx">FX</option>
+                      </select>
+                    </label>
+                    <label className="feed-massive-field">
+                      <span className="form-label">Locale</span>
+                      <select className="form-input" value={moExchLocale} onChange={e => setMoExchLocale(e.target.value)} disabled={moExchBusy}>
+                        <option value="">All</option>
+                        <option value="us">US</option>
+                        <option value="global">Global</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={moExchBusy || !configured} onClick={runMoExchanges}>
+                      {moExchBusy ? 'Loading\u2026' : 'Fetch Exchanges'}
+                    </button>
+                  </div>
+                  {moExchErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moExchErr}</p> : null}
+                  {moExchResults ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <p style={{ fontSize: '0.82rem', marginBottom: 'var(--space-2)' }}><strong>{moExchResults.length}</strong> exchange(s) returned</p>
+                      <div style={{ maxHeight: '22rem', overflow: 'auto', border: '1px solid var(--border-color, #ddd)', borderRadius: 'var(--radius-sm)' }}>
+                        <table className="feed-massive-table" style={{ width: '100%', fontSize: '0.78rem' }}>
+                          <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>MIC</th><th>Asset Class</th><th>Locale</th><th>URL</th></tr></thead>
+                          <tbody>
+                            {moExchResults.map((ex, i) => (
+                              <tr key={i}>
+                                <td>{String(ex.id ?? '')}</td>
+                                <td>{String(ex.name ?? '')}</td>
+                                <td>{String(ex.type ?? '')}</td>
+                                <td>{String(ex.mic ?? '')}</td>
+                                <td>{String(ex.asset_class ?? '')}</td>
+                                <td>{String(ex.locale ?? '')}</td>
+                                <td style={{ maxWidth: '16rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ex.url ? <a href={String(ex.url)} target="_blank" rel="noreferrer" style={{ fontSize: '0.76rem' }}>{String(ex.url)}</a> : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {moSubTab === 'market_holidays' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Retrieve upcoming market holidays from the official API and compare with locally stored holidays. Helps verify that the local holiday calendar is in sync with the market schedule.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v3/reference/market/holidays</code></p>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={moHolBusy || !configured} onClick={runMoHolidays}>
+                      {moHolBusy ? 'Loading\u2026' : 'Fetch & Compare Holidays'}
+                    </button>
+                  </div>
+                  {moHolErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moHolErr}</p> : null}
+                  {moHolData?.ok ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+                        <div>
+                          <h4 style={{ fontSize: '0.85rem', marginBottom: 'var(--space-2)' }}>Massive holidays ({moHolData.massive_count ?? 0})</h4>
+                          <div style={{ maxHeight: '18rem', overflow: 'auto', border: '1px solid var(--border-color, #ddd)', borderRadius: 'var(--radius-sm)' }}>
+                            <table className="feed-massive-table" style={{ width: '100%', fontSize: '0.78rem' }}>
+                              <thead><tr><th>Date</th><th>Exchange</th><th>Name</th><th>Status</th></tr></thead>
+                              <tbody>
+                                {(moHolData.massive_holidays || []).map((h, i) => (
+                                  <tr key={i}>
+                                    <td>{String(h.date ?? '')}</td>
+                                    <td>{String(h.exchange ?? '')}</td>
+                                    <td>{String(h.name ?? '')}</td>
+                                    <td>{String(h.status ?? '')}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                        <div>
+                          <h4 style={{ fontSize: '0.85rem', marginBottom: 'var(--space-2)' }}>Local holidays ({moHolData.local_count ?? 0})</h4>
+                          <div style={{ maxHeight: '18rem', overflow: 'auto', border: '1px solid var(--border-color, #ddd)', borderRadius: 'var(--radius-sm)' }}>
+                            <table className="feed-massive-table" style={{ width: '100%', fontSize: '0.78rem' }}>
+                              <thead><tr><th>Date</th><th>Exchange</th><th>Label</th></tr></thead>
+                              <tbody>
+                                {(moHolData.local_holidays || []).map((h, i) => (
+                                  <tr key={i}>
+                                    <td>{String(h.holiday_date ?? '')}</td>
+                                    <td>{String(h.exchange ?? '')}</td>
+                                    <td>{String(h.label ?? '')}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                      {moHolData.comparison ? (
+                        <div style={{ marginTop: 'var(--space-4)', padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', background: 'var(--surface-2, #f5f5f5)', fontSize: '0.82rem' }}>
+                          <strong>Comparison summary</strong>
+                          <ul style={{ margin: 'var(--space-2) 0 0 var(--space-4)', padding: 0 }}>
+                            <li>In both: <strong>{moHolData.comparison.in_both.length}</strong> date(s)</li>
+                            <li>Massive only: <strong>{moHolData.comparison.in_massive_only.length}</strong>{moHolData.comparison.in_massive_only.length > 0 ? ` — ${moHolData.comparison.in_massive_only.join(', ')}` : ''}</li>
+                            <li>Local only: <strong>{moHolData.comparison.in_local_only.length}</strong>{moHolData.comparison.in_local_only.length > 0 ? ` — ${moHolData.comparison.in_local_only.join(', ')}` : ''}</li>
+                          </ul>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {moSubTab === 'market_status' ? (
+                <div className="feed-massive-agg-tab-panel" role="tabpanel">
+                  <div className="feed-massive-agg-sub-doc">
+                    <p><strong>Use case:</strong> Check current real-time trading status across all Massive-tracked markets (equities, options, forex, crypto). Useful for verifying market open/close state before triggering data pipelines.</p>
+                    <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v1/marketstatus/now</code></p>
+                  </div>
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <button type="button" className="btn btn-secondary" disabled={moStatusBusy || !configured} onClick={runMoStatus}>
+                      {moStatusBusy ? 'Loading\u2026' : 'Fetch Market Status'}
+                    </button>
+                  </div>
+                  {moStatusErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{moStatusErr}</p> : null}
+                  {moStatusData ? (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(14rem, 1fr))', gap: 'var(--space-3)' }}>
+                        {Object.entries(moStatusData).filter(([k]) => k !== 'serverTime' && k !== 'server_time').map(([key, val]) => (
+                          <div key={key} style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color, #ddd)', background: 'var(--surface-2, #f5f5f5)' }}>
+                            <div style={{ fontSize: '0.78rem', opacity: 0.65, marginBottom: 'var(--space-1)' }}>{key.replace(/_/g, ' ')}</div>
+                            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val ?? '—')}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {(moStatusData.serverTime || moStatusData.server_time) ? (
+                        <p style={{ marginTop: 'var(--space-3)', fontSize: '0.78rem', opacity: 0.6 }}>Server time: {String(moStatusData.serverTime ?? moStatusData.server_time ?? '')}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+            </div>
+          </div>
+          </FeedMassiveServiceBlock>
+        </FeedMassiveCapabilityPanel>
+
+        {/* ── Technical Indicators ── */}
+        <FeedMassiveCapabilityPanel
+          capId="technical-indicators"
+          checklistRow={rTi}
+          effectiveStatus={effTi}
+          expanded={capExpanded['technical-indicators'] === true}
+          onToggle={() => toggleCap('technical-indicators')}
+          highlight={highlightedCapabilityId === 'technical-indicators'}
+          ariaLabel="Technical Indicators"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effTi}
+            evidence={tiEvidence}
+            checklistRow={rTi}
+          >
+          <div className="feed-massive-agg-tabs-wrap">
+            <div className="feed-massive-agg-tabs" role="tablist">
+              {(['sma', 'ema', 'rsi', 'macd'] as const).map(t => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={tiSubTab === t}
+                  className={`feed-massive-agg-tab${tiSubTab === t ? ' active' : ''}`}
+                  onClick={() => setTiSubTab(t)}
+                >
+                  {t.toUpperCase()}
+                  <span className="feed-massive-agg-tab-badge">REST</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="feed-massive-agg-tab-panels">
+              <div className="feed-massive-agg-tab-panel" role="tabpanel">
+                <div className="feed-massive-agg-sub-doc">
+                  {tiSubTab === 'sma' ? (
+                    <>
+                      <p><strong>Use case:</strong> Compute Simple Moving Average over a custom window for any ticker. Smooths price data to identify trends. Works with both option tickers (<code>O:</code> prefix) and stock/index tickers.</p>
+                      <p style={{ fontSize: '0.78rem', opacity: 0.75, marginTop: 'var(--space-1)' }}><strong>Option applicability:</strong> Directly supported for option tickers. Also useful for underlying stock analysis to inform option strategy decisions.</p>
+                      <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v1/indicators/sma/&#123;ticker&#125;</code></p>
+                    </>
+                  ) : tiSubTab === 'ema' ? (
+                    <>
+                      <p><strong>Use case:</strong> Compute Exponential Moving Average, which weights recent prices more heavily than SMA. Reacts faster to price changes, useful for momentum-based strategies.</p>
+                      <p style={{ fontSize: '0.78rem', opacity: 0.75, marginTop: 'var(--space-1)' }}><strong>Option applicability:</strong> Directly supported for option tickers. Commonly applied to underlying equities to generate entry/exit signals for option trades.</p>
+                      <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v1/indicators/ema/&#123;ticker&#125;</code></p>
+                    </>
+                  ) : tiSubTab === 'rsi' ? (
+                    <>
+                      <p><strong>Use case:</strong> Relative Strength Index measures speed and magnitude of price movements on a 0–100 scale. Values above 70 suggest overbought; below 30 suggest oversold.</p>
+                      <p style={{ fontSize: '0.78rem', opacity: 0.75, marginTop: 'var(--space-1)' }}><strong>Option applicability:</strong> Directly supported for option tickers. Often used on underlying equities to time option entry (e.g. selling puts when RSI is oversold).</p>
+                      <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v1/indicators/rsi/&#123;ticker&#125;</code></p>
+                    </>
+                  ) : (
+                    <>
+                      <p><strong>Use case:</strong> MACD (Moving Average Convergence Divergence) tracks the relationship between two EMAs. The signal line crossover identifies momentum shifts. Customizable short/long/signal windows.</p>
+                      <p style={{ fontSize: '0.78rem', opacity: 0.75, marginTop: 'var(--space-1)' }}><strong>Option applicability:</strong> Directly supported for option tickers. Primarily used on underlying equities to identify trend reversals for directional option strategies.</p>
+                      <p className="feed-massive-agg-sub-endpoint"><code>REST: GET /v1/indicators/macd/&#123;ticker&#125;</code></p>
+                    </>
+                  )}
+                </div>
+                <div className="feed-massive-form-grid">
+                  <label className="feed-massive-field">
+                    <span className="form-label">Ticker</span>
+                    <input className="form-input" value={tiTicker} onChange={e => setTiTicker(e.target.value)} disabled={tiBusy || !configured} placeholder="O:SPY251219C00600000 or AAPL" autoComplete="off" />
+                  </label>
+                  {tiSubTab !== 'macd' ? (
+                    <label className="feed-massive-field">
+                      <span className="form-label">Window</span>
+                      <input className="form-input" type="number" min={1} max={500} value={tiWindow} onChange={e => setTiWindow(e.target.value)} disabled={tiBusy} />
+                    </label>
+                  ) : (
+                    <>
+                      <label className="feed-massive-field">
+                        <span className="form-label">Short window</span>
+                        <input className="form-input" type="number" min={1} value={tiMacdShort} onChange={e => setTiMacdShort(e.target.value)} disabled={tiBusy} />
+                      </label>
+                      <label className="feed-massive-field">
+                        <span className="form-label">Long window</span>
+                        <input className="form-input" type="number" min={1} value={tiMacdLong} onChange={e => setTiMacdLong(e.target.value)} disabled={tiBusy} />
+                      </label>
+                      <label className="feed-massive-field">
+                        <span className="form-label">Signal window</span>
+                        <input className="form-input" type="number" min={1} value={tiMacdSignal} onChange={e => setTiMacdSignal(e.target.value)} disabled={tiBusy} />
+                      </label>
+                    </>
+                  )}
+                  <label className="feed-massive-field">
+                    <span className="form-label">Timespan</span>
+                    <select className="form-input" value={tiTimespan} onChange={e => setTiTimespan(e.target.value)} disabled={tiBusy}>
+                      <option value="minute">Minute</option>
+                      <option value="hour">Hour</option>
+                      <option value="day">Day</option>
+                      <option value="week">Week</option>
+                      <option value="month">Month</option>
+                    </select>
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Series type</span>
+                    <select className="form-input" value={tiSeriesType} onChange={e => setTiSeriesType(e.target.value)} disabled={tiBusy}>
+                      <option value="close">Close</option>
+                      <option value="open">Open</option>
+                      <option value="high">High</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </label>
+                  <label className="feed-massive-field">
+                    <span className="form-label">Limit</span>
+                    <input className="form-input" type="number" min={1} max={5000} value={tiLimit} onChange={e => setTiLimit(e.target.value)} disabled={tiBusy} />
+                  </label>
+                </div>
+                <div style={{ marginTop: 'var(--space-3)' }}>
+                  <button type="button" className="btn btn-secondary" disabled={tiBusy || !configured || !tiTicker.trim()} onClick={runTiIndicator}>
+                    {tiBusy ? 'Loading\u2026' : `Fetch ${tiSubTab.toUpperCase()}`}
+                  </button>
+                </div>
+                {tiErr ? <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>{tiErr}</p> : null}
+                {tiResult?.ok && tiResult.results?.values ? (
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <p style={{ fontSize: '0.82rem', marginBottom: 'var(--space-2)' }}>
+                      <strong>{tiResult.count}</strong> data point(s) for <strong>{tiResult.ticker}</strong>
+                    </p>
+                    <div style={{ maxHeight: '22rem', overflow: 'auto', border: '1px solid var(--border-color, #ddd)', borderRadius: 'var(--radius-sm)' }}>
+                      <table className="feed-massive-table" style={{ width: '100%', fontSize: '0.78rem' }}>
+                        <thead>
+                          <tr>
+                            <th>Timestamp</th>
+                            {tiSubTab === 'macd' ? (
+                              <><th>Value</th><th>Signal</th><th>Histogram</th></>
+                            ) : (
+                              <th>Value</th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(tiResult.results.values as Record<string, unknown>[]).map((v, i) => (
+                            <tr key={i}>
+                              <td>{String(v.timestamp ?? '')}</td>
+                              {tiSubTab === 'macd' ? (
+                                <>
+                                  <td>{v.value != null ? Number(v.value).toFixed(4) : '—'}</td>
+                                  <td>{v.signal != null ? Number(v.signal).toFixed(4) : '—'}</td>
+                                  <td>{v.histogram != null ? Number(v.histogram).toFixed(4) : '—'}</td>
+                                </>
+                              ) : (
+                                <td>{v.value != null ? Number(v.value).toFixed(4) : '—'}</td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          </FeedMassiveServiceBlock>
+        </FeedMassiveCapabilityPanel>
 
       </div>
     </div>

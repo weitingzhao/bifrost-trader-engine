@@ -22,14 +22,12 @@ export interface ServerStatusPageProps {
   status: StatusResponse | null
   loadStatus: () => Promise<StatusResponse | null>
   embeddedInSettings?: boolean
-  breadcrumbLabel?: string
 }
 
 export function ServerStatusPage({
   status,
   loadStatus,
   embeddedInSettings,
-  breadcrumbLabel = 'System',
 }: ServerStatusPageProps) {
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
   const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
@@ -114,18 +112,6 @@ export function ServerStatusPage({
 
   return (
     <div className={`settings-page-card ${embeddedInSettings ? 'server-status-page server-status-page--embedded' : 'server-status-page'}`}>
-      <div className="settings-page-header">
-        <div className="settings-page-title-group">
-          <h2 className="settings-page-title">
-            {breadcrumbLabel}
-            <InfoTooltip text="System (management process) — API health, IB monitor connections, block reasons, and application log console." />
-          </h2>
-          <p className="settings-page-subtitle">
-            API health, IB monitor connections, block reasons, and process log console.
-          </p>
-        </div>
-      </div>
-
       <div className="server-groups settings-page-groups">
         <section className="replay-section" aria-labelledby="server-panel-head">
           <StatusMonitorPanel

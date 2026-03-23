@@ -80,6 +80,18 @@
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --transition-fast: 0.15s var(--ease-out);
   --transition-normal: 0.2s var(--ease-out);
+
+  /* Settings 布局 */
+  --settings-sidebar-width: 13.5rem;
+  --settings-main-padding-x: var(--space-6);
+  --settings-main-padding-y: var(--space-5);
+  --settings-section-gap: var(--space-5);
+  --settings-embedded-bp: 960px;
+
+  /* Viewport scrollbar (document) — dark theme: muted slate, blends with --color-bg */
+  --scrollbar-track: var(--color-bg);
+  --scrollbar-thumb: rgba(100, 116, 139, 0.42);
+  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.62);
 }
 
 /* ---------- 明亮主题 ---------- */
@@ -127,10 +139,39 @@
   --risk-payoff-zero: #1f2937;
   --risk-payoff-breakeven: rgba(202, 138, 4, 0.85);
   --risk-payoff-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
+
+  --scrollbar-track: var(--color-bg);
+  --scrollbar-thumb: rgba(148, 163, 184, 0.55);
+  --scrollbar-thumb-hover: rgba(100, 116, 139, 0.5);
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 3px solid var(--scrollbar-track);
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 body {
@@ -1783,210 +1824,7 @@ body::before {
   padding-inline: 0.5rem;
 }
 
-/* ---------- Celery Console（嵌入式终端样式） ---------- */
-.celery-console-wrap {
-  margin-top: var(--space-2);
-}
-
-.celery-console-terminal {
-  --console-bg: var(--color-bg);
-  --console-border: var(--color-border-strong);
-  display: block;
-  width: 100%;
-  min-height: 120px;
-  max-height: 600px;
-  padding: var(--space-3) var(--space-4);
-  background: var(--console-bg);
-  border: 1px solid var(--console-border);
-  border-radius: 8px 8px 0 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-caption);
-  line-height: 1.5;
-  color: var(--color-text-muted);
-  white-space: pre-wrap;
-  word-break: break-word;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
-  /* Hide vertical scrollbar by default; wheel / trackpad still scrolls. Show thin bar on hover or focus. */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.celery-console-resize-handle {
-  height: 6px;
-  margin: 0;
-  cursor: ns-resize;
-  background: var(--color-border);
-  border: 1px solid var(--color-border-strong);
-  border-top: none;
-  border-radius: 0 0 8px 8px;
-  flex-shrink: 0;
-}
-.celery-console-resize-handle:hover {
-  background: var(--color-border-strong);
-}
-.celery-console-resize-handle:active {
-  background: var(--color-text-dim);
-}
-
-.celery-console-terminal::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.celery-console-wrap:hover .celery-console-terminal,
-.celery-console-terminal:focus-within {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
-}
-
-.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar,
-.celery-console-terminal:focus-within::-webkit-scrollbar {
-  width: 5px;
-  height: 0;
-}
-
-.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-track,
-.celery-console-terminal:focus-within::-webkit-scrollbar-track {
-  background: transparent;
-  border-radius: 0 8px 8px 0;
-}
-
-.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb,
-.celery-console-terminal:focus-within::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
-  border-radius: 999px;
-}
-
-.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb:hover,
-.celery-console-terminal:focus-within::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.55);
-}
-
-[data-theme="light"] .celery-console-terminal {
-  --console-bg: var(--color-surface-elevated);
-  --console-border: var(--color-border);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
-[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal,
-[data-theme="light"] .celery-console-terminal:focus-within {
-  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
-}
-
-[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb,
-[data-theme="light"] .celery-console-terminal:focus-within::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.3);
-}
-
-[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb:hover,
-[data-theme="light"] .celery-console-terminal:focus-within::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.5);
-}
-
-.celery-console-terminal pre {
-  margin: 0;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  overflow-wrap: anywhere;
-  min-width: 0;
-}
-
-/* Celery 控制台按级别与时间着色 */
-.celery-log-line .celery-log-time {
-  color: var(--color-text-dim);
-}
-.celery-log-line.celery-log--error {
-  color: var(--color-danger);
-}
-.celery-log-line.celery-log--error .celery-log-time {
-  color: var(--color-text-dim);
-}
-.celery-log-line.celery-log--warning {
-  color: var(--color-warning);
-}
-.celery-log-line.celery-log--warning .celery-log-time {
-  color: var(--color-text-dim);
-}
-.celery-log-line.celery-log--info {
-  color: var(--color-text-muted);
-}
-.celery-log-line.celery-log--info .celery-log-time {
-  color: var(--color-text-dim);
-}
-.celery-log-line.celery-log--debug {
-  color: var(--color-text-dim);
-}
-.celery-log-line.celery-log--debug .celery-log-time {
-  color: var(--color-text-dim);
-}
-.celery-log-line.celery-log--default {
-  color: var(--color-text-muted);
-}
-
-.celery-console-status-line {
-  margin-top: var(--space-2);
-  font-size: var(--text-tiny);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.celery-console-status-indicator {
-  min-height: 1.25rem;
-  display: flex;
-  align-items: center;
-}
-
-.celery-console-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-1);
-  flex-wrap: wrap;
-}
-
-.btn-celery-console-clear {
-  flex-shrink: 0;
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-caption);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
-}
-
-.btn-celery-console-clear:hover {
-  color: var(--color-text-main);
-  border-color: var(--color-border-strong);
-  background: var(--color-border);
-}
-
-.celery-console-max-lines-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--text-caption);
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-.celery-console-max-lines-select {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-caption);
-  color: var(--color-text-main);
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  cursor: pointer;
-}
+/* Celery Console — moved to styles/settings-celery.css */
 
 /* Market Streams card: hero section with elevated presence */
 .realtime-quotes-card {
@@ -2976,30 +2814,7 @@ tr:hover .realtime-quote-drag-handle {
   background: rgba(2, 132, 199, 0.03);
 }
 
-/* Light theme: settings page adjustments */
-[data-theme="light"] .settings-sidebar {
-  background: var(--color-surface);
-  border-right-color: var(--color-border);
-}
-[data-theme="light"] .settings-sidebar-link:hover {
-  background: rgba(0, 0, 0, 0.04);
-}
-[data-theme="light"] .settings-sidebar-subs {
-  border-left-color: rgba(14, 165, 233, 0.2);
-}
-[data-theme="light"] .settings-page-groups > .daemon-group,
-[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group {
-  background: var(--color-surface);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-[data-theme="light"] .settings-page-groups > .daemon-group::before,
-[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group::before {
-  background: var(--color-accent);
-}
-[data-theme="light"] .settings-page-groups > .daemon-group:hover,
-[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-}
+/* Light theme: settings sidebar + page-groups — moved to styles/settings-celery.css */
 [data-theme="light"] .settings-ib-config-table-wrap,
 [data-theme="light"] .settings-holidays-table-wrap {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -4678,313 +4493,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Settings page: full width — left sidebar nav + main content */
-.settings-page {
-  display: flex;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  gap: 0;
-  min-height: 0;
-}
-
-.settings-sidebar {
-  flex-shrink: 0;
-  width: 13.5rem;
-  padding: var(--space-5) var(--space-3) var(--space-5) var(--space-4);
-  border-right: 1px solid var(--color-border);
-  background: var(--color-surface);
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  min-height: 100vh;
-}
-
-.settings-sidebar-group-block {
-  margin-bottom: var(--space-5);
-}
-.settings-sidebar-group-block:first-child {
-  margin-top: 0;
-}
-.settings-sidebar-group-block:last-child {
-  margin-bottom: 0;
-}
-
-.settings-sidebar-group-label {
-  font-size: 0.625rem;
-  font-weight: 700;
-  color: var(--color-text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 0 var(--space-3);
-  margin-bottom: var(--space-2);
-  display: block;
-}
-
-.settings-sidebar-celery-row {
-  display: flex;
-  align-items: stretch;
-  gap: 0.2rem;
-  margin-bottom: 2px;
-}
-
-.settings-sidebar-celery-row .settings-sidebar-link-celery {
-  flex: 1;
-  min-width: 0;
-}
-
-.settings-sidebar-celery-row .title-inline-lamp {
-  flex-shrink: 0;
-}
-
-.settings-sidebar-celery-queue-badge {
-  margin-left: 0.35rem;
-  padding: 0.05rem 0.4rem;
-  font-size: 0.65rem;
-  font-weight: 600;
-  line-height: 1.2;
-  border-radius: 999px;
-  background: rgba(99, 179, 237, 0.18);
-  color: var(--color-text-main);
-  border: 1px solid rgba(99, 179, 237, 0.35);
-}
-
-.settings-sidebar-celery-stop {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 2.25rem;
-  align-self: stretch;
-  margin-bottom: 2px;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.settings-sidebar-celery-stop:hover:not(:disabled) {
-  color: var(--color-text-main);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.settings-sidebar-celery-stop:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.settings-sidebar-celery-stop:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-/* Flat split between System Status and Feed (same link style, no nested subs). */
-.settings-sidebar-inline-split {
-  height: 0;
-  margin: var(--space-3) 0 var(--space-2);
-  border: none;
-  border-top: 1px solid var(--color-border);
-}
-
-.settings-sidebar-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0.4rem var(--space-3);
-  font-size: var(--text-body);
-  color: var(--color-text-muted);
-  text-decoration: none;
-  border-radius: 8px;
-  margin-bottom: 2px;
-  border-left: 2px solid transparent;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-
-.settings-sidebar-icon {
-  flex-shrink: 0;
-  opacity: 0.6;
-  transition: opacity var(--transition-fast);
-}
-.settings-sidebar-link:hover .settings-sidebar-icon {
-  opacity: 0.85;
-}
-.settings-sidebar-link.active .settings-sidebar-icon {
-  opacity: 1;
-}
-
-.settings-sidebar-link:hover {
-  color: var(--color-text-main);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.settings-sidebar-link.active {
-  font-weight: 500;
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-  border-left-color: var(--color-accent);
-}
-
-.settings-sidebar-link:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-.settings-sidebar-group {
-  margin-bottom: 2px;
-}
-
-.settings-sidebar-parent {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 0.4rem var(--space-3);
-  border-radius: 8px;
-  margin-bottom: 2px;
-  border-left: 2px solid transparent;
-  transition: border-color var(--transition-fast);
-}
-
-.settings-sidebar-parent-label {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-body);
-  color: var(--color-text-muted);
-  text-decoration: none;
-  transition: color var(--transition-fast);
-}
-
-.settings-sidebar-parent-label:hover {
-  color: var(--color-text-main);
-}
-
-.settings-sidebar-parent.active {
-  border-left-color: var(--color-accent);
-  background: var(--color-accent-soft);
-}
-.settings-sidebar-parent.active .settings-sidebar-parent-label {
-  font-weight: 500;
-  color: var(--color-accent);
-}
-
-.settings-sidebar-chevron {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--color-text-dim);
-  font-size: 0.5rem;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: color var(--transition-fast), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.settings-sidebar-chevron:hover {
-  color: var(--color-text-main);
-}
-
-.settings-sidebar-chevron.expanded {
-  transform: rotate(-180deg);
-}
-
-.settings-sidebar-subs {
-  padding-left: var(--space-2);
-  border-left: 1px solid rgba(163, 230, 53, 0.15);
-  margin-left: calc(var(--space-3) + 1px);
-  margin-bottom: var(--space-1);
-  margin-top: var(--space-1);
-}
-
-.settings-sidebar-subs[hidden] {
-  display: none;
-}
-
-.settings-sidebar-link-sub {
-  padding-left: var(--space-2);
-  font-size: var(--text-caption);
-  margin-bottom: 1px;
-}
-.settings-sidebar-link-sub .settings-sidebar-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.settings-sidebar-link-massive-cap {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-.settings-sidebar-massive-cap-label {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-main {
-  flex: 1;
-  min-width: 0;
-  max-width: 100%;
-  padding: var(--space-5) var(--space-6);
-  padding-left: var(--space-6);
-  /* Avoid a second horizontal scrollbar: wide tables/logs scroll inside their own wrappers */
-  overflow-x: hidden;
-}
-
-/* Embedded Daemon/Celery under Settings: don’t let grid/flex min-content widen the whole page */
-.settings-main > .settings-page-card.celery-page--embedded,
-.settings-main > .settings-page-card.daemon-status-page--embedded {
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.celery-page-grid > * {
-  min-width: 0;
-}
-
-.daemon-status-page--embedded .daemon-groups,
-.daemon-status-page--embedded .status-management-celery-row {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.daemon-status-page--embedded .status-management-celery-row > .status-panel-section {
-  min-width: 0;
-}
-
-/* Event Subscribe subscription labels may nowrap; allow wrap when Daemon is embedded in Settings */
-.daemon-status-page--embedded .table-event-subscribe .event-subscribe-col-subscription {
-  white-space: normal;
-  overflow-wrap: break-word;
-}
-
-/* Daemon Event card + compact strategy: long status lines wrap instead of stretching layout */
-.daemon-group-event .daemon-group-body .section-hint,
-.daemon-event-run-status-hint,
-.strategy-compact-status {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.daemon-header-main > div {
-  min-width: 0;
-  overflow-wrap: break-word;
-}
-
 /* Wide status tables: scroll horizontally instead of stretching the page */
 .table-scroll-x {
   max-width: 100%;
@@ -5008,253 +4516,7 @@ button:disabled {
   background: rgba(148, 163, 184, 0.5);
 }
 
-.settings-page-card {
-  padding: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-}
-
-/* Celery page: responsive grid (wide: status | SSE, log full width, massive | bars, config full width) */
-.celery-page-grid {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-  min-width: 0;
-}
-
-@media (min-width: 960px) {
-  .celery-page-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      'celery-status celery-sse'
-      'celery-log celery-log'
-      'celery-queues celery-queues'
-      'celery-config celery-config';
-    gap: var(--space-5);
-    align-items: start;
-  }
-
-  .celery-page-cell--status {
-    grid-area: celery-status;
-  }
-  .celery-page-cell--sse {
-    grid-area: celery-sse;
-  }
-  .celery-page-cell--log {
-    grid-area: celery-log;
-  }
-  .celery-page-cell--queues {
-    grid-area: celery-queues;
-  }
-  .celery-page-cell--config {
-    grid-area: celery-config;
-  }
-}
-
-/* Settings sidebar layout: prevent grid tracks / Worker log from expanding past main column */
-.celery-page--embedded .celery-page-grid {
-  width: 100%;
-  max-width: 100%;
-}
-@media (min-width: 960px) {
-  .celery-page--embedded .celery-page-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-}
-.celery-page--embedded .celery-page-cell--log,
-.celery-page--embedded .celery-page-cell--log.replay-section {
-  min-width: 0;
-  max-width: 100%;
-}
-.celery-page--embedded .celery-console-wrap {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-}
-.celery-page--embedded .celery-console-terminal {
-  max-width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-}
-
-/* Celery page: Massive + Bars queues (tabs, toolbar, confirm) */
-.celery-queue-tabs {
-  display: flex;
-  gap: 0.25rem;
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-}
-.celery-queue-tab {
-  padding: 0.4rem 0.85rem;
-  font-size: var(--text-small);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  cursor: pointer;
-  border-radius: 6px 6px 0 0;
-}
-.celery-queue-tab:hover {
-  color: var(--color-text-main);
-  background: rgba(255, 255, 255, 0.04);
-}
-.celery-queue-tab--active {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-}
-.celery-queue-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
-}
-.celery-queue-toolbar-spacer {
-  flex: 1;
-  min-width: 0.5rem;
-}
-.celery-queue-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-.celery-queue-field-label {
-  font-size: var(--text-tiny);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-dim);
-}
-.celery-queue-select {
-  min-width: 8rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text-main);
-  font-size: var(--text-small);
-}
-.celery-queue-keep-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-2);
-}
-.celery-queue-field--inline {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.35rem;
-}
-.celery-queue-keep-input {
-  width: 4.5rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg);
-  color: var(--color-text-main);
-  font-size: var(--text-small);
-}
-.celery-queue-hint {
-  margin-top: 0;
-  margin-bottom: var(--space-2);
-}
-.celery-queue-confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 4000;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-4);
-}
-.celery-queue-confirm-dialog {
-  max-width: 26rem;
-  width: 100%;
-  padding: var(--space-5);
-  border-radius: 12px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-elevated);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
-}
-.celery-queue-confirm-title {
-  margin: 0 0 var(--space-3);
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: var(--color-text-main);
-}
-.celery-queue-confirm-message {
-  margin: 0 0 var(--space-4);
-  font-size: var(--text-body);
-  color: var(--color-text-muted);
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-.celery-queue-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
-/* Contain stray overflow so nested scroll regions don’t stack with Settings main */
-.celery-page--embedded {
-  overflow-x: hidden;
-}
-
-.settings-page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-5);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.settings-page-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.settings-page .settings-page-actions .btn-resume {
-  padding: 0.4rem 1.2rem;
-  font-size: var(--text-body);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  border-radius: 8px;
-  transition: all var(--transition-fast);
-}
-
-/* Settings page: buttons match System Status compact style */
-.settings-page .btn-resume,
-.settings-page .btn-suspend,
-.settings-page .btn-flatten,
-.settings-page .btn-pause,
-.settings-page .btn-secondary {
-  padding: 0.3rem 0.65rem;
-  font-size: 0.8125rem;
-  border-radius: 6px;
-}
-
-/* Secondary/cancel style for Refresh, Delete etc. in Settings (btn-pause used in HolidaysSection) */
-.settings-page .btn-pause {
-  background: var(--color-border-strong);
-  color: var(--color-text-main);
-  border: 1px solid transparent;
-  transition: all var(--transition-fast);
-}
-.settings-page .btn-pause:hover:not(:disabled) {
-  background: #4a5568;
-  border-color: var(--color-border-strong);
-}
+/* Celery page grid + queue — moved to styles/settings-celery.css */
 
 /* Heartbeat section: refined layout */
 .settings-heartbeat-row {
@@ -5348,93 +4610,6 @@ button:disabled {
   margin-left: 0;
 }
 
-.settings-page-groups {
-  display: flex;
-  flex-direction: column;
-  flex-wrap: nowrap;
-  gap: var(--space-5);
-}
-
-/* Only top-level Settings configuration cards — not nested StatusDaemonPanel / StatusCeleryPanel rows */
-.settings-page-groups > .daemon-group,
-.settings-page-groups > .settings-ib-connection-group > .daemon-group {
-  flex: none;
-  min-width: 0;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: var(--space-5);
-  position: relative;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-normal);
-}
-.settings-page-groups > .daemon-group::before,
-.settings-page-groups > .settings-ib-connection-group > .daemon-group::before {
-  content: '';
-  position: absolute;
-  top: var(--space-4);
-  left: 0;
-  width: 3px;
-  height: calc(100% - var(--space-4) * 2);
-  background: var(--color-accent);
-  border-radius: 0 2px 2px 0;
-  opacity: 0.5;
-  transition: opacity var(--transition-fast);
-}
-.settings-page-groups > .daemon-group:hover,
-.settings-page-groups > .settings-ib-connection-group > .daemon-group:hover {
-  border-color: var(--color-border-strong);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-}
-.settings-page-groups > .daemon-group:hover::before,
-.settings-page-groups > .settings-ib-connection-group > .daemon-group:hover::before {
-  opacity: 1;
-}
-.settings-page-groups > .daemon-group .daemon-group-header,
-.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-header {
-  margin-bottom: var(--space-4);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-}
-.settings-page-groups > .daemon-group .daemon-group-title,
-.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-title {
-  font-size: var(--text-caption);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--color-text-main);
-}
-.settings-page-groups > .daemon-group .daemon-group-body,
-.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-body {
-  padding: 0;
-}
-
-/* Scroll margin so anchor targets aren't under header */
-.settings-page-groups > .daemon-group[id],
-.settings-page-groups > .settings-ib-connection-group > .daemon-group[id] {
-  scroll-margin-top: 1rem;
-}
-
-.settings-ib-connection-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-}
-.settings-ib-connection-group .daemon-group[id] {
-  scroll-margin-top: 1rem;
-}
-.settings-ib-group-title {
-  margin: 0 0 var(--space-3);
-  padding-top: var(--space-1);
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-text-main);
-}
-
-/* Settings page: ? icon tooltip (hover to show) */
-.settings-page-title-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
 .settings-page-title,
 .page-title-with-tooltip {
   display: inline-flex;
@@ -5445,31 +4620,6 @@ button:disabled {
   font-weight: 700;
   letter-spacing: -0.01em;
 }
-.settings-page-subtitle {
-  margin: 0;
-  font-size: var(--text-caption);
-  color: var(--color-text-dim);
-  font-weight: 400;
-}
-.settings-page-msg {
-  font-size: var(--text-caption);
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-}
-.settings-page-msg.msg-ok {
-  background: var(--color-success-soft);
-}
-.settings-page-msg.msg-error {
-  background: var(--color-danger-soft);
-}
-.settings-save-btn {
-  padding: 0.45rem 1.4rem !important;
-  font-size: var(--text-body) !important;
-  font-weight: 600;
-  border-radius: 8px !important;
-  letter-spacing: 0.02em;
-}
-
 /* Status lamp inline in title (same row as "?" help icon) */
 .title-inline-lamp {
   display: inline-flex;
@@ -12135,6 +11285,74 @@ th:has(> .coverage-pool-th-held-amt) {
   color: var(--color-text-main);
 }
 
+.feed-massive-api-coverage-banner {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  border-radius: var(--feed-massive-radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+}
+
+.feed-massive-api-coverage-banner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.feed-massive-api-coverage-copy {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.feed-massive-api-coverage-title {
+  font-size: var(--text-small);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-main);
+  margin-bottom: var(--space-1);
+}
+
+.feed-massive-api-coverage-desc {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+  line-height: 1.45;
+  max-width: 42rem;
+}
+
+.feed-massive-api-coverage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.feed-massive-api-coverage-sync-msg {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+}
+
+.feed-massive-api-coverage-frame-wrap {
+  margin-top: var(--space-4);
+  border-radius: var(--feed-massive-radius);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  background: var(--color-bg);
+  min-height: min(70vh, 720px);
+}
+
+.feed-massive-api-coverage-iframe {
+  display: block;
+  width: 100%;
+  height: min(70vh, 720px);
+  border: 0;
+  background: #0d1117;
+}
+
 .feed-massive-status-value--ok {
   color: var(--color-lamp-green);
 }
@@ -12359,6 +11577,75 @@ th:has(> .coverage-pool-th-held-amt) {
   border-color: var(--color-border-strong);
 }
 
+/* Massive Option: collapsible capability panels (default collapsed) */
+.feed-massive-cap-section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.feed-massive-cap-panel-header {
+  margin: 0;
+}
+
+.feed-massive-cap-panel-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  margin: 0;
+  font: inherit;
+  font-size: var(--text-body);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text-main);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: inherit;
+  transition: background var(--transition-fast);
+}
+
+.feed-massive-cap-panel-toggle:hover {
+  background: var(--color-surface-hover);
+}
+
+.feed-massive-cap-panel-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.feed-massive-cap-panel-chevron {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transform-origin: 50% 50%;
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.feed-massive-cap-panel-chevron--open {
+  transform: rotate(45deg);
+}
+
+.feed-massive-cap-panel-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.feed-massive-cap-panel-body {
+  padding: 0 var(--space-4) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
 .feed-massive-card.feed-massive-card--cap-active {
   border-color: var(--color-accent);
   box-shadow:
@@ -12437,6 +11724,50 @@ th:has(> .coverage-pool-th-held-amt) {
   max-width: 42rem;
 }
 
+.feed-massive-ref-lists {
+  margin-top: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.feed-massive-ref-lists .feed-massive-details-debug {
+  margin-top: 0;
+  min-width: 0;
+}
+
+@media (max-width: 52rem) {
+  .feed-massive-ref-lists {
+    grid-template-columns: 1fr;
+  }
+}
+
+.feed-massive-details-debug {
+  margin-top: var(--space-2);
+}
+
+.feed-massive-details-debug summary {
+  cursor: pointer;
+  font-size: var(--text-caption);
+  color: var(--color-text-main);
+  font-weight: 500;
+}
+
+.feed-massive-pre-json {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  max-height: 22rem;
+  overflow: auto;
+  font-size: var(--text-small, 0.8125rem);
+  line-height: 1.4;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-elevated, var(--color-bg-secondary));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .feed-massive-inline-actions {
   display: flex;
   flex-wrap: wrap;
@@ -12477,6 +11808,104 @@ th:has(> .coverage-pool-th-held-amt) {
   .feed-massive-form-grid--wide {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ── Option aggregates: tab strip + panels ── */
+.feed-massive-agg-tabs-wrap {
+  margin-top: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+.feed-massive-agg-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+.feed-massive-agg-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.feed-massive-agg-tab:hover {
+  color: var(--color-text);
+  background: rgba(148, 163, 184, 0.12);
+}
+.feed-massive-agg-tab--active {
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+.feed-massive-agg-tab-badge {
+  display: inline-block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--color-border);
+  color: var(--color-text-dim);
+  font-weight: 600;
+}
+.feed-massive-agg-tab--active .feed-massive-agg-tab-badge {
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--color-text);
+}
+.feed-massive-agg-tab-panels {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.feed-massive-agg-tab-panel.snap-wb-form {
+  margin-top: 0;
+}
+.feed-massive-agg-tab-panel .feed-massive-agg-sub-doc {
+  margin-top: 0;
+}
+.feed-massive-agg-sub-doc {
+  margin-top: var(--space-3);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+  color: var(--color-text);
+}
+.feed-massive-agg-tab-panel > .feed-massive-agg-sub-doc:first-child {
+  margin-top: 0;
+}
+.feed-massive-agg-sub-doc p {
+  margin: var(--space-1) 0;
+}
+.feed-massive-agg-sub-endpoint {
+  margin-top: var(--space-2) !important;
+  color: var(--color-text-dim);
+}
+.feed-massive-ws-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+.feed-massive-ws-cmd {
+  font-size: var(--text-tiny);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  word-break: break-all;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .feed-massive-actions-row {
@@ -15339,4 +14768,125 @@ th:has(> .coverage-pool-th-held-amt) {
   line-height: 1.45;
   color: var(--color-text-muted);
   max-width: 48rem;
+}
+
+/* ── Greeks / IV quality summary ── */
+.gk-quality-summary {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated, var(--color-bg-secondary));
+}
+.gk-quality-summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+}
+.gk-quality-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 5rem;
+}
+.gk-quality-summary-label {
+  font-size: var(--text-tiny);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.gk-quality-summary-value {
+  font-size: var(--text-small, 0.8125rem);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--color-text-main);
+}
+.gk-quality-summary-pct {
+  font-weight: 400;
+  font-size: var(--text-tiny);
+  color: var(--color-text-dim);
+}
+
+/* ── Snapshot workbench (Chain / Contract / Unified) — tab strip uses .feed-massive-agg-tabs* (same as Option aggregates) ── */
+
+.snap-wb-form {
+  margin-top: var(--space-3);
+}
+
+.snap-wb-scenario {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  background: var(--color-bg-elevated, var(--color-bg-secondary));
+}
+.snap-wb-scenario-title {
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-dim, var(--color-text-muted));
+  margin: var(--space-2) 0 var(--space-1);
+}
+.snap-wb-scenario-title:first-child {
+  margin-top: 0;
+}
+.snap-wb-scenario-text {
+  font-size: var(--text-small, 0.8125rem);
+  line-height: 1.5;
+  color: var(--color-text-main);
+  margin: 0 0 var(--space-1);
+}
+.snap-wb-scenario-text code {
+  font-size: 0.85em;
+}
+
+.snap-wb-adv-filters {
+  margin-top: var(--space-2);
+}
+.snap-wb-adv-filters > summary {
+  cursor: pointer;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.snap-wb-result {
+  margin-top: var(--space-3);
+}
+
+.snap-wb-summary {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated, var(--color-bg-secondary));
+}
+.snap-wb-summary-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-small, 0.8125rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-dim, var(--color-text-muted));
+}
+.snap-wb-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+.snap-wb-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.snap-wb-summary-key {
+  font-size: var(--text-tiny);
+  color: var(--color-text-muted);
+  text-transform: capitalize;
+}
+.snap-wb-summary-val {
+  font-size: var(--text-small, 0.8125rem);
+  color: var(--color-text-main);
+  word-break: break-word;
 }

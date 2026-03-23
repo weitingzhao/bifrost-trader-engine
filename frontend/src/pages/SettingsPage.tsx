@@ -55,6 +55,7 @@ import { CeleryPage } from './CeleryPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
+import { SettingsShell } from './settings/SettingsShell'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -343,10 +344,9 @@ export function SettingsPage({
   const isSystemSection = activeSectionId === 'settings-system'
   const isFeedSection = activeSectionId === 'settings-feed'
 
-  return (
-    <div className="settings-page">
-      <nav className="settings-sidebar" aria-label="Settings sections">
-        <div className="settings-sidebar-group-block" role="group" aria-label="Status and feed">
+  const sidebarContent = (
+    <>
+      <div className="settings-sidebar-group-block" role="group" aria-label="Status and feed">
           <div className="settings-sidebar-group-label">Status</div>
           <div className="settings-sidebar-group">
             <div className={`settings-sidebar-parent ${activeSectionId === 'settings-system' ? 'active' : ''}`}>
@@ -388,10 +388,10 @@ export function SettingsPage({
                 href="#settings-system-server"
                 className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemServerActive ? 'active' : ''}`}
               >
-                <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="System (management / monitor)" aria-hidden>
+                <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Server (management / monitor)" aria-hidden>
                   <SettingsSidebarLampGlyph id="system" />
                 </span>
-                System
+                Server
               </a>
               <a
                 href="#settings-system-daemon"
@@ -546,8 +546,11 @@ export function SettingsPage({
             )
           })}
         </div>
-      </nav>
-      <div className="settings-main">
+    </>
+  )
+
+  return (
+    <SettingsShell sidebar={sidebarContent}>
         {isSystemSection ? (
           isSystemCeleryActive ? (
             <CeleryPage
@@ -570,7 +573,6 @@ export function SettingsPage({
               status={status}
               loadStatus={loadStatus}
               embeddedInSettings
-              breadcrumbLabel="System"
             />
           ) : (
             <StatusPage
@@ -679,7 +681,6 @@ export function SettingsPage({
           </div>
       </div>
         )}
-      </div>
-    </div>
+    </SettingsShell>
   )
 }

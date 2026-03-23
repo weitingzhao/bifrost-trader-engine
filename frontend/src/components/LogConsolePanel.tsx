@@ -37,6 +37,50 @@ export interface LogConsolePanelProps {
   emptyStatus?: ReactNode
 }
 
+const CONSOLE_ICON_PX = 15
+const CONSOLE_ICON_STROKE = 1.5
+
+function LogConsoleSelectAllIcon() {
+  return (
+    <svg
+      width={CONSOLE_ICON_PX}
+      height={CONSOLE_ICON_PX}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={CONSOLE_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 6h13M8 12h13M8 18h13" />
+      <path d="M3 6h.01M3 12h.01M3 18h.01" />
+    </svg>
+  )
+}
+
+function LogConsoleClearIcon() {
+  return (
+    <svg
+      width={CONSOLE_ICON_PX}
+      height={CONSOLE_ICON_PX}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={CONSOLE_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
+  )
+}
+
 function parseConsoleLogLine(line: string): { level: 'error' | 'warning' | 'info' | 'debug' | 'default'; timePart: string | null; body: string } {
   const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:,\d+)?)\s+/)
   const timePart = timeMatch ? timeMatch[1] : null
@@ -214,19 +258,23 @@ export function LogConsolePanel({
         <div className="celery-console-actions">
           <button
             type="button"
-            className="btn-celery-console-clear"
+            className="celery-queue-icon-btn celery-queue-icon-btn--refresh"
             onClick={selectAll}
             title="Select all log text for copying"
+            aria-label="Select all log text for copying"
           >
-            Select All
+            <LogConsoleSelectAllIcon />
           </button>
           <button
             type="button"
-            className="btn-celery-console-clear"
-            onClick={() => { void clear() }}
+            className="celery-queue-icon-btn celery-queue-icon-btn--delete"
+            onClick={() => {
+              void clear()
+            }}
             title={clearTitle}
+            aria-label={clearTitle}
           >
-            Clear
+            <LogConsoleClearIcon />
           </button>
           <InfoTooltip text={infoTooltipText} />
         </div>

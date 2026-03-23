@@ -1,0 +1,1096 @@
+/* ==========================================================================
+   Settings & Celery — Shell layout, sidebar, main area, embedded pages,
+   Celery console & queue UI.
+   Extracted from App.css to colocate all Settings/Celery rules.
+   Depends on design tokens (:root variables) defined in App.css.
+   ==========================================================================
+
+   LAYOUT CONTRACT
+   ---------------
+   .settings-page            flex row; sidebar + main.
+   .settings-sidebar         fixed-width (--settings-sidebar-width), sticky, full viewport height.
+   .settings-main            flex:1, min-width:0, overflow-x:hidden.
+                              Horizontal scroll is NEVER on .settings-main itself;
+                              wide content (tables, logs) must use .table-scroll-x wrappers.
+
+   Embedded sub-pages (Celery, Daemon, Server) render inside .settings-main as:
+     .settings-page-card.<page>--embedded
+   Rules:
+     1. Root node MUST have min-width:0 + max-width:100% (set via .settings-main > selector).
+     2. All flex/grid children inside MUST set min-width:0 to prevent content blow-out.
+     3. Console / log containers use box-sizing:border-box to respect parent bounds.
+
+   Breakpoint: --settings-embedded-bp (960px) for Celery 2-column grid.
+   @media cannot use var(); keep the literal in sync with the :root token.
+
+   ========================================================================== */
+
+/* ==========================================================================
+   1. Settings Shell — Two-column layout
+   ========================================================================== */
+
+/* Settings page: full width — left sidebar nav + main content */
+.settings-page {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  min-height: 0;
+}
+
+/* --- Sidebar --- */
+
+.settings-sidebar {
+  flex-shrink: 0;
+  width: var(--settings-sidebar-width);
+  padding: var(--space-5) var(--space-3) var(--space-5) var(--space-4);
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  min-height: 100vh;
+}
+
+.settings-sidebar-group-block {
+  margin-bottom: var(--space-5);
+}
+.settings-sidebar-group-block:first-child {
+  margin-top: 0;
+}
+.settings-sidebar-group-block:last-child {
+  margin-bottom: 0;
+}
+
+.settings-sidebar-group-label {
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0 var(--space-3);
+  margin-bottom: var(--space-2);
+  display: block;
+}
+
+.settings-sidebar-celery-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  margin-bottom: 2px;
+}
+
+.settings-sidebar-celery-row .settings-sidebar-link-celery {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-sidebar-celery-row .title-inline-lamp {
+  flex-shrink: 0;
+}
+
+.settings-sidebar-celery-queue-badge {
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.2;
+  border-radius: 999px;
+  background: rgba(99, 179, 237, 0.18);
+  color: var(--color-text-main);
+  border: 1px solid rgba(99, 179, 237, 0.35);
+}
+
+.settings-sidebar-celery-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.25rem;
+  align-self: stretch;
+  margin-bottom: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-sidebar-celery-stop:hover:not(:disabled) {
+  color: var(--color-text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-sidebar-celery-stop:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-sidebar-celery-stop:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* Flat split between System Status and Feed (same link style, no nested subs). */
+.settings-sidebar-inline-split {
+  height: 0;
+  margin: var(--space-3) 0 var(--space-2);
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.4rem var(--space-3);
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  border-radius: 8px;
+  margin-bottom: 2px;
+  border-left: 2px solid transparent;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.settings-sidebar-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity var(--transition-fast);
+}
+.settings-sidebar-link:hover .settings-sidebar-icon {
+  opacity: 0.85;
+}
+.settings-sidebar-link.active .settings-sidebar-icon {
+  opacity: 1;
+}
+
+.settings-sidebar-link:hover {
+  color: var(--color-text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-sidebar-link.active {
+  font-weight: 500;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  border-left-color: var(--color-accent);
+}
+
+.settings-sidebar-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.settings-sidebar-group {
+  margin-bottom: 2px;
+}
+
+.settings-sidebar-parent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.4rem var(--space-3);
+  border-radius: 8px;
+  margin-bottom: 2px;
+  border-left: 2px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+
+.settings-sidebar-parent-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.settings-sidebar-parent-label:hover {
+  color: var(--color-text-main);
+}
+
+.settings-sidebar-parent.active {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.settings-sidebar-parent.active .settings-sidebar-parent-label {
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+.settings-sidebar-chevron {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 0.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color var(--transition-fast), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-sidebar-chevron:hover {
+  color: var(--color-text-main);
+}
+
+.settings-sidebar-chevron.expanded {
+  transform: rotate(-180deg);
+}
+
+.settings-sidebar-subs {
+  padding-left: var(--space-2);
+  border-left: 1px solid rgba(163, 230, 53, 0.15);
+  margin-left: calc(var(--space-3) + 1px);
+  margin-bottom: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.settings-sidebar-subs[hidden] {
+  display: none;
+}
+
+.settings-sidebar-link-sub {
+  padding-left: var(--space-2);
+  font-size: var(--text-caption);
+  margin-bottom: 1px;
+}
+.settings-sidebar-link-sub .settings-sidebar-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.settings-sidebar-link-massive-cap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.settings-sidebar-massive-cap-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Main content column --- */
+
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--settings-main-padding-y) var(--settings-main-padding-x);
+  padding-left: var(--settings-main-padding-x);
+  /* Avoid a second horizontal scrollbar: wide tables/logs scroll inside their own wrappers */
+  overflow-x: hidden;
+}
+
+/* Embedded Daemon/Celery under Settings: don't let grid/flex min-content widen the whole page */
+.settings-main > .settings-page-card.celery-page--embedded,
+.settings-main > .settings-page-card.daemon-status-page--embedded {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.celery-page-grid > * {
+  min-width: 0;
+}
+
+.daemon-status-page--embedded .daemon-groups,
+.daemon-status-page--embedded .status-management-celery-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.daemon-status-page--embedded .status-management-celery-row > .status-panel-section {
+  min-width: 0;
+}
+
+/* Event Subscribe subscription labels may nowrap; allow wrap when Daemon is embedded in Settings */
+.daemon-status-page--embedded .table-event-subscribe .event-subscribe-col-subscription {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* Daemon Event card + compact strategy: long status lines wrap instead of stretching layout */
+.daemon-group-event .daemon-group-body .section-hint,
+.daemon-event-run-status-hint,
+.strategy-compact-status {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.daemon-header-main > div {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* ==========================================================================
+   2. Settings Page Header, Actions & Buttons
+   ========================================================================== */
+
+.settings-page-card {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.settings-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-page-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.settings-page .settings-page-actions .btn-resume {
+  padding: 0.4rem 1.2rem;
+  font-size: var(--text-body);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 8px;
+  transition: all var(--transition-fast);
+}
+
+/* Settings page: buttons match System Status compact style */
+.settings-page .btn-resume,
+.settings-page .btn-suspend,
+.settings-page .btn-flatten,
+.settings-page .btn-pause,
+.settings-page .btn-secondary {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.8125rem;
+  border-radius: 6px;
+}
+
+/* Secondary/cancel style for Refresh, Delete etc. in Settings (btn-pause used in HolidaysSection) */
+.settings-page .btn-pause {
+  background: var(--color-border-strong);
+  color: var(--color-text-main);
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+}
+.settings-page .btn-pause:hover:not(:disabled) {
+  background: #4a5568;
+  border-color: var(--color-border-strong);
+}
+
+/* ==========================================================================
+   3. Settings Page Groups (Card Containers)
+   ========================================================================== */
+
+.settings-page-groups {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: var(--settings-section-gap);
+}
+
+/* Only top-level Settings configuration cards — not nested StatusDaemonPanel / StatusCeleryPanel rows */
+.settings-page-groups > .daemon-group,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group {
+  flex: none;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: var(--space-5);
+  position: relative;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-normal);
+}
+.settings-page-groups > .daemon-group::before,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group::before {
+  content: '';
+  position: absolute;
+  top: var(--space-4);
+  left: 0;
+  width: 3px;
+  height: calc(100% - var(--space-4) * 2);
+  background: var(--color-accent);
+  border-radius: 0 2px 2px 0;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
+}
+.settings-page-groups > .daemon-group:hover,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+.settings-page-groups > .daemon-group:hover::before,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group:hover::before {
+  opacity: 1;
+}
+.settings-page-groups > .daemon-group .daemon-group-header,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-header {
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-page-groups > .daemon-group .daemon-group-title,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-title {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-text-main);
+}
+.settings-page-groups > .daemon-group .daemon-group-body,
+.settings-page-groups > .settings-ib-connection-group > .daemon-group .daemon-group-body {
+  padding: 0;
+}
+
+/* Scroll margin so anchor targets aren't under header */
+.settings-page-groups > .daemon-group[id],
+.settings-page-groups > .settings-ib-connection-group > .daemon-group[id] {
+  scroll-margin-top: 1rem;
+}
+
+.settings-ib-connection-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-section-gap);
+}
+.settings-ib-connection-group .daemon-group[id] {
+  scroll-margin-top: 1rem;
+}
+.settings-ib-group-title {
+  margin: 0 0 var(--space-3);
+  padding-top: var(--space-1);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+/* ==========================================================================
+   4. Settings Page Titles & Messages
+   ========================================================================== */
+
+/* Settings page: ? icon tooltip (hover to show) */
+.settings-page-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.settings-page-subtitle {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+  font-weight: 400;
+}
+.settings-page-msg {
+  font-size: var(--text-caption);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+.settings-page-msg.msg-ok {
+  background: var(--color-success-soft);
+}
+.settings-page-msg.msg-error {
+  background: var(--color-danger-soft);
+}
+.settings-save-btn {
+  padding: 0.45rem 1.4rem !important;
+  font-size: var(--text-body) !important;
+  font-weight: 600;
+  border-radius: 8px !important;
+  letter-spacing: 0.02em;
+}
+
+/* ==========================================================================
+   5. Celery Console (Terminal UI)
+   ========================================================================== */
+
+.celery-console-wrap {
+  margin-top: var(--space-2);
+}
+
+.celery-console-terminal {
+  --console-bg: var(--color-bg);
+  --console-border: var(--color-border-strong);
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  max-height: 600px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--console-bg);
+  border: 1px solid var(--console-border);
+  border-radius: 8px 8px 0 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  /* Hide vertical scrollbar by default; wheel / trackpad still scrolls. Show thin bar on hover or focus. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.celery-console-resize-handle {
+  height: 6px;
+  margin: 0;
+  cursor: ns-resize;
+  background: var(--color-border);
+  border: 1px solid var(--color-border-strong);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  flex-shrink: 0;
+}
+.celery-console-resize-handle:hover {
+  background: var(--color-border-strong);
+}
+.celery-console-resize-handle:active {
+  background: var(--color-text-dim);
+}
+
+.celery-console-terminal::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.celery-console-wrap:hover .celery-console-terminal,
+.celery-console-terminal:focus-within {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar,
+.celery-console-terminal:focus-within::-webkit-scrollbar {
+  width: 5px;
+  height: 0;
+}
+
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-track,
+.celery-console-terminal:focus-within::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 0 8px 8px 0;
+}
+
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb,
+.celery-console-terminal:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+
+.celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb:hover,
+.celery-console-terminal:focus-within::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+/* Light: console */
+[data-theme="light"] .celery-console-terminal {
+  --console-bg: var(--color-surface-elevated);
+  --console-border: var(--color-border);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal,
+[data-theme="light"] .celery-console-terminal:focus-within {
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+
+[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb,
+[data-theme="light"] .celery-console-terminal:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+}
+
+[data-theme="light"] .celery-console-wrap:hover .celery-console-terminal::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] .celery-console-terminal:focus-within::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.5);
+}
+
+.celery-console-terminal pre {
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* Log lines: coloring by level */
+.celery-log-line .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--error {
+  color: var(--color-danger);
+}
+.celery-log-line.celery-log--error .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--warning {
+  color: var(--color-warning);
+}
+.celery-log-line.celery-log--warning .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--info {
+  color: var(--color-text-muted);
+}
+.celery-log-line.celery-log--info .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--debug {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--debug .celery-log-time {
+  color: var(--color-text-dim);
+}
+.celery-log-line.celery-log--default {
+  color: var(--color-text-muted);
+}
+
+.celery-console-status-line {
+  margin-top: var(--space-2);
+  font-size: var(--text-tiny);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.celery-console-status-indicator {
+  min-height: 1.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.celery-console-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.celery-console-max-lines-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.celery-console-max-lines-select {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--color-text-main);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   6. Celery Page Grid & Queue UI
+   ========================================================================== */
+
+/* Celery page: responsive grid (wide: status | SSE, log full width, massive | bars, config full width) */
+.celery-page-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--settings-section-gap);
+  min-width: 0;
+}
+
+/* SSE backlog cell (Celery page): grid minmax(0) + fixed table — no extra horizontal scrollbar / empty min-height gap */
+.celery-page-cell--sse {
+  min-width: 0;
+  max-width: 100%;
+}
+.celery-page-cell--sse .system-tab-panel {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+}
+.celery-page-cell--sse .table-scroll-x {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+.celery-page-cell--sse .table-operations {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+}
+.celery-page-cell--sse .table-operations tbody td {
+  word-break: break-word;
+}
+.celery-page-cell--sse .table-operations .sse-depths-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Breakpoint = var(--settings-embedded-bp) — @media can't use var(), keep in sync manually */
+@media (min-width: 960px) {
+  .celery-page-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      'celery-status celery-sse'
+      'celery-log celery-log'
+      'celery-queues celery-queues'
+      'celery-config celery-config';
+    gap: var(--settings-section-gap);
+    align-items: start;
+  }
+
+  .celery-page-cell--status {
+    grid-area: celery-status;
+  }
+  .celery-page-cell--sse {
+    grid-area: celery-sse;
+  }
+  .celery-page-cell--log {
+    grid-area: celery-log;
+  }
+  .celery-page-cell--queues {
+    grid-area: celery-queues;
+  }
+  .celery-page-cell--config {
+    grid-area: celery-config;
+  }
+}
+
+/* Settings sidebar layout: prevent grid tracks / Worker log from expanding past main column */
+.celery-page--embedded .celery-page-grid {
+  width: 100%;
+  max-width: 100%;
+}
+@media (min-width: 960px) {
+  .celery-page--embedded .celery-page-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+.celery-page--embedded .celery-page-cell--log,
+.celery-page--embedded .celery-page-cell--log.replay-section {
+  min-width: 0;
+  max-width: 100%;
+}
+.celery-page--embedded .celery-console-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.celery-page--embedded .celery-console-terminal {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Celery page: Massive + Bars queues (tabs, toolbar, confirm) */
+.celery-queue-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.celery-queue-tab {
+  padding: 0.4rem 0.85rem;
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+}
+.celery-queue-tab:hover {
+  color: var(--color-text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+.celery-queue-tab--active {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+.celery-queue-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.celery-queue-toolbar-spacer {
+  flex: 1;
+  min-width: 0.5rem;
+}
+.celery-queue-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.celery-queue-field-label {
+  font-size: var(--text-tiny);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-dim);
+}
+.celery-queue-field--status {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.celery-queue-field--limit {
+  flex: 0 1 auto;
+}
+.celery-status-bubbles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.celery-status-bubble {
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-tiny);
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.celery-status-bubble:hover {
+  color: var(--color-text-main);
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+.celery-status-bubble:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.celery-status-bubble--active {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* Toolbar: refresh + delete + trim — compact icon buttons */
+.celery-queue-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    filter 0.12s ease;
+}
+.celery-queue-icon-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.celery-queue-icon-btn--refresh {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.celery-queue-icon-btn--refresh:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 38%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 9%, var(--color-surface));
+}
+.celery-queue-icon-btn--refresh:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+@keyframes celery-queue-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.celery-queue-icon-btn--refreshing svg {
+  animation: celery-queue-icon-spin 0.72s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+.celery-queue-icon-btn--delete {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--color-danger) 90%, #fff) 0%,
+    var(--color-danger) 52%,
+    color-mix(in srgb, var(--color-danger) 90%, #1a0505) 100%
+  );
+  color: #fff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 2px 8px color-mix(in srgb, var(--color-danger) 32%, transparent);
+}
+.celery-queue-icon-btn--delete:hover {
+  filter: brightness(1.05);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 3px 12px color-mix(in srgb, var(--color-danger) 40%, transparent);
+}
+.celery-queue-icon-btn--delete:active {
+  filter: brightness(0.97);
+}
+
+.celery-queue-icon-btn--trim {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+  color: var(--color-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.celery-queue-icon-btn--trim:hover {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-accent) 58%, var(--color-border));
+  color: var(--color-accent);
+  box-shadow: 0 1px 8px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+.celery-queue-icon-btn--trim:active {
+  filter: brightness(0.96);
+}
+
+.celery-queue-select {
+  min-width: 8rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  font-size: var(--text-small);
+}
+.celery-queue-keep-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.celery-queue-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+.celery-queue-keep-input {
+  width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-main);
+  font-size: var(--text-small);
+}
+.celery-queue-hint {
+  margin-top: 0;
+  margin-bottom: var(--space-2);
+}
+.celery-queue-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.celery-queue-confirm-dialog {
+  max-width: 26rem;
+  width: 100%;
+  padding: var(--space-5);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+.celery-queue-confirm-title {
+  margin: 0 0 var(--space-3);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.celery-queue-confirm-message {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-body);
+  color: var(--color-text-muted);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.celery-queue-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Contain stray overflow so nested scroll regions don't stack with Settings main */
+.celery-page--embedded {
+  overflow-x: hidden;
+}
+
+/* ==========================================================================
+   7. Light Theme — Settings shell & page groups
+   ========================================================================== */
+
+[data-theme="light"] .settings-sidebar {
+  background: var(--color-surface);
+  border-right-color: var(--color-border);
+}
+[data-theme="light"] .settings-sidebar-link:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .settings-sidebar-subs {
+  border-left-color: rgba(14, 165, 233, 0.2);
+}
+[data-theme="light"] .settings-page-groups > .daemon-group,
+[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group {
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .settings-page-groups > .daemon-group::before,
+[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group::before {
+  background: var(--color-accent);
+}
+[data-theme="light"] .settings-page-groups > .daemon-group:hover,
+[data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}

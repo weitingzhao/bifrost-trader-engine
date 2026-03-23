@@ -350,7 +350,7 @@ export function StatusPage({
     return { label, value: out }
   })
 
-  /** Shut down entire system: Celery first, then Daemon, then Management last (so others still receive messages). */
+  /** Shut down entire system: Celery first, then Daemon, then Server last (so others still receive messages). */
   const doShutdownAll = async () => {
     setShutdownConfirmOpen(false)
     setShutdownAllLoading(true)
@@ -362,14 +362,14 @@ export function StatusPage({
       setShutdownAllMsg({ text: 'Stopping Daemon…', isErr: false })
       const r1 = await postStop()
       if (!r1.ok) errors.push(`Daemon: ${r1.error ?? r1.statusText ?? 'failed'}`)
-      setShutdownAllMsg({ text: 'Stopping Management…', isErr: false })
+      setShutdownAllMsg({ text: 'Stopping Server…', isErr: false })
       const r2 = await postMonitorStop()
-      if (!r2.ok) errors.push(`Management: ${r2.error ?? r2.statusText ?? 'failed'}`)
+      if (!r2.ok) errors.push(`Server: ${r2.error ?? r2.statusText ?? 'failed'}`)
       setShutdownAllMsg({
         text: errors.length === 0 ? 'All systems shut down.' : `Shut down requested; some failed: ${errors.join('; ')}`,
         isErr: errors.length > 0,
       })
-      // Do not call loadStatus() after Management stop: the server process exits, so the request would hang.
+      // Do not call loadStatus() after Server stop: the server process exits, so the request would hang.
     } finally {
       setShutdownAllLoading(false)
     }
@@ -393,7 +393,7 @@ export function StatusPage({
           <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
             <h3 id="shutdown-modal-title">Shutdown entire system?</h3>
             <p>
-              Celery, then Daemon, then Management will be stopped in order. This cannot be undone.
+              Celery, then Daemon, then Server will be stopped in order. This cannot be undone.
             </p>
             <div className="data-reset-modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
@@ -427,7 +427,7 @@ export function StatusPage({
             <button
               type="button"
               className="section-header-icon-btn"
-              title="Stop Celery, then Daemon, then Management (in order)"
+              title="Stop Celery, then Daemon, then Server (in order)"
               aria-label="Shutdown entire system"
               disabled={shutdownAllLoading}
               onClick={onShutdownAllClick}
@@ -467,10 +467,10 @@ export function StatusPage({
             className={`system-tab ${systemTab === 'monitor' || systemTab === 'celery' ? 'active' : ''}`}
             onClick={() => setSystemTabSelected('monitor')}
           >
-            <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Management status" aria-hidden>
+            <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Server status" aria-hidden>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
             </span>
-            <span>Management</span>
+            <span>Server</span>
             {celeryUiMode !== 'relocated' ? (
               <>
                 <span className="status-tab-sep" aria-hidden>/</span>
@@ -570,7 +570,7 @@ export function StatusPage({
       </div>
       )}
 
-      {/* Stream Event — Trading Strategy + Event Subscribe, same row style as Management/Celery (above Console) */}
+      {/* Stream Event — Trading Strategy + Event Subscribe, same row style as Server/Celery (above Console) */}
       {showConsoleSection && (
       <div className="card process-section system-tabs-wrapper stream-event-card">
         <div className="status-section-heading-row">

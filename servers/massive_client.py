@@ -32,6 +32,18 @@ def _norm_expiry(s: str) -> str:
     return s
 
 
+def _expiry_to_polygon_date(s: str) -> Optional[str]:
+    """Convert YYYYMMDD or YYYY-MM-DD to Polygon's YYYY-MM-DD format. Returns None if invalid."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    return None
+
+
 def _right_from_contract_type(ct: str) -> str:
     u = (ct or "").upper()
     if u in ("CALL", "C"):
@@ -106,8 +118,13 @@ class MassiveClient:
         *,
         include_debug: bool = False,
         max_contract_samples: int = 200,
+        expiration_date: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Paginate /v3/reference/options/contracts; return expirations, strikes, tickers map."""
+        """Paginate /v3/reference/options/contracts; return expirations, strikes, tickers map.
+
+        When *expiration_date* is set (YYYYMMDD or YYYY-MM-DD), Polygon filters
+        server-side so only contracts for that single expiry are returned.
+        """
         underlying = (underlying or "").strip().upper()
         if not underlying or not self._api_key:
             return {"expirations": [], "strikes": [], "error": "symbol or api key missing"}
@@ -118,6 +135,9 @@ class MassiveClient:
         next_url: Optional[str] = None
         path = "/v3/reference/options/contracts"
         params: Dict[str, Any] = {"underlying_ticker": underlying, "limit": 250}
+        poly_exp = _expiry_to_polygon_date(expiration_date or "")
+        if poly_exp:
+            params["expiration_date"] = poly_exp
         pages = 0
         while pages < max_pages:
             pages += 1
@@ -206,16 +226,157 @@ class MassiveClient:
             }
         return out
 
-    def fetch_options_snapshot(self, underlying: str) -> Dict[str, Any]:
-        """GET /v3/snapshot/options/{underlying}."""
+    def fetch_option_contracts_list(
+        self,
+        underlying: str,
+        *,
+        expiration_date: Optional[str] = None,
+        contract_type: Optional[str] = None,
+        strike_price: Optional[float] = None,
+        strike_price_gte: Optional[float] = None,
+        strike_price_lte: Optional[float] = None,
+        limit: Optional[int] = None,
+        sort: Optional[str] = None,
+        order: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /v3/reference/options/contracts — raw contract listing with filters."""
         underlying = (underlying or "").strip().upper()
         if not underlying or not self._api_key:
             return {"results": [], "error": "symbol or api key missing"}
-        status, data = self._get(f"/v3/snapshot/options/{underlying}")
+        params: Dict[str, Any] = {
+            "underlying_ticker": underlying,
+            "limit": min(int(limit or 100), 250),
+        }
+        poly_exp = _expiry_to_polygon_date(expiration_date or "")
+        if poly_exp:
+            params["expiration_date"] = poly_exp
+        if contract_type:
+            params["contract_type"] = contract_type.lower()
+        if strike_price is not None:
+            params["strike_price"] = strike_price
+        if strike_price_gte is not None:
+            params["strike_price.gte"] = strike_price_gte
+        if strike_price_lte is not None:
+            params["strike_price.lte"] = strike_price_lte
+        if sort:
+            params["sort"] = sort
+        if order:
+            params["order"] = order
+        status, data = self._get("/v3/reference/options/contracts", params)
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
         return data if isinstance(data, dict) else {"results": [], "error": "invalid response"}
+
+    def fetch_option_contract_detail(self, options_ticker: str) -> Dict[str, Any]:
+        """GET /v3/reference/options/contracts/{options_ticker} — single contract metadata."""
+        options_ticker = (options_ticker or "").strip()
+        if not options_ticker or not self._api_key:
+            return {"results": {}, "error": "options_ticker or api key missing"}
+        status, data = self._get(f"/v3/reference/options/contracts/{options_ticker}")
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": {}, "error": err}
+        return data if isinstance(data, dict) else {"results": {}, "error": "invalid response"}
+
+    def fetch_options_snapshot(
+        self,
+        underlying: str,
+        *,
+        strike_price: Optional[float] = None,
+        strike_price_gte: Optional[float] = None,
+        strike_price_lte: Optional[float] = None,
+        expiration_date: Optional[str] = None,
+        expiration_date_gte: Optional[str] = None,
+        expiration_date_lte: Optional[str] = None,
+        contract_type: Optional[str] = None,
+        limit: Optional[int] = None,
+        sort: Optional[str] = None,
+        order: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /v3/snapshot/options/{underlying} with optional filters."""
+        underlying = (underlying or "").strip().upper()
+        if not underlying or not self._api_key:
+            return {"results": [], "error": "symbol or api key missing"}
+        params: Dict[str, Any] = {}
+        if strike_price is not None:
+            params["strike_price"] = strike_price
+        if strike_price_gte is not None:
+            params["strike_price.gte"] = strike_price_gte
+        if strike_price_lte is not None:
+            params["strike_price.lte"] = strike_price_lte
+        if expiration_date:
+            poly = _expiry_to_polygon_date(expiration_date)
+            if poly:
+                params["expiration_date"] = poly
+        if expiration_date_gte:
+            poly = _expiry_to_polygon_date(expiration_date_gte)
+            if poly:
+                params["expiration_date.gte"] = poly
+        if expiration_date_lte:
+            poly = _expiry_to_polygon_date(expiration_date_lte)
+            if poly:
+                params["expiration_date.lte"] = poly
+        if contract_type:
+            params["contract_type"] = contract_type.lower()
+        if limit is not None:
+            params["limit"] = min(int(limit), 250)
+        if sort:
+            params["sort"] = sort
+        if order:
+            params["order"] = order
+        status, data = self._get(f"/v3/snapshot/options/{underlying}", params or None)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": [], "error": "invalid response"}
+
+    def fetch_option_contract_snapshot(self, underlying: str, option_contract: str) -> Dict[str, Any]:
+        """GET /v3/snapshot/options/{underlyingAsset}/{optionContract}."""
+        underlying = (underlying or "").strip().upper()
+        option_contract = (option_contract or "").strip()
+        if not underlying or not option_contract or not self._api_key:
+            return {"results": {}, "error": "underlying, option_contract, or api key missing"}
+        status, data = self._get(f"/v3/snapshot/options/{underlying}/{option_contract}")
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": {}, "error": err}
+        return data if isinstance(data, dict) else {"results": {}, "error": "invalid response"}
+
+    def fetch_unified_snapshot(
+        self,
+        *,
+        tickers: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        ticker_gte: Optional[str] = None,
+        ticker_lte: Optional[str] = None,
+        limit: Optional[int] = None,
+        sort: Optional[str] = None,
+        order: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /v3/snapshot — cross-asset unified snapshot."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {}
+        if tickers:
+            params["ticker.any_of"] = tickers
+        if asset_type:
+            params["type"] = asset_type
+        if ticker_gte:
+            params["ticker.gte"] = ticker_gte
+        if ticker_lte:
+            params["ticker.lte"] = ticker_lte
+        if limit is not None:
+            params["limit"] = min(int(limit), 250)
+        if sort:
+            params["sort"] = sort
+        if order:
+            params["order"] = order
+        status, data = self._get("/v3/snapshot", params or None)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
 
     def fetch_option_aggs(
         self,
@@ -231,6 +392,46 @@ class MassiveClient:
             return {"results": [], "error": "ticker or api key missing"}
         path = f"/v2/aggs/ticker/{ot}/range/{multiplier}/{timespan}/{start_ms}/{end_ms}"
         status, data = self._get(path, {"adjusted": "true", "sort": "asc", "limit": 50000})
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_option_open_close(
+        self,
+        options_ticker: str,
+        date: str,
+        *,
+        adjusted: bool = True,
+    ) -> Dict[str, Any]:
+        """GET /v1/open-close/{optionsTicker}/{date} — daily OHLC + pre/after-hours."""
+        ot = (options_ticker or "").strip()
+        d = (date or "").strip()
+        if not ot or not d or not self._api_key:
+            return {"error": "options_ticker, date, or api key missing"}
+        params: Dict[str, Any] = {}
+        if not adjusted:
+            params["adjusted"] = "false"
+        status, data = self._get(f"/v1/open-close/{ot}/{d}", params or None)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"error": err}
+        return data if isinstance(data, dict) else {"error": "invalid response"}
+
+    def fetch_option_previous_day(
+        self,
+        options_ticker: str,
+        *,
+        adjusted: bool = True,
+    ) -> Dict[str, Any]:
+        """GET /v2/aggs/ticker/{optionsTicker}/prev — previous trading day OHLC."""
+        ot = (options_ticker or "").strip()
+        if not ot or not self._api_key:
+            return {"results": [], "error": "ticker or api key missing"}
+        params: Dict[str, Any] = {}
+        if not adjusted:
+            params["adjusted"] = "false"
+        status, data = self._get(f"/v2/aggs/ticker/{ot}/prev", params or None)
         if status >= 400:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
@@ -269,6 +470,132 @@ class MassiveClient:
             err = data.get("error", data) if isinstance(data, dict) else str(data)
             return {"results": [], "error": err}
         return data if isinstance(data, dict) else {"results": []}
+
+    # ── Market Ops (cross-asset reference, read-only) ──
+
+    def fetch_market_conditions(
+        self,
+        *,
+        asset_class: Optional[str] = None,
+        data_type: Optional[str] = None,
+        limit: int = 1000,
+    ) -> Dict[str, Any]:
+        """GET /v3/reference/conditions — trade/quote condition codes."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {"limit": limit}
+        if asset_class:
+            params["asset_class"] = asset_class
+        if data_type:
+            params["data_type"] = data_type
+        status, data = self._get("/v3/reference/conditions", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_market_exchanges(self, *, asset_class: Optional[str] = None, locale: Optional[str] = None) -> Dict[str, Any]:
+        """GET /v3/reference/exchanges — list of exchanges."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        params: Dict[str, Any] = {}
+        if asset_class:
+            params["asset_class"] = asset_class
+        if locale:
+            params["locale"] = locale
+        status, data = self._get("/v3/reference/exchanges", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_market_holidays(self) -> Dict[str, Any]:
+        """GET /v3/reference/market/holidays — upcoming market holidays."""
+        if not self._api_key:
+            return {"results": [], "error": "api key missing"}
+        status, data = self._get("/v3/reference/market/holidays")
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": [], "error": err}
+        return data if isinstance(data, dict) else {"results": []}
+
+    def fetch_market_status(self) -> Dict[str, Any]:
+        """GET /v1/marketstatus/now — current trading status."""
+        if not self._api_key:
+            return {"error": "api key missing"}
+        status, data = self._get("/v1/marketstatus/now")
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"error": err}
+        return data if isinstance(data, dict) else {"error": "invalid response"}
+
+    # ── Technical Indicators (cross-asset, read-only) ──
+
+    def _fetch_indicator(
+        self,
+        indicator: str,
+        ticker: str,
+        *,
+        timespan: str = "day",
+        window: int = 14,
+        series_type: str = "close",
+        adjusted: bool = True,
+        order: str = "desc",
+        limit: int = 100,
+        expand_underlying: bool = False,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Generic helper for GET /v1/indicators/{indicator}/{ticker}."""
+        ticker = (ticker or "").strip().upper()
+        if not ticker or not self._api_key:
+            return {"results": {}, "error": "ticker or api key missing"}
+        params: Dict[str, Any] = {
+            "timespan": timespan,
+            "window": window,
+            "series_type": series_type,
+            "adjusted": str(adjusted).lower(),
+            "order": order,
+            "limit": limit,
+            "expand_underlying": str(expand_underlying).lower(),
+        }
+        if extra:
+            params.update(extra)
+        status, data = self._get(f"/v1/indicators/{indicator}/{ticker}", params)
+        if status >= 400:
+            err = data.get("error", data) if isinstance(data, dict) else str(data)
+            return {"results": {}, "error": err}
+        return data if isinstance(data, dict) else {"results": {}}
+
+    def fetch_indicator_sma(self, ticker: str, **kwargs: Any) -> Dict[str, Any]:
+        """GET /v1/indicators/sma/{ticker} — Simple Moving Average."""
+        return self._fetch_indicator("sma", ticker, **kwargs)
+
+    def fetch_indicator_ema(self, ticker: str, **kwargs: Any) -> Dict[str, Any]:
+        """GET /v1/indicators/ema/{ticker} — Exponential Moving Average."""
+        return self._fetch_indicator("ema", ticker, **kwargs)
+
+    def fetch_indicator_rsi(self, ticker: str, **kwargs: Any) -> Dict[str, Any]:
+        """GET /v1/indicators/rsi/{ticker} — Relative Strength Index."""
+        return self._fetch_indicator("rsi", ticker, **kwargs)
+
+    def fetch_indicator_macd(
+        self,
+        ticker: str,
+        *,
+        short_window: int = 12,
+        long_window: int = 26,
+        signal_window: int = 9,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """GET /v1/indicators/macd/{ticker} — MACD."""
+        extra = {
+            "short_window": short_window,
+            "long_window": long_window,
+            "signal_window": signal_window,
+        }
+        return self._fetch_indicator(
+            "macd", ticker, extra=extra, **kwargs,
+        )
 
     def sleep_backoff(self, attempt: int) -> None:
         time.sleep(min(2.0 ** attempt, 30.0))

@@ -16,7 +16,7 @@ type QueueTab = 'massive' | 'bars'
 type StatusFilter = 'all' | 'pending' | 'running' | 'done' | 'failed'
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
-  { value: 'all', label: 'All statuses' },
+  { value: 'all', label: 'All' },
   { value: 'pending', label: 'Pending' },
   { value: 'running', label: 'Running' },
   { value: 'done', label: 'Done' },
@@ -24,6 +24,75 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
 ]
 
 const LIMIT_OPTIONS = [10, 25, 50, 100] as const
+
+/** Toolbar icon size — compact for a lighter look */
+const CELERY_QUEUE_ICON_PX = 15
+const CELERY_QUEUE_ICON_STROKE = 1.5
+
+function CeleryQueueTrashIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={CELERY_QUEUE_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
+  )
+}
+
+function CeleryQueueRefreshIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={CELERY_QUEUE_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
+    </svg>
+  )
+}
+
+function CeleryQueueTrimIcon({ size = CELERY_QUEUE_ICON_PX }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={CELERY_QUEUE_ICON_STROKE}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <line x1="20" x2="8.12" y1="4" y2="15.88" />
+      <line x1="14.47" x2="20" y1="14.48" y2="20" />
+      <line x1="8.12" x2="12" y1="8.12" y2="12" />
+    </svg>
+  )
+}
 
 function fmtMassiveJobResult(j: MassiveJobApiRow): string {
   const r = j.result as Record<string, unknown> | undefined
@@ -222,36 +291,71 @@ export function CeleryJobQueuesSection() {
       </div>
 
       <div className="celery-queue-toolbar">
-        <label className="celery-queue-field">
-          <span className="celery-queue-field-label">Status</span>
-          <select
-            className="celery-queue-select"
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value as StatusFilter)}
+        <div className="celery-queue-field celery-queue-field--status">
+          <span className="celery-queue-field-label" id="celery-queue-status-label">
+            Status
+          </span>
+          <div
+            className="celery-status-bubbles"
+            role="radiogroup"
+            aria-labelledby="celery-queue-status-label"
           >
             {STATUS_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={statusFilter === o.value}
+                className={`celery-status-bubble ${statusFilter === o.value ? 'celery-status-bubble--active' : ''}`}
+                onClick={() => setStatusFilter(o.value)}
+              >
                 {o.label}
-              </option>
+              </button>
             ))}
-          </select>
-        </label>
-        <label className="celery-queue-field">
-          <span className="celery-queue-field-label">Last</span>
-          <select className="celery-queue-select" value={limit} onChange={e => setLimit(Number(e.target.value))}>
+          </div>
+        </div>
+        <div className="celery-queue-field celery-queue-field--limit">
+          <span className="celery-queue-field-label" id="celery-queue-limit-label">
+            Last
+          </span>
+          <div
+            className="celery-status-bubbles"
+            role="radiogroup"
+            aria-labelledby="celery-queue-limit-label"
+          >
             {LIMIT_OPTIONS.map(n => (
-              <option key={n} value={n}>
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={limit === n}
+                className={`celery-status-bubble ${limit === n ? 'celery-status-bubble--active' : ''}`}
+                onClick={() => setLimit(n)}
+              >
                 {n}
-              </option>
+              </button>
             ))}
-          </select>
-        </label>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={loading} onClick={refresh}>
-          {loading ? 'Loading…' : 'Refresh'}
+          </div>
+        </div>
+        <button
+          type="button"
+          className={`celery-queue-icon-btn celery-queue-icon-btn--refresh${loading ? ' celery-queue-icon-btn--refreshing' : ''}`}
+          disabled={loading}
+          onClick={refresh}
+          title="Refresh job list"
+          aria-label="Refresh job list"
+        >
+          <CeleryQueueRefreshIcon />
         </button>
         <div className="celery-queue-toolbar-spacer" />
-        <button type="button" className="btn btn-secondary btn-sm" onClick={openDeleteAll}>
-          Delete all…
+        <button
+          type="button"
+          className="celery-queue-icon-btn celery-queue-icon-btn--delete"
+          onClick={openDeleteAll}
+          title="Delete all jobs matching the current status filter"
+          aria-label="Delete all jobs matching the current status filter"
+        >
+          <CeleryQueueTrashIcon />
         </button>
         <div className="celery-queue-keep-group">
           <label className="celery-queue-field celery-queue-field--inline">
@@ -266,8 +370,14 @@ export function CeleryJobQueuesSection() {
               aria-label="Keep last N jobs when trimming"
             />
           </label>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={openTrim}>
-            Trim…
+          <button
+            type="button"
+            className="celery-queue-icon-btn celery-queue-icon-btn--trim"
+            onClick={openTrim}
+            title="Trim job table: keep only the newest N rows by ID"
+            aria-label="Trim job table: keep only the newest N rows by ID"
+          >
+            <CeleryQueueTrimIcon />
           </button>
         </div>
       </div>

@@ -54,6 +54,7 @@ export {
   fetchOptionSnapshot,
   fetchMassiveStatus,
   postMassiveSync,
+  postMassiveApiCoverageSync,
   fetchMassiveJobsList,
   deleteMassiveJob,
   deleteAllMassiveJobs,
@@ -65,8 +66,26 @@ export {
   fetchCorporateActions,
   fetchResearchOptionOi,
   fetchResearchOptionTrades,
+  fetchGreeksCoverage,
+  fetchContractsCoverage,
+  fetchMassiveMarketConditions,
+  fetchMassiveMarketExchanges,
+  fetchMassiveMarketHolidays,
+  fetchMassiveMarketStatus,
+  fetchTechnicalIndicator,
 } from './research'
-export type { OptionSnapshotRow, MassiveStatusResponse, MassiveJobApiRow, CorporateActionRow } from './research'
+export type {
+  OptionSnapshotRow,
+  MassiveOptionExpirationsDebug,
+  MassiveStatusResponse,
+  MassiveJobApiRow,
+  CorporateActionRow,
+  GreeksCoverageResponse,
+  ContractsCoverageResponse,
+  MassiveMarketHolidaysResponse,
+  TechnicalIndicatorParams,
+  TechnicalIndicatorResponse,
+} from './research'
 export {
   postSetHeartbeatInterval,
   postIbConfig,

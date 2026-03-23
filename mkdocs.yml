@@ -36,3 +36,4 @@ nav:
     - State Space: research/STATE_SPACE_MAPPING.md
     - Config Safety: research/CONFIG_SAFETY_TAXONOMY.md
     - Guard Tuning: research/GUARD_TUNING_AND_IMPACT.md
+    - Massive API coverage: plans/massive-api-coverage.md

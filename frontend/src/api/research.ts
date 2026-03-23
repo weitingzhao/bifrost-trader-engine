@@ -16,7 +16,7 @@ export interface MassiveOptionExpirationsDebug {
 export async function fetchOptionExpirations(
   symbol: string,
   provider: 'auto' | 'ib' | 'massive' = 'auto',
-  options?: { debug?: boolean },
+  options?: { debug?: boolean; expiration?: string },
 ): Promise<{
   symbol: string
   expirations: string[]
@@ -29,8 +29,9 @@ export async function fetchOptionExpirations(
   const s = (symbol || '').trim()
   if (!s) return { symbol: '', expirations: [], error: 'symbol is required' }
   const dbg = options?.debug ? '&debug=1' : ''
+  const exp = options?.expiration ? `&expiration=${encodeURIComponent(options.expiration)}` : ''
   const r = await fetch(
-    `${API}/research/option-expirations?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}${dbg}`,
+    `${API}/research/option-expirations?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}${dbg}${exp}`,
   )
   const j = await r.json().catch(() => ({}))
   const strikes: number[] | undefined = Array.isArray(j.strikes)
@@ -152,6 +153,26 @@ export async function postMassiveSync(
   }
 }
 
+export async function postMassiveApiCoverageSync(): Promise<{
+  ok: boolean
+  error?: string
+  source?: string
+  target?: string
+  size_bytes?: number
+}> {
+  const r = await fetch(`${API}/research/massive/api-coverage/sync`, {
+    method: 'POST',
+  })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok) && r.ok,
+    error: typeof j.error === 'string' ? j.error : undefined,
+    source: typeof j.source === 'string' ? j.source : undefined,
+    target: typeof j.target === 'string' ? j.target : undefined,
+    size_bytes: Number.isFinite(Number(j.size_bytes)) ? Number(j.size_bytes) : undefined,
+  }
+}
+
 export interface MassiveJobApiRow {
   job_id: string
   type?: string
@@ -208,12 +229,19 @@ export async function deleteAllMassiveJobs(status?: string | null): Promise<{
 }> {
   const params = new URLSearchParams()
   if (status && status !== 'all') params.set('status', status)
-  const r = await fetch(`${API}/research/massive/jobs?${params}`, { method: 'DELETE' })
-  const j = await r.json().catch(() => ({}))
+  const qs = params.toString()
+  const r = await fetch(`${API}/research/massive/jobs/purge${qs ? `?${qs}` : ''}`, { method: 'POST' })
+  const j = (await r.json().catch(() => ({}))) as { ok?: boolean; deleted?: number; error?: string; detail?: string }
+  const err =
+    typeof j.error === 'string'
+      ? j.error
+      : typeof j.detail === 'string'
+        ? j.detail
+        : undefined
   return {
     ok: r.ok && j.ok !== false,
     deleted: typeof j.deleted === 'number' ? j.deleted : 0,
-    error: typeof j.error === 'string' ? j.error : undefined,
+    error: err,
   }
 }
 
@@ -419,6 +447,206 @@ export async function fetchCorporateActions(
       }))
     : []
   return { ok: true, rows }
+}
+
+export interface GreeksCoverageResponse {
+  ok: boolean
+  symbol?: string
+  expiration?: string
+  source?: string
+  total?: number
+  coverage?: {
+    with_iv?: number
+    iv_pct?: number
+    with_delta?: number
+    with_gamma?: number
+    with_theta?: number
+    with_vega?: number
+    with_full_greeks?: number
+    full_greeks_pct?: number
+    with_oi?: number
+  }
+  freshness?: {
+    oldest_ts?: string | null
+    newest_ts?: string | null
+    stale_rows?: number
+  }
+  error?: string
+}
+
+export async function fetchGreeksCoverage(
+  symbol: string,
+  expiration?: string,
+  source: 'massive' | 'ib' = 'massive',
+): Promise<GreeksCoverageResponse> {
+  const s = (symbol || '').trim()
+  if (!s) return { ok: false, error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s, source })
+  if (expiration?.trim()) q.set('expiration', expiration.trim())
+  const r = await fetch(`${API}/research/massive/greeks-coverage?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    symbol: typeof j.symbol === 'string' ? j.symbol : undefined,
+    expiration: typeof j.expiration === 'string' ? j.expiration : undefined,
+    source: typeof j.source === 'string' ? j.source : undefined,
+    total: typeof j.total === 'number' ? j.total : undefined,
+    coverage: typeof j.coverage === 'object' && j.coverage != null ? j.coverage : undefined,
+    freshness: typeof j.freshness === 'object' && j.freshness != null ? j.freshness : undefined,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export interface ContractsCoverageResponse {
+  ok: boolean
+  symbol?: string
+  expiration?: string
+  total?: number
+  coverage?: {
+    with_massive_ticker?: number
+    ticker_pct?: number
+    with_complete_identity?: number
+    identity_pct?: number
+    mapping_mismatch?: number
+    distinct_expirations?: number
+    distinct_strikes?: number
+  }
+  freshness?: {
+    oldest_ts?: string | null
+    newest_ts?: string | null
+    stale_rows?: number
+  }
+  error?: string
+}
+
+export async function fetchContractsCoverage(
+  symbol: string,
+  expiration?: string,
+): Promise<ContractsCoverageResponse> {
+  const s = (symbol || '').trim()
+  if (!s) return { ok: false, error: 'symbol is required' }
+  const q = new URLSearchParams({ symbol: s })
+  if (expiration?.trim()) q.set('expiration', expiration.trim())
+  const r = await fetch(`${API}/research/massive/contracts-coverage?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    symbol: typeof j.symbol === 'string' ? j.symbol : undefined,
+    expiration: typeof j.expiration === 'string' ? j.expiration : undefined,
+    total: typeof j.total === 'number' ? j.total : undefined,
+    coverage: typeof j.coverage === 'object' && j.coverage != null ? j.coverage : undefined,
+    freshness: typeof j.freshness === 'object' && j.freshness != null ? j.freshness : undefined,
+    error: typeof j.error === 'string' ? j.error : undefined,
+  }
+}
+
+export async function fetchMassiveMarketConditions(opts?: {
+  asset_class?: string
+  data_type?: string
+  limit?: number
+}): Promise<{ ok: boolean; results: Record<string, unknown>[]; count?: number; error?: string }> {
+  const q = new URLSearchParams()
+  if (opts?.asset_class) q.set('asset_class', opts.asset_class)
+  if (opts?.data_type) q.set('data_type', opts.data_type)
+  if (opts?.limit) q.set('limit', String(opts.limit))
+  const r = await fetch(`${API}/research/massive/market-ops/conditions?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  return { ok: Boolean(j.ok), results: Array.isArray(j.results) ? j.results : [], count: j.count, error: j.error }
+}
+
+export async function fetchMassiveMarketExchanges(opts?: {
+  asset_class?: string
+  locale?: string
+}): Promise<{ ok: boolean; results: Record<string, unknown>[]; count?: number; error?: string }> {
+  const q = new URLSearchParams()
+  if (opts?.asset_class) q.set('asset_class', opts.asset_class)
+  if (opts?.locale) q.set('locale', opts.locale)
+  const r = await fetch(`${API}/research/massive/market-ops/exchanges?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  return { ok: Boolean(j.ok), results: Array.isArray(j.results) ? j.results : [], count: j.count, error: j.error }
+}
+
+export interface MassiveMarketHolidaysResponse {
+  ok: boolean
+  massive_holidays: Record<string, unknown>[]
+  massive_count?: number
+  local_holidays: Record<string, unknown>[]
+  local_count?: number
+  comparison?: {
+    in_massive_only: string[]
+    in_local_only: string[]
+    in_both: string[]
+  }
+  error?: string
+}
+
+export async function fetchMassiveMarketHolidays(): Promise<MassiveMarketHolidaysResponse> {
+  const r = await fetch(`${API}/research/massive/market-ops/holidays`)
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    massive_holidays: Array.isArray(j.massive_holidays) ? j.massive_holidays : [],
+    massive_count: j.massive_count,
+    local_holidays: Array.isArray(j.local_holidays) ? j.local_holidays : [],
+    local_count: j.local_count,
+    comparison: j.comparison,
+    error: j.error,
+  }
+}
+
+export async function fetchMassiveMarketStatus(): Promise<{ ok: boolean; status?: Record<string, unknown>; error?: string }> {
+  const r = await fetch(`${API}/research/massive/market-ops/status`)
+  const j = await r.json().catch(() => ({}))
+  return { ok: Boolean(j.ok), status: j.status, error: j.error }
+}
+
+export interface TechnicalIndicatorParams {
+  ticker: string
+  indicator: 'sma' | 'ema' | 'rsi' | 'macd'
+  timespan?: string
+  window?: number
+  series_type?: string
+  adjusted?: boolean
+  order?: string
+  limit?: number
+  short_window?: number
+  long_window?: number
+  signal_window?: number
+}
+
+export interface TechnicalIndicatorResponse {
+  ok: boolean
+  indicator?: string
+  ticker?: string
+  count?: number
+  results?: {
+    values?: Record<string, unknown>[]
+    underlying?: Record<string, unknown>
+    [key: string]: unknown
+  }
+  error?: string
+}
+
+export async function fetchTechnicalIndicator(
+  params: TechnicalIndicatorParams,
+): Promise<TechnicalIndicatorResponse> {
+  const { ticker, indicator, ...rest } = params
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(rest)) {
+    if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+  }
+  const r = await fetch(
+    `${API}/research/massive/technical-indicators/${indicator}/${encodeURIComponent(ticker)}?${q.toString()}`,
+  )
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: Boolean(j.ok),
+    indicator: j.indicator,
+    ticker: j.ticker,
+    count: j.count,
+    results: j.results,
+    error: j.error,
+  }
 }
 
 export async function pollMassiveJobUntilDone(
