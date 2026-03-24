@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
-import { fetchMaxPainCompute, fetchMaxPainComputeHistory } from '../../api'
+import { fetchMaxPainCompute, fetchMaxPainComputeHistory, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
 import type { MaxPainComputeResponse, MaxPainHistoryPoint, MaxPainStrikePoint } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { OD_CHART_AXIS_FONT } from './odChartConstants'
@@ -334,6 +334,8 @@ export function OptionDiscoveryMaxPainPanel({
   const [live, setLive] = useState<MaxPainComputeResponse | null>(null)
   const [hist, setHist] = useState<MaxPainHistoryPoint[]>([])
   const [loading, setLoading] = useState(false)
+  const [oiBackfillLoading, setOiBackfillLoading] = useState(false)
+  const [oiBackfillMsg, setOiBackfillMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
 
@@ -369,6 +371,41 @@ export function OptionDiscoveryMaxPainPanel({
     }
   }, [canLoad, symbol, expiration])
 
+  const backfillOiForSymbol = useCallback(async () => {
+    const sym = symbol.trim().toUpperCase()
+    if (!massiveConfigured || !sym) return
+    setOiBackfillLoading(true)
+    setOiBackfillMsg('Backfilling daily OI…')
+    setErr(null)
+    try {
+      const sync = await postMassiveSync('oi', {
+        mode: 'watchlist_eod',
+        symbols: [sym],
+      })
+      if (!sync.ok || !sync.job_id) {
+        setErr(sync.error ?? sync.message ?? 'Failed to enqueue OI backfill')
+        setOiBackfillMsg(null)
+        return
+      }
+      const polled = await pollMassiveJobUntilDone(sync.job_id, { maxAttempts: 180, intervalMs: 1000 })
+      if (!polled.ok) {
+        setErr(polled.error ?? 'OI backfill job failed')
+        setOiBackfillMsg(null)
+        return
+      }
+      setOiBackfillMsg('OI backfill done. Refreshing Max Pain…')
+      await load()
+      setOiBackfillMsg(
+        'OI backfill finished. Historical Trend needs at least 2 distinct trade dates with OI for this expiry.',
+      )
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to backfill OI')
+      setOiBackfillMsg(null)
+    } finally {
+      setOiBackfillLoading(false)
+    }
+  }, [symbol, massiveConfigured, load])
+
   useEffect(() => {
     void load()
   }, [load])
@@ -398,11 +435,49 @@ export function OptionDiscoveryMaxPainPanel({
           Max Pain Analysis
           <InfoTooltip text="Based on end-of-day open interest from Massive (15 min delayed source). Computed live from PostgreSQL; not read from stored report rows." />
         </h3>
-        <button type="button" className="button button-secondary button-sm" onClick={() => void load()} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh max pain'}
-        </button>
+        <div className="od-max-pain-header-actions">
+          <button
+            type="button"
+            className="section-header-icon-btn od-max-pain-refresh-icon-btn"
+            onClick={() => void backfillOiForSymbol()}
+            disabled={loading || oiBackfillLoading}
+            title={
+              oiBackfillLoading
+                ? 'Backfilling OI history for this symbol'
+                : 'Backfill OI history for this symbol and refresh trend'
+            }
+            aria-label={
+              oiBackfillLoading
+                ? 'Backfilling OI history for this symbol'
+                : 'Backfill OI history for this symbol and refresh trend'
+            }
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M7 7h10" />
+              <path d="M7 12h10" />
+              <path d="M7 17h6" />
+              <path d="M16 14l3 3-3 3" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="section-header-icon-btn od-max-pain-refresh-icon-btn"
+            onClick={() => void load()}
+            disabled={loading || oiBackfillLoading}
+            title={loading ? 'Loading max pain' : 'Refresh max pain'}
+            aria-label={loading ? 'Loading max pain' : 'Refresh max pain'}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+              <path d="M16 21h5v-5" />
+            </svg>
+          </button>
+        </div>
       </div>
 
+      {oiBackfillMsg ? <p className="section-hint" role="status">{oiBackfillMsg}</p> : null}
       {loading && !live ? <p className="section-hint">Loading Max Pain…</p> : null}
       {err ? <p className="msg-error" role="alert">{err}</p> : null}
 

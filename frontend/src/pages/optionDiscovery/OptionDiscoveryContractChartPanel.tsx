@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Bar } from '../../types'
-import { fetchOptionBars } from '../../api'
+import { fetchOptionBars, pollMassiveJobUntilDone, postMassiveSync } from '../../api'
 import { BarsCandlestickChart } from '../data/BarsCandlestickChart'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { buildPolygonOptionsTicker } from '../../utils/polygonOptionsTicker'
 
 const OPTION_BAR_PERIODS = [
   { value: '1 D', label: 'Daily' },
@@ -10,6 +11,9 @@ const OPTION_BAR_PERIODS = [
   { value: '5 mins', label: '5 min' },
   { value: '1 min', label: '1 min' },
 ] as const
+
+/** Option Discovery chart always reads Massive-backed rows in PostgreSQL (option_min / option_day). */
+const BAR_SOURCE: 'massive' = 'massive'
 
 function sortBarsAsc(bars: Bar[]): Bar[] {
   return [...bars].sort((a, b) => a.time - b.time)
@@ -20,23 +24,18 @@ export function OptionDiscoveryContractChartPanel({
   expiration,
   strike,
   optionRight,
-  defaultBarSource,
 }: {
   symbol: string
   expiration: string
   strike: number
   optionRight: 'C' | 'P'
-  defaultBarSource: 'ib' | 'massive'
 }) {
-  const [period, setPeriod] = useState<string>('1 D')
-  const [barSource, setBarSource] = useState<'ib' | 'massive'>(defaultBarSource)
+  const [period, setPeriod] = useState<string>('1 min')
   const [bars, setBars] = useState<Bar[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setBarSource(defaultBarSource)
-  }, [defaultBarSource])
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [syncHint, setSyncHint] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const sym = symbol.trim().toUpperCase()
@@ -55,7 +54,7 @@ export function OptionDiscoveryContractChartPanel({
         option_right: optionRight,
         period,
         limit: 200,
-        source: barSource,
+        source: BAR_SOURCE,
       })
       const raw = res.bars ?? []
       setBars(raw)
@@ -63,7 +62,7 @@ export function OptionDiscoveryContractChartPanel({
         const msg = (res.message || '').trim()
         setError(
           msg ||
-            'No bars in the database for this contract. Run a Massive aggregates backfill (option_min / option_day) for this options ticker.',
+            'No bars in the database for this contract. Click Backfill from Massive to enqueue aggregates (option_min), or run the same job from Feed → Massive Option.',
         )
       }
     } catch (e) {
@@ -72,11 +71,72 @@ export function OptionDiscoveryContractChartPanel({
     } finally {
       setLoading(false)
     }
-  }, [symbol, expiration, strike, optionRight, period, barSource])
+  }, [symbol, expiration, strike, optionRight, period])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  const runMassiveAggregatesBackfill = useCallback(async () => {
+    const sym = symbol.trim().toUpperCase()
+    const exp = expiration.trim()
+    if (!sym || !exp || !Number.isFinite(strike)) return
+    if (period === '1 D') {
+      setSyncHint(
+        'Daily bars are read from option_day. The Massive aggregates job only writes intraday rows to option_min. Use IB bars elsewhere or open/close on the Massive Option feed page.',
+      )
+      return
+    }
+    setSyncBusy(true)
+    setSyncHint(null)
+    setError(null)
+    try {
+      const optionsTicker = buildPolygonOptionsTicker(sym, exp, strike, optionRight)
+      const endMs = Date.now()
+      const lookbackMs = 7 * 24 * 60 * 60 * 1000
+      const startMs = endMs - lookbackMs
+      let timespan = 'minute'
+      let multiplier = 1
+      if (period === '1 hour') {
+        timespan = 'hour'
+        multiplier = 1
+      } else {
+        timespan = 'minute'
+        multiplier = 1
+      }
+      const res = await postMassiveSync('aggregates', {
+        options_ticker: optionsTicker,
+        symbol: sym,
+        expiry: exp,
+        strike,
+        option_right: optionRight,
+        timespan,
+        multiplier,
+        start_ms: startMs,
+        end_ms: endMs,
+      })
+      if (!res.ok || !res.job_id) {
+        setError(res.error ?? res.message ?? 'Failed to enqueue Massive aggregates job')
+        return
+      }
+      const polled = await pollMassiveJobUntilDone(res.job_id, { maxAttempts: 120, intervalMs: 1000 })
+      if (!polled.ok) {
+        setError(polled.error ?? 'Massive job failed')
+        return
+      }
+      if (period === '5 mins') {
+        setSyncHint('Backfill wrote 1-minute bars. Chart period set to 1 min to match.')
+        setPeriod('1 min')
+      } else {
+        setSyncHint('Backfill finished. Reloading bars from PostgreSQL.')
+        await load()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Backfill failed')
+    } finally {
+      setSyncBusy(false)
+    }
+  }, [symbol, expiration, strike, optionRight, period, load])
 
   const chartBars = useMemo(() => sortBarsAsc(bars), [bars])
 
@@ -98,34 +158,38 @@ export function OptionDiscoveryContractChartPanel({
             </label>
           ))}
         </div>
-        <span className="od-contract-chart-toolbar-label">Source</span>
-        <select
-          className="od-contract-chart-source"
-          value={barSource}
-          onChange={e => setBarSource(e.target.value === 'ib' ? 'ib' : 'massive')}
-          aria-label="Bars data source"
-        >
-          <option value="massive">Massive (DB)</option>
-          <option value="ib">IB (DB)</option>
-        </select>
         <button
           type="button"
           className="button button-secondary button-sm"
-          disabled={loading}
+          disabled={loading || syncBusy}
           onClick={() => void load()}
         >
           {loading ? 'Loading…' : 'Reload'}
         </button>
+        <button
+          type="button"
+          className="button button-primary button-sm"
+          disabled={loading || syncBusy || period === '1 D'}
+          title={
+            period === '1 D'
+              ? 'Daily bars are not filled by REST aggregates; use another pipeline for option_day.'
+              : 'Enqueue Celery job: Massive /v2/aggs → option_min (last 7 days)'
+          }
+          onClick={() => void runMassiveAggregatesBackfill()}
+        >
+          {syncBusy ? 'Backfilling…' : 'Backfill from Massive'}
+        </button>
         <span className="page-title-with-tooltip" style={{ marginLeft: '0.25rem' }}>
-          <InfoTooltip text="Reads stored OHLC from option_day (daily) or option_min (intraday). Populate via Massive Option feed: aggregates / custom_bars jobs writing to PostgreSQL." />
+          <InfoTooltip text="Reads OHLC from PostgreSQL (option_day for Daily, option_min for intraday). Backfill enqueues aggregates on the massive Celery queue. You can also use Feed → Massive Option → Option aggregates." />
         </span>
       </div>
+      {syncHint && <p className="section-hint" role="status">{syncHint}</p>}
       {error && <p className="section-hint" role="status">{error}</p>}
       {chartBars.length > 0 && (
         <div className="data-bars-chart-container" style={{ marginTop: '0.75rem' }}>
           <div className="data-bars-chart-header">
             <span className="data-bars-chart-title">
-              {symbol.trim().toUpperCase()} {optionRight === 'C' ? 'Call' : 'Put'} {strike.toFixed(2)} · {period} · {barSource} · {chartBars.length} bars
+              {symbol.trim().toUpperCase()} {optionRight === 'C' ? 'Call' : 'Put'} {strike.toFixed(2)} · {period} · Massive (DB) · {chartBars.length} bars
             </span>
           </div>
           <BarsCandlestickChart bars={chartBars} period={period} />

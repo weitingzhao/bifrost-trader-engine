@@ -6312,10 +6312,12 @@ th {
 }
 
 .option-discovery-sidebar {
-  width: clamp(12rem, 20vw, 17rem);
+  /* Single column width: Underlying + Expiration panels align to the same width */
+  width: clamp(11rem, 16vw, 14rem);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: var(--space-3);
   position: sticky;
   top: var(--space-2);
@@ -6335,15 +6337,75 @@ th {
   margin-bottom: 0;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+}
+
+/* Override global flex-start so Underlying matches Expiration panel width */
+.option-discovery-sidebar .option-discovery-underlying-body {
+  align-items: stretch;
 }
 
 .option-discovery-sidebar .option-discovery-list-with-header {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* Expiration table: fixed columns so width matches Underlying panel above */
+.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table thead th.option-discovery-expiration-col-date,
+.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table tbody td.option-discovery-expiration-col-date {
+  width: 58%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table thead th.option-discovery-expiration-col-days,
+.option-discovery-sidebar .option-discovery-expiration .option-discovery-list-table tbody td.option-discovery-expiration-days-cell {
+  width: 42%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table thead th:first-child,
+.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table tbody td:first-child {
+  width: 42%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table thead th:nth-child(2),
+.option-discovery-sidebar .option-discovery-underlying .option-discovery-list-table tbody td:nth-child(2) {
+  width: 58%;
+  min-width: 0;
+}
+
+/* Reset global 2nd column min-width so fixed layout can shrink in sidebar */
+.option-discovery-sidebar .option-discovery-list-table td:nth-child(2) {
+  min-width: 0;
 }
 
 .option-discovery-sidebar .option-discovery-list-wrap {
@@ -6363,6 +6425,255 @@ th {
 .option-discovery-main {
   flex: 1;
   min-width: 0;
+}
+
+.option-discovery-main-inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* Sticky context + in-page TOC (Option Discovery layers) */
+.od-sticky-context {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 calc(-1 * var(--space-1));
+  background: var(--color-bg, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+.od-sticky-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.od-sticky-context-chip {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.od-compare-icon-btn {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.od-compare-icon-btn.section-header-icon-btn:hover,
+.od-compare-icon-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-compare-icon-btn-count {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: var(--color-accent, #6ea8fe);
+  color: #fff;
+  border: 1px solid var(--color-surface);
+  font-size: 0.62rem;
+  line-height: 1rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.od-page-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-caption);
+}
+
+.od-page-toc a {
+  color: var(--color-accent, #6ea8fe);
+  text-decoration: none;
+}
+
+.od-page-toc a:hover {
+  text-decoration: underline;
+}
+
+/* Layer sections: anchor scroll + visual separation */
+.od-layer-section {
+  scroll-margin-top: 6rem;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.od-layer-section:last-of-type {
+  border-bottom: none;
+}
+
+.od-layer-section--locked .od-layer-section-header {
+  opacity: 0.75;
+}
+
+.od-layer-section-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.od-layer-toggle-btn {
+  flex-shrink: 0;
+}
+
+.od-layer-toggle-btn.section-header-icon-btn:hover,
+.od-layer-toggle-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-layer-section-body {
+  min-width: 0;
+}
+
+.od-layer-step {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-caption);
+  font-weight: 700;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-main);
+}
+
+.od-layer-section-head-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.od-layer-section-title {
+  margin: 0;
+  font-size: var(--text-h3, 1.1rem);
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.od-layer-section-subtitle {
+  margin: 0.25rem 0 0;
+}
+
+.od-layer-locked-hint {
+  margin: 0;
+}
+
+.od-iv-term-section {
+  margin-top: 0;
+}
+
+.od-data-state {
+  padding: var(--space-2);
+  border-radius: 6px;
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+}
+
+.od-data-state-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+/* Compare drawer */
+.od-compare-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+
+.od-compare-drawer {
+  width: min(32rem, 100vw);
+  max-width: 100%;
+  background: var(--color-bg, var(--color-surface));
+  border-left: 1px solid var(--color-border);
+  padding: var(--space-4);
+  overflow-y: auto;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+}
+
+.od-compare-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.od-compare-drawer-title {
+  margin: 0;
+  font-size: var(--text-h3, 1.1rem);
+}
+
+.od-compare-drawer-meta {
+  margin: 0 0 var(--space-3);
+}
+
+.od-compare-table-wrap {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.od-compare-drawer-actions {
+  margin-top: var(--space-3);
+}
+
+/* Long option chain table: contain scroll inside layer 4 */
+#od-layer-4 .od-chain-table-wrap {
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+}
+
+/* Full-chain block (EOD OI / Max Pain) — above Strike window */
+.option-discovery-full-chain {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Strike-window scope: analytics + quotes (snapshot / selected strikes, not full chain) */
+.option-discovery-view-scope {
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.option-discovery-view-scope-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* One separator: view-scope border; drop stack’s own top rule when nested */
+.option-discovery-view-scope > .od-option-structure-stack {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 /* Strike window collapsible panel */
@@ -6417,11 +6728,12 @@ th {
 
 .option-discovery-conditions-head-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.5rem 1rem;
+  gap: 0.5rem 0.75rem;
   flex-shrink: 0;
   margin-bottom: var(--space-2);
+  min-width: 0;
 }
 
 .option-discovery-conditions-head-row h3 {
@@ -6451,15 +6763,273 @@ th {
   margin-bottom: var(--space-2);
 }
 
+/* Chain title + daily status on one line; long status scrolls horizontally */
+.option-discovery-daily-summary.option-discovery-daily-summary--inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+  flex-wrap: nowrap;
+  gap: 0.35rem 0.6rem;
+}
+
 .option-discovery-daily-summary-label {
   font-size: var(--text-caption);
   font-weight: 600;
   color: var(--color-text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .option-discovery-daily-summary-bits {
   flex: 1 1 14rem;
   min-width: 0;
+}
+
+.option-discovery-daily-summary--inline .option-discovery-daily-summary-bits {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.option-discovery-daily-summary--inline .od-daily-data-open-btn {
+  flex-shrink: 0;
+}
+
+/* Match section-header-icon-btn but no rotate (navigation, not refresh) */
+.option-discovery-daily-summary--inline .od-daily-data-open-btn.section-header-icon-btn:hover {
+  transform: none;
+}
+.option-discovery-daily-summary--inline .od-daily-data-open-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-iv-term-error {
+  color: var(--color-danger, #c62828);
+  margin-bottom: 0.35rem;
+}
+
+.od-iv-term-section .od-iv-term-exp-hint {
+  margin-bottom: 0.65rem;
+}
+
+/* IV term: expiration picker — compact card, grid chips */
+.od-iv-term-exp-card {
+  margin: 0 0 0.85rem;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--color-surface-elevated) 92%, var(--color-accent-soft) 8%) 0%,
+    var(--color-surface) 100%
+  );
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
+.od-iv-term-exp-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  padding: 0.55rem 0.65rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.od-iv-term-exp-card-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.od-iv-term-exp-card-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.od-iv-term-exp-card-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-main);
+}
+
+.od-iv-term-exp-card-badge--warn {
+  border-color: color-mix(in srgb, var(--color-warning, #b45309) 45%, var(--color-border));
+  color: var(--color-warning, #b45309);
+}
+
+.od-iv-term-quick-select-btn {
+  flex-shrink: 0;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 55%, var(--color-surface-elevated));
+  color: var(--color-text-main);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.od-iv-term-quick-select-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent-soft) 85%, var(--color-surface-elevated));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.od-iv-term-quick-select-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.od-iv-term-quick-select-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.od-iv-term-quick-select-btn--muted {
+  border-color: color-mix(in srgb, var(--color-border) 90%, var(--color-text-muted));
+  background: color-mix(in srgb, var(--color-surface) 88%, var(--color-surface-elevated));
+  color: var(--color-text-muted);
+}
+
+.od-iv-term-quick-select-btn--muted:hover:not(:disabled) {
+  border-color: var(--color-border);
+  color: var(--color-text-main);
+  background: var(--color-surface-elevated);
+  box-shadow: none;
+}
+
+.od-iv-term-exp-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.od-iv-term-exp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.55rem 0.55rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.25rem, 1fr));
+  gap: 0.35rem;
+  max-height: 12rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.od-iv-term-exp-li {
+  margin: 0;
+  min-width: 0;
+}
+
+.od-iv-term-exp-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.38rem 0.45rem 0.38rem 0.4rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
+  background: var(--color-surface-elevated);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.od-iv-term-exp-item:has(input:not(:disabled)):hover {
+  border-color: color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 35%, var(--color-surface-elevated));
+}
+
+.od-iv-term-exp-item--checked {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 65%, var(--color-surface-elevated));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+}
+
+.od-iv-term-exp-item:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.od-iv-term-exp-checkbox {
+  flex-shrink: 0;
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  accent-color: var(--color-accent, #6ea8fe);
+  cursor: inherit;
+}
+
+.od-iv-term-exp-date {
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  color: var(--color-text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.od-analytics-term-actions {
+  margin: 0.35rem 0 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.od-iv-term-action-icon-btn {
+  flex-shrink: 0;
+}
+
+.od-iv-term-action-icon-btn.section-header-icon-btn:hover,
+.od-iv-term-action-icon-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-iv-term-backfill-hint {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+}
+
+.od-iv-term-sync-status {
+  margin: 0.35rem 0 0.5rem;
+}
+
+.od-iv-term-chart-caption {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+  font-size: var(--text-caption);
+  word-break: break-word;
 }
 
 .od-max-pain-section {
@@ -6468,7 +7038,14 @@ th {
   border-top: 1px solid var(--color-border);
 }
 
-/* Max Pain + Option analytics block inside main column */
+/* Max Pain first in main column — sits above Strike window; no extra top rule */
+.option-discovery-main > .option-discovery-full-chain:first-child .od-max-pain-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Option Analytics stack (below Strike window); was also used with Max Pain inside */
 .od-option-structure-stack {
   width: 100%;
   min-width: 0;
@@ -6483,11 +7060,18 @@ th {
   border-top: none;
 }
 
-/* Override .replay-section spacing so separator matches Max Pain block */
+/* Analytics below Max Pain inside same stack (legacy) */
 .od-option-structure-stack .od-analytics-section.replay-section {
   margin-top: var(--space-4);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
+}
+
+/* Analytics is sole child in stack — separator is the stack border only */
+.od-option-structure-stack > .od-analytics-section.replay-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .mp-header-row {
@@ -6506,6 +7090,17 @@ th {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.od-max-pain-refresh-icon-btn.section-header-icon-btn:hover,
+.od-max-pain-refresh-icon-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-max-pain-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .od-max-pain-card {
@@ -6699,6 +7294,12 @@ th {
   align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-3) 0;
+}
+
+.od-gex-disclaimer {
+  margin-top: var(--space-2);
+  margin-bottom: 0;
+  max-width: 42rem;
 }
 
 /* (legacy .option-discovery-top-row rules removed — replaced by sidebar/main layout) */

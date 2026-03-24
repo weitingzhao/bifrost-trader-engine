@@ -29,13 +29,21 @@ import type {
 import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
+import { buildPolygonOptionsTicker } from '../utils/polygonOptionsTicker'
 import { OptionDiscoveryMaxPainPanel } from './optionDiscovery/OptionDiscoveryMaxPainPanel'
 import { OptionDiscoveryContractChartPanel } from './optionDiscovery/OptionDiscoveryContractChartPanel'
 import { OptionDiscoveryAnalyticsPanel, IvSmileChart, IvSmileLegend } from './optionDiscovery/OptionDiscoveryAnalytics'
 import type { IvTermPoint } from './optionDiscovery/OptionDiscoveryAnalytics'
+import { OdLayerSection } from './optionDiscovery/OdLayerSection'
+import { OptionDiscoveryIvTermSection } from './optionDiscovery/OptionDiscoveryIvTermSection'
+import { OptionDiscoveryCompareDrawer, addCompareRow } from './optionDiscovery/OptionDiscoveryCompareDrawer'
 
 const STRIKE_COUNT_OPTIONS = [4, 6, 8, 19, 30, 'all'] as const
 type StrikeCountOption = (typeof STRIKE_COUNT_OPTIONS)[number]
+
+/** IV term structure: default count (sidebar order); server accepts up to 12 expirations per request. */
+const IV_TERM_DEFAULT_EXPIRATIONS = 8
+const IV_TERM_MAX_EXPIRATIONS = 12
 
 /** Strike ladder & chain: show both sides, calls only, or puts only. */
 type StrikeSideMode = 'all' | 'call' | 'put'
@@ -477,7 +485,7 @@ export function OptionDiscoveryPage({
 }: OptionDiscoveryPageProps) {
   const stkSymbols = useWatchlistStkSymbols()
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
-  const [quoteSource, setQuoteSource] = useState<'ib' | 'massive'>('ib')
+  const [quoteSource, setQuoteSource] = useState<'ib' | 'massive'>('massive')
   const [selectedSymbol, setSelectedSymbol] = useState('')
   const [expirations, setExpirations] = useState<string[]>([])
   const [strikes, setStrikes] = useState<number[]>([])
@@ -534,6 +542,15 @@ export function OptionDiscoveryPage({
   // IV term structure (Phase 2)
   const [termPoints, setTermPoints] = useState<IvTermPoint[]>([])
   const [termLoading, setTermLoading] = useState(false)
+  const [termError, setTermError] = useState<string | null>(null)
+  /** Subset of `expirations` (same order as sidebar) to send to IV term API */
+  const [ivTermExpKeys, setIvTermExpKeys] = useState<string[]>([])
+  /** Massive: enqueue chain snapshot jobs for IV-term selection, then reload IV term */
+  const [ivTermSyncLoading, setIvTermSyncLoading] = useState(false)
+  const [ivTermSyncStatus, setIvTermSyncStatus] = useState<string | null>(null)
+
+  const [compareOpen, setCompareOpen] = useState(false)
+  const [compareRows, setCompareRows] = useState<OptionSnapshotRow[]>([])
 
   // P3: Event context
   const [eventContextWarnings, setEventContextWarnings] = useState<string[]>([])
@@ -544,7 +561,7 @@ export function OptionDiscoveryPage({
       .then(s => {
         if (!cancelled) {
           setMassiveStatus(s)
-          if (s.configured) setQuoteSource('massive')
+          setQuoteSource(s.configured ? 'massive' : 'ib')
         }
       })
       .catch(() => {
@@ -830,6 +847,7 @@ export function OptionDiscoveryPage({
         const rows = sn.rows ?? []
         if (rows.length > 0) {
           setSnapshotRows(rows)
+          setSelectedContractIdx(0)
           if (sn.underlying_price != null && Number.isFinite(Number(sn.underlying_price))) {
             setUnderlyingPrice(Number(sn.underlying_price))
           }
@@ -858,16 +876,140 @@ export function OptionDiscoveryPage({
 
   const loadIvTermStructure = useCallback(async () => {
     const sym = selectedSymbol.trim()
-    if (!sym || expirations.length < 2) return
+    const ordered = expirations.filter(e => ivTermExpKeys.includes(e))
+    if (!sym || ordered.length < 2) return
     setTermLoading(true)
+    setTermError(null)
     setTermPoints([])
     try {
       const { fetchIvTermStructure } = await import('../api/research')
-      const res = await fetchIvTermStructure(sym, expirations.slice(0, 8))
-      if (res.ok && res.points) setTermPoints(res.points)
-    } catch { /* term structure unavailable */ }
-    setTermLoading(false)
-  }, [selectedSymbol, expirations])
+      const res = await fetchIvTermStructure(sym, ordered.slice(0, IV_TERM_MAX_EXPIRATIONS), quoteSource)
+      if (!res.ok) {
+        setTermError(res.error ?? 'Failed to load IV term structure')
+        return
+      }
+      const pts = res.points ?? []
+      if (pts.length < 2) {
+        setTermError(
+          quoteSource === 'massive'
+            ? 'Not enough ATM IV in PostgreSQL for the checked expirations (need ≥2 with IV). Use Backfill snapshots (Massive) to enqueue chain jobs for the selection, or Load quotes in section 4 per expiration. You can check any expirations (up to 12), not only the first eight.'
+            : 'Not enough ATM IV in PostgreSQL for the checked expirations (need ≥2 with IV). Load chain quotes in section 4 for those expirations, or switch to Massive and use Backfill if that pipeline populates your DB.',
+        )
+        setTermPoints(pts)
+        return
+      }
+      setTermPoints(pts)
+    } catch (e) {
+      setTermError(e instanceof Error ? e.message : 'Failed to load IV term structure')
+    } finally {
+      setTermLoading(false)
+    }
+  }, [selectedSymbol, expirations, ivTermExpKeys, quoteSource])
+
+  const syncIvTermMassiveSnapshots = useCallback(async () => {
+    if (quoteSource !== 'massive') {
+      setTermError(
+        'Backfill uses Massive chain snapshot jobs. Switch quote source to Massive, or load IB quotes separately for each checked expiration (section 4).',
+      )
+      return
+    }
+    const sym = selectedSymbol.trim()
+    const ordered = expirations.filter(e => ivTermExpKeys.includes(e)).slice(0, IV_TERM_MAX_EXPIRATIONS)
+    if (!sym || ordered.length < 2) return
+    setIvTermSyncLoading(true)
+    setTermError(null)
+    setIvTermSyncStatus(null)
+    try {
+      for (let i = 0; i < ordered.length; i++) {
+        const exp = ordered[i]
+        setIvTermSyncStatus(`Massive chain snapshot ${i + 1}/${ordered.length} (${exp})…`)
+        const massiveChainPayload: Record<string, unknown> = {
+          underlying: sym,
+          snapshot_type: 'chain',
+          expiration_date: exp,
+          limit: 250,
+        }
+        if (effectiveStrikes.length > 0) {
+          massiveChainPayload.strike_price_gte = Math.min(...effectiveStrikes)
+          massiveChainPayload.strike_price_lte = Math.max(...effectiveStrikes)
+        }
+        const sync = await postMassiveSync('snapshot', massiveChainPayload)
+        if (!sync.ok || !sync.job_id) {
+          setTermError(sync.error ?? sync.message ?? `Massive sync failed for ${exp}`)
+          return
+        }
+        const polled = await pollMassiveJobUntilDone(sync.job_id, { maxAttempts: 120, intervalMs: 1000 })
+        if (!polled.ok) {
+          setTermError(polled.error ?? `Massive job failed for ${exp}`)
+          return
+        }
+      }
+      setIvTermSyncStatus('Loading IV term structure…')
+      await loadIvTermStructure()
+    } catch (e) {
+      setTermError(e instanceof Error ? e.message : 'Backfill failed')
+    } finally {
+      setIvTermSyncLoading(false)
+      setIvTermSyncStatus(null)
+    }
+  }, [quoteSource, selectedSymbol, expirations, ivTermExpKeys, effectiveStrikes, loadIvTermStructure])
+
+  const toggleIvTermExpiration = useCallback(
+    (exp: string, checked: boolean) => {
+      setIvTermExpKeys(prev => {
+        const set = new Set(prev)
+        if (checked) {
+          if (set.size >= IV_TERM_MAX_EXPIRATIONS) return prev
+          set.add(exp)
+        } else {
+          if (set.size <= 2 && set.has(exp)) return prev
+          set.delete(exp)
+        }
+        return expirations.filter(e => set.has(e))
+      })
+    },
+    [expirations],
+  )
+
+  const resetIvTermExpirationsToDefault = useCallback(() => {
+    setIvTermExpKeys(expirations.slice(0, IV_TERM_DEFAULT_EXPIRATIONS).slice(0, IV_TERM_MAX_EXPIRATIONS))
+  }, [expirations])
+
+  const selectAllIvTermExpirations = useCallback(() => {
+    setIvTermExpKeys(expirations.slice(0, IV_TERM_MAX_EXPIRATIONS))
+  }, [expirations])
+
+  /** Clears extra checks; keeps the first two expirations (minimum required for IV term). */
+  const uncheckAllIvTermExpirations = useCallback(() => {
+    if (expirations.length < 2) return
+    setIvTermExpKeys(expirations.slice(0, 2))
+  }, [expirations])
+
+  useEffect(() => {
+    setTermPoints([])
+    setTermError(null)
+    setIvTermExpKeys([])
+    setIvTermSyncLoading(false)
+    setIvTermSyncStatus(null)
+  }, [selectedSymbol])
+
+  useEffect(() => {
+    if (expirations.length < 2) {
+      setIvTermExpKeys([])
+      return
+    }
+    setIvTermExpKeys(prev => {
+      const def = expirations.slice(0, IV_TERM_DEFAULT_EXPIRATIONS).slice(0, IV_TERM_MAX_EXPIRATIONS)
+      if (prev.length === 0) return def
+      const kept = expirations.filter(e => prev.includes(e))
+      if (kept.length >= 2) return kept.slice(0, IV_TERM_MAX_EXPIRATIONS)
+      return def
+    })
+  }, [expirations])
+
+  const handleAddToCompare = useCallback((row: OptionSnapshotRow) => {
+    setCompareRows(prev => addCompareRow(prev, row))
+  }, [])
 
   const loadQuotes = useCallback(async () => {
     const sym = selectedSymbol.trim()
@@ -883,8 +1025,12 @@ export function OptionDiscoveryPage({
     try {
       if (quoteSource === 'ib') {
         const res = await fetchOptionSnapshot(sym, exp, strikesToSend)
-        setSnapshotRows(res.rows ?? [])
+        const ibRows = res.rows ?? []
+        setSnapshotRows(ibRows)
         setUnderlyingPrice(res.underlying_price ?? null)
+        if (ibRows.length > 0) {
+          setSelectedContractIdx(0)
+        }
         if (res.error) {
           setSnapshotFeedback({ level: 'error', body: res.error })
         } else if ((res.rows ?? []).length === 0) {
@@ -929,6 +1075,7 @@ export function OptionDiscoveryPage({
       setUnderlyingPrice(sn.underlying_price ?? null)
 
       if (rows.length > 0) {
+        setSelectedContractIdx(0)
         setSnapshotFeedback(null)
         return
       }
@@ -1019,10 +1166,9 @@ export function OptionDiscoveryPage({
     const row = snapshotRows[selectedContractIdx]
     if (!row) return
     const sym = selectedSymbol.trim()
-    const exp = selectedExpiration.trim().replace(/-/g, '')
+    const exp = selectedExpiration.trim()
     if (!sym || !exp) return
-    const strikeStr = String(Math.round(row.strike * 1000)).padStart(8, '0')
-    const optTicker = `O:${sym}${exp}${row.right}${strikeStr}`
+    const optTicker = buildPolygonOptionsTicker(sym, exp, row.strike, row.right)
     let cancelled = false
     setLiquidityLoading(true)
     Promise.allSettled([
@@ -1245,54 +1391,63 @@ export function OptionDiscoveryPage({
             Massive · 15 min delayed
           </span>
         )}
+        {massiveStatus?.configured && massiveStatus && !massiveStatus.trades_enabled && (
+          <span className="page-title-with-tooltip" style={{ marginLeft: '0.35rem' }}>
+            <InfoTooltip text="Tape (last trades) is not available on this tier. Enable trades in Massive config for Developer." />
+          </span>
+        )}
       </h2>
 
-      {/* ── Session bar: quote source + daily data ── */}
+      {/* ── Session bar: Chain title + daily data on one row ── */}
       <section className="replay-section option-discovery-session-bar" aria-label="Session">
         <div className="option-discovery-conditions-head-row">
           <h3 id="option-discovery-conditions-head">Chain</h3>
-          <div className="option-discovery-quote-source-inline">
-            <label className="option-discovery-quote-source-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span className="section-hint">Quote source</span>
-              <select
-                value={quoteSource}
-                onChange={e => setQuoteSource(e.target.value as 'ib' | 'massive')}
-                aria-label="Quote source"
-              >
-                <option value="ib">IB (live)</option>
-                <option value="massive" disabled={!massiveStatus?.configured}>
-                  Massive (delayed)
-                </option>
-              </select>
-            </label>
-            {quoteSource === 'massive' && massiveStatus && !massiveStatus.trades_enabled && (
-              <InfoTooltip text="Tape (last trades) is not available on this tier. Enable trades in Massive config for Developer." />
-            )}
-          </div>
+          {massiveStatus?.configured && selectedSymbol.trim() ? (
+            <div className="option-discovery-daily-summary option-discovery-daily-summary--inline" role="status">
+              {dailyDimsLoading ? (
+                <span className="section-hint">Loading daily data status…</span>
+              ) : dailyDims ? (
+                <>
+                  <span className="option-discovery-daily-summary-label">
+                    Daily data ({dailyDimsDate ?? '—'})
+                  </span>
+                  <span className="section-hint option-discovery-daily-summary-bits">
+                    {`${selectedSymbol.trim().toUpperCase()} · Snapshot: ${formatSnapshotTime(dailyDims['daily-snapshot'])} · OI: ${formatDimShort('daily-oi', dailyDims['daily-oi'])} · Max pain: ${formatDimShort('daily-max-pain', dailyDims['daily-max-pain'])} · Corporate: ${formatDimShort('daily-corporate', dailyDims['daily-corporate'])} · WS: ${formatDimShort('daily-ws-alive', dailyDims['daily-ws-alive'])}`}
+                  </span>
+                  {onOpenMassiveFeed && (
+                    <button
+                      type="button"
+                      className="section-header-icon-btn od-daily-data-open-btn"
+                      onClick={onOpenMassiveFeed}
+                      title="Open daily data status in Settings"
+                      aria-label="Open daily data status"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="16"
+                        height="16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <line x1="3" y1="9" x2="21" y2="9" />
+                        <line x1="3" y1="15" x2="21" y2="15" />
+                        <line x1="9" y1="3" x2="9" y2="21" />
+                        <line x1="15" y1="3" x2="15" y2="21" />
+                      </svg>
+                    </button>
+                  )}
+                </>
+              ) : (
+                <span className="section-hint">Daily data status unavailable.</span>
+              )}
+            </div>
+          ) : null}
         </div>
-        {massiveStatus?.configured && selectedSymbol.trim() ? (
-          <div className="option-discovery-daily-summary" role="status">
-            {dailyDimsLoading ? (
-              <span className="section-hint">Loading daily data status…</span>
-            ) : dailyDims ? (
-              <>
-                <span className="option-discovery-daily-summary-label">
-                  Daily data ({dailyDimsDate ?? '—'})
-                </span>
-                <span className="section-hint option-discovery-daily-summary-bits">
-                  {`${selectedSymbol.trim().toUpperCase()} · Snapshot: ${formatSnapshotTime(dailyDims['daily-snapshot'])} · OI: ${formatDimShort('daily-oi', dailyDims['daily-oi'])} · Max pain: ${formatDimShort('daily-max-pain', dailyDims['daily-max-pain'])} · Corporate: ${formatDimShort('daily-corporate', dailyDims['daily-corporate'])} · WS: ${formatDimShort('daily-ws-alive', dailyDims['daily-ws-alive'])}`}
-                </span>
-                {onOpenMassiveFeed && (
-                  <button type="button" className="button-feedback-nav" onClick={onOpenMassiveFeed}>
-                    Open daily data status
-                  </button>
-                )}
-              </>
-            ) : (
-              <span className="section-hint">Daily data status unavailable.</span>
-            )}
-          </div>
-        ) : null}
       </section>
 
       {/* ── Layout: sidebar + main ── */}
@@ -1396,6 +1551,99 @@ export function OptionDiscoveryPage({
 
         {/* ── Main column ── */}
         <div className="option-discovery-main">
+          <div className="option-discovery-main-inner">
+            <div id="od-layer-context" className="od-sticky-context">
+              <div className="od-sticky-context-row">
+                <span className="od-sticky-context-chip" title="Current context">
+                  {selectedSymbol.trim() || '—'}
+                  {selectedExpiration.trim() ? ` · ${selectedExpiration}` : ''}
+                  {underlyingPrice != null ? ` · ${fmtUsd(underlyingPrice)}` : ''}
+                </span>
+                <button
+                  type="button"
+                  className="section-header-icon-btn od-compare-icon-btn"
+                  onClick={() => setCompareOpen(true)}
+                  aria-label={`Open compare drawer (${compareRows.length} selected)`}
+                  title={`Open compare drawer (${compareRows.length} selected)`}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M6 4v16" />
+                    <path d="M18 4v16" />
+                    <path d="M9 7h6" />
+                    <path d="M9 12h6" />
+                    <path d="M9 17h6" />
+                  </svg>
+                  <span className="od-compare-icon-btn-count" aria-hidden>{compareRows.length}</span>
+                </button>
+              </div>
+              <nav className="od-page-toc" aria-label="On this page">
+                <a href="#od-layer-1">1 · IV term</a>
+                <a href="#od-layer-2">2 · Max pain</a>
+                <a href="#od-layer-3">3 · Strike &amp; analytics</a>
+                <a href="#od-layer-4">4 · Quotes &amp; contract</a>
+              </nav>
+            </div>
+
+            <OdLayerSection
+              id="od-layer-1"
+              step={1}
+              title="Underlying & IV term structure"
+              subtitle="ATM IV across listed expirations (not limited to the selected expiry)."
+              enabled={selectedSymbol.trim() !== ''}
+              lockedHint="Select an underlying symbol in the left sidebar."
+            >
+              <OptionDiscoveryIvTermSection
+                symbol={selectedSymbol}
+                expirations={expirations}
+                selectedExpirations={ivTermExpKeys}
+                onToggleExpiration={toggleIvTermExpiration}
+                onResetExpirationsToDefault={resetIvTermExpirationsToDefault}
+                onSelectAllExpirations={selectAllIvTermExpirations}
+                onUncheckAllExpirations={uncheckAllIvTermExpirations}
+                maxExpirations={IV_TERM_MAX_EXPIRATIONS}
+                defaultExpirationCount={IV_TERM_DEFAULT_EXPIRATIONS}
+                massiveBackfillAvailable={quoteSource === 'massive' && Boolean(massiveStatus?.configured)}
+                onBackfillMassiveSnapshots={syncIvTermMassiveSnapshots}
+                snapshotSyncLoading={ivTermSyncLoading}
+                snapshotSyncStatus={ivTermSyncStatus}
+                onLoad={loadIvTermStructure}
+                termPoints={termPoints}
+                termLoading={termLoading}
+                termError={termError}
+              />
+            </OdLayerSection>
+
+            <OdLayerSection
+              id="od-layer-2"
+              step={2}
+              title="Expiration · full chain"
+              subtitle="Max pain and OI liability for the selected expiration (EOD-style)."
+              enabled={selectedSymbol.trim() !== '' && selectedExpiration.trim() !== ''}
+              lockedHint="Select an expiration in the left sidebar."
+            >
+              {selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && (
+                <div
+                  className="option-discovery-full-chain"
+                  data-analytics-scope="full-chain"
+                  aria-label="Full chain"
+                >
+                  <OptionDiscoveryMaxPainPanel
+                    symbol={selectedSymbol}
+                    expiration={selectedExpiration}
+                    massiveConfigured={Boolean(massiveStatus?.configured)}
+                  />
+                </div>
+              )}
+            </OdLayerSection>
+
+            <OdLayerSection
+              id="od-layer-3"
+              step={3}
+              title="Strike window & option analytics"
+              subtitle="Adjust the strike ladder, then review IV smile, OI, and gamma exposure for the loaded snapshot."
+              enabled={selectedSymbol.trim() !== '' && selectedExpiration.trim() !== ''}
+              lockedHint="Select symbol and expiration first."
+            >
           {/* Strike window (collapsible) */}
           <details className="option-discovery-strike-window" open aria-label="Strike window">
             <summary className="option-discovery-strike-window-summary">
@@ -1405,7 +1653,7 @@ export function OptionDiscoveryPage({
               </span>
             </summary>
             <p className="section-hint option-discovery-strike-window-hint">
-              Applies to Option Analytics and option quotes below. Max Pain uses the full chain independently.
+              Select strikes for the option chain table and window-scoped charts below.
             </p>
             <div className="option-discovery-strikes-content">
         {strikesLoading ? (
@@ -1696,28 +1944,48 @@ export function OptionDiscoveryPage({
             </div>
           </details>
 
-          {/* ── Max Pain (full chain) + Analytics (strike window) ── */}
-          {selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && (
-            <div className="od-option-structure-stack" aria-label="Option structure and analytics">
-              <OptionDiscoveryMaxPainPanel
-                symbol={selectedSymbol}
-                expiration={selectedExpiration}
-                massiveConfigured={Boolean(massiveStatus?.configured)}
+          {/* Strike-window scope: snapshotRows / effectiveStrikes — not EOD full chain. */}
+          <div
+            className="option-discovery-view-scope"
+            data-analytics-scope="strike-window"
+            aria-label="Strike window scope"
+          >
+            <p className="section-hint option-discovery-view-scope-hint" id="option-discovery-view-scope-hint">
+              Scoped to the selected strike window.
+            </p>
+
+          {/* Option Analytics — uses snapshotRows (strike selection) */}
+          {selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' &&
+            snapshotRows.length > 0 && !snapshotLoading && quoteSource === 'massive' && (
+            <div
+              className="od-option-structure-stack"
+              aria-label="Option analytics"
+              aria-describedby="option-discovery-view-scope-hint"
+            >
+              <OptionDiscoveryAnalyticsPanel
+                rows={snapshotRows}
+                underlying={underlyingPrice}
               />
-              {snapshotRows.length > 0 && !snapshotLoading && quoteSource === 'massive' && (
-                <OptionDiscoveryAnalyticsPanel
-                  rows={snapshotRows}
-                  underlying={underlyingPrice}
-                  termPoints={termPoints.length > 0 ? termPoints : undefined}
-                  termLoading={termLoading}
-                  onLoadTerm={() => void loadIvTermStructure()}
-                />
-              )}
             </div>
           )}
+          </div>
 
+            </OdLayerSection>
+
+            <OdLayerSection
+              id="od-layer-4"
+              step={4}
+              title="Option quotes & contract"
+              subtitle="Refresh Massive/IB snapshots, browse the chain, then open a contract for liquidity, risk, and K-line."
+              enabled={selectedSymbol.trim() !== '' && selectedExpiration.trim() !== ''}
+              lockedHint="Select symbol and expiration first."
+            >
           {/* ── Option quotes ── */}
-          <section className="replay-section" aria-labelledby="option-discovery-table-head">
+          <section
+            className="replay-section"
+            aria-labelledby="option-discovery-table-head"
+            aria-describedby="option-discovery-view-scope-hint"
+          >
             <h3 id="option-discovery-table-head">
               By expiration – Option quotes
               <InfoTooltip text="IB: live quotes from TWS. Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
@@ -1968,6 +2236,17 @@ export function OptionDiscoveryPage({
             >
               + Watchlist
             </button>
+            <button
+              type="button"
+              className="button button-secondary button-sm"
+              onClick={() => {
+                handleAddToCompare(selectedRow)
+                setCompareOpen(true)
+              }}
+              aria-label="Add current contract to compare"
+            >
+              Add to compare
+            </button>
             {quoteSource === 'massive' && (
               <span className="od-detail-delayed">Massive · 15 min delayed</span>
             )}
@@ -1985,7 +2264,7 @@ export function OptionDiscoveryPage({
           <div className="od-detail-tabs" role="tablist">
             {([
               ['overview', 'Overview'],
-              ['chart', 'Chart'],
+              ['chart', 'Chart (K-line)'],
               ['liquidity', 'Liquidity'],
               ['risk', 'Risk'],
               ['relative', 'Relative Value'],
@@ -2002,6 +2281,9 @@ export function OptionDiscoveryPage({
               </button>
             ))}
           </div>
+          <p className="section-hint od-detail-chart-hint" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
+            Select a row in the chain table, then open the Chart (K-line) tab for OHLC. If the chart is empty, click Backfill from Massive (Celery worker on the massive queue required).
+          </p>
 
           {/* ── Tab: Overview (P0) ── */}
           {contractDetailTab === 'overview' && (
@@ -2084,7 +2366,6 @@ export function OptionDiscoveryPage({
                 expiration={selectedExpiration}
                 strike={selectedRow.strike}
                 optionRight={selectedRow.right === 'P' ? 'P' : 'C'}
-                defaultBarSource={quoteSource === 'massive' ? 'massive' : 'ib'}
               />
             </div>
           )}
@@ -2339,6 +2620,19 @@ export function OptionDiscoveryPage({
           })()}
         </section>
       )}
+            </OdLayerSection>
+
+          <OptionDiscoveryCompareDrawer
+            open={compareOpen}
+            onClose={() => setCompareOpen(false)}
+            rows={compareRows}
+            symbol={selectedSymbol}
+            expiration={selectedExpiration}
+            dteLabel={expirationDaysFromToday(selectedExpiration)}
+            onRemove={i => setCompareRows(prev => prev.filter((_, j) => j !== i))}
+            onClear={() => setCompareRows([])}
+          />
+        </div>{/* end option-discovery-main-inner */}
         </div>{/* end option-discovery-main */}
       </div>{/* end option-discovery-layout */}
     </div>

@@ -1140,7 +1140,7 @@ def compute_max_pain_history_from_db(
                       SELECT MAX(trade_date) AS max_td FROM option_open_interest_daily
                       WHERE symbol = %s AND expiry = %s AND source = 'massive'
                     )
-                    SELECT o.trade_date, o.close
+                    SELECT (o.bar_time::date) AS trade_date, o.close
                     FROM stock_day o, latest
                     WHERE o.symbol = %s AND latest.max_td IS NOT NULL
                       AND (o.bar_time::date) >= (latest.max_td - %s::integer)

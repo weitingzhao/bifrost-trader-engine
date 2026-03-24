@@ -1023,7 +1023,7 @@ export async function fetchIvTermStructure(
     expirations: expirations.join(','),
     source,
   })
-  const r = await fetch(`/api/research/iv-term-structure?${params}`)
+  const r = await fetch(`${API}/research/iv-term-structure?${params}`)
   const j = await r.json().catch(() => ({}))
   const pts: IvTermStructurePoint[] = Array.isArray(j.points)
     ? j.points.map((p: Record<string, unknown>) => ({
@@ -1035,11 +1035,19 @@ export async function fetchIvTermStructure(
         strike: p.strike != null ? Number(p.strike) : undefined,
       }))
     : []
+  const errMsg = (() => {
+    if (j.error != null && String(j.error).trim() !== '') return String(j.error)
+    const d = j.detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d) && d[0]?.msg) return String(d[0].msg)
+    if (!r.ok) return `HTTP ${r.status}`
+    return undefined
+  })()
   return {
-    ok: Boolean(j.ok),
+    ok: Boolean(j.ok) && r.ok,
     symbol: j.symbol ?? symbol,
     underlying_price: j.underlying_price != null ? Number(j.underlying_price) : undefined,
     points: pts,
-    error: j.error,
+    error: errMsg,
   }
 }
