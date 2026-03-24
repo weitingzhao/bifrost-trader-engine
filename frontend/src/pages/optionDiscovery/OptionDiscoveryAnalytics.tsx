@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { OptionSnapshotRow } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
 import { OD_CHART_AXIS_FONT } from './odChartConstants'
@@ -606,6 +606,10 @@ export function OptionDiscoveryAnalyticsPanel({
   rows: OptionSnapshotRow[]
   underlying: number | null
 }) {
+  const [ivCollapsed, setIvCollapsed] = useState(false)
+  const [oiCollapsed, setOiCollapsed] = useState(false)
+  const [gexCollapsed, setGexCollapsed] = useState(false)
+
   const hasIv = rows.some(r => r.iv != null && Number.isFinite(r.iv!))
   const hasOi = rows.some(r => r.open_interest != null && Number.isFinite(r.open_interest!) && r.open_interest! > 0)
   const hasGex = rows.some(
@@ -629,32 +633,86 @@ export function OptionDiscoveryAnalyticsPanel({
       <div className="od-charts-grid">
         {hasIv && (
           <div className="mp-chart-pane">
-            <h4 className="mp-chart-subtitle">IV Smile</h4>
-            <IvSmileLegend underlying={underlying} />
-            <IvSmileChart rows={rows} underlying={underlying} />
-            <SkewSummary rows={rows} underlying={underlying} />
+            <div className="od-analytics-chart-head">
+              <h4 className="mp-chart-subtitle">IV Smile</h4>
+              <button
+                type="button"
+                className="section-header-icon-btn od-analytics-chart-toggle-btn"
+                onClick={() => setIvCollapsed(v => !v)}
+                title={ivCollapsed ? 'Expand IV Smile' : 'Collapse IV Smile'}
+                aria-label={ivCollapsed ? 'Expand IV Smile' : 'Collapse IV Smile'}
+                aria-expanded={!ivCollapsed}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d={ivCollapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'} />
+                </svg>
+              </button>
+            </div>
+            {!ivCollapsed && (
+              <>
+                <IvSmileLegend underlying={underlying} />
+                <IvSmileChart rows={rows} underlying={underlying} />
+                <SkewSummary rows={rows} underlying={underlying} />
+              </>
+            )}
           </div>
         )}
 
         {hasOi && (
           <div className="mp-chart-pane">
-            <h4 className="mp-chart-subtitle">Open Interest Profile</h4>
-            <OiProfileLegend underlying={underlying} />
-            <OiProfileChart rows={rows} underlying={underlying} />
+            <div className="od-analytics-chart-head">
+              <h4 className="mp-chart-subtitle">Open Interest Profile</h4>
+              <button
+                type="button"
+                className="section-header-icon-btn od-analytics-chart-toggle-btn"
+                onClick={() => setOiCollapsed(v => !v)}
+                title={oiCollapsed ? 'Expand Open Interest Profile' : 'Collapse Open Interest Profile'}
+                aria-label={oiCollapsed ? 'Expand Open Interest Profile' : 'Collapse Open Interest Profile'}
+                aria-expanded={!oiCollapsed}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d={oiCollapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'} />
+                </svg>
+              </button>
+            </div>
+            {!oiCollapsed && (
+              <>
+                <OiProfileLegend underlying={underlying} />
+                <OiProfileChart rows={rows} underlying={underlying} />
+              </>
+            )}
           </div>
         )}
 
         {hasGex && (
           <div className="mp-chart-pane od-chart-pane-span2">
-            <h4 className="mp-chart-subtitle">
-              Gamma exposure (dealer-style)
-              <InfoTooltip text="Stacked |gamma × open interest × 100| per strike (US equity contract size). Magnitude only; not a forecast of dealer hedging flow. Delayed snapshot data." />
-            </h4>
-            <GammaExposureLegend underlying={underlying} />
-            <GammaExposureChart rows={rows} underlying={underlying} />
-            <p className="section-hint od-gex-disclaimer">
-              Approximate notional gamma exposure (gamma × OI × 100). For illustration only; not a hedge-flow forecast.
-            </p>
+            <div className="od-analytics-chart-head">
+              <h4 className="mp-chart-subtitle">
+                Gamma exposure (dealer-style)
+                <InfoTooltip text="Stacked |gamma × open interest × 100| per strike (US equity contract size). Magnitude only; not a forecast of dealer hedging flow. Delayed snapshot data." />
+              </h4>
+              <button
+                type="button"
+                className="section-header-icon-btn od-analytics-chart-toggle-btn"
+                onClick={() => setGexCollapsed(v => !v)}
+                title={gexCollapsed ? 'Expand Gamma exposure' : 'Collapse Gamma exposure'}
+                aria-label={gexCollapsed ? 'Expand Gamma exposure' : 'Collapse Gamma exposure'}
+                aria-expanded={!gexCollapsed}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d={gexCollapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'} />
+                </svg>
+              </button>
+            </div>
+            {!gexCollapsed && (
+              <>
+                <GammaExposureLegend underlying={underlying} />
+                <GammaExposureChart rows={rows} underlying={underlying} />
+                <p className="section-hint od-gex-disclaimer">
+                  Approximate notional gamma exposure (gamma × OI × 100). For illustration only; not a hedge-flow forecast.
+                </p>
+              </>
+            )}
           </div>
         )}
       </div>

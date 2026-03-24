@@ -38,7 +38,7 @@ function LiabilityByStrikeSvg({
   underlyingClose: number | null
 }) {
   const w = 640
-  const h = 280
+  const h = 240
   const pad = { l: 60, r: 24, t: 20, b: 40 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
@@ -154,9 +154,9 @@ function LiabilityLegend({ underlyingClose, maxPainStrike }: {
         <span className="mp-legend-swatch" style={{ background: 'var(--color-lamp-red, #ef5350)' }} />
         Put liability
       </span>
-      <span className="mp-legend-item">
+      <span className="mp-legend-item mp-legend-item-max-pain">
         <span className="mp-legend-swatch mp-legend-line" style={{ borderColor: 'var(--color-accent, #6ea8fe)' }} />
-        Max Pain {maxPainStrike.toFixed(2)}
+        Max Pain <strong className="mp-legend-max-pain-value">{maxPainStrike.toFixed(2)}</strong>
       </span>
       {underlyingClose != null && Number.isFinite(underlyingClose) && (
         <span className="mp-legend-item">
@@ -178,7 +178,7 @@ function OiBarsSvg({
   showPut: boolean
 }) {
   const w = 640
-  const h = 180
+  const h = 152
   const pad = { l: 60, r: 24, t: 8, b: 36 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
@@ -240,7 +240,7 @@ function OiBarsSvg({
 
 function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
   const w = 640
-  const h = 200
+  const h = 172
   const pad = { l: 60, r: 48, t: 16, b: 36 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
@@ -334,6 +334,8 @@ export function OptionDiscoveryMaxPainPanel({
   const [live, setLive] = useState<MaxPainComputeResponse | null>(null)
   const [hist, setHist] = useState<MaxPainHistoryPoint[]>([])
   const [loading, setLoading] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+  const [trendCollapsed, setTrendCollapsed] = useState(false)
   const [oiBackfillLoading, setOiBackfillLoading] = useState(false)
   const [oiBackfillMsg, setOiBackfillMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -439,6 +441,18 @@ export function OptionDiscoveryMaxPainPanel({
           <button
             type="button"
             className="section-header-icon-btn od-max-pain-refresh-icon-btn"
+            onClick={() => setCollapsed(v => !v)}
+            title={collapsed ? 'Expand Max Pain Analysis' : 'Collapse Max Pain Analysis'}
+            aria-label={collapsed ? 'Expand Max Pain Analysis' : 'Collapse Max Pain Analysis'}
+            aria-expanded={!collapsed}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d={collapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'} />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="section-header-icon-btn od-max-pain-refresh-icon-btn"
             onClick={() => void backfillOiForSymbol()}
             disabled={loading || oiBackfillLoading}
             title={
@@ -477,64 +491,86 @@ export function OptionDiscoveryMaxPainPanel({
         </div>
       </div>
 
-      {oiBackfillMsg ? <p className="section-hint" role="status">{oiBackfillMsg}</p> : null}
-      {loading && !live ? <p className="section-hint">Loading Max Pain…</p> : null}
-      {err ? <p className="msg-error" role="alert">{err}</p> : null}
+      {!collapsed && (
+        <>
+          {oiBackfillMsg ? <p className="section-hint" role="status">{oiBackfillMsg}</p> : null}
+          {loading && !live ? <p className="section-hint">Loading Max Pain…</p> : null}
+          {err ? <p className="msg-error" role="alert">{err}</p> : null}
 
-      {live?.ok && live.max_pain_strike != null && (
-        <div className="od-max-pain-card">
-          <div className="od-max-pain-card-metric">
-            <span className="od-max-pain-card-label">Max Pain</span>
-            <strong>{live.max_pain_strike.toFixed(2)}</strong>
-          </div>
-          <div className="od-max-pain-card-metric">
-            <span className="od-max-pain-card-label">Spot</span>
-            <strong>{live.underlying_close != null ? live.underlying_close.toFixed(2) : '—'}</strong>
-          </div>
-          <div className="od-max-pain-card-metric">
-            <span className="od-max-pain-card-label">Distance</span>
-            <strong>
-              {live.distance_to_max_pain_pct != null ? `${(live.distance_to_max_pain_pct * 100).toFixed(2)}%` : '—'}
-            </strong>
-          </div>
-          <div className="od-max-pain-card-metric">
-            <span className="od-max-pain-card-label">Total OI</span>
-            <strong>{live.total_oi != null ? live.total_oi.toLocaleString() : '—'}</strong>
-          </div>
-          <div className="od-max-pain-card-metric">
-            <span className="od-max-pain-card-label">OI as-of</span>
-            <strong>{live.trade_date ?? '—'}</strong>
-          </div>
-          {live.recent_corporate_action && (
-            <p className="od-max-pain-corp-warn" role="status">
-              Recent corporate action — verify strikes and multipliers.
-            </p>
+          {live?.ok && points.length > 0 && (
+            <div className="od-max-pain-layout">
+              <div className="od-max-pain-top-layout">
+                <div className="od-max-pain-summary-col">
+                  <div className="od-max-pain-card od-max-pain-card--vertical">
+                    <div className="od-max-pain-card-metric">
+                      <span className="od-max-pain-card-label">Max Pain</span>
+                      <strong>{live.max_pain_strike != null ? live.max_pain_strike.toFixed(2) : '—'}</strong>
+                    </div>
+                    <div className="od-max-pain-card-metric">
+                      <span className="od-max-pain-card-label">Spot</span>
+                      <strong>{live.underlying_close != null ? live.underlying_close.toFixed(2) : '—'}</strong>
+                    </div>
+                    <div className="od-max-pain-card-metric">
+                      <span className="od-max-pain-card-label">Distance</span>
+                      <strong>
+                        {live.distance_to_max_pain_pct != null ? `${(live.distance_to_max_pain_pct * 100).toFixed(2)}%` : '—'}
+                      </strong>
+                    </div>
+                    <div className="od-max-pain-card-metric">
+                      <span className="od-max-pain-card-label">Total OI</span>
+                      <strong>{live.total_oi != null ? live.total_oi.toLocaleString() : '—'}</strong>
+                    </div>
+                    <div className="od-max-pain-card-metric">
+                      <span className="od-max-pain-card-label">OI as-of</span>
+                      <strong>{live.trade_date ?? '—'}</strong>
+                    </div>
+                    {live.recent_corporate_action && (
+                      <p className="od-max-pain-corp-warn" role="status">
+                        Recent corporate action — verify strikes and multipliers.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="od-max-pain-strike-col">
+                  <div className="mp-chart-pane">
+                    <h4 className="mp-chart-subtitle">Seller Liability by Strike</h4>
+                    <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
+                    <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
+                      underlyingClose={live.underlying_close ?? null} />
+                  </div>
+
+                  <div className="mp-chart-pane">
+                    <h4 className="mp-chart-subtitle">Open Interest by Strike</h4>
+                    <OiBarsSvg points={points} showCall showPut />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mp-chart-pane od-max-pain-trend-pane">
+                <div className="od-max-pain-trend-head">
+                  <h4 className="mp-chart-subtitle">Historical Trend</h4>
+                  <button
+                    type="button"
+                    className="section-header-icon-btn od-max-pain-refresh-icon-btn"
+                    onClick={() => setTrendCollapsed(v => !v)}
+                    title={trendCollapsed ? 'Expand Historical Trend' : 'Collapse Historical Trend'}
+                    aria-label={trendCollapsed ? 'Expand Historical Trend' : 'Collapse Historical Trend'}
+                    aria-expanded={!trendCollapsed}
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d={trendCollapsed ? 'M9 18l6-6-6-6' : 'M6 9l6 6 6-6'} />
+                    </svg>
+                  </button>
+                </div>
+                {!trendCollapsed && <TrendSvg series={hist} />}
+              </div>
+            </div>
           )}
-        </div>
+
+          <p className="od-max-pain-disclaimer">{DISCLAIMER}</p>
+        </>
       )}
-
-      {live?.ok && points.length > 0 && (
-        <div className="od-charts-grid">
-          <div className="mp-chart-pane">
-            <h4 className="mp-chart-subtitle">Seller Liability by Strike</h4>
-            <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
-            <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
-              underlyingClose={live.underlying_close ?? null} />
-          </div>
-
-          <div className="mp-chart-pane">
-            <h4 className="mp-chart-subtitle">Open Interest by Strike</h4>
-            <OiBarsSvg points={points} showCall showPut />
-          </div>
-
-          <div className="mp-chart-pane od-chart-pane-span2">
-            <h4 className="mp-chart-subtitle">Historical Trend</h4>
-            <TrendSvg series={hist} />
-          </div>
-        </div>
-      )}
-
-      <p className="od-max-pain-disclaimer">{DISCLAIMER}</p>
     </section>
   )
 }

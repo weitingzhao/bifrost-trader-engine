@@ -1715,19 +1715,28 @@ export function OptionDiscoveryPage({
                 <div className="strike-ladder-toolbar">
                   <button
                     type="button"
-                    className="button button-secondary button-sm"
+                    className="section-header-icon-btn od-strike-range-icon-btn"
                     onClick={() => setMultiSelectStrikes([...computedStrikes])}
                     aria-label="Select all"
+                    title="Select all strikes in range"
                   >
-                    All
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M9 12l2 2 4-4" />
+                      <path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9" />
+                    </svg>
                   </button>
                   <button
                     type="button"
-                    className="button button-secondary button-sm"
+                    className="section-header-icon-btn od-strike-range-icon-btn"
                     onClick={() => setMultiSelectStrikes([])}
                     aria-label="Clear"
+                    title="Clear selected strikes"
                   >
-                    Clear
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                    </svg>
                   </button>
                 </div>
                 <div className="strike-ladder-controls-summary">
@@ -1986,29 +1995,37 @@ export function OptionDiscoveryPage({
             aria-labelledby="option-discovery-table-head"
             aria-describedby="option-discovery-view-scope-hint"
           >
-            <h3 id="option-discovery-table-head">
-              By expiration – Option quotes
-              <InfoTooltip text="IB: live quotes from TWS. Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
-            </h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', marginBottom: '1rem' }}>
+            <div className="od-option-quotes-head-row">
+              <h3 id="option-discovery-table-head" className="od-option-quotes-head-title">
+                Option quotes
+                <InfoTooltip text="IB: live quotes from TWS. Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
+              </h3>
               <button
                 type="button"
-                className="button button-primary"
+                className="section-header-icon-btn od-option-quotes-refresh-btn"
                 onClick={() => void loadQuotes()}
                 disabled={!canLoadQuotes}
-                aria-label="Refresh option quotes for selected symbol and expiration"
+                aria-label="Refresh option quotes"
+                title={snapshotLoading ? 'Loading option quotes' : 'Refresh option quotes'}
               >
-                {snapshotLoading ? 'Loading…' : 'Refresh quotes'}
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                  <path d="M16 21h5v-5" />
+                </svg>
               </button>
-          {underlyingPrice != null && (
-            <span className="section-hint">Underlying: {fmtUsd(underlyingPrice)}</span>
-          )}
-          {addWatchlistFeedback != null && (
-            <span className="section-hint" role="status">
-              {addWatchlistFeedback.includes('|') ? 'Added to Watchlist.' : addWatchlistFeedback}
-            </span>
-          )}
-        </div>
+              {underlyingPrice != null && (
+                <span className="section-hint od-option-quotes-underlying">Underlying: {fmtUsd(underlyingPrice)}</span>
+              )}
+            </div>
+            {addWatchlistFeedback != null && (
+              <div style={{ marginBottom: '0.5rem' }}>
+                <span className="section-hint" role="status">
+                  {addWatchlistFeedback.includes('|') ? 'Added to Watchlist.' : addWatchlistFeedback}
+                </span>
+              </div>
+            )}
         {snapshotLoading && (
           <p className="section-hint">Fetching option quotes (may take ~10s)…</p>
         )}
@@ -2230,22 +2247,33 @@ export function OptionDiscoveryPage({
             </h3>
             <button
               type="button"
-              className="button button-secondary button-sm"
+              className="section-header-icon-btn od-detail-action-icon-btn"
               onClick={() => void handleAddToWatchlist(selectedRow)}
               aria-label={`Add ${selectedRow.right === 'C' ? 'Call' : 'Put'} ${selectedRow.strike} to Watchlist`}
+              title={`Add ${selectedRow.right === 'C' ? 'Call' : 'Put'} ${selectedRow.strike} to Watchlist`}
             >
-              + Watchlist
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
             </button>
             <button
               type="button"
-              className="button button-secondary button-sm"
+              className="section-header-icon-btn od-detail-action-icon-btn"
               onClick={() => {
                 handleAddToCompare(selectedRow)
                 setCompareOpen(true)
               }}
               aria-label="Add current contract to compare"
+              title="Add current contract to compare"
             >
-              Add to compare
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M6 4v16" />
+                <path d="M18 4v16" />
+                <path d="M9 7h6" />
+                <path d="M9 12h6" />
+                <path d="M9 17h6" />
+              </svg>
             </button>
             {quoteSource === 'massive' && (
               <span className="od-detail-delayed">Massive · 15 min delayed</span>

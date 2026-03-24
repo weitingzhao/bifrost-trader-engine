@@ -5709,10 +5709,55 @@ th {
 }
 
 .strike-ladder-col-header-check input[type="checkbox"] {
-  width: 0.9rem;
-  height: 0.9rem;
+  width: 1rem;
+  height: 1rem;
   margin: 0;
   flex-shrink: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, var(--color-text-muted));
+  border-radius: 4px;
+  background: var(--color-surface-elevated);
+  position: relative;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform 0.08s ease;
+}
+
+.strike-ladder-col-header-check input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  left: 0.28rem;
+  top: 0.08rem;
+  width: 0.24rem;
+  height: 0.5rem;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0);
+  transform-origin: center;
+  transition: transform var(--transition-fast);
+}
+
+.strike-ladder-col-header-check input[type="checkbox"]:checked {
+  background: var(--color-accent, #6ea8fe);
+  border-color: var(--color-accent, #6ea8fe);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.strike-ladder-col-header-check input[type="checkbox"]:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+
+.strike-ladder-col-header-check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--color-accent, #6ea8fe);
+  outline-offset: 1px;
+}
+
+.strike-ladder-col-header-check input[type="checkbox"]:active {
+  transform: scale(0.96);
 }
 
 .strike-ladder-col-header-put {
@@ -5881,6 +5926,57 @@ th {
   width: 2.5rem;
   text-align: center;
   padding-left: var(--space-1);
+}
+
+.strike-ladder-table .strike-ladder-cell-check input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, var(--color-text-muted));
+  border-radius: 4px;
+  background: var(--color-surface);
+  position: relative;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform 0.08s ease;
+}
+
+.strike-ladder-table .strike-ladder-cell-check input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  left: 0.28rem;
+  top: 0.08rem;
+  width: 0.24rem;
+  height: 0.5rem;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0);
+  transform-origin: center;
+  transition: transform var(--transition-fast);
+}
+
+.strike-ladder-table .strike-ladder-cell-check input[type="checkbox"]:checked {
+  background: var(--color-accent, #6ea8fe);
+  border-color: var(--color-accent, #6ea8fe);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.strike-ladder-table .strike-ladder-cell-check input[type="checkbox"]:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+
+.strike-ladder-table .strike-ladder-cell-check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--color-accent, #6ea8fe);
+  outline-offset: 1px;
+}
+
+.strike-ladder-table .strike-ladder-cell-check input[type="checkbox"]:active {
+  transform: scale(0.96);
 }
 
 .strike-ladder-table .strike-ladder-cell-strike {
@@ -7114,10 +7210,57 @@ th {
   background: var(--color-surface-elevated);
 }
 
+.od-max-pain-layout {
+  width: 100%;
+  max-width: none;
+  margin-bottom: var(--space-3);
+}
+
+.od-max-pain-top-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 13rem) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.od-max-pain-summary-col {
+  min-width: 0;
+}
+
+.od-max-pain-card.od-max-pain-card--vertical {
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin-bottom: 0;
+  height: 100%;
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--color-accent) 22%, var(--color-border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent-soft) 35%, var(--color-surface-elevated)) 0%,
+    var(--color-surface-elevated) 100%
+  );
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
 .od-max-pain-card-metric {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+}
+
+.od-max-pain-card--vertical .od-max-pain-card-metric {
+  padding: 0.32rem 0.08rem;
+  border-bottom: 1px dashed color-mix(in srgb, var(--color-border) 78%, transparent);
+}
+
+.od-max-pain-card--vertical .od-max-pain-card-metric:last-of-type {
+  border-bottom: none;
+}
+
+.od-max-pain-card--vertical .od-max-pain-card-metric strong {
+  font-size: 1.04rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .od-max-pain-card-label {
@@ -7130,6 +7273,36 @@ th {
   margin: 0;
   font-size: var(--text-caption);
   color: #c9a227;
+}
+
+.od-max-pain-strike-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.od-max-pain-strike-col .mp-chart-pane {
+  border: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
+  border-radius: 10px;
+  padding: var(--space-1) var(--space-2) 0.35rem;
+  background: color-mix(in srgb, var(--color-surface-elevated) 92%, var(--color-surface));
+}
+
+.od-max-pain-trend-pane {
+  margin-top: var(--space-2);
+}
+
+.od-max-pain-trend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.od-max-pain-trend-head .mp-chart-subtitle {
+  margin: 0;
 }
 
 /* Tab bar */
@@ -7182,6 +7355,12 @@ th {
 }
 
 @media (max-width: 52rem) {
+  .od-max-pain-top-layout {
+    grid-template-columns: 1fr;
+  }
+  .od-max-pain-layout {
+    max-width: 100%;
+  }
   .od-charts-grid {
     grid-template-columns: 1fr;
   }
@@ -7219,6 +7398,23 @@ th {
   gap: 0.35rem;
 }
 
+.mp-legend-item-max-pain {
+  color: var(--color-accent, #6ea8fe);
+  font-weight: 600;
+}
+
+.mp-legend-max-pain-value {
+  display: inline-block;
+  padding: 0.04rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 70%, var(--color-surface-elevated));
+  color: var(--color-text-main);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
 .mp-legend-swatch {
   display: inline-block;
   width: 12px;
@@ -7251,13 +7447,68 @@ th {
 
 /* ── Option analytics (IV smile / OI profile / skew / term structure) ── */
 .od-analytics-section {
-  max-width: 52rem;
+  width: 100%;
+  max-width: none;
 }
 .od-analytics-title {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   margin: 0 0 var(--space-2);
+}
+
+.od-analytics-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.od-analytics-chart-head .mp-chart-subtitle {
+  margin: 0;
+}
+
+.od-analytics-chart-toggle-btn.section-header-icon-btn:hover,
+.od-analytics-chart-toggle-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-detail-action-icon-btn.section-header-icon-btn:hover,
+.od-detail-action-icon-btn.section-header-icon-btn:active,
+.od-contract-chart-icon-btn.section-header-icon-btn:hover,
+.od-contract-chart-icon-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-strike-range-icon-btn.section-header-icon-btn:hover,
+.od-strike-range-icon-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-option-quotes-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.od-option-quotes-head-title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.od-option-quotes-refresh-btn.section-header-icon-btn:hover,
+.od-option-quotes-refresh-btn.section-header-icon-btn:active {
+  transform: none;
+}
+
+.od-option-quotes-underlying {
+  white-space: nowrap;
 }
 .od-analytics-skew {
   display: flex;
@@ -7468,23 +7719,72 @@ th {
 .od-chain-column-filter-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 0.85rem;
+  gap: 0.4rem 0.5rem;
   align-items: center;
 }
 .od-chain-column-filter-item {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.38rem;
+  padding: 0.2rem 0.55rem 0.22rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+  background: var(--color-surface);
   font-size: var(--text-caption);
   color: var(--color-text-main);
   cursor: pointer;
   user-select: none;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 .od-chain-column-filter-item input {
-  width: 0.85rem;
-  height: 0.85rem;
+  width: 0.9rem;
+  height: 0.9rem;
   margin: 0;
   flex-shrink: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid color-mix(in srgb, var(--color-border) 85%, var(--color-text-muted));
+  border-radius: 3px;
+  background: var(--color-surface-elevated);
+  position: relative;
+}
+.od-chain-column-filter-item input::after {
+  content: '';
+  position: absolute;
+  left: 0.26rem;
+  top: 0.06rem;
+  width: 0.22rem;
+  height: 0.48rem;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0);
+  transform-origin: center;
+  transition: transform var(--transition-fast);
+}
+.od-chain-column-filter-item input:checked {
+  background: var(--color-accent, #6ea8fe);
+  border-color: var(--color-accent, #6ea8fe);
+}
+.od-chain-column-filter-item input:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+.od-chain-column-filter-item:has(input:checked) {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 72%, var(--color-surface-elevated));
+  color: var(--color-accent, #6ea8fe);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+.od-chain-column-filter-item:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 42%, var(--color-surface-elevated));
+}
+.od-chain-column-filter-item input:focus-visible {
+  outline: 2px solid var(--color-accent, #6ea8fe);
+  outline-offset: 1px;
 }
 
 .od-chain-table-wrap {
