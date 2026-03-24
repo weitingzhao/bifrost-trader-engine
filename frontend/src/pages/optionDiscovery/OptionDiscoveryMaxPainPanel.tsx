@@ -12,48 +12,158 @@ function scaleLin(v: number, vmin: number, vmax: number, outMin: number, outMax:
   return outMin + ((v - vmin) / (vmax - vmin)) * (outMax - outMin)
 }
 
-function PainByStrikeSvg({
+function fmtDollarCompact(v: number): string {
+  const abs = Math.abs(v)
+  if (abs >= 1e9) return `$${(v / 1e9).toFixed(1)}B`
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(1)}M`
+  if (abs >= 1e3) return `$${(v / 1e3).toFixed(0)}k`
+  return `$${v.toFixed(0)}`
+}
+
+function pickXTickIndices(n: number, maxTicks: number): number[] {
+  if (n <= maxTicks) return Array.from({ length: n }, (_, i) => i)
+  const step = (n - 1) / (maxTicks - 1)
+  return Array.from({ length: maxTicks }, (_, i) => Math.round(i * step))
+}
+
+/** OptionCharts-style stacked bar chart: Call liability (green) + Put liability (red) per strike. */
+function LiabilityByStrikeSvg({
   points,
   maxPainStrike,
-  showPain,
+  underlyingClose,
 }: {
   points: MaxPainStrikePoint[]
   maxPainStrike: number
-  showPain: boolean
+  underlyingClose: number | null
 }) {
-  const w = 560
-  const h = 200
-  const pad = { l: 44, r: 12, t: 12, b: 28 }
+  const w = 640
+  const h = 280
+  const pad = { l: 60, r: 24, t: 20, b: 40 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
-  if (!showPain || points.length === 0) return null
+  if (points.length === 0) return null
+
   const strikes = points.map(p => p.strike)
-  const pains = points.map(p => p.pain)
   const minS = Math.min(...strikes)
   const maxS = Math.max(...strikes)
-  const minP = Math.min(...pains)
-  const maxP = Math.max(...pains)
-  const pts = points
-    .map(p => {
-      const x = pad.l + scaleLin(p.strike, minS, maxS, 0, innerW)
-      const y = pad.t + innerH - scaleLin(p.pain, minP, maxP, 0, innerH)
-      return `${x},${y}`
-    })
-    .join(' ')
-  const mpX = pad.l + scaleLin(maxPainStrike, minS, maxS, 0, innerW)
+  const maxPain = Math.max(1, ...points.map(p => p.pain))
+
+  const n = points.length
+  const gap = Math.max(1, innerW * 0.12 / Math.max(n, 1))
+  const barW = Math.max(2, (innerW - gap * (n - 1)) / n)
+  const halfBar = barW / 2
+
+  const xForStrike = (s: number) => pad.l + scaleLin(s, minS, maxS, halfBar, innerW - halfBar)
+
+  const yTicks = 4
+  const yStep = maxPain / yTicks
+  const gridLines: ReactElement[] = []
+  const yLabels: ReactElement[] = []
+  for (let i = 0; i <= yTicks; i++) {
+    const val = yStep * i
+    const y = pad.t + innerH - scaleLin(val, 0, maxPain, 0, innerH)
+    if (i > 0) {
+      gridLines.push(
+        <line key={`g-${i}`} x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
+          stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />,
+      )
+    }
+    yLabels.push(
+      <text key={`yl-${i}`} x={pad.l - 6} y={y + 3} textAnchor="end" fontSize="10"
+        fill="var(--color-text-dim)">{fmtDollarCompact(val)}</text>,
+    )
+  }
+
+  const xTickIdxs = pickXTickIndices(n, 8)
+
+  const mpX = xForStrike(maxPainStrike)
+  const ucInRange = underlyingClose != null && Number.isFinite(underlyingClose) &&
+    underlyingClose >= minS && underlyingClose <= maxS
+  const ucX = ucInRange ? xForStrike(underlyingClose!) : null
+
   return (
-    <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Pain by strike">
-      <polyline fill="none" stroke="var(--color-accent, #6ea8fe)" strokeWidth="2" points={pts} />
-      {Number.isFinite(mpX) ? (
-        <line x1={mpX} x2={mpX} y1={pad.t} y2={pad.t + innerH} stroke="var(--color-lamp-green)" strokeWidth="1" strokeDasharray="4 3" />
-      ) : null}
-      <text x={pad.l} y={h - 6} fontSize="10" fill="var(--color-text-dim)">
-        Strike
-      </text>
-      <text x={w - pad.r - 48} y={pad.t + 10} fontSize="10" fill="var(--color-text-dim)">
-        Writer payout
-      </text>
+    <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`}
+      aria-label="Seller liability by strike — stacked Call (green) and Put (red) with Max Pain and spot price markers">
+      <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
+        fill="var(--color-surface)" rx={4} />
+
+      {gridLines}
+      {yLabels}
+
+      <line x1={pad.l} x2={pad.l + innerW} y1={pad.t + innerH} y2={pad.t + innerH}
+        stroke="var(--color-border)" strokeWidth={1} />
+      <line x1={pad.l} x2={pad.l} y1={pad.t} y2={pad.t + innerH}
+        stroke="var(--color-border)" strokeWidth={1} />
+
+      {points.map((p, i) => {
+        const cx = xForStrike(p.strike)
+        const y0 = pad.t + innerH
+        const putH = scaleLin(p.pain_put, 0, maxPain, 0, innerH)
+        const callH = scaleLin(p.pain_call, 0, maxPain, 0, innerH)
+        const isMin = p.strike === maxPainStrike
+        return (
+          <g key={i}>
+            <rect x={cx - halfBar} y={y0 - putH} width={barW} height={Math.max(putH, 0.5)}
+              fill={isMin ? '#ef5350' : 'var(--color-lamp-red, #ef5350)'} opacity={isMin ? 1 : 0.72} rx={1} />
+            <rect x={cx - halfBar} y={y0 - putH - callH} width={barW} height={Math.max(callH, 0.5)}
+              fill={isMin ? '#66bb6a' : 'var(--color-lamp-green, #66bb6a)'} opacity={isMin ? 1 : 0.72} rx={1} />
+          </g>
+        )
+      })}
+
+      {Number.isFinite(mpX) && (
+        <line x1={mpX} x2={mpX} y1={pad.t - 2} y2={pad.t + innerH + 2}
+          stroke="var(--color-accent, #6ea8fe)" strokeWidth={1.5} strokeDasharray="5 3" />
+      )}
+      {ucX != null && (
+        <line x1={ucX} x2={ucX} y1={pad.t - 2} y2={pad.t + innerH + 2}
+          stroke="var(--color-text-main, #e0e0e0)" strokeWidth={1.2} strokeDasharray="2 2" />
+      )}
+
+      {xTickIdxs.map(i => {
+        const p = points[i]
+        if (!p) return null
+        const x = xForStrike(p.strike)
+        return (
+          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize="10"
+            fill="var(--color-text-dim)">{p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}</text>
+        )
+      })}
+
+      <text x={pad.l - 4} y={pad.t - 6} textAnchor="end" fontSize="9"
+        fill="var(--color-text-dim)">Seller liability ($)</text>
+
+      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize="10"
+        fill="var(--color-text-dim)">Strike</text>
     </svg>
+  )
+}
+
+function LiabilityLegend({ underlyingClose, maxPainStrike }: {
+  underlyingClose: number | null
+  maxPainStrike: number
+}) {
+  return (
+    <div className="mp-legend" role="presentation">
+      <span className="mp-legend-item">
+        <span className="mp-legend-swatch" style={{ background: 'var(--color-lamp-green, #66bb6a)' }} />
+        Call liability
+      </span>
+      <span className="mp-legend-item">
+        <span className="mp-legend-swatch" style={{ background: 'var(--color-lamp-red, #ef5350)' }} />
+        Put liability
+      </span>
+      <span className="mp-legend-item">
+        <span className="mp-legend-swatch mp-legend-line" style={{ borderColor: 'var(--color-accent, #6ea8fe)' }} />
+        Max Pain {maxPainStrike.toFixed(2)}
+      </span>
+      {underlyingClose != null && Number.isFinite(underlyingClose) && (
+        <span className="mp-legend-item">
+          <span className="mp-legend-swatch mp-legend-line" style={{ borderColor: 'var(--color-text-main, #e0e0e0)' }} />
+          Spot {underlyingClose.toFixed(2)}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -66,9 +176,9 @@ function OiBarsSvg({
   showCall: boolean
   showPut: boolean
 }) {
-  const w = 560
+  const w = 640
   const h = 180
-  const pad = { l: 44, r: 12, t: 8, b: 28 }
+  const pad = { l: 60, r: 24, t: 8, b: 36 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
   if ((!showCall && !showPut) || points.length === 0) return null
@@ -80,55 +190,57 @@ function OiBarsSvg({
     ...points.map(p => (showCall ? p.call_oi : 0) + (showPut ? p.put_oi : 0)),
   )
   const n = points.length
-  const barW = Math.max(2, innerW / Math.max(n * 2, 8))
+  const gap = Math.max(1, innerW * 0.12 / Math.max(n, 1))
+  const barW = Math.max(2, (innerW - gap * (n - 1)) / n)
+  const halfBar = barW / 2
+  const xForStrike = (s: number) => pad.l + scaleLin(s, minS, maxS, halfBar, innerW - halfBar)
+  const xTickIdxs = pickXTickIndices(n, 8)
   return (
     <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Open interest by strike">
+      <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
+        fill="var(--color-surface)" rx={4} />
       {points.flatMap((p, i) => {
-        const cx = pad.l + scaleLin(p.strike, minS, maxS, 0, innerW)
+        const cx = xForStrike(p.strike)
         const y0 = pad.t + innerH
         const out: ReactElement[] = []
-        const half = barW * 0.45
-        if (showCall && p.call_oi > 0) {
-          const bh = scaleLin(p.call_oi, 0, maxOi, 0, innerH)
-          out.push(
-            <rect
-              key={`c-${i}`}
-              x={cx - barW}
-              y={y0 - bh}
-              width={half * 2}
-              height={bh}
-              fill="var(--color-lamp-green)"
-              opacity={0.75}
-            />,
-          )
-        }
         if (showPut && p.put_oi > 0) {
           const bh = scaleLin(p.put_oi, 0, maxOi, 0, innerH)
           out.push(
-            <rect
-              key={`p-${i}`}
-              x={cx + 2}
-              y={y0 - bh}
-              width={half * 2}
-              height={bh}
-              fill="var(--color-lamp-red)"
-              opacity={0.65}
-            />,
+            <rect key={`p-${i}`} x={cx - halfBar} y={y0 - bh} width={barW} height={bh}
+              fill="var(--color-lamp-red)" opacity={0.65} rx={1} />,
+          )
+        }
+        if (showCall && p.call_oi > 0) {
+          const putH = showPut ? scaleLin(p.put_oi, 0, maxOi, 0, innerH) : 0
+          const bh = scaleLin(p.call_oi, 0, maxOi, 0, innerH)
+          out.push(
+            <rect key={`c-${i}`} x={cx - halfBar} y={y0 - putH - bh} width={barW} height={bh}
+              fill="var(--color-lamp-green)" opacity={0.75} rx={1} />,
           )
         }
         return out
       })}
-      <text x={pad.l} y={h - 6} fontSize="10" fill="var(--color-text-dim)">
-        Strike · Green=Call OI · Red=Put OI
-      </text>
+      {xTickIdxs.map(i => {
+        const p = points[i]
+        if (!p) return null
+        const x = xForStrike(p.strike)
+        return (
+          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize="10"
+            fill="var(--color-text-dim)">{p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}</text>
+        )
+      })}
+      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize="10"
+        fill="var(--color-text-dim)">Strike</text>
+      <text x={pad.l - 4} y={pad.t - 2} textAnchor="end" fontSize="9"
+        fill="var(--color-text-dim)">Open Interest</text>
     </svg>
   )
 }
 
 function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
-  const w = 560
+  const w = 640
   const h = 200
-  const pad = { l: 44, r: 44, t: 12, b: 32 }
+  const pad = { l: 60, r: 48, t: 16, b: 36 }
   const innerW = w - pad.l - pad.r
   const innerH = h - pad.t - pad.b
   if (series.length < 2) {
@@ -136,15 +248,14 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
   }
   const mp = series.map(s => s.max_pain_strike)
   const closes = series.map(s => s.underlying_close).filter((x): x is number => x != null && Number.isFinite(x))
-  const minMp = Math.min(...mp)
-  const maxMp = Math.max(...mp)
+  const allVals = [...mp, ...closes]
+  const minY = Math.min(...allVals)
+  const maxY = Math.max(...allVals)
   const hasClose = closes.length >= 2
-  const minC = hasClose ? Math.min(...closes) : 0
-  const maxC = hasClose ? Math.max(...closes) : 1
   const ptsMp = series
     .map((s, i) => {
       const x = pad.l + scaleLin(i, 0, series.length - 1, 0, innerW)
-      const y = pad.t + innerH - scaleLin(s.max_pain_strike, minMp, maxMp, 0, innerH)
+      const y = pad.t + innerH - scaleLin(s.max_pain_strike, minY, maxY, 0, innerH)
       return `${x},${y}`
     })
     .join(' ')
@@ -153,32 +264,64 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
         .map((s, i) => {
           if (s.underlying_close == null || !Number.isFinite(s.underlying_close)) return null
           const x = pad.l + scaleLin(i, 0, series.length - 1, 0, innerW)
-          const y = pad.t + innerH - scaleLin(s.underlying_close, minC, maxC, 0, innerH)
+          const y = pad.t + innerH - scaleLin(s.underlying_close, minY, maxY, 0, innerH)
           return `${x},${y}`
         })
         .filter(Boolean)
         .join(' ')
     : ''
+
+  const xTickIdxs = pickXTickIndices(series.length, 6)
+  const yTicks = 4
+  const yStep = (maxY - minY) / yTicks || 1
+
   return (
-    <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Max pain vs underlying trend">
+    <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Max pain vs underlying price trend over time">
+      <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
+        fill="var(--color-surface)" rx={4} />
+
+      {Array.from({ length: yTicks + 1 }, (_, i) => {
+        const val = minY + yStep * i
+        const y = pad.t + innerH - scaleLin(val, minY, maxY, 0, innerH)
+        return (
+          <g key={i}>
+            {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
+              stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
+            <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize="10"
+              fill="var(--color-text-dim)">{val.toFixed(1)}</text>
+          </g>
+        )
+      })}
+
       <polyline fill="none" stroke="var(--color-accent, #6ea8fe)" strokeWidth="2" points={ptsMp} />
-      {ptsC ? (
+      {ptsC && (
         <polyline fill="none" stroke="var(--color-text-muted)" strokeWidth="1.5" strokeDasharray="3 2" points={ptsC} />
-      ) : null}
-      <text x={pad.l} y={h - 8} fontSize="10" fill="var(--color-text-dim)">
-        Time (oldest → newest)
+      )}
+
+      {xTickIdxs.map(i => {
+        const s = series[i]
+        if (!s) return null
+        const x = pad.l + scaleLin(i, 0, series.length - 1, 0, innerW)
+        const label = s.trade_date.slice(5)
+        return (
+          <text key={i} x={x} y={h - 8} textAnchor="middle" fontSize="9"
+            fill="var(--color-text-dim)">{label}</text>
+        )
+      })}
+
+      <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fontSize="10" fill="var(--color-accent, #6ea8fe)">
+        Max Pain
       </text>
-      <text x={w - pad.r - 52} y={pad.t + 10} fontSize="10" fill="var(--color-accent, #6ea8fe)">
-        Max pain
-      </text>
-      {hasClose ? (
-        <text x={w - pad.r - 52} y={pad.t + 22} fontSize="10" fill="var(--color-text-muted)">
+      {hasClose && (
+        <text x={w - pad.r} y={pad.t + 22} textAnchor="end" fontSize="10" fill="var(--color-text-muted)">
           Underlying
         </text>
-      ) : null}
+      )}
     </svg>
   )
 }
+
+type MaxPainTab = 'liability' | 'oi' | 'trend'
 
 export function OptionDiscoveryMaxPainPanel({
   symbol,
@@ -193,10 +336,7 @@ export function OptionDiscoveryMaxPainPanel({
   const [hist, setHist] = useState<MaxPainHistoryPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [showPain, setShowPain] = useState(true)
-  const [showCallOi, setShowCallOi] = useState(false)
-  const [showPutOi, setShowPutOi] = useState(false)
-  const [showTrend, setShowTrend] = useState(true)
+  const [activeTab, setActiveTab] = useState<MaxPainTab>('liability')
 
   const canLoad = massiveConfigured && symbol.trim() !== '' && expiration.trim() !== ''
 
@@ -252,53 +392,35 @@ export function OptionDiscoveryMaxPainPanel({
     return null
   }
 
+  const tabs: { id: MaxPainTab; label: string }[] = [
+    { id: 'liability', label: 'Seller Liability' },
+    { id: 'oi', label: 'Open Interest' },
+    { id: 'trend', label: 'Historical Trend' },
+  ]
+
   return (
     <section className="replay-section od-max-pain-section" aria-labelledby="od-max-pain-head">
-      <h3 id="od-max-pain-head" className="od-max-pain-title">
-        Max Pain Analysis
-        <InfoTooltip text="Based on end-of-day open interest from Massive (15 min delayed source). Computed live from PostgreSQL; not read from stored report rows." />
-      </h3>
-      <p className="section-hint od-max-pain-sub">
-        Based on end-of-day open interest from Massive (15 min delayed source)
-      </p>
-
-      <div className="od-max-pain-toggles" role="group" aria-label="Chart layers">
-        <label className="od-max-pain-toggle">
-          <input type="checkbox" checked={showPain} onChange={e => setShowPain(e.target.checked)} />
-          Pain by strike
-        </label>
-        <label className="od-max-pain-toggle">
-          <input type="checkbox" checked={showCallOi} onChange={e => setShowCallOi(e.target.checked)} />
-          Call OI bars
-        </label>
-        <label className="od-max-pain-toggle">
-          <input type="checkbox" checked={showPutOi} onChange={e => setShowPutOi(e.target.checked)} />
-          Put OI bars
-        </label>
-        <label className="od-max-pain-toggle">
-          <input type="checkbox" checked={showTrend} onChange={e => setShowTrend(e.target.checked)} />
-          Historical trend
-        </label>
+      <div className="mp-header-row">
+        <h3 id="od-max-pain-head" className="od-max-pain-title">
+          Max Pain Analysis
+          <InfoTooltip text="Based on end-of-day open interest from Massive (15 min delayed source). Computed live from PostgreSQL; not read from stored report rows." />
+        </h3>
         <button type="button" className="button button-secondary button-sm" onClick={() => void load()} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>
 
       {loading && !live ? <p className="section-hint">Loading Max Pain…</p> : null}
-      {err ? (
-        <p className="msg-error" role="alert">
-          {err}
-        </p>
-      ) : null}
+      {err ? <p className="msg-error" role="alert">{err}</p> : null}
 
-      {live?.ok && live.max_pain_strike != null ? (
+      {live?.ok && live.max_pain_strike != null && (
         <div className="od-max-pain-card">
           <div className="od-max-pain-card-metric">
-            <span className="od-max-pain-card-label">Max pain strike</span>
+            <span className="od-max-pain-card-label">Max Pain</span>
             <strong>{live.max_pain_strike.toFixed(2)}</strong>
           </div>
           <div className="od-max-pain-card-metric">
-            <span className="od-max-pain-card-label">Underlying close</span>
+            <span className="od-max-pain-card-label">Spot</span>
             <strong>{live.underlying_close != null ? live.underlying_close.toFixed(2) : '—'}</strong>
           </div>
           <div className="od-max-pain-card-metric">
@@ -315,36 +437,46 @@ export function OptionDiscoveryMaxPainPanel({
             <span className="od-max-pain-card-label">OI as-of</span>
             <strong>{live.trade_date ?? '—'}</strong>
           </div>
-          {live.recent_corporate_action ? (
+          {live.recent_corporate_action && (
             <p className="od-max-pain-corp-warn" role="status">
-              Recent corporate action in DB — verify strikes and multipliers.
+              Recent corporate action — verify strikes and multipliers.
             </p>
-          ) : null}
+          )}
         </div>
-      ) : null}
+      )}
 
-      {live?.ok && points.length > 0 ? (
-        <div className="od-max-pain-charts">
-          {showPain ? (
-            <div className="od-max-pain-chart-block">
-              <h4 className="od-max-pain-chart-title">Pain by strike</h4>
-              <PainByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0} showPain={showPain} />
+      {live?.ok && points.length > 0 && (
+        <div className="mp-chart-area">
+          <div className="mp-tabs" role="tablist">
+            {tabs.map(t => (
+              <button key={t.id} type="button" role="tab" className={`mp-tab${activeTab === t.id ? ' mp-tab--active' : ''}`}
+                aria-selected={activeTab === t.id} onClick={() => setActiveTab(t.id)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'liability' && (
+            <div className="mp-chart-pane">
+              <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
+              <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
+                underlyingClose={live.underlying_close ?? null} />
             </div>
-          ) : null}
-          {showCallOi || showPutOi ? (
-            <div className="od-max-pain-chart-block">
-              <h4 className="od-max-pain-chart-title">Open interest by strike</h4>
-              <OiBarsSvg points={points} showCall={showCallOi} showPut={showPutOi} />
+          )}
+
+          {activeTab === 'oi' && (
+            <div className="mp-chart-pane">
+              <OiBarsSvg points={points} showCall showPut />
             </div>
-          ) : null}
-          {showTrend ? (
-            <div className="od-max-pain-chart-block">
-              <h4 className="od-max-pain-chart-title">Max Pain vs underlying (daily)</h4>
+          )}
+
+          {activeTab === 'trend' && (
+            <div className="mp-chart-pane">
               <TrendSvg series={hist} />
             </div>
-          ) : null}
+          )}
         </div>
-      ) : null}
+      )}
 
       <p className="od-max-pain-disclaimer">{DISCLAIMER}</p>
     </section>

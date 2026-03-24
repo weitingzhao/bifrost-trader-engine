@@ -33,6 +33,7 @@ export {
   deleteAllBarsJobs,
   trimBarsJobs,
   fetchBars,
+  fetchOptionBars,
   fetchBarStats,
   fetchMarketTradingDay,
   fetchBarsCoverage,

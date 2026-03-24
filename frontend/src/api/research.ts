@@ -189,6 +189,8 @@ export async function fetchMassiveDailyChecklist(params: {
 export interface MaxPainStrikePoint {
   strike: number
   pain: number
+  pain_call: number
+  pain_put: number
   call_oi: number
   put_oi: number
 }
@@ -241,6 +243,8 @@ export async function fetchMaxPainCompute(params: {
     pain_by_strike: pts.map((p: Record<string, unknown>) => ({
       strike: Number(p.strike),
       pain: Number(p.pain),
+      pain_call: Number(p.pain_call ?? 0),
+      pain_put: Number(p.pain_put ?? 0),
       call_oi: Number(p.call_oi ?? 0),
       put_oi: Number(p.put_oi ?? 0),
     })),

@@ -30,6 +30,7 @@ import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
 import { OptionDiscoveryMaxPainPanel } from './optionDiscovery/OptionDiscoveryMaxPainPanel'
+import { OptionDiscoveryContractChartPanel } from './optionDiscovery/OptionDiscoveryContractChartPanel'
 
 const STRIKE_COUNT_OPTIONS = [4, 6, 8, 19, 30, 'all'] as const
 type StrikeCountOption = (typeof STRIKE_COUNT_OPTIONS)[number]
@@ -239,7 +240,7 @@ function StrikeLadderOiStrikeCell({
 
 // ── P0–P3: Contract detail types & derived metric helpers ──
 
-type ContractDetailTab = 'overview' | 'liquidity' | 'risk' | 'relative'
+type ContractDetailTab = 'overview' | 'chart' | 'liquidity' | 'risk' | 'relative'
 
 interface DerivedMetrics {
   spread: number | null
@@ -1953,6 +1954,7 @@ export function OptionDiscoveryPage({
           <div className="od-detail-tabs" role="tablist">
             {([
               ['overview', 'Overview'],
+              ['chart', 'Chart'],
               ['liquidity', 'Liquidity'],
               ['risk', 'Risk'],
               ['relative', 'Relative Value'],
@@ -2041,6 +2043,18 @@ export function OptionDiscoveryPage({
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {contractDetailTab === 'chart' && selectedRow && (
+            <div className="od-detail-body">
+              <OptionDiscoveryContractChartPanel
+                symbol={selectedSymbol}
+                expiration={selectedExpiration}
+                strike={selectedRow.strike}
+                optionRight={selectedRow.right === 'P' ? 'P' : 'C'}
+                defaultBarSource={quoteSource === 'massive' ? 'massive' : 'ib'}
+              />
             </div>
           )}
 

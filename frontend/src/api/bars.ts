@@ -129,6 +129,37 @@ export async function fetchBars(symbol?: string, period = '1 D', limit = 100): P
   return r.json()
 }
 
+/** Stored option OHLC from option_day / option_min (GET /bars?asset=option). */
+export async function fetchOptionBars(params: {
+  symbol: string
+  expiry: string
+  strike: number
+  option_right: string
+  period?: string
+  limit?: number
+  source?: 'ib' | 'massive'
+}): Promise<BarsResponse & { asset?: string; source?: string; message?: string }> {
+  const exp = (params.expiry || '').trim()
+  const expNorm =
+    exp.length >= 10 && exp[4] === '-' ? `${exp.slice(0, 4)}${exp.slice(5, 7)}${exp.slice(8, 10)}` : exp.replace(/-/g, '').slice(0, 8)
+  const right = (params.option_right || 'C').trim().toUpperCase()
+  const rChar = right === 'PUT' || right === 'P' ? 'P' : 'C'
+  const q = new URLSearchParams({
+    asset: 'option',
+    symbol: params.symbol.trim().toUpperCase(),
+    expiry: expNorm,
+    strike: String(params.strike),
+    option_right: rChar,
+    period: (params.period || '1 D').trim(),
+    limit: String(params.limit ?? 200),
+  })
+  const src = params.source
+  if (src === 'ib' || src === 'massive') q.set('source', src)
+  const res = await fetch(`${API}/bars?${q}`)
+  if (!res.ok) throw new Error(res.statusText)
+  return res.json()
+}
+
 /** Bar row count in stock_day / stock_min for symbol (Data page analysis). */
 export async function fetchBarStats(symbol: string): Promise<BarStatsResponse> {
   const params = new URLSearchParams({ symbol: symbol.trim() })

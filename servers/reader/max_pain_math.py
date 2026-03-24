@@ -51,15 +51,19 @@ def compute_max_pain_curve(skmap: Dict[float, Tuple[int, int]]) -> Tuple[float, 
     best_x = strikes_sorted[0]
     best_pain: float | None = None
     for x in strikes_sorted:
-        pain = 0.0
+        pain_call = 0.0
+        pain_put = 0.0
         for s, (coi, poi) in skmap.items():
-            pain += float(coi) * max(0.0, x - s) * 100.0
-            pain += float(poi) * max(0.0, s - x) * 100.0
+            pain_call += float(coi) * max(0.0, x - s) * 100.0
+            pain_put += float(poi) * max(0.0, s - x) * 100.0
+        pain = pain_call + pain_put
         c_at, p_at = skmap.get(x, (0, 0))
         points.append(
             {
                 "strike": x,
                 "pain": pain,
+                "pain_call": pain_call,
+                "pain_put": pain_put,
                 "call_oi": int(c_at),
                 "put_oi": int(p_at),
             }
