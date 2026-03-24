@@ -446,26 +446,65 @@ function computeRelativeValue(
 }
 
 /** Parse expiration string (YYYYMMDD or YYYY-MM-DD) and return days from today. Returns "x day" / "x days". */
-function expirationDaysFromToday(expiration: string): string {
+function parseExpirationDateParts(expiration: string): { y: number; m: number; d: number } | null {
   const s = (expiration || '').trim()
-  if (!s) return '—'
-  let y = 0
-  let m = 0
-  let d = 0
+  if (!s) return null
   if (/^\d{8}$/.test(s)) {
-    y = parseInt(s.slice(0, 4), 10)
-    m = parseInt(s.slice(4, 6), 10) - 1
-    d = parseInt(s.slice(6, 8), 10)
-  } else {
-    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-    if (match) {
-      y = parseInt(match[1], 10)
-      m = parseInt(match[2], 10) - 1
-      d = parseInt(match[3], 10)
-    } else {
-      return '—'
+    return {
+      y: parseInt(s.slice(0, 4), 10),
+      m: parseInt(s.slice(4, 6), 10) - 1,
+      d: parseInt(s.slice(6, 8), 10),
     }
   }
+  const match = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  return {
+    y: parseInt(match[1], 10),
+    m: parseInt(match[2], 10) - 1,
+    d: parseInt(match[3], 10),
+  }
+}
+
+function getThirdFridayDay(year: number, month: number): number {
+  const first = new Date(year, month, 1)
+  const firstDow = first.getDay() // 0=Sun ... 5=Fri
+  const firstFriday = 1 + ((5 - firstDow + 7) % 7)
+  return firstFriday + 14
+}
+
+type ExpirationKind = 'all' | 'standard' | 'weeklies' | 'quarterlies'
+
+function classifyExpiration(expiration: string): Exclude<ExpirationKind, 'all'> {
+  const parts = parseExpirationDateParts(expiration)
+  if (!parts) return 'standard'
+  const dt = new Date(parts.y, parts.m, parts.d)
+  if (Number.isNaN(dt.getTime())) return 'standard'
+  const isFriday = dt.getDay() === 5
+  if (!isFriday) return 'standard'
+  const thirdFriday = getThirdFridayDay(parts.y, parts.m)
+  const isThirdFriday = parts.d === thirdFriday
+  if (!isThirdFriday) return 'weeklies'
+  const quarterMonths = [2, 5, 8, 11] // Mar/Jun/Sep/Dec in zero-based index
+  if (quarterMonths.includes(parts.m)) return 'quarterlies'
+  return 'standard'
+}
+
+function expirationBadge(kind: Exclude<ExpirationKind, 'all'>): string {
+  if (kind === 'weeklies') return 'W'
+  if (kind === 'quarterlies') return 'Q'
+  return ''
+}
+
+function expirationKindLabel(kind: Exclude<ExpirationKind, 'all'>): string {
+  if (kind === 'weeklies') return 'Weeklies'
+  if (kind === 'quarterlies') return 'Quarterlies'
+  return 'Standard'
+}
+
+function expirationDaysFromToday(expiration: string): string {
+  const parts = parseExpirationDateParts(expiration)
+  if (!parts) return '—'
+  const { y, m, d } = parts
   const expDate = new Date(y, m, d)
   if (Number.isNaN(expDate.getTime())) return '—'
   const today = new Date()
@@ -493,6 +532,7 @@ export function OptionDiscoveryPage({
   const [expirationsError, setExpirationsError] = useState<string | null>(null)
   const [selectedExpiration, setSelectedExpiration] = useState('')
   const [expirationsLoading, setExpirationsLoading] = useState(false)
+  const [expirationFilterKind, setExpirationFilterKind] = useState<ExpirationKind>('all')
   const [strikesLoading, setStrikesLoading] = useState(false)
   const [snapshotRows, setSnapshotRows] = useState<OptionSnapshotRow[]>([])
   const [snapshotLoading, setSnapshotLoading] = useState(false)
@@ -1251,6 +1291,10 @@ export function OptionDiscoveryPage({
   }, [selectedRow, underlyingPrice])
 
   const canLoadQuotes = selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && !snapshotLoading
+  const visibleExpirations = useMemo(() => {
+    if (expirationFilterKind === 'all') return expirations
+    return expirations.filter(exp => classifyExpiration(exp) === expirationFilterKind)
+  }, [expirations, expirationFilterKind])
 
   const showCallSide = strikeSideMode === 'all' || strikeSideMode === 'call'
   const showPutSide = strikeSideMode === 'all' || strikeSideMode === 'put'
@@ -1511,6 +1555,48 @@ export function OptionDiscoveryPage({
               ) : (
                 <div className="option-discovery-list-with-header">
                   <div className="option-discovery-list-header" aria-label="Expiration">Expiration</div>
+                  <div className="option-discovery-expiration-filters" role="group" aria-label="Expiration type filter">
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'all' ? 'active' : ''}`}
+                      onClick={() => setExpirationFilterKind('all')}
+                      aria-pressed={expirationFilterKind === 'all'}
+                      aria-label="All expirations"
+                      title="All expirations"
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'standard' ? 'active' : ''}`}
+                      onClick={() => setExpirationFilterKind('standard')}
+                      aria-pressed={expirationFilterKind === 'standard'}
+                      aria-label="Standard expirations"
+                      title="Standard expirations"
+                    >
+                      Std
+                    </button>
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'weeklies' ? 'active' : ''}`}
+                      onClick={() => setExpirationFilterKind('weeklies')}
+                      aria-pressed={expirationFilterKind === 'weeklies'}
+                      aria-label="Weekly expirations"
+                      title="Weekly expirations"
+                    >
+                      Wk
+                    </button>
+                    <button
+                      type="button"
+                      className={`option-discovery-exp-filter-btn ${expirationFilterKind === 'quarterlies' ? 'active' : ''}`}
+                      onClick={() => setExpirationFilterKind('quarterlies')}
+                      aria-pressed={expirationFilterKind === 'quarterlies'}
+                      aria-label="Quarterly expirations"
+                      title="Quarterly expirations"
+                    >
+                      Qtr
+                    </button>
+                  </div>
                   <div className="option-discovery-list-wrap">
                     <table className="option-discovery-list-table" role="grid" aria-label="Expiration list">
                       <thead>
@@ -1525,21 +1611,44 @@ export function OptionDiscoveryPage({
                         </tr>
                       </thead>
                       <tbody>
-                        {expirations.map(exp => (
-                          <tr
-                            key={exp}
-                            role="button"
-                            tabIndex={0}
-                            className={selectedExpiration === exp ? 'option-discovery-list-row-selected' : ''}
-                            onClick={() => setSelectedExpiration(exp)}
-                            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedExpiration(exp) } }}
-                            aria-label={`Select ${exp}, ${expirationDaysFromToday(exp)}`}
-                            aria-pressed={selectedExpiration === exp}
-                          >
-                            <td className="option-discovery-expiration-col-date">{exp}</td>
-                            <td className="option-discovery-expiration-days-cell">{expirationDaysFromToday(exp)}</td>
+                        {visibleExpirations.length === 0 ? (
+                          <tr>
+                            <td className="option-discovery-expiration-empty-cell" colSpan={2}>
+                              No expirations in this filter.
+                            </td>
                           </tr>
-                        ))}
+                        ) : (
+                          visibleExpirations.map(exp => {
+                            const kind = classifyExpiration(exp)
+                            const badge = expirationBadge(kind)
+                            return (
+                              <tr
+                                key={exp}
+                                role="button"
+                                tabIndex={0}
+                                className={selectedExpiration === exp ? 'option-discovery-list-row-selected' : ''}
+                                onClick={() => setSelectedExpiration(exp)}
+                                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedExpiration(exp) } }}
+                                aria-label={`Select ${exp}, ${expirationDaysFromToday(exp)}${badge ? `, ${expirationKindLabel(kind)}` : ''}`}
+                                aria-pressed={selectedExpiration === exp}
+                              >
+                                <td className="option-discovery-expiration-col-date">
+                                  <span>{exp}</span>
+                                  {badge && (
+                                    <span
+                                      className={`option-discovery-expiration-kind-badge option-discovery-expiration-kind-badge--${kind}`}
+                                      title={expirationKindLabel(kind)}
+                                      aria-label={expirationKindLabel(kind)}
+                                    >
+                                      {badge}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="option-discovery-expiration-days-cell">{expirationDaysFromToday(exp)}</td>
+                              </tr>
+                            )
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
