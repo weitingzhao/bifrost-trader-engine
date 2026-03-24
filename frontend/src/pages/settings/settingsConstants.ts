@@ -21,6 +21,12 @@ export const CONFIG_SECTIONS = [
   { id: 'settings-holidays', label: 'US market holidays', icon: 'calendar' as const },
 ] as const
 
+/** Data Coverage: Option and Stock coverage pages (sidebar group above Feed). */
+export const COVERAGE_SUBSECTIONS = [
+  { id: 'coverage-option', label: 'Option', icon: 'coverage-option' as const },
+  { id: 'coverage-stock', label: 'Stock', icon: 'coverage-stock' as const },
+] as const
+
 /** Feed: IB Stock (single link). Massive Option submenu is nested under Feed in SettingsPage. */
 export const FEED_MASSIVE_OPTION_ID = 'feed-massive-option' as const
 

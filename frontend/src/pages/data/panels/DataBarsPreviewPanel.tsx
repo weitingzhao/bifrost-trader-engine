@@ -34,8 +34,8 @@ export function DataBarsPreviewPanel({
   return (
     <section className="replay-section" aria-labelledby="data-bars-head">
       <h3 id="data-bars-head" className="page-title-with-tooltip">
-        Preview
-        <InfoTooltip text="Load bars from DB for a symbol and period. Backfill is triggered per symbol in the coverage table above (uses config default ranges)." />
+        Bars Preview
+        <InfoTooltip text="Load and display stored bars for a single symbol and period. Candlestick chart and table with the most recent bars, sorted by time." />
       </h3>
       <div className="replay-bar-symbol-row" style={{ flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
         <label htmlFor="data-bar-symbol" className="replay-bar-symbol-label">

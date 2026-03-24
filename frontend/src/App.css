@@ -12128,6 +12128,17 @@ th:has(> .coverage-pool-th-held-amt) {
   margin-top: 0;
 }
 
+.feed-massive-section-header {
+  margin: var(--space-4) 0 var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border-subtle, var(--color-border));
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .feed-massive-queue-summary {
   display: flex;
   align-items: center;

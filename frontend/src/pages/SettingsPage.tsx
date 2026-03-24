@@ -28,6 +28,7 @@ import {
   IB_CONNECTION_SUBSECTIONS,
   SETTINGS_SECTIONS,
   CONFIG_SECTIONS,
+  COVERAGE_SUBSECTIONS,
   FEED_MASSIVE_OPTION_ID,
   FEED_SUBSECTIONS,
 } from './settings/settingsConstants'
@@ -35,11 +36,8 @@ import { CAPABILITY_GROUP_LABELS } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
 import { isMassiveOptionFeedHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
 import {
-  checklistEffectiveStatusLabel,
   effectiveChecklistProjectStatus,
-  effectiveStatusToSidebarLamp,
   groupedChecklistRows,
-  massiveFeedParentLamp,
   shortServiceLabel,
   tierOkForRow,
   tradesOkForRow,
@@ -57,6 +55,8 @@ import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
+import { OptionCoveragePage } from './OptionCoveragePage'
+import { StockCoveragePage } from './StockCoveragePage'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -197,6 +197,7 @@ export function SettingsPage({
 
   const hashToSectionId = (hash: string) => {
     const h = hash ? hash.slice(1) : ''
+    if (h && h.startsWith('coverage-')) return 'settings-coverage'
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
     if (h === 'feed-celery') return 'settings-system'
@@ -218,7 +219,6 @@ export function SettingsPage({
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
   const celeryLamp = celeryMetricsFromStatus(status).celeryLamp
-  const massiveParentLamp = massiveFeedParentLamp(massiveStatus)
   const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
   const monitorLamp: 'green' | 'yellow' | 'red' = ((status?.monitor_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
   const isSystemServerActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-server'
@@ -343,6 +343,7 @@ export function SettingsPage({
       : null
 
   const isSystemSection = activeSectionId === 'settings-system'
+  const isCoverageSection = activeSectionId === 'settings-coverage'
   const isFeedSection = activeSectionId === 'settings-feed'
 
   const sidebarContent = (
@@ -434,6 +435,18 @@ export function SettingsPage({
             </div>
           </div>
           <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
+          <div className="settings-sidebar-group-label">Data Coverage</div>
+          {COVERAGE_SUBSECTIONS.map((sub) => (
+            <a
+              key={sub.id}
+              href={`#${sub.id}`}
+              className={`settings-sidebar-link ${isCoverageSection && currentHash === sub.id ? 'active' : ''}`}
+            >
+              <SettingsSectionIcon name={sub.icon} />
+              {sub.label}
+            </a>
+          ))}
+          <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
           <div className="settings-sidebar-group-label">Feed</div>
           {FEED_SUBSECTIONS.map((sub) => (
             <a
@@ -448,13 +461,7 @@ export function SettingsPage({
           <div className="settings-sidebar-group">
             <div className={`settings-sidebar-parent ${isMassiveOptionFeedActive ? 'active' : ''}`}>
               <a href={`#${FEED_MASSIVE_OPTION_ID}`} className="settings-sidebar-parent-label">
-                <span
-                  className={`title-inline-lamp lamp-icon ${massiveParentLamp}`}
-                  title="Massive Option: green = all capabilities OK, yellow = partial/tier limits, red = not configured or missing implementation"
-                  aria-hidden
-                >
-                  <SettingsSidebarLampGlyph id="massive-option" />
-                </span>
+                <SettingsSectionIcon name="feed-massive" />
                 Massive Option
               </a>
               <button
@@ -477,7 +484,7 @@ export function SettingsPage({
                     const tierOk = tierOkForRow(row, massiveStatus, configured)
                     const tradesOk = tradesOkForRow(row, massiveStatus)
                     const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
-                    const lamp = effectiveStatusToSidebarLamp(eff)
+                    const isTierLimited = eff === 'not-on-tier'
                     const anchor = feedMassiveSvcAnchorId(row.id)
                     const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
                     const childActive = currentHash === anchor || fromTab === row.id
@@ -488,8 +495,8 @@ export function SettingsPage({
                         className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
                       >
                         <span
-                          className={`title-inline-lamp lamp-icon ${lamp}`}
-                          title={checklistEffectiveStatusLabel(eff)}
+                          className={`title-inline-lamp lamp-icon ${isTierLimited ? 'tier' : 'none'}`}
+                          title={isTierLimited ? 'Not available on current plan tier' : undefined}
                           aria-hidden
                         >
                           <SettingsSidebarLampGlyph id={row.id} />
@@ -594,6 +601,12 @@ export function SettingsPage({
               consoleCardTitle="Console"
               celeryUiMode="relocated"
             />
+          )
+        ) : isCoverageSection ? (
+          currentHash === 'coverage-stock' ? (
+            <StockCoveragePage status={status} />
+          ) : (
+            <OptionCoveragePage status={status} />
           )
         ) : isFeedSection ? (
           isMassiveOptionFeedHash(currentHash) ? (

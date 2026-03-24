@@ -7,7 +7,7 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#0d1117;color:#c9d1d9;padding:28px 32px;line-height:1.5}
 h1{font-size:22px;color:#58a6ff;margin-bottom:4px;font-weight:600}
-.sub{font-size:13px;color:#8b949e;font-weight:400;margin-bottom:24px}
+.sub{font-size:13px;color:#8b949e;font-weight:400;margin-bottom:16px}
 .stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
 .stat{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:110px;text-align:center}
 .stat-val{font-size:28px;font-weight:700;color:#58a6ff}
@@ -31,11 +31,18 @@ td{padding:7px 10px;border-bottom:1px solid #21262d;vertical-align:top}
 .b-na{background:#21262d;color:#484f58}
 tr.dim td{opacity:.5}
 tr:hover td{background:#161b22}
+tr.proj td:first-child{color:#d29922}
 .ep{color:#79c0ff;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;word-break:break-all}
 .uc{max-width:260px;font-size:11px;color:#8b949e}
 .code{font-size:11px;color:#8b949e;font-family:'SF Mono',Monaco,Consolas,monospace}
 .note{font-size:11px;max-width:220px;color:#636c76}
-.legend{margin-top:20px;font-size:11px;color:#484f58;text-align:center}
+.legend{margin-top:20px;font-size:11px;color:#484f58;text-align:center}.legend a{color:#58a6ff}
+.surfaces{display:flex;gap:16px;margin-bottom:14px;font-size:12px;flex-wrap:wrap}
+.surfaces a{color:#58a6ff;text-decoration:none;border:1px solid #30363d;border-radius:6px;padding:4px 10px;background:#161b22;transition:border-color .15s}
+.surfaces a:hover{border-color:#58a6ff}
+.colmap{font-size:11px;color:#8b949e;margin-bottom:18px;line-height:1.45;max-width:920px}
+.colmap code{font-size:10px;color:#79c0ff}
+body.embed .colmap{font-size:10px;margin-bottom:10px}
 .cards{display:none;gap:12px;grid-template-columns:1fr}
 .card{border:1px solid #30363d;border-radius:10px;background:#161b22;padding:12px}
 .card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
@@ -61,11 +68,18 @@ body.embed .legend{display:none}
 </head>
 <body>
 <h1>Massive (Polygon) Options API Coverage Sheet</h1>
-<p class="sub">bifrost-trader-engine — endpoint × capability × test matrix &nbsp;|&nbsp; Generated 2026-03-23</p>
+<p class="sub">bifrost-trader-engine — same columns as <code>docs/plans/massive_api_coverage.csv</code> (Product, Section, DocPage, …)</p>
+<nav class="surfaces" aria-label="Official Massive Options documentation">
+  <a href="https://massive.com/docs/rest/options/overview#market-hours-and-timezone" target="_blank" rel="noopener">REST</a>
+  <a href="https://massive.com/docs/websocket/options/overview#market-hours-and-timezone" target="_blank" rel="noopener">WebSocket</a>
+  <a href="https://massive.com/docs/flat-files/options/overview#data-availability-and-frequency" target="_blank" rel="noopener">Flat Files</a>
+</nav>
+<p class="colmap">Classification follows Massive docs: <strong>Product</strong> = <code>REST</code> | <code>WebSocket</code> | <code>Flat Files</code> (three official surfaces) or <code>Project</code> for repo-only rows. <strong>Section</strong> = REST Quickstart six blocks for Product REST; WebSocket/Flat Files sections per <a href="https://massive.com/docs/llms.txt">llms.txt</a>. <strong>Doc page</strong> = leaf doc title. CSV column names match these headers exactly.</p>
 <div class="stats" id="stats"></div>
 <div class="filters">
-  <label>Category</label><select id="fCat"><option value="">All</option></select>
-  <label>Sub</label><select id="fSub"><option value="">All</option></select>
+  <label>Product</label><select id="fProduct"><option value="">All</option></select>
+  <label>Section</label><select id="fSection"><option value="">All</option></select>
+  <label>Doc page</label><select id="fDocPage"><option value="">All</option></select>
   <label>Status</label><select id="fStatus"><option value="">All</option></select>
   <label>Test</label><select id="fTest"><option value="">All</option></select>
   <label>Tier</label><select id="fTier"><option value="">All</option></select>
@@ -73,45 +87,45 @@ body.embed .legend{display:none}
 </div>
 <div class="wrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
 <section id="cards" class="cards" aria-label="Coverage records"></section>
-<div class="legend">CSV: docs/plans/massive_api_coverage.csv &nbsp;|&nbsp; MkDocs: Research → Massive API coverage &nbsp;|&nbsp; Official index: massive.com/docs/llms.txt</div>
+<div class="legend">Spreadsheet: <code>docs/plans/massive_api_coverage.csv</code> — columns Product, Section, DocPage match this table. &nbsp;|&nbsp; <a href="https://massive.com/docs/rest/quickstart">REST Quickstart</a> &nbsp;|&nbsp; <a href="https://massive.com/docs/llms.txt">llms.txt</a></div>
 <script>
 var DATA=[
-{cat:"REST - Options",sub:"Aggregates",ep:"GET /v2/aggs/ticker/{optionsTicker}/range/{multiplier}/{timespan}/{from}/{to}",doc:"Custom-range OHLCV bars",use:"Backfill bars → option_min; Celery aggregates/custom_bars",code:"MassiveClient.fetch_option_aggs",chk:"aggregates",status:"implemented",test:"pytest: no",tier:"starter",note:"Core pipeline. No pytest."},
-{cat:"REST - Options",sub:"Aggregates",ep:"GET /v1/open-close/{optionsTicker}/{date}",doc:"Daily OHLC + pre/after-hours",use:"Single-day summary; Celery aggregates/open_close",code:"MassiveClient.fetch_option_open_close",chk:"aggregates",status:"implemented",test:"pytest: yes",tier:"starter",note:""},
-{cat:"REST - Options",sub:"Aggregates",ep:"GET /v2/aggs/ticker/{optionsTicker}/prev",doc:"Previous day OHLC bar",use:"Quick baseline; Celery aggregates/prev",code:"MassiveClient.fetch_option_previous_day",chk:"aggregates",status:"implemented",test:"pytest: yes",tier:"starter",note:""},
-{cat:"REST - Options",sub:"Contracts",ep:"GET /v3/reference/options/contracts",doc:"Paginated index of all option contracts",use:"Contracts List tab + expirations/strikes resolution; supports filters and summary evidence",code:"MassiveClient.fetch_option_contracts_list + fetch_expirations_and_strikes",chk:"contracts",status:"implemented",test:"pytest: no",tier:"starter",note:"Implemented in Massive Option Contracts section."},
-{cat:"REST - Options",sub:"Contracts",ep:"GET /v3/reference/options/contracts/{options_ticker}",doc:"Single contract detail (type/style/expiry/strike)",use:"Contracts Detail tab in Massive Option page; returns metadata for one options ticker",code:"MassiveClient.fetch_option_contract_detail + run_massive_job(kind=contracts, mode=detail)",chk:"contracts",status:"implemented",test:"pytest: no",tier:"starter",note:"Implemented with Celery contracts detail mode."},
-{cat:"REST - Options",sub:"Market Ops",ep:"GET /v3/reference/conditions",doc:"Unified trade/quote condition codes",use:"MassiveClient.fetch_market_conditions → GET /research/massive/market-ops/conditions",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Conditions tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query with asset_class/data_type filters."},
-{cat:"REST - Options",sub:"Market Ops",ep:"GET /v3/reference/exchanges",doc:"List of exchanges with IDs/names/MICs",use:"MassiveClient.fetch_market_exchanges → GET /research/massive/market-ops/exchanges",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Exchanges tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query with asset_class/locale filters."},
-{cat:"REST - Options",sub:"Market Ops",ep:"GET /v3/reference/market/holidays",doc:"Upcoming market holidays",use:"MassiveClient.fetch_market_holidays → GET /research/massive/market-ops/holidays",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Market Holidays tab",status:"implemented",test:"N/A",tier:"starter",note:"Includes side-by-side comparison with local reference_us_holidays."},
-{cat:"REST - Options",sub:"Market Ops",ep:"GET /v3/reference/market/status",doc:"Current market trading status",use:"MassiveClient.fetch_market_status → GET /research/massive/market-ops/status",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Market Status tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query; displays status cards for all markets."},
-{cat:"REST - Options",sub:"Snapshots",ep:"GET /v3/snapshot/options/{underlyingAsset}",doc:"Full option chain snapshot: greeks/IV/quotes/OI",use:"Chain → option_contracts + option_snapshots; Celery snapshot/chain",code:"MassiveClient.fetch_options_snapshot",chk:"snapshot",status:"implemented",test:"pytest: no",tier:"starter",note:"Core pipeline. High-priority test gap."},
-{cat:"REST - Options",sub:"Snapshots",ep:"GET /v3/snapshot/options/{underlyingAsset}/{optionContract}",doc:"Single-contract snapshot",use:"Per-contract detail; Celery snapshot/contract",code:"MassiveClient.fetch_option_contract_snapshot",chk:"snapshot",status:"implemented",test:"pytest: no",tier:"starter",note:""},
-{cat:"REST - Options",sub:"Snapshots",ep:"GET /v3/snapshot",doc:"Unified cross-asset snapshot",use:"Multi-asset query; Celery snapshot/unified",code:"MassiveClient.fetch_unified_snapshot",chk:"snapshot",status:"implemented",test:"pytest: no",tier:"starter",note:""},
-{cat:"REST - Options",sub:"Technical Indicators",ep:"GET /v1/indicators/sma/{optionsTicker}",doc:"Simple Moving Average",use:"MassiveClient._fetch_indicator('sma') → GET /research/massive/technical-indicators/sma/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → SMA tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; supports option tickers (O: prefix) and stock tickers."},
-{cat:"REST - Options",sub:"Technical Indicators",ep:"GET /v1/indicators/ema/{optionsTicker}",doc:"Exponential Moving Average",use:"MassiveClient._fetch_indicator('ema') → GET /research/massive/technical-indicators/ema/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → EMA tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; weights recent prices more heavily than SMA."},
-{cat:"REST - Options",sub:"Technical Indicators",ep:"GET /v1/indicators/macd/{optionsTicker}",doc:"MACD indicator",use:"MassiveClient.fetch_indicator_macd → GET /research/massive/technical-indicators/macd/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → MACD tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; customizable short/long/signal windows."},
-{cat:"REST - Options",sub:"Technical Indicators",ep:"GET /v1/indicators/rsi/{optionsTicker}",doc:"Relative Strength Index",use:"MassiveClient._fetch_indicator('rsi') → GET /research/massive/technical-indicators/rsi/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → RSI tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; 0-100 scale (>70 overbought / <30 oversold)."},
-{cat:"REST - Options",sub:"Trades & Quotes",ep:"GET /v2/last/trade/{optionsTicker}",doc:"Most recent trade for a contract",use:"MassiveClient.fetch_last_trade → GET /research/massive/trades-quotes/last-trade/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"trades-quotes",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query; available on Starter tier."},
-{cat:"REST - Options",sub:"Trades & Quotes",ep:"GET /v3/quotes/{optionsTicker}",doc:"Historical BBO quotes for a contract",use:"MassiveClient.fetch_option_quotes → GET /research/massive/trades-quotes/quotes/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"trades-quotes",status:"implemented",test:"N/A",tier:"starter",note:"Read-only query with timestamp range and pagination."},
-{cat:"REST - Options",sub:"Trades & Quotes",ep:"GET /v3/trades/{optionsTicker}",doc:"Tick-level trade data for a contract",use:"MassiveClient.fetch_option_trades → GET /research/massive/trades-quotes/trades/{ticker}; gated by trades_enabled",code:"servers/massive_client.py + servers/routers/research.py",chk:"trades-quotes",status:"implemented",test:"N/A",tier:"developer",note:"Gated by massive.features.trades_enabled. 403 when trades disabled."},
-{cat:"REST - Stocks",sub:"Corporate Actions",ep:"GET /v3/reference/dividends → /stocks/v1/dividends",doc:"Cash dividend distributions",use:"Sync dividends → massive_corporate_action; Celery corporate_action",code:"MassiveClient.fetch_dividends",chk:"corporate-actions",status:"implemented",test:"pytest: no",tier:"starter",note:"Uses deprecated /v3 path. Migrate to /stocks/v1."},
-{cat:"REST - Stocks",sub:"Corporate Actions",ep:"GET /v3/reference/splits → /stocks/v1/splits",doc:"Stock split events and ratios",use:"Sync splits → massive_corporate_action; Celery corporate_action",code:"MassiveClient.fetch_splits",chk:"corporate-actions",status:"implemented",test:"pytest: no",tier:"starter",note:"Uses deprecated /v3 path. Migrate to /stocks/v1."},
-{cat:"WebSocket",sub:"Aggregates/s",ep:"wss://…/options  A.O:{ticker}",doc:"Stream per-second OHLCV",use:"Verified by verify script; no persistent bridge",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"starter",note:"WS ingest → Redis → SSE not built (phase 2)."},
-{cat:"WebSocket",sub:"Aggregates/m",ep:"wss://…/options  AM.O:{ticker}",doc:"Stream per-minute OHLCV",use:"Verified by verify script",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"starter",note:""},
-{cat:"WebSocket",sub:"Quotes",ep:"wss://…/options  Q.O:{ticker}",doc:"Stream BBO quotes",use:"Default channel in verify script",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"starter",note:"Delayed on Starter."},
-{cat:"WebSocket",sub:"Trades",ep:"wss://…/options  T.O:{ticker}",doc:"Stream tick-level trades",use:"In verify script; not verified on Starter",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"developer",note:""},
-{cat:"WebSocket",sub:"FMV",ep:"wss://…/options  FMV.O:{ticker}",doc:"Stream Fair Market Value",use:"FMV section in Massive Option page; WS verify command entry point",code:"verify_massive_options_ws.py + FeedMassiveOptionPage FMV section",chk:"fmv",status:"partial",test:"manual: copy FMV verify cmd from UI",tier:"business",note:"Business plan only. Verify entry point implemented; no engine persistence."},
-{cat:"Flat Files",sub:"Day Aggs",ep:"S3 flat file download",doc:"Daily OHLCV all US options",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-day-aggs",status:"not-implemented",test:"N/A",tier:"starter",note:"Visible but not yet integrated."},
-{cat:"Flat Files",sub:"Minute Aggs",ep:"S3 flat file download",doc:"Minute OHLCV all US options",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-minute-aggs",status:"not-implemented",test:"N/A",tier:"starter",note:"Visible but not yet integrated."},
-{cat:"Flat Files",sub:"Quotes",ep:"S3 flat file download",doc:"Top-of-book quotes",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-quotes",status:"not-implemented",test:"N/A",tier:"starter",note:"Visible but not yet integrated."},
-{cat:"Flat Files",sub:"Trades",ep:"S3 flat file download",doc:"Tick-level trades",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-trades",status:"not-implemented",test:"N/A",tier:"developer",note:"Developer tier required. Visible but not yet integrated."},
-{cat:"Infrastructure",sub:"Celery Queue",ep:"(internal)",doc:"Dedicated massive Celery queue",use:"Queue summary in Massive Option header; details in Celery page",code:"massive_tasks.py + research router",chk:"(header summary)",status:"implemented",test:"pytest: no",tier:"starter",note:"Removed as standalone capability; shown as header summary."},
-{cat:"Infrastructure",sub:"Greeks / IV",ep:"(derived)",doc:"Greeks + IV coverage workflow (chain/contract/unified + DB verify)",use:"Greeks / IV section with four tabs, coverage API, and quality summary metrics",code:"fetch_options_snapshot + fetch_option_contract_snapshot + fetch_unified_snapshot + /research/massive/greeks-coverage",chk:"greeks-iv",status:"implemented",test:"pytest: no",tier:"starter",note:"Implemented capability; provider may still omit greeks for some contracts."},
-{cat:"Infrastructure",sub:"Daily OI",ep:"(derived)",doc:"OI per contract from chain snapshot",use:"Snapshot includes open_interest; standalone OI job placeholder",code:"run_massive_job (kind=oi)",chk:"daily-oi",status:"partial",test:"pytest: no",tier:"starter",note:"OI in option_snapshots; dedicated backfill not wired."}
+{product:"REST",section:"Contracts",docPage:"All Contracts",ep:"GET /v3/reference/options/contracts",doc:"Paginated index of all option contracts",use:"Contracts List tab + expirations/strikes resolution; supports filters and summary evidence",code:"MassiveClient.fetch_option_contracts_list + fetch_expirations_and_strikes",chk:"contracts",status:"implemented",test:"pytest: no",tier:"starter",note:"Implemented in Massive Option Contracts section.",proj:false},
+{product:"REST",section:"Contracts",docPage:"Contract Overview",ep:"GET /v3/reference/options/contracts/{options_ticker}",doc:"Single contract detail (type/style/expiry/strike)",use:"Contracts Detail tab in Massive Option page; returns metadata for one options ticker",code:"MassiveClient.fetch_option_contract_detail + run_massive_job(kind=contracts, mode=detail)",chk:"contracts",status:"implemented",test:"pytest: no",tier:"starter",note:"Implemented with Celery contracts detail mode.",proj:false},
+{product:"REST",section:"Aggregate Bars (OHLC)",docPage:"Custom Bars (OHLC)",ep:"GET /v2/aggs/ticker/{optionsTicker}/range/{multiplier}/{timespan}/{from}/{to}",doc:"Custom-range OHLCV bars",use:"Backfill bars → option_min; Celery aggregates/custom_bars",code:"MassiveClient.fetch_option_aggs",chk:"aggregates",status:"implemented",test:"pytest: no",tier:"starter",note:"Core pipeline. No pytest.",proj:false},
+{product:"REST",section:"Aggregate Bars (OHLC)",docPage:"Daily Ticker Summary (OHLC)",ep:"GET /v1/open-close/{optionsTicker}/{date}",doc:"Daily OHLC + pre/after-hours",use:"Single-day summary; Celery aggregates/open_close",code:"MassiveClient.fetch_option_open_close",chk:"aggregates",status:"implemented",test:"pytest: yes",tier:"starter",note:"",proj:false},
+{product:"REST",section:"Aggregate Bars (OHLC)",docPage:"Previous Day Bar (OHLC)",ep:"GET /v2/aggs/ticker/{optionsTicker}/prev",doc:"Previous day OHLC bar",use:"Quick baseline; Celery aggregates/prev",code:"MassiveClient.fetch_option_previous_day",chk:"aggregates",status:"implemented",test:"pytest: yes",tier:"starter",note:"",proj:false},
+{product:"REST",section:"Snapshots",docPage:"Option Chain Snapshot",ep:"GET /v3/snapshot/options/{underlyingAsset}",doc:"Full option chain snapshot: greeks/IV/quotes/OI",use:"Chain → option_contracts + option_snapshots; Celery snapshot/chain",code:"MassiveClient.fetch_options_snapshot",chk:"snapshot",status:"implemented",test:"pytest: no",tier:"starter",note:"Core pipeline. High-priority test gap.",proj:false},
+{product:"REST",section:"Snapshots",docPage:"Option Contract Snapshot",ep:"GET /v3/snapshot/options/{underlyingAsset}/{optionContract}",doc:"Single-contract snapshot",use:"Per-contract detail; Celery snapshot/contract",code:"MassiveClient.fetch_option_contract_snapshot",chk:"snapshot",status:"implemented",test:"pytest: no",tier:"starter",note:"",proj:false},
+{product:"REST",section:"Snapshots",docPage:"Unified Snapshot",ep:"GET /v3/snapshot",doc:"Unified cross-asset snapshot",use:"Multi-asset query; Celery snapshot/unified",code:"MassiveClient.fetch_unified_snapshot",chk:"snapshot",status:"implemented",test:"pytest: no",tier:"starter",note:"",proj:false},
+{product:"REST",section:"Trade & Quotes",docPage:"Last Trade",ep:"GET /v2/last/trade/{optionsTicker}",doc:"Most recent trade for a contract",use:"MassiveClient.fetch_last_trade → GET /research/massive/trades-quotes/last-trade/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"trades-quotes",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query; available on Starter tier.",proj:false},
+{product:"REST",section:"Trade & Quotes",docPage:"Quotes",ep:"GET /v3/quotes/{optionsTicker}",doc:"Historical BBO quotes for a contract",use:"MassiveClient.fetch_option_quotes → GET /research/massive/trades-quotes/quotes/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"trades-quotes",status:"implemented",test:"N/A",tier:"starter",note:"Read-only query with timestamp range and pagination.",proj:false},
+{product:"REST",section:"Trade & Quotes",docPage:"Trades",ep:"GET /v3/trades/{optionsTicker}",doc:"Tick-level trade data for a contract",use:"MassiveClient.fetch_option_trades → GET /research/massive/trades-quotes/trades/{ticker}; gated by trades_enabled",code:"servers/massive_client.py + servers/routers/research.py",chk:"trades-quotes",status:"implemented",test:"N/A",tier:"developer",note:"Gated by massive.features.trades_enabled. 403 when trades disabled.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Simple Moving Average (SMA)",ep:"GET /v1/indicators/sma/{optionsTicker}",doc:"Simple Moving Average",use:"MassiveClient._fetch_indicator('sma') → GET /research/massive/technical-indicators/sma/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → SMA tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; supports option tickers (O: prefix) and stock tickers.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Exponential Moving Average (EMA)",ep:"GET /v1/indicators/ema/{optionsTicker}",doc:"Exponential Moving Average",use:"MassiveClient._fetch_indicator('ema') → GET /research/massive/technical-indicators/ema/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → EMA tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; weights recent prices more heavily than SMA.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Moving Average Convergence/Divergence (MACD)",ep:"GET /v1/indicators/macd/{optionsTicker}",doc:"MACD indicator",use:"MassiveClient.fetch_indicator_macd → GET /research/massive/technical-indicators/macd/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → MACD tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; customizable short/long/signal windows.",proj:false},
+{product:"REST",section:"Technical Indicators",docPage:"Relative Strength Index (RSI)",ep:"GET /v1/indicators/rsi/{optionsTicker}",doc:"Relative Strength Index",use:"MassiveClient._fetch_indicator('rsi') → GET /research/massive/technical-indicators/rsi/{ticker}",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Technical Indicators → RSI tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only; 0-100 scale (>70 overbought / <30 oversold).",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Condition Codes",ep:"GET /v3/reference/conditions",doc:"Unified trade/quote condition codes",use:"MassiveClient.fetch_market_conditions → GET /research/massive/market-ops/conditions",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Conditions tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query with asset_class/data_type filters.",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Exchanges",ep:"GET /v3/reference/exchanges",doc:"List of exchanges with IDs/names/MICs",use:"MassiveClient.fetch_market_exchanges → GET /research/massive/market-ops/exchanges",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Exchanges tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query with asset_class/locale filters.",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Market Holidays",ep:"GET /v3/reference/market/holidays",doc:"Upcoming market holidays",use:"MassiveClient.fetch_market_holidays → GET /research/massive/market-ops/holidays",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Market Holidays tab",status:"implemented",test:"N/A",tier:"starter",note:"Includes side-by-side comparison with local reference_us_holidays.",proj:false},
+{product:"REST",section:"Market Operations",docPage:"Market Status",ep:"GET /v3/reference/market/status",doc:"Current market trading status",use:"MassiveClient.fetch_market_status → GET /research/massive/market-ops/status",code:"servers/massive_client.py + servers/routers/research.py",chk:"FeedMassiveOptionPage Market Ops → Market Status tab",status:"implemented",test:"N/A",tier:"starter",note:"Read-only real-time query; displays status cards for all markets.",proj:false},
+{product:"WebSocket",section:"Aggregates (Per Second)",docPage:"Aggregates (Per Second)",ep:"wss://…/options  A.O:{ticker}",doc:"Stream per-second OHLCV",use:"Verified by verify script; no persistent bridge",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"starter",note:"WS ingest → Redis → SSE not built (phase 2).",proj:false},
+{product:"WebSocket",section:"Aggregates (Per Minute)",docPage:"Aggregates (Per Minute)",ep:"wss://…/options  AM.O:{ticker}",doc:"Stream per-minute OHLCV",use:"Verified by verify script",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"starter",note:"",proj:false},
+{product:"WebSocket",section:"Quotes",docPage:"Quotes",ep:"wss://…/options  Q.O:{ticker}",doc:"Stream BBO quotes",use:"Default channel in verify script",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"starter",note:"Delayed on Starter.",proj:false},
+{product:"WebSocket",section:"Trades",docPage:"Trades",ep:"wss://…/options  T.O:{ticker}",doc:"Stream tick-level trades",use:"In verify script; not verified on Starter",code:"verify_massive_options_ws.py",chk:"websocket",status:"partial",test:"script",tier:"developer",note:"",proj:false},
+{product:"WebSocket",section:"Fair Market Value",docPage:"Fair Market Value",ep:"wss://…/options  FMV.O:{ticker}",doc:"Stream Fair Market Value",use:"FMV section in Massive Option page; WS verify command entry point",code:"verify_massive_options_ws.py + FeedMassiveOptionPage FMV section",chk:"fmv",status:"partial",test:"manual: copy FMV verify cmd from UI",tier:"business",note:"Business plan only. Verify entry point implemented; no engine persistence.",proj:false},
+{product:"Flat Files",section:"Day Aggregates",docPage:"Day Aggregates",ep:"S3 flat file download",doc:"Daily OHLCV all US options",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-day-aggs",status:"not-implemented",test:"N/A",tier:"starter",note:"Visible but not yet integrated.",proj:false},
+{product:"Flat Files",section:"Minute Aggregates",docPage:"Minute Aggregates",ep:"S3 flat file download",doc:"Minute OHLCV all US options",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-minute-aggs",status:"not-implemented",test:"N/A",tier:"starter",note:"Visible but not yet integrated.",proj:false},
+{product:"Flat Files",section:"Quotes",docPage:"Quotes",ep:"S3 flat file download",doc:"Top-of-book quotes",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-quotes",status:"not-implemented",test:"N/A",tier:"starter",note:"Visible but not yet integrated.",proj:false},
+{product:"Flat Files",section:"Trades",docPage:"Trades",ep:"S3 flat file download",doc:"Tick-level trades",use:"Flat Files section placeholder",code:"FeedMassiveOptionPage Flat Files panel",chk:"flat-file-trades",status:"not-implemented",test:"N/A",tier:"developer",note:"Developer tier required. Visible but not yet integrated.",proj:false},
+{product:"Project",section:"Corporate actions",docPage:"Dividends",ep:"GET /v3/reference/dividends → /stocks/v1/dividends",doc:"Cash dividend distributions",use:"Sync dividends → massive_corporate_action; Celery corporate_action",code:"MassiveClient.fetch_dividends",chk:"corporate-actions",status:"implemented",test:"pytest: no",tier:"starter",note:"Not under Massive Options taxonomy; Stocks REST sync.",proj:true},
+{product:"Project",section:"Corporate actions",docPage:"Splits",ep:"GET /v3/reference/splits → /stocks/v1/splits",doc:"Stock split events and ratios",use:"Sync splits → massive_corporate_action; Celery corporate_action",code:"MassiveClient.fetch_splits",chk:"corporate-actions",status:"implemented",test:"pytest: no",tier:"starter",note:"Not under Massive Options taxonomy; Stocks REST sync.",proj:true},
+{product:"Project",section:"Infrastructure",docPage:"Celery queue",ep:"(internal)",doc:"Dedicated massive Celery queue",use:"Queue summary in Massive Option header; details in Celery page",code:"massive_tasks.py + research router",chk:"(header summary)",status:"implemented",test:"pytest: no",tier:"starter",note:"Project-only; not a Massive API surface.",proj:true},
+{product:"Project",section:"Infrastructure",docPage:"Greeks / IV",ep:"(derived)",doc:"Greeks + IV coverage workflow",use:"Greeks / IV section with four tabs, coverage API, and quality summary metrics",code:"fetch_options_snapshot + fetch_option_contract_snapshot + fetch_unified_snapshot + /research/massive/greeks-coverage",chk:"greeks-iv",status:"implemented",test:"pytest: no",tier:"starter",note:"Project-only derived workflow.",proj:true},
+{product:"Project",section:"Infrastructure",docPage:"Daily open interest",ep:"(derived)",doc:"OI per contract from chain snapshot",use:"Snapshot includes open_interest; standalone OI job placeholder",code:"run_massive_job (kind=oi)",chk:"daily-oi",status:"partial",test:"pytest: no",tier:"starter",note:"Project-only placeholder.",proj:true}
 ];
 
-var headers=["Category","Sub","Endpoint","Summary","Use Case","Code Location","Checklist","Status","Test","Tier","Notes"];
+var headers=["Product","Section","Doc page","Endpoint","Summary","Use Case","Code Location","Checklist","Status","Test","Tier","Notes"];
 
 function badge(t,cls){return '<span class="badge '+cls+'">'+t+'</span>'}
 function statusBadge(s){
@@ -132,13 +146,14 @@ function render(data){
   data.forEach(function(r){
     var tr=document.createElement("tr");
     if(r.status==="not-implemented") tr.className="dim";
-    tr.innerHTML='<td>'+r.cat+'</td><td>'+r.sub+'</td><td class="ep">'+r.ep+'</td><td>'+r.doc+'</td><td class="uc">'+r.use+'</td><td class="code">'+r.code+'</td><td>'+(r.chk==="--"?"":r.chk)+'</td><td>'+statusBadge(r.status)+'</td><td>'+testBadge(r.test)+'</td><td>'+r.tier+'</td><td class="note">'+r.note+'</td>';
+    if(r.proj) tr.className=(tr.className?tr.className+" ":"")+"proj";
+    tr.innerHTML='<td>'+r.product+'</td><td>'+r.section+'</td><td>'+r.docPage+'</td><td class="ep">'+r.ep+'</td><td>'+r.doc+'</td><td class="uc">'+r.use+'</td><td class="code">'+r.code+'</td><td>'+(r.chk==="--"?"":r.chk)+'</td><td>'+statusBadge(r.status)+'</td><td>'+testBadge(r.test)+'</td><td>'+r.tier+'</td><td class="note">'+r.note+'</td>';
     tb.appendChild(tr);
 
     var card=document.createElement("article");
     card.className='card'+(r.status==="not-implemented"?' dim':'');
     card.innerHTML=
-      '<div class="card-head"><div class="card-title">'+r.cat+' / '+r.sub+'</div><div>'+statusBadge(r.status)+'</div></div>'+
+      '<div class="card-head"><div class="card-title">'+r.product+' · '+r.section+' · '+r.docPage+'</div><div>'+statusBadge(r.status)+'</div></div>'+
       '<div class="kv">'+
       '<div class="k">Endpoint</div><div class="v ep">'+r.ep+'</div>'+
       '<div class="k">Summary</div><div class="v">'+r.doc+'</div>'+
@@ -172,22 +187,23 @@ function updateStats(data){
 }
 
 function initFilters(){
-  var cats={},subs={},statuses={},tests={},tiers={};
-  DATA.forEach(function(r){ cats[r.cat]=1; subs[r.sub]=1; statuses[r.status]=1; tests[r.test]=1; tiers[r.tier]=1; });
+  var prods={},sects={},docPages={},statuses={},tests={},tiers={};
+  DATA.forEach(function(r){ prods[r.product]=1; sects[r.section]=1; docPages[r.docPage]=1; statuses[r.status]=1; tests[r.test]=1; tiers[r.tier]=1; });
   function fill(id,obj){var el=document.getElementById(id);Object.keys(obj).sort().forEach(function(k){var o=document.createElement("option");o.value=k;o.textContent=k;el.appendChild(o)})}
-  fill("fCat",cats); fill("fSub",subs); fill("fStatus",statuses); fill("fTest",tests); fill("fTier",tiers);
+  fill("fProduct",prods); fill("fSection",sects); fill("fDocPage",docPages); fill("fStatus",statuses); fill("fTest",tests); fill("fTier",tiers);
 }
 
 function applyFilters(){
-  var c=document.getElementById("fCat").value;
-  var su=document.getElementById("fSub").value;
+  var p=document.getElementById("fProduct").value;
+  var se=document.getElementById("fSection").value;
+  var dp=document.getElementById("fDocPage").value;
   var s=document.getElementById("fStatus").value;
   var t=document.getElementById("fTest").value;
   var ti=document.getElementById("fTier").value;
   var q=document.getElementById("fSearch").value.toLowerCase();
   var f=DATA.filter(function(r){
-    return (!c||r.cat===c)&&(!su||r.sub===su)&&(!s||r.status===s)&&(!t||r.test===t)&&(!ti||r.tier===ti)&&
-      (!q||r.ep.toLowerCase().indexOf(q)>=0||r.doc.toLowerCase().indexOf(q)>=0||r.use.toLowerCase().indexOf(q)>=0||r.code.toLowerCase().indexOf(q)>=0);
+    return (!p||r.product===p)&&(!se||r.section===se)&&(!dp||r.docPage===dp)&&(!s||r.status===s)&&(!t||r.test===t)&&(!ti||r.tier===ti)&&
+      (!q||r.ep.toLowerCase().indexOf(q)>=0||r.doc.toLowerCase().indexOf(q)>=0||r.use.toLowerCase().indexOf(q)>=0||r.code.toLowerCase().indexOf(q)>=0||r.docPage.toLowerCase().indexOf(q)>=0||r.product.toLowerCase().indexOf(q)>=0||r.section.toLowerCase().indexOf(q)>=0);
   });
   render(f);
 }
@@ -198,7 +214,7 @@ if(new URLSearchParams(window.location.search).get("embed")==="1"){
 document.getElementById("thead").innerHTML='<tr>'+headers.map(function(h){return '<th>'+h+'</th>'}).join("")+'</tr>';
 initFilters();
 render(DATA);
-["fCat","fSub","fStatus","fTest","fTier"].forEach(function(id){document.getElementById(id).onchange=applyFilters});
+["fProduct","fSection","fDocPage","fStatus","fTest","fTier"].forEach(function(id){document.getElementById(id).onchange=applyFilters});
 document.getElementById("fSearch").oninput=applyFilters;
 </script>
 </body>

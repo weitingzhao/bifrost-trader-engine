@@ -55,8 +55,8 @@ export function DataJobsPanel({
   return (
     <section className="replay-section" aria-labelledby="data-jobs-head">
       <h3 id="data-jobs-head" className="page-title-with-tooltip">
-        Celery jobs
-        <InfoTooltip text="Recent bars backfill tasks sent to Celery. Each row = one period (1 D, 1 min, 5 mins, 1 hour). Check here to see if 1 hour or other periods were queued and their status." />
+        Job Queue
+        <InfoTooltip text="View and manage Celery backfill job history. Filter by status, sort by job ID / status / created / updated. Each row represents one symbol-period backfill task." />
       </h3>
       <div className="replay-toolbar data-jobs-toolbar" style={{ marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
         <div className="data-jobs-status-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

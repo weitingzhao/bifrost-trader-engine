@@ -24,7 +24,6 @@ export type SettingsSidebarLampGlyphId =
   | 'reference'
   | 'snapshot'
   | 'aggregates'
-  | 'greeks-iv'
   | 'daily-oi'
   | 'trades-quotes'
   | 'corporate-actions'
@@ -112,14 +111,6 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
           <line x1="18" y1="20" x2="18" y2="10" />
           <line x1="12" y1="20" x2="12" y2="4" />
           <line x1="6" y1="20" x2="6" y2="14" />
-        </svg>
-      )
-    /** Greeks / IV verify: check on circle */
-    case 'greeks-iv':
-      return (
-        <svg {...SVG_COMMON}>
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-          <polyline points="22 4 12 14.01 9 11.01" />
         </svg>
       )
     /** Daily OI: gauge / meter */

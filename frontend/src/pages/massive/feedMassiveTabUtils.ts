@@ -22,7 +22,7 @@ export function parseFeedMassiveSvcFromHash(hash: string): string | null {
   return null
 }
 
-export const FEED_MASSIVE_DEFAULT_TAB_ID = 'reference'
+export const FEED_MASSIVE_DEFAULT_TAB_ID = 'contracts'
 
 const FEED_MASSIVE_OPTION_PAGE = 'feed-massive-option'
 

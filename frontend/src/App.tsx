@@ -9,8 +9,6 @@ import {
   subscribeQuotes,
   fetchBarsBenchmark,
   fetchBarsJobs,
-  fetchMassiveStatus,
-  type MassiveStatusResponse,
 } from './api'
 import { postStop } from './api/control'
 import { postMonitorStop, postCeleryStop } from './api/monitor'
@@ -36,8 +34,6 @@ import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
 import { isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
-import { massiveFeedParentLamp } from './pages/massive/massiveChecklistStatus'
-import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGlyphs'
 import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
@@ -210,9 +206,6 @@ export default function App() {
   /** Celery bars worker queue counts (polled every 3s for dashboard) */
   const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
   const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
-  /** Same source as Settings → Feed → Massive Option parent lamp (poll 20s). */
-  const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
-  const massiveParentLamp = useMemo(() => massiveFeedParentLamp(massiveStatus), [massiveStatus])
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
 
@@ -222,7 +215,7 @@ export default function App() {
     if (!h) return 'system'
     const hashNorm = hash.startsWith('#') ? hash : `#${hash}`
     if (isMassiveOptionFeedHash(hashNorm)) return 'massive'
-    if (h.startsWith('settings-system') || h.startsWith('feed-')) return 'system'
+    if (h.startsWith('settings-system') || h.startsWith('feed-') || h.startsWith('coverage-')) return 'system'
     return 'config'
   }, [])
   const [settingsViewSection, setSettingsViewSection] = useState<'system' | 'config' | 'massive' | null>(null)
@@ -370,25 +363,6 @@ export default function App() {
     const t = setInterval(pollWorkerJobs, 3000)
     return () => clearInterval(t)
   }, [isDetailMode])
-
-  useEffect(() => {
-    let cancelled = false
-    const load = () => {
-      fetchMassiveStatus()
-        .then((s) => {
-          if (!cancelled) setMassiveStatus(s)
-        })
-        .catch(() => {
-          if (!cancelled) setMassiveStatus(null)
-        })
-    }
-    load()
-    const t = window.setInterval(load, 20000)
-    return () => {
-      cancelled = true
-      window.clearInterval(t)
-    }
-  }, [])
 
   useEffect(() => {
     if (isDetailMode) return
@@ -1180,13 +1154,11 @@ export default function App() {
                 }}
                 title="Settings → Feed → Massive Option"
               >
-                <span
-                  className={`app-header-menu-massive-lamp title-inline-lamp lamp-icon ${massiveParentLamp}`}
-                  title="Massive Option: green = all capabilities OK, yellow = partial/tier limits, red = not configured or missing implementation"
-                  aria-hidden
-                >
-                  <SettingsSidebarLampGlyph id="massive-option" />
-                </span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+                  <path d="M3 3v18h18" />
+                  <path d="m7 16 3-4 3 2 5-8 3 4" />
+                  <path d="M17 8h4v4" />
+                </svg>
                 Massive Option
               </button>
               <button

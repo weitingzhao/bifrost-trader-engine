@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>IB Stock API Coverage — bifrost-trader-engine</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#0d1117;color:#c9d1d9;padding:28px 32px;line-height:1.5}
+h1{font-size:22px;color:#58a6ff;margin-bottom:4px;font-weight:600}
+.sub{font-size:13px;color:#8b949e;font-weight:400;margin-bottom:16px}
+.stats{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.stat{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 18px;min-width:110px;text-align:center}
+.stat-val{font-size:28px;font-weight:700;color:#58a6ff}
+.stat-lbl{font-size:11px;color:#8b949e;margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+.filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filters label{font-size:11px;color:#8b949e;margin-right:2px}
+.filters select,.filters input{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:12px;font-family:inherit}
+.filters select:focus,.filters input:focus{outline:none;border-color:#58a6ff}
+.wrap{overflow-x:auto;border:1px solid #30363d;border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead{position:sticky;top:0;z-index:2}
+th{background:#161b22;color:#8b949e;font-weight:600;padding:9px 10px;text-align:left;border-bottom:2px solid #30363d;font-size:10px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #21262d;vertical-align:top}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;letter-spacing:.3px;white-space:nowrap}
+.b-impl{background:#0d419d;color:#58a6ff}
+.b-part{background:#462c00;color:#d29922}
+.b-noimpl{background:#21262d;color:#636c76}
+.b-na{background:#21262d;color:#484f58}
+tr.dim td{opacity:.5}
+tr:hover td{background:#161b22}
+.ep{color:#79c0ff;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;word-break:break-all}
+.uc{max-width:260px;font-size:11px;color:#8b949e}
+.code{font-size:11px;color:#8b949e;font-family:'SF Mono',Monaco,Consolas,monospace}
+.note{font-size:11px;max-width:220px;color:#636c76}
+.legend{margin-top:20px;font-size:11px;color:#484f58;text-align:center}
+.colmap{font-size:11px;color:#8b949e;margin-bottom:18px;line-height:1.45;max-width:920px}
+.colmap code{font-size:10px;color:#79c0ff}
+.cards{display:none;gap:12px;grid-template-columns:1fr}
+.card{border:1px solid #30363d;border-radius:10px;background:#161b22;padding:12px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.card-title{font-size:12px;font-weight:600;color:#e6edf3}
+.kv{display:grid;grid-template-columns:112px 1fr;gap:4px 10px;font-size:11px}
+.k{color:#8b949e;text-transform:uppercase;letter-spacing:.3px}
+.v{color:#c9d1d9;word-break:break-word}
+.v.ep{font-size:11px}
+body.embed{padding:12px 14px}
+body.embed h1{font-size:16px}
+body.embed .sub{font-size:11px;margin-bottom:10px}
+body.embed .stats{margin-bottom:10px;gap:8px}
+body.embed .stat{padding:8px 10px;min-width:76px}
+body.embed .stat-val{font-size:18px}
+body.embed .stat-lbl{font-size:9px}
+body.embed .filters{margin-bottom:10px}
+body.embed .filters label{display:none}
+body.embed .filters select,body.embed .filters input{font-size:11px;padding:5px 8px}
+body.embed .wrap{display:none}
+body.embed .cards{display:grid}
+body.embed .legend{display:none}
+</style>
+</head>
+<body>
+<h1>IB Stock Historical Bars — API Coverage Sheet</h1>
+<p class="sub">bifrost-trader-engine — same columns as <code>docs/plans/ib_stock_coverage.csv</code> (Product, Section, DocPage, …)</p>
+<p class="colmap">Classification follows project convention: <strong>Product</strong> = <code>Historical Bars</code>. <strong>Section</strong> = functional grouping (Coverage, Inspect, Backfill, Data Management). <strong>Doc page</strong> = leaf capability name. CSV column names match these headers exactly.</p>
+<div class="stats" id="stats"></div>
+<div class="filters">
+  <label>Section</label><select id="fSection"><option value="">All</option></select>
+  <label>Status</label><select id="fStatus"><option value="">All</option></select>
+  <input id="fSearch" placeholder="Search endpoint / use case…" style="width:220px">
+</div>
+<div class="wrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+<section id="cards" class="cards" aria-label="Coverage records"></section>
+<div class="legend">Spreadsheet: <code>docs/plans/ib_stock_coverage.csv</code></div>
+<script>
+var DATA=[
+{product:"Historical Bars",section:"Coverage",docPage:"Bars Coverage Matrix",ep:"GET /data/bars-coverage",doc:"Multi-period coverage matrix for watchlist stocks and reference indices",use:"Stock Coverage page: overview of stored bars per symbol per period with status indicators",code:"api.fetchBarsCoverage → DataCoveragePanel",chk:"ib-bars-coverage",status:"implemented",tier:"N/A",note:"Coverage includes Daily / 1min / 5min / 1h with count and date range."},
+{product:"Historical Bars",section:"Coverage",docPage:"Watchlist EOD Pull",ep:"POST /data/watchlist-eod-refresh",doc:"Queue end-of-day backfill jobs for all watchlist symbols",use:"Batch operation to fill latest bars for all watchlist stocks; supports dry-run preview",code:"api.postWatchlistEodRefresh + fetchWatchlistEodRefreshPreview",chk:"ib-eod-pull",status:"implemented",tier:"N/A",note:"Dry-run previews overwrite records and IB request plan before queueing."},
+{product:"Historical Bars",section:"Coverage",docPage:"Index Refresh",ep:"POST /data/indices-refresh",doc:"Pull daily bars for reference indices from TradingView",use:"Refresh ^GSPC / ^DJI / ^IXIC via TradingView into stock_day",code:"api.postIndicesRefresh",chk:"ib-index-refresh",status:"implemented",tier:"N/A",note:"TradingView source; daily only; symbol list from reference_indices config."},
+{product:"Historical Bars",section:"Inspect",docPage:"Bars Preview",ep:"GET /data/bars",doc:"Load and display stored bars for a single symbol and period",use:"Inspect panel: candlestick chart and table with latest N bars per symbol/period",code:"api.fetchBars → DataBarsPreviewPanel",chk:"ib-bars-preview",status:"implemented",tier:"N/A",note:"Chart + table; 5 most recent bars shown; sort by time asc/desc."},
+{product:"Historical Bars",section:"Backfill",docPage:"Single Symbol Pull",ep:"POST /data/bars-backfill",doc:"Queue backfill for one symbol with configurable range and periods",use:"Pull modal: Max/Min/Custom range per period; queues Celery jobs",code:"api.postBarsBackfill",chk:"ib-single-pull",status:"implemented",tier:"N/A",note:"Supports test mode (fake IB call) and custom API interval."},
+{product:"Historical Bars",section:"Backfill",docPage:"Job Queue",ep:"GET /data/bars-jobs, DELETE /data/bars-jobs/{id}",doc:"View and manage Celery backfill job history",use:"Jobs panel: list jobs with status filters / sorting / pagination",code:"api.fetchBarsJobs + deleteBarsJob + deleteAllBarsJobs → DataJobsPanel",chk:"ib-jobs",status:"implemented",tier:"N/A",note:"Filter by status; sort by job_id / status / created / updated."},
+{product:"Historical Bars",section:"Data Management",docPage:"Reset Symbol Data",ep:"DELETE /data/bars/{symbol}",doc:"Delete stored bars for a symbol with period selection",use:"Reset modal: choose periods to clear; cannot be undone",code:"api.deleteBarsForSymbol",chk:"ib-reset-symbol",status:"implemented",tier:"N/A",note:"Separate flow for index (daily only) vs watchlist (multi-period)."}
+];
+
+var headers=["Product","Section","Doc page","Endpoint","Summary","Use Case","Code Location","Checklist","Status","Tier","Notes"];
+
+function badge(t,cls){return '<span class="badge '+cls+'">'+t+'</span>'}
+function statusBadge(s){
+  if(s==="implemented") return badge("Implemented","b-impl");
+  if(s==="partial") return badge("Partial","b-part");
+  return badge("Not impl","b-noimpl");
+}
+
+function render(data){
+  var tb=document.getElementById("tbody");tb.innerHTML="";
+  var cards=document.getElementById("cards");cards.innerHTML="";
+  data.forEach(function(r){
+    var tr=document.createElement("tr");
+    if(r.status==="not-implemented") tr.className="dim";
+    tr.innerHTML='<td>'+r.product+'</td><td>'+r.section+'</td><td>'+r.docPage+'</td><td class="ep">'+r.ep+'</td><td>'+r.doc+'</td><td class="uc">'+r.use+'</td><td class="code">'+r.code+'</td><td>'+(r.chk==="--"?"":r.chk)+'</td><td>'+statusBadge(r.status)+'</td><td>'+r.tier+'</td><td class="note">'+r.note+'</td>';
+    tb.appendChild(tr);
+
+    var card=document.createElement("article");
+    card.className='card'+(r.status==="not-implemented"?' dim':'');
+    card.innerHTML=
+      '<div class="card-head"><div class="card-title">'+r.product+' · '+r.section+' · '+r.docPage+'</div><div>'+statusBadge(r.status)+'</div></div>'+
+      '<div class="kv">'+
+      '<div class="k">Endpoint</div><div class="v ep">'+r.ep+'</div>'+
+      '<div class="k">Summary</div><div class="v">'+r.doc+'</div>'+
+      '<div class="k">Use case</div><div class="v">'+r.use+'</div>'+
+      '<div class="k">Code</div><div class="v">'+r.code+'</div>'+
+      '<div class="k">Checklist</div><div class="v">'+(r.chk==="--"?"":r.chk)+'</div>'+
+      '<div class="k">Tier</div><div class="v">'+r.tier+'</div>'+
+      '<div class="k">Notes</div><div class="v">'+r.note+'</div>'+
+      '</div>';
+    cards.appendChild(card);
+  });
+  updateStats(data);
+}
+
+function updateStats(data){
+  var impl=0,part=0,ni=0;
+  data.forEach(function(r){
+    if(r.status==="implemented") impl++;
+    else if(r.status==="partial") part++;
+    else ni++;
+  });
+  document.getElementById("stats").innerHTML=
+    '<div class="stat"><div class="stat-val">'+data.length+'</div><div class="stat-lbl">Total</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#3fb950">'+impl+'</div><div class="stat-lbl">Implemented</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#d29922">'+part+'</div><div class="stat-lbl">Partial</div></div>'+
+    '<div class="stat"><div class="stat-val" style="color:#636c76">'+ni+'</div><div class="stat-lbl">Not impl</div></div>';
+}
+
+function initFilters(){
+  var sects={},statuses={};
+  DATA.forEach(function(r){ sects[r.section]=1; statuses[r.status]=1; });
+  function fill(id,obj){var el=document.getElementById(id);Object.keys(obj).sort().forEach(function(k){var o=document.createElement("option");o.value=k;o.textContent=k;el.appendChild(o)})}
+  fill("fSection",sects); fill("fStatus",statuses);
+}
+
+function applyFilters(){
+  var se=document.getElementById("fSection").value;
+  var s=document.getElementById("fStatus").value;
+  var q=document.getElementById("fSearch").value.toLowerCase();
+  var f=DATA.filter(function(r){
+    return (!se||r.section===se)&&(!s||r.status===s)&&
+      (!q||r.ep.toLowerCase().indexOf(q)>=0||r.doc.toLowerCase().indexOf(q)>=0||r.use.toLowerCase().indexOf(q)>=0||r.code.toLowerCase().indexOf(q)>=0||r.docPage.toLowerCase().indexOf(q)>=0||r.section.toLowerCase().indexOf(q)>=0);
+  });
+  render(f);
+}
+
+if(new URLSearchParams(window.location.search).get("embed")==="1"){
+  document.body.classList.add("embed");
+}
+document.getElementById("thead").innerHTML='<tr>'+headers.map(function(h){return '<th>'+h+'</th>'}).join("")+'</tr>';
+initFilters();
+render(DATA);
+["fSection","fStatus"].forEach(function(id){document.getElementById(id).onchange=applyFilters});
+document.getElementById("fSearch").oninput=applyFilters;
+</script>
+</body>
+</html>
