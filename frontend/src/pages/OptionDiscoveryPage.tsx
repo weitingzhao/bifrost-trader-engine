@@ -31,6 +31,8 @@ import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
 import { OptionDiscoveryMaxPainPanel } from './optionDiscovery/OptionDiscoveryMaxPainPanel'
 import { OptionDiscoveryContractChartPanel } from './optionDiscovery/OptionDiscoveryContractChartPanel'
+import { OptionDiscoveryAnalyticsPanel, IvSmileChart, IvSmileLegend } from './optionDiscovery/OptionDiscoveryAnalytics'
+import type { IvTermPoint } from './optionDiscovery/OptionDiscoveryAnalytics'
 
 const STRIKE_COUNT_OPTIONS = [4, 6, 8, 19, 30, 'all'] as const
 type StrikeCountOption = (typeof STRIKE_COUNT_OPTIONS)[number]
@@ -50,8 +52,6 @@ type ChainColumnId =
   | 'theta'
   | 'vega'
   | 'oi'
-  | 'moneyness'
-  | 'actions'
 
 const CHAIN_COLUMN_LABEL: Record<ChainColumnId, string> = {
   bid: 'Bid',
@@ -64,8 +64,6 @@ const CHAIN_COLUMN_LABEL: Record<ChainColumnId, string> = {
   theta: 'Theta',
   vega: 'Vega',
   oi: 'OI',
-  moneyness: 'Moneyness',
-  actions: 'Actions',
 }
 
 const DEFAULT_CHAIN_COLUMN_VISIBILITY: Record<ChainColumnId, boolean> = {
@@ -75,12 +73,20 @@ const DEFAULT_CHAIN_COLUMN_VISIBILITY: Record<ChainColumnId, boolean> = {
   mid: true,
   iv: true,
   delta: true,
-  gamma: true,
-  theta: true,
-  vega: true,
+  gamma: false,
+  theta: false,
+  vega: false,
   oi: true,
-  moneyness: true,
-  actions: true,
+}
+
+function debounce<T extends (...args: unknown[]) => void>(fn: T, ms: number): T & { cancel: () => void } {
+  let tid: ReturnType<typeof setTimeout> | null = null
+  const debounced = (...args: unknown[]) => {
+    if (tid) clearTimeout(tid)
+    tid = setTimeout(() => fn(...args), ms)
+  }
+  debounced.cancel = () => { if (tid) clearTimeout(tid) }
+  return debounced as T & { cancel: () => void }
 }
 
 const STD_DEV_OPTIONS = [1, 1.5, 2, 2.5, 'custom'] as const
@@ -525,6 +531,10 @@ export function OptionDiscoveryPage({
   // P2: Server-side relative value
   const [serverRelativeValue, setServerRelativeValue] = useState<RelativeValueResponse | null>(null)
 
+  // IV term structure (Phase 2)
+  const [termPoints, setTermPoints] = useState<IvTermPoint[]>([])
+  const [termLoading, setTermLoading] = useState(false)
+
   // P3: Event context
   const [eventContextWarnings, setEventContextWarnings] = useState<string[]>([])
 
@@ -846,6 +856,19 @@ export function OptionDiscoveryPage({
 
   useEffect(() => () => { stopSnapshotPgWatch() }, [stopSnapshotPgWatch])
 
+  const loadIvTermStructure = useCallback(async () => {
+    const sym = selectedSymbol.trim()
+    if (!sym || expirations.length < 2) return
+    setTermLoading(true)
+    setTermPoints([])
+    try {
+      const { fetchIvTermStructure } = await import('../api/research')
+      const res = await fetchIvTermStructure(sym, expirations.slice(0, 8))
+      if (res.ok && res.points) setTermPoints(res.points)
+    } catch { /* term structure unavailable */ }
+    setTermLoading(false)
+  }, [selectedSymbol, expirations])
+
   const loadQuotes = useCallback(async () => {
     const sym = selectedSymbol.trim()
     const exp = selectedExpiration.trim()
@@ -952,6 +975,16 @@ export function OptionDiscoveryPage({
       setSnapshotLoading(false)
     }
   }, [selectedSymbol, selectedExpiration, effectiveStrikes, quoteSource, stopSnapshotPgWatch, startSnapshotPgWatch])
+
+  // Auto-load quotes when symbol / expiration / strikes / source change (debounced)
+  const loadQuotesDebounced = useMemo(() => debounce(() => { void loadQuotes() }, 400), [loadQuotes])
+  useEffect(() => {
+    const sym = selectedSymbol.trim()
+    const exp = selectedExpiration.trim()
+    if (!sym || !exp) return
+    loadQuotesDebounced()
+    return () => loadQuotesDebounced.cancel()
+  }, [selectedSymbol, selectedExpiration, effectiveStrikes.join(','), quoteSource, loadQuotesDebounced])
 
   const handleAddToWatchlist = useCallback(
     async (row: OptionSnapshotRow) => {
@@ -1085,8 +1118,6 @@ export function OptionDiscoveryPage({
       ...(quoteSource === 'massive'
         ? (['iv', 'delta', 'gamma', 'theta', 'vega', 'oi'] as const satisfies readonly ChainColumnId[])
         : []),
-      'moneyness',
-      'actions',
     ]
     return order.filter(id => chainColumnVisibility[id] !== false)
   }, [quoteSource, chainColumnVisibility])
@@ -1124,49 +1155,6 @@ export function OptionDiscoveryPage({
     ) =>
       chainColumnList.map(col => {
         const key = `${side}-${col}`
-        if (col === 'moneyness') {
-          const d = row ? computeDerivedMetrics(row, underlyingPrice) : null
-          return (
-            <td
-              key={key}
-              className={`od-chain-td od-chain-td-moneyness${sideSelected ? ' od-chain-td--selected' : ''}`}
-              onClick={e => {
-                e.stopPropagation()
-                if (rowIdx != null) setSelectedContractIdx(selectedContractIdx === rowIdx ? null : rowIdx)
-              }}
-            >
-              {row && d ? (
-                <span className={`od-moneyness-badge od-moneyness-badge--${d.moneynessLabel.toLowerCase()}`}>
-                  {d.moneynessLabel}
-                </span>
-              ) : (
-                '—'
-              )}
-            </td>
-          )
-        }
-        if (col === 'actions') {
-          return (
-            <td
-              key={key}
-              className={`od-chain-td od-chain-td-actions${sideSelected ? ' od-chain-td--selected' : ''}`}
-              onClick={e => e.stopPropagation()}
-            >
-              {row ? (
-                <button
-                  type="button"
-                  className="button button-secondary button-sm"
-                  onClick={() => void handleAddToWatchlist(row)}
-                  aria-label={`Add ${side === 'call' ? 'Call' : 'Put'} ${row.strike} to Watchlist`}
-                >
-                  + Watchlist
-                </button>
-              ) : (
-                '—'
-              )}
-            </td>
-          )
-        }
         let cell: string = '—'
         if (row) {
           switch (col) {
@@ -1217,14 +1205,14 @@ export function OptionDiscoveryPage({
           </td>
         )
       }),
-    [chainColumnList, underlyingPrice, handleAddToWatchlist, selectedContractIdx, setSelectedContractIdx],
+    [chainColumnList, underlyingPrice, selectedContractIdx, setSelectedContractIdx],
   )
 
   const chainFilterColumnIds = useMemo((): ChainColumnId[] => {
     if (quoteSource === 'massive') {
-      return ['bid', 'ask', 'last', 'mid', 'iv', 'delta', 'gamma', 'theta', 'vega', 'oi', 'moneyness', 'actions']
+      return ['bid', 'ask', 'last', 'mid', 'iv', 'delta', 'gamma', 'theta', 'vega', 'oi']
     }
-    return ['bid', 'ask', 'last', 'mid', 'moneyness', 'actions']
+    return ['bid', 'ask', 'last', 'mid']
   }, [quoteSource])
 
   return (
@@ -1259,9 +1247,10 @@ export function OptionDiscoveryPage({
         )}
       </h2>
 
-      <section className="replay-section option-discovery-conditions-section" aria-label="Option chain selection conditions">
+      {/* ── Session bar: quote source + daily data ── */}
+      <section className="replay-section option-discovery-session-bar" aria-label="Session">
         <div className="option-discovery-conditions-head-row">
-          <h3 id="option-discovery-conditions-head">Option chain selection</h3>
+          <h3 id="option-discovery-conditions-head">Chain</h3>
           <div className="option-discovery-quote-source-inline">
             <label className="option-discovery-quote-source-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
               <span className="section-hint">Quote source</span>
@@ -1304,103 +1293,121 @@ export function OptionDiscoveryPage({
             )}
           </div>
         ) : null}
-        <div className="option-discovery-top-row">
-        <section className="replay-section option-discovery-underlying" aria-label="Underlying">
-          <div className="option-discovery-underlying-body">
-            {stkSymbols.length === 0 ? (
-              <div className="option-discovery-list-wrap option-discovery-list-empty">
-                Add STK in Watchlist and turn on Option? for symbols that have options.
-              </div>
-            ) : (
-              <div className="option-discovery-list-with-header">
-                <div className="option-discovery-list-header">Underlying</div>
-                <div className="option-discovery-list-wrap">
-                  <table className="option-discovery-list-table" role="grid" aria-label="Underlying symbol list">
-                    <thead>
-                      <tr>
-                        <th scope="col">Symbol</th>
-                        <th scope="col">Price (daily)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stkSymbols.map(sym => (
-                        <tr
-                          key={sym}
-                          role="button"
-                          tabIndex={0}
-                          className={selectedSymbol === sym ? 'option-discovery-list-row-selected' : ''}
-                          onClick={() => setSelectedSymbol(sym)}
-                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSymbol(sym) } }}
-                          aria-label={`Select ${sym}`}
-                          aria-pressed={selectedSymbol === sym}
-                        >
-                          <td>{sym}</td>
-                          <td>
-                            {symbolDailyPrices[sym] != null ? fmtUsd(symbolDailyPrices[sym]!) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
+      </section>
 
-        <section className="replay-section option-discovery-expiration" aria-label="Expiration">
-          <div className="option-discovery-expiration-body">
-            {expirationsLoading ? (
-              <div className="option-discovery-list-wrap option-discovery-list-empty">Loading…</div>
-            ) : expirations.length === 0 ? (
-              <div className="option-discovery-list-wrap option-discovery-list-empty">
-                {selectedSymbol ? 'No expirations.' : 'Select symbol.'}
-                {expirationsError && (
-                  <span style={{ color: 'var(--color-danger)', display: 'block', marginTop: '0.25rem' }} role="alert">{expirationsError}</span>
-                )}
-              </div>
-            ) : (
-              <div className="option-discovery-list-with-header">
-                <div className="option-discovery-list-header" aria-label="Expiration">Expiration</div>
-                <div className="option-discovery-list-wrap">
-                  <table className="option-discovery-list-table" role="grid" aria-label="Expiration list">
-                    <thead>
-                      <tr>
-                        <th scope="col" className="option-discovery-expiration-col-date" />
-                        <th scope="col" className="option-discovery-expiration-col-days">
-                          Days
-                          {selectedExpiration && (
-                            <span className="option-discovery-expiration-days-header"> · {expirationDaysFromToday(selectedExpiration)}</span>
-                          )}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {expirations.map(exp => (
-                        <tr
-                          key={exp}
-                          role="button"
-                          tabIndex={0}
-                          className={selectedExpiration === exp ? 'option-discovery-list-row-selected' : ''}
-                          onClick={() => setSelectedExpiration(exp)}
-                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedExpiration(exp) } }}
-                          aria-label={`Select ${exp}, ${expirationDaysFromToday(exp)}`}
-                          aria-pressed={selectedExpiration === exp}
-                        >
-                          <td className="option-discovery-expiration-col-date">{exp}</td>
-                          <td className="option-discovery-expiration-days-cell">{expirationDaysFromToday(exp)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+      {/* ── Layout: sidebar + main ── */}
+      <div className="option-discovery-layout">
+        {/* ── Sidebar: Underlying + Expiration ── */}
+        <aside className="option-discovery-sidebar" aria-label="Symbol and expiration selection">
+          <section className="replay-section option-discovery-underlying" aria-label="Underlying">
+            <div className="option-discovery-underlying-body">
+              {stkSymbols.length === 0 ? (
+                <div className="option-discovery-list-wrap option-discovery-list-empty">
+                  Add STK in Watchlist and turn on Option? for symbols that have options.
                 </div>
-              </div>
-            )}
-          </div>
-        </section>
+              ) : (
+                <div className="option-discovery-list-with-header">
+                  <div className="option-discovery-list-header">Underlying</div>
+                  <div className="option-discovery-list-wrap">
+                    <table className="option-discovery-list-table" role="grid" aria-label="Underlying symbol list">
+                      <thead>
+                        <tr>
+                          <th scope="col">Symbol</th>
+                          <th scope="col">Price (daily)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stkSymbols.map(sym => (
+                          <tr
+                            key={sym}
+                            role="button"
+                            tabIndex={0}
+                            className={selectedSymbol === sym ? 'option-discovery-list-row-selected' : ''}
+                            onClick={() => setSelectedSymbol(sym)}
+                            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSymbol(sym) } }}
+                            aria-label={`Select ${sym}`}
+                            aria-pressed={selectedSymbol === sym}
+                          >
+                            <td>{sym}</td>
+                            <td>
+                              {symbolDailyPrices[sym] != null ? fmtUsd(symbolDailyPrices[sym]!) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
 
-        <section className="replay-section option-discovery-strikes" aria-label="Strikes">
-          <div className="option-discovery-strikes-content" style={{ flex: 1, minWidth: 0 }}>
+          <section className="replay-section option-discovery-expiration" aria-label="Expiration">
+            <div className="option-discovery-expiration-body">
+              {expirationsLoading ? (
+                <div className="option-discovery-list-wrap option-discovery-list-empty">Loading…</div>
+              ) : expirations.length === 0 ? (
+                <div className="option-discovery-list-wrap option-discovery-list-empty">
+                  {selectedSymbol ? 'No expirations.' : 'Select symbol.'}
+                  {expirationsError && (
+                    <span style={{ color: 'var(--color-danger)', display: 'block', marginTop: '0.25rem' }} role="alert">{expirationsError}</span>
+                  )}
+                </div>
+              ) : (
+                <div className="option-discovery-list-with-header">
+                  <div className="option-discovery-list-header" aria-label="Expiration">Expiration</div>
+                  <div className="option-discovery-list-wrap">
+                    <table className="option-discovery-list-table" role="grid" aria-label="Expiration list">
+                      <thead>
+                        <tr>
+                          <th scope="col" className="option-discovery-expiration-col-date" />
+                          <th scope="col" className="option-discovery-expiration-col-days">
+                            Days
+                            {selectedExpiration && (
+                              <span className="option-discovery-expiration-days-header"> · {expirationDaysFromToday(selectedExpiration)}</span>
+                            )}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expirations.map(exp => (
+                          <tr
+                            key={exp}
+                            role="button"
+                            tabIndex={0}
+                            className={selectedExpiration === exp ? 'option-discovery-list-row-selected' : ''}
+                            onClick={() => setSelectedExpiration(exp)}
+                            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedExpiration(exp) } }}
+                            aria-label={`Select ${exp}, ${expirationDaysFromToday(exp)}`}
+                            aria-pressed={selectedExpiration === exp}
+                          >
+                            <td className="option-discovery-expiration-col-date">{exp}</td>
+                            <td className="option-discovery-expiration-days-cell">{expirationDaysFromToday(exp)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        </aside>
+
+        {/* ── Main column ── */}
+        <div className="option-discovery-main">
+          {/* Strike window (collapsible) */}
+          <details className="option-discovery-strike-window" open aria-label="Strike window">
+            <summary className="option-discovery-strike-window-summary">
+              Strike window
+              <span className="section-hint option-discovery-strike-window-count">
+                {effectiveStrikes.length} selected · {computedStrikes.length} in range
+              </span>
+            </summary>
+            <p className="section-hint option-discovery-strike-window-hint">
+              Applies to Option Analytics and option quotes below. Max Pain uses the full chain independently.
+            </p>
+            <div className="option-discovery-strikes-content">
         {strikesLoading ? (
           <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Loading strikes for selected expiration…</p>
         ) : computedStrikes.length > 0 ? (() => {
@@ -1686,32 +1693,45 @@ export function OptionDiscoveryPage({
         ) : (
           <p className="section-hint strike-ladder-hint-below" style={{ marginTop: '0.35rem', marginBottom: 0 }}>Select symbol and expiration to see strikes.</p>
         )}
-          </div>
-        </section>
-        </div>
-      </section>
+            </div>
+          </details>
 
-      <OptionDiscoveryMaxPainPanel
-        symbol={selectedSymbol}
-        expiration={selectedExpiration}
-        massiveConfigured={Boolean(massiveStatus?.configured)}
-      />
+          {/* ── Max Pain (full chain) + Analytics (strike window) ── */}
+          {selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' && (
+            <div className="od-option-structure-stack" aria-label="Option structure and analytics">
+              <OptionDiscoveryMaxPainPanel
+                symbol={selectedSymbol}
+                expiration={selectedExpiration}
+                massiveConfigured={Boolean(massiveStatus?.configured)}
+              />
+              {snapshotRows.length > 0 && !snapshotLoading && quoteSource === 'massive' && (
+                <OptionDiscoveryAnalyticsPanel
+                  rows={snapshotRows}
+                  underlying={underlyingPrice}
+                  termPoints={termPoints.length > 0 ? termPoints : undefined}
+                  termLoading={termLoading}
+                  onLoadTerm={() => void loadIvTermStructure()}
+                />
+              )}
+            </div>
+          )}
 
-      <section className="replay-section" aria-labelledby="option-discovery-table-head">
-        <h3 id="option-discovery-table-head">
-          By expiration – Option quotes
-          <InfoTooltip text="IB: live quotes from TWS. Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
-        </h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', marginBottom: '1rem' }}>
-          <button
-            type="button"
-            className="button button-primary"
-            onClick={() => void loadQuotes()}
-            disabled={!canLoadQuotes}
-            aria-label="Load option quotes for selected symbol and expiration"
-          >
-            {snapshotLoading ? 'Loading…' : 'Load quotes'}
-          </button>
+          {/* ── Option quotes ── */}
+          <section className="replay-section" aria-labelledby="option-discovery-table-head">
+            <h3 id="option-discovery-table-head">
+              By expiration – Option quotes
+              <InfoTooltip text="IB: live quotes from TWS. Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
+            </h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', marginBottom: '1rem' }}>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => void loadQuotes()}
+                disabled={!canLoadQuotes}
+                aria-label="Refresh option quotes for selected symbol and expiration"
+              >
+                {snapshotLoading ? 'Loading…' : 'Refresh quotes'}
+              </button>
           {underlyingPrice != null && (
             <span className="section-hint">Underlying: {fmtUsd(underlyingPrice)}</span>
           )}
@@ -1858,14 +1878,17 @@ export function OptionDiscoveryPage({
                       const putSel = putIdx != null && selectedContractIdx === putIdx
                       const rowHighlight =
                         (callIdx != null && callSel) || (putIdx != null && putSel)
-                      const atm =
-                        underlyingPrice != null &&
-                        Number.isFinite(underlyingPrice) &&
-                        Math.abs(strike - underlyingPrice) < 0.021
+                      const atm = underlyingPrice != null && Number.isFinite(underlyingPrice) && Math.abs(strike - underlyingPrice) < 0.021
+                      const itm = !atm && underlyingPrice != null && Number.isFinite(underlyingPrice) && strike < underlyingPrice
+                      const moneyClass = atm ? ' od-chain-row-atm' : itm ? ' od-chain-row-itm' : ' od-chain-row-otm'
                       return (
                         <tr
                           key={strike}
-                          className={`od-chain-row od-quote-row${rowHighlight ? ' od-quote-row--selected' : ''}${atm ? ' od-chain-row-atm' : ''}`}
+                          className={`od-chain-row od-quote-row${rowHighlight ? ' od-quote-row--selected' : ''}${moneyClass}`}
+                          onClick={() => {
+                            if (callIdx != null) setSelectedContractIdx(callSel ? null : callIdx)
+                            else if (putIdx != null) setSelectedContractIdx(putSel ? null : putIdx)
+                          }}
                         >
                           {strikeSideMode === 'put' ? (
                             <>
@@ -1909,7 +1932,7 @@ export function OptionDiscoveryPage({
         {snapshotRows.length === 0 && !snapshotLoading && !snapshotFeedback && (
           <p className="section-hint" role="status">
             {!snapshotLoadAttempted
-              ? 'Select symbol and expiration, then click Load quotes.'
+              ? 'Select symbol and expiration to load quotes automatically.'
               : 'No quotes returned. Check Massive job queue, Celery worker, and PostgreSQL option_snapshots.'}
           </p>
         )}
@@ -1937,6 +1960,14 @@ export function OptionDiscoveryPage({
                 {selectedDerived.moneynessLabel}
               </span>
             </h3>
+            <button
+              type="button"
+              className="button button-secondary button-sm"
+              onClick={() => void handleAddToWatchlist(selectedRow)}
+              aria-label={`Add ${selectedRow.right === 'C' ? 'Call' : 'Put'} ${selectedRow.strike} to Watchlist`}
+            >
+              + Watchlist
+            </button>
             {quoteSource === 'massive' && (
               <span className="od-detail-delayed">Massive · 15 min delayed</span>
             )}
@@ -2258,12 +2289,7 @@ export function OptionDiscoveryPage({
             const rvZScore = hasServer ? serverRelativeValue!.iv_zscore : clientRv.ivZScore
             const rvAvgIv = hasServer ? serverRelativeValue!.avg_iv : clientRv.neighborAvgIv
             const rvCount = hasServer ? serverRelativeValue!.contracts_compared : clientRv.neighborCount
-            const serverCurve = serverRelativeValue?.iv_curve
             const sameRight = snapshotRows.filter(r => r.right === selectedRow.right && r.iv != null && Number.isFinite(r.iv!))
-            const curveData = serverCurve && serverCurve.length >= 3
-              ? serverCurve
-              : sameRight.sort((a, b) => a.strike - b.strike).map(r => ({ strike: r.strike, iv: r.iv! }))
-            const maxIv = curveData.length > 0 ? Math.max(...curveData.map(c => c.iv)) : 1
             return (
               <div className="od-detail-body">
                 <div className="od-card-grid">
@@ -2290,21 +2316,11 @@ export function OptionDiscoveryPage({
                       <span className="od-kv-v">{rvCount ?? 0}</span>
                     </div>
                   </div>
-                  {curveData.length >= 3 && (
+                  {sameRight.length >= 3 && (
                     <div className="od-card-section">
-                      <div className="od-card-section-title">IV Curve (same expiry, {selectedRow.right === 'C' ? 'Calls' : 'Puts'})</div>
-                      <div className="od-iv-curve">
-                        {curveData.map(c => {
-                          const isThis = c.strike === selectedRow.strike
-                          const barH = Math.max(2, Math.min(100, (c.iv / maxIv) * 100))
-                          return (
-                            <div key={c.strike} className={`od-iv-bar-wrap${isThis ? ' od-iv-bar-wrap--active' : ''}`} title={`${c.strike}: IV ${c.iv.toFixed(4)}`}>
-                              <div className="od-iv-bar" style={{ height: `${barH}%` }} />
-                              <div className="od-iv-bar-label">{c.strike}</div>
-                            </div>
-                          )
-                        })}
-                      </div>
+                      <div className="od-card-section-title">IV Smile (same expiry, {selectedRow.right === 'C' ? 'Calls' : 'Puts'})</div>
+                      <IvSmileLegend side={selectedRow.right === 'C' ? 'call' : 'put'} underlying={underlyingPrice} />
+                      <IvSmileChart rows={sameRight} underlying={underlyingPrice} side={selectedRow.right === 'C' ? 'call' : 'put'} />
                     </div>
                   )}
                 </div>
@@ -2323,6 +2339,8 @@ export function OptionDiscoveryPage({
           })()}
         </section>
       )}
+        </div>{/* end option-discovery-main */}
+      </div>{/* end option-discovery-layout */}
     </div>
   )
 }

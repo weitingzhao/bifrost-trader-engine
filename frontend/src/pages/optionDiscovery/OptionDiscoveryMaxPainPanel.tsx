@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from 're
 import { fetchMaxPainCompute, fetchMaxPainComputeHistory } from '../../api'
 import type { MaxPainComputeResponse, MaxPainHistoryPoint, MaxPainStrikePoint } from '../../api'
 import { InfoTooltip } from '../../components/InfoTooltip'
+import { OD_CHART_AXIS_FONT } from './odChartConstants'
 
 const DISCLAIMER =
   'Disclaimer: Max Pain is a theoretical reference metric based on end-of-day open interest data. It does not predict future price movement and should not be used as the sole basis for trading decisions. Open interest data is sourced from Massive (Polygon) with approximately 15-minute delay. Corporate actions (splits, special dividends) may affect strike prices and contract multipliers.'
@@ -69,7 +70,7 @@ function LiabilityByStrikeSvg({
       )
     }
     yLabels.push(
-      <text key={`yl-${i}`} x={pad.l - 6} y={y + 3} textAnchor="end" fontSize="10"
+      <text key={`yl-${i}`} x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
         fill="var(--color-text-dim)">{fmtDollarCompact(val)}</text>,
     )
   }
@@ -82,7 +83,7 @@ function LiabilityByStrikeSvg({
   const ucX = ucInRange ? xForStrike(underlyingClose!) : null
 
   return (
-    <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`}
+    <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`}
       aria-label="Seller liability by strike — stacked Call (green) and Put (red) with Max Pain and spot price markers">
       <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
         fill="var(--color-surface)" rx={4} />
@@ -125,15 +126,15 @@ function LiabilityByStrikeSvg({
         if (!p) return null
         const x = xForStrike(p.strike)
         return (
-          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize="10"
+          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
             fill="var(--color-text-dim)">{p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}</text>
         )
       })}
 
-      <text x={pad.l - 4} y={pad.t - 6} textAnchor="end" fontSize="9"
+      <text x={pad.l - 4} y={pad.t - 6} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
         fill="var(--color-text-dim)">Seller liability ($)</text>
 
-      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize="10"
+      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
         fill="var(--color-text-dim)">Strike</text>
     </svg>
   )
@@ -196,7 +197,7 @@ function OiBarsSvg({
   const xForStrike = (s: number) => pad.l + scaleLin(s, minS, maxS, halfBar, innerW - halfBar)
   const xTickIdxs = pickXTickIndices(n, 8)
   return (
-    <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Open interest by strike">
+    <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Open interest by strike">
       <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
         fill="var(--color-surface)" rx={4} />
       {points.flatMap((p, i) => {
@@ -225,13 +226,13 @@ function OiBarsSvg({
         if (!p) return null
         const x = xForStrike(p.strike)
         return (
-          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize="10"
+          <text key={`xt-${i}`} x={x} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
             fill="var(--color-text-dim)">{p.strike % 1 === 0 ? p.strike.toFixed(0) : p.strike.toFixed(1)}</text>
         )
       })}
-      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize="10"
+      <text x={pad.l + innerW / 2} y={h - 0} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
         fill="var(--color-text-dim)">Strike</text>
-      <text x={pad.l - 4} y={pad.t - 2} textAnchor="end" fontSize="9"
+      <text x={pad.l - 4} y={pad.t - 2} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
         fill="var(--color-text-dim)">Open Interest</text>
     </svg>
   )
@@ -276,7 +277,7 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
   const yStep = (maxY - minY) / yTicks || 1
 
   return (
-    <svg className="od-max-pain-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Max pain vs underlying price trend over time">
+    <svg className="od-max-pain-svg od-chart-svg" viewBox={`0 0 ${w} ${h}`} aria-label="Max pain vs underlying price trend over time">
       <rect x={pad.l} y={pad.t} width={innerW} height={innerH}
         fill="var(--color-surface)" rx={4} />
 
@@ -287,7 +288,7 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
           <g key={i}>
             {i > 0 && <line x1={pad.l} x2={pad.l + innerW} y1={y} y2={y}
               stroke="var(--color-border)" strokeWidth={0.5} strokeDasharray="3 3" />}
-            <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize="10"
+            <text x={pad.l - 6} y={y + 3} textAnchor="end" fontSize={OD_CHART_AXIS_FONT}
               fill="var(--color-text-dim)">{val.toFixed(1)}</text>
           </g>
         )
@@ -304,24 +305,22 @@ function TrendSvg({ series }: { series: MaxPainHistoryPoint[] }) {
         const x = pad.l + scaleLin(i, 0, series.length - 1, 0, innerW)
         const label = s.trade_date.slice(5)
         return (
-          <text key={i} x={x} y={h - 8} textAnchor="middle" fontSize="9"
+          <text key={i} x={x} y={h - 8} textAnchor="middle" fontSize={OD_CHART_AXIS_FONT}
             fill="var(--color-text-dim)">{label}</text>
         )
       })}
 
-      <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fontSize="10" fill="var(--color-accent, #6ea8fe)">
+      <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fontSize={OD_CHART_AXIS_FONT} fill="var(--color-accent, #6ea8fe)">
         Max Pain
       </text>
       {hasClose && (
-        <text x={w - pad.r} y={pad.t + 22} textAnchor="end" fontSize="10" fill="var(--color-text-muted)">
+        <text x={w - pad.r} y={pad.t + 22} textAnchor="end" fontSize={OD_CHART_AXIS_FONT} fill="var(--color-text-muted)">
           Underlying
         </text>
       )}
     </svg>
   )
 }
-
-type MaxPainTab = 'liability' | 'oi' | 'trend'
 
 export function OptionDiscoveryMaxPainPanel({
   symbol,
@@ -336,7 +335,7 @@ export function OptionDiscoveryMaxPainPanel({
   const [hist, setHist] = useState<MaxPainHistoryPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<MaxPainTab>('liability')
+
 
   const canLoad = massiveConfigured && symbol.trim() !== '' && expiration.trim() !== ''
 
@@ -392,12 +391,6 @@ export function OptionDiscoveryMaxPainPanel({
     return null
   }
 
-  const tabs: { id: MaxPainTab; label: string }[] = [
-    { id: 'liability', label: 'Seller Liability' },
-    { id: 'oi', label: 'Open Interest' },
-    { id: 'trend', label: 'Historical Trend' },
-  ]
-
   return (
     <section className="replay-section od-max-pain-section" aria-labelledby="od-max-pain-head">
       <div className="mp-header-row">
@@ -406,7 +399,7 @@ export function OptionDiscoveryMaxPainPanel({
           <InfoTooltip text="Based on end-of-day open interest from Massive (15 min delayed source). Computed live from PostgreSQL; not read from stored report rows." />
         </h3>
         <button type="button" className="button button-secondary button-sm" onClick={() => void load()} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh'}
+          {loading ? 'Loading…' : 'Refresh max pain'}
         </button>
       </div>
 
@@ -446,35 +439,23 @@ export function OptionDiscoveryMaxPainPanel({
       )}
 
       {live?.ok && points.length > 0 && (
-        <div className="mp-chart-area">
-          <div className="mp-tabs" role="tablist">
-            {tabs.map(t => (
-              <button key={t.id} type="button" role="tab" className={`mp-tab${activeTab === t.id ? ' mp-tab--active' : ''}`}
-                aria-selected={activeTab === t.id} onClick={() => setActiveTab(t.id)}>
-                {t.label}
-              </button>
-            ))}
+        <div className="od-charts-grid">
+          <div className="mp-chart-pane">
+            <h4 className="mp-chart-subtitle">Seller Liability by Strike</h4>
+            <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
+            <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
+              underlyingClose={live.underlying_close ?? null} />
           </div>
 
-          {activeTab === 'liability' && (
-            <div className="mp-chart-pane">
-              <LiabilityLegend underlyingClose={live.underlying_close ?? null} maxPainStrike={live.max_pain_strike ?? 0} />
-              <LiabilityByStrikeSvg points={points} maxPainStrike={live.max_pain_strike ?? 0}
-                underlyingClose={live.underlying_close ?? null} />
-            </div>
-          )}
+          <div className="mp-chart-pane">
+            <h4 className="mp-chart-subtitle">Open Interest by Strike</h4>
+            <OiBarsSvg points={points} showCall showPut />
+          </div>
 
-          {activeTab === 'oi' && (
-            <div className="mp-chart-pane">
-              <OiBarsSvg points={points} showCall showPut />
-            </div>
-          )}
-
-          {activeTab === 'trend' && (
-            <div className="mp-chart-pane">
-              <TrendSvg series={hist} />
-            </div>
-          )}
+          <div className="mp-chart-pane od-chart-pane-span2">
+            <h4 className="mp-chart-subtitle">Historical Trend</h4>
+            <TrendSvg series={hist} />
+          </div>
         </div>
       )}
 

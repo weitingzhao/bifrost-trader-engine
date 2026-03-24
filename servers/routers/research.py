@@ -1520,3 +1520,142 @@ async def post_option_snapshot(
         err = str(e)
         out["error"] = err
     return out
+
+
+@router.get("/research/iv-term-structure", response_model=None)
+def get_iv_term_structure(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+    expirations: str = Query(
+        ...,
+        description="Comma-separated expiration dates (YYYYMMDD or YYYY-MM-DD), max 12",
+    ),
+    source: str = Query("massive", description="Snapshot source: massive | ib"),
+) -> Dict[str, Any]:
+    """ATM IV for multiple expirations — powers the IV term structure chart."""
+    from datetime import date, datetime
+
+    from servers.massive_client import contract_key_from_parts
+    from servers.reader.massive_jobs import get_option_snapshots_latest
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "symbol": symbol, "points": [], "error": "PostgreSQL not configured"}
+
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return {"ok": False, "symbol": sym, "points": [], "error": "symbol is required"}
+
+    src = (source or "massive").strip().lower()
+    if src not in ("massive", "ib"):
+        src = "massive"
+
+    exp_list: List[str] = []
+    for raw in (expirations or "").split(","):
+        e = _norm_expiry_key(raw)
+        if len(e) == 8 and e.isdigit():
+            exp_list.append(e)
+    exp_list = exp_list[:12]
+    if len(exp_list) < 2:
+        return {"ok": False, "symbol": sym, "points": [], "error": "Need at least 2 valid expirations"}
+
+    reader = getattr(request.app.state, "reader", None)
+    last_price: Optional[float] = None
+    if reader and hasattr(reader, "get_stock_day_fallback_price"):
+        fallback = reader.get_stock_day_fallback_price(sym)
+        if fallback and fallback[0] is not None and fallback[0] > 0:
+            last_price = float(fallback[0])
+    if not last_price:
+        return {"ok": False, "symbol": sym, "points": [], "error": "No underlying price available for ATM strike selection"}
+
+    atm_strikes = _strikes_around_spot(last_price, count=2)
+    if not atm_strikes:
+        return {"ok": False, "symbol": sym, "points": [], "error": "Cannot compute ATM strikes"}
+
+    all_keys: List[str] = []
+    key_exp_map: Dict[str, str] = {}
+    for exp in exp_list:
+        for st in atm_strikes:
+            for r in ("C", "P"):
+                k = contract_key_from_parts(sym, exp, float(st), r)
+                all_keys.append(k)
+                key_exp_map[k] = exp
+
+    rows = get_option_snapshots_latest(db, all_keys, source=src)
+
+    exp_iv: Dict[str, List[Tuple[float, Optional[float], Optional[float], float]]] = {}
+    for row in rows:
+        ck = row.get("contract_key") or ""
+        exp = key_exp_map.get(ck)
+        if not exp:
+            continue
+        strike, right = _parse_contract_key(ck)
+        if strike is None:
+            continue
+        iv_val = row.get("iv")
+        if iv_val is None:
+            continue
+        try:
+            iv_f = float(iv_val)
+        except (TypeError, ValueError):
+            continue
+        if not (0 < iv_f < 10):
+            continue
+        entry = exp_iv.setdefault(exp, [])
+        dist = abs(strike - last_price)
+        if right == "C":
+            entry.append((dist, iv_f, None, strike))
+        else:
+            entry.append((dist, None, iv_f, strike))
+
+    today = date.today()
+    points: List[Dict[str, Any]] = []
+    for exp in exp_list:
+        items = exp_iv.get(exp, [])
+        if not items:
+            continue
+        items.sort(key=lambda x: x[0])
+        best_call: Optional[float] = None
+        best_put: Optional[float] = None
+        best_strike: Optional[float] = None
+        for dist, iv_c, iv_p, st in items:
+            if iv_c is not None and best_call is None:
+                best_call = iv_c
+                if best_strike is None:
+                    best_strike = st
+            if iv_p is not None and best_put is None:
+                best_put = iv_p
+                if best_strike is None:
+                    best_strike = st
+            if best_call is not None and best_put is not None:
+                break
+
+        atm_iv: Optional[float] = None
+        if best_call is not None and best_put is not None:
+            atm_iv = (best_call + best_put) / 2
+        elif best_call is not None:
+            atm_iv = best_call
+        elif best_put is not None:
+            atm_iv = best_put
+        if atm_iv is None:
+            continue
+
+        try:
+            exp_date = datetime.strptime(exp, "%Y%m%d").date()
+        except ValueError:
+            continue
+        dte = (exp_date - today).days
+        if dte < 0:
+            continue
+
+        points.append({
+            "expiration": exp,
+            "dte_days": dte,
+            "strike": best_strike,
+            "iv_call": best_call,
+            "iv_put": best_put,
+            "atm_iv": atm_iv,
+        })
+
+    points.sort(key=lambda p: p["dte_days"])
+    return {"ok": True, "symbol": sym, "underlying_price": last_price, "points": points}

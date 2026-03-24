@@ -6296,12 +6296,123 @@ th {
   color: var(--color-text-main);
 }
 
-/* Option Discovery: conditions section — fixed height; list areas get explicit height so they scroll */
-.option-discovery-conditions-section {
-  height: 22rem;
+/* Option Discovery: session bar (quote source + daily data) — no fixed height */
+.option-discovery-session-bar {
   display: flex;
   flex-direction: column;
   overflow: visible;
+}
+
+/* Option Discovery: sidebar + main layout */
+.option-discovery-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.option-discovery-sidebar {
+  width: clamp(12rem, 20vw, 17rem);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: sticky;
+  top: var(--space-2);
+}
+
+.option-discovery-sidebar .replay-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.option-discovery-sidebar .option-discovery-underlying-body,
+.option-discovery-sidebar .option-discovery-expiration-body {
+  margin-bottom: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.option-discovery-sidebar .option-discovery-list-with-header {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.option-discovery-sidebar .option-discovery-list-wrap {
+  max-height: 18rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.option-discovery-sidebar .option-discovery-list-empty {
+  min-height: 6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.option-discovery-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Strike window collapsible panel */
+.option-discovery-strike-window {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin-bottom: var(--space-4);
+}
+
+.option-discovery-strike-window-summary {
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--color-text-main);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  user-select: none;
+  list-style: revert;
+}
+
+.option-discovery-strike-window-count {
+  font-weight: 400;
+  margin-left: auto;
+}
+
+.option-discovery-strike-window-hint {
+  margin: 0 var(--space-3) var(--space-2);
+}
+
+.option-discovery-strike-window > .option-discovery-strikes-content {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.option-discovery-strike-window .option-discovery-strikes-with-header {
+  display: flex;
+  flex-direction: column;
+}
+
+.option-discovery-strike-window .strike-ladder-layout {
+  display: flex;
+}
+
+.option-discovery-strike-window .strike-ladder-wrap,
+.option-discovery-strike-window .strike-ladder-col .strike-ladder-wrap {
+  max-height: 18rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .option-discovery-conditions-head-row {
@@ -6357,11 +6468,36 @@ th {
   border-top: 1px solid var(--color-border);
 }
 
+/* Max Pain + Option analytics block inside main column */
+.od-option-structure-stack {
+  width: 100%;
+  min-width: 0;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.od-option-structure-stack .od-max-pain-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Override .replay-section spacing so separator matches Max Pain block */
+.od-option-structure-stack .od-analytics-section.replay-section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
 .mp-header-row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
   margin-bottom: var(--space-2);
+  width: 100%;
 }
 
 .od-max-pain-title {
@@ -6428,8 +6564,47 @@ th {
   margin-bottom: var(--space-3);
 }
 
+.mp-chart-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+/* Option Discovery: two charts per row (2×2 grid); span-2 = full width row */
+.od-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  align-items: start;
+}
+.od-charts-grid .mp-chart-pane {
+  min-width: 0;
+}
+.od-charts-grid .od-chart-pane-span2 {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 52rem) {
+  .od-charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .od-charts-grid .od-chart-pane-span2 {
+    grid-column: auto;
+  }
+}
+
 .mp-chart-pane {
   min-width: 0;
+}
+
+.mp-chart-subtitle {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
 }
 
 /* Legend row */
@@ -6479,146 +6654,54 @@ th {
   max-width: 52rem;
 }
 
-.option-discovery-conditions-section .option-discovery-top-row {
-  flex: 1;
-  min-height: 0;
-  overflow: visible;
+/* ── Option analytics (IV smile / OI profile / skew / term structure) ── */
+.od-analytics-section {
+  max-width: 52rem;
 }
-
-/* Option Discovery: one row; each box fills section height */
-.option-discovery-top-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: var(--space-4);
-  margin-top: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--color-border);
-  min-height: 20rem;
-}
-
-.option-discovery-top-row .replay-section {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.option-discovery-top-row .option-discovery-underlying {
-  flex-shrink: 0;
-  min-width: 12rem;
-}
-
-.option-discovery-top-row .option-discovery-underlying .option-discovery-underlying-body,
-.option-discovery-top-row .option-discovery-expiration > div {
-  margin-bottom: 0;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.option-discovery-top-row .option-discovery-expiration {
-  flex-shrink: 0;
-  min-width: 15rem;
-}
-
-.option-discovery-top-row .option-discovery-strikes {
-  flex: 1;
-  min-width: 18rem;
-}
-
-.option-discovery-top-row .option-discovery-strikes .option-discovery-strikes-content {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Each list/box fills available height in the row */
-.option-discovery-top-row .option-discovery-list-with-header {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* In conditions section: explicit height so list scroll works (flex height was not creating scroll) */
-.option-discovery-conditions-section .option-discovery-top-row .option-discovery-list-wrap {
-  height: 17rem;
-  min-height: 17rem;
-  max-height: 17rem;
-  flex: none;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.option-discovery-top-row .option-discovery-list-wrap {
-  flex: 1;
-  min-height: 0;
-  height: auto;
-  max-height: none;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.option-discovery-top-row .option-discovery-list-empty {
-  flex: 1;
-  min-height: 10rem;
+.od-analytics-title {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
 }
-
-/* Strikes ladder fills height */
-.option-discovery-top-row .option-discovery-strikes-with-header {
-  flex: 1;
-  min-height: 0;
+.od-analytics-skew {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+}
+.od-analytics-skew-label {
+  color: var(--color-text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.od-analytics-skew-val {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.od-analytics-skew-val--put-heavy { color: var(--color-lamp-red, #ef5350); }
+.od-analytics-skew-val--call-heavy { color: var(--color-lamp-green, #66bb6a); }
+.od-analytics-skew-val--neutral { color: var(--color-text-dim); }
+.od-analytics-skew-detail {
+  color: var(--color-text-dim);
+  font-size: var(--text-caption);
+}
+.od-analytics-skew-hint {
+  color: var(--color-text-dim);
+  font-size: var(--text-caption);
+}
+.od-analytics-term-prompt {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
 }
 
-.option-discovery-top-row .strike-ladder-layout {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-/* In conditions section: explicit height so strike ladder scroll works */
-.option-discovery-conditions-section .option-discovery-top-row .strike-ladder-wrap,
-.option-discovery-conditions-section .option-discovery-top-row .strike-ladder-col .strike-ladder-wrap {
-  height: 17rem;
-  min-height: 17rem;
-  max-height: 17rem;
-  flex: none;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.option-discovery-top-row .strike-ladder-col .strike-ladder-wrap {
-  flex: 1;
-  min-height: 0;
-  height: auto;
-  max-height: none;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.option-discovery-top-row .strike-ladder-wrap {
-  height: auto;
-  min-height: 0;
-  max-height: none;
-  flex: 1;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
+/* (legacy .option-discovery-top-row rules removed — replaced by sidebar/main layout) */
 
 .option-discovery-underlying-body {
   display: flex;
@@ -6887,11 +6970,19 @@ th {
   background: var(--color-accent-soft) !important;
 }
 
+/* ITM / ATM / OTM row background — industry-style visual */
+.od-chain-row-itm { background: rgba(52, 199, 89, 0.06); }
+.od-chain-row-otm { background: transparent; }
+.od-chain-row-atm {
+  background: var(--color-accent-soft, rgba(88, 166, 255, 0.10));
+  border-top: 2px solid var(--color-accent, #58a6ff);
+}
 .od-chain-row-atm .od-chain-strike-cell {
   color: var(--color-accent);
+  font-weight: 800;
 }
 
-.od-chain-row.od-quote-row { cursor: default; }
+.od-chain-row.od-quote-row { cursor: pointer; }
 .od-chain-row.od-quote-row:hover { background: var(--color-surface-elevated); }
 .od-chain-row.od-quote-row--selected { background: var(--color-accent-soft); outline: 1px solid var(--color-accent); outline-offset: -1px; }
 
@@ -6899,10 +6990,7 @@ th {
   cursor: pointer;
 }
 
-.od-chain-td-actions {
-  text-align: center !important;
-}
-
+/* Moneyness badge (used in contract detail header) */
 .od-moneyness-badge {
   display: inline-block;
   padding: 1px 6px;
@@ -6916,7 +7004,6 @@ th {
 .od-moneyness-badge--itm { background: var(--color-success-soft, rgba(52,199,89,.15)); color: var(--color-success); }
 .od-moneyness-badge--atm { background: var(--color-accent-soft, rgba(88,166,255,.15)); color: var(--color-accent); }
 .od-moneyness-badge--otm { background: var(--color-surface-elevated); color: var(--color-text-muted); }
-.od-moneyness-badge--— { display: none; }
 
 /* Event context warnings (P3) */
 /* Snapshot feedback blocks (error / warning / info) */

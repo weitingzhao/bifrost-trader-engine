@@ -82,9 +82,12 @@ export {
   fetchMassiveDailyChecklist,
   fetchMaxPainCompute,
   fetchMaxPainComputeHistory,
+  fetchIvTermStructure,
 } from './research'
 export type {
   OptionSnapshotRow,
+  IvTermStructurePoint,
+  IvTermStructureResponse,
   MassiveOptionExpirationsDebug,
   MassiveStatusResponse,
   MassiveJobApiRow,

@@ -995,3 +995,51 @@ export async function fetchRelativeValue(
     error: j.error,
   }
 }
+
+export interface IvTermStructurePoint {
+  expiration: string
+  dte_days: number
+  atm_iv: number | null
+  iv_call?: number | null
+  iv_put?: number | null
+  strike?: number
+}
+
+export interface IvTermStructureResponse {
+  ok: boolean
+  symbol: string
+  underlying_price?: number
+  points: IvTermStructurePoint[]
+  error?: string
+}
+
+export async function fetchIvTermStructure(
+  symbol: string,
+  expirations: string[],
+  source: string = 'massive',
+): Promise<IvTermStructureResponse> {
+  const params = new URLSearchParams({
+    symbol,
+    expirations: expirations.join(','),
+    source,
+  })
+  const r = await fetch(`/api/research/iv-term-structure?${params}`)
+  const j = await r.json().catch(() => ({}))
+  const pts: IvTermStructurePoint[] = Array.isArray(j.points)
+    ? j.points.map((p: Record<string, unknown>) => ({
+        expiration: String(p.expiration ?? ''),
+        dte_days: Number(p.dte_days ?? 0),
+        atm_iv: p.atm_iv != null ? Number(p.atm_iv) : null,
+        iv_call: p.iv_call != null ? Number(p.iv_call) : null,
+        iv_put: p.iv_put != null ? Number(p.iv_put) : null,
+        strike: p.strike != null ? Number(p.strike) : undefined,
+      }))
+    : []
+  return {
+    ok: Boolean(j.ok),
+    symbol: j.symbol ?? symbol,
+    underlying_price: j.underlying_price != null ? Number(j.underlying_price) : undefined,
+    points: pts,
+    error: j.error,
+  }
+}
