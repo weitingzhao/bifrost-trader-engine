@@ -89,3 +89,8 @@ export function groupedChecklistRows(): { group: CapabilityGroup; rows: Checklis
     rows: checklistRows.filter(r => r.group === g),
   })).filter(g => g.rows.length > 0)
 }
+
+export function capabilityGroupForRowId(rowId: string): CapabilityGroup | null {
+  const row = checklistRows.find(r => r.id === rowId)
+  return row?.group ?? null
+}

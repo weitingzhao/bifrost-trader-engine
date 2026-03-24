@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -14,14 +15,26 @@ from src.sink.postgres_sink import _get_conn_params
 logger = logging.getLogger(__name__)
 
 
+def canonical_payload_hash(kind: str, payload: Optional[Dict[str, Any]] = None) -> str:
+    """Deterministic SHA-256 of kind + payload for job deduplication."""
+    canonical = (kind or "").strip() + ":" + json.dumps(payload or {}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def insert_job_massive_backfill(
     status_config: dict,
     kind: str,
     payload: Optional[Dict[str, Any]] = None,
-) -> Optional[int]:
-    """Insert pending job_massive_backfill. Returns job_massive_backfill_id or None."""
+) -> Tuple[Optional[int], bool]:
+    """Insert pending job_massive_backfill with dedup.
+
+    Returns (job_id, deduplicated).  If an identical pending/running job exists,
+    returns that job's id with deduplicated=True instead of inserting a new row.
+    """
     if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
-        return None
+        return None, False
+    kind_clean = (kind or "").strip()
+    ph = canonical_payload_hash(kind_clean, payload)
     try:
         params = _get_conn_params(status_config)
         conn = psycopg2.connect(**params)
@@ -29,20 +42,57 @@ def insert_job_massive_backfill(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO job_massive_backfill (kind, payload, status, created_at, updated_at)
-                    VALUES (%s, %s, 'pending', now(), now())
+                    SELECT job_massive_backfill_id FROM job_massive_backfill
+                    WHERE kind = %s AND payload_hash = %s AND status IN ('pending', 'running')
+                    LIMIT 1
+                    """,
+                    (kind_clean, ph),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    conn.rollback()
+                    return int(existing[0]), True
+
+                cur.execute(
+                    """
+                    INSERT INTO job_massive_backfill (kind, payload, payload_hash, status, created_at, updated_at)
+                    VALUES (%s, %s, %s, 'pending', now(), now())
                     RETURNING job_massive_backfill_id
                     """,
-                    ((kind or "").strip(), json.dumps(payload or {})),
+                    (kind_clean, json.dumps(payload or {}), ph),
                 )
                 row = cur.fetchone()
             conn.commit()
-            return int(row[0]) if row else None
+            return (int(row[0]) if row else None), False
         finally:
             conn.close()
     except Exception as e:
         logger.warning("insert_job_massive_backfill failed: %s", e)
-        return None
+        return None, False
+
+
+def get_watchlist_optionable_stk_symbols(status_config: dict) -> List[str]:
+    """Distinct STK symbols on watchlist with optionable=true (for Massive EOD scope)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT symbol FROM watchlist
+                    WHERE sec_type = 'STK' AND optionable = true AND symbol IS NOT NULL AND trim(symbol) <> ''
+                    ORDER BY symbol
+                    """
+                )
+                return [str(r[0]).strip().upper() for r in cur.fetchall() if r and r[0]]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_watchlist_optionable_stk_symbols failed: %s", e)
+        return []
 
 
 def update_job_massive_backfill_celery_task_id(
@@ -392,7 +442,12 @@ def get_option_snapshots_latest(
     contract_keys: List[str],
     source: str = "massive",
 ) -> List[Dict[str, Any]]:
-    """Latest snapshot per contract_key (distinct on)."""
+    """Latest snapshot per contract_key.
+
+    Tries the materialized view ``option_snapshots_latest`` first (fast path).
+    Falls back to ``DISTINCT ON`` from the base ``option_snapshots`` table if
+    the view does not exist or the query fails.
+    """
     if not contract_keys or not status_config or (
         status_config.get("sink") != "postgres" and not status_config.get("postgres")
     ):
@@ -405,17 +460,41 @@ def get_option_snapshots_latest(
         conn = psycopg2.connect(**params)
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT DISTINCT ON (contract_key)
-                        contract_key, snapshot_ts, last, bid, ask, mid,
-                        iv, delta, gamma, theta, vega, open_interest, underlying_price, source
-                    FROM option_snapshots
-                    WHERE contract_key = ANY(%s) AND source = %s
-                    ORDER BY contract_key, snapshot_ts DESC
-                    """,
-                    (keys, source),
-                )
+                # Try MV first
+                mv_ok = False
+                try:
+                    cur.execute(
+                        "SELECT 1 FROM pg_matviews WHERE schemaname = 'public' AND matviewname = 'option_snapshots_latest' LIMIT 1"
+                    )
+                    if cur.fetchone():
+                        cur.execute(
+                            """
+                            SELECT contract_key, snapshot_ts, last, bid, ask, mid,
+                                   iv, delta, gamma, theta, vega, open_interest, underlying_price, source
+                            FROM option_snapshots_latest
+                            WHERE contract_key = ANY(%s) AND source = %s
+                            """,
+                            (keys, source),
+                        )
+                        mv_ok = True
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+
+                if not mv_ok:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT ON (contract_key)
+                            contract_key, snapshot_ts, last, bid, ask, mid,
+                            iv, delta, gamma, theta, vega, open_interest, underlying_price, source
+                        FROM option_snapshots
+                        WHERE contract_key = ANY(%s) AND source = %s
+                        ORDER BY contract_key, snapshot_ts DESC
+                        """,
+                        (keys, source),
+                    )
                 rows = cur.fetchall()
             return [dict(r) for r in rows]
         finally:
@@ -537,3 +616,336 @@ def get_option_bars(
     except Exception as e:
         logger.debug("get_option_bars failed: %s", e)
         return []
+
+
+def count_pending_massive_jobs(status_config: dict) -> int:
+    """Count job_massive_backfill rows with status pending or running."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return 0
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT count(*)::int FROM job_massive_backfill
+                    WHERE status IN ('pending', 'running')
+                    """
+                )
+                row = cur.fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("count_pending_massive_jobs failed: %s", e)
+        return 0
+
+
+def get_report_max_pain_rows(
+    status_config: dict,
+    *,
+    symbol: Optional[str] = None,
+    expiry: Optional[str] = None,
+    trade_date_gte: Optional[str] = None,
+    trade_date_lte: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Query report_option_max_pain_daily (source=massive)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    lim = max(1, min(int(limit), 500))
+    sym = (symbol or "").strip().upper() or None
+    exp = (expiry or "").strip() or None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                conds = ["source = 'massive'"]
+                args: List[Any] = []
+                if sym:
+                    conds.append("symbol = %s")
+                    args.append(sym)
+                if exp:
+                    conds.append("expiry = %s")
+                    args.append(exp)
+                if trade_date_gte:
+                    conds.append("trade_date >= %s")
+                    args.append(trade_date_gte)
+                if trade_date_lte:
+                    conds.append("trade_date <= %s")
+                    args.append(trade_date_lte)
+                where = " AND ".join(conds)
+                args.append(lim)
+                cur.execute(
+                    f"""
+                    SELECT report_option_max_pain_daily_id, symbol, expiry, trade_date,
+                           max_pain_strike, underlying_close, total_oi, computation_detail, source, created_at
+                    FROM report_option_max_pain_daily
+                    WHERE {where}
+                    ORDER BY trade_date DESC, symbol, expiry
+                    LIMIT %s
+                    """,
+                    tuple(args),
+                )
+                return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_report_max_pain_rows failed: %s", e)
+        return []
+
+
+def get_report_max_pain_latest_batch(
+    status_config: dict,
+    *,
+    symbol: Optional[str] = None,
+    limit: int = 80,
+) -> tuple[List[Dict[str, Any]], Optional[str]]:
+    """Rows for the latest trade_date present in report_option_max_pain_daily; returns (rows, trade_date_iso)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return [], None
+    lim = max(1, min(int(limit), 500))
+    sym = (symbol or "").strip().upper() or None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT MAX(trade_date) FROM report_option_max_pain_daily WHERE source = 'massive'"
+                )
+                r0 = cur.fetchone()
+                max_d = r0[0] if r0 else None
+                if max_d is None:
+                    return [], None
+                td = max_d.isoformat() if hasattr(max_d, "isoformat") else str(max_d)
+                if sym:
+                    cur.execute(
+                        """
+                        SELECT report_option_max_pain_daily_id, symbol, expiry, trade_date,
+                               max_pain_strike, underlying_close, total_oi, computation_detail, source, created_at
+                        FROM report_option_max_pain_daily
+                        WHERE source = 'massive' AND trade_date = %s AND symbol = %s
+                        ORDER BY symbol, expiry
+                        LIMIT %s
+                        """,
+                        (max_d, sym, lim),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT report_option_max_pain_daily_id, symbol, expiry, trade_date,
+                               max_pain_strike, underlying_close, total_oi, computation_detail, source, created_at
+                        FROM report_option_max_pain_daily
+                        WHERE source = 'massive' AND trade_date = %s
+                        ORDER BY symbol, expiry
+                        LIMIT %s
+                        """,
+                        (max_d, lim),
+                    )
+                return [dict(r) for r in cur.fetchall()], td
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_report_max_pain_latest_batch failed: %s", e)
+        return [], None
+
+
+def get_massive_daily_checklist_data(
+    status_config: dict,
+    symbols: List[str],
+    trade_date: str,
+) -> Dict[str, Any]:
+    """Per-symbol daily dimension status for UI checklist (PG + optional Redis WS).
+
+    *trade_date* is the US session calendar date (YYYY-MM-DD) to evaluate against.
+    """
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {"trade_date": trade_date, "symbols": {}, "error": "postgres not configured"}
+    syms = [s.strip().upper() for s in symbols if s and str(s).strip()][:80]
+    if not syms:
+        return {"trade_date": trade_date, "symbols": {}}
+
+    out_symbols: Dict[str, Any] = {}
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for sym in syms:
+                    ck_prefix = f"{sym}|OPT|"
+                    # Chain snapshot (Massive) on trade_date in America/New_York
+                    cur.execute(
+                        """
+                        SELECT COUNT(*)::int, MAX(snapshot_ts)
+                        FROM option_snapshots
+                        WHERE source = 'massive'
+                          AND contract_key LIKE %s
+                          AND (snapshot_ts AT TIME ZONE 'America/New_York')::date = %s::date
+                        """,
+                        (ck_prefix + "%", trade_date),
+                    )
+                    snap_row = cur.fetchone()
+                    snap_cnt = int(snap_row[0]) if snap_row else 0
+                    snap_max = snap_row[1]
+                    if snap_cnt > 0:
+                        daily_snapshot = {
+                            "status": "complete",
+                            "rows": snap_cnt,
+                            "last_ts": snap_max.isoformat() if snap_max else None,
+                        }
+                    else:
+                        daily_snapshot = {"status": "missing", "rows": 0}
+
+                    cur.execute(
+                        """
+                        SELECT COUNT(*)::int, MAX(trade_date)
+                        FROM option_open_interest_daily
+                        WHERE symbol = %s AND source = 'massive' AND trade_date = %s::date
+                        """,
+                        (sym, trade_date),
+                    )
+                    oi_row = cur.fetchone()
+                    oi_cnt = int(oi_row[0]) if oi_row else 0
+                    if oi_cnt > 0:
+                        daily_oi = {"status": "complete", "rows": oi_cnt, "trade_date": trade_date}
+                    else:
+                        cur.execute(
+                            """
+                            SELECT MAX(trade_date) FROM option_open_interest_daily
+                            WHERE symbol = %s AND source = 'massive'
+                            """,
+                            (sym,),
+                        )
+                        ld = cur.fetchone()[0]
+                        daily_oi = {
+                            "status": "missing",
+                            "last_trade_date": ld.isoformat() if ld is not None and hasattr(ld, "isoformat") else None,
+                        }
+
+                    cur.execute(
+                        """
+                        SELECT COUNT(*)::int
+                        FROM report_option_max_pain_daily
+                        WHERE symbol = %s AND source = 'massive' AND trade_date = %s::date
+                        """,
+                        (sym, trade_date),
+                    )
+                    mp_cnt = int(cur.fetchone()[0])
+                    if mp_cnt > 0:
+                        daily_mp = {"status": "complete", "rows": mp_cnt, "trade_date": trade_date}
+                    else:
+                        daily_mp = {"status": "missing"}
+
+                    cur.execute(
+                        """
+                        SELECT MAX(created_at) FROM massive_corporate_action
+                        WHERE symbol = %s AND source = 'massive'
+                        """,
+                        (sym,),
+                    )
+                    mx = cur.fetchone()[0]
+                    if mx is not None:
+                        from datetime import datetime, timezone
+
+                        now = datetime.now(timezone.utc)
+                        if getattr(mx, "tzinfo", None) is None:
+                            mx_aware = mx.replace(tzinfo=timezone.utc)
+                        else:
+                            mx_aware = mx.astimezone(timezone.utc)
+                        age_sec = (now - mx_aware).total_seconds()
+                        if age_sec <= 7 * 86400:
+                            daily_corp = {
+                                "status": "complete",
+                                "last_sync": mx.isoformat() if hasattr(mx, "isoformat") else str(mx),
+                            }
+                        else:
+                            daily_corp = {
+                                "status": "partial",
+                                "last_sync": mx.isoformat() if hasattr(mx, "isoformat") else str(mx),
+                            }
+                    else:
+                        daily_corp = {"status": "missing"}
+
+                    out_symbols[sym] = {
+                        "daily-snapshot": daily_snapshot,
+                        "daily-oi": daily_oi,
+                        "daily-max-pain": daily_mp,
+                        "daily-corporate": daily_corp,
+                    }
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("get_massive_daily_checklist_data failed: %s", e)
+        return {"trade_date": trade_date, "symbols": out_symbols, "error": str(e)}
+
+    # WS status: global (same for all symbols)
+    ws_block: Dict[str, Any] = {"status": "missing", "connected": False}
+    try:
+        from servers.redis_url import redis_url_from_config
+
+        rurl = redis_url_from_config(status_config)
+        if rurl:
+            import redis
+
+            r = redis.from_url(rurl, decode_responses=True)
+            h = r.hgetall("massive:meta:status")
+            if h:
+                connected = h.get("connected") == "1"
+                lm = h.get("last_msg_ts")
+                age_s: Optional[float] = None
+                if lm is not None:
+                    try:
+                        import time as _time
+
+                        age_s = max(0.0, _time.time() - float(lm))
+                    except (TypeError, ValueError):
+                        age_s = None
+                if connected and age_s is not None and age_s < 120:
+                    ws_block = {"status": "complete", "connected": True, "last_msg_age_s": age_s}
+                elif connected:
+                    ws_block = {"status": "degraded", "connected": True, "last_msg_age_s": age_s}
+                else:
+                    ws_block = {"status": "degraded", "connected": False, "last_msg_age_s": age_s}
+    except Exception:
+        pass
+
+    for sym in out_symbols:
+        out_symbols[sym]["daily-ws-alive"] = dict(ws_block)
+
+    return {"trade_date": trade_date, "symbols": out_symbols}
+
+
+def get_latest_massive_job_by_kind(
+    status_config: dict, kind: str
+) -> Optional[Dict[str, Any]]:
+    """Latest job row for a given kind (newest first)."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    k = (kind or "").strip().lower()
+    if not k:
+        return None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT job_massive_backfill_id, kind, payload, status, result, celery_task_id, created_at, updated_at
+                    FROM job_massive_backfill
+                    WHERE kind = %s
+                    ORDER BY job_massive_backfill_id DESC
+                    LIMIT 1
+                    """,
+                    (k,),
+                )
+                row = cur.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_latest_massive_job_by_kind failed: %s", e)
+        return None

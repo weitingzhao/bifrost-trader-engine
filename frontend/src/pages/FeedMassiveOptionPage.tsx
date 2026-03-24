@@ -31,9 +31,10 @@ import type {
 import { InfoTooltip } from '../components/InfoTooltip'
 import checklistRows from './massiveFeedChecklistRows'
 import type { ChecklistRow } from './massiveFeedChecklistRows'
-import { CAPABILITY_GROUP_LABELS } from './massiveFeedChecklistRows'
+import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
 import {
+  capabilityGroupForRowId,
   checklistEffectiveStatusLabel,
   effectiveChecklistProjectStatus,
   groupedChecklistRows,
@@ -245,6 +246,16 @@ export function FeedMassiveOptionPage({
   const [_jobsError, setJobsError] = useState<string | null>(null)
   /** Which capability section is focused after chip click or hash deep-link (border highlight). */
   const [highlightedCapabilityId, setHighlightedCapabilityId] = useState<string | null>(null)
+  /** Collapsible capability groups in sticky nav (REST / WebSocket / Flat Files / Project). */
+  const [capNavGroupExpanded, setCapNavGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
+    CAPABILITY_GROUP_ORDER.reduce(
+      (acc, g) => {
+        acc[g] = true
+        return acc
+      },
+      {} as Record<CapabilityGroup, boolean>,
+    ),
+  )
   /** Per-capability body expanded; default collapsed. */
   const [capExpanded, setCapExpanded] = useState<Record<string, boolean>>({})
 
@@ -465,6 +476,10 @@ export function FeedMassiveOptionPage({
   const scrollToSection = useCallback((id: string) => {
     setHighlightedCapabilityId(id)
     setCapExpanded(prev => ({ ...prev, [id]: true }))
+    const g = capabilityGroupForRowId(id)
+    if (g) {
+      setCapNavGroupExpanded(prev => (prev[g] ? prev : { ...prev, [g]: true }))
+    }
     const el = document.getElementById(feedMassiveSvcAnchorId(id))
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1381,35 +1396,63 @@ export function FeedMassiveOptionPage({
             ) : null}
           </div>
           <p className="feed-massive-cap-hint">
-            Capabilities grouped by delivery channel. Click a chip to jump and expand that section.
+            Capabilities grouped by delivery channel. Click a group header to show or hide chips; click a chip to jump
+            and expand that section.
           </p>
-          {groupedChecklistRows().map(({ group, rows: groupRows }) => (
-            <div key={group} className="feed-massive-cap-group">
-              <span className="feed-massive-cap-group-label">{CAPABILITY_GROUP_LABELS[group]}</span>
-              <div className="feed-massive-cap-summary">
-                {groupRows.map(row => {
-                  const tierOk = tierOkForRow(row, massiveStatus, Boolean(configured))
-                  const tradesOk = tradesOkForRow(row, massiveStatus)
-                  const eff = effectiveChecklistProjectStatus(row, Boolean(configured), tierOk, tradesOk)
-                  return (
-                    <a
-                      key={row.id}
-                      href={`#${feedMassiveSvcAnchorId(row.id)}`}
-                      className={`feed-massive-tab-chip${highlightedCapabilityId === row.id ? ' feed-massive-tab-chip--active' : ''}`}
-                      aria-current={highlightedCapabilityId === row.id ? 'location' : undefined}
-                      onClick={e => {
-                        e.preventDefault()
-                        scrollToSection(row.id)
-                      }}
-                    >
-                      <span className={feedMassiveOverviewDotClass(eff)} title={checklistEffectiveStatusLabel(eff)} aria-hidden />
-                      <span className="feed-massive-tab-chip-label">{shortServiceLabel(row)}</span>
-                    </a>
-                  )
-                })}
+          {groupedChecklistRows().map(({ group, rows: groupRows }) => {
+            const navOpen = capNavGroupExpanded[group]
+            const groupHasHighlight = groupRows.some(row => highlightedCapabilityId === row.id)
+            return (
+              <div key={group} className="feed-massive-cap-group">
+                <button
+                  type="button"
+                  className={`feed-massive-cap-group-toggle${groupHasHighlight ? ' feed-massive-cap-group-toggle--active' : ''}`}
+                  aria-expanded={navOpen}
+                  aria-controls={`feed-massive-cap-group-panel-${group}`}
+                  id={`feed-massive-cap-group-head-${group}`}
+                  onClick={() => setCapNavGroupExpanded(prev => ({ ...prev, [group]: !prev[group] }))}
+                >
+                  <span
+                    className={`feed-massive-cap-group-chevron${navOpen ? ' feed-massive-cap-group-chevron--open' : ''}`}
+                    aria-hidden
+                  >
+                    ▼
+                  </span>
+                  <span className="feed-massive-cap-group-label">{CAPABILITY_GROUP_LABELS[group]}</span>
+                </button>
+                <div
+                  id={`feed-massive-cap-group-panel-${group}`}
+                  className="feed-massive-cap-group-panel"
+                  hidden={!navOpen}
+                  role="region"
+                  aria-labelledby={`feed-massive-cap-group-head-${group}`}
+                >
+                  <div className="feed-massive-cap-summary">
+                    {groupRows.map(row => {
+                      const tierOk = tierOkForRow(row, massiveStatus, Boolean(configured))
+                      const tradesOk = tradesOkForRow(row, massiveStatus)
+                      const eff = effectiveChecklistProjectStatus(row, Boolean(configured), tierOk, tradesOk)
+                      return (
+                        <a
+                          key={row.id}
+                          href={`#${feedMassiveSvcAnchorId(row.id)}`}
+                          className={`feed-massive-tab-chip${highlightedCapabilityId === row.id ? ' feed-massive-tab-chip--active' : ''}`}
+                          aria-current={highlightedCapabilityId === row.id ? 'location' : undefined}
+                          onClick={e => {
+                            e.preventDefault()
+                            scrollToSection(row.id)
+                          }}
+                        >
+                          <span className={feedMassiveOverviewDotClass(eff)} title={checklistEffectiveStatusLabel(eff)} aria-hidden />
+                          <span className="feed-massive-tab-chip-label">{shortServiceLabel(row)}</span>
+                        </a>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </nav>
 
@@ -2942,258 +2985,6 @@ export function FeedMassiveOptionPage({
           </FeedMassiveServiceBlock>
         </FeedMassiveCapabilityPanel>
 
-        <h3 className="feed-massive-group-header" id="feed-massive-group-project">Project</h3>
-
-        {/* Reference / contracts */}
-        <FeedMassiveCapabilityPanel
-          capId="reference"
-          checklistRow={rRef}
-          effectiveStatus={effRef}
-          expanded={capExpanded.reference === true}
-          onToggle={() => toggleCap('reference')}
-          highlight={highlightedCapabilityId === 'reference'}
-          ariaLabel="Reference contracts"
-        >
-          <FeedMassiveServiceBlock
-            effectiveStatus={effRef}
-            checklistRow={rRef}
-            evidence={refTestMsg ?? (configured ? 'Run Test to fetch expirations via Massive REST.' : 'Configure Massive API key first.')}
-            testArea={
-              <div className="feed-massive-inline-actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <label className="feed-massive-field">
-                  <span className="form-label">Symbol</span>
-                  <input
-                    className="form-input"
-                    value={refSymbol}
-                    onChange={e => setRefSymbol(e.target.value)}
-                    disabled={refTestBusy || !configured}
-                    autoComplete="off"
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={refTestBusy || !configured}
-                  onClick={() => runRefExpirationsTest()}
-                >
-                  {refTestBusy ? 'Running…' : 'Run expirations test'}
-                </button>
-                {onGoToScreener ? (
-                  <button type="button" className="btn btn-secondary" onClick={onGoToScreener}>
-                    Open Option Discovery
-                  </button>
-                ) : null}
-              </div>
-            }
-          >
-            <div className="feed-massive-card-head">
-              <h3>Reference / contracts</h3>
-            </div>
-            <p className="feed-massive-card-lead">
-              Massive-backed expirations and strikes (same API as Research → Option Discovery when using Massive).
-              Read-only: no rows are written to PostgreSQL (
-              <code style={{ fontSize: '0.85em' }}>option_snapshots</code> or other tables). After a successful run,
-              expand <strong>Expirations</strong> and <strong>Strikes</strong> below for the full lists.
-            </p>
-            {refTestExpirations.length > 0 || refTestStrikes.length > 0 ? (
-              <div className="feed-massive-ref-lists">
-                {refTestExpirations.length > 0 ? (
-                  <details className="feed-massive-details-debug" open>
-                    <summary>Expirations ({refTestExpirations.length})</summary>
-                    <pre className="feed-massive-pre-json" tabIndex={0}>
-                      {refTestExpirations.join('\n')}
-                    </pre>
-                  </details>
-                ) : null}
-                {refTestStrikes.length > 0 ? (
-                  <details className="feed-massive-details-debug" open>
-                    <summary>Strikes ({refTestStrikes.length})</summary>
-                    <pre className="feed-massive-pre-json" tabIndex={0}>
-                      {refTestStrikes.map(s => String(s)).join('\n')}
-                    </pre>
-                  </details>
-                ) : null}
-              </div>
-            ) : null}
-            {refTestDebug ? (
-              <div className="feed-massive-ref-debug" style={{ marginTop: 'var(--space-3)' }}>
-                <details className="feed-massive-details-debug">
-                  <summary>
-                    Contract samples ({refTestDebug.contract_samples.length}
-                    {refTestDebug.contract_samples_truncated ? ', truncated' : ''})
-                  </summary>
-                  <pre
-                    className="feed-massive-pre-json"
-                    tabIndex={0}
-                  >
-                    {JSON.stringify(refTestDebug.contract_samples, null, 2)}
-                  </pre>
-                </details>
-                <details className="feed-massive-details-debug">
-                  <summary>Raw requests and responses ({refTestDebug.pages.length} page(s))</summary>
-                  <pre
-                    className="feed-massive-pre-json"
-                    tabIndex={0}
-                  >
-                    {JSON.stringify(refTestDebug.pages, null, 2)}
-                  </pre>
-                </details>
-              </div>
-            ) : null}
-          </FeedMassiveServiceBlock>
-        </FeedMassiveCapabilityPanel>
-
-        {/* Greeks / IV migrated to Data Coverage → Option (OptionCoveragePage) */}
-
-        {/* Daily open interest */}
-        <FeedMassiveCapabilityPanel
-          capId="daily-oi"
-          checklistRow={rOi}
-          effectiveStatus={effOi}
-          expanded={capExpanded['daily-oi'] === true}
-          onToggle={() => toggleCap('daily-oi')}
-          highlight={highlightedCapabilityId === 'daily-oi'}
-          ariaLabel="Open interest"
-        >
-          <FeedMassiveServiceBlock
-            effectiveStatus={effOi}
-            checklistRow={rOi}
-            evidence={oiFetchMsg ?? jobEvidenceLine(latestJobForKind(jobs, 'oi'))}
-            testArea={
-              <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <label className="feed-massive-field">
-                  <span className="form-label">Symbol</span>
-                  <input
-                    className="form-input"
-                    value={oiFetchSym}
-                    onChange={e => setOiFetchSym(e.target.value)}
-                    disabled={oiFetchBusy}
-                    autoComplete="off"
-                  />
-                </label>
-                <button type="button" className="btn btn-secondary" disabled={oiFetchBusy} onClick={() => runOiApiFetch()}>
-                  {oiFetchBusy ? 'Loading…' : 'GET option-oi'}
-                </button>
-              </div>
-            }
-          >
-            <div className="feed-massive-card-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconOi />
-                </span>
-                <h3>Open interest</h3>
-              </div>
-            </div>
-            <p className="feed-massive-card-lead">
-              Placeholder job; prefer chain snapshot for OI when available. Use GET option-oi to read stored daily OI rows.
-            </p>
-          </FeedMassiveServiceBlock>
-          <div className="feed-massive-actions-row">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={oiBusy || !configured}
-              onClick={() => runOi()}
-            >
-              {oiBusy ? 'Running…' : 'Enqueue OI job'}
-            </button>
-          </div>
-          {oiErr ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
-              {oiErr}
-            </p>
-          ) : null}
-        </FeedMassiveCapabilityPanel>
-
-        {/* Corporate actions */}
-        <FeedMassiveCapabilityPanel
-          capId="corporate-actions"
-          checklistRow={rCorp}
-          effectiveStatus={effCorp}
-          expanded={capExpanded['corporate-actions'] === true}
-          onToggle={() => toggleCap('corporate-actions')}
-          highlight={highlightedCapabilityId === 'corporate-actions'}
-          ariaLabel="Corporate actions"
-        >
-          <FeedMassiveServiceBlock
-            effectiveStatus={effCorp}
-            checklistRow={rCorp}
-            evidence={
-              corpRows.length > 0
-                ? `${corpRows.length} row(s) loaded from DB for current query. ${jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))}`
-                : jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))
-            }
-            testArea={
-              <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <label className="feed-massive-field">
-                  <span className="form-label">Underlying</span>
-                  <input
-                    className="form-input"
-                    value={corpSymbol}
-                    onChange={e => setCorpSymbol(e.target.value)}
-                    disabled={corpBusy || !configured}
-                    autoComplete="off"
-                  />
-                </label>
-                <button type="button" className="btn btn-secondary" disabled={corpBusy || !configured} onClick={() => runCorpAction()}>
-                  {corpBusy ? 'Running…' : 'Enqueue sync'}
-                </button>
-                <button type="button" className="btn btn-primary" disabled={corpDbLoading} onClick={() => loadCorpFromDb()}>
-                  {corpDbLoading ? 'Loading…' : 'Load from DB'}
-                </button>
-              </div>
-            }
-          >
-            <div className="feed-massive-card-head">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                <span className="feed-massive-card-icon" aria-hidden>
-                  <CardIconCorpAction />
-                </span>
-                <h3>Corporate actions</h3>
-              </div>
-            </div>
-            <p className="feed-massive-card-lead">
-              Dividends and stock splits via Massive REST. Enter a stock ticker, sync from API, then load persisted rows from PostgreSQL.
-            </p>
-          </FeedMassiveServiceBlock>
-          {corpErr ? (
-            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
-              {corpErr}
-            </p>
-          ) : null}
-          {corpRows.length > 0 ? (
-            <div className="feed-massive-table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Symbol</th>
-                    <th scope="col">Type</th>
-                    <th scope="col">Ex date</th>
-                    <th scope="col">Amount</th>
-                    <th scope="col">Ratio</th>
-                    <th scope="col">Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {corpRows.map((r, i) => (
-                    <tr key={`${r.symbol}-${r.action_type}-${r.ex_date}-${i}`}>
-                      <td>{r.symbol}</td>
-                      <td><span className={r.action_type === 'dividend' ? 'feed-massive-badge feed-massive-badge--done' : 'feed-massive-badge feed-massive-badge--run'}>{r.action_type}</span></td>
-                      <td>{r.ex_date ?? '—'}</td>
-                      <td>{r.amount != null ? r.amount.toFixed(4) : '—'}</td>
-                      <td>{r.ratio_from != null && r.ratio_to != null ? `${r.ratio_from}:${r.ratio_to}` : '—'}</td>
-                      <td style={{ maxWidth: '14rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description ?? undefined}>
-                        {r.description ?? '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </FeedMassiveCapabilityPanel>
-
         <h3 className="feed-massive-group-header" id="feed-massive-group-ws">WebSocket</h3>
 
         <h4 className="feed-massive-section-header" id="feed-massive-ws-section-aggregates-s">Aggregates (Per Second)</h4>
@@ -3510,6 +3301,258 @@ export function FeedMassiveOptionPage({
             </FeedMassiveCapabilityPanel>
           )
         })}
+
+        <h3 className="feed-massive-group-header" id="feed-massive-group-project">Project</h3>
+
+        {/* Reference / contracts */}
+        <FeedMassiveCapabilityPanel
+          capId="reference"
+          checklistRow={rRef}
+          effectiveStatus={effRef}
+          expanded={capExpanded.reference === true}
+          onToggle={() => toggleCap('reference')}
+          highlight={highlightedCapabilityId === 'reference'}
+          ariaLabel="Reference contracts"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effRef}
+            checklistRow={rRef}
+            evidence={refTestMsg ?? (configured ? 'Run Test to fetch expirations via Massive REST.' : 'Configure Massive API key first.')}
+            testArea={
+              <div className="feed-massive-inline-actions" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <label className="feed-massive-field">
+                  <span className="form-label">Symbol</span>
+                  <input
+                    className="form-input"
+                    value={refSymbol}
+                    onChange={e => setRefSymbol(e.target.value)}
+                    disabled={refTestBusy || !configured}
+                    autoComplete="off"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={refTestBusy || !configured}
+                  onClick={() => runRefExpirationsTest()}
+                >
+                  {refTestBusy ? 'Running…' : 'Run expirations test'}
+                </button>
+                {onGoToScreener ? (
+                  <button type="button" className="btn btn-secondary" onClick={onGoToScreener}>
+                    Open Option Discovery
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            <div className="feed-massive-card-head">
+              <h3>Reference / contracts</h3>
+            </div>
+            <p className="feed-massive-card-lead">
+              Massive-backed expirations and strikes (same API as Research → Option Discovery when using Massive).
+              Read-only: no rows are written to PostgreSQL (
+              <code style={{ fontSize: '0.85em' }}>option_snapshots</code> or other tables). After a successful run,
+              expand <strong>Expirations</strong> and <strong>Strikes</strong> below for the full lists.
+            </p>
+            {refTestExpirations.length > 0 || refTestStrikes.length > 0 ? (
+              <div className="feed-massive-ref-lists">
+                {refTestExpirations.length > 0 ? (
+                  <details className="feed-massive-details-debug" open>
+                    <summary>Expirations ({refTestExpirations.length})</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0}>
+                      {refTestExpirations.join('\n')}
+                    </pre>
+                  </details>
+                ) : null}
+                {refTestStrikes.length > 0 ? (
+                  <details className="feed-massive-details-debug" open>
+                    <summary>Strikes ({refTestStrikes.length})</summary>
+                    <pre className="feed-massive-pre-json" tabIndex={0}>
+                      {refTestStrikes.map(s => String(s)).join('\n')}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+            {refTestDebug ? (
+              <div className="feed-massive-ref-debug" style={{ marginTop: 'var(--space-3)' }}>
+                <details className="feed-massive-details-debug">
+                  <summary>
+                    Contract samples ({refTestDebug.contract_samples.length}
+                    {refTestDebug.contract_samples_truncated ? ', truncated' : ''})
+                  </summary>
+                  <pre
+                    className="feed-massive-pre-json"
+                    tabIndex={0}
+                  >
+                    {JSON.stringify(refTestDebug.contract_samples, null, 2)}
+                  </pre>
+                </details>
+                <details className="feed-massive-details-debug">
+                  <summary>Raw requests and responses ({refTestDebug.pages.length} page(s))</summary>
+                  <pre
+                    className="feed-massive-pre-json"
+                    tabIndex={0}
+                  >
+                    {JSON.stringify(refTestDebug.pages, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            ) : null}
+          </FeedMassiveServiceBlock>
+        </FeedMassiveCapabilityPanel>
+
+        {/* Greeks / IV migrated to Data Coverage → Option (OptionCoveragePage) */}
+
+        {/* Daily open interest */}
+        <FeedMassiveCapabilityPanel
+          capId="daily-oi"
+          checklistRow={rOi}
+          effectiveStatus={effOi}
+          expanded={capExpanded['daily-oi'] === true}
+          onToggle={() => toggleCap('daily-oi')}
+          highlight={highlightedCapabilityId === 'daily-oi'}
+          ariaLabel="Open interest"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effOi}
+            checklistRow={rOi}
+            evidence={oiFetchMsg ?? jobEvidenceLine(latestJobForKind(jobs, 'oi'))}
+            testArea={
+              <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <label className="feed-massive-field">
+                  <span className="form-label">Symbol</span>
+                  <input
+                    className="form-input"
+                    value={oiFetchSym}
+                    onChange={e => setOiFetchSym(e.target.value)}
+                    disabled={oiFetchBusy}
+                    autoComplete="off"
+                  />
+                </label>
+                <button type="button" className="btn btn-secondary" disabled={oiFetchBusy} onClick={() => runOiApiFetch()}>
+                  {oiFetchBusy ? 'Loading…' : 'GET option-oi'}
+                </button>
+              </div>
+            }
+          >
+            <div className="feed-massive-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden>
+                  <CardIconOi />
+                </span>
+                <h3>Open interest</h3>
+              </div>
+            </div>
+            <p className="feed-massive-card-lead">
+              Placeholder job; prefer chain snapshot for OI when available. Use GET option-oi to read stored daily OI rows.
+            </p>
+          </FeedMassiveServiceBlock>
+          <div className="feed-massive-actions-row">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={oiBusy || !configured}
+              onClick={() => runOi()}
+            >
+              {oiBusy ? 'Running…' : 'Enqueue OI job'}
+            </button>
+          </div>
+          {oiErr ? (
+            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+              {oiErr}
+            </p>
+          ) : null}
+        </FeedMassiveCapabilityPanel>
+
+        {/* Corporate actions */}
+        <FeedMassiveCapabilityPanel
+          capId="corporate-actions"
+          checklistRow={rCorp}
+          effectiveStatus={effCorp}
+          expanded={capExpanded['corporate-actions'] === true}
+          onToggle={() => toggleCap('corporate-actions')}
+          highlight={highlightedCapabilityId === 'corporate-actions'}
+          ariaLabel="Corporate actions"
+        >
+          <FeedMassiveServiceBlock
+            effectiveStatus={effCorp}
+            checklistRow={rCorp}
+            evidence={
+              corpRows.length > 0
+                ? `${corpRows.length} row(s) loaded from DB for current query. ${jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))}`
+                : jobEvidenceLine(latestJobForKind(jobs, 'corporate_action'))
+            }
+            testArea={
+              <div className="feed-massive-inline-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <label className="feed-massive-field">
+                  <span className="form-label">Underlying</span>
+                  <input
+                    className="form-input"
+                    value={corpSymbol}
+                    onChange={e => setCorpSymbol(e.target.value)}
+                    disabled={corpBusy || !configured}
+                    autoComplete="off"
+                  />
+                </label>
+                <button type="button" className="btn btn-secondary" disabled={corpBusy || !configured} onClick={() => runCorpAction()}>
+                  {corpBusy ? 'Running…' : 'Enqueue sync'}
+                </button>
+                <button type="button" className="btn btn-primary" disabled={corpDbLoading} onClick={() => loadCorpFromDb()}>
+                  {corpDbLoading ? 'Loading…' : 'Load from DB'}
+                </button>
+              </div>
+            }
+          >
+            <div className="feed-massive-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span className="feed-massive-card-icon" aria-hidden>
+                  <CardIconCorpAction />
+                </span>
+                <h3>Corporate actions</h3>
+              </div>
+            </div>
+            <p className="feed-massive-card-lead">
+              Dividends and stock splits via Massive REST. Enter a stock ticker, sync from API, then load persisted rows from PostgreSQL.
+            </p>
+          </FeedMassiveServiceBlock>
+          {corpErr ? (
+            <p className="status-page-msg err" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+              {corpErr}
+            </p>
+          ) : null}
+          {corpRows.length > 0 ? (
+            <div className="feed-massive-table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Symbol</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Ex date</th>
+                    <th scope="col">Amount</th>
+                    <th scope="col">Ratio</th>
+                    <th scope="col">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {corpRows.map((r, i) => (
+                    <tr key={`${r.symbol}-${r.action_type}-${r.ex_date}-${i}`}>
+                      <td>{r.symbol}</td>
+                      <td><span className={r.action_type === 'dividend' ? 'feed-massive-badge feed-massive-badge--done' : 'feed-massive-badge feed-massive-badge--run'}>{r.action_type}</span></td>
+                      <td>{r.ex_date ?? '—'}</td>
+                      <td>{r.amount != null ? r.amount.toFixed(4) : '—'}</td>
+                      <td>{r.ratio_from != null && r.ratio_to != null ? `${r.ratio_from}:${r.ratio_to}` : '—'}</td>
+                      <td style={{ maxWidth: '14rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description ?? undefined}>
+                        {r.description ?? '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </FeedMassiveCapabilityPanel>
 
       </div>
     </div>

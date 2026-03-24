@@ -203,6 +203,10 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 升级后仅修改配置并重启相关进程（Server + Worker + 可选 WS Ingest），无需 schema 迁移。
 
+#### 2.10.6 详细落地与分项计划
+
+上述 §2.10 定义了 Massive 数据源的**架构约定**与**行为边界**。更细粒度的**落地方案**（数据库升级、WebSocket ingest 进程、Worker 调度与对账、FastAPI 缓存与推送、UI Checklist 与数据补全、Max Pain 报表）见 **[Option 数据 Feed 架构与实施计划](plans/option-data-feed/README.md)**。
+
 ---
 
 系统由三部分组成，对应上文 §2.2，缺一不可：

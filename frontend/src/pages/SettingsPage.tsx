@@ -32,7 +32,7 @@ import {
   FEED_MASSIVE_OPTION_ID,
   FEED_SUBSECTIONS,
 } from './settings/settingsConstants'
-import { CAPABILITY_GROUP_LABELS } from './massiveFeedChecklistRows'
+import { CAPABILITY_GROUP_LABELS, CAPABILITY_GROUP_ORDER, type CapabilityGroup } from './massiveFeedChecklistRows'
 import { feedMassiveSvcAnchorId } from './massive/feedMassiveAnchors'
 import { isMassiveOptionFeedHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
 import {
@@ -211,6 +211,15 @@ export function SettingsPage({
   })
   const [ibConnectionExpanded, setIbConnectionExpanded] = useState(true)
   const [massiveOptionExpanded, setMassiveOptionExpanded] = useState(true)
+  const [massiveCapGroupExpanded, setMassiveCapGroupExpanded] = useState<Record<CapabilityGroup, boolean>>(() =>
+    CAPABILITY_GROUP_ORDER.reduce(
+      (acc, g) => {
+        acc[g] = true
+        return acc
+      },
+      {} as Record<CapabilityGroup, boolean>,
+    ),
+  )
   const [systemStatusExpanded, setSystemStatusExpanded] = useState(true)
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [celeryStopBusy, setCeleryStopBusy] = useState(false)
@@ -243,6 +252,27 @@ export function SettingsPage({
       window.clearInterval(t)
     }
   }, [])
+
+  useEffect(() => {
+    const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
+    setMassiveCapGroupExpanded(prev => {
+      let next: Record<CapabilityGroup, boolean> | null = null
+      const ensureOpen = (g: CapabilityGroup) => {
+        if (!prev[g]) {
+          if (!next) next = { ...prev }
+          next[g] = true
+        }
+      }
+      for (const { group, rows: groupRows } of groupedChecklistRows()) {
+        const active = groupRows.some(row => {
+          const anchor = feedMassiveSvcAnchorId(row.id)
+          return currentHash === anchor || fromTab === row.id
+        })
+        if (active) ensureOpen(group)
+      }
+      return next ?? prev
+    })
+  }, [currentHash])
 
   const onSidebarCeleryStop = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault()
@@ -476,37 +506,79 @@ export function SettingsPage({
               </button>
             </div>
             <div id="settings-feed-massive-subs" className="settings-sidebar-subs" hidden={!massiveOptionExpanded}>
-              {groupedChecklistRows().map(({ group, rows: groupRows }) => (
-                <div key={group} className="settings-sidebar-massive-group">
-                  <span className="settings-sidebar-massive-group-label">{CAPABILITY_GROUP_LABELS[group]}</span>
-                  {groupRows.map(row => {
-                    const configured = Boolean(massiveStatus?.configured)
-                    const tierOk = tierOkForRow(row, massiveStatus, configured)
-                    const tradesOk = tradesOkForRow(row, massiveStatus)
-                    const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
-                    const isTierLimited = eff === 'not-on-tier'
-                    const anchor = feedMassiveSvcAnchorId(row.id)
-                    const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
-                    const childActive = currentHash === anchor || fromTab === row.id
-                    return (
-                      <a
-                        key={row.id}
-                        href={`#${anchor}`}
-                        className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
+              {groupedChecklistRows().map(({ group, rows: groupRows }) => {
+                const capGroupOpen = massiveCapGroupExpanded[group]
+                const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
+                const groupHasActive = groupRows.some(row => {
+                  const anchor = feedMassiveSvcAnchorId(row.id)
+                  return currentHash === anchor || fromTab === row.id
+                })
+                return (
+                  <div key={group} className="settings-sidebar-massive-group">
+                    <div
+                      className={`settings-sidebar-massive-cap-group-head${
+                        groupHasActive ? ' settings-sidebar-massive-cap-group-head--active' : ''
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        className="settings-sidebar-massive-cap-group-toggle"
+                        aria-expanded={capGroupOpen}
+                        aria-controls={`settings-massive-cap-group-${group}`}
+                        id={`settings-massive-cap-group-head-${group}`}
+                        onClick={() =>
+                          setMassiveCapGroupExpanded(prev => ({ ...prev, [group]: !prev[group] }))
+                        }
                       >
                         <span
-                          className={`title-inline-lamp lamp-icon ${isTierLimited ? 'tier' : 'none'}`}
-                          title={isTierLimited ? 'Not available on current plan tier' : undefined}
+                          className={`settings-sidebar-chevron settings-sidebar-massive-cap-group-chevron ${
+                            capGroupOpen ? 'expanded' : ''
+                          }`}
                           aria-hidden
                         >
-                          <SettingsSidebarLampGlyph id={row.id} />
+                          ▼
                         </span>
-                        <span className="settings-sidebar-massive-cap-label">{shortServiceLabel(row)}</span>
-                      </a>
-                    )
-                  })}
-                </div>
-              ))}
+                        <span className="settings-sidebar-massive-cap-group-title">
+                          {CAPABILITY_GROUP_LABELS[group]}
+                        </span>
+                      </button>
+                    </div>
+                    <div
+                      id={`settings-massive-cap-group-${group}`}
+                      className="settings-sidebar-massive-cap-group-subs"
+                      hidden={!capGroupOpen}
+                      role="group"
+                      aria-labelledby={`settings-massive-cap-group-head-${group}`}
+                    >
+                      {groupRows.map(row => {
+                        const configured = Boolean(massiveStatus?.configured)
+                        const tierOk = tierOkForRow(row, massiveStatus, configured)
+                        const tradesOk = tradesOkForRow(row, massiveStatus)
+                        const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
+                        const isTierLimited = eff === 'not-on-tier'
+                        const anchor = feedMassiveSvcAnchorId(row.id)
+                        const childActive = currentHash === anchor || fromTab === row.id
+                        return (
+                          <a
+                            key={row.id}
+                            href={`#${anchor}`}
+                            className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
+                          >
+                            <span
+                              className={`title-inline-lamp lamp-icon ${isTierLimited ? 'tier' : 'none'}`}
+                              title={isTierLimited ? 'Not available on current plan tier' : undefined}
+                              aria-hidden
+                            >
+                              <SettingsSidebarLampGlyph id={row.id} />
+                            </span>
+                            <span className="settings-sidebar-massive-cap-label">{shortServiceLabel(row)}</span>
+                          </a>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>

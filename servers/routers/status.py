@@ -220,6 +220,48 @@ def get_status(request: Request) -> Dict[str, Any]:
             payload["celery_worker_ib_client_id"] = None
             payload["celery_workers"] = []
         payload["celery_worker_last_updated_ts"] = get_job_bars_backfill_last_updated(control_via_db) if control_via_db else None
+        try:
+            from servers.massive_config import get_massive_settings
+            from servers.reader.massive_jobs import count_pending_massive_jobs
+            from servers.redis_url import redis_url_from_config
+
+            _ms = get_massive_settings(reader._config)
+            _pending_m = count_pending_massive_jobs(control_via_db) if control_via_db else 0
+            massive_info: Dict[str, Any] = {
+                "configured": bool(_ms.get("api_key")),
+                "tier": _ms.get("tier"),
+                "pending_jobs": _pending_m,
+                "last_snapshot_age_s": None,
+            }
+            _rurl = redis_url_from_config(reader._config)
+            if _rurl:
+                import redis
+
+                _r = redis.from_url(_rurl, decode_responses=True)
+                _mh = _r.hgetall("massive:meta:status")
+                if _mh:
+                    massive_info["ws_connected"] = bool(_mh.get("connected") == "1")
+                    _lm = _mh.get("last_msg_ts")
+                    if _lm is not None:
+                        try:
+                            massive_info["last_msg_age_s"] = max(0.0, time.time() - float(_lm))
+                        except (TypeError, ValueError):
+                            massive_info["last_msg_age_s"] = None
+                    else:
+                        massive_info["last_msg_age_s"] = None
+                    try:
+                        massive_info["ws_reconnects"] = int(_mh.get("reconnects") or 0)
+                    except (TypeError, ValueError):
+                        massive_info["ws_reconnects"] = int(_mh.get("reconnects") or 0)
+                else:
+                    massive_info["ws_connected"] = False
+                    massive_info["last_msg_age_s"] = None
+            else:
+                massive_info["ws_connected"] = None
+                massive_info["last_msg_age_s"] = None
+            payload["massive"] = massive_info
+        except Exception:
+            payload["massive"] = None
         dl = (payload.get("daemon_lamp") or "red").strip().lower()
         ml = (payload.get("monitor_lamp") or "red").strip().lower()
         sl = (payload.get("status_lamp") or "red").strip().lower()

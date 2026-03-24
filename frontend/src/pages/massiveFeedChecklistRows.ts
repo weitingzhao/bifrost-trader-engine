@@ -7,7 +7,7 @@ export const CAPABILITY_GROUP_LABELS: Record<CapabilityGroup, string> = {
   flat: 'Flat Files',
 }
 
-export const CAPABILITY_GROUP_ORDER: CapabilityGroup[] = ['rest', 'project', 'ws', 'flat']
+export const CAPABILITY_GROUP_ORDER: CapabilityGroup[] = ['rest', 'ws', 'flat', 'project']
 
 export interface ChecklistRow {
   id: string

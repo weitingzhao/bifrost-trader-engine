@@ -1,0 +1,17 @@
+[Unit]
+Description=Bifrost Massive Options WebSocket ingest (run_massive_ws.py)
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_ENV=prod
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_massive_ws.py --config config/config.prod.yaml
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

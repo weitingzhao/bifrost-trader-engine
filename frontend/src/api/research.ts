@@ -133,6 +133,58 @@ export async function fetchMassiveStatus(): Promise<MassiveStatusResponse> {
   }
 }
 
+/** Per-dimension block from GET /research/massive/daily-checklist */
+export interface MassiveDailyDimBlock {
+  status?: string
+  rows?: number
+  last_ts?: string
+  trade_date?: string
+  last_trade_date?: string | null
+  last_sync?: string
+  connected?: boolean
+  last_msg_age_s?: number | null
+}
+
+export type MassiveDailyChecklistDims = {
+  'daily-snapshot'?: MassiveDailyDimBlock
+  'daily-oi'?: MassiveDailyDimBlock
+  'daily-max-pain'?: MassiveDailyDimBlock
+  'daily-corporate'?: MassiveDailyDimBlock
+  'daily-ws-alive'?: MassiveDailyDimBlock
+}
+
+export async function fetchMassiveDailyChecklist(params: {
+  symbols: string[]
+  tradeDate?: string
+}): Promise<{
+  ok: boolean
+  trade_date?: string
+  symbols?: Record<string, MassiveDailyChecklistDims>
+  error?: string
+}> {
+  const syms = [...new Set((params.symbols || []).map(s => String(s).trim().toUpperCase()).filter(Boolean))].slice(
+    0,
+    80,
+  )
+  if (syms.length === 0) {
+    return { ok: false, error: 'symbols is required' }
+  }
+  const q = new URLSearchParams({ symbols: syms.join(',') })
+  const td = (params.tradeDate || '').trim()
+  if (td) q.set('trade_date', td)
+  const r = await fetch(`${API}/research/massive/daily-checklist?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  if (!j.ok) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed' }
+  }
+  const symMap = j.symbols && typeof j.symbols === 'object' ? (j.symbols as Record<string, MassiveDailyChecklistDims>) : {}
+  return {
+    ok: true,
+    trade_date: typeof j.trade_date === 'string' ? j.trade_date : undefined,
+    symbols: symMap,
+  }
+}
+
 export async function postMassiveSync(
   kind: string,
   payload: Record<string, unknown>,

@@ -450,7 +450,17 @@
 | source | text NOT NULL DEFAULT 'ib' | 数据来源：`ib` 或 `massive` |
 | created_at | timestamptz | 写入时间（默认 now()） |
 
+- **主键**：`PRIMARY KEY (option_snapshots_id, snapshot_ts)`（分区表要求主键包含分区键）。
+- **分区**：`PARTITION BY RANGE (snapshot_ts)` 按月分区（命名如 `option_snapshots_y2026m03`）。`pg_ddl` 自动创建当月 + 未来 3 个月分区及 default 分区。已有非分区表的库在 `db_refresh_schema.py` 时自动迁移。
 - **索引**：`(contract_key, snapshot_ts DESC)`。
+- **保留策略**：保留最近 **90 天**热数据；早于 90 天的月份分区 `ALTER TABLE ... DETACH PARTITION` 后归档（`pg_dump` / `COPY` 到冷存储）或 `DROP`。运维步骤见 `scripts/archive_option_snapshots.sh`（占位模板）。
+
+#### 物化视图 `option_snapshots_latest`
+
+- **用途**：按 `contract_key` 取最新一行的物化视图，加速 Discovery 读路径。
+- **定义**：`CREATE MATERIALIZED VIEW option_snapshots_latest AS SELECT DISTINCT ON (contract_key) ... FROM option_snapshots ORDER BY contract_key, snapshot_ts DESC`。
+- **唯一索引**：`UNIQUE (contract_key)`——支持 `REFRESH MATERIALIZED VIEW CONCURRENTLY`。
+- **刷新**：chain snapshot 写入成功后自动 `REFRESH CONCURRENTLY`（见 `massive_tasks.py`）。
 
 ### 2.16.3 表 `option_open_interest_daily`（R-A6：期权日终 Open Interest）
 
@@ -517,11 +527,36 @@
 | status | text NOT NULL | pending \| running \| done \| failed |
 | result | jsonb | 执行结果：{ ok, count?, message? } 或 { ok: false, error } |
 | celery_task_id | text | Celery 任务 ID（可选，便于关联） |
+| payload_hash | text | SHA-256 of `kind + canonical(payload)`；用于去重索引 |
 | created_at | timestamptz | 创建时间（默认 now()） |
 | updated_at | timestamptz | 最后更新时间（默认 now()） |
 
 - **索引**：`(status, created_at)` 便于 Worker 取最旧 pending 任务；GET /research/massive/jobs 按 job_massive_backfill_id DESC 分页。
-- **Trim**：可选保留最近 200 条。
+- **去重索引**：`UNIQUE (kind, payload_hash) WHERE status IN ('pending', 'running') AND payload_hash IS NOT NULL`——防止同一 payload 同时存在多条 pending/running 任务。
+- **Trim**：可选保留最近 500 条。
+
+### 2.16.5a 表 `report_option_max_pain_daily`（R-A6：Max Pain 日报表）
+
+- **用途**：每日按标的/到期计算的 **Max Pain**（使期权买方总损失最大的行权价），基于 `option_open_interest_daily` 的 EOD OI 数据。属 Gold / 报表层，由日批 Worker 计算写入。
+- **写入**：日终 OI 拉取完成后 Worker 计算并 UPSERT；`POST /research/massive/sync kind=max_pain` 手动触发。
+- **列**：
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| report_option_max_pain_daily_id | bigserial | 自增主键 |
+| symbol | text NOT NULL | 标的代码 |
+| expiry | text NOT NULL | 到期 |
+| trade_date | date NOT NULL | OI 截止交易日 |
+| max_pain_strike | double precision NOT NULL | Max Pain 行权价 |
+| underlying_close | double precision | 标的收盘价（可空） |
+| total_oi | integer | 该到期日 OI 合计（可空） |
+| computation_detail | jsonb | 各 strike 的 pain value（便于前端 drill-down） |
+| source | text NOT NULL DEFAULT 'massive' | 数据来源 |
+| created_at | timestamptz | 写入时间（默认 now()） |
+
+- **唯一约束**：`UNIQUE(symbol, expiry, trade_date, source)`。
+- **索引**：`(symbol, trade_date DESC)`、`(symbol, expiry, trade_date DESC)`。
+- **读取**：`GET /research/max-pain`、`GET /research/max-pain/latest`。
 
 ### 2.16.6 表 `massive_corporate_action`（R-A6：公司行动缓存）
 
@@ -1367,6 +1402,7 @@ python scripts/db_release_dblock.py --yes       # 不确认，直接终止
 | 2026-03-19 Executions 分源迁移 | 三张原始源表：`executions_raw_tws`（TWS/manual 源）、`executions_raw_flex`（Flex 源权威成交）、`executions_raw_journal`（journal_closed 人工会计调整）。`account_executions` 为统一只读视图（UNION ALL，Flex 优先覆盖 TWS，Journal 独立流）。**`account_executions_final`**：仅 UNION `executions_raw_flex` + `executions_raw_journal`（不含 TWS 补洞行），列与主键编码规则与全量视图中对应两分支一致。**`account_executions_fly`**：源为 `executions_raw_tws`，`account_executions_id = -(executions_raw_tws_id)`；排除 `sec_type = BAG`（多腿组合占位）；排除在 **`account_executions_final` 中已出现相同 `(account_id, contract_key)`（非空、trim 后相等）** 的 TWS 行。**GET /executions**、**GET /performance** 在 `source_scope=on_the_fly` 时读此视图。回填脚本 `scripts/db_backfill_executions_raw.py`。 | 阶段 3 扩展 |
 | 2026-03-20 settings 移除 IB 连接列 | `settings` 表不再包含 `ib_host`、`ib_port_type`、`ib_client_id_*`、`ib2_*` 等列；IB 连接与 client_id 以 YAML `ib.host` / `ib.secondary` 为唯一真源；`pg_ddl` 新建库不含上述列。§2.9。 | 阶段 2 |
 | 2026-03-21 Massive 期权研究数据（R-A6） | option_day / option_min 增加 `source` 列（text, DEFAULT 'ib'）并调整 UNIQUE 包含 source；option_min 周期增加 '1 sec'（Massive 秒聚合）；option_contracts 增加 `massive_option_ticker`（可选）；option_snapshots 扩展为含 Greeks/IV（iv/delta/gamma/theta/vega）+ OI + underlying_price + source；新增表 option_open_interest_daily（§2.16.3）、option_trades（§2.16.4，预留）、job_massive_backfill（§2.16.5）、massive_corporate_action（§2.16.6）。 | 期权研究阶段 |
+| 2026-03-24 Option Feed DB 升级（DATABASE_PLAN Phase 1） | `job_massive_backfill` 增加 `payload_hash` 列 + 部分唯一索引（防重复 pending/running）。新增表 `report_option_max_pain_daily`（§2.16.5a，Max Pain 日报表，含 `computation_detail` jsonb）。`option_snapshots` 迁移为 `PARTITION BY RANGE (snapshot_ts)` 按月分区（新库直接分区建表，已有库自动迁移）。新增物化视图 `option_snapshots_latest`（`DISTINCT ON contract_key`，支持 `REFRESH CONCURRENTLY`）。90 天保留策略：旧分区 DETACH + 归档。 | Option Feed 架构 Phase 1–4 |
 
 ---
 

@@ -1,6 +1,7 @@
 """Research: Option Discovery and related endpoints (R-OD1)."""
 
 import asyncio
+import hashlib
 import json
 import shutil
 import time
@@ -10,7 +11,20 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from servers.redis_url import redis_url_from_config
+
 router = APIRouter(tags=["research"])
+
+# FASTAPI_PLAN FA-2: snapshot Redis cache TTL (seconds)
+SNAPSHOT_CACHE_TTL_SEC = 120
+
+
+def _option_expirations_cache_response(body: Dict[str, Any]) -> JSONResponse:
+    """Slow-changing expirations list: allow browser / SWR to cache 5 minutes."""
+    return JSONResponse(
+        content=body,
+        headers={"Cache-Control": "max-age=300"},
+    )
 
 MAX_OPTION_SNAPSHOT_CONTRACTS = 20
 MAX_OPTION_SNAPSHOT_CONTRACTS_EXTENDED = 60  # when frontend sends many strikes (e.g. 30)
@@ -91,7 +105,7 @@ def _massive_job_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
             res = json.loads(res)
         except json.JSONDecodeError:
             pass
-    return {
+    out: Dict[str, Any] = {
         "job_id": str(j.get("job_massive_backfill_id", "")),
         "type": "massive_backfill",
         "kind": j.get("kind"),
@@ -101,6 +115,10 @@ def _massive_job_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
         "created_ts": created_ts,
         "updated_ts": updated_ts,
     }
+    ph = j.get("payload_hash")
+    if ph:
+        out["payload_hash"] = ph[:16]
+    return out
 
 
 def _filter_option_strikes(strikes_raw: List[float], last_price: Optional[float]) -> List[float]:
@@ -177,6 +195,34 @@ def get_massive_status(request: Request) -> Dict[str, Any]:
     }
 
 
+@router.get("/research/massive/daily-checklist")
+def get_massive_daily_checklist(
+    request: Request,
+    symbols: str = Query(..., description="Comma-separated underlying symbols (Watchlist STK)"),
+    trade_date: Optional[str] = Query(
+        None,
+        description="Session calendar date YYYY-MM-DD (US). Default: today in America/New_York",
+    ),
+) -> Dict[str, Any]:
+    """Per-symbol daily data readiness (snapshot, OI, Max Pain, corporate, WS ingest)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from servers.reader.massive_jobs import get_massive_daily_checklist_data
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    sym_list = [s.strip().upper() for s in (symbols or "").split(",") if s.strip()][:80]
+    if not sym_list:
+        return {"ok": False, "error": "symbols is required"}
+    td = (trade_date or "").strip()
+    if not td:
+        td = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    data = get_massive_daily_checklist_data(db, sym_list, td)
+    return {"ok": True, **data}
+
+
 @router.post("/research/massive/api-coverage/sync")
 def post_massive_api_coverage_sync() -> Dict[str, Any]:
     """Sync docs/plans/massive_api_coverage.html to frontend/public/plans for UI embed."""
@@ -238,7 +284,7 @@ async def get_option_expirations(
     if prov == "ib":
         out = await _option_expirations_ib(request, symbol)
         out["provider"] = "ib"
-        return out
+        return _option_expirations_cache_response(out)
 
     if prov == "massive":
         from servers.massive_config import get_massive_settings
@@ -274,7 +320,7 @@ async def get_option_expirations(
         md = result.get("massive_debug")
         if debug and isinstance(md, dict):
             out["massive_debug"] = md
-        return out
+        return _option_expirations_cache_response(out)
 
     # auto: Massive first when configured and successful
     from servers.massive_config import get_massive_settings
@@ -302,14 +348,14 @@ async def get_option_expirations(
             md = result.get("massive_debug")
             if debug and isinstance(md, dict):
                 out["massive_debug"] = md
-            return out
+            return _option_expirations_cache_response(out)
 
     ib_out = await _option_expirations_ib(request, symbol)
     ib_out["provider"] = "ib"
-    return ib_out
+    return _option_expirations_cache_response(ib_out)
 
 
-@router.get("/research/option-snapshots")
+@router.get("/research/option-snapshots", response_model=None)
 def get_option_snapshots_pg(
     request: Request,
     symbol: str = Query(..., description="Underlying symbol"),
@@ -319,7 +365,7 @@ def get_option_snapshots_pg(
         description="Comma-separated strikes; if omitted, uses ATM ladder from daily last when available",
     ),
     source: str = Query("massive", description="Snapshot source column: massive | ib"),
-) -> Dict[str, Any]:
+) -> Any:
     """Latest option_snapshots rows from PostgreSQL (Massive sync or IB sink)."""
     from servers.massive_client import contract_key_from_parts
     from servers.reader.massive_jobs import get_option_snapshots_latest
@@ -364,6 +410,28 @@ def get_option_snapshots_pg(
     for st in strikes_list:
         for r in ("C", "P"):
             keys.append(contract_key_from_parts(sym, exp_norm, float(st), r))
+
+    cache_fingerprint = hashlib.sha256(
+        json.dumps(keys, sort_keys=True).encode()
+    ).hexdigest()[:24]
+    cache_key = f"massive:snapshot_cache:{sym}:{exp_norm}:{src}:{cache_fingerprint}"
+    try:
+        import redis
+
+        rurl = redis_url_from_config(reader._config if reader else {})
+        if rurl:
+            rc = redis.from_url(rurl, decode_responses=True)
+            cached = rc.get(cache_key)
+            if cached:
+                return JSONResponse(
+                    content=json.loads(cached),
+                    headers={
+                        "X-Cache": "HIT",
+                        "Cache-Control": f"private, max-age={SNAPSHOT_CACHE_TTL_SEC}",
+                    },
+                )
+    except Exception:
+        pass
 
     rows = get_option_snapshots_latest(db, keys, source=src)
     out_rows: List[Dict[str, Any]] = []
@@ -412,7 +480,22 @@ def get_option_snapshots_pg(
             "No rows in option_snapshots for the requested contract keys. "
             "Run Load quotes again after a successful Massive chain snapshot, or verify expiry/strikes match the chain."
         )
-    return out
+    try:
+        import redis
+
+        rurl = redis_url_from_config(reader._config if reader else {})
+        if rurl:
+            rc = redis.from_url(rurl, decode_responses=True)
+            rc.setex(cache_key, SNAPSHOT_CACHE_TTL_SEC, json.dumps(out, default=str))
+    except Exception:
+        pass
+    return JSONResponse(
+        content=out,
+        headers={
+            "X-Cache": "MISS",
+            "Cache-Control": f"private, max-age={SNAPSHOT_CACHE_TTL_SEC}",
+        },
+    )
 
 
 @router.get("/research/option-contract/liquidity-summary")
@@ -1095,7 +1178,20 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     kind = (body.get("kind") or "").strip().lower()
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     allowed = frozenset(
-        {"aggregates", "snapshot", "oi", "reference", "corporate_action", "trades", "trades_quotes", "contracts"}
+        {
+            "aggregates",
+            "snapshot",
+            "oi",
+            "reference",
+            "corporate_action",
+            "trades",
+            "trades_quotes",
+            "contracts",
+            "eod_pipeline",
+            "max_pain",
+            "reconcile",
+            "trim_jobs",
+        }
     )
     if kind not in allowed:
         return {"ok": False, "error": f"Invalid kind; allowed: {sorted(allowed)}"}
@@ -1123,12 +1219,20 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     if not db:
         return {"ok": False, "error": "PostgreSQL not configured"}
 
-    jid = insert_job_massive_backfill(db, kind, payload)
+    jid, deduplicated = insert_job_massive_backfill(db, kind, payload)
     if jid is None:
         return {"ok": False, "error": "Failed to enqueue job"}
 
+    if deduplicated:
+        return {"ok": True, "job_id": str(jid), "deduplicated": True}
+
     try:
-        async_result = run_massive_job.apply_async(args=[jid], task_id=str(jid))
+        queue_name = (
+            "massive_high" if str(body.get("priority") or "").strip().lower() == "high" else "massive"
+        )
+        async_result = run_massive_job.apply_async(
+            args=[jid], task_id=str(jid), queue=queue_name
+        )
         update_job_massive_backfill_celery_task_id(db, jid, async_result.id)
     except Exception as e:
         return {"ok": False, "error": str(e)}

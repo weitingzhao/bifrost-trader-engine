@@ -333,6 +333,88 @@ class MassiveClient:
             return {"results": [], "error": err}
         return data if isinstance(data, dict) else {"results": [], "error": "invalid response"}
 
+    def fetch_options_snapshot_all_pages(
+        self,
+        underlying: str,
+        *,
+        page_delay_sec: float = 0.2,
+        max_pages: int = 500,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Paginate GET /v3/snapshot/options/{underlying} until next_url is empty.
+
+        Merges all ``results`` into a single list. Stops on error or *max_pages*.
+        """
+        underlying = (underlying or "").strip().upper()
+        if not underlying or not self._api_key:
+            return {"results": [], "error": "symbol or api key missing", "pages": 0}
+        merged: List[Dict[str, Any]] = []
+        next_url: Optional[str] = None
+        pages = 0
+        path = f"/v3/snapshot/options/{underlying}"
+        while pages < max_pages:
+            if next_url:
+                url = next_url
+                if "apiKey=" not in url and "apikey=" not in url.lower():
+                    sep = "&" if "?" in url else "?"
+                    url = f"{url}{sep}apiKey={self._api_key}"
+                req = Request(url, headers={"Accept": "application/json"}, method="GET")
+                try:
+                    with urlopen(req, timeout=60, context=self._ssl) as resp:
+                        body = resp.read().decode("utf-8", errors="replace")
+                        data = json.loads(body)
+                except Exception as e:
+                    logger.warning("fetch_options_snapshot_all_pages page error: %s", e)
+                    return {"results": merged, "error": str(e), "pages": pages}
+            else:
+                # First page: reuse same query params as fetch_options_snapshot
+                q: Dict[str, Any] = {}
+                if kwargs.get("strike_price") is not None:
+                    q["strike_price"] = kwargs["strike_price"]
+                if kwargs.get("strike_price_gte") is not None:
+                    q["strike_price.gte"] = kwargs["strike_price_gte"]
+                if kwargs.get("strike_price_lte") is not None:
+                    q["strike_price.lte"] = kwargs["strike_price_lte"]
+                exp = kwargs.get("expiration_date")
+                if exp:
+                    poly = _expiry_to_polygon_date(str(exp))
+                    if poly:
+                        q["expiration_date"] = poly
+                eg = kwargs.get("expiration_date_gte")
+                if eg:
+                    poly = _expiry_to_polygon_date(str(eg))
+                    if poly:
+                        q["expiration_date.gte"] = poly
+                el = kwargs.get("expiration_date_lte")
+                if el:
+                    poly = _expiry_to_polygon_date(str(el))
+                    if poly:
+                        q["expiration_date.lte"] = poly
+                if kwargs.get("contract_type"):
+                    q["contract_type"] = str(kwargs["contract_type"]).lower()
+                lim = kwargs.get("limit")
+                if lim is not None:
+                    q["limit"] = min(int(lim), 250)
+                if kwargs.get("sort"):
+                    q["sort"] = str(kwargs["sort"])
+                if kwargs.get("order"):
+                    q["order"] = str(kwargs["order"])
+                status, data = self._get(path, q or None)
+                if status >= 400:
+                    err = data.get("error", data) if isinstance(data, dict) else str(data)
+                    return {"results": merged, "error": err, "pages": pages}
+            if not isinstance(data, dict):
+                return {"results": merged, "error": "invalid response", "pages": pages}
+            chunk = data.get("results") or []
+            if isinstance(chunk, list):
+                merged.extend([x for x in chunk if isinstance(x, dict)])
+            pages += 1
+            next_url = data.get("next_url") if isinstance(data, dict) else None
+            if not next_url:
+                return {"results": merged, "error": None, "pages": pages}
+            time.sleep(max(0.0, float(page_delay_sec)))
+        return {"results": merged, "error": None, "pages": pages, "truncated": True}
+
     def fetch_option_contract_snapshot(self, underlying: str, option_contract: str) -> Dict[str, Any]:
         """GET /v3/snapshot/options/{underlyingAsset}/{optionContract}."""
         underlying = (underlying or "").strip().upper()

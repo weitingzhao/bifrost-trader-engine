@@ -6,9 +6,11 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+import time
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 _here = Path(__file__).resolve().parent
 _project_root = _here.parent
@@ -65,6 +67,389 @@ def _parse_snapshot_ts(item: Dict[str, Any]) -> datetime:
             except (TypeError, ValueError, OSError):
                 pass
     return datetime.now(timezone.utc)
+
+
+REST_GAP_SEC = 0.2
+
+
+def _rest_throttle() -> None:
+    time.sleep(REST_GAP_SEC)
+
+
+def _eod_trade_date_str_et(payload: Dict[str, Any]) -> str:
+    """Default EOD trade_date = calendar date in America/New_York."""
+    raw = (payload.get("trade_date") or "").strip()
+    if raw:
+        return raw[:10]
+    et = ZoneInfo("America/New_York")
+    return datetime.now(et).date().isoformat()
+
+
+def _apply_oi_daily_from_chain(
+    conn: Any,
+    underlying: str,
+    trade_date: date,
+    snap_results: List[Dict[str, Any]],
+) -> int:
+    """Upsert option_contracts + option_open_interest_daily from chain snapshot items."""
+    from servers.massive_client import contract_key_from_parts
+
+    underlying = (underlying or "").strip().upper()
+    n = 0
+    with conn.cursor() as cur:
+        for item in snap_results:
+            if not isinstance(item, dict):
+                continue
+            det = item.get("details") or {}
+            ticker = (det.get("ticker") or item.get("ticker") or "").strip()
+            if not ticker:
+                continue
+            exp_raw = det.get("expiration_date") or det.get("expiration")
+            if not exp_raw:
+                continue
+            exp = _norm_expiry(str(exp_raw)[:10])
+            try:
+                strike = float(det.get("strike_price"))
+            except (TypeError, ValueError):
+                continue
+            ort = _right_from_contract_type(det.get("contract_type", "call"))
+            ck = contract_key_from_parts(underlying, exp, strike, ort)
+            oi = item.get("open_interest")
+            if oi is None:
+                continue
+            try:
+                oi = int(oi)
+            except (TypeError, ValueError):
+                continue
+            cur.execute(
+                """
+                INSERT INTO option_contracts (contract_key, symbol, expiry, strike, option_right, massive_option_ticker, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (contract_key) DO UPDATE SET
+                  massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker)
+                """,
+                (ck, underlying, exp, strike, ort, ticker),
+            )
+            cur.execute(
+                """
+                INSERT INTO option_open_interest_daily (
+                  contract_key, symbol, expiry, strike, option_right, trade_date, open_interest, source, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'massive', now())
+                ON CONFLICT (contract_key, trade_date, source)
+                DO UPDATE SET open_interest = EXCLUDED.open_interest, created_at = now()
+                """,
+                (ck, underlying, exp, strike, ort, trade_date, oi),
+            )
+            n += 1
+    return n
+
+
+def _run_oi_watchlist_eod(
+    conn: Any,
+    client: Any,
+    status_cfg: dict,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Fetch full chain snapshots for Watchlist STK symbols; write option_open_interest_daily."""
+    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+
+    td_s = _eod_trade_date_str_et(payload)
+    try:
+        trade_date = date.fromisoformat(td_s)
+    except ValueError as e:
+        raise ValueError(f"invalid trade_date: {td_s}") from e
+
+    symbols = payload.get("symbols")
+    if isinstance(symbols, list) and symbols:
+        sym_list = [str(s).strip().upper() for s in symbols if s]
+    else:
+        sym_list = get_watchlist_optionable_stk_symbols(status_cfg)
+    if not sym_list:
+        logger.info("oi watchlist_eod: no symbols (empty watchlist)")
+        return {"ok": True, "kind": "oi", "mode": "watchlist_eod", "rows_upserted": 0, "symbols": []}
+
+    total_rows = 0
+    per_symbol: List[Dict[str, Any]] = []
+    for sym in sym_list:
+        _rest_throttle()
+        data = client.fetch_options_snapshot_all_pages(sym, limit=250)
+        if data.get("error"):
+            err = data.get("error")
+            logger.warning("oi snapshot failed for %s: %s", sym, err)
+            per_symbol.append({"symbol": sym, "error": str(err), "rows": 0, "pages": data.get("pages", 0)})
+            continue
+        results = data.get("results") or []
+        if not isinstance(results, list):
+            results = []
+        n = _apply_oi_daily_from_chain(conn, sym, trade_date, results)
+        conn.commit()
+        total_rows += n
+        per_symbol.append(
+            {
+                "symbol": sym,
+                "rows": n,
+                "pages": data.get("pages", 0),
+                "truncated": bool(data.get("truncated")),
+            }
+        )
+        logger.info(
+            "oi watchlist_eod: %s trade_date=%s rows=%s pages=%s",
+            sym, td_s, n, data.get("pages"),
+        )
+
+    return {
+        "ok": True,
+        "kind": "oi",
+        "mode": "watchlist_eod",
+        "trade_date": td_s,
+        "rows_upserted": total_rows,
+        "per_symbol": per_symbol,
+    }
+
+
+def _strike_map_for_max_pain(rows: List[Dict[str, Any]]) -> Dict[str, Dict[float, Tuple[int, int]]]:
+    """Group by expiry -> strike -> (call_oi, put_oi)."""
+    by_exp: Dict[str, Dict[float, Tuple[int, int]]] = {}
+    for r in rows:
+        exp = str(r.get("expiry") or "").strip()
+        if not exp:
+            continue
+        try:
+            sk = float(r.get("strike"))
+        except (TypeError, ValueError):
+            continue
+        oi = int(r.get("open_interest") or 0)
+        right = (r.get("option_right") or "").strip().upper()
+        if exp not in by_exp:
+            by_exp[exp] = {}
+        d = by_exp[exp]
+        c_oi, p_oi = d.get(sk, (0, 0))
+        if right == "C":
+            d[sk] = (c_oi + oi, p_oi)
+        elif right == "P":
+            d[sk] = (c_oi, p_oi + oi)
+    return by_exp
+
+
+def _max_pain_for_expiry(strike_oi: Dict[float, Tuple[int, int]]) -> Tuple[float, float, Dict[str, float]]:
+    """Return (strike_minimizing_writer_payout, pain_value, detail_by_strike_candidate).
+
+    Writer aggregate payout at underlying close X:
+      sum_s call_oi(s)*max(0,X-s)*100 + put_oi(s)*max(0,s-X)*100
+    Max pain = X that minimizes this (min payout by writers / max pain to holders).
+    """
+    if not strike_oi:
+        return (0.0, 0.0, {})
+    strikes = sorted(strike_oi.keys())
+    best_x = strikes[0]
+    best_pain: Optional[float] = None
+    detail: Dict[str, float] = {}
+    for x in strikes:
+        pain = 0.0
+        for s, (coi, poi) in strike_oi.items():
+            pain += float(coi) * max(0.0, x - s) * 100.0
+            pain += float(poi) * max(0.0, s - x) * 100.0
+        detail[f"{x:g}"] = pain
+        if best_pain is None or pain < best_pain:
+            best_pain = pain
+            best_x = x
+    return (best_x, float(best_pain or 0.0), detail)
+
+
+def _run_max_pain(
+    conn: Any,
+    status_cfg: dict,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Compute Max Pain from option_open_interest_daily for Watchlist symbols / trade_date."""
+    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+
+    td_s = _eod_trade_date_str_et(payload)
+    try:
+        trade_date = date.fromisoformat(td_s)
+    except ValueError as e:
+        raise ValueError(f"invalid trade_date: {td_s}") from e
+
+    symbols = payload.get("symbols")
+    if isinstance(symbols, list) and symbols:
+        sym_list = [str(s).strip().upper() for s in symbols if s]
+    else:
+        sym_list = get_watchlist_optionable_stk_symbols(status_cfg)
+
+    if not sym_list:
+        return {"ok": True, "kind": "max_pain", "rows_upserted": 0, "trade_date": td_s, "message": "no symbols"}
+
+    rows_written = 0
+    detail_out: List[Dict[str, Any]] = []
+    with conn.cursor() as cur:
+        for sym in sym_list:
+            cur.execute(
+                """
+                SELECT expiry, strike, option_right, open_interest
+                FROM option_open_interest_daily
+                WHERE symbol = %s AND trade_date = %s AND source = 'massive'
+                """,
+                (sym, trade_date),
+            )
+            raw = [
+                {"expiry": row[0], "strike": row[1], "option_right": row[2], "open_interest": row[3]}
+                for row in cur.fetchall()
+            ]
+            by_exp = _strike_map_for_max_pain(raw)
+            for exp, skmap in by_exp.items():
+                mp_strike, pain_val, comp = _max_pain_for_expiry(skmap)
+                total_oi = sum(t[0] + t[1] for t in skmap.values())
+                cur.execute(
+                    """
+                    INSERT INTO report_option_max_pain_daily (
+                      symbol, expiry, trade_date, max_pain_strike, underlying_close, total_oi,
+                      computation_detail, source, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'massive', now())
+                    ON CONFLICT (symbol, expiry, trade_date, source)
+                    DO UPDATE SET
+                      max_pain_strike = EXCLUDED.max_pain_strike,
+                      underlying_close = EXCLUDED.underlying_close,
+                      total_oi = EXCLUDED.total_oi,
+                      computation_detail = EXCLUDED.computation_detail,
+                      created_at = now()
+                    """,
+                    (
+                        sym,
+                        exp,
+                        trade_date,
+                        mp_strike,
+                        None,
+                        int(total_oi) if total_oi else None,
+                        json.dumps({"pain_by_strike": comp, "min_pain_value": pain_val}),
+                    ),
+                )
+                rows_written += 1
+                detail_out.append({"symbol": sym, "expiry": exp, "max_pain_strike": mp_strike, "total_oi": total_oi})
+    conn.commit()
+    logger.info("max_pain: trade_date=%s rows=%s", td_s, rows_written)
+    return {
+        "ok": True,
+        "kind": "max_pain",
+        "trade_date": td_s,
+        "rows_upserted": rows_written,
+        "expiries": detail_out[:50],
+    }
+
+
+def _run_reconcile(
+    conn: Any,
+    client: Any,
+    status_cfg: dict,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Compare chain snapshot contract count vs DB OI rows for Watchlist symbols."""
+    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+
+    td_s = _eod_trade_date_str_et(payload)
+    try:
+        trade_date = date.fromisoformat(td_s)
+    except ValueError as e:
+        raise ValueError(f"invalid trade_date: {td_s}") from e
+
+    threshold = float(payload.get("threshold", 0.05))
+    symbols = payload.get("symbols")
+    if isinstance(symbols, list) and symbols:
+        sym_list = [str(s).strip().upper() for s in symbols if s]
+    else:
+        sym_list = get_watchlist_optionable_stk_symbols(status_cfg)
+
+    results: List[Dict[str, Any]] = []
+    with conn.cursor() as cur:
+        for sym in sym_list:
+            _rest_throttle()
+            remote = client.fetch_options_snapshot_all_pages(sym, limit=250)
+            if remote.get("error"):
+                results.append(
+                    {
+                        "symbol": sym,
+                        "status": "error",
+                        "message": str(remote.get("error")),
+                    }
+                )
+                logger.warning("reconcile: snapshot failed for %s: %s", sym, remote.get("error"))
+                continue
+            rem_list = remote.get("results") or []
+            remote_with_oi = sum(
+                1
+                for it in rem_list
+                if isinstance(it, dict) and it.get("open_interest") is not None
+            )
+            cur.execute(
+                """
+                SELECT count(*)::int FROM option_open_interest_daily
+                WHERE symbol = %s AND trade_date = %s AND source = 'massive'
+                """,
+                (sym, trade_date),
+            )
+            row = cur.fetchone()
+            local_cnt = int(row[0]) if row else 0
+            denom = max(remote_with_oi, 1)
+            diff_ratio = abs(remote_with_oi - local_cnt) / float(denom)
+            st = "pass"
+            if diff_ratio > threshold:
+                st = "warn" if diff_ratio <= 0.15 else "fail"
+                logger.warning(
+                    "reconcile: %s trade_date=%s remote_oi_rows=%s local_rows=%s ratio_diff=%.3f status=%s",
+                    sym, td_s, remote_with_oi, local_cnt, diff_ratio, st,
+                )
+            else:
+                logger.info(
+                    "reconcile: %s trade_date=%s remote=%s local=%s ok",
+                    sym, td_s, remote_with_oi, local_cnt,
+                )
+            results.append(
+                {
+                    "symbol": sym,
+                    "status": st,
+                    "remote_contracts_with_oi": remote_with_oi,
+                    "local_oi_rows": local_cnt,
+                    "diff_ratio": round(diff_ratio, 4),
+                }
+            )
+    return {"ok": True, "kind": "reconcile", "trade_date": td_s, "threshold": threshold, "results": results}
+
+
+def _run_trim_jobs(conn: Any) -> Dict[str, Any]:
+    """Keep the newest 500 rows in job_massive_backfill; delete older."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM job_massive_backfill
+            WHERE job_massive_backfill_id NOT IN (
+              SELECT job_massive_backfill_id FROM job_massive_backfill
+              ORDER BY job_massive_backfill_id DESC
+              LIMIT 500
+            )
+            """
+        )
+        deleted = cur.rowcount
+    conn.commit()
+    logger.info("trim job_massive_backfill: deleted %s rows", deleted)
+    return {"ok": True, "kind": "trim_jobs", "deleted": int(deleted)}
+
+
+def _refresh_snapshots_latest(conn: Any) -> None:
+    """Best-effort REFRESH of option_snapshots_latest materialized view."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM pg_matviews WHERE schemaname = 'public' AND matviewname = 'option_snapshots_latest'"
+            )
+            if cur.fetchone():
+                cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY option_snapshots_latest")
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
 
 def _apply_snapshot(
@@ -319,16 +704,16 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     if not status_cfg.get("postgres") and status_cfg.get("sink") != "postgres":
         return {"ok": False, "error": "postgres not configured"}
 
-    ms = get_massive_settings(config)
-    client = MassiveClient(ms["api_key"], ms["rest_base"])
-    if not client.configured:
-        update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
-        return {"ok": False, "error": "no api key"}
-
     job = get_job_massive_backfill(status_cfg, job_id)
     if not job:
         return {"ok": False, "error": "job not found"}
     kind = (job.get("kind") or "").strip().lower()
+
+    ms = get_massive_settings(config)
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    if not client.configured and kind not in ("trim_jobs", "max_pain"):
+        update_job_massive_backfill_result(status_cfg, job_id, "failed", {"ok": False, "error": "Massive API key not configured"})
+        return {"ok": False, "error": "no api key"}
     payload = job.get("payload")
     if isinstance(payload, str):
         try:
@@ -452,6 +837,8 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                     raise RuntimeError(str(snap.get("error")))
                 count = _apply_snapshot(conn, u, snap)
                 conn.commit()
+                if count > 0:
+                    _refresh_snapshots_latest(conn)
                 raw_results = snap.get("results") or []
                 if not isinstance(raw_results, list):
                     raw_results = []
@@ -572,14 +959,75 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
                 return result
 
             if kind == "oi":
-                result = {"ok": True, "kind": kind, "message": "Use snapshot job to populate OI from chain data"}
+                mode = (payload.get("mode") or "watchlist_eod").strip().lower()
+                if mode == "watchlist_eod":
+                    result = _run_oi_watchlist_eod(conn, client, status_cfg, payload)
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+                result = {
+                    "ok": True,
+                    "kind": kind,
+                    "message": "Use mode=watchlist_eod for EOD OI, or snapshot chain for point-in-time",
+                }
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
+            if kind == "eod_pipeline":
+                from servers.reader.market import get_is_us_trading_day
+
+                td_s = _eod_trade_date_str_et(payload)
+                if not get_is_us_trading_day(status_cfg, td_s):
+                    result = {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "not a US trading day",
+                        "trade_date": td_s,
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
+                oi_res = _run_oi_watchlist_eod(conn, client, status_cfg, payload)
+                mp_res = _run_max_pain(conn, status_cfg, payload)
+                result = {"ok": True, "kind": kind, "oi": oi_res, "max_pain": mp_res}
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
+            if kind == "max_pain":
+                result = _run_max_pain(conn, status_cfg, payload)
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
+            if kind == "reconcile":
+                result = _run_reconcile(conn, client, status_cfg, payload)
+                update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                return result
+
+            if kind == "trim_jobs":
+                result = _run_trim_jobs(conn)
                 update_job_massive_backfill_result(status_cfg, job_id, "done", result)
                 return result
 
             if kind == "corporate_action":
+                syms = payload.get("symbols")
+                if isinstance(syms, list) and syms:
+                    total = 0
+                    for raw_s in syms:
+                        sym_one = str(raw_s).strip().upper()
+                        if not sym_one:
+                            continue
+                        total += _apply_corporate_actions(conn, client, sym_one)
+                        _rest_throttle()
+                    conn.commit()
+                    result = {
+                        "ok": True,
+                        "kind": kind,
+                        "rows_upserted": total,
+                        "symbols_count": len(syms),
+                    }
+                    update_job_massive_backfill_result(status_cfg, job_id, "done", result)
+                    return result
                 sym = (payload.get("symbol") or "").strip().upper()
                 if not sym:
-                    raise ValueError("payload.symbol required")
+                    raise ValueError("payload.symbol or payload.symbols required")
                 count = _apply_corporate_actions(conn, client, sym)
                 conn.commit()
                 result = {"ok": True, "kind": kind, "rows_upserted": count}
@@ -768,3 +1216,57 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
         err = {"ok": False, "error": str(e)}
         update_job_massive_backfill_result(status_cfg, job_id, "failed", err)
         return err
+
+
+def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Insert job_massive_backfill and dispatch to Celery ``massive`` queue."""
+    from src.app.config import read_config
+    from servers.reader.massive_jobs import (
+        insert_job_massive_backfill,
+        update_job_massive_backfill_celery_task_id,
+    )
+
+    cfg_path = _config_path_for_task()
+    config, _ = read_config(cfg_path)
+    jid, dedup = insert_job_massive_backfill(config, kind, payload or {})
+    if jid is None:
+        return {"ok": False, "error": "enqueue failed"}
+    if dedup:
+        logger.info("Massive beat: deduplicated kind=%s job_id=%s", kind, jid)
+        return {"ok": True, "deduplicated": True, "job_id": jid}
+    async_result = run_massive_job.apply_async(args=[jid], queue="massive")
+    update_job_massive_backfill_celery_task_id(config, jid, async_result.id)
+    return {"ok": True, "job_id": jid, "celery_task_id": async_result.id}
+
+
+@app.task(name="servers.massive_tasks.beat_eod_pipeline")
+def beat_eod_pipeline() -> Dict[str, Any]:
+    """Celery Beat: enqueue ``eod_pipeline`` (Watchlist EOD OI + Max Pain)."""
+    return _enqueue_massive_job("eod_pipeline", {})
+
+
+@app.task(name="servers.massive_tasks.beat_corporate_watchlist")
+def beat_corporate_watchlist() -> Dict[str, Any]:
+    """Celery Beat: enqueue ``corporate_action`` for all Watchlist optionable STK symbols."""
+    from src.app.config import read_config
+    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+
+    cfg_path = _config_path_for_task()
+    config, _ = read_config(cfg_path)
+    symbols = get_watchlist_optionable_stk_symbols(config)
+    if not symbols:
+        logger.info("beat_corporate_watchlist: empty watchlist, skip")
+        return {"ok": True, "skipped": True, "reason": "empty watchlist"}
+    return _enqueue_massive_job("corporate_action", {"symbols": symbols})
+
+
+@app.task(name="servers.massive_tasks.beat_reconcile")
+def beat_reconcile() -> Dict[str, Any]:
+    """Celery Beat: enqueue ``reconcile`` (Watchlist vs DB OI counts)."""
+    return _enqueue_massive_job("reconcile", {})
+
+
+@app.task(name="servers.massive_tasks.beat_trim_massive_jobs")
+def beat_trim_massive_jobs() -> Dict[str, Any]:
+    """Celery Beat: enqueue ``trim_jobs`` (keep newest 500 rows in job_massive_backfill)."""
+    return _enqueue_massive_job("trim_jobs", {})

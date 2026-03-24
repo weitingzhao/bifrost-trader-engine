@@ -78,12 +78,15 @@ export {
   fetchMassiveHistTrades,
   fetchLiquiditySummary,
   fetchRelativeValue,
+  fetchMassiveDailyChecklist,
 } from './research'
 export type {
   OptionSnapshotRow,
   MassiveOptionExpirationsDebug,
   MassiveStatusResponse,
   MassiveJobApiRow,
+  MassiveDailyDimBlock,
+  MassiveDailyChecklistDims,
   CorporateActionRow,
   GreeksCoverageResponse,
   ContractsCoverageResponse,

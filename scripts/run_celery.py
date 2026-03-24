@@ -71,4 +71,6 @@ if __name__ == "__main__":
     _kill_existing_celery_workers()
     from servers.celery_app import app
     # Solo pool: single process, no fork; stop-poll started in worker_init. Prefork would need worker_process_init.
-    app.worker_main(argv=["worker", "-l", "info", "-Q", "bars,massive", "--pool=solo"])
+    app.worker_main(
+        argv=["worker", "-l", "info", "-Q", "bars,massive_high,massive", "--pool=solo"]
+    )

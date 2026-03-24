@@ -6,6 +6,8 @@ Usage:
 
 Or: python scripts/run_celery.py [config_path]
 
+Celery Beat (Massive schedules): python scripts/run_celery_beat.py
+
 Solo pool: single process, one IB connection (client_id). Stop-poll runs in worker_init so Stop button works.
 """
 
@@ -55,6 +57,7 @@ broker_url = _redis_url_from_config()
 result_backend = broker_url
 
 from celery import Celery  # noqa: E402
+from celery.schedules import crontab  # noqa: E402
 
 app = Celery(
     "bifrost.bars",
@@ -70,11 +73,34 @@ app.conf.update(
     task_routes={
         "servers.bars_tasks.backfill_bars": {"queue": "bars"},
         "servers.massive_tasks.run_massive_job": {"queue": "massive"},
+        "servers.massive_tasks.beat_eod_pipeline": {"queue": "massive"},
+        "servers.massive_tasks.beat_corporate_watchlist": {"queue": "massive"},
+        "servers.massive_tasks.beat_reconcile": {"queue": "massive"},
+        "servers.massive_tasks.beat_trim_massive_jobs": {"queue": "massive"},
     },
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
     result_expires=86400,
+    beat_schedule={
+        # Times are UTC. ~17:00 America/New_York in EST is 22:00 UTC (adjust for DST if needed).
+        "massive-eod-pipeline": {
+            "task": "servers.massive_tasks.beat_eod_pipeline",
+            "schedule": crontab(hour=22, minute=0),
+        },
+        "massive-corporate-watchlist": {
+            "task": "servers.massive_tasks.beat_corporate_watchlist",
+            "schedule": crontab(hour=23, minute=0),
+        },
+        "massive-reconcile": {
+            "task": "servers.massive_tasks.beat_reconcile",
+            "schedule": crontab(hour=22, minute=45),
+        },
+        "massive-trim-jobs": {
+            "task": "servers.massive_tasks.beat_trim_massive_jobs",
+            "schedule": crontab(hour=2, minute=15),
+        },
+    },
 )
 
 

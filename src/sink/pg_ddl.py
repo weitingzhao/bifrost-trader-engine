@@ -441,32 +441,174 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_contracts_symbol_expiry_strike_right ON option_contracts (symbol, expiry, strike, option_right)"
         )
-        _log_table("option_snapshots", "Option snapshot (point-in-time quote)")
+        _log_table("option_snapshots", "Option snapshot (point-in-time quote, RANGE partitioned by snapshot_ts)")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS option_snapshots (
-                option_snapshots_id bigserial PRIMARY KEY,
-                contract_key text NOT NULL,
-                snapshot_ts timestamptz NOT NULL,
-                last double precision,
-                bid double precision,
-                ask double precision,
-                mid double precision,
-                iv double precision,
-                delta double precision,
-                gamma double precision,
-                theta double precision,
-                vega double precision,
-                open_interest integer,
-                underlying_price double precision,
-                source text NOT NULL DEFAULT 'ib',
-                created_at timestamptz DEFAULT now()
-            )
+            DO $snap_part$
+            DECLARE
+              tbl_kind char;
+              m_start date;
+              m_end date;
+              part_name text;
+            BEGIN
+              -- Check if the table exists at all
+              SELECT relkind INTO tbl_kind FROM pg_class
+              WHERE relname = 'option_snapshots' AND relnamespace = 'public'::regnamespace;
+
+              IF tbl_kind IS NULL THEN
+                -- Fresh install: create as partitioned table directly
+                CREATE SEQUENCE IF NOT EXISTS option_snapshots_option_snapshots_id_seq;
+                CREATE TABLE option_snapshots (
+                    option_snapshots_id bigint NOT NULL DEFAULT nextval('option_snapshots_option_snapshots_id_seq'),
+                    contract_key text NOT NULL,
+                    snapshot_ts timestamptz NOT NULL,
+                    last double precision,
+                    bid double precision,
+                    ask double precision,
+                    mid double precision,
+                    iv double precision,
+                    delta double precision,
+                    gamma double precision,
+                    theta double precision,
+                    vega double precision,
+                    open_interest integer,
+                    underlying_price double precision,
+                    source text NOT NULL DEFAULT 'ib',
+                    created_at timestamptz DEFAULT now(),
+                    PRIMARY KEY (option_snapshots_id, snapshot_ts)
+                ) PARTITION BY RANGE (snapshot_ts);
+                ALTER SEQUENCE option_snapshots_option_snapshots_id_seq OWNED BY option_snapshots.option_snapshots_id;
+                -- Create default partition for current month and next 3 months
+                FOR i IN 0..3 LOOP
+                  m_start := date_trunc('month', now())::date + (i || ' months')::interval;
+                  m_end   := m_start + interval '1 month';
+                  part_name := 'option_snapshots_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                  EXECUTE format(
+                    'CREATE TABLE IF NOT EXISTS %I PARTITION OF option_snapshots FOR VALUES FROM (%L) TO (%L)',
+                    part_name, m_start, m_end
+                  );
+                END LOOP;
+                -- Default partition for anything outside defined ranges
+                CREATE TABLE IF NOT EXISTS option_snapshots_default PARTITION OF option_snapshots DEFAULT;
+
+              ELSIF tbl_kind = 'r' THEN
+                -- Existing non-partitioned table: migrate to partitioned
+                RAISE NOTICE 'Migrating option_snapshots from heap to RANGE partition on snapshot_ts ...';
+
+                -- 1. Create new partitioned parent
+                CREATE SEQUENCE IF NOT EXISTS option_snapshots_new_id_seq;
+                CREATE TABLE option_snapshots_new (
+                    option_snapshots_id bigint NOT NULL DEFAULT nextval('option_snapshots_new_id_seq'),
+                    contract_key text NOT NULL,
+                    snapshot_ts timestamptz NOT NULL,
+                    last double precision,
+                    bid double precision,
+                    ask double precision,
+                    mid double precision,
+                    iv double precision,
+                    delta double precision,
+                    gamma double precision,
+                    theta double precision,
+                    vega double precision,
+                    open_interest integer,
+                    underlying_price double precision,
+                    source text NOT NULL DEFAULT 'ib',
+                    created_at timestamptz DEFAULT now(),
+                    PRIMARY KEY (option_snapshots_id, snapshot_ts)
+                ) PARTITION BY RANGE (snapshot_ts);
+
+                -- 2. Create monthly partitions covering existing data + future
+                SELECT date_trunc('month', COALESCE(min(snapshot_ts), now()))::date INTO m_start
+                FROM option_snapshots;
+                m_end := (date_trunc('month', now()) + interval '4 months')::date;
+
+                WHILE m_start < m_end LOOP
+                  part_name := 'option_snapshots_new_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                  EXECUTE format(
+                    'CREATE TABLE IF NOT EXISTS %I PARTITION OF option_snapshots_new FOR VALUES FROM (%L) TO (%L)',
+                    part_name, m_start, (m_start + interval '1 month')::date
+                  );
+                  m_start := (m_start + interval '1 month')::date;
+                END LOOP;
+                CREATE TABLE IF NOT EXISTS option_snapshots_new_default PARTITION OF option_snapshots_new DEFAULT;
+
+                -- 3. Copy data
+                INSERT INTO option_snapshots_new
+                  SELECT * FROM option_snapshots;
+
+                -- 4. Set sequence to continue after max id
+                PERFORM setval('option_snapshots_new_id_seq',
+                  GREATEST(
+                    (SELECT COALESCE(max(option_snapshots_id), 0) FROM option_snapshots_new),
+                    1
+                  )
+                );
+
+                -- 5. Swap tables
+                DROP MATERIALIZED VIEW IF EXISTS option_snapshots_latest;
+                ALTER TABLE option_snapshots RENAME TO option_snapshots_old;
+                ALTER TABLE option_snapshots_new RENAME TO option_snapshots;
+
+                -- Rename partitions to standard naming
+                FOR part_name IN
+                  SELECT tablename FROM pg_tables
+                  WHERE schemaname = 'public' AND tablename LIKE 'option_snapshots_new_%'
+                LOOP
+                  EXECUTE format('ALTER TABLE %I RENAME TO %I',
+                    part_name, replace(part_name, '_new_', '_'));
+                END LOOP;
+
+                -- Rename and reassign sequence
+                ALTER SEQUENCE option_snapshots_new_id_seq RENAME TO option_snapshots_option_snapshots_id_seq;
+                ALTER SEQUENCE option_snapshots_option_snapshots_id_seq OWNED BY option_snapshots.option_snapshots_id;
+                ALTER TABLE option_snapshots ALTER COLUMN option_snapshots_id SET DEFAULT nextval('option_snapshots_option_snapshots_id_seq');
+
+                -- Drop old table (data already copied)
+                DROP TABLE IF EXISTS option_snapshots_old;
+                RAISE NOTICE 'Migration complete: option_snapshots is now RANGE partitioned.';
+
+              ELSE
+                -- Already partitioned (relkind = 'p'), ensure future partitions exist
+                FOR i IN 0..3 LOOP
+                  m_start := date_trunc('month', now())::date + (i || ' months')::interval;
+                  m_end   := m_start + interval '1 month';
+                  part_name := 'option_snapshots_y' || to_char(m_start, 'YYYY') || 'm' || to_char(m_start, 'MM');
+                  IF to_regclass('public.' || part_name) IS NULL THEN
+                    EXECUTE format(
+                      'CREATE TABLE %I PARTITION OF option_snapshots FOR VALUES FROM (%L) TO (%L)',
+                      part_name, m_start, m_end
+                    );
+                  END IF;
+                END LOOP;
+              END IF;
+            END $snap_part$;
             """
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_snapshots_contract_key_ts ON option_snapshots (contract_key, snapshot_ts DESC)"
         )
+
+        _log("option_snapshots_latest materialized view")
+        cur.execute(
+            """
+            DO $snap_mv$
+            BEGIN
+              IF to_regclass('public.option_snapshots_latest') IS NULL THEN
+                EXECUTE '
+                  CREATE MATERIALIZED VIEW option_snapshots_latest AS
+                  SELECT DISTINCT ON (contract_key)
+                      contract_key, snapshot_ts, last, bid, ask, mid,
+                      iv, delta, gamma, theta, vega, open_interest, underlying_price, source
+                  FROM option_snapshots
+                  ORDER BY contract_key, snapshot_ts DESC
+                ';
+                CREATE UNIQUE INDEX option_snapshots_latest_ck
+                  ON option_snapshots_latest (contract_key);
+              END IF;
+            END $snap_mv$;
+            """
+        )
+
         _log("migrate option_* tables for Massive (R-A6): source column, snapshots greeks")
         cur.execute(
             """
@@ -1053,6 +1195,54 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS job_massive_backfill_status_created ON job_massive_backfill (status, created_at)"
         )
+        cur.execute(
+            """
+            DO $jmb_hash$
+            BEGIN
+              IF to_regclass('public.job_massive_backfill') IS NOT NULL THEN
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'job_massive_backfill' AND column_name = 'payload_hash'
+                ) THEN
+                  ALTER TABLE job_massive_backfill ADD COLUMN payload_hash text;
+                END IF;
+              END IF;
+            END $jmb_hash$;
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS job_massive_backfill_dedup
+            ON job_massive_backfill (kind, payload_hash)
+            WHERE status IN ('pending', 'running') AND payload_hash IS NOT NULL
+            """
+        )
+
+        _log_table("report_option_max_pain_daily", "Max Pain daily report (R-A6)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS report_option_max_pain_daily (
+                report_option_max_pain_daily_id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                trade_date date NOT NULL,
+                max_pain_strike double precision NOT NULL,
+                underlying_close double precision,
+                total_oi integer,
+                computation_detail jsonb,
+                source text NOT NULL DEFAULT 'massive',
+                created_at timestamptz DEFAULT now(),
+                UNIQUE (symbol, expiry, trade_date, source)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS report_max_pain_symbol_date ON report_option_max_pain_daily (symbol, trade_date DESC)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS report_max_pain_symbol_expiry_date ON report_option_max_pain_daily (symbol, expiry, trade_date DESC)"
+        )
+
         _log_table("option_open_interest_daily", "Option daily open interest (Massive)")
         cur.execute(
             """
