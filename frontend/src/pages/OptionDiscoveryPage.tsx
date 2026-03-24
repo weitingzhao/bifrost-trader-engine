@@ -16,11 +16,20 @@ import {
   fetchGreeksCoverage,
   fetchLiquiditySummary,
   fetchRelativeValue,
+  fetchMassiveDailyChecklist,
 } from '../api'
-import type { MassiveStatusResponse, GreeksCoverageResponse, LiquiditySummaryResponse, RelativeValueResponse } from '../api'
+import type {
+  MassiveStatusResponse,
+  GreeksCoverageResponse,
+  LiquiditySummaryResponse,
+  RelativeValueResponse,
+  MassiveDailyChecklistDims,
+  MassiveDailyDimBlock,
+} from '../api'
 import type { OptionSnapshotRow } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtUsd } from '../utils/format'
+import { OptionDiscoveryMaxPainPanel } from './optionDiscovery/OptionDiscoveryMaxPainPanel'
 
 const STRIKE_COUNT_OPTIONS = [4, 6, 8, 19, 30, 'all'] as const
 type StrikeCountOption = (typeof STRIKE_COUNT_OPTIONS)[number]
@@ -109,6 +118,36 @@ interface OptionDiscoveryPageProps {
 }
 
 /** STK symbols from Watchlist that are optionable (sec_type STK and optionable=true). */
+function nyCalendarDateIso(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const y = parts.find(p => p.type === 'year')?.value
+  const m = parts.find(p => p.type === 'month')?.value
+  const d = parts.find(p => p.type === 'day')?.value
+  if (y && m && d) return `${y}-${m}-${d}`
+  return new Date().toISOString().slice(0, 10)
+}
+
+function formatDimShort(_key: string, block: MassiveDailyDimBlock | undefined): string {
+  if (!block?.status) return '—'
+  const st = block.status.toLowerCase()
+  if (st === 'complete') return 'OK'
+  if (st === 'missing') return 'missing'
+  if (st === 'partial') return 'partial'
+  if (st === 'degraded') return 'degraded'
+  return block.status
+}
+
+function formatSnapshotTime(block: MassiveDailyDimBlock | undefined): string {
+  if (!block?.last_ts) return formatDimShort('daily-snapshot', block)
+  const m = /T(\d{2}:\d{2})/.exec(block.last_ts)
+  return m ? `OK ${m[1]}` : 'OK'
+}
+
 function useWatchlistStkSymbols(): string[] {
   const [items, setItems] = useState<WatchlistItem[]>([])
   useEffect(() => {
@@ -504,6 +543,44 @@ export function OptionDiscoveryPage({
       cancelled = true
     }
   }, [])
+
+  const [dailyDims, setDailyDims] = useState<MassiveDailyChecklistDims | null>(null)
+  const [dailyDimsDate, setDailyDimsDate] = useState<string | null>(null)
+  const [dailyDimsLoading, setDailyDimsLoading] = useState(false)
+
+  useEffect(() => {
+    const sym = selectedSymbol.trim().toUpperCase()
+    if (!sym || !massiveStatus?.configured) {
+      setDailyDims(null)
+      setDailyDimsDate(null)
+      return
+    }
+    let cancelled = false
+    setDailyDimsLoading(true)
+    fetchMassiveDailyChecklist({ symbols: [sym], tradeDate: nyCalendarDateIso() })
+      .then(res => {
+        if (cancelled) return
+        if (!res.ok || !res.symbols?.[sym]) {
+          setDailyDims(null)
+          setDailyDimsDate(null)
+          return
+        }
+        setDailyDims(res.symbols[sym])
+        setDailyDimsDate(res.trade_date ?? nyCalendarDateIso())
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDailyDims(null)
+          setDailyDimsDate(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDailyDimsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedSymbol, massiveStatus?.configured])
 
   const stdDevValue = useMemo(() => {
     if (stdDevOption === 'custom') {
@@ -1203,6 +1280,29 @@ export function OptionDiscoveryPage({
             )}
           </div>
         </div>
+        {massiveStatus?.configured && selectedSymbol.trim() ? (
+          <div className="option-discovery-daily-summary" role="status">
+            {dailyDimsLoading ? (
+              <span className="section-hint">Loading daily data status…</span>
+            ) : dailyDims ? (
+              <>
+                <span className="option-discovery-daily-summary-label">
+                  Daily data ({dailyDimsDate ?? '—'})
+                </span>
+                <span className="section-hint option-discovery-daily-summary-bits">
+                  {`${selectedSymbol.trim().toUpperCase()} · Snapshot: ${formatSnapshotTime(dailyDims['daily-snapshot'])} · OI: ${formatDimShort('daily-oi', dailyDims['daily-oi'])} · Max pain: ${formatDimShort('daily-max-pain', dailyDims['daily-max-pain'])} · Corporate: ${formatDimShort('daily-corporate', dailyDims['daily-corporate'])} · WS: ${formatDimShort('daily-ws-alive', dailyDims['daily-ws-alive'])}`}
+                </span>
+                {onOpenMassiveFeed && (
+                  <button type="button" className="button-feedback-nav" onClick={onOpenMassiveFeed}>
+                    Open daily data status
+                  </button>
+                )}
+              </>
+            ) : (
+              <span className="section-hint">Daily data status unavailable.</span>
+            )}
+          </div>
+        ) : null}
         <div className="option-discovery-top-row">
         <section className="replay-section option-discovery-underlying" aria-label="Underlying">
           <div className="option-discovery-underlying-body">
@@ -1589,6 +1689,12 @@ export function OptionDiscoveryPage({
         </section>
         </div>
       </section>
+
+      <OptionDiscoveryMaxPainPanel
+        symbol={selectedSymbol}
+        expiration={selectedExpiration}
+        massiveConfigured={Boolean(massiveStatus?.configured)}
+      />
 
       <section className="replay-section" aria-labelledby="option-discovery-table-head">
         <h3 id="option-discovery-table-head">

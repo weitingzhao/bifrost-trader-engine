@@ -55,6 +55,7 @@ import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
+import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 
@@ -197,6 +198,7 @@ export function SettingsPage({
 
   const hashToSectionId = (hash: string) => {
     const h = hash ? hash.slice(1) : ''
+    if (h === FEED_MASSIVE_DAILY_DATA_ID) return 'settings-coverage'
     if (h && h.startsWith('coverage-')) return 'settings-coverage'
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
@@ -470,7 +472,11 @@ export function SettingsPage({
             <a
               key={sub.id}
               href={`#${sub.id}`}
-              className={`settings-sidebar-link ${isCoverageSection && currentHash === sub.id ? 'active' : ''}`}
+              className={`settings-sidebar-link ${
+                isCoverageSection && (currentHash === sub.id || (sub.id === 'coverage-option' && currentHash === FEED_MASSIVE_DAILY_DATA_ID))
+                  ? 'active'
+                  : ''
+              }`}
             >
               <SettingsSectionIcon name={sub.icon} />
               {sub.label}

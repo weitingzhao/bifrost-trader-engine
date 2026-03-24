@@ -16,6 +16,8 @@ import type {
   GreeksCoverageResponse,
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { DailyDataChecklistSection } from './massive/DailyDataChecklistSection'
+import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 
 interface OptionCoveragePageProps {
   status: StatusResponse | null
@@ -67,6 +69,20 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
   }, [])
 
   useEffect(() => { loadJobs() }, [loadJobs])
+
+  useEffect(() => {
+    const scrollDaily = () => {
+      const h = window.location.hash.replace('#', '')
+      if (h === FEED_MASSIVE_DAILY_DATA_ID) {
+        requestAnimationFrame(() => {
+          document.getElementById(FEED_MASSIVE_DAILY_DATA_ID)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
+      }
+    }
+    scrollDaily()
+    window.addEventListener('hashchange', scrollDaily)
+    return () => window.removeEventListener('hashchange', scrollDaily)
+  }, [])
 
   const configured = massiveStatus?.configured
 
@@ -267,8 +283,10 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
         </button>
         {' / '}
         Option Coverage
-        <InfoTooltip text="Greeks, IV, and coverage metrics derived from Massive Options snapshot endpoints. Chain snapshots persist to PostgreSQL; contract and unified return data without writing." />
+        <InfoTooltip text="Daily option pipeline status, then Greeks/IV and coverage metrics from Massive snapshot endpoints. Chain snapshots persist to PostgreSQL; contract and unified return data without writing." />
       </h2>
+
+      <DailyDataChecklistSection configured={Boolean(configured)} />
 
       <section className="replay-section" aria-labelledby="option-coverage-greeks-head">
         <h3 id="option-coverage-greeks-head" className="page-title-with-tooltip">

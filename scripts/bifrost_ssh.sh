@@ -7,6 +7,7 @@
 #
 # Interactive mode (no args, or -i/--interactive): SSH ControlMaster — SSH login once (unless using keys);
 # sudo password is kept in memory for the whole session (sudo -S) until quit or menu (5) Clear.
+# Menu (6) DB refresh / (7) lock release: choose Dev (local --dev) or Prod (remote --prod); no need to exit SSH.
 
 set -euo pipefail
 
@@ -180,6 +181,8 @@ _interactive_paint_main_menu() {
   echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}Server + Engine + Celery on host (colored summary above)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} Clear stored sudo password"
+  echo "  ${C_GREEN}${C_BOLD}6)${C_RESET} ${C_BOLD}DB: Refresh schema${C_RESET} ${C_DIM}(choose Dev=local --dev or Prod=remote --prod; pg_ddl / script changes — stays in this menu)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}7)${C_RESET} ${C_BOLD}DB: Release locks${C_RESET} ${C_DIM}(choose Dev=local or Prod=remote; dry-run then optional terminate)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
@@ -257,6 +260,13 @@ Usage (from repo root):
     --migrate                   with --deploy or --deploy-only: run db_refresh_schema.py --prod on remote
     --sync-prod-config          with deploy: also rsync config/config.prod.yaml (overwrites remote)
 
+    --db-refresh                Remote ${DEPLOY_PATH}: python scripts/db_refresh_schema.py --prod (no rsync). Menu (6) Prod.
+    --db-refresh-dev            This machine (repo root): python scripts/db_refresh_schema.py --dev (local .venv if present).
+    --db-release-locks          Remote: db_release_dblock.py --prod --dry-run.
+    --db-release-locks-dev      Local: db_release_dblock.py --dev --dry-run.
+    --db-release-locks-terminate  Remote: db_release_dblock.py --prod --yes.
+    --db-release-locks-terminate-dev  Local: db_release_dblock.py --dev --yes.
+
     --password VALUE | -p VALUE | --password=VALUE
                                 remote sudo password for sudo -S (interactive: skip password prompt;
                                 CLI: non-interactive sudo without NOPASSWD). Same as env DEPLOY_SUDO_PASSWORD.
@@ -278,6 +288,13 @@ Examples:
   ./scripts/bifrost_ssh.sh --all --restart -deploy
   ./scripts/bifrost_ssh.sh --all --status
   ./scripts/bifrost_ssh.sh -server -engine --status
+
+  ./scripts/bifrost_ssh.sh --db-refresh
+  ./scripts/bifrost_ssh.sh --db-refresh-dev
+  ./scripts/bifrost_ssh.sh --db-release-locks
+  ./scripts/bifrost_ssh.sh --db-release-locks-dev
+  ./scripts/bifrost_ssh.sh --db-release-locks-terminate
+  ./scripts/bifrost_ssh.sh --db-release-locks-terminate-dev
 
 systemctl over SSH uses ssh -t when stdin is a TTY so sudo can prompt; non-interactive needs NOPASSWD for systemctl.
 With --password, --status uses sudo -S like start/stop/restart; without it, status runs as the SSH user (often sufficient for is-active).
@@ -335,6 +352,21 @@ ssh_remote() {
     ssh -S "${SSH_CONTROL_PATH}" "$@"
   else
     _ssh_plain "$@"
+  fi
+}
+
+# Like ssh_remote but allocate a PTY on the remote (-tt even when stdin is not a tty).
+# Needed so remote Python (e.g. db_refresh_schema.py) sees stderr as a TTY and keeps ANSI colors
+# when local stdout is piped to tee or captured.
+ssh_remote_tty() {
+  if [[ -n "${SSH_CONTROL_PATH}" ]]; then
+    ssh -tt -S "${SSH_CONTROL_PATH}" "$@"
+  else
+    if _use_sshpass_for_ssh; then
+      SSHPASS="${SUDO_PASSWORD}" sshpass -e ssh -tt "$@"
+    else
+      ssh -tt "$@"
+    fi
   fi
 }
 
@@ -524,6 +556,7 @@ npm run build
 cd ..
 if [[ "${DO_MIGRATE}" == "1" ]]; then
   echo "Running db_refresh_schema.py --prod ..."
+  export FORCE_COLOR=1
   python scripts/db_refresh_schema.py --prod
 fi
 echo "Remote install/build finished."
@@ -629,6 +662,43 @@ _interactive_quick_deploy() {
   done
 }
 
+# Run scripts/<name> from repo root with .venv if present (local Dev DB tools).
+_local_run_python_script() {
+  local _script="$1"
+  shift
+  cd "${PROJECT_ROOT}" || return 1
+  if [[ ! -f "scripts/${_script}" ]]; then
+    echo "ERROR: scripts/${_script} not found under ${PROJECT_ROOT}" >&2
+    return 1
+  fi
+  if [[ -f .venv/bin/activate ]]; then
+    # shellcheck source=/dev/null
+    source .venv/bin/activate
+  fi
+  python "scripts/${_script}" "$@"
+}
+
+# Interactive: 1=Dev (local --dev) 2=Prod (remote --prod). Prints dev|prod to stdout.
+# Must print prompts to stderr: callers use _env="$(...)" and stdout is captured — only the
+# final dev|prod must go to stdout, or the user sees nothing and read blocks on a hidden prompt.
+_interactive_pick_db_env() {
+  local _pick
+  echo "" >&2
+  echo "  ${C_DIM}1)${C_RESET} Dev — this machine (${C_DIM}--dev${C_RESET}, local repo + .venv)" >&2
+  echo "  ${C_DIM}2)${C_RESET} Prod — ${DEPLOY_HOST} (${C_DIM}--prod${C_RESET} on ${DEPLOY_PATH})" >&2
+  echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Target ${C_DIM}[1|2, default 2]${C_RESET} " >&2
+  read -r _pick
+  _pick=$(echo "${_pick}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  case "${_pick}" in
+    1|d|dev) printf '%s' dev ;;
+    ""|2|p|prod) printf '%s' prod ;;
+    *)
+      _msg_warn "Invalid choice — using Prod."
+      printf '%s' prod
+      ;;
+  esac
+}
+
 # Interactive menu 3: always query all bifrost units on DEPLOY_HOST; store colored summary for banner (no sub-prompt).
 _interactive_show_status() {
   local _raw _ec
@@ -649,6 +719,184 @@ _interactive_show_status() {
   fi
   _msg_info "Status refresh finished (exit ${_ec}). Redrawing menu…"
   return 0
+}
+
+# Interactive menu 6: db_refresh_schema.py --dev (local) or --prod (remote).
+_interactive_db_refresh_schema() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local _ec _env
+  _env="$(_interactive_pick_db_env)"
+  if [[ "${_env}" == "dev" ]]; then
+    _msg_info "Local: python scripts/db_refresh_schema.py --dev …"
+    echo ""
+    if [[ ! -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+      _msg_warn "No .venv at repo root — install deps or create venv; run may fail."
+    fi
+    set +e
+    # FORCE_COLOR: piped to tee → stderr not a TTY; script honors env (see db_refresh_schema.py).
+    FORCE_COLOR=1 _local_run_python_script db_refresh_schema.py --dev 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+    _ec=${PIPESTATUS[0]}
+    set -e
+  else
+    _bifrost_restore_session_sudo
+    _msg_info "Remote ${DEPLOY_HOST}: python scripts/db_refresh_schema.py --prod …"
+    echo ""
+    set +e
+    ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_DB_REFRESH_EOF' 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+set -euo pipefail
+cd "$DEPLOY_PATH"
+if [[ ! -f .venv/bin/activate ]]; then
+  echo "ERROR: .venv missing on remote. Run Quick deploy (menu 2) once to create venv and sync code." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source .venv/bin/activate
+export FORCE_COLOR=1
+python scripts/db_refresh_schema.py --prod
+REMOTE_DB_REFRESH_EOF
+    _ec=${PIPESTATUS[0]}
+    set -e
+  fi
+  {
+    echo ""
+    echo "--- exit code: ${_ec} ---"
+  } | tee -a "${BIFROST_SSH_LAST_LOG}"
+  _msg_info "DB schema refresh finished (exit ${_ec}). Redrawing menu…"
+  return 0
+}
+
+# Interactive menu 7: db_release_dblock.py --dev (local) or --prod (remote); dry-run then optional --yes.
+_interactive_db_release_locks() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local _ec _ans _env _term_q
+  _env="$(_interactive_pick_db_env)"
+  if [[ "${_env}" == "dev" ]]; then
+    _term_q="python scripts/db_release_dblock.py --dev --yes"
+    _msg_info "Step 1/2 (local): db_release_dblock.py --dev --dry-run …"
+    if [[ ! -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+      _msg_warn "No .venv at repo root — run may fail."
+    fi
+  else
+    _term_q="python scripts/db_release_dblock.py --prod --yes"
+    _bifrost_restore_session_sudo
+    _msg_info "Step 1/2 (remote): db_release_dblock.py --prod --dry-run …"
+  fi
+  echo ""
+  set +e
+  if [[ "${_env}" == "dev" ]]; then
+    _local_run_python_script db_release_dblock.py --dev --dry-run 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+  else
+    ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_DB_REL_DRY_EOF' 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+set -euo pipefail
+cd "$DEPLOY_PATH"
+if [[ ! -f .venv/bin/activate ]]; then
+  echo "ERROR: .venv missing on remote. Run Quick deploy (menu 2) first." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source .venv/bin/activate
+python scripts/db_release_dblock.py --prod --dry-run
+REMOTE_DB_REL_DRY_EOF
+  fi
+  _ec=${PIPESTATUS[0]}
+  {
+    echo ""
+    echo "--- dry-run exit code: ${_ec} ---"
+  } | tee -a "${BIFROST_SSH_LAST_LOG}"
+  set -e
+  echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Run terminate (${_term_q})? ${C_DIM}[y/N]${C_RESET} "
+  read -r _ans
+  _ans=$(echo "${_ans}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  if [[ "${_ans}" != "y" && "${_ans}" != "yes" ]]; then
+    _msg_info "Skipped terminate. Output above was dry-run only."
+    return 0
+  fi
+  if [[ "${_env}" == "dev" ]]; then
+    _msg_info "Step 2/2 (local): db_release_dblock.py --dev --yes …"
+  else
+    _msg_info "Step 2/2 (remote): db_release_dblock.py --prod --yes …"
+  fi
+  echo ""
+  set +e
+  if [[ "${_env}" == "dev" ]]; then
+    _local_run_python_script db_release_dblock.py --dev --yes 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
+  else
+    ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_DB_REL_YES_EOF' 2>&1 | tee -a "${BIFROST_SSH_LAST_LOG}"
+set -euo pipefail
+cd "$DEPLOY_PATH"
+# shellcheck source=/dev/null
+source .venv/bin/activate
+python scripts/db_release_dblock.py --prod --yes
+REMOTE_DB_REL_YES_EOF
+  fi
+  _ec=${PIPESTATUS[0]}
+  {
+    echo ""
+    echo "--- exit code: ${_ec} ---"
+  } | tee -a "${BIFROST_SSH_LAST_LOG}"
+  set -e
+  _msg_info "DB lock release finished (exit ${_ec}). Redrawing menu…"
+  return 0
+}
+
+# Non-interactive: remote db_refresh_schema.py --prod.
+_cli_remote_db_refresh_schema() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  _bifrost_restore_session_sudo
+  ssh_remote_tty "${REMOTE}" DEPLOY_PATH="${DEPLOY_PATH}" bash -s <<'REMOTE_DB_REFRESH_EOF'
+set -euo pipefail
+cd "$DEPLOY_PATH"
+if [[ ! -f .venv/bin/activate ]]; then
+  echo "ERROR: .venv missing on remote. Deploy first: ./scripts/bifrost_ssh.sh --deploy-only" >&2
+  exit 1
+fi
+source .venv/bin/activate
+export FORCE_COLOR=1
+python scripts/db_refresh_schema.py --prod
+REMOTE_DB_REFRESH_EOF
+}
+
+# Non-interactive: local db_refresh_schema.py --dev.
+_cli_local_db_refresh_schema() {
+  if [[ ! -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+    _msg_warn "No .venv at ${PROJECT_ROOT}; run may fail."
+  fi
+  FORCE_COLOR=1 _local_run_python_script db_refresh_schema.py --dev
+}
+
+# Non-interactive: remote db_release_dblock.py --prod ($1 empty or --yes).
+_cli_remote_db_release_locks() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local extra="--dry-run"
+  if [[ "${1:-}" == "--yes" ]]; then
+    extra="--yes"
+  fi
+  _bifrost_restore_session_sudo
+  # shellcheck disable=SC2086
+  ssh_remote_tty "${REMOTE}" bash -s <<EOF
+set -euo pipefail
+cd "${DEPLOY_PATH}"
+if [[ ! -f .venv/bin/activate ]]; then
+  echo "ERROR: .venv missing on remote. Deploy first." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source .venv/bin/activate
+python scripts/db_release_dblock.py --prod ${extra}
+EOF
+}
+
+# Non-interactive: local db_release_dblock.py --dev ($1 empty or --yes).
+_cli_local_db_release_locks() {
+  local extra="--dry-run"
+  if [[ "${1:-}" == "--yes" ]]; then
+    extra="--yes"
+  fi
+  if [[ ! -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+    _msg_warn "No .venv at ${PROJECT_ROOT}; run may fail."
+  fi
+  # shellcheck disable=SC2086
+  _local_run_python_script db_release_dblock.py --dev ${extra}
 }
 
 # Map token -> bifrost unit name, or ALL for all three units (empty if unknown).
@@ -801,7 +1049,7 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-5|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
       1) _interactive_systemctl_one_service ;;
@@ -826,12 +1074,14 @@ interactive_mode() {
         BIFROST_SESSION_SUDO_PASSWORD=""
         echo "[INFO] Stored sudo password cleared." >"${BIFROST_SSH_LAST_LOG}"
         ;;
+      6) _interactive_db_refresh_schema ;;
+      7) _interactive_db_release_locks ;;
       q|Q)
         echo "[INFO] Bye." >"${BIFROST_SSH_LAST_LOG}"
         _interactive_paint_full
         break
         ;;
-      *) echo "[WARN] Unknown choice — try 1–5 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
+      *) echo "[WARN] Unknown choice — try 1–7 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
     esac
   done
   _ssh_control_cleanup
@@ -891,8 +1141,23 @@ fi
 
 set -- "${CLI_ARGS[@]}"
 
+CLI_DB_REFRESH=0
+CLI_DB_REFRESH_DEV=0
+CLI_DB_REL_DRY=0
+CLI_DB_REL_DRY_DEV=0
+CLI_DB_REL_YES=0
+CLI_DB_REL_YES_DEV=0
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --db-refresh) CLI_DB_REFRESH=1 ;;
+    --db-refresh-dev) CLI_DB_REFRESH_DEV=1 ;;
+    --db-release-locks)
+      CLI_DB_REL_DRY=1
+      ;;
+    --db-release-locks-dev) CLI_DB_REL_DRY_DEV=1 ;;
+    --db-release-locks-terminate) CLI_DB_REL_YES=1 ;;
+    --db-release-locks-terminate-dev) CLI_DB_REL_YES_DEV=1 ;;
     --server|-server) _restart_add_unit bifrost-server ;;
     --engine|-engine) _restart_add_unit bifrost-engine ;;
     --celery|-celery) _restart_add_unit bifrost-celery ;;
@@ -925,6 +1190,42 @@ while [[ $# -gt 0 ]]; do
   esac
   shift || true
 done
+
+# DB-only: schema refresh or lock release (local or remote; no rsync / systemctl).
+_db_cli_count=$((CLI_DB_REFRESH + CLI_DB_REFRESH_DEV + CLI_DB_REL_DRY + CLI_DB_REL_DRY_DEV + CLI_DB_REL_YES + CLI_DB_REL_YES_DEV))
+if [[ "${_db_cli_count}" -gt 0 ]]; then
+  if [[ "${_db_cli_count}" -gt 1 ]]; then
+    usage_error "use only one of --db-refresh / --db-refresh-dev / --db-release-locks / --db-release-locks-dev / --db-release-locks-terminate / --db-release-locks-terminate-dev."
+  fi
+  if [[ "${DO_DEPLOY}" == "1" ]] || [[ "${DO_DEPLOY_ONLY}" == "1" ]] || [[ -n "${ACTION:-}" ]] || [[ "${DO_STATUS}" == "1" ]] \
+    || [[ "${RESTART_ALL}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]] || [[ "${DO_MIGRATE}" == "1" ]] || [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
+    usage_error "DB flags (--db-refresh*) cannot be combined with deploy, systemctl, --migrate, or --sync-prod-config."
+  fi
+  if [[ "${CLI_DB_REFRESH_DEV}" == "1" ]]; then
+    _cli_local_db_refresh_schema
+    exit $?
+  fi
+  if [[ "${CLI_DB_REFRESH}" == "1" ]]; then
+    _cli_remote_db_refresh_schema
+    exit $?
+  fi
+  if [[ "${CLI_DB_REL_DRY_DEV}" == "1" ]]; then
+    _cli_local_db_release_locks
+    exit $?
+  fi
+  if [[ "${CLI_DB_REL_DRY}" == "1" ]]; then
+    _cli_remote_db_release_locks
+    exit $?
+  fi
+  if [[ "${CLI_DB_REL_YES_DEV}" == "1" ]]; then
+    _cli_local_db_release_locks --yes
+    exit $?
+  fi
+  if [[ "${CLI_DB_REL_YES}" == "1" ]]; then
+    _cli_remote_db_release_locks --yes
+    exit $?
+  fi
+fi
 
 if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
   if [[ "${DO_DEPLOY}" == "1" ]]; then

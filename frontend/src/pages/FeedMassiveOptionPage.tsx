@@ -44,10 +44,7 @@ import {
 } from './massive/massiveChecklistStatus'
 import { FeedMassiveServiceBlock } from './massive/FeedMassiveServiceBlock'
 import type { EffectiveServiceStatus } from './massive/FeedMassiveServiceBlock'
-import {
-  parseFeedMassiveSvcFromHash,
-  parseFeedMassiveTabFromHash,
-} from './massive/feedMassiveTabUtils'
+import { parseFeedMassiveSvcFromHash, parseFeedMassiveTabFromHash } from './massive/feedMassiveTabUtils'
 
 const WS_VERIFY_CMD = 'python scripts/verify_massive_options_ws.py --config config/config.dev.yaml'
 

@@ -185,6 +185,104 @@ export async function fetchMassiveDailyChecklist(params: {
   }
 }
 
+/** Live Max Pain from EOD OI (GET /research/max-pain/compute) — not persisted. */
+export interface MaxPainStrikePoint {
+  strike: number
+  pain: number
+  call_oi: number
+  put_oi: number
+}
+
+export interface MaxPainComputeResponse {
+  ok: boolean
+  error?: string
+  symbol?: string
+  expiry?: string
+  trade_date?: string
+  max_pain_strike?: number
+  min_pain_value?: number
+  total_oi?: number
+  underlying_close?: number | null
+  distance_to_max_pain_pct?: number | null
+  pain_by_strike?: MaxPainStrikePoint[]
+  recent_corporate_action?: boolean
+}
+
+export async function fetchMaxPainCompute(params: {
+  symbol: string
+  expiry: string
+  tradeDate?: string
+}): Promise<MaxPainComputeResponse> {
+  const sym = (params.symbol || '').trim().toUpperCase()
+  const exp = (params.expiry || '').trim()
+  if (!sym || !exp) return { ok: false, error: 'symbol and expiry are required' }
+  const q = new URLSearchParams({ symbol: sym, expiry: exp })
+  const td = (params.tradeDate || '').trim()
+  if (td) q.set('trade_date', td)
+  const r = await fetch(`${API}/research/max-pain/compute?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  if (!j.ok) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed' }
+  }
+  const pts = Array.isArray(j.pain_by_strike) ? j.pain_by_strike : []
+  return {
+    ok: true,
+    symbol: typeof j.symbol === 'string' ? j.symbol : sym,
+    expiry: typeof j.expiry === 'string' ? j.expiry : undefined,
+    trade_date: typeof j.trade_date === 'string' ? j.trade_date : undefined,
+    max_pain_strike: typeof j.max_pain_strike === 'number' ? j.max_pain_strike : undefined,
+    min_pain_value: typeof j.min_pain_value === 'number' ? j.min_pain_value : undefined,
+    total_oi: typeof j.total_oi === 'number' ? j.total_oi : undefined,
+    underlying_close: j.underlying_close != null && Number.isFinite(Number(j.underlying_close)) ? Number(j.underlying_close) : null,
+    distance_to_max_pain_pct:
+      j.distance_to_max_pain_pct != null && Number.isFinite(Number(j.distance_to_max_pain_pct))
+        ? Number(j.distance_to_max_pain_pct)
+        : null,
+    pain_by_strike: pts.map((p: Record<string, unknown>) => ({
+      strike: Number(p.strike),
+      pain: Number(p.pain),
+      call_oi: Number(p.call_oi ?? 0),
+      put_oi: Number(p.put_oi ?? 0),
+    })),
+    recent_corporate_action: Boolean(j.recent_corporate_action),
+  }
+}
+
+export interface MaxPainHistoryPoint {
+  trade_date: string
+  max_pain_strike: number
+  total_oi: number
+  underlying_close?: number | null
+}
+
+export async function fetchMaxPainComputeHistory(params: {
+  symbol: string
+  expiry: string
+  lookbackDays?: number
+}): Promise<{ ok: boolean; error?: string; expiry?: string; series: MaxPainHistoryPoint[] }> {
+  const sym = (params.symbol || '').trim().toUpperCase()
+  const exp = (params.expiry || '').trim()
+  if (!sym || !exp) return { ok: false, error: 'symbol and expiry are required', series: [] }
+  const q = new URLSearchParams({ symbol: sym, expiry: exp })
+  if (params.lookbackDays != null && params.lookbackDays > 0) q.set('lookback_days', String(params.lookbackDays))
+  const r = await fetch(`${API}/research/max-pain/compute/history?${q.toString()}`)
+  const j = await r.json().catch(() => ({}))
+  if (!j.ok) {
+    return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed', series: [] }
+  }
+  const raw = Array.isArray(j.series) ? j.series : []
+  const series: MaxPainHistoryPoint[] = raw.map((row: Record<string, unknown>) => ({
+    trade_date: String(row.trade_date ?? ''),
+    max_pain_strike: Number(row.max_pain_strike),
+    total_oi: Number(row.total_oi ?? 0),
+    underlying_close:
+      row.underlying_close != null && Number.isFinite(Number(row.underlying_close))
+        ? Number(row.underlying_close)
+        : null,
+  }))
+  return { ok: true, expiry: typeof j.expiry === 'string' ? j.expiry : undefined, series }
+}
+
 export async function postMassiveSync(
   kind: string,
   payload: Record<string, unknown>,

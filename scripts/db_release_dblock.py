@@ -9,6 +9,13 @@ Modes:
 
 Usage:
   python scripts/db_release_dblock.py [--config PATH] [--all] [--yes] [--dry-run]
+  python scripts/db_release_dblock.py --dev [--yes]          # config/config.dev.yaml
+  python scripts/db_release_dblock.py --prod [--yes]         # config/config.prod.yaml
+  python scripts/db_release_dblock.py --env prod [--yes]
+
+Config resolution (when ``--config`` is omitted) matches ``run_server`` / ``db_refresh_schema.py``:
+``BIFROST_CONFIG``, ``--prod`` / ``--dev`` / ``--env``, ``BIFROST_ENV``, then
+``config/config.{dev|prod}.yaml``, ``config/config.yaml``, ``config/config.yaml.example``.
 """
 
 from __future__ import annotations
@@ -35,17 +42,17 @@ _TABLES = (
 )
 
 
-def _load_config(config_path: str) -> tuple[dict, dict]:
+def _load_config(config_path: str) -> dict:
     import yaml
+
     with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-    pg = config.get("postgres") or {}
-    return config, pg
+        return yaml.safe_load(f) or {}
 
 
-def _conn_params(pg: dict) -> dict:
+def _conn_params_from_root_config(config: dict) -> dict:
     from src.sink.postgres_sink import _get_conn_params
-    return _get_conn_params({"postgres": pg})
+
+    return _get_conn_params(config)
 
 
 def _print_backend_row(r: tuple, *, show_relation: bool = True) -> None:
@@ -118,15 +125,27 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Diagnose and release PostgreSQL locks / idle-in-transaction backends."
     )
-    parser.add_argument("--config", default="config/config.yaml", help="Config path")
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="YAML config with postgres block. If omitted, same rules as run_server / db_refresh_schema.py.",
+    )
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation, terminate all listed backends")
     parser.add_argument("--dry-run", action="store_true", help="Only list backends, do not terminate")
     parser.add_argument("--all", action="store_true", help="Show ALL idle-in-transaction backends (full diagnostic)")
-    args = parser.parse_args()
+    args, argv_remainder = parser.parse_known_args(sys.argv[1:])
 
-    config_path = args.config
-    if not os.path.isabs(config_path):
-        config_path = str(_PROJECT_ROOT / config_path)
+    if args.config:
+        config_path = args.config
+        if not os.path.isabs(config_path):
+            config_path = str(_PROJECT_ROOT / config_path)
+        config_path = str(Path(config_path).resolve())
+    else:
+        from src.app.config import resolve_startup_config_path
+
+        config_path, _ = resolve_startup_config_path(str(_PROJECT_ROOT), argv_remainder)
+
     if not Path(config_path).exists():
         print(f"Config not found: {config_path}", file=sys.stderr)
         return 1
@@ -137,12 +156,26 @@ def main() -> int:
         print("Missing psycopg2. Install with: pip install -e .", file=sys.stderr)
         return 1
 
-    _, pg = _load_config(config_path)
+    config = _load_config(config_path)
+    pg = config.get("postgres") or {}
     if not pg and not os.environ.get("PGHOST"):
-        print("postgres or PGHOST required in config.", file=sys.stderr)
+        print(
+            "postgres block required in config (or set PGHOST). "
+            f"Try: python scripts/db_release_dblock.py --dev   (uses config/config.dev.yaml if present)\n"
+            f"  Resolved config path was: {config_path}",
+            file=sys.stderr,
+        )
         return 1
 
-    params = _conn_params(pg)
+    try:
+        from src.app.config import config_profile_from_resolved_path
+
+        profile = config_profile_from_resolved_path(config_path)
+    except ImportError:
+        profile = None
+    print(f"Using config: {config_path}" + (f"  (profile: {profile})" if profile else ""), file=sys.stderr)
+
+    params = _conn_params_from_root_config(config)
     params["connect_timeout"] = 10
 
     try:

@@ -310,7 +310,7 @@ export function DailyDataChecklistSection({ configured }: { configured: boolean 
                     {DAILY_DIMS.map(({ key }) => {
                       const block = row[key]
                       const k = `${sym}|${key}`
-                      const spinning = busyKey === k || batchBusy
+                      const spinning = busyKey === k
                       const can = canBackfillDim(key, block) && !batchBusy && busyKey == null
                       const title = fmtDimTooltip(key, block)
                       return (
@@ -321,7 +321,9 @@ export function DailyDataChecklistSection({ configured }: { configured: boolean 
                             title={title}
                             disabled={!can || spinning}
                             onClick={() => {
-                              if (can) void runBackfill(sym, key).then(() => loadChecklist())
+                              if (!can || spinning) return
+                              setResultLog('')
+                              void runBackfill(sym, key).then(() => loadChecklist())
                             }}
                           >
                             {spinning ? '…' : statusLabel(block?.status)}

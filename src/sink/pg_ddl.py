@@ -495,6 +495,22 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 -- Existing non-partitioned table: migrate to partitioned
                 RAISE NOTICE 'Migrating option_snapshots from heap to RANGE partition on snapshot_ts ...';
 
+                -- 0. Align legacy heap column set with current DDL (migrate_opt block runs later in _ensure_tables;
+                -- without these, INSERT ... SELECT by name fails on older DBs that only had mid + created_at.)
+                IF NOT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'option_snapshots' AND column_name = 'iv'
+                ) THEN
+                  ALTER TABLE option_snapshots ADD COLUMN iv double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN delta double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN gamma double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN theta double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN vega double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN open_interest integer;
+                  ALTER TABLE option_snapshots ADD COLUMN underlying_price double precision;
+                  ALTER TABLE option_snapshots ADD COLUMN source text NOT NULL DEFAULT 'ib';
+                END IF;
+
                 -- 1. Create new partitioned parent
                 CREATE SEQUENCE IF NOT EXISTS option_snapshots_new_id_seq;
                 CREATE TABLE option_snapshots_new (
@@ -532,9 +548,44 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
                 END LOOP;
                 CREATE TABLE IF NOT EXISTS option_snapshots_new_default PARTITION OF option_snapshots_new DEFAULT;
 
-                -- 3. Copy data
-                INSERT INTO option_snapshots_new
-                  SELECT * FROM option_snapshots;
+                -- 3. Copy data (must list columns by name: legacy heaps often had created_at before iv/greeks
+                -- from ALTER TABLE ... ADD COLUMN, so SELECT * would misalign types.)
+                INSERT INTO option_snapshots_new (
+                    option_snapshots_id,
+                    contract_key,
+                    snapshot_ts,
+                    last,
+                    bid,
+                    ask,
+                    mid,
+                    iv,
+                    delta,
+                    gamma,
+                    theta,
+                    vega,
+                    open_interest,
+                    underlying_price,
+                    source,
+                    created_at
+                )
+                SELECT
+                    option_snapshots_id,
+                    contract_key,
+                    snapshot_ts,
+                    last,
+                    bid,
+                    ask,
+                    mid,
+                    iv,
+                    delta,
+                    gamma,
+                    theta,
+                    vega,
+                    open_interest,
+                    underlying_price,
+                    source,
+                    created_at
+                FROM option_snapshots;
 
                 -- 4. Set sequence to continue after max id
                 PERFORM setval('option_snapshots_new_id_seq',

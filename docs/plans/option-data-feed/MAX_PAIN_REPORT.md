@@ -143,11 +143,11 @@ flowchart TD
 
 ---
 
-## 8. 待决策点
+## 8. Owner 决策（已锁定）
 
-| 编号 | 问题 |
+| 编号 | 决策 |
 |------|------|
-| MP-1 | `computation_detail` 是否存入 PG（JSONB 体积 vs 前端体验）？还是 API 层实时计算返回？ |
-| MP-2 | Max Pain 页面放在 Research 下作为子页面，还是嵌入 Option Discovery 内？ |
-| MP-3 | 历史趋势图是否在 V1 实现？ |
-| MP-4 | 是否需要同时展示 Call OI、Put OI 的分布柱状图（与 Max Pain 叠加）？ |
+| MP-1 | **API 层实时计算**：`GET /research/max-pain/compute` 与 `GET /research/max-pain/compute/history` 从 `option_open_interest_daily`（及 `stock_day`）现算 pain 曲线与历史序列；**不依赖** `report_option_max_pain_daily` 中已存的 `computation_detail` 做展示。（Celery `kind=max_pain` 仍可写表供其他用途，与 UI 解耦。） |
+| MP-2 | **嵌入 Option Discovery**：`OptionDiscoveryMaxPainPanel`（在「By expiration – Option quotes」区块之上）。 |
+| MP-3 | **V1 实现历史趋势**：`compute/history` + 「Max Pain vs underlying (daily)」折线。 |
+| MP-4 | **需要**：复选框 **Pain by strike / Call OI bars / Put OI bars / Historical trend**，按勾选动态显示对应图层。 |

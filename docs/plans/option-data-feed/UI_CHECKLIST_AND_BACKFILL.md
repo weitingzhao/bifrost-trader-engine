@@ -128,10 +128,10 @@ NVDA · Snapshot: ✓ 15:45 · OI: ✗ missing · Max Pain: ✗
 
 ---
 
-## 7. 待决策点
+## 7. Owner 决策（已锁定）
 
-| 编号 | 问题 |
+| 编号 | 决策 |
 |------|------|
-| UI-1 | 日粒度 Checklist 展示全部 Watchlist 标的还是仅用户选择的？ |
-| UI-2 | 是否在 Option Discovery 嵌入轻量摘要？ |
-| UI-3 | Batch backfill 是否需要确认弹窗（涉及多个 API 调用）？ |
+| UI-1 | **全部 Watchlist 中 optionable STK**，与 Watchlist 一致；非仅手动多选几个标的。 |
+| UI-2 | **嵌入**：Option Discovery 在 Massive 已配置且已选标的时，条件区顶部展示一行日粒度摘要（含跳转 Feed → Daily Data Status）。 |
+| UI-3 | **不要** Batch backfill 确认弹窗；补全完成后把 **job 结果**（及批量时的多行输出）留在页面 **Last run output** 区域展示即可。 |

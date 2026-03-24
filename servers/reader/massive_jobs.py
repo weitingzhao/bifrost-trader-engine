@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from datetime import date as date_type
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
@@ -949,3 +950,250 @@ def get_latest_massive_job_by_kind(
     except Exception as e:
         logger.debug("get_latest_massive_job_by_kind failed: %s", e)
         return None
+
+
+def _stock_close_on_date(cur: Any, symbol: str, trade_date: date_type) -> Optional[float]:
+    """Latest stock_day close on calendar day (if any)."""
+    try:
+        cur.execute(
+            """
+            SELECT close FROM stock_day
+            WHERE symbol = %s AND (bar_time::date) = %s
+            ORDER BY bar_time DESC
+            LIMIT 1
+            """,
+            (symbol, trade_date),
+        )
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+    except Exception:
+        pass
+    return None
+
+
+def _recent_corporate_action_flag(cur: Any, symbol: str) -> bool:
+    try:
+        cur.execute(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM massive_corporate_action
+              WHERE symbol = %s AND source = 'massive'
+                AND created_at >= (now() AT TIME ZONE 'utc') - interval '30 days'
+            )
+            """,
+            (symbol,),
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def compute_max_pain_live_from_db(
+    status_config: dict,
+    *,
+    symbol: str,
+    expiry: str,
+    trade_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Real-time Max Pain from option_open_interest_daily (no report table)."""
+    from servers.reader.max_pain_math import (
+        compute_max_pain_curve,
+        normalize_expiry_for_oi,
+        strike_map_for_expiry,
+    )
+
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    sym = (symbol or "").strip().upper()
+    exp = (expiry or "").strip()
+    if not sym or not exp:
+        return {"ok": False, "error": "symbol and expiry are required"}
+    exp_norm = normalize_expiry_for_oi(exp)
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                td_use: Optional[date_type] = None
+                if trade_date and str(trade_date).strip():
+                    raw = str(trade_date).strip()[:10]
+                    td_use = date_type.fromisoformat(raw)
+                else:
+                    cur.execute(
+                        """
+                        SELECT MAX(trade_date) FROM option_open_interest_daily
+                        WHERE symbol = %s AND expiry = %s AND source = 'massive'
+                        """,
+                        (sym, exp_norm),
+                    )
+                    r0 = cur.fetchone()
+                    if r0 and r0[0] is not None:
+                        d0 = r0[0]
+                        td_use = d0 if isinstance(d0, date_type) else date_type.fromisoformat(str(d0)[:10])
+                if td_use is None:
+                    return {
+                        "ok": False,
+                        "error": "No open interest rows for this symbol/expiry",
+                        "symbol": sym,
+                        "expiry": exp_norm,
+                    }
+
+                cur.execute(
+                    """
+                    SELECT expiry, strike, option_right, open_interest
+                    FROM option_open_interest_daily
+                    WHERE symbol = %s AND expiry = %s AND trade_date = %s AND source = 'massive'
+                    """,
+                    (sym, exp_norm, td_use),
+                )
+                raw_rows = [
+                    {"expiry": row[0], "strike": row[1], "option_right": row[2], "open_interest": row[3]}
+                    for row in cur.fetchall()
+                ]
+                skmap = strike_map_for_expiry(raw_rows, exp)
+                if not skmap:
+                    return {
+                        "ok": False,
+                        "error": "No OI rows for this expiry on trade_date",
+                        "symbol": sym,
+                        "expiry": exp_norm,
+                        "trade_date": td_use.isoformat(),
+                    }
+                mp_strike, min_pain, points, total_oi = compute_max_pain_curve(skmap)
+                underlying_close = _stock_close_on_date(cur, sym, td_use)
+                corp_flag = _recent_corporate_action_flag(cur, sym)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("compute_max_pain_live_from_db failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+    uc = underlying_close
+    dist_pct: Optional[float] = None
+    if uc is not None and uc > 0:
+        dist_pct = abs(float(mp_strike) - float(uc)) / float(uc)
+
+    return {
+        "ok": True,
+        "symbol": sym,
+        "expiry": exp_norm,
+        "trade_date": td_use.isoformat(),
+        "max_pain_strike": mp_strike,
+        "min_pain_value": min_pain,
+        "total_oi": total_oi,
+        "underlying_close": uc,
+        "distance_to_max_pain_pct": dist_pct,
+        "pain_by_strike": points,
+        "recent_corporate_action": corp_flag,
+    }
+
+
+def compute_max_pain_history_from_db(
+    status_config: dict,
+    *,
+    symbol: str,
+    expiry: str,
+    lookback_days: int = 90,
+) -> Dict[str, Any]:
+    """Time series of max pain per trade_date (recomputed from OI; no report table)."""
+    from servers.reader.max_pain_math import (
+        compute_max_pain_curve,
+        normalize_expiry_for_oi,
+        strike_map_for_expiry,
+    )
+
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return {"ok": False, "error": "PostgreSQL not configured", "series": []}
+    sym = (symbol or "").strip().upper()
+    exp = (expiry or "").strip()
+    if not sym or not exp:
+        return {"ok": False, "error": "symbol and expiry are required", "series": []}
+    exp_norm = normalize_expiry_for_oi(exp)
+    lb = max(7, min(int(lookback_days), 365))
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH latest AS (
+                      SELECT MAX(trade_date) AS max_td FROM option_open_interest_daily
+                      WHERE symbol = %s AND expiry = %s AND source = 'massive'
+                    )
+                    SELECT o.trade_date, o.expiry, o.strike, o.option_right, o.open_interest
+                    FROM option_open_interest_daily o, latest
+                    WHERE o.symbol = %s AND o.expiry = %s AND o.source = 'massive'
+                      AND latest.max_td IS NOT NULL
+                      AND o.trade_date >= (latest.max_td - %s::integer)
+                      AND o.trade_date <= latest.max_td
+                    ORDER BY o.trade_date, o.strike
+                    """,
+                    (sym, exp_norm, sym, exp_norm, lb),
+                )
+                all_rows = cur.fetchall()
+                cur.execute(
+                    """
+                    WITH latest AS (
+                      SELECT MAX(trade_date) AS max_td FROM option_open_interest_daily
+                      WHERE symbol = %s AND expiry = %s AND source = 'massive'
+                    )
+                    SELECT o.trade_date, o.close
+                    FROM stock_day o, latest
+                    WHERE o.symbol = %s AND latest.max_td IS NOT NULL
+                      AND (o.bar_time::date) >= (latest.max_td - %s::integer)
+                      AND (o.bar_time::date) <= latest.max_td
+                    ORDER BY o.bar_time
+                    """,
+                    (sym, exp_norm, sym, lb),
+                )
+                stock_rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("compute_max_pain_history_from_db failed: %s", e)
+        return {"ok": False, "error": str(e), "series": []}
+
+    close_by_day: Dict[str, float] = {}
+    for r in stock_rows:
+        d0 = r[0]
+        if d0 is None:
+            continue
+        d = d0.isoformat()[:10] if hasattr(d0, "isoformat") else str(d0)[:10]
+        if r[1] is not None:
+            close_by_day[d] = float(r[1])
+
+    by_td: Dict[str, List[Dict[str, Any]]] = {}
+    for row in all_rows:
+        td0 = row[0]
+        if td0 is None:
+            continue
+        td_s = td0.isoformat()[:10] if hasattr(td0, "isoformat") else str(td0)[:10]
+        by_td.setdefault(td_s, []).append(
+            {
+                "expiry": row[1],
+                "strike": row[2],
+                "option_right": row[3],
+                "open_interest": row[4],
+            }
+        )
+
+    series: List[Dict[str, Any]] = []
+    for td_s in sorted(by_td.keys()):
+        raw_rows = by_td[td_s]
+        skmap = strike_map_for_expiry(raw_rows, exp)
+        if not skmap:
+            continue
+        mp_strike, _min_p, _pts, tot_oi = compute_max_pain_curve(skmap)
+        series.append(
+            {
+                "trade_date": td_s,
+                "max_pain_strike": mp_strike,
+                "total_oi": tot_oi,
+                "underlying_close": close_by_day.get(td_s),
+            }
+        )
+
+    return {"ok": True, "symbol": sym, "expiry": exp_norm, "series": series}

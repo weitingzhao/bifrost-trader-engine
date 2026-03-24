@@ -33,7 +33,7 @@ import { GatesConfigPage } from './pages/GatesConfigPage'
 import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
-import { isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
+import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
 import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
@@ -215,7 +215,14 @@ export default function App() {
     if (!h) return 'system'
     const hashNorm = hash.startsWith('#') ? hash : `#${hash}`
     if (isMassiveOptionFeedHash(hashNorm)) return 'massive'
-    if (h.startsWith('settings-system') || h.startsWith('feed-') || h.startsWith('coverage-')) return 'system'
+    if (
+      h === FEED_MASSIVE_DAILY_DATA_ID ||
+      h.startsWith('settings-system') ||
+      h.startsWith('feed-') ||
+      h.startsWith('coverage-')
+    ) {
+      return 'system'
+    }
     return 'config'
   }, [])
   const [settingsViewSection, setSettingsViewSection] = useState<'system' | 'config' | 'massive' | null>(null)
@@ -1313,7 +1320,7 @@ export default function App() {
           onGoToScreener={() => setResearchView('screener')}
           onOpenMassiveFeed={() => {
             setActiveTab('settings')
-            window.location.hash = `#${FEED_MASSIVE_OPTION_ID}`
+            window.location.hash = `#${FEED_MASSIVE_DAILY_DATA_ID}`
           }}
           breadcrumbLabel="Option Discovery"
         />

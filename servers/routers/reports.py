@@ -51,3 +51,35 @@ def get_max_pain_latest(
         return {"ok": False, "error": "PostgreSQL not configured", "trade_date": None, "rows": []}
     rows, td = get_report_max_pain_latest_batch(db, symbol=symbol, limit=limit)
     return {"ok": True, "trade_date": td, "count": len(rows), "rows": rows}
+
+
+@router.get("/max-pain/compute")
+def get_max_pain_compute(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+    expiry: str = Query(..., description="Expiration YYYYMMDD or YYYY-MM-DD"),
+    trade_date: Optional[str] = Query(None, description="OI as-of date YYYY-MM-DD (default: latest in PG)"),
+) -> Dict[str, Any]:
+    """Real-time Max Pain from EOD OI (not from report_option_max_pain_daily)."""
+    from servers.reader.massive_jobs import compute_max_pain_live_from_db
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured"}
+    return compute_max_pain_live_from_db(db, symbol=symbol, expiry=expiry, trade_date=trade_date)
+
+
+@router.get("/max-pain/compute/history")
+def get_max_pain_compute_history(
+    request: Request,
+    symbol: str = Query(..., description="Underlying symbol"),
+    expiry: str = Query(..., description="Expiration YYYYMMDD or YYYY-MM-DD"),
+    lookback_days: int = Query(90, ge=7, le=365, description="Calendar days back from latest OI date"),
+) -> Dict[str, Any]:
+    """Per-trade-date max pain series recomputed from OI (no stored report rows)."""
+    from servers.reader.massive_jobs import compute_max_pain_history_from_db
+
+    db = _db_config(request)
+    if not db:
+        return {"ok": False, "error": "PostgreSQL not configured", "series": []}
+    return compute_max_pain_history_from_db(db, symbol=symbol, expiry=expiry, lookback_days=lookback_days)

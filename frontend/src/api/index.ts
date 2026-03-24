@@ -79,6 +79,8 @@ export {
   fetchLiquiditySummary,
   fetchRelativeValue,
   fetchMassiveDailyChecklist,
+  fetchMaxPainCompute,
+  fetchMaxPainComputeHistory,
 } from './research'
 export type {
   OptionSnapshotRow,
@@ -87,6 +89,9 @@ export type {
   MassiveJobApiRow,
   MassiveDailyDimBlock,
   MassiveDailyChecklistDims,
+  MaxPainStrikePoint,
+  MaxPainComputeResponse,
+  MaxPainHistoryPoint,
   CorporateActionRow,
   GreeksCoverageResponse,
   ContractsCoverageResponse,

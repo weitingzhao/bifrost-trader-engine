@@ -22,7 +22,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -106,7 +106,7 @@ TABLE_TO_CATEGORY: Dict[str, str] = {
     t: cat for cat, tables in EXPECTED_TABLES_BY_CATEGORY.items() for t in tables
 }
 
-# ANSI colors (only applied when stderr is a TTY or when USE_COLOR is set)
+# ANSI colors: stderr TTY, or FORCE_COLOR/CLICOLOR_FORCE; disabled by --no-color or NO_COLOR (https://no-color.org/).
 RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -119,7 +119,13 @@ BLUE = "\033[34m"
 
 
 def _color_enabled(no_color: bool) -> bool:
-    return not no_color and hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+    if no_color:
+        return False
+    if os.environ.get("NO_COLOR", "").strip():
+        return False
+    if os.environ.get("FORCE_COLOR", "").strip() or os.environ.get("CLICOLOR_FORCE", "").strip():
+        return True
+    return hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
 
 
 def _c(no_color: bool, code: str, text: str) -> str:
@@ -259,7 +265,7 @@ def main() -> int:
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE n.nspname = current_schema()
-                  AND c.relkind IN ('r', 'v')
+                  AND c.relkind IN ('r', 'v', 'p')
                 """
             )
             relkind_map = {r[0]: r[1] for r in cur.fetchall()}
@@ -287,8 +293,15 @@ def main() -> int:
                 line += _c(no_color, YELLOW, f", {present_count} present")
                 if missing:
                     line += _c(no_color, RED, f", {len(missing)} missing ({', '.join(missing)})")
+            def _relkind_label(k: Optional[str]) -> str:
+                if k == "v":
+                    return "view"
+                if k == "p":
+                    return "partitioned"
+                return "table"
+
             detail = ", ".join(
-                f"{name}[{'view' if relkind_map.get(name) == 'v' else 'table'}]"
+                f"{name}[{_relkind_label(relkind_map.get(name))}]"
                 for name in sorted(present_list)
             )
             if detail:
