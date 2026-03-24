@@ -3,7 +3,6 @@ import type { StatusResponse, WatchlistItem } from '../types'
 import {
   fetchWatchlist,
   fetchOptionExpirations,
-  fetchOptionSnapshot,
   fetchBarsBenchmark,
   postWatchlist,
   fetchMassiveStatus,
@@ -524,7 +523,6 @@ export function OptionDiscoveryPage({
 }: OptionDiscoveryPageProps) {
   const stkSymbols = useWatchlistStkSymbols()
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
-  const [quoteSource, setQuoteSource] = useState<'ib' | 'massive'>('massive')
   const [selectedSymbol, setSelectedSymbol] = useState('')
   const [expirations, setExpirations] = useState<string[]>([])
   const [strikes, setStrikes] = useState<number[]>([])
@@ -601,7 +599,6 @@ export function OptionDiscoveryPage({
       .then(s => {
         if (!cancelled) {
           setMassiveStatus(s)
-          setQuoteSource(s.configured ? 'massive' : 'ib')
         }
       })
       .catch(() => {
@@ -737,13 +734,7 @@ export function OptionDiscoveryPage({
     return () => { cancelled = true }
   }, [stkSymbols.join(',')])
 
-  const providerForSource = useCallback(
-    (source: 'ib' | 'massive'): 'auto' | 'ib' | 'massive' =>
-      source === 'massive' && massiveStatus?.configured ? 'massive' : source === 'ib' ? 'ib' : 'auto',
-    [massiveStatus?.configured],
-  )
-
-  const loadExpirations = useCallback(async (symbol: string, source: 'ib' | 'massive' = quoteSource) => {
+  const loadExpirations = useCallback(async (symbol: string) => {
     const s = (symbol || '').trim()
     if (!s) {
       setExpirations([])
@@ -756,20 +747,13 @@ export function OptionDiscoveryPage({
     setExpirationsLoading(true)
     setExpirationsError(null)
     try {
-      const provider = providerForSource(source)
-      const res = await fetchOptionExpirations(s, provider)
+      const res = await fetchOptionExpirations(s, 'massive')
       setExpirations(res.expirations || [])
       setStockDayLastPrice(res.last_price ?? null)
       setExpirationsError(res.error ?? null)
       const firstExp = (res.expirations && res.expirations.length > 0 ? res.expirations[0] : '') || ''
       setSelectedExpiration(firstExp)
-      // For IB the union strikes are usable (IB returns per-underlying, not per-expiry);
-      // for Massive/auto we'll load per-expiry strikes separately via loadStrikesForExpiration.
-      if (provider === 'ib') {
-        setStrikes(res.strikes ?? [])
-      } else {
-        setStrikes([])
-      }
+      setStrikes([])
     } catch {
       setExpirations([])
       setStrikes([])
@@ -779,7 +763,7 @@ export function OptionDiscoveryPage({
     } finally {
       setExpirationsLoading(false)
     }
-  }, [quoteSource, providerForSource])
+  }, [])
 
   const loadStrikesForExpiration = useCallback(async (symbol: string, expiration: string) => {
     const s = (symbol || '').trim()
@@ -788,11 +772,9 @@ export function OptionDiscoveryPage({
       setStrikes([])
       return
     }
-    const provider = providerForSource(quoteSource)
-    if (provider === 'ib') return
     setStrikesLoading(true)
     try {
-      const res = await fetchOptionExpirations(s, provider, { expiration: e })
+      const res = await fetchOptionExpirations(s, 'massive', { expiration: e })
       setStrikes(res.strikes ?? [])
       if (res.last_price != null) setStockDayLastPrice(res.last_price)
     } catch {
@@ -800,9 +782,7 @@ export function OptionDiscoveryPage({
     } finally {
       setStrikesLoading(false)
     }
-  }, [quoteSource, providerForSource])
-
-  const prevQuoteSourceRef = useRef(quoteSource)
+  }, [])
 
   useEffect(() => {
     setMultiSelectStrikes([])
@@ -823,14 +803,7 @@ export function OptionDiscoveryPage({
   useEffect(() => {
     setSnapshotLoadAttempted(false)
     setSnapshotFeedback(null)
-  }, [selectedSymbol, selectedExpiration, quoteSource])
-
-  useEffect(() => {
-    if (prevQuoteSourceRef.current === quoteSource) return
-    prevQuoteSourceRef.current = quoteSource
-    const sym = selectedSymbol.trim()
-    if (sym) loadExpirations(sym, quoteSource)
-  }, [quoteSource, selectedSymbol, loadExpirations])
+  }, [selectedSymbol, selectedExpiration])
 
   useEffect(() => {
     setMultiSelectStrikes([])
@@ -910,7 +883,7 @@ export function OptionDiscoveryPage({
 
   useEffect(() => {
     stopSnapshotPgWatch()
-  }, [selectedSymbol, selectedExpiration, quoteSource, strikesWatchKey, stopSnapshotPgWatch])
+  }, [selectedSymbol, selectedExpiration, strikesWatchKey, stopSnapshotPgWatch])
 
   useEffect(() => () => { stopSnapshotPgWatch() }, [stopSnapshotPgWatch])
 
@@ -923,7 +896,7 @@ export function OptionDiscoveryPage({
     setTermPoints([])
     try {
       const { fetchIvTermStructure } = await import('../api/research')
-      const res = await fetchIvTermStructure(sym, ordered.slice(0, IV_TERM_MAX_EXPIRATIONS), quoteSource)
+      const res = await fetchIvTermStructure(sym, ordered.slice(0, IV_TERM_MAX_EXPIRATIONS), 'massive')
       if (!res.ok) {
         setTermError(res.error ?? 'Failed to load IV term structure')
         return
@@ -931,9 +904,7 @@ export function OptionDiscoveryPage({
       const pts = res.points ?? []
       if (pts.length < 2) {
         setTermError(
-          quoteSource === 'massive'
-            ? 'Not enough ATM IV in PostgreSQL for the checked expirations (need ≥2 with IV). Use Backfill snapshots (Massive) to enqueue chain jobs for the selection, or Load quotes in section 4 per expiration. You can check any expirations (up to 12), not only the first eight.'
-            : 'Not enough ATM IV in PostgreSQL for the checked expirations (need ≥2 with IV). Load chain quotes in section 4 for those expirations, or switch to Massive and use Backfill if that pipeline populates your DB.',
+          'Not enough ATM IV in PostgreSQL for the checked expirations (need ≥2 with IV). Use Backfill snapshots (Massive) to enqueue chain jobs for the selection, or Load quotes in section 4 per expiration. You can check any expirations (up to 12), not only the first eight.',
         )
         setTermPoints(pts)
         return
@@ -944,15 +915,9 @@ export function OptionDiscoveryPage({
     } finally {
       setTermLoading(false)
     }
-  }, [selectedSymbol, expirations, ivTermExpKeys, quoteSource])
+  }, [selectedSymbol, expirations, ivTermExpKeys])
 
   const syncIvTermMassiveSnapshots = useCallback(async () => {
-    if (quoteSource !== 'massive') {
-      setTermError(
-        'Backfill uses Massive chain snapshot jobs. Switch quote source to Massive, or load IB quotes separately for each checked expiration (section 4).',
-      )
-      return
-    }
     const sym = selectedSymbol.trim()
     const ordered = expirations.filter(e => ivTermExpKeys.includes(e)).slice(0, IV_TERM_MAX_EXPIRATIONS)
     if (!sym || ordered.length < 2) return
@@ -992,7 +957,7 @@ export function OptionDiscoveryPage({
       setIvTermSyncLoading(false)
       setIvTermSyncStatus(null)
     }
-  }, [quoteSource, selectedSymbol, expirations, ivTermExpKeys, effectiveStrikes, loadIvTermStructure])
+  }, [selectedSymbol, expirations, ivTermExpKeys, effectiveStrikes, loadIvTermStructure])
 
   const toggleIvTermExpiration = useCallback(
     (exp: string, checked: boolean) => {
@@ -1063,22 +1028,6 @@ export function OptionDiscoveryPage({
     setSelectedContractIdx(null)
     setSnapshotLoadAttempted(true)
     try {
-      if (quoteSource === 'ib') {
-        const res = await fetchOptionSnapshot(sym, exp, strikesToSend)
-        const ibRows = res.rows ?? []
-        setSnapshotRows(ibRows)
-        setUnderlyingPrice(res.underlying_price ?? null)
-        if (ibRows.length > 0) {
-          setSelectedContractIdx(0)
-        }
-        if (res.error) {
-          setSnapshotFeedback({ level: 'error', body: res.error })
-        } else if ((res.rows ?? []).length === 0) {
-          setSnapshotFeedback({ level: 'info', body: 'No option quotes returned from IB for the selected expiration/strikes.' })
-        }
-        return
-      }
-
       // ── Massive path ──
       // Chain snapshot must match UI expiry/strikes: default API is ~10 rows with no filters (wrong contracts).
       const massiveChainPayload: Record<string, unknown> = {
@@ -1161,7 +1110,7 @@ export function OptionDiscoveryPage({
     } finally {
       setSnapshotLoading(false)
     }
-  }, [selectedSymbol, selectedExpiration, effectiveStrikes, quoteSource, stopSnapshotPgWatch, startSnapshotPgWatch])
+  }, [selectedSymbol, selectedExpiration, effectiveStrikes, stopSnapshotPgWatch, startSnapshotPgWatch])
 
   // Auto-load quotes when symbol / expiration / strikes / source change (debounced)
   const loadQuotesDebounced = useMemo(() => debounce(() => { void loadQuotes() }, 400), [loadQuotes])
@@ -1171,7 +1120,7 @@ export function OptionDiscoveryPage({
     if (!sym || !exp) return
     loadQuotesDebounced()
     return () => loadQuotesDebounced.cancel()
-  }, [selectedSymbol, selectedExpiration, effectiveStrikes.join(','), quoteSource, loadQuotesDebounced])
+  }, [selectedSymbol, selectedExpiration, effectiveStrikes.join(','), loadQuotesDebounced])
 
   const handleAddToWatchlist = useCallback(
     async (row: OptionSnapshotRow) => {
@@ -1197,7 +1146,7 @@ export function OptionDiscoveryPage({
 
   // P1: Load liquidity data when a contract is selected (Massive source only)
   useEffect(() => {
-    if (selectedContractIdx == null || quoteSource !== 'massive') {
+    if (selectedContractIdx == null) {
       setLiquidityLastTrade(null)
       setLiquidityQuoteCount(null)
       setServerLiquidity(null)
@@ -1235,11 +1184,11 @@ export function OptionDiscoveryPage({
       setLiquidityLoading(false)
     })
     return () => { cancelled = true }
-  }, [selectedContractIdx, snapshotRows, selectedSymbol, selectedExpiration, quoteSource])
+  }, [selectedContractIdx, snapshotRows, selectedSymbol, selectedExpiration])
 
   // P2: Load greeks coverage when quotes arrive (Massive source only)
   useEffect(() => {
-    if (quoteSource !== 'massive' || snapshotRows.length === 0) {
+    if (snapshotRows.length === 0) {
       setGreeksCoverage(null)
       return
     }
@@ -1251,11 +1200,11 @@ export function OptionDiscoveryPage({
       if (!cancelled) setGreeksCoverage(r)
     }).catch(() => { if (!cancelled) setGreeksCoverage(null) })
     return () => { cancelled = true }
-  }, [snapshotRows.length, selectedSymbol, selectedExpiration, quoteSource])
+  }, [snapshotRows.length, selectedSymbol, selectedExpiration])
 
   // P2: Load server-side relative value when contract selected
   useEffect(() => {
-    if (selectedContractIdx == null || quoteSource !== 'massive') {
+    if (selectedContractIdx == null) {
       setServerRelativeValue(null)
       return
     }
@@ -1269,7 +1218,7 @@ export function OptionDiscoveryPage({
       if (!cancelled) setServerRelativeValue(r)
     }).catch(() => { if (!cancelled) setServerRelativeValue(null) })
     return () => { cancelled = true }
-  }, [selectedContractIdx, snapshotRows, selectedSymbol, selectedExpiration, quoteSource])
+  }, [selectedContractIdx, snapshotRows, selectedSymbol, selectedExpiration])
 
   // P3: Build event context warnings
   useEffect(() => {
@@ -1305,12 +1254,10 @@ export function OptionDiscoveryPage({
       'ask',
       'last',
       'mid',
-      ...(quoteSource === 'massive'
-        ? (['iv', 'delta', 'gamma', 'theta', 'vega', 'oi'] as const satisfies readonly ChainColumnId[])
-        : []),
+      ...(['iv', 'delta', 'gamma', 'theta', 'vega', 'oi'] as const satisfies readonly ChainColumnId[]),
     ]
     return order.filter(id => chainColumnVisibility[id] !== false)
-  }, [quoteSource, chainColumnVisibility])
+  }, [chainColumnVisibility])
 
   const chainStrikesSorted = useMemo(() => {
     const set = new Set<number>()
@@ -1399,11 +1346,8 @@ export function OptionDiscoveryPage({
   )
 
   const chainFilterColumnIds = useMemo((): ChainColumnId[] => {
-    if (quoteSource === 'massive') {
-      return ['bid', 'ask', 'last', 'mid', 'iv', 'delta', 'gamma', 'theta', 'vega', 'oi']
-    }
-    return ['bid', 'ask', 'last', 'mid']
-  }, [quoteSource])
+    return ['bid', 'ask', 'last', 'mid', 'iv', 'delta', 'gamma', 'theta', 'vega', 'oi']
+  }, [])
 
   return (
     <div className="card process-section">
@@ -1425,7 +1369,7 @@ export function OptionDiscoveryPage({
         ) : (
           <>{breadcrumbLabel}{' '}</>
         )}
-        <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration. Expirations use Massive when configured (auto), else IB. Quotes: IB live or Massive delayed snapshot sync + PostgreSQL." />
+        <InfoTooltip text="Option Discovery: choose underlying (from Watchlist STK with Option? on) and expiration. Expirations and quotes use Massive delayed snapshot sync + PostgreSQL." />
         {massiveStatus?.configured && (
           <span
             className="section-hint"
@@ -1711,7 +1655,7 @@ export function OptionDiscoveryPage({
                 onUncheckAllExpirations={uncheckAllIvTermExpirations}
                 maxExpirations={IV_TERM_MAX_EXPIRATIONS}
                 defaultExpirationCount={IV_TERM_DEFAULT_EXPIRATIONS}
-                massiveBackfillAvailable={quoteSource === 'massive' && Boolean(massiveStatus?.configured)}
+                massiveBackfillAvailable={Boolean(massiveStatus?.configured)}
                 onBackfillMassiveSnapshots={syncIvTermMassiveSnapshots}
                 snapshotSyncLoading={ivTermSyncLoading}
                 snapshotSyncStatus={ivTermSyncStatus}
@@ -2074,7 +2018,7 @@ export function OptionDiscoveryPage({
 
           {/* Option Analytics — uses snapshotRows (strike selection) */}
           {selectedSymbol.trim() !== '' && selectedExpiration.trim() !== '' &&
-            snapshotRows.length > 0 && !snapshotLoading && quoteSource === 'massive' && (
+            snapshotRows.length > 0 && !snapshotLoading && (
             <div
               className="od-option-structure-stack"
               aria-label="Option analytics"
@@ -2094,7 +2038,7 @@ export function OptionDiscoveryPage({
               id="od-layer-4"
               step={4}
               title="Option quotes & contract"
-              subtitle="Refresh Massive/IB snapshots, browse the chain, then open a contract for liquidity, risk, and K-line."
+              subtitle="Refresh Massive snapshots, browse the chain, then open a contract for liquidity, risk, and K-line."
               enabled={selectedSymbol.trim() !== '' && selectedExpiration.trim() !== ''}
               lockedHint="Select symbol and expiration first."
             >
@@ -2107,7 +2051,7 @@ export function OptionDiscoveryPage({
             <div className="od-option-quotes-head-row">
               <h3 id="option-discovery-table-head" className="od-option-quotes-head-title">
                 Option quotes
-                <InfoTooltip text="IB: live quotes from TWS. Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
+                <InfoTooltip text="Massive: enqueue sync job (REST), then read snapshots from PostgreSQL; 15 min delayed. Bid/ask may be empty outside RTH." />
               </h3>
               <button
                 type="button"
@@ -2145,7 +2089,7 @@ export function OptionDiscoveryPage({
           >
             {snapshotFeedback.title && <strong>{snapshotFeedback.title}</strong>}
             <span>{snapshotFeedback.body}</span>
-            {snapshotFeedback.level !== 'error' && quoteSource === 'massive' && (
+            {snapshotFeedback.level !== 'error' && (
               <div className="od-feedback-actions">
                 <button
                   type="button"
@@ -2163,7 +2107,7 @@ export function OptionDiscoveryPage({
                 )}
               </div>
             )}
-            {snapshotPgWatching && quoteSource === 'massive' && (
+            {snapshotPgWatching && (
               <p className="od-snapshot-watch-hint" role="status">
                 Watching PostgreSQL for new snapshots… ~{snapshotPgWatchSecondsLeft ?? 0}s left. Matching rows will appear
                 automatically when data is available. Use Pull now to enqueue another chain snapshot if the worker was not
@@ -2384,9 +2328,7 @@ export function OptionDiscoveryPage({
                 <path d="M9 17h6" />
               </svg>
             </button>
-            {quoteSource === 'massive' && (
-              <span className="od-detail-delayed">Massive · 15 min delayed</span>
-            )}
+            <span className="od-detail-delayed">Massive · 15 min delayed</span>
             <button
               type="button"
               className="od-detail-close"
@@ -2461,19 +2403,17 @@ export function OptionDiscoveryPage({
                     <span className="od-kv-k">DTE</span><span className="od-kv-v">{expirationDaysFromToday(selectedExpiration)}</span>
                   </div>
                 </div>
-                {quoteSource === 'massive' && (
-                  <div className="od-card-section">
-                    <div className="od-card-section-title">Greeks</div>
-                    <div className="od-kv-grid">
-                      <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
-                      <span className="od-kv-k">Delta</span><span className="od-kv-v">{fmtOptNum(selectedRow.delta, 4)}</span>
-                      <span className="od-kv-k">Gamma</span><span className="od-kv-v">{fmtOptNum(selectedRow.gamma, 4)}</span>
-                      <span className="od-kv-k">Theta</span><span className="od-kv-v">{fmtOptNum(selectedRow.theta, 4)}</span>
-                      <span className="od-kv-k">Vega</span><span className="od-kv-v">{fmtOptNum(selectedRow.vega, 4)}</span>
-                      <span className="od-kv-k">OI</span><span className="od-kv-v">{selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
-                    </div>
+                <div className="od-card-section">
+                  <div className="od-card-section-title">Greeks</div>
+                  <div className="od-kv-grid">
+                    <span className="od-kv-k">IV</span><span className="od-kv-v">{fmtOptNum(selectedRow.iv, 4)}</span>
+                    <span className="od-kv-k">Delta</span><span className="od-kv-v">{fmtOptNum(selectedRow.delta, 4)}</span>
+                    <span className="od-kv-k">Gamma</span><span className="od-kv-v">{fmtOptNum(selectedRow.gamma, 4)}</span>
+                    <span className="od-kv-k">Theta</span><span className="od-kv-v">{fmtOptNum(selectedRow.theta, 4)}</span>
+                    <span className="od-kv-k">Vega</span><span className="od-kv-v">{fmtOptNum(selectedRow.vega, 4)}</span>
+                    <span className="od-kv-k">OI</span><span className="od-kv-v">{selectedRow.open_interest != null ? String(selectedRow.open_interest) : '—'}</span>
                   </div>
-                )}
+                </div>
               </div>
 
               {/* P2: Data Quality Badge */}
@@ -2527,9 +2467,6 @@ export function OptionDiscoveryPage({
             return (
               <div className="od-detail-body">
                 {liquidityLoading && <p className="section-hint">Loading liquidity data…</p>}
-                {quoteSource !== 'massive' && (
-                  <p className="section-hint">Liquidity details are available with Massive quote source.</p>
-                )}
                 <div className="od-card-grid">
                   <div className="od-card-section">
                     <div className="od-card-section-title">Tradability Score</div>
