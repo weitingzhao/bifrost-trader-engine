@@ -121,17 +121,25 @@ class MassiveClient:
         include_debug: bool = False,
         max_contract_samples: int = 200,
         expiration_date: Optional[str] = None,
+        collect_contract_rows: bool = False,
     ) -> Dict[str, Any]:
         """Paginate /v3/reference/options/contracts; return expirations, strikes, tickers map.
 
         When *expiration_date* is set (YYYYMMDD or YYYY-MM-DD), Polygon filters
         server-side so only contracts for that single expiry are returned.
+
+        When *collect_contract_rows* is True, each contract row is appended to
+        ``contract_rows`` for PostgreSQL upserts (option_contracts).
         """
         underlying = (underlying or "").strip().upper()
         if not underlying or not self._api_key:
-            return {"expirations": [], "strikes": [], "error": "symbol or api key missing"}
+            out_bad: Dict[str, Any] = {"expirations": [], "strikes": [], "error": "symbol or api key missing"}
+            if collect_contract_rows:
+                out_bad["contract_rows"] = []
+            return out_bad
         expirations: set = set()
         strikes: set = set()
+        contract_rows: List[Dict[str, Any]] = []
         debug_pages: List[Dict[str, Any]] = []
         contract_samples: List[Dict[str, Any]] = []
         next_url: Optional[str] = None
@@ -162,6 +170,8 @@ class MassiveClient:
                         "strikes": sorted(strikes),
                         "error": str(e),
                     }
+                    if collect_contract_rows:
+                        out_e["contract_rows"] = contract_rows
                     if include_debug:
                         out_e["massive_debug"] = {"pages": debug_pages, "contract_samples": contract_samples}
                     return out_e
@@ -193,6 +203,8 @@ class MassiveClient:
                         "strikes": [],
                         "error": err_body,
                     }
+                    if collect_contract_rows:
+                        out_err["contract_rows"] = []
                     if include_debug:
                         out_err["massive_debug"] = {"pages": debug_pages, "contract_samples": []}
                     return out_err
@@ -213,6 +225,18 @@ class MassiveClient:
                         strikes.add(float(sp))
                     except (TypeError, ValueError):
                         pass
+                if collect_contract_rows and ed and sp is not None:
+                    try:
+                        contract_rows.append(
+                            {
+                                "ticker": (r.get("ticker") or "").strip(),
+                                "expiration_date": _norm_expiry(str(ed)[:10]),
+                                "strike_price": float(sp),
+                                "contract_type": (r.get("contract_type") or "").strip(),
+                            }
+                        )
+                    except (TypeError, ValueError):
+                        pass
             next_url = data.get("next_url") if isinstance(data, dict) else None
             if not next_url:
                 break
@@ -220,6 +244,8 @@ class MassiveClient:
             "expirations": sorted(expirations),
             "strikes": sorted(strikes),
         }
+        if collect_contract_rows:
+            out["contract_rows"] = contract_rows
         if include_debug:
             out["massive_debug"] = {
                 "pages": debug_pages,

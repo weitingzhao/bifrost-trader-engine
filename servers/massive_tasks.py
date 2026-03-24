@@ -1270,3 +1270,23 @@ def beat_reconcile() -> Dict[str, Any]:
 def beat_trim_massive_jobs() -> Dict[str, Any]:
     """Celery Beat: enqueue ``trim_jobs`` (keep newest 500 rows in job_massive_backfill)."""
     return _enqueue_massive_job("trim_jobs", {})
+
+
+@app.task(name="servers.massive_tasks.beat_refresh_expirations")
+def beat_refresh_expirations() -> Dict[str, Any]:
+    """Celery Beat: refresh option expiration cache + option_contracts for Watchlist optionable STK symbols."""
+    from src.app.config import read_config
+    from servers.massive_config import get_expiration_cache_settings
+    from servers.reader.massive_jobs import (
+        get_watchlist_optionable_stk_symbols,
+        refresh_expirations_watchlist_batch,
+    )
+
+    cfg_path = _config_path_for_task()
+    config, _ = read_config(cfg_path)
+    symbols = get_watchlist_optionable_stk_symbols(config)
+    if not symbols:
+        logger.info("beat_refresh_expirations: empty watchlist, skip")
+        return {"ok": True, "skipped": True, "reason": "empty watchlist"}
+    batch = get_expiration_cache_settings(config)["beat_batch_size"]
+    return refresh_expirations_watchlist_batch(config, config, symbols, max_symbols=batch)

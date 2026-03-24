@@ -77,6 +77,7 @@ app.conf.update(
         "servers.massive_tasks.beat_corporate_watchlist": {"queue": "massive"},
         "servers.massive_tasks.beat_reconcile": {"queue": "massive"},
         "servers.massive_tasks.beat_trim_massive_jobs": {"queue": "massive"},
+        "servers.massive_tasks.beat_refresh_expirations": {"queue": "massive"},
     },
     timezone="UTC",
     enable_utc=True,
@@ -99,6 +100,10 @@ app.conf.update(
         "massive-trim-jobs": {
             "task": "servers.massive_tasks.beat_trim_massive_jobs",
             "schedule": crontab(hour=2, minute=15),
+        },
+        "massive-refresh-expirations": {
+            "task": "servers.massive_tasks.beat_refresh_expirations",
+            "schedule": crontab(hour="*/6", minute=20),
         },
     },
 )

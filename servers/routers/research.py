@@ -5,10 +5,11 @@ import hashlib
 import json
 import shutil
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Body, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from servers.redis_url import redis_url_from_config
@@ -19,12 +20,14 @@ router = APIRouter(tags=["research"])
 SNAPSHOT_CACHE_TTL_SEC = 120
 
 
-def _option_expirations_cache_response(body: Dict[str, Any]) -> JSONResponse:
+def _option_expirations_cache_response(
+    body: Dict[str, Any], extra_headers: Optional[Dict[str, str]] = None
+) -> JSONResponse:
     """Slow-changing expirations list: allow browser / SWR to cache 5 minutes."""
-    return JSONResponse(
-        content=body,
-        headers={"Cache-Control": "max-age=300"},
-    )
+    headers: Dict[str, str] = {"Cache-Control": "max-age=300"}
+    if extra_headers:
+        headers.update(extra_headers)
+    return JSONResponse(content=body, headers=headers)
 
 MAX_OPTION_SNAPSHOT_CONTRACTS = 20
 MAX_OPTION_SNAPSHOT_CONTRACTS_EXTENDED = 60  # when frontend sends many strikes (e.g. 30)
@@ -129,6 +132,26 @@ def _filter_option_strikes(strikes_raw: List[float], last_price: Optional[float]
     else:
         strikes = [s for s in strikes_raw if s >= 5.0]
     return sorted(set(strikes))
+
+
+def _expiration_cache_is_fresh(max_updated_at: Optional[Any], ttl_sec: int) -> bool:
+    if max_updated_at is None or ttl_sec <= 0:
+        return False
+    now = datetime.now(timezone.utc)
+    mu = max_updated_at
+    if hasattr(mu, "tzinfo") and getattr(mu, "tzinfo", None) is None:
+        mu = mu.replace(tzinfo=timezone.utc)
+    else:
+        mu = mu.astimezone(timezone.utc)
+    return (now - mu).total_seconds() <= float(ttl_sec)
+
+
+def _ttl_sec_expiration_cache(config: dict) -> int:
+    from servers.massive_config import get_expiration_cache_settings
+    from servers.reader.massive_jobs import is_us_equity_regular_session_et
+
+    s = get_expiration_cache_settings(config)
+    return s["ttl_trading_sec"] if is_us_equity_regular_session_et() else s["ttl_off_hours_sec"]
 
 
 async def _option_expirations_ib(request: Request, symbol: str) -> Dict[str, Any]:
@@ -247,6 +270,7 @@ def post_massive_api_coverage_sync() -> Dict[str, Any]:
 @router.get("/research/option-expirations")
 async def get_option_expirations(
     request: Request,
+    background_tasks: BackgroundTasks,
     symbol: str = Query(..., description="Underlying symbol (e.g. NVDA)"),
     provider: str = Query(
         "auto",
@@ -263,8 +287,16 @@ async def get_option_expirations(
         "(YYYY-MM-DD or YYYYMMDD). Reduces pagination and returns strikes for that expiry only. "
         "Ignored when provider=ib.",
     ),
-) -> Dict[str, Any]:
-    """R-OD1: Expirations and strikes from IB and/or Massive REST."""
+) -> Any:
+    """R-OD1: Expirations and strikes from IB and/or Massive REST (PostgreSQL cache first)."""
+    from servers.massive_config import get_expiration_cache_settings, get_massive_settings
+    from servers.reader.massive_jobs import (
+        get_option_expiration_cache_snapshot,
+        get_option_expirations_from_contracts_db,
+        get_strikes_for_expiry_from_contracts_db,
+        refresh_expirations_from_massive_api,
+    )
+
     symbol = (symbol or "").strip()
     if not symbol:
         return {"symbol": "", "expirations": [], "strikes": [], "error": "symbol is required"}
@@ -286,23 +318,13 @@ async def get_option_expirations(
         out["provider"] = "ib"
         return _option_expirations_cache_response(out)
 
-    if prov == "massive":
-        from servers.massive_config import get_massive_settings
-        from servers.massive_client import MassiveClient
+    db = _db_config(request)
+    ms = get_massive_settings(config)
+    ecfg = get_expiration_cache_settings(config)
+    ttl_sec = _ttl_sec_expiration_cache(config)
 
-        ms = get_massive_settings(config)
-        if not ms["api_key"]:
-            return {
-                "symbol": symbol,
-                "expirations": [],
-                "strikes": [],
-                "error": "Massive API key not configured",
-                "provider": "massive",
-            }
-        client = MassiveClient(ms["api_key"], ms["rest_base"])
-        result = client.fetch_expirations_and_strikes(
-            symbol, include_debug=debug, expiration_date=expiration,
-        )
+    async def _massive_response_from_rest_result(result: Dict[str, Any]) -> JSONResponse:
+        result.pop("contract_rows", None)
         expirations = result.get("expirations") or []
         strikes_raw: List[float] = result.get("strikes") or []
         strikes = _filter_option_strikes(strikes_raw, last_price)
@@ -311,6 +333,7 @@ async def get_option_expirations(
             "expirations": expirations,
             "strikes": strikes,
             "provider": "massive",
+            "expiration_backend": "rest",
         }
         if last_price is not None:
             out["last_price"] = last_price
@@ -320,35 +343,135 @@ async def get_option_expirations(
         md = result.get("massive_debug")
         if debug and isinstance(md, dict):
             out["massive_debug"] = md
-        return _option_expirations_cache_response(out)
+        return _option_expirations_cache_response(out, {"X-Expiration-Cache": "miss"})
 
-    # auto: Massive first when configured and successful
-    from servers.massive_config import get_massive_settings
-    from servers.massive_client import MassiveClient
+    async def _massive_db_first_flow() -> JSONResponse:
+        """PostgreSQL cache / contracts first; then Massive REST with persist."""
+        if not ms["api_key"]:
+            return JSONResponse(
+                content={
+                    "symbol": symbol,
+                    "expirations": [],
+                    "strikes": [],
+                    "error": "Massive API key not configured",
+                    "provider": "massive",
+                }
+            )
 
-    ms = get_massive_settings(config)
-    if ms["api_key"]:
-        client = MassiveClient(ms["api_key"], ms["rest_base"])
-        result = client.fetch_expirations_and_strikes(
-            symbol, include_debug=debug, expiration_date=expiration,
+        exp_q = (expiration or "").strip()
+
+        # Single-expiry: strikes from option_contracts or REST refresh.
+        if exp_q:
+            if db:
+                strikes_db = get_strikes_for_expiry_from_contracts_db(db, symbol, exp_q)
+                if strikes_db:
+                    strikes_f = _filter_option_strikes(strikes_db, last_price)
+                    exp_norm = _norm_expiry_key(exp_q)
+                    body: Dict[str, Any] = {
+                        "symbol": symbol,
+                        "expirations": [exp_norm] if exp_norm else [],
+                        "strikes": strikes_f,
+                        "provider": "massive",
+                        "expiration_backend": "contracts",
+                    }
+                    if last_price is not None:
+                        body["last_price"] = last_price
+                    return _option_expirations_cache_response(body, {"X-Expiration-Cache": "hit"})
+            result = await asyncio.to_thread(
+                refresh_expirations_from_massive_api,
+                db,
+                config,
+                symbol,
+                exp_q,
+                debug,
+                debug,
+            )
+            return await _massive_response_from_rest_result(result)
+
+        # Full expiration list
+        if db and ecfg["enabled"]:
+            snap = get_option_expiration_cache_snapshot(db, symbol)
+            if snap:
+                exps, max_u = snap
+                if exps:
+                    if _expiration_cache_is_fresh(max_u, ttl_sec):
+                        body_f = {
+                            "symbol": symbol,
+                            "expirations": exps,
+                            "strikes": [],
+                            "provider": "massive",
+                            "expiration_backend": "cache",
+                        }
+                        if last_price is not None:
+                            body_f["last_price"] = last_price
+                        return _option_expirations_cache_response(body_f, {"X-Expiration-Cache": "fresh"})
+                    if ecfg["stale_while_revalidate"]:
+                        db_cfg = db
+                        cfg_c = config
+
+                        def _bg_refresh() -> None:
+                            refresh_expirations_from_massive_api(
+                                db_cfg, cfg_c, symbol, None, False
+                            )
+
+                        background_tasks.add_task(_bg_refresh)
+                        body_s = {
+                            "symbol": symbol,
+                            "expirations": exps,
+                            "strikes": [],
+                            "provider": "massive",
+                            "expiration_backend": "cache_stale",
+                        }
+                        if last_price is not None:
+                            body_s["last_price"] = last_price
+                        return _option_expirations_cache_response(
+                            body_s,
+                            {
+                                "X-Expiration-Cache": "stale",
+                                "Cache-Control": "private, max-age=60",
+                            },
+                        )
+
+        if db:
+            ex_contracts = get_option_expirations_from_contracts_db(db, symbol)
+            if ex_contracts:
+                body_c = {
+                    "symbol": symbol,
+                    "expirations": ex_contracts,
+                    "strikes": [],
+                    "provider": "massive",
+                    "expiration_backend": "contracts",
+                }
+                if last_price is not None:
+                    body_c["last_price"] = last_price
+                return _option_expirations_cache_response(body_c, {"X-Expiration-Cache": "hit"})
+
+        result = await asyncio.to_thread(
+            refresh_expirations_from_massive_api,
+            db,
+            config,
+            symbol,
+            None,
+            debug,
+            debug,
         )
-        err = result.get("error")
-        exps = result.get("expirations") or []
-        strikes_raw = result.get("strikes") or []
-        if not err and (exps or strikes_raw):
-            strikes = _filter_option_strikes(strikes_raw, last_price)
-            out: Dict[str, Any] = {
-                "symbol": symbol,
-                "expirations": exps,
-                "strikes": strikes,
-                "provider": "massive",
-            }
-            if last_price is not None:
-                out["last_price"] = last_price
-            md = result.get("massive_debug")
-            if debug and isinstance(md, dict):
-                out["massive_debug"] = md
-            return _option_expirations_cache_response(out)
+        return await _massive_response_from_rest_result(result)
+
+    if prov == "massive":
+        return await _massive_db_first_flow()
+
+    # auto: Massive-first (DB + REST) when configured and data present, else IB
+    if ms["api_key"]:
+        resp = await _massive_db_first_flow()
+        try:
+            payload = json.loads(resp.body.decode("utf-8"))
+        except Exception:
+            payload = {}
+        err = payload.get("error") if isinstance(payload, dict) else None
+        exps = (payload.get("expirations") or []) if isinstance(payload, dict) else []
+        strikes_l = (payload.get("strikes") or []) if isinstance(payload, dict) else []
+        if not err and (exps or strikes_l):
+            return resp
 
     ib_out = await _option_expirations_ib(request, symbol)
     ib_out["provider"] = "ib"

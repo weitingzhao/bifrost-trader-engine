@@ -5,10 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from datetime import date as date_type
+from datetime import datetime, time
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import psycopg2
+from psycopg2 import ProgrammingError
 from psycopg2.extras import RealDictCursor
 
 from src.sink.postgres_sink import _get_conn_params
@@ -1197,3 +1201,304 @@ def compute_max_pain_history_from_db(
         )
 
     return {"ok": True, "symbol": sym, "expiry": exp_norm, "series": series}
+
+
+def _right_from_ref_contract_type(ct: str) -> str:
+    u = (ct or "").upper()
+    if u in ("CALL", "C"):
+        return "C"
+    if u in ("PUT", "P"):
+        return "P"
+    return "C"
+
+
+def is_us_equity_regular_session_et(now: Optional[datetime] = None) -> bool:
+    """Weekday 09:30–16:00 America/New_York (no holiday calendar)."""
+    et = ZoneInfo("America/New_York")
+    dt = now or datetime.now(et)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=et)
+    else:
+        dt = dt.astimezone(et)
+    if dt.weekday() >= 5:
+        return False
+    t = dt.time()
+    return time(9, 30) <= t < time(16, 0)
+
+
+def get_option_expirations_from_contracts_db(status_config: dict, symbol: str) -> List[str]:
+    """Distinct expirations (YYYYMMDD) from option_contracts for an underlying."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return []
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT expiry FROM option_contracts
+                    WHERE symbol = %s
+                    ORDER BY expiry
+                    """,
+                    (sym,),
+                )
+                return [str(r[0]).strip() for r in cur.fetchall() if r and r[0]]
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_option_expirations_from_contracts_db failed: %s", e)
+        return []
+
+
+def get_strikes_for_expiry_from_contracts_db(
+    status_config: dict, symbol: str, expiration: str
+) -> List[float]:
+    """Distinct strikes for symbol + expiry from option_contracts."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return []
+    sym = (symbol or "").strip().upper()
+    exp = _norm_expiry_db((expiration or "").strip())
+    if not sym or len(exp) != 8 or not exp.isdigit():
+        return []
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT strike FROM option_contracts
+                    WHERE symbol = %s AND expiry = %s
+                    ORDER BY strike
+                    """,
+                    (sym, exp),
+                )
+                out: List[float] = []
+                for r in cur.fetchall():
+                    if r and r[0] is not None:
+                        try:
+                            out.append(float(r[0]))
+                        except (TypeError, ValueError):
+                            pass
+                return out
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("get_strikes_for_expiry_from_contracts_db failed: %s", e)
+        return []
+
+
+def get_option_expiration_cache_snapshot(
+    status_config: dict, symbol: str, source: str = "massive"
+) -> Optional[Tuple[List[str], Optional[datetime]]]:
+    """Return (sorted expirations, max updated_at) or None if no rows / table missing."""
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return None
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT expiry, updated_at FROM option_expiration_cache
+                    WHERE symbol = %s AND source = %s
+                    ORDER BY expiry
+                    """,
+                    (sym, source),
+                )
+                rows = cur.fetchall()
+            if not rows:
+                return None
+            exps: List[str] = []
+            max_u: Optional[datetime] = None
+            for r in rows:
+                exps.append(str(r[0]).strip())
+                u = r[1]
+                if u is not None:
+                    if hasattr(u, "tzinfo") and u.tzinfo is None:
+                        u = u.replace(tzinfo=ZoneInfo("UTC"))
+                    if max_u is None or u > max_u:
+                        max_u = u
+            return (exps, max_u)
+        finally:
+            conn.close()
+    except ProgrammingError as e:
+        if getattr(e, "pgcode", None) == "42P01":
+            return None
+        logger.debug("get_option_expiration_cache_snapshot: %s", e)
+        return None
+    except Exception as e:
+        logger.debug("get_option_expiration_cache_snapshot failed: %s", e)
+        return None
+
+
+def replace_option_expiration_cache(
+    status_config: dict,
+    symbol: str,
+    expirations: List[str],
+    source: str = "massive",
+) -> None:
+    """Replace full expiration list for a symbol (full-chain refresh)."""
+    sym = (symbol or "").strip().upper()
+    if not sym or not status_config:
+        return
+    if not expirations:
+        return
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM option_expiration_cache WHERE symbol = %s AND source = %s",
+                    (sym, source),
+                )
+                for raw in expirations:
+                    e = _norm_expiry_db(str(raw))
+                    if len(e) != 8 or not e.isdigit():
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO option_expiration_cache (symbol, expiry, source, last_seen_at, updated_at)
+                        VALUES (%s, %s, %s, now(), now())
+                        """,
+                        (sym, e, source),
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+    except ProgrammingError as e:
+        if getattr(e, "pgcode", None) == "42P01":
+            return
+        logger.warning("replace_option_expiration_cache failed: %s", e)
+    except Exception as e:
+        logger.warning("replace_option_expiration_cache failed: %s", e)
+
+
+def upsert_option_contracts_from_reference_rows(
+    status_config: dict,
+    underlying: str,
+    contract_rows: List[Dict[str, Any]],
+) -> int:
+    """Upsert option_contracts from Polygon reference contract rows."""
+    from servers.massive_client import contract_key_from_parts
+
+    underlying = (underlying or "").strip().upper()
+    if not contract_rows or not underlying:
+        return 0
+    if not status_config or (status_config.get("sink") != "postgres" and not status_config.get("postgres")):
+        return 0
+    n = 0
+    try:
+        params = _get_conn_params(status_config)
+        conn = psycopg2.connect(**params)
+        try:
+            with conn.cursor() as cur:
+                for row in contract_rows:
+                    exp = row.get("expiration_date") or row.get("expiration") or ""
+                    if not exp:
+                        continue
+                    ed = _norm_expiry_db(str(exp)[:10])
+                    if len(ed) != 8 or not ed.isdigit():
+                        continue
+                    sp = row.get("strike_price")
+                    if sp is None:
+                        continue
+                    try:
+                        strike = float(sp)
+                    except (TypeError, ValueError):
+                        continue
+                    ort = _right_from_ref_contract_type(str(row.get("contract_type") or "call"))
+                    ticker = (row.get("ticker") or "").strip() or None
+                    ck = contract_key_from_parts(underlying, ed, strike, ort)
+                    cur.execute(
+                        """
+                        INSERT INTO option_contracts (contract_key, symbol, expiry, strike, option_right, massive_option_ticker, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, now())
+                        ON CONFLICT (contract_key) DO UPDATE SET
+                          massive_option_ticker = COALESCE(EXCLUDED.massive_option_ticker, option_contracts.massive_option_ticker)
+                        """,
+                        (ck, underlying, ed, strike, ort, ticker),
+                    )
+                    n += 1
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("upsert_option_contracts_from_reference_rows failed: %s", e)
+    return n
+
+
+def refresh_expirations_from_massive_api(
+    status_config: dict,
+    config: dict,
+    symbol: str,
+    expiration_date: Optional[str] = None,
+    include_debug: bool = False,
+    skip_persist: bool = False,
+) -> Dict[str, Any]:
+    """Fetch expirations/strikes from Massive REST and persist contracts + expiration cache."""
+    from servers.massive_config import get_massive_settings
+    from servers.massive_client import MassiveClient
+
+    ms = get_massive_settings(config)
+    if not ms["api_key"]:
+        return {"expirations": [], "strikes": [], "error": "Massive API key not configured"}
+    client = MassiveClient(ms["api_key"], ms["rest_base"])
+    result = client.fetch_expirations_and_strikes(
+        symbol,
+        include_debug=include_debug,
+        expiration_date=expiration_date,
+        collect_contract_rows=True,
+    )
+    if status_config and not result.get("error") and not skip_persist:
+        rows = result.get("contract_rows") or []
+        try:
+            upsert_option_contracts_from_reference_rows(status_config, symbol, rows)
+            if not (expiration_date or "").strip():
+                replace_option_expiration_cache(status_config, symbol, result.get("expirations") or [], source="massive")
+        except Exception as e:
+            logger.warning("refresh_expirations_from_massive_api persist failed: %s", e)
+    return result
+
+
+def refresh_expirations_watchlist_batch(
+    status_config: dict,
+    config: dict,
+    symbols: List[str],
+    *,
+    max_symbols: int = 24,
+) -> Dict[str, Any]:
+    """Refresh expiration cache + contracts for a batch of underlyings (Celery beat)."""
+    from servers.massive_config import get_massive_settings
+
+    ms = get_massive_settings(config)
+    if not ms["api_key"]:
+        return {"ok": False, "error": "Massive API key not configured", "refreshed": 0}
+    syms = [s.strip().upper() for s in symbols if s]
+    syms = list(dict.fromkeys(syms))[: max(1, max_symbols)]
+    ok = 0
+    errors: List[str] = []
+    gap = 0.2
+    for i, sym in enumerate(syms):
+        if i > 0:
+            time.sleep(gap)
+        try:
+            r = refresh_expirations_from_massive_api(
+                status_config, config, sym, expiration_date=None, include_debug=False
+            )
+            if r.get("error"):
+                errors.append(f"{sym}: {r.get('error')}")
+            else:
+                ok += 1
+        except Exception as e:
+            errors.append(f"{sym}: {e}")
+    return {"ok": True, "refreshed": ok, "errors": errors[:20], "batch_size": len(syms)}

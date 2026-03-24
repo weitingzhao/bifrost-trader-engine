@@ -27,5 +27,18 @@ def get_massive_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def get_expiration_cache_settings(config: Dict[str, Any]) -> Dict[str, Any]:
+    """TTL and behavior for option expiration list (PostgreSQL cache + REST fallback)."""
+    m = config.get("massive") or {}
+    ec = m.get("expiration_cache") or {}
+    return {
+        "enabled": bool(ec.get("enabled", True)),
+        "ttl_trading_sec": int(ec.get("ttl_trading_sec", 3600)),
+        "ttl_off_hours_sec": int(ec.get("ttl_off_hours_sec", 43200)),
+        "stale_while_revalidate": bool(ec.get("stale_while_revalidate", True)),
+        "beat_batch_size": int(ec.get("beat_batch_size", 12)),
+    }
+
+
 def massive_delay_notice_english() -> str:
     return "Data delayed by 15 minutes (Options Starter). Not for live trading decisions."

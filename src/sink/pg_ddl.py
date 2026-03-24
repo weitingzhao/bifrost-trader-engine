@@ -441,6 +441,24 @@ def _ensure_tables(conn, log=None, log_table=None) -> None:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS option_contracts_symbol_expiry_strike_right ON option_contracts (symbol, expiry, strike, option_right)"
         )
+        _log_table("option_expiration_cache", "Cached option expirations per underlying (Massive REST + TTL)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS option_expiration_cache (
+                option_expiration_cache_id bigserial PRIMARY KEY,
+                symbol text NOT NULL,
+                expiry text NOT NULL,
+                source text NOT NULL DEFAULT 'massive',
+                last_seen_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now(),
+                UNIQUE (symbol, expiry, source)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS option_expiration_cache_symbol_updated "
+            "ON option_expiration_cache (symbol, updated_at DESC)"
+        )
         _log_table("option_snapshots", "Option snapshot (point-in-time quote, RANGE partitioned by snapshot_ts)")
         cur.execute(
             """

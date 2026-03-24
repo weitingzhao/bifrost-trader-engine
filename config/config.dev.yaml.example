@@ -42,3 +42,9 @@ massive:
   ws_url: "wss://socket.polygon.io/options"
   features:
     trades_enabled: false # Developer tier can set true
+  expiration_cache:
+    enabled: true
+    ttl_trading_sec: 3600
+    ttl_off_hours_sec: 43200
+    stale_while_revalidate: true
+    beat_batch_size: 12
