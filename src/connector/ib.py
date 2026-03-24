@@ -410,7 +410,14 @@ class IBConnector:
                 if not exp or strike is None or right is None:
                     return None
                 rt = str(right).upper()
-                contract = Option(symbol, exp, float(strike), rt, exchange, currency)
+                contract = Option(
+                    symbol=symbol,
+                    lastTradeDateOrContractMonth=exp,
+                    strike=float(strike),
+                    right=rt,
+                    exchange=exchange,
+                    currency=currency,
+                )
             else:
                 contract = self._stock(symbol, exchange)
             await self.ib.qualifyContractsAsync(contract)
@@ -473,7 +480,14 @@ class IBConnector:
         rt = (right or "").upper()
         if not symbol or not exp or rt not in ("C", "P"):
             return None
-        contract = Option(symbol, exp, float(strike), rt, exchange, currency)
+        contract = Option(
+            symbol=symbol,
+            lastTradeDateOrContractMonth=exp,
+            strike=float(strike),
+            right=rt,
+            exchange=exchange,
+            currency=currency,
+        )
 
         async def _read_ticker(ticker: Any) -> tuple:
             bid = ask = last = mid = None
@@ -682,7 +696,14 @@ class IBConnector:
             return None
         if not symbol or not exp or strike is None:
             return None
-        contract = Option(symbol.strip(), exp, float(strike), rt, exchange, currency)
+        contract = Option(
+            symbol=symbol.strip(),
+            lastTradeDateOrContractMonth=exp,
+            strike=float(strike),
+            right=rt,
+            exchange=exchange,
+            currency=currency,
+        )
         try:
             ticker = self.ib.reqMktData(contract, "", False, False)
             ticker.updateEvent += lambda t: on_update(contract_key, t)
