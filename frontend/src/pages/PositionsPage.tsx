@@ -18,7 +18,7 @@ import {
   getContractLabelParts,
   parseOptionContractKey,
 } from '../utils/format'
-import { executionMatchesInstanceGroup } from './portfolio/ledgerOptHelpers'
+import { executionMatchesInstanceGroup, sliceExecutionForInstanceOptView } from './portfolio/ledgerOptHelpers'
 
 /** Align position vs execution contract_key: OCC local differs in segment 1; OPT|expiry|strike|right match. */
 function optExecutionMatchKey(accountId: string, contractKey: string): string {
@@ -920,6 +920,45 @@ export function PositionsPage({
       executionsFinalIdSet,
       executionsTwsIdSet,
     ],
+  )
+
+  /** Instance row: per option, abs execution qtys joined by comma; Final book only when any Final matches (else TWS). Option groups separated by fullwidth | */
+  const formatInstanceOptExecQtyCell = useCallback(
+    (allGroup: InstanceAllGroup): string => {
+      const instId = allGroup.strategy_instance_id
+      const oppId = allGroup.strategy_opportunity_id
+      const perOption: string[] = []
+      for (const pos of allGroup.options) {
+        const execMatchesInstance = (ex: Execution) => {
+          if (pos.filtered_exec_lists) return true
+          return executionMatchesInstanceGroup(ex, instId, oppId)
+        }
+        let final: Execution[] = []
+        let tws: Execution[] = []
+        if (pos.filtered_exec_lists) {
+          final = pos.filtered_exec_lists.final.filter(execMatchesInstance)
+          tws = pos.filtered_exec_lists.tws.filter(execMatchesInstance)
+        } else {
+          const lists = getPositionExecLists(pos)
+          final = lists.final.filter(execMatchesInstance)
+          tws = lists.tws.filter(execMatchesInstance)
+        }
+        const src = final.length > 0 ? final : tws
+        const qtyStrs =
+          src.length > 0
+            ? src.map(ex => {
+                const qRaw =
+                  instId != null
+                    ? sliceExecutionForInstanceOptView(ex, instId)?.quantity ?? ex.quantity
+                    : ex.quantity
+                return String(Math.abs(Number(qRaw) || 0))
+              })
+            : [String(Math.abs(pos.qty))]
+        perOption.push(qtyStrs.join(', '))
+      }
+      return perOption.join(' ｜ ')
+    },
+    [getPositionExecLists],
   )
 
   /** Index live positions by (account_id, contract_key) for fast lookup when merging attribution data. */
@@ -2428,7 +2467,9 @@ export function PositionsPage({
                             <th>Contract Type</th>
                             <th>Symbols</th>
                             <th>Opened</th>
-                            <th>Opt</th>
+                            <th title="Per option: execution quantities (comma-separated). Uses Final book only when at least one matching Final exists; otherwise TWS. Multiple option lines separated by |.">
+                              Exec Qty
+                            </th>
                             <th>Underlying</th>
                             <th>Opt PNL</th>
                             <th>Max Gain</th>
@@ -2443,6 +2484,7 @@ export function PositionsPage({
                             const oppName = allGroup.strategy_opportunity_name?.trim() || null
                             const openedAt = allGroup.strategy_instance_opened_at_epoch
                             const optN = allGroup.options.length
+                            const optExecQtySummary = formatInstanceOptExecQtyCell(allGroup)
                             const covN = allGroup.stock_coverage.length
                             const isExpanded = expandedInstanceKeys.includes(instKey)
                             const structLabel = allGroup.structure_type
@@ -2502,7 +2544,12 @@ export function PositionsPage({
                                     <>{fmtDate(openedAt)}{fmtDaysAgo(openedAt) ? <span className="replay-time-ago"> {fmtDaysAgo(openedAt)}</span> : null}</>
                                   ) : '—'}
                                 </td>
-                                <td>{optN}</td>
+                                <td
+                                  className="instance-sheet-exec-qty-cell"
+                                  title="Per option: execution quantities (comma-separated). Final preferred over TWS when matching Finals exist. | separates option lines."
+                                >
+                                  {optN > 0 ? optExecQtySummary : '—'}
+                                </td>
                                 <td>
                                   {covN > 0 ? (() => {
                                     let allCovered = true
