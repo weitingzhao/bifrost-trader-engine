@@ -10,15 +10,18 @@ import { fmtChicagoTime, fmtPnl, fmtPnlCalendar, fmtUsd } from '../utils/format'
 import {
   computeDayRealizedUnrealized,
   computeDayRealizedUnrealizedStock,
+  computeOptionDayPnLForPerformanceDate,
   computeOptPairsFromExecutions,
   dateStrMinusDays,
   executionDateStr,
   execPnl,
+  filterRelevantOptPairsForDay,
   getChicagoDayRange,
   getTimeRangeDates,
   ledgerOptionExecutionDisplayPnl,
   listDateStrings,
   listMonthKeysInRange,
+  mapWithConcurrency,
   matchPnl,
   normalizeStrike,
   optionRightToFull,
@@ -28,6 +31,9 @@ import {
 
 /** Backend: account_executions_final (official book). Use for all Performance data except the On the fly panel. */
 const PERFORMANCE_EXEC_SOURCE_SCOPE = 'performance_book' as const
+
+/** Days to look back from each calendar day / selected day so OPT pairing matches the execution fetch window. */
+const OPT_PAIR_LOOK_BACK_DAYS = 180
 
 interface PerformancePageProps {
   status: StatusResponse | null
@@ -194,48 +200,57 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       const firstDateStr = `${monthKey}-01`
       const lastDay = new Date(y, m, 0).getDate()
       const lastDateStr = `${monthKey}-${String(lastDay).padStart(2, '0')}`
-      const { since_ts } = getChicagoDayRange(firstDateStr)
+      const lookBackStart = dateStrMinusDays(firstDateStr, OPT_PAIR_LOOK_BACK_DAYS)
+      const { since_ts } = getChicagoDayRange(lookBackStart)
       const { until_ts } = getChicagoDayRange(lastDateStr)
-      return fetchExecutions(
-          since_ts,
-          until_ts,
+      const dateStrsForMonth: string[] = []
+      for (let day = 1; day <= lastDay; day++) {
+        dateStrsForMonth.push(`${monthKey}-${String(day).padStart(2, '0')}`)
+      }
+      const optPromise = mapWithConcurrency(dateStrsForMonth, 8, async (dateStr) => {
+        const lb = dateStrMinusDays(dateStr, OPT_PAIR_LOOK_BACK_DAYS)
+        const { since_ts: s } = getChicagoDayRange(lb)
+        const { until_ts: u } = getChicagoDayRange(dateStr)
+        const res = await fetchExecutions(
+          s,
+          u,
           5000,
           true,
           strategyOpportunityId ?? undefined,
           strategyInstanceId ?? undefined,
           PERFORMANCE_EXEC_SOURCE_SCOPE,
         )
-        .then((res) => {
-          const execs = res.executions ?? []
-          const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-          const execById = new Map<number, Execution>()
-          for (const e of execs) {
-            if (e.account_executions_id != null) execById.set(e.account_executions_id, e)
-          }
-          const optMap: Record<string, { realized: number; unrealized: number }> = {}
-          const stockMap: Record<string, { realized: number; unrealized: number }> = {}
-          for (let day = 1; day <= lastDay; day++) {
-            const dateStr = `${monthKey}-${String(day).padStart(2, '0')}`
-            const dayExecs = execs.filter((e) => executionDateStr(e) === dateStr)
-            const sameDayPairs =
-              optPairs == null
-                ? null
-                : optPairs.filter((p) => {
-                  const legP = execById.get(p.leg_p_execution_id)
-                  const pDate = legP != null ? executionDateStr(legP) : ''
-                  return pDate === dateStr
-                })
-            const useBackendPairs = sameDayPairs != null && sameDayPairs.length > 0
-            const { realized: optR, unrealized: optU } = computeDayRealizedUnrealized(
-              dayExecs,
-              useBackendPairs ? sameDayPairs : null,
-            )
-            const { realized: stkR, unrealized: stkU } = computeDayRealizedUnrealizedStock(dayExecs)
-            optMap[dateStr] = { realized: optR, unrealized: optU }
-            stockMap[dateStr] = { realized: stkR, unrealized: stkU }
-          }
-          return { opt: optMap, stock: stockMap }
-        })
+        const execs = res.executions ?? []
+        const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
+        const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs)
+        return { dateStr, realized, unrealized }
+      })
+      const stockPromise = fetchExecutions(
+        since_ts,
+        until_ts,
+        5000,
+        false,
+        strategyOpportunityId ?? undefined,
+        strategyInstanceId ?? undefined,
+        PERFORMANCE_EXEC_SOURCE_SCOPE,
+      ).then((res) => {
+        const execs = res.executions ?? []
+        const stockMap: Record<string, { realized: number; unrealized: number }> = {}
+        for (let day = 1; day <= lastDay; day++) {
+          const dateStr = `${monthKey}-${String(day).padStart(2, '0')}`
+          const dayExecs = execs.filter((e) => executionDateStr(e) === dateStr)
+          const { realized: stkR, unrealized: stkU } = computeDayRealizedUnrealizedStock(dayExecs)
+          stockMap[dateStr] = { realized: stkR, unrealized: stkU }
+        }
+        return stockMap
+      })
+      return Promise.all([optPromise, stockPromise]).then(([optRows, stockMap]) => {
+        const optMap: Record<string, { realized: number; unrealized: number }> = {}
+        for (const r of optRows) {
+          optMap[r.dateStr] = { realized: r.realized, unrealized: r.unrealized }
+        }
+        return { opt: optMap, stock: stockMap }
+      })
     }
 
     Promise.all(monthKeys.map(fetchOneMonth))
@@ -275,21 +290,27 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
     }
   }, [selectedDay])
 
-  // Fetch executions for the calendar month and compute per-day Realized/Unrealized (same as Records)
+  // Per calendar day: same fetch window as day-detail — since (day − OPT_PAIR_LOOK_BACK_DAYS) through end of that day
+  // (not month-end), so backend FIFO pairs match click-drill-down and R/U split is consistent.
   useEffect(() => {
     if (!calendarMonth) {
       setCalendarDayPnL(null)
       return
     }
     const [y, m] = calendarMonth.split('-').map(Number)
-    const firstDateStr = `${y}-${String(m).padStart(2, '0')}-01`
     const lastDay = new Date(y, m, 0).getDate()
-    const lastDateStr = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-    const { since_ts } = getChicagoDayRange(firstDateStr)
-    const { until_ts } = getChicagoDayRange(lastDateStr)
+    const dateStrs: string[] = []
+    for (let day = 1; day <= lastDay; day++) {
+      dateStrs.push(`${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`)
+    }
     setCalendarDayPnLLoading(true)
     setCalendarDayPnL(null)
-    fetchExecutions(
+    let cancelled = false
+    mapWithConcurrency(dateStrs, 8, async (dateStr) => {
+      const lookBackStart = dateStrMinusDays(dateStr, OPT_PAIR_LOOK_BACK_DAYS)
+      const { since_ts } = getChicagoDayRange(lookBackStart)
+      const { until_ts } = getChicagoDayRange(dateStr)
+      const res = await fetchExecutions(
         since_ts,
         until_ts,
         5000,
@@ -298,36 +319,28 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         strategyInstanceId ?? undefined,
         PERFORMANCE_EXEC_SOURCE_SCOPE,
       )
-      .then((res) => {
-        const execs = res.executions ?? []
-        const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-        const execById = new Map<number, Execution>()
-        for (const e of execs) {
-          if (e.account_executions_id != null) execById.set(e.account_executions_id, e)
-        }
+      const execs = res.executions ?? []
+      const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
+      const { realized, unrealized } = computeOptionDayPnLForPerformanceDate(dateStr, execs, optPairs)
+      return { dateStr, realized, unrealized }
+    })
+      .then((rows) => {
+        if (cancelled) return
         const map: Record<string, { realized: number; unrealized: number }> = {}
-        for (let day = 1; day <= lastDay; day++) {
-          const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-          const dayExecs = execs.filter((e) => executionDateStr(e) === dateStr)
-          const sameDayPairs =
-            optPairs == null
-              ? null
-              : optPairs.filter((p) => {
-                const legP = execById.get(p.leg_p_execution_id)
-                const pDate = legP != null ? executionDateStr(legP) : ''
-                return pDate === dateStr
-              })
-          const useBackendPairs = sameDayPairs != null && sameDayPairs.length > 0
-          const { realized, unrealized } = computeDayRealizedUnrealized(
-            dayExecs,
-            useBackendPairs ? sameDayPairs : null,
-          )
-          map[dateStr] = { realized, unrealized }
+        for (const r of rows) {
+          map[r.dateStr] = { realized: r.realized, unrealized: r.unrealized }
         }
         setCalendarDayPnL(map)
       })
-      .catch(() => setCalendarDayPnL({}))
-      .finally(() => setCalendarDayPnLLoading(false))
+      .catch(() => {
+        if (!cancelled) setCalendarDayPnL({})
+      })
+      .finally(() => {
+        if (!cancelled) setCalendarDayPnLLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [calendarMonth, strategyOpportunityId, strategyInstanceId])
 
   // Calendar PnL owns its own performance query for the displayed month (so Time Range does not trigger refetch)
@@ -358,9 +371,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
       .finally(() => setCalendarMonthPerformanceLoading(false))
   }, [calendarMonth, strategyOpportunityId, strategyInstanceId])
 
-  // When a day is selected, fetch executions from (selectedDay - LOOK_BACK_DAYS) through end of selected day
-  // so backend can pair opens from before the month with closes on the selected day; then filter display to selected day only.
-  const OPT_PAIR_LOOK_BACK_DAYS = 60
+  // When a day is selected, fetch executions from (selectedDay − OPT_PAIR_LOOK_BACK_DAYS) through end of selected day (same as each calendar cell)
   useEffect(() => {
     if (!selectedDay) {
       setSelectedDayExecutions(null)
@@ -386,29 +397,12 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
         setSelectedDayOptPairs('opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null)
         const execs = res.executions ?? []
         const optPairs = 'opt_pairs' in res && Array.isArray(res.opt_pairs) ? res.opt_pairs : null
-        const execByIdForDate = new Map(execs.map((e: Execution) => [e.account_executions_id!, e]))
-        const legDate = (eid: number) => {
-          const ex = execByIdForDate.get(eid)
-          return ex != null ? executionDateStr(ex) : ''
-        }
-        const dayExecs = execs.filter((e: Execution) => executionDateStr(e) === selectedDay)
-        const relevantPairs =
-          optPairs != null && optPairs.length > 0
-            ? optPairs.filter(
-                (p: { leg_c_execution_id?: number; leg_p_execution_id?: number }) =>
-                  p.leg_c_execution_id != null &&
-                  p.leg_p_execution_id != null &&
-                  execByIdForDate.has(p.leg_c_execution_id) &&
-                  execByIdForDate.has(p.leg_p_execution_id) &&
-                  (legDate(p.leg_c_execution_id) === selectedDay || legDate(p.leg_p_execution_id) === selectedDay),
-              )
-            : null
-        const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeDayRealizedUnrealized(
-          dayExecs,
-          relevantPairs != null && relevantPairs.length > 0 ? relevantPairs : null,
+        const { realized, unrealized, symbolsRealized, symbolsUnrealized } = computeOptionDayPnLForPerformanceDate(
+          selectedDay,
+          execs,
+          optPairs,
         )
         setSelectedDayComputedPnL({ realized, unrealized })
-        setCalendarDayPnL((prev) => (prev && selectedDay ? { ...prev, [selectedDay]: { realized, unrealized } } : prev))
         if (symbolsRealized.length === 0 && symbolsUnrealized.length > 0) {
           setSelectedDayPnLType('unrealized')
         }
@@ -896,19 +890,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                               for (const e of allExecs) {
                                 if (e.account_executions_id != null) execById.set(e.account_executions_id, e)
                               }
-                              const legDateStr = (eid: number) => {
-                                const ex = execById.get(eid)
-                                return ex != null ? executionDateStr(ex) : ''
-                              }
-                              // Pairs that have at least one leg on the selected day (can look back to earlier days).
-                              const relevantPairs = backendPairs.filter(
-                                (p) =>
-                                  p.leg_c_execution_id != null &&
-                                  p.leg_p_execution_id != null &&
-                                  execById.has(p.leg_c_execution_id) &&
-                                  execById.has(p.leg_p_execution_id) &&
-                                  (legDateStr(p.leg_c_execution_id) === selectedDay || legDateStr(p.leg_p_execution_id) === selectedDay),
-                              )
+                              const relevantPairs = filterRelevantOptPairsForDay(backendPairs, execById, selectedDay)
                               type DayPair = {
                                 account_id: string
                                 symbol: string
@@ -1046,26 +1028,25 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                   if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
                                 }
                                 const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
-                                const groupSumPnl =
-                                  unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
-                                  pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
-                                const groupCommissionSum =
-                                  pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0) +
-                                  unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
+                                const realizedPnl = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                const realizedComm = pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0)
+                                const unrealizedPnl = unmatchedExecs.reduce((s, e) => s + execPnl(e), 0)
+                                const unrealizedComm = unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
                                 if (pairs.length > 0) {
                                   if (!keysBySymbolRealized.has(symbol)) keysBySymbolRealized.set(symbol, [])
                                   keysBySymbolRealized.get(symbol)!.push(key)
-                                  symbolSumRealized.set(symbol, (symbolSumRealized.get(symbol) ?? 0) + groupSumPnl)
-                                  symbolCommissionRealized.set(symbol, (symbolCommissionRealized.get(symbol) ?? 0) + groupCommissionSum)
-                                  totalRealizedSum += groupSumPnl
-                                  totalCommissionRealized += groupCommissionSum
-                                } else {
+                                  symbolSumRealized.set(symbol, (symbolSumRealized.get(symbol) ?? 0) + realizedPnl)
+                                  symbolCommissionRealized.set(symbol, (symbolCommissionRealized.get(symbol) ?? 0) + realizedComm)
+                                  totalRealizedSum += realizedPnl
+                                  totalCommissionRealized += realizedComm
+                                }
+                                if (unmatchedExecs.length > 0) {
                                   if (!keysBySymbolUnrealized.has(symbol)) keysBySymbolUnrealized.set(symbol, [])
                                   keysBySymbolUnrealized.get(symbol)!.push(key)
-                                  symbolSumUnrealized.set(symbol, (symbolSumUnrealized.get(symbol) ?? 0) + groupSumPnl)
-                                  symbolCommissionUnrealized.set(symbol, (symbolCommissionUnrealized.get(symbol) ?? 0) + groupCommissionSum)
-                                  totalUnrealizedSum += groupSumPnl
-                                  totalCommissionUnrealized += groupCommissionSum
+                                  symbolSumUnrealized.set(symbol, (symbolSumUnrealized.get(symbol) ?? 0) + unrealizedPnl)
+                                  symbolCommissionUnrealized.set(symbol, (symbolCommissionUnrealized.get(symbol) ?? 0) + unrealizedComm)
+                                  totalUnrealizedSum += unrealizedPnl
+                                  totalCommissionUnrealized += unrealizedComm
                                 }
                               }
                               const symbolsRealized = Array.from(keysBySymbolRealized.keys()).sort()
@@ -1151,8 +1132,8 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                         {symbolsForType.length === 0 ? (
                                           <p className="section-hint">
                                             {selectedDayPnLType === 'realized'
-                                              ? 'No realized (matched BUY↔SELL) contracts for this day.'
-                                              : 'No unrealized (open) contracts for this day.'}
+                                              ? 'No realized (matched BUY↔SELL) pairs for this day.'
+                                              : 'No unrealized (unmatched) executions for this day.'}
                                           </p>
                                         ) : (
                                         <>
@@ -1182,29 +1163,33 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                         if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
                                       }
                                       const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
-                                      const rows: Row[] = [
-                                        ...sortedExecs.map((e) => ({ type: 'Execution' as const, e })),
-                                        ...pairs.map((p) => ({ type: 'Match' as const, p })),
-                                      ]
-                                      const groupSumPnl =
-                                        unmatchedExecs.reduce((s, e) => s + execPnl(e), 0) +
-                                        pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
-                                      const groupCommissionSum =
-                                        pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0) +
-                                        unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
+                                      const isRealizedTab = selectedDayPnLType === 'realized'
+                                      const rows: Row[] = isRealizedTab
+                                        ? [
+                                            ...sortedExecs.map((e) => ({ type: 'Execution' as const, e })),
+                                            ...pairs.map((p) => ({ type: 'Match' as const, p })),
+                                          ]
+                                        : unmatchedExecs.map((e) => ({ type: 'Execution' as const, e }))
+                                      const tabPnl = isRealizedTab
+                                        ? pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+                                        : unmatchedExecs.reduce((s, e) => s + execPnl(e), 0)
+                                      const tabComm = isRealizedTab
+                                        ? pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0)
+                                        : unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
+                                      if (rows.length === 0) return null
                                       return (
                                         <div key={key} className="performance-calendar-contract-group">
                                           <h6 className="performance-calendar-contract-title">
                                             {symbol} {expiry} {strike} {rightFull !== '—' ? rightFull : ''}
                                             <span className={
-                                              pairs.length > 0
-                                                ? (groupSumPnl >= 0 ? 'tone-positive' : 'tone-negative')
+                                              isRealizedTab
+                                                ? (tabPnl >= 0 ? 'tone-positive' : 'tone-negative')
                                                 : 'tone-unrealized'
                                             }>
-                                              {' '}{fmtUsd(groupSumPnl)}
+                                              {' '}{fmtUsd(tabPnl)}
                                             </span>
                                             <span className="performance-records-commission-sum">
-                                              {' '}{fmtUsd(groupCommissionSum)}
+                                              {' '}{fmtUsd(tabComm)}
                                             </span>
                                           </h6>
                                           <table className="performance-calendar-pairs-table performance-calendar-unified-table">

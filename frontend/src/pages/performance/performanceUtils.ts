@@ -125,6 +125,37 @@ export function executionDateStr(e: Execution): string {
   return ''
 }
 
+/**
+ * Backend opt pairs attributed to a calendar day: both legs present in execById,
+ * at least one leg's trade date (executionDateStr) equals selectedDay,
+ * and each leg that falls on selectedDay must have |quantity| equal to |pair.quantity|.
+ */
+export function filterRelevantOptPairsForDay(
+  backendPairs: BackendOptPair[],
+  execById: Map<number, Execution>,
+  selectedDay: string,
+): BackendOptPair[] {
+  return backendPairs.filter((p) => {
+    if (
+      p.leg_c_execution_id == null ||
+      p.leg_p_execution_id == null ||
+      !execById.has(p.leg_c_execution_id) ||
+      !execById.has(p.leg_p_execution_id)
+    ) {
+      return false
+    }
+    const pairQtyAbs = Math.abs(Number(p.quantity) || 0)
+    const legC = execById.get(p.leg_c_execution_id)!
+    const legP = execById.get(p.leg_p_execution_id)!
+    const cOnDay = executionDateStr(legC) === selectedDay
+    const pOnDay = executionDateStr(legP) === selectedDay
+    if (!cOnDay && !pOnDay) return false
+    if (cOnDay && Math.abs(Number(legC.quantity) || 0) !== pairQtyAbs) return false
+    if (pOnDay && Math.abs(Number(legP.quantity) || 0) !== pairQtyAbs) return false
+    return true
+  })
+}
+
 export function getTimeRangeDates(
   timeRange: 'quarter' | 'year' | '3year',
   calendarMonth: string,
@@ -381,14 +412,14 @@ export function computeDayRealizedUnrealized(
       if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
     }
     const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
-    const groupSumPnl =
-      unmatchedExecs.reduce((s, e) => s + ledgerOptionExecutionCashFlowSigned(e), 0) +
-      pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
-    if (pairs.length > 0) {
-      totalRealizedSum += groupSumPnl
+    const realizedPnl = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
+    const unrealizedPnl = unmatchedExecs.reduce((s, e) => s + ledgerOptionExecutionCashFlowSigned(e), 0)
+    if (Math.abs(realizedPnl) >= 0.005 || pairs.length > 0) {
+      totalRealizedSum += realizedPnl
       symbolsRealizedSet.add(symbol)
-    } else {
-      totalUnrealizedSum += groupSumPnl
+    }
+    if (Math.abs(unrealizedPnl) >= 0.005 || unmatchedExecs.length > 0) {
+      totalUnrealizedSum += unrealizedPnl
       symbolsUnrealizedSet.add(symbol)
     }
   }
@@ -398,6 +429,50 @@ export function computeDayRealizedUnrealized(
     symbolsRealized: Array.from(symbolsRealizedSet).sort(),
     symbolsUnrealized: Array.from(symbolsUnrealizedSet).sort(),
   }
+}
+
+/**
+ * Option Realized/Unrealized for one calendar day — same rules as Calendar day-detail.
+ * `execs` / `optPairs` must come from GET /executions with until_ts = end of `dateStr`
+ * and since_ts = start of (dateStr − lookback), so FIFO matches the drill-down.
+ */
+export function computeOptionDayPnLForPerformanceDate(
+  dateStr: string,
+  execs: Execution[],
+  optPairs: BackendOptPair[] | null,
+): { realized: number; unrealized: number; symbolsRealized: string[]; symbolsUnrealized: string[] } {
+  const execByIdForDate = new Map<number, Execution>(
+    execs.filter((e) => e.account_executions_id != null).map((e) => [e.account_executions_id!, e]),
+  )
+  const dayExecs = execs.filter((e) => executionDateStr(e) === dateStr)
+  const relevantPairs =
+    optPairs != null && optPairs.length > 0
+      ? filterRelevantOptPairsForDay(optPairs, execByIdForDate, dateStr)
+      : null
+  return computeDayRealizedUnrealized(
+    dayExecs,
+    relevantPairs != null && relevantPairs.length > 0 ? relevantPairs : null,
+  )
+}
+
+/** Run async tasks with limited concurrency; results keep input order. */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let nextIndex = 0
+  async function worker() {
+    while (true) {
+      const i = nextIndex++
+      if (i >= items.length) break
+      results[i] = await fn(items[i]!, i)
+    }
+  }
+  const n = Math.min(Math.max(1, limit), Math.max(1, items.length))
+  await Promise.all(Array.from({ length: n }, () => worker()))
+  return results
 }
 
 export function computeDayRealizedUnrealizedStock(
