@@ -262,6 +262,7 @@ body::before {
   align-items: center;
   gap: 4px;
   position: relative;
+  flex-shrink: 0;
 }
 
 .app-header-lamp-cell {
@@ -464,8 +465,10 @@ body::before {
   font-size: var(--text-caption);
   color: var(--color-text-muted);
   max-width: 8rem;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: right;
 }
 
 .app-header-system-msg.err {

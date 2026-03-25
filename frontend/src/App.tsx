@@ -967,6 +967,9 @@ export default function App() {
           </nav>
         </div>
         <div className="app-header-right" ref={headerMenuRef}>
+          {quickCtrlMsg.text ? (
+            <span className={`app-header-system-msg ${quickCtrlMsg.isErr ? 'err' : ''}`}>{quickCtrlMsg.text}</span>
+          ) : null}
           <div className="app-header-system-lamps-wrap" ref={systemLampRef}>
             <div className="app-header-lamp-stop-group" aria-label="System status">
               <div
@@ -1098,9 +1101,6 @@ export default function App() {
               </span>
             </div>
           </div>
-          {quickCtrlMsg.text ? (
-            <span className={`app-header-system-msg ${quickCtrlMsg.isErr ? 'err' : ''}`}>{quickCtrlMsg.text}</span>
-          ) : null}
           <button
             type="button"
             className={`app-header-icon-btn ${headerMenuOpen ? 'active' : ''} ${activeTab === 'settings' ? 'active' : ''}`}
