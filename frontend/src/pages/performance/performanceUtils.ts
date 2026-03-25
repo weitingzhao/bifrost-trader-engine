@@ -27,7 +27,12 @@ export function sortExecByExecutionDateThenTime(a: Execution, b: Execution): num
   const da = executionDateStr(a)
   const db = executionDateStr(b)
   if (da !== db) return da.localeCompare(db)
-  return (a.time ?? 0) - (b.time ?? 0)
+  const ta = a.time ?? 0
+  const tb = b.time ?? 0
+  if (ta !== tb) return ta - tb
+  const ia = a.account_executions_id ?? 0
+  const ib = b.account_executions_id ?? 0
+  return ia - ib
 }
 
 /** Signed cash flow for one option leg — same base as Trade Ledger Options Details (per execution). */
@@ -58,6 +63,15 @@ export function execPnl(e: Execution): number {
   const commission = Number(e.commission) || 0
   const pnl = qty * price * 100 - commission
   return Number.isFinite(pnl) ? pnl : 0
+}
+
+/** CSS tone for per-leg PnL cell: BUY = outflow (red), SELL = inflow (green); matches ledger intuition. */
+export function executionLegPnlToneClass(e: Execution, ep: number): string {
+  if (Math.abs(ep) < 0.005) return ''
+  const s = (e.side ?? '').toString().trim().toUpperCase()
+  if (s === 'BUY' || s === 'BOT' || s === 'B') return 'tone-negative'
+  if (s === 'SELL' || s === 'SLD' || s === 'S') return 'tone-positive'
+  return ep >= 0 ? 'tone-positive' : 'tone-negative'
 }
 
 export function matchPnl(p: { quantity: number; c_side: string; p_side: string; c_price: number; p_price: number; commission: number }): number {
@@ -128,7 +142,8 @@ export function executionDateStr(e: Execution): string {
 /**
  * Backend opt pairs attributed to a calendar day: both legs present in execById,
  * at least one leg's trade date (executionDateStr) equals selectedDay,
- * and each leg that falls on selectedDay must have |quantity| equal to |pair.quantity|.
+ * and for each leg on selectedDay, FIFO pair qty must not exceed that execution's |quantity|
+ * (same execution can appear in multiple pairs with partial qty — strict equality was wrong).
  */
 export function filterRelevantOptPairsForDay(
   backendPairs: BackendOptPair[],
@@ -150,8 +165,10 @@ export function filterRelevantOptPairsForDay(
     const cOnDay = executionDateStr(legC) === selectedDay
     const pOnDay = executionDateStr(legP) === selectedDay
     if (!cOnDay && !pOnDay) return false
-    if (cOnDay && Math.abs(Number(legC.quantity) || 0) !== pairQtyAbs) return false
-    if (pOnDay && Math.abs(Number(legP.quantity) || 0) !== pairQtyAbs) return false
+    const absC = Math.abs(Number(legC.quantity) || 0)
+    const absP = Math.abs(Number(legP.quantity) || 0)
+    if (cOnDay && pairQtyAbs > absC) return false
+    if (pOnDay && pairQtyAbs > absP) return false
     return true
   })
 }
@@ -201,100 +218,97 @@ export function listMonthKeysInRange(sinceStr: string, untilStr: string): string
 
 export function computeOptPairsFromExecutions(
   executions: Execution[],
-  sortExec: (a: Execution, b: Execution) => number = sortExecByTradeDateThenTime,
+  sortExec: (a: Execution, b: Execution) => number = sortExecByExecutionDateThenTime,
 ): { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] {
+  const QTY_EPS = 1e-9
   const opt = executions.filter((e) => (e.sec_type ?? '').toUpperCase() === 'OPT')
   const byKey: Record<string, Execution[]> = {}
   for (const e of opt) {
     const side = (e.side ?? 'BUY').toString().trim().toUpperCase() || 'BUY'
     if (side !== 'BUY' && side !== 'SELL') continue
-    const key = [
-      e.symbol ?? '',
-      e.expiry ?? '',
-      String(e.strike ?? ''),
-      e.account_id ?? '',
-    ].join('\t')
+    const key = [e.symbol ?? '', e.expiry ?? '', String(e.strike ?? ''), e.account_id ?? ''].join('\t')
     if (!byKey[key]) byKey[key] = []
     byKey[key].push(e)
   }
   const pairs: { account_id: string; symbol: string; expiry: string; strike: string; quantity: number; c_side: string; c_price: number; p_side: string; p_price: number; commission: number; net_pnl: number }[] = []
   for (const list of Object.values(byKey)) {
     const sorted = [...list].sort(sortExec)
-    const buyQueue: { q: number; p: number; c: number; side: string }[] = []
-    const sellQueue: { q: number; p: number; c: number; side: string }[] = []
     const sym = sorted[0]?.symbol ?? ''
     const exp = sorted[0]?.expiry ?? ''
     const str = String(sorted[0]?.strike ?? '')
     const acc = sorted[0]?.account_id ?? ''
 
+    type WorkItem = { side: string; price: number; remQty: number; remComm: number }
+    const work: WorkItem[] = []
     for (const x of sorted) {
       const q = Number(x.quantity) || 0
       const p = Number(x.price) || 0
       const comm = Number(x.commission) || 0
       if (!Number.isFinite(q) || q <= 0 || !Number.isFinite(p)) continue
       const side = (x.side ?? 'BUY').toString().trim().toUpperCase() || 'BUY'
+      work.push({ side, price: p, remQty: q, remComm: comm })
+    }
 
-      if (side === 'BUY') {
-        let remaining = q
-        while (remaining > 0 && sellQueue.length > 0) {
-          const ss = sellQueue[0]
-          const qMatch = Math.min(remaining, ss.q)
-          if (qMatch <= 0) break
-          const bAlloc = (qMatch / q) * comm
-          const sAlloc = (qMatch / ss.q) * ss.c
-          const signB = -1
-          const signS = 1
-          const legB = signB * qMatch * p * 100 - bAlloc
-          const legS = signS * qMatch * ss.p * 100 - sAlloc
-          pairs.push({
-            account_id: acc,
-            symbol: sym,
-            expiry: exp,
-            strike: str,
-            quantity: Math.round(qMatch * 1e4) / 1e4,
-            c_side: ss.side,
-            c_price: Math.round(ss.p * 1e4) / 1e4,
-            p_side: side,
-            p_price: Math.round(p * 1e4) / 1e4,
-            commission: Math.round((bAlloc + sAlloc) * 100) / 100,
-            net_pnl: Math.round((legB + legS) * 100) / 100,
-          })
-          remaining -= qMatch
-          if (qMatch >= ss.q) sellQueue.shift()
-          else sellQueue[0] = { ...ss, q: ss.q - qMatch, c: ss.c * (1 - qMatch / ss.q) }
+    // Iterative FIFO: one pair per round, deduct matched qty, repeat.
+    for (;;) {
+      let pairFound = false
+      const buyQ: WorkItem[] = []
+      const sellQ: WorkItem[] = []
+
+      for (const w of work) {
+        if (w.remQty <= QTY_EPS) continue
+
+        if (w.side === 'BUY') {
+          if (sellQ.length > 0) {
+            const s = sellQ[0]
+            const qMatch = Math.min(w.remQty, s.remQty)
+            if (qMatch <= QTY_EPS) { buyQ.push(w); continue }
+            const bAlloc = (qMatch / w.remQty) * w.remComm
+            const sAlloc = (qMatch / s.remQty) * s.remComm
+            const legB = -1 * qMatch * w.price * 100 - bAlloc
+            const legS = 1 * qMatch * s.price * 100 - sAlloc
+            pairs.push({
+              account_id: acc, symbol: sym, expiry: exp, strike: str,
+              quantity: Math.round(qMatch * 1e4) / 1e4,
+              c_side: s.side, c_price: Math.round(s.price * 1e4) / 1e4,
+              p_side: w.side, p_price: Math.round(w.price * 1e4) / 1e4,
+              commission: Math.round((bAlloc + sAlloc) * 100) / 100,
+              net_pnl: Math.round((legB + legS) * 100) / 100,
+            })
+            w.remComm -= bAlloc; w.remQty -= qMatch
+            s.remComm -= sAlloc; s.remQty -= qMatch
+            pairFound = true
+            break
+          } else {
+            buyQ.push(w)
+          }
+        } else {
+          if (buyQ.length > 0) {
+            const b = buyQ[0]
+            const qMatch = Math.min(w.remQty, b.remQty)
+            if (qMatch <= QTY_EPS) { sellQ.push(w); continue }
+            const bAlloc = (qMatch / b.remQty) * b.remComm
+            const sAlloc = (qMatch / w.remQty) * w.remComm
+            const legB = -1 * qMatch * b.price * 100 - bAlloc
+            const legS = 1 * qMatch * w.price * 100 - sAlloc
+            pairs.push({
+              account_id: acc, symbol: sym, expiry: exp, strike: str,
+              quantity: Math.round(qMatch * 1e4) / 1e4,
+              c_side: b.side, c_price: Math.round(b.price * 1e4) / 1e4,
+              p_side: w.side, p_price: Math.round(w.price * 1e4) / 1e4,
+              commission: Math.round((bAlloc + sAlloc) * 100) / 100,
+              net_pnl: Math.round((legB + legS) * 100) / 100,
+            })
+            b.remComm -= bAlloc; b.remQty -= qMatch
+            w.remComm -= sAlloc; w.remQty -= qMatch
+            pairFound = true
+            break
+          } else {
+            sellQ.push(w)
+          }
         }
-        if (remaining > 0) buyQueue.push({ q: remaining, p, c: (remaining / q) * comm, side })
-      } else {
-        let remaining = q
-        while (remaining > 0 && buyQueue.length > 0) {
-          const bb = buyQueue[0]
-          const qMatch = Math.min(remaining, bb.q)
-          if (qMatch <= 0) break
-          const bAlloc = (qMatch / bb.q) * bb.c
-          const sAlloc = (qMatch / q) * comm
-          const signB = -1
-          const signS = 1
-          const legB = signB * qMatch * bb.p * 100 - bAlloc
-          const legS = signS * qMatch * p * 100 - sAlloc
-          pairs.push({
-            account_id: acc,
-            symbol: sym,
-            expiry: exp,
-            strike: str,
-            quantity: Math.round(qMatch * 1e4) / 1e4,
-            c_side: bb.side,
-            c_price: Math.round(bb.p * 1e4) / 1e4,
-            p_side: side,
-            p_price: Math.round(p * 1e4) / 1e4,
-            commission: Math.round((bAlloc + sAlloc) * 100) / 100,
-            net_pnl: Math.round((legB + legS) * 100) / 100,
-          })
-          remaining -= qMatch
-          if (qMatch >= bb.q) buyQueue.shift()
-          else buyQueue[0] = { ...bb, q: bb.q - qMatch, c: bb.c * (1 - qMatch / bb.q) }
-        }
-        if (remaining > 0) sellQueue.push({ q: remaining, p, c: (remaining / q) * comm, side })
       }
+      if (!pairFound) break
     }
   }
   return pairs
@@ -303,7 +317,7 @@ export function computeOptPairsFromExecutions(
 export function computeDayRealizedUnrealized(
   executions: Execution[],
   optPairs: BackendOptPair[] | null,
-  sortExec: (a: Execution, b: Execution) => number = sortExecByTradeDateThenTime,
+  sortExec: (a: Execution, b: Execution) => number = sortExecByExecutionDateThenTime,
 ): { realized: number; unrealized: number; symbolsRealized: string[]; symbolsUnrealized: string[] } {
   type DayPair = {
     account_id: string
@@ -406,19 +420,30 @@ export function computeDayRealizedUnrealized(
     const firstPair = pairs[0]
     const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
     const sortedExecs = [...execs].sort(sortExec)
-    const pairedExecIds = new Set<number>()
+    const matchedQtyById = new Map<number, number>()
     for (const p of pairs) {
-      if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
-      if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
+      const pq = Math.abs(p.quantity) || 0
+      if (p.leg_c_execution_id != null) matchedQtyById.set(p.leg_c_execution_id, (matchedQtyById.get(p.leg_c_execution_id) ?? 0) + pq)
+      if (p.leg_p_execution_id != null) matchedQtyById.set(p.leg_p_execution_id, (matchedQtyById.get(p.leg_p_execution_id) ?? 0) + pq)
     }
-    const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
     const realizedPnl = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
-    const unrealizedPnl = unmatchedExecs.reduce((s, e) => s + ledgerOptionExecutionCashFlowSigned(e), 0)
+    let unrealizedPnl = 0
+    let hasUnmatched = false
+    for (const e of sortedExecs) {
+      const eq = Math.abs(Number(e.quantity) || 0)
+      if (eq <= 0) continue
+      const mq = e.account_executions_id != null ? (matchedQtyById.get(e.account_executions_id) ?? 0) : 0
+      const uq = eq - mq
+      if (uq > 1e-9) {
+        unrealizedPnl += (uq / eq) * ledgerOptionExecutionCashFlowSigned(e)
+        hasUnmatched = true
+      }
+    }
     if (Math.abs(realizedPnl) >= 0.005 || pairs.length > 0) {
       totalRealizedSum += realizedPnl
       symbolsRealizedSet.add(symbol)
     }
-    if (Math.abs(unrealizedPnl) >= 0.005 || unmatchedExecs.length > 0) {
+    if (Math.abs(unrealizedPnl) >= 0.005 || hasUnmatched) {
       totalUnrealizedSum += unrealizedPnl
       symbolsUnrealizedSet.add(symbol)
     }

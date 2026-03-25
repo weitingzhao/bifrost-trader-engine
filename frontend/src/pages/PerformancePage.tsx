@@ -14,7 +14,8 @@ import {
   computeOptPairsFromExecutions,
   dateStrMinusDays,
   executionDateStr,
-  execPnl,
+  executionLegPnlToneClass,
+  ledgerOptionExecutionCashFlowSigned,
   filterRelevantOptPairsForDay,
   getChicagoDayRange,
   getTimeRangeDates,
@@ -26,7 +27,6 @@ import {
   normalizeStrike,
   optionRightToFull,
   sortExecByExecutionDateThenTime,
-  sortExecByTradeDateThenTime,
 } from './performance/performanceUtils'
 
 /** Backend: account_executions_final (official book). Use for all Performance data except the On the fly panel. */
@@ -1021,17 +1021,30 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                 const first = execs[0]
                                 const firstPair = pairs[0]
                                 const symbol = first?.symbol ?? firstPair?.symbol ?? '—'
-                                const sortedExecs = [...execs].sort(sortExecByTradeDateThenTime)
-                                const pairedExecIds = new Set<number>()
+                                const sortedExecs = [...execs].sort(sortExecByExecutionDateThenTime)
+                                const matchedQtyById = new Map<number, number>()
                                 for (const p of pairs) {
-                                  if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
-                                  if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
+                                  const pq = Math.abs(p.quantity) || 0
+                                  if (p.leg_c_execution_id != null) matchedQtyById.set(p.leg_c_execution_id, (matchedQtyById.get(p.leg_c_execution_id) ?? 0) + pq)
+                                  if (p.leg_p_execution_id != null) matchedQtyById.set(p.leg_p_execution_id, (matchedQtyById.get(p.leg_p_execution_id) ?? 0) + pq)
                                 }
-                                const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
                                 const realizedPnl = pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
                                 const realizedComm = pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0)
-                                const unrealizedPnl = unmatchedExecs.reduce((s, e) => s + execPnl(e), 0)
-                                const unrealizedComm = unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
+                                let unrealizedPnl = 0
+                                let unrealizedComm = 0
+                                let hasUnmatched = false
+                                for (const e of sortedExecs) {
+                                  const eq = Math.abs(Number(e.quantity) || 0)
+                                  if (eq <= 0) continue
+                                  const mq = e.account_executions_id != null ? (matchedQtyById.get(e.account_executions_id) ?? 0) : 0
+                                  const uq = eq - mq
+                                  if (uq > 1e-9) {
+                                    const ratio = uq / eq
+                                    unrealizedPnl += ratio * ledgerOptionExecutionCashFlowSigned(e)
+                                    unrealizedComm += ratio * (Number(e.commission) || 0)
+                                    hasUnmatched = true
+                                  }
+                                }
                                 if (pairs.length > 0) {
                                   if (!keysBySymbolRealized.has(symbol)) keysBySymbolRealized.set(symbol, [])
                                   keysBySymbolRealized.get(symbol)!.push(key)
@@ -1040,7 +1053,7 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                   totalRealizedSum += realizedPnl
                                   totalCommissionRealized += realizedComm
                                 }
-                                if (unmatchedExecs.length > 0) {
+                                if (hasUnmatched) {
                                   if (!keysBySymbolUnrealized.has(symbol)) keysBySymbolUnrealized.set(symbol, [])
                                   keysBySymbolUnrealized.get(symbol)!.push(key)
                                   symbolSumUnrealized.set(symbol, (symbolSumUnrealized.get(symbol) ?? 0) + unrealizedPnl)
@@ -1059,8 +1072,15 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                               return (
                                 <>
                                   <h5 className="performance-calendar-day-detail-subtitle">
-                                    Option executions by contract
+                                    {selectedDayPnLType === 'realized'
+                                      ? 'Matched legs and pairs by contract (FIFO)'
+                                      : 'Executions by contract (unmatched quantity)'}
                                   </h5>
+                                  {selectedDayPnLType === 'realized' && (
+                                    <p className="section-hint performance-calendar-records-realized-hint">
+                                      Realized lists execution legs that participate in a FIFO match (scaled to matched qty when partial), then match rows. Open quantity appears under Unrealized.
+                                    </p>
+                                  )}
                                   {contractKeys.length === 0 ? (
                                     <p className="section-hint">No Option executions in DB for this trade date.</p>
                                   ) : (
@@ -1155,27 +1175,68 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                               ? execById.get(firstPair.leg_p_execution_id)?.option_right
                                               : undefined)
                                       )
-                                      const sortedExecs = [...execs].sort(sortExecByTradeDateThenTime)
-                                      type Row = { type: 'Execution'; e: Execution } | { type: 'Match'; p: (typeof dayPairs)[0] }
-                                      const pairedExecIds = new Set<number>()
+                                      const sortedExecs = [...execs].sort(sortExecByExecutionDateThenTime)
+                                      type Row =
+                                        | { type: 'Execution'; e: Execution; unmatchedRatio?: number; matchedRatio?: number }
+                                        | { type: 'Match'; p: (typeof dayPairs)[0] }
+                                      const matchedQtyById2 = new Map<number, number>()
                                       for (const p of pairs) {
-                                        if (p.leg_c_execution_id != null) pairedExecIds.add(p.leg_c_execution_id)
-                                        if (p.leg_p_execution_id != null) pairedExecIds.add(p.leg_p_execution_id)
+                                        const pq = Math.abs(p.quantity) || 0
+                                        if (p.leg_c_execution_id != null) matchedQtyById2.set(p.leg_c_execution_id, (matchedQtyById2.get(p.leg_c_execution_id) ?? 0) + pq)
+                                        if (p.leg_p_execution_id != null) matchedQtyById2.set(p.leg_p_execution_id, (matchedQtyById2.get(p.leg_p_execution_id) ?? 0) + pq)
                                       }
-                                      const unmatchedExecs = sortedExecs.filter((e) => e.account_executions_id == null || !pairedExecIds.has(e.account_executions_id))
                                       const isRealizedTab = selectedDayPnLType === 'realized'
+                                      let tabUnrealizedPnl = 0
+                                      let tabUnrealizedComm = 0
+                                      const unmatchedRows: { e: Execution; unmatchedRatio: number }[] = []
+                                      if (!isRealizedTab) {
+                                        for (const e of sortedExecs) {
+                                          const eq = Math.abs(Number(e.quantity) || 0)
+                                          if (eq <= 0) continue
+                                          const mq = e.account_executions_id != null ? (matchedQtyById2.get(e.account_executions_id) ?? 0) : 0
+                                          const uq = eq - mq
+                                          if (uq > 1e-9) {
+                                            const ratio = uq / eq
+                                            unmatchedRows.push({ e, unmatchedRatio: ratio })
+                                            tabUnrealizedPnl += ratio * ledgerOptionExecutionCashFlowSigned(e)
+                                            tabUnrealizedComm += ratio * (Number(e.commission) || 0)
+                                          }
+                                        }
+                                      }
+                                      const pairedLegIdSet = new Set<number>()
+                                      for (const p of pairs) {
+                                        if (p.leg_c_execution_id != null) pairedLegIdSet.add(p.leg_c_execution_id)
+                                        if (p.leg_p_execution_id != null) pairedLegIdSet.add(p.leg_p_execution_id)
+                                      }
+                                      const realizedExecRows: { e: Execution; matchedRatio: number }[] = []
+                                      if (isRealizedTab) {
+                                        for (const e of sortedExecs) {
+                                          const id = e.account_executions_id
+                                          if (id == null || !pairedLegIdSet.has(id)) continue
+                                          const eq = Math.abs(Number(e.quantity) || 0)
+                                          if (eq <= 0) continue
+                                          const mq = matchedQtyById2.get(id) ?? 0
+                                          if (mq <= 1e-9) continue
+                                          realizedExecRows.push({ e, matchedRatio: mq / eq })
+                                        }
+                                      }
+                                      // Realized: execution legs involved in a match (scaled when partial), then FIFO match rows.
                                       const rows: Row[] = isRealizedTab
                                         ? [
-                                            ...sortedExecs.map((e) => ({ type: 'Execution' as const, e })),
+                                            ...realizedExecRows.map(({ e, matchedRatio }) => ({
+                                              type: 'Execution' as const,
+                                              e,
+                                              matchedRatio,
+                                            })),
                                             ...pairs.map((p) => ({ type: 'Match' as const, p })),
                                           ]
-                                        : unmatchedExecs.map((e) => ({ type: 'Execution' as const, e }))
+                                        : unmatchedRows.map(({ e, unmatchedRatio }) => ({ type: 'Execution' as const, e, unmatchedRatio }))
                                       const tabPnl = isRealizedTab
                                         ? pairs.reduce((s, p) => s + (p.net_pnl ?? matchPnl(p)), 0)
-                                        : unmatchedExecs.reduce((s, e) => s + execPnl(e), 0)
+                                        : tabUnrealizedPnl
                                       const tabComm = isRealizedTab
                                         ? pairs.reduce((s, p) => s + (Number(p.commission) || 0), 0)
-                                        : unmatchedExecs.reduce((s, e) => s + (Number(e.commission) || 0), 0)
+                                        : tabUnrealizedComm
                                       if (rows.length === 0) return null
                                       return (
                                         <div key={key} className="performance-calendar-contract-group">
@@ -1225,15 +1286,25 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                       </td>
                                                       <td>{row.p.account_id || '—'}</td>
                                                       <td>{tradeDateStr}</td>
-                                                      <td>{row.p.c_side}</td>
-                                                      <td>{legC?.quantity != null && legP?.quantity != null ? `${legC.quantity} / ${legP.quantity}` : String(row.p.quantity)}</td>
-                                                      <td>{fmtUsd(row.p.c_price)}</td>
+                                                      <td>{`${row.p.c_side} / ${row.p.p_side}`}</td>
+                                                      <td>{String(row.p.quantity)}</td>
+                                                      <td>{`${fmtUsd(row.p.c_price)} / ${fmtUsd(row.p.p_price)}`}</td>
                                                       <td>{fmtUsd(row.p.commission)}</td>
                                                       <td className={(() => { const mp = row.p.net_pnl ?? matchPnl(row.p); return Math.abs(mp) < 0.005 ? '' : (mp >= 0 ? 'tone-positive' : 'tone-negative'); })()}>{fmtPnl(row.p.net_pnl ?? matchPnl(row.p))}</td>
                                                     </tr>
                                                   )
                                                 })() : (
                                                   (() => {
+                                                    const r =
+                                                      row.unmatchedRatio != null
+                                                        ? row.unmatchedRatio
+                                                        : row.matchedRatio != null
+                                                          ? row.matchedRatio
+                                                          : 1
+                                                    const ep = ledgerOptionExecutionCashFlowSigned(row.e) * r
+                                                    const ec = (Number(row.e.commission) || 0) * r
+                                                    const eq = Math.abs(Number(row.e.quantity) || 0)
+                                                    const displayQty = r < 1 - 1e-9 ? Math.round((eq * r) * 1e4) / 1e4 : (row.e.quantity ?? '—')
                                                     return (
                                                   <tr key={row.e.account_executions_id ?? idx} className="performance-calendar-row-execution">
                                                     <td>Execution</td>
@@ -1241,10 +1312,10 @@ export function PerformancePage({ status: _status, onViewChange }: PerformancePa
                                                     <td>{row.e.account_id ?? '—'}</td>
                                                     <td>{(row.e.trade_date ?? '').trim() || '—'}</td>
                                                     <td>{row.e.side ?? '—'}</td>
-                                                    <td>{row.e.quantity ?? '—'}</td>
+                                                    <td>{displayQty}</td>
                                                     <td>{fmtUsd(row.e.price)}</td>
-                                                    <td>{fmtUsd(row.e.commission)}</td>
-                                                    <td className={(() => { const ep = execPnl(row.e); return Math.abs(ep) < 0.005 ? '' : (ep >= 0 ? 'tone-positive' : 'tone-negative'); })()}>{fmtPnl(execPnl(row.e))}</td>
+                                                    <td>{fmtUsd(ec)}</td>
+                                                    <td className={executionLegPnlToneClass(row.e, ep)}>{fmtPnl(ep)}</td>
                                                   </tr>
                                                     );
                                                   })()

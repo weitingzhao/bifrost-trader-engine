@@ -69,6 +69,49 @@ def _norm_option_right(r: Any) -> str:
     return s
 
 
+def _unix_ts_to_chicago_date_str(ts: float) -> str:
+    """Chicago calendar date YYYY-MM-DD from Unix ts (seconds). Mirrors frontend unixTimeToChicagoDateStr."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        dt = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(ZoneInfo("America/Chicago"))
+        return f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+    except Exception:
+        return ""
+
+
+def _execution_date_str_for_fifo(e: Dict[str, Any]) -> str:
+    """Mirror frontend executionDateStr: Flex trade_date if YYYY-MM-DD, else Chicago date from time."""
+    td = e.get("trade_date")
+    if td is not None:
+        if isinstance(td, datetime):
+            return td.date().isoformat()
+        if isinstance(td, date):
+            return td.isoformat()
+        s = str(td).strip()
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            return s[:10]
+    t = e.get("time")
+    if t is not None:
+        try:
+            return _unix_ts_to_chicago_date_str(float(t))
+        except (TypeError, ValueError):
+            pass
+    return ""
+
+
+def _fifo_sort_key(e: Dict[str, Any]) -> Tuple[str, float, int]:
+    """Same ordering intent as frontend sortExecByExecutionDateThenTime: date, then time, then stable id."""
+    ds = _execution_date_str_for_fifo(e)
+    tm = float(e["time"]) if e.get("time") is not None else 0.0
+    eid_val = e.get("account_executions_id") if e.get("account_executions_id") is not None else e.get("id")
+    try:
+        eid = int(eid_val) if eid_val is not None else 0
+    except (TypeError, ValueError):
+        eid = 0
+    return (ds, tm, eid)
+
+
 def _compute_opt_pair_map_and_pairs(
     executions: List[Dict[str, Any]],
 ) -> Tuple[Dict[int, List[int]], List[Dict[str, Any]]]:
@@ -77,6 +120,10 @@ def _compute_opt_pair_map_and_pairs(
     Returns (pair_map, opt_pairs).
     In each pair dict, leg_c / leg_p are the chronologically first / second FIFO
     legs (not Call/Put). quantity is the matched amount (q_match).
+
+    Processing order matches frontend sortExecByExecutionDateThenTime:
+    execution calendar date (Flex trade_date or Chicago date from time), then
+    time, then account_executions_id for stable tie-breaks.
     """
     # Prefer account_executions_id (current schema); fallback to id for legacy.
     def _exec_id(e: Dict[str, Any]) -> Optional[Any]:
@@ -141,14 +188,12 @@ def _compute_opt_pair_map_and_pairs(
             groups[key] = []
         groups[key].append(e)
 
-    for (sym, exp, strike_str, acc), group in groups.items():
-        group_sorted = sorted(
-            group,
-            key=lambda x: float(x["time"]) if x.get("time") is not None else 0.0,
-        )
-        buy_queue: List[Tuple[float, float, float, str, int]] = []
-        sell_queue: List[Tuple[float, float, float, str, int]] = []
+    _QTY_EPS = 1e-9
 
+    for (sym, exp, strike_str, acc), group in groups.items():
+        group_sorted = sorted(group, key=_fifo_sort_key)
+
+        work: List[Dict[str, Any]] = []
         for x in group_sorted:
             side = _norm_side(x.get("side"))
             if side not in ("BUY", "SELL"):
@@ -167,93 +212,91 @@ def _compute_opt_pair_map_and_pairs(
             eid = int(eid_val) if eid_val is not None else None
             if eid is None:
                 continue
+            work.append({"eid": eid, "side": side, "price": p, "rem_qty": q, "rem_comm": c})
 
-            if side == "BUY":
-                remaining = q
-                while remaining > 0 and sell_queue:
-                    q_s, p_s, c_s, side_s, s_id = sell_queue[0]
-                    q_match = min(remaining, q_s)
-                    if q_match <= 0:
+        # Iterative FIFO: one pair per round, deduct matched qty, repeat.
+        while True:
+            pair_found = False
+            buy_q: List[Dict[str, Any]] = []
+            sell_q: List[Dict[str, Any]] = []
+
+            for w in work:
+                if w["rem_qty"] <= _QTY_EPS:
+                    continue
+
+                if w["side"] == "BUY":
+                    if sell_q:
+                        s = sell_q[0]
+                        q_match = min(w["rem_qty"], s["rem_qty"])
+                        if q_match <= _QTY_EPS:
+                            buy_q.append(w)
+                            continue
+                        c_b = (q_match / w["rem_qty"]) * w["rem_comm"]
+                        c_s = (q_match / s["rem_qty"]) * s["rem_comm"]
+                        leg_b = -1.0 * q_match * w["price"] * 100.0 - c_b
+                        leg_s = 1.0 * q_match * s["price"] * 100.0 - c_s
+                        add_pair(s["eid"], w["eid"])
+                        opt_pairs.append({
+                            "leg_c_execution_id": s["eid"],
+                            "leg_p_execution_id": w["eid"],
+                            "symbol": sym,
+                            "expiry": exp,
+                            "strike": strike_str,
+                            "account_id": acc,
+                            "quantity": round(q_match, 4),
+                            "c_side": s["side"],
+                            "c_price": round(s["price"], 4),
+                            "p_side": w["side"],
+                            "p_price": round(w["price"], 4),
+                            "commission": round(c_b + c_s, 2),
+                            "net_pnl": round(leg_b + leg_s, 2),
+                        })
+                        w["rem_comm"] -= c_b
+                        w["rem_qty"] -= q_match
+                        s["rem_comm"] -= c_s
+                        s["rem_qty"] -= q_match
+                        pair_found = True
                         break
-                    c_b_alloc = (q_match / q) * c if q else 0.0
-                    c_s_alloc = (q_match / q_s) * c_s if q_s else 0.0
-                    sign_b = -1.0
-                    sign_s = 1.0
-                    leg_b = sign_b * q_match * p * 100.0 - c_b_alloc
-                    leg_s = sign_s * q_match * p_s * 100.0 - c_s_alloc
-                    pair_net = leg_b + leg_s
-                    add_pair(s_id, eid)
-                    opt_pairs.append({
-                        "leg_c_execution_id": s_id,
-                        "leg_p_execution_id": eid,
-                        "symbol": sym,
-                        "expiry": exp,
-                        "strike": strike_str,
-                        "account_id": acc,
-                        "quantity": round(q_match, 4),
-                        "c_side": side_s,
-                        "c_price": round(p_s, 4),
-                        "p_side": side,
-                        "p_price": round(p, 4),
-                        "commission": round(c_b_alloc + c_s_alloc, 2),
-                        "net_pnl": round(pair_net, 2),
-                    })
-                    remaining -= q_match
-                    if q_match >= q_s:
-                        sell_queue.pop(0)
                     else:
-                        sell_queue[0] = (
-                            q_s - q_match,
-                            p_s,
-                            c_s * (1 - q_match / q_s),
-                            side_s,
-                            s_id,
-                        )
-                if remaining > 0:
-                    buy_queue.append((remaining, p, (remaining / q) * c, side, eid))
-            else:
-                remaining = q
-                while remaining > 0 and buy_queue:
-                    q_b, p_b, c_b, side_b, b_id = buy_queue[0]
-                    q_match = min(remaining, q_b)
-                    if q_match <= 0:
+                        buy_q.append(w)
+                else:
+                    if buy_q:
+                        b = buy_q[0]
+                        q_match = min(w["rem_qty"], b["rem_qty"])
+                        if q_match <= _QTY_EPS:
+                            sell_q.append(w)
+                            continue
+                        c_b = (q_match / b["rem_qty"]) * b["rem_comm"]
+                        c_s = (q_match / w["rem_qty"]) * w["rem_comm"]
+                        leg_b = -1.0 * q_match * b["price"] * 100.0 - c_b
+                        leg_s = 1.0 * q_match * w["price"] * 100.0 - c_s
+                        add_pair(b["eid"], w["eid"])
+                        opt_pairs.append({
+                            "leg_c_execution_id": b["eid"],
+                            "leg_p_execution_id": w["eid"],
+                            "symbol": sym,
+                            "expiry": exp,
+                            "strike": strike_str,
+                            "account_id": acc,
+                            "quantity": round(q_match, 4),
+                            "c_side": b["side"],
+                            "c_price": round(b["price"], 4),
+                            "p_side": w["side"],
+                            "p_price": round(w["price"], 4),
+                            "commission": round(c_b + c_s, 2),
+                            "net_pnl": round(leg_b + leg_s, 2),
+                        })
+                        b["rem_comm"] -= c_b
+                        b["rem_qty"] -= q_match
+                        w["rem_comm"] -= c_s
+                        w["rem_qty"] -= q_match
+                        pair_found = True
                         break
-                    c_b_alloc = (q_match / q_b) * c_b if q_b else 0.0
-                    c_s_alloc = (q_match / q) * c if q else 0.0
-                    sign_b = -1.0
-                    sign_s = 1.0
-                    leg_b = sign_b * q_match * p_b * 100.0 - c_b_alloc
-                    leg_s = sign_s * q_match * p * 100.0 - c_s_alloc
-                    pair_net = leg_b + leg_s
-                    add_pair(b_id, eid)
-                    opt_pairs.append({
-                        "leg_c_execution_id": b_id,
-                        "leg_p_execution_id": eid,
-                        "symbol": sym,
-                        "expiry": exp,
-                        "strike": strike_str,
-                        "account_id": acc,
-                        "quantity": round(q_match, 4),
-                        "c_side": side_b,
-                        "c_price": round(p_b, 4),
-                        "p_side": side,
-                        "p_price": round(p, 4),
-                        "commission": round(c_b_alloc + c_s_alloc, 2),
-                        "net_pnl": round(pair_net, 2),
-                    })
-                    remaining -= q_match
-                    if q_match >= q_b:
-                        buy_queue.pop(0)
                     else:
-                        buy_queue[0] = (
-                            q_b - q_match,
-                            p_b,
-                            c_b * (1 - q_match / q_b),
-                            side_b,
-                            b_id,
-                        )
-                if remaining > 0:
-                    sell_queue.append((remaining, p, (remaining / q) * c, side, eid))
+                        sell_q.append(w)
+
+            if not pair_found:
+                break
 
     return (pair_map, opt_pairs)
 

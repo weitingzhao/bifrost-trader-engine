@@ -142,3 +142,92 @@ class TestPartialMatchScenario:
         assert 2 in paired_ids
 
         assert 3 not in paired_ids
+
+
+class TestIterativeFIFOEquivalence:
+    """Iterative one-pair-per-round FIFO produces the same results as a single-pass."""
+
+    def test_buy_split_across_two_sells(self):
+        """BUY(5) matched by SELL(2) then SELL(3): two pairs consuming the BUY entirely."""
+        execs = [
+            _make_exec(1, side="BUY", quantity=5, price=3.0, time=100, commission=1.0),
+            _make_exec(2, side="SELL", quantity=2, price=4.0, time=200, commission=0.5),
+            _make_exec(3, side="SELL", quantity=3, price=5.0, time=300, commission=0.8),
+        ]
+        _, pairs = _compute_opt_pair_map_and_pairs(execs)
+        assert len(pairs) == 2
+        assert pairs[0]["quantity"] == 2.0
+        assert pairs[0]["leg_c_execution_id"] == 1
+        assert pairs[0]["leg_p_execution_id"] == 2
+        assert pairs[1]["quantity"] == 3.0
+        assert pairs[1]["leg_c_execution_id"] == 1
+        assert pairs[1]["leg_p_execution_id"] == 3
+        total_comm = sum(p["commission"] for p in pairs)
+        assert abs(total_comm - (1.0 + 0.5 + 0.8)) < 0.02
+
+    def test_interleaved_buys_and_sells(self):
+        """BUY(5), SELL(2), BUY(1), SELL(4): three pairs, correct FIFO order."""
+        execs = [
+            _make_exec(1, side="BUY", quantity=5, price=3.0, time=100, commission=1.0),
+            _make_exec(2, side="SELL", quantity=2, price=4.0, time=200, commission=0.6),
+            _make_exec(3, side="BUY", quantity=1, price=2.0, time=250, commission=0.3),
+            _make_exec(4, side="SELL", quantity=4, price=5.0, time=300, commission=1.2),
+        ]
+        _, pairs = _compute_opt_pair_map_and_pairs(execs)
+        assert len(pairs) == 3
+        assert pairs[0]["quantity"] == 2.0
+        assert (pairs[0]["leg_c_execution_id"], pairs[0]["leg_p_execution_id"]) == (1, 2)
+        assert pairs[1]["quantity"] == 3.0
+        assert (pairs[1]["leg_c_execution_id"], pairs[1]["leg_p_execution_id"]) == (1, 4)
+        assert pairs[2]["quantity"] == 1.0
+        assert (pairs[2]["leg_c_execution_id"], pairs[2]["leg_p_execution_id"]) == (3, 4)
+
+    def test_partial_match_leaves_exec_for_unrealized(self):
+        """BUY(5) + SELL(2): the BUY appears in pair but still has qty 3 unmatched.
+
+        matchedQtyById must account for partial consumption, not binary presence.
+        """
+        execs = [
+            _make_exec(1, side="BUY", quantity=5, price=3.0, time=100, commission=1.0),
+            _make_exec(2, side="SELL", quantity=2, price=4.0, time=200, commission=0.5),
+        ]
+        _, pairs = _compute_opt_pair_map_and_pairs(execs)
+        assert len(pairs) == 1
+        assert pairs[0]["quantity"] == 2.0
+
+        matched_qty = {}
+        for p in pairs:
+            for leg_key in ("leg_c_execution_id", "leg_p_execution_id"):
+                eid = p[leg_key]
+                matched_qty[eid] = matched_qty.get(eid, 0) + p["quantity"]
+
+        assert matched_qty.get(1) == 2.0
+        unmatched_buy = 5.0 - matched_qty.get(1, 0)
+        assert abs(unmatched_buy - 3.0) < 1e-9
+
+    def test_commission_allocation_across_rounds(self):
+        """Commission must be proportionally split across iterative pair rounds."""
+        execs = [
+            _make_exec(1, side="BUY", quantity=4, price=3.0, time=100, commission=2.0),
+            _make_exec(2, side="SELL", quantity=1, price=4.0, time=200, commission=0.5),
+            _make_exec(3, side="SELL", quantity=3, price=5.0, time=300, commission=1.5),
+        ]
+        _, pairs = _compute_opt_pair_map_and_pairs(execs)
+        assert len(pairs) == 2
+        assert pairs[0]["quantity"] == 1.0
+        assert pairs[0]["commission"] == round((1 / 4) * 2.0 + 0.5, 2)
+        assert pairs[1]["quantity"] == 3.0
+        assert pairs[1]["commission"] == round((3 / 3) * (2.0 - (1 / 4) * 2.0) + 1.5, 2)
+
+    def test_same_time_tiebreaker_lower_id_first(self):
+        """Same calendar day + same time: lower account_executions_id is earlier in FIFO (matches frontend)."""
+        execs = [
+            _make_exec(164, side="BUY", quantity=4, price=1.0, time=100, trade_date="2025-03-25"),
+            _make_exec(163, side="BUY", quantity=1, price=1.0, time=100, trade_date="2025-03-25"),
+            _make_exec(160, side="SELL", quantity=1, price=1.0, time=200, trade_date="2025-03-25"),
+        ]
+        _, pairs = _compute_opt_pair_map_and_pairs(execs)
+        assert len(pairs) == 1
+        assert pairs[0]["quantity"] == 1.0
+        assert pairs[0]["leg_c_execution_id"] == 163
+        assert pairs[0]["leg_p_execution_id"] == 160
