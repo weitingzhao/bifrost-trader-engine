@@ -16,10 +16,11 @@ def list_instances(
     conn: Any,
     account_id: Optional[str] = None,
     strategy_opportunity_id: Optional[int] = None,
+    strategy_instance_ids: Optional[List[int]] = None,
     opened_at_from: Optional[float] = None,
     opened_at_until: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
-    """List strategy instances, optionally filtered by account_id, strategy_opportunity_id, opened_at range (Unix seconds)."""
+    """List strategy instances, optionally filtered by account_id, strategy_opportunity_id, strategy_instance_ids, opened_at range (Unix seconds)."""
     if conn is None:
         return []
     try:
@@ -31,6 +32,10 @@ def list_instances(
         if strategy_opportunity_id is not None:
             conditions.append("si.strategy_opportunity_id = %s")
             values.append(strategy_opportunity_id)
+        if strategy_instance_ids:
+            placeholders = ", ".join(["%s"] * len(strategy_instance_ids))
+            conditions.append(f"si.strategy_instance_id IN ({placeholders})")
+            values.extend(strategy_instance_ids)
         if opened_at_from is not None and opened_at_from > 0:
             conditions.append("si.opened_at >= to_timestamp(%s)")
             values.append(opened_at_from)

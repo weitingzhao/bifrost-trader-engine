@@ -36,6 +36,7 @@ export function StrategyInstancesPage({
   const [opportunities, setOpportunities] = useState<StrategyOpportunity[]>([])
   const [accountIdFilter, setAccountIdFilter] = useState<string>('')
   const [opportunityIdFilter, setOpportunityIdFilter] = useState<number | ''>('')
+  const [instanceIdFilter, setInstanceIdFilter] = useState('')
   const [selectedInstanceId, setSelectedInstanceId] = useState<number | null>(null)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createOpportunityId, setCreateOpportunityId] = useState<number | ''>('')
@@ -86,16 +87,29 @@ export function StrategyInstancesPage({
   const loadInstances = useCallback(() => {
     setLoading(true)
     setError(null)
-    const params: { account_id?: string; strategy_opportunity_id?: number } = {}
+    const params: { account_id?: string; strategy_opportunity_id?: number; strategy_instance_ids?: number[] } = {}
     if (accountIdFilter.trim()) params.account_id = accountIdFilter.trim()
     if (opportunityIdFilter !== '' && Number.isFinite(Number(opportunityIdFilter))) {
       params.strategy_opportunity_id = Number(opportunityIdFilter)
     }
+    const instanceIds: number[] = []
+    const seen = new Set<number>()
+    for (const part of instanceIdFilter.split(',')) {
+      const p = part.trim()
+      if (!p) continue
+      const n = Number(p)
+      if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) continue
+      const id = Math.floor(n)
+      if (seen.has(id)) continue
+      seen.add(id)
+      instanceIds.push(id)
+    }
+    if (instanceIds.length > 0) params.strategy_instance_ids = instanceIds
     fetchStrategyInstances(params)
       .then((r) => setItems(r.items ?? []))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
-  }, [accountIdFilter, opportunityIdFilter])
+  }, [accountIdFilter, opportunityIdFilter, instanceIdFilter])
 
   useEffect(() => {
     loadInstances()
@@ -514,6 +528,19 @@ export function StrategyInstancesPage({
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          <span className="filter-label">Instance</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={instanceIdFilter}
+            onChange={(e) => setInstanceIdFilter(e.target.value)}
+            placeholder="e.g. 1, 2, 3"
+            title="Comma-separated instance IDs"
+            aria-label="Filter by instance IDs (comma-separated)"
+            style={{ minWidth: '11rem' }}
+          />
         </label>
       </div>
 

@@ -494,16 +494,18 @@ class StatusReader:
         self,
         account_id: Optional[str] = None,
         strategy_opportunity_id: Optional[int] = None,
+        strategy_instance_ids: Optional[List[int]] = None,
         opened_at_from: Optional[float] = None,
         opened_at_until: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
-        """Return strategy_instance rows, optionally filtered by account_id, strategy_opportunity_id, opened_at range (Unix seconds)."""
+        """Return strategy_instance rows, optionally filtered by account_id, strategy_opportunity_id, strategy_instance_ids, opened_at range (Unix seconds)."""
         if not self._connect():
             return []
         result = strategy_instance_module.list_instances(
             self._conn,
             account_id=account_id,
             strategy_opportunity_id=strategy_opportunity_id,
+            strategy_instance_ids=strategy_instance_ids,
             opened_at_from=opened_at_from,
             opened_at_until=opened_at_until,
         )

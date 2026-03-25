@@ -411,19 +411,50 @@ class StrategyInstanceUpdateBody(BaseModel):
     opened_at: Optional[str] = None  # ISO 8601 or Unix seconds (number as string)
 
 
+def _parse_strategy_instance_ids_csv(value: Optional[str]) -> Optional[List[int]]:
+    """Parse comma-separated positive integer IDs; dedupe preserving order. None/empty => no filter."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    out: List[int] = []
+    seen: set = set()
+    for part in s.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        try:
+            n = int(p, 10)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid strategy instance id: {p!r}")
+        if n <= 0:
+            raise HTTPException(status_code=400, detail="strategy_instance_ids must be positive integers")
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out if out else None
+
+
 @router.get("/instances")
 def list_strategy_instances(
     request: Request,
     account_id: Optional[str] = Query(None, description="Filter by account ID"),
     strategy_opportunity_id: Optional[int] = Query(None, description="Filter by strategy opportunity ID"),
+    strategy_instance_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated strategy instance IDs (e.g. 1,2,3)",
+    ),
     opened_at_from: Optional[float] = Query(None, description="Filter: opened_at >= (Unix seconds)"),
     opened_at_until: Optional[float] = Query(None, description="Filter: opened_at <= (Unix seconds)"),
 ) -> Dict[str, Any]:
-    """Return list of strategy_instance rows (SI.2). Optional filters: account_id, strategy_opportunity_id, opened_at range."""
+    """Return list of strategy_instance rows (SI.2). Optional filters: account_id, strategy_opportunity_id, strategy_instance_ids, opened_at range."""
     reader = request.app.state.reader
+    ids = _parse_strategy_instance_ids_csv(strategy_instance_ids)
     items: List[Dict[str, Any]] = reader.list_strategy_instances(
         account_id=account_id,
         strategy_opportunity_id=strategy_opportunity_id,
+        strategy_instance_ids=ids,
         opened_at_from=opened_at_from,
         opened_at_until=opened_at_until,
     )

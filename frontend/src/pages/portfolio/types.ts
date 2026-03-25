@@ -24,6 +24,11 @@ export type OpenOptionPosition = {
   attribution_type?: 'single' | 'mixed' | 'unassigned'
   /** Estimated share of position qty attributed to the instance (0–1). */
   attribution_ratio?: number
+  /**
+   * Instance tab only: when set, use these fills instead of the full contract ledger
+   * (e.g. Uncategorized rows: executions that do not match the instance row for this contract).
+   */
+  filtered_exec_lists?: { final: Execution[]; tws: Execution[] }
 }
 
 export type InstancePositionGroup = {

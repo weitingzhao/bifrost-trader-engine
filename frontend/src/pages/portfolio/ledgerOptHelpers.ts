@@ -18,7 +18,7 @@ export function executionStrategyInstanceIds(ex: Execution): number[] {
         out.push(Number(id))
       }
     }
-    return out
+    if (out.length > 0) return out
   }
   if (ex.strategy_instance_id != null && Number.isFinite(Number(ex.strategy_instance_id))) {
     return [Number(ex.strategy_instance_id)]
@@ -85,6 +85,32 @@ export function sliceExecutionForInstanceOptView(ex: Execution, instanceId: numb
 
   if (ex.strategy_instance_id === instanceId) return ex
   return null
+}
+
+/**
+ * Whether this execution belongs under a Positions Instance row (same instance + opportunity when resolved).
+ * Unassigned bucket (strategyInstanceId null): only fills with no instance attribution.
+ */
+export function executionMatchesInstanceGroup(
+  ex: Execution,
+  strategyInstanceId: number | null,
+  strategyOpportunityId: number | null,
+): boolean {
+  if (strategyInstanceId == null) {
+    return executionStrategyInstanceIds(ex).length === 0
+  }
+  const ids = executionStrategyInstanceIds(ex)
+  if (!ids.includes(strategyInstanceId)) return false
+  if (strategyOpportunityId == null) return true
+  const sliced = sliceExecutionForInstanceOptView(ex, strategyInstanceId)
+  const exOppRaw =
+    sliced?.strategy_opportunity_id != null && Number.isFinite(Number(sliced.strategy_opportunity_id))
+      ? Number(sliced.strategy_opportunity_id)
+      : ex.strategy_opportunity_id != null && Number.isFinite(Number(ex.strategy_opportunity_id))
+        ? Number(ex.strategy_opportunity_id)
+        : null
+  if (exOppRaw != null && exOppRaw !== strategyOpportunityId) return false
+  return true
 }
 
 /**

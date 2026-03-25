@@ -4,6 +4,8 @@ import { API } from './constants'
 export interface StrategyInstancesParams {
   account_id?: string
   strategy_opportunity_id?: number
+  /** One or more instance IDs; serialized as comma-separated query value. */
+  strategy_instance_ids?: number[]
   opened_at_from?: number
   opened_at_until?: number
 }
@@ -14,6 +16,9 @@ export async function fetchStrategyInstances(
   const search = new URLSearchParams()
   if (params?.account_id) search.set('account_id', params.account_id)
   if (params?.strategy_opportunity_id != null) search.set('strategy_opportunity_id', String(params.strategy_opportunity_id))
+  if (params?.strategy_instance_ids != null && params.strategy_instance_ids.length > 0) {
+    search.set('strategy_instance_ids', params.strategy_instance_ids.join(','))
+  }
   if (params?.opened_at_from != null) search.set('opened_at_from', String(params.opened_at_from))
   if (params?.opened_at_until != null) search.set('opened_at_until', String(params.opened_at_until))
   const q = search.toString()

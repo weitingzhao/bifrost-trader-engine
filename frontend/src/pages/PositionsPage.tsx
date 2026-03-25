@@ -18,7 +18,7 @@ import {
   getContractLabelParts,
   parseOptionContractKey,
 } from '../utils/format'
-import { executionStrategyInstanceIds } from './portfolio/ledgerOptHelpers'
+import { executionMatchesInstanceGroup } from './portfolio/ledgerOptHelpers'
 
 /** Align position vs execution contract_key: OCC local differs in segment 1; OPT|expiry|strike|right match. */
 function optExecutionMatchKey(accountId: string, contractKey: string): string {
@@ -555,7 +555,7 @@ export function PositionsPage({
   const [instanceFilterOppName, setInstanceFilterOppName] = useState<string>('all')
   const [instanceFilterAttributionType, setInstanceFilterAttributionType] = useState<string>('all')
   const getPositionKey = (p: OpenOptionPosition, instId: number | null) =>
-    `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}`
+    `${instId ?? 'none'}-${p.contract_key}-${p.strike}-${p.expiry}-${p.pool_label}-${p.account_id}${p.filtered_exec_lists ? '-unc' : ''}`
   /** Options tab (physical rows only): stable expand key without instance slice. */
   const getOptionsTabPositionKey = (p: OpenOptionPosition) =>
     `${p.pool_label}-${p.account_id}-${p.contract_key}-${p.expiry}-${p.strike}`
@@ -898,6 +898,10 @@ export function PositionsPage({
 
   const getPositionExecLists = useCallback(
     (pos: OpenOptionPosition): { final: Execution[]; tws: Execution[]; merged: Execution[] } => {
+      if (pos.filtered_exec_lists) {
+        const { final, tws } = pos.filtered_exec_lists
+        return { final, tws, merged: mergeExecsUniqueById(final, tws) }
+      }
       if (pos.kind === 'live' && pos.position) {
         const key = optExecutionMatchKey(pos.account_id, pos.contract_key)
         const final = livePositionExecutionsFinalMap.get(key) ?? []
@@ -1250,20 +1254,49 @@ export function PositionsPage({
     }
 
     const resolveOppId = (bucket: Bucket): number | null => {
+      /** Unassigned bucket: never infer opportunity from fills — no instance ⇒ no row-level opportunity (Uncategorized only). */
+      if (bucket.id == null) return null
       if (bucket.oppId != null) return bucket.oppId
-      if (bucket.id != null) {
-        for (const a of attributions) {
-          if (a.strategy_instance_id === bucket.id && a.strategy_opportunity_id != null)
-            return a.strategy_opportunity_id
-        }
+      for (const a of attributions) {
+        if (a.strategy_instance_id === bucket.id && a.strategy_opportunity_id != null)
+          return a.strategy_opportunity_id
       }
       for (const p of bucket.options) {
+        if (p.filtered_exec_lists) continue
         const execs = getPositionExecLists(p).merged
         for (const e of execs) {
           if (e.strategy_opportunity_id != null) return e.strategy_opportunity_id
         }
       }
       return null
+    }
+
+    /** Fills that do not match this instance row → separate Uncategorized rows under Unassigned. */
+    const unassignedKey = '__unassigned__'
+    for (const [, b] of map) {
+      if (b.id == null) continue
+      const oppIdForMatch = resolveOppId(b)
+      for (const p of b.options) {
+        if (p.filtered_exec_lists) continue
+        const full = getPositionExecLists(p)
+        const unscopedFinal = full.final.filter(
+          ex => !executionMatchesInstanceGroup(ex, b.id, oppIdForMatch),
+        )
+        const unscopedTws = full.tws.filter(
+          ex => !executionMatchesInstanceGroup(ex, b.id, oppIdForMatch),
+        )
+        if (unscopedFinal.length === 0 && unscopedTws.length === 0) continue
+        let u = map.get(unassignedKey)
+        if (!u) {
+          u = { id: null, label: null, oppName: null, oppId: null, openedAt: null, options: [] }
+          map.set(unassignedKey, u)
+        }
+        u.options.push({
+          ...p,
+          filtered_exec_lists: { final: unscopedFinal, tws: unscopedTws },
+          attribution_type: 'unassigned',
+        })
+      }
     }
 
     const execPremiumPnl = (execs: Execution[]): number => {
@@ -1327,27 +1360,39 @@ export function PositionsPage({
 
     const result: InstanceAllGroup[] = []
     for (const [, b] of map) {
+      const oppId = resolveOppId(b)
       let optPnl = 0
       for (const p of b.options) {
-        const matchedExecs = getPositionExecLists(p).merged
+        if (p.filtered_exec_lists) {
+          const matchedExecs = getPositionExecLists(p).merged
+          if (matchedExecs.length > 0) {
+            optPnl += execPremiumPnl(matchedExecs)
+          } else {
+            optPnl += p.unrealized_pnl
+          }
+          continue
+        }
+        const matchedExecs = getPositionExecLists(p).merged.filter(ex =>
+          executionMatchesInstanceGroup(ex, b.id, oppId),
+        )
         if (matchedExecs.length > 0) {
           optPnl += execPremiumPnl(matchedExecs)
         } else {
           optPnl += p.unrealized_pnl
         }
       }
-      const oppId = resolveOppId(b)
       const opp = oppId != null ? oppMap.get(oppId) : undefined
       const str = opp ? structureMap.get(opp.strategy_structure_id) : undefined
       const attrForInstance = b.id != null ? attributions.find(a => a.strategy_instance_id === b.id) : undefined
       const resolvedStructureType = str?.structure_type ?? attrForInstance?.structure_type ?? null
       const resolvedScopeType = opp?.scope_type ?? attrForInstance?.scope_type ?? null
-      const coverage = computeStockCoverage(b.options, str)
+      const optionsForRisk = b.options.filter(p => !p.filtered_exec_lists)
+      const coverage = computeStockCoverage(optionsForRisk, str)
 
       let riskProfile = null as import('../utils/riskProfile').RiskProfile | null
-      if (b.options.length > 0) {
+      if (optionsForRisk.length > 0) {
         const byAcct = new Map<string, OpenOptionPosition[]>()
-        for (const p of b.options) {
+        for (const p of optionsForRisk) {
           const aid = (p.account_id ?? '').trim()
           if (!byAcct.has(aid)) byAcct.set(aid, [])
           byAcct.get(aid)!.push(p)
@@ -2394,7 +2439,7 @@ export function PositionsPage({
                         <tbody>
                           {sortedInstanceAllGroups.map(allGroup => {
                             const instKey = allGroup.strategy_instance_id != null ? String(allGroup.strategy_instance_id) : '__unassigned__'
-                            const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Instance #${allGroup.strategy_instance_id}` : 'Unassigned')
+                            const instLabel = allGroup.strategy_instance_label ?? (allGroup.strategy_instance_id != null ? `Instance #${allGroup.strategy_instance_id}` : 'Uncategorized')
                             const oppName = allGroup.strategy_opportunity_name?.trim() || null
                             const openedAt = allGroup.strategy_instance_opened_at_epoch
                             const optN = allGroup.options.length
@@ -2528,12 +2573,14 @@ export function PositionsPage({
                                                 const value = (pos.avg_cost ?? 0) * absQty * 100
                                                 const ts = getPositionTime(pos)
                                                 const execLists = getPositionExecLists(pos)
-                                                const execMatchesInstance = (ex: Execution) =>
-                                                  allGroup.strategy_instance_id == null
-                                                    ? executionStrategyInstanceIds(ex).length === 0
-                                                    : executionStrategyInstanceIds(ex).includes(
-                                                        Number(allGroup.strategy_instance_id),
-                                                      )
+                                                const execMatchesInstance = (ex: Execution) => {
+                                                  if (pos.filtered_exec_lists) return true
+                                                  return executionMatchesInstanceGroup(
+                                                    ex,
+                                                    allGroup.strategy_instance_id,
+                                                    allGroup.strategy_opportunity_id,
+                                                  )
+                                                }
                                                 const scopedFinalExecs = execLists.final.filter(execMatchesInstance)
                                                 const scopedTwsExecs = execLists.tws.filter(execMatchesInstance)
                                                 const execCount = scopedFinalExecs.length + scopedTwsExecs.length
@@ -2602,7 +2649,14 @@ export function PositionsPage({
                                                     <td><span className="replay-pnl-unrealized">{fmtUsd(pos.unrealized_pnl)}</span></td>
                                                     <td className="replay-muted">{pos.pool_label}</td>
                                                     <td>
-                                                      {pos.attribution_type === 'mixed' ? (
+                                                      {pos.filtered_exec_lists ? (
+                                                        <span
+                                                          className="attr-badge attr-unassigned"
+                                                          title="Fills that do not match the instance row for this contract (Uncategorized)"
+                                                        >
+                                                          Uncategorized
+                                                        </span>
+                                                      ) : pos.attribution_type === 'mixed' ? (
                                                         <span className="attr-badge attr-mixed" title={`Estimated attribution (net): ${((pos.attribution_ratio ?? 0) * 100).toFixed(0)}%`}>Mixed</span>
                                                       ) : pos.attribution_type === 'single' ? (
                                                         <span className="attr-badge attr-single" title="Single instance attribution">Single</span>
@@ -2613,7 +2667,10 @@ export function PositionsPage({
                                                     <td>{pos.account_id || '—'}</td>
                                                     <td className="replay-strategy-opp-cell">
                                                       {execCount === 0 ? '—' : (
-                                                        <span className="replay-muted">{execCount} execution{execCount > 1 ? 's' : ''} ↓</span>
+                                                        <span className="replay-muted">
+                                                          {pos.filtered_exec_lists ? 'Uncategorized · ' : null}
+                                                          {execCount} execution{execCount > 1 ? 's' : ''} ↓
+                                                        </span>
                                                       )}
                                                     </td>
                                                     <td>—</td>
