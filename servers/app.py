@@ -148,6 +148,12 @@ def create_app(
     app.state._docs_log_thread: Optional[threading.Thread] = None
     app.state._docs_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # Ops API console log stream (run_server_ops.py → bifrost:ops_console)
+    app.state.ops_log_queues: list = []
+    app.state.ops_log_lock = threading.Lock()
+    app.state._ops_log_thread: Optional[threading.Thread] = None
+    app.state._ops_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
     # Monitor-side IB state (for AccountIbClient / MarketIbClient).
     app.state.monitor_enabled = True
     app.state.account_ib_client = None
@@ -190,6 +196,10 @@ def create_app(
         app.state.bifrost_docs_port = int(_scfg.get("docs_port") or 8767)
     except (TypeError, ValueError):
         app.state.bifrost_docs_port = 8767
+    try:
+        app.state.bifrost_ops_port = int(_scfg.get("ops_port") or 8768)
+    except (TypeError, ValueError):
+        app.state.bifrost_ops_port = 8768
 
     app.state.bifrost_utilized_services = _utilized_services_from_config(merged_config)
 

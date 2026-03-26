@@ -57,12 +57,15 @@ import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { DocsApiStatusPage } from './DocsApiStatusPage'
+import { OpsApiStatusPage } from './OpsApiStatusPage'
 import { ApiHealthOverviewPage } from './ApiHealthOverviewPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
+import { useDeferredStart } from '../hooks/useDeferredStart'
+import { fetchOpsHealth } from '../api/ops'
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -233,6 +236,8 @@ export function SettingsPage({
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [massiveApiHealthOk, setMassiveApiHealthOk] = useState<boolean | null>(null)
   const [docsApiHealthOk, setDocsApiHealthOk] = useState<boolean | null>(null)
+  const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
+  const deferredStart = useDeferredStart(280)
   const [celeryStopBusy, setCeleryStopBusy] = useState(false)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
@@ -247,12 +252,15 @@ export function SettingsPage({
   const isApiSection = activeSectionId === 'settings-api'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
   const isApiDocsActive = isApiSection && currentHash === 'settings-api-docs'
+  const isApiOpsActive = isApiSection && currentHash === 'settings-api-ops'
   /** Any API hash other than Docs or Massive (e.g. settings-api-overview) shows API Overview. */
-  const isApiHealthOverviewActive = isApiSection && !isApiMassiveActive && !isApiDocsActive
+  const isApiHealthOverviewActive = isApiSection && !isApiMassiveActive && !isApiDocsActive && !isApiOpsActive
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
   const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
+  const opsApiLamp: 'green' | 'red' | 'none' = opsApiHealthOk === true ? 'green' : opsApiHealthOk === false ? 'red' : 'none'
 
   useEffect(() => {
+    if (!deferredStart) return
     let cancelled = false
     const load = () => {
       fetchMassiveStatus()
@@ -264,6 +272,9 @@ export function SettingsPage({
       fetchDocsApiHealth()
         .then(() => { if (!cancelled) setDocsApiHealthOk(true) })
         .catch(() => { if (!cancelled) setDocsApiHealthOk(false) })
+      fetchOpsHealth()
+        .then(() => { if (!cancelled) setOpsApiHealthOk(true) })
+        .catch(() => { if (!cancelled) setOpsApiHealthOk(false) })
     }
     load()
     const t = window.setInterval(load, 20000)
@@ -271,7 +282,7 @@ export function SettingsPage({
       cancelled = true
       window.clearInterval(t)
     }
-  }, [])
+  }, [deferredStart])
 
   useEffect(() => {
     const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
@@ -531,6 +542,15 @@ export function SettingsPage({
               </span>
               Massive
             </a>
+            <a
+              href="#settings-api-ops"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiOpsActive ? 'active' : ''}`}
+            >
+              <span className={`title-inline-lamp lamp-icon ${opsApiLamp}`} title="Ops API health" aria-hidden>
+                <SettingsSidebarLampGlyph id="api-ops" />
+              </span>
+              Ops
+            </a>
           </div>
         </div>
         <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
@@ -749,6 +769,8 @@ export function SettingsPage({
           <MassiveApiStatusPage embeddedInSettings />
         ) : isApiDocsActive ? (
           <DocsApiStatusPage embeddedInSettings />
+        ) : isApiOpsActive ? (
+          <OpsApiStatusPage embeddedInSettings />
         ) : (
           <ApiHealthOverviewPage embeddedInSettings />
         )

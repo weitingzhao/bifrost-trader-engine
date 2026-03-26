@@ -14,6 +14,7 @@ export interface UseLogConsoleOptions {
   clearLogs: ClearLogsFn
   initialHeightPx?: number
   initialMaxLines?: number
+  enabled?: boolean
 }
 
 export interface LogConsoleController {
@@ -112,6 +113,7 @@ export function useLogConsole({
   clearLogs,
   initialHeightPx = 260,
   initialMaxLines = 50,
+  enabled = true,
 }: UseLogConsoleOptions): LogConsoleController {
   const [lines, setLines] = useState<string[]>([])
   const [status, setStatus] = useState<ConsoleStatus>('idle')
@@ -119,6 +121,10 @@ export function useLogConsole({
   const consoleRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
+    if (!enabled) {
+      setStatus('idle')
+      return
+    }
     let unsub: (() => void) | null = null
     let cancelled = false
     const limit = initialMaxLines
@@ -154,7 +160,7 @@ export function useLogConsole({
       cancelled = true
       if (unsub) unsub()
     }
-  }, [fetchLogs, initialMaxLines, subscribeLogs])
+  }, [enabled, fetchLogs, initialMaxLines, subscribeLogs])
 
   useEffect(() => {
     const el = consoleRef.current

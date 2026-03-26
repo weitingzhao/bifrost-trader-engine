@@ -5,6 +5,7 @@ import {
   fetchHealthAtOrigin,
   fetchMassiveApiHealth,
   fetchMassiveApiHealthAtOrigin,
+  fetchOpsHealthAtOrigin,
   type ApiOriginBase,
 } from '../api'
 import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/fetchTimeout'
@@ -25,6 +26,7 @@ type ProbeKind =
       serverPort: number
       massivePort: number
       docsPort: number
+      opsPort: number
     }
 
 interface ColumnPlan {
@@ -42,6 +44,7 @@ interface ProbeResult {
   server: ServiceProbe
   massive: ServiceProbe
   docs: ServiceProbe
+  ops: ServiceProbe
 }
 
 interface ColumnState {
@@ -82,6 +85,7 @@ function formatServiceLabel(service: string): string {
   const t = service.toLowerCase()
   if (t === 'massive') return 'Massive'
   if (t === 'docs') return 'Docs'
+  if (t === 'ops') return 'Ops'
   return service.charAt(0).toUpperCase() + service.slice(1)
 }
 
@@ -103,10 +107,11 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
   if (kind.kind === 'single') {
     const o = kind.origin
     const baseLabel = o === '' ? '(same origin as this app)' : o
-    const [sr, mr, dr] = await Promise.allSettled([
+    const [sr, mr, dr, or] = await Promise.allSettled([
       fetchHealthAtOrigin(o, tmo),
       fetchMassiveApiHealthAtOrigin(o, tmo),
       fetchDocsApiHealthAtOrigin(o, tmo),
+      fetchOpsHealthAtOrigin(o, tmo),
     ])
     return {
       server: {
@@ -124,16 +129,23 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
         ts: dr.status === 'fulfilled' ? dr.value.ts : undefined,
         base: baseLabel,
       },
+      ops: {
+        ok: or.status === 'fulfilled',
+        ts: or.status === 'fulfilled' ? or.value.ts : undefined,
+        base: baseLabel,
+      },
     }
   }
-  const { scheme, host, serverPort, massivePort, docsPort } = kind
+  const { scheme, host, serverPort, massivePort, docsPort, opsPort } = kind
   const oS = `${scheme}://${host}:${serverPort}`
   const oM = `${scheme}://${host}:${massivePort}`
   const oD = `${scheme}://${host}:${docsPort}`
-  const [sr, mr, dr] = await Promise.allSettled([
+  const oO = `${scheme}://${host}:${opsPort}`
+  const [sr, mr, dr, or] = await Promise.allSettled([
     fetchHealthAtOrigin(oS, tmo),
     fetchMassiveApiHealthAtOrigin(oM, tmo),
     fetchDocsApiHealthAtOrigin(oD, tmo),
+    fetchOpsHealthAtOrigin(oO, tmo),
   ])
   return {
     server: {
@@ -150,6 +162,11 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
       ok: dr.status === 'fulfilled',
       ts: dr.status === 'fulfilled' ? dr.value.ts : undefined,
       base: oD,
+    },
+    ops: {
+      ok: or.status === 'fulfilled',
+      ts: or.status === 'fulfilled' ? or.value.ts : undefined,
+      base: oO,
     },
   }
 }
@@ -202,6 +219,7 @@ async function resolveColumnPlans(): Promise<{
     const sp = typeof h?.server_port === 'number' && Number.isFinite(h.server_port) ? h.server_port : 8765
     const mp = typeof h?.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
     const dp = typeof h?.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
+    const op = typeof h?.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
     const noYamlPaths = cfgDev == null && cfgProd == null
 
     let dev: ColumnPlan | null = null
@@ -216,7 +234,7 @@ async function resolveColumnPlans(): Promise<{
         if (!host) throw new Error('no host')
         dev = {
           display: cfgDev.replace(/\/$/, ''),
-          probe: { kind: 'split', scheme, host, serverPort: sp, massivePort: mp, docsPort: dp },
+          probe: { kind: 'split', scheme, host, serverPort: sp, massivePort: mp, docsPort: dp, opsPort: op },
         }
       } catch {
         const o = cfgDev.replace(/\/$/, '')
@@ -281,6 +299,7 @@ function buildColumn(title: string, display: string | null, probe: ProbeResult |
       row('Bifrost server', probe.server, 'GET /health failed'),
       row('Massive API', probe.massive, 'GET /research/massive/health failed'),
       row('Docs API', probe.docs, 'GET /research/docs/health failed'),
+      row('Ops API', probe.ops, 'GET /ops/health failed'),
     ],
   }
 }

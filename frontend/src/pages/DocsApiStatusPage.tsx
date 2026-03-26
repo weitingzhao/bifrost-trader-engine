@@ -12,6 +12,7 @@ import {
 } from '../api/logs'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import { useDeferredStart } from '../hooks/useDeferredStart'
 import { useControlAction } from './status/useControlAction'
 
 export interface DocsApiStatusPageProps {
@@ -37,6 +38,7 @@ function docsApiDocsBase(health: DocsApiHealthResponse | null): string {
 export function DocsApiStatusPage({ embeddedInSettings }: DocsApiStatusPageProps) {
   const [health, setHealth] = useState<DocsApiHealthResponse | null>(null)
   const [healthOk, setHealthOk] = useState<boolean | null>(null)
+  const deferredStart = useDeferredStart()
   const mountedRef = useRef(true)
   const docsCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [docsCtrlMsg, setDocsCtrlMsg] = useState({ text: '', isErr: false })
@@ -58,9 +60,11 @@ export function DocsApiStatusPage({ embeddedInSettings }: DocsApiStatusPageProps
     fetchLogs: fetchDocsLogs,
     subscribeLogs: subscribeDocsLogs,
     clearLogs: clearDocsLogs,
+    enabled: deferredStart,
   })
 
   useEffect(() => {
+    if (!deferredStart) return
     mountedRef.current = true
     const load = () => {
       fetchDocsApiHealth()
@@ -70,7 +74,7 @@ export function DocsApiStatusPage({ embeddedInSettings }: DocsApiStatusPageProps
     load()
     const t = window.setInterval(load, 15_000)
     return () => { mountedRef.current = false; window.clearInterval(t) }
-  }, [])
+  }, [deferredStart])
 
   useEffect(() => {
     return () => {

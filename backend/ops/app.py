@@ -1,0 +1,158 @@
+"""Bifrost Ops API — unified control plane for Celery workers.
+
+Independent FastAPI service (same pattern as backend.massive).
+Reads config from the shared YAML config system.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from src.app.config import config_profile_from_resolved_path
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_OPS_PORT = 8768
+DEFAULT_ALLOWED_UNITS = [
+    "bifrost-celery-worker",
+    "bifrost-celery-beat",
+]
+
+
+def _broker_url_from_config(config: dict) -> str:
+    r = config.get("redis") or {}
+    import os
+
+    host = (r.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1").strip()
+    port = int(r.get("port") or os.environ.get("REDIS_PORT") or 6379)
+    db = int(r.get("db") or os.environ.get("REDIS_DB") or 1)
+    password = (r.get("password") or os.environ.get("REDIS_PASSWORD") or "").strip()
+    if password:
+        return f"redis://:{password}@{host}:{port}/{db}"
+    return f"redis://{host}:{port}/{db}"
+
+
+def _allowed_units_from_config(config: dict) -> List[str]:
+    ops_cfg = config.get("ops") or {}
+    units = ops_cfg.get("allowed_units")
+    if isinstance(units, list) and units:
+        return [str(u).strip() for u in units if str(u).strip()]
+    return list(DEFAULT_ALLOWED_UNITS)
+
+
+def create_ops_app(
+    config: dict,
+    resolved_config_path: Optional[str] = None,
+) -> FastAPI:
+    """Build the Ops control plane FastAPI app."""
+
+    app = FastAPI(
+        title="Bifrost Ops API",
+        description="Unified control plane: Celery worker status, commands, audit.",
+        docs_url="/ops/docs",
+        redoc_url="/ops/redoc",
+        openapi_url="/ops/openapi.json",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.state.bifrost_config_profile = (
+        config_profile_from_resolved_path(resolved_config_path)
+        if resolved_config_path
+        else None
+    )
+
+    broker_url = _broker_url_from_config(config)
+    allowed_units = _allowed_units_from_config(config)
+
+    # ── Wire services ─────────────────────────────────────────────────────────
+
+    from servers.celery_app import app as celery_app
+
+    from backend.ops.services.command_bus import CommandBus
+    from backend.ops.services.executor_local import RestrictedExecutor
+    from backend.ops.services.worker_state import WorkerStateService
+
+    worker_svc = WorkerStateService(celery_app, broker_url)
+    command_bus = CommandBus()
+
+    use_redis_stop = (config.get("ops") or {}).get("use_redis_stop", True)
+    executor = RestrictedExecutor(
+        allowed_units=allowed_units,
+        broker_url=broker_url,
+        use_redis_stop=use_redis_stop,
+    )
+    command_bus.set_executor(executor)
+
+    app.state.worker_state_service = worker_svc
+    app.state.command_bus = command_bus
+    app.state.audit_log: list = []
+
+    # ── Router ────────────────────────────────────────────────────────────────
+
+    from backend.ops.routers.workers import router as ops_router
+
+    app.include_router(ops_router)
+
+    # ── Health ────────────────────────────────────────────────────────────────
+
+    def _health_payload() -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "status": "ok",
+            "service": "bifrost-ops",
+            "ts": time.time(),
+        }
+        profile = getattr(app.state, "bifrost_config_profile", None)
+        if profile is not None:
+            out["config_profile"] = profile
+        srv = config.get("server") or {}
+        out["port"] = int(srv.get("ops_port") or DEFAULT_OPS_PORT)
+        if resolved_config_path:
+            out["config_path"] = str(Path(resolved_config_path).resolve())
+        return out
+
+    @app.get("/health")
+    def ops_health_root() -> Dict[str, Any]:
+        return _health_payload()
+
+    @app.get("/ops/health")
+    def ops_health_prefixed() -> Dict[str, Any]:
+        return _health_payload()
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    @app.on_event("startup")
+    async def startup_event() -> None:
+        logger.info(
+            "Ops API started — allowed units: %s, broker: %s",
+            allowed_units,
+            broker_url.split("@")[-1] if "@" in broker_url else broker_url,
+        )
+
+    @app.on_event("shutdown")
+    async def shutdown_event() -> None:
+        logger.info("Ops API shutting down")
+
+    return app
+
+
+def run_ops_server(config: dict, resolved_config_path: Optional[str] = None) -> None:
+    """Start the Ops API server."""
+    import uvicorn
+
+    port = int((config.get("server") or {}).get("ops_port") or DEFAULT_OPS_PORT)
+    app = create_ops_app(config, resolved_config_path=resolved_config_path)
+    host = "0.0.0.0"
+    logger.info("Ops API server on %s:%s", host, port)
+    uvicorn.run(app, host=host, port=port, log_level="info", log_config=None)

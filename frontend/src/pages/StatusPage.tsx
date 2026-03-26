@@ -3,6 +3,7 @@ import type { Operation, StatusResponse } from '../types'
 import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postReleaseTickerSubscriptions, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import { useDeferredStart } from '../hooks/useDeferredStart'
 import { fmtTs, fmtUsd } from '../utils/format'
 import {
   DAEMON_REASON_LABELS,
@@ -80,6 +81,7 @@ export function StatusPage({
   const [shutdownAllLoading, setShutdownAllLoading] = useState(false)
   const [shutdownAllMsg, setShutdownAllMsg] = useState({ text: '', isErr: false })
   const [shutdownConfirmOpen, setShutdownConfirmOpen] = useState(false)
+  const deferredStart = useDeferredStart()
   const systemTab = currentSection ?? internalSystemTab
   const setSystemTabSelected = onSectionChange ?? setInternalSystemTab
   const consoleTab = currentConsoleSection ?? internalConsoleTab
@@ -92,16 +94,19 @@ export function StatusPage({
     fetchLogs: fetchDaemonLogs,
     subscribeLogs: subscribeDaemonLogs,
     clearLogs: clearDaemonLogs,
+    enabled: deferredStart && showConsoleSection && (consoleTab === 'daemon-console' || consoleTab === 'events'),
   })
   const serverConsole = useLogConsole({
     fetchLogs: fetchServerLogs,
     subscribeLogs: subscribeServerLogs,
     clearLogs: clearServerLogs,
+    enabled: deferredStart && showConsoleSection && consoleTab === 'server-console',
   })
   const celeryConsole = useLogConsole({
     fetchLogs: fetchCeleryLogs,
     subscribeLogs: subscribeCeleryLogs,
     clearLogs: clearCeleryLogs,
+    enabled: deferredStart && showConsoleSection && celeryUiMode !== 'relocated' && consoleTab === 'console',
   })
 
   useEffect(() => {
@@ -159,10 +164,11 @@ export function StatusPage({
   }, [hbForCountdown?.daemon_alive])
 
   useEffect(() => {
+    if (!deferredStart) return
     fetchHealth()
       .then(() => setLastHealthAt(Date.now() / 1000))
       .catch(() => setLastHealthAt(null))
-  }, [])
+  }, [deferredStart])
 
   useEffect(() => {
     if (lastHealthAt == null) return

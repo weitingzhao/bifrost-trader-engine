@@ -2,6 +2,7 @@ import type { StatusResponse } from '../types'
 import { fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import { useDeferredStart } from '../hooks/useDeferredStart'
 import { StatusCeleryPanel, StatusSseQueuesPanel } from './status/panels'
 import { celeryMetricsFromStatus, useCeleryStopControl } from './status/celeryMetrics'
 import { CeleryJobQueuesSection } from './celery/CeleryJobQueuesSection'
@@ -22,10 +23,12 @@ export function CeleryPage({
   const j = status
   const metrics = celeryMetricsFromStatus(j)
   const { celeryCtrlMsg, onCeleryStop } = useCeleryStopControl(loadStatus)
+  const deferredStart = useDeferredStart()
   const celeryConsole = useLogConsole({
     fetchLogs: fetchCeleryLogs,
     subscribeLogs: subscribeCeleryLogs,
     clearLogs: clearCeleryLogs,
+    enabled: deferredStart,
   })
 
   return (

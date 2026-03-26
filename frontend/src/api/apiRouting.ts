@@ -13,6 +13,7 @@ export interface HealthRoutingFields {
   server_port?: number
   massive_port?: number
   docs_port?: number
+  ops_port?: number
   utilized_services?: Array<{ service: string; env: string }>
 }
 
@@ -44,7 +45,7 @@ function envForService(
  */
 function baseForEnvRole(
   env: 'dev' | 'prod',
-  role: 'server' | 'massive' | 'docs',
+  role: 'server' | 'massive' | 'docs' | 'ops',
   h: HealthRoutingFields,
 ): string {
   const devEnv = trimEnv(import.meta.env.VITE_DEV_API_ORIGIN)
@@ -52,6 +53,7 @@ function baseForEnvRole(
   const sp = typeof h.server_port === 'number' && Number.isFinite(h.server_port) ? h.server_port : 8765
   const mp = typeof h.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
   const dp = typeof h.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
+  const op = typeof h.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
   const cfgDev = trimEnv(h.frontend_dev_path)
   const cfgProd = trimEnv(h.frontend_prod_path)
   const pub = trimEnv(h.frontend_public_origin)
@@ -66,7 +68,7 @@ function baseForEnvRole(
         const scheme = (u.protocol || 'http:').replace(':', '') || 'http'
         const host = u.hostname
         if (!host) throw new Error('no host')
-        const port = role === 'massive' ? mp : role === 'docs' ? dp : sp
+        const port = role === 'massive' ? mp : role === 'docs' ? dp : role === 'ops' ? op : sp
         return `${scheme}://${host}:${port}`
       } catch {
         return cfgDev.replace(/\/$/, '')
@@ -90,23 +92,27 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   server: string
   massive: string
   docs: string
+  ops: string
 } {
   const serverEntry = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
 
   const explicitMassive = trimEnv(import.meta.env.VITE_MASSIVE_API_ORIGIN)
   const explicitDocs = trimEnv(import.meta.env.VITE_DOCS_API_ORIGIN)
+  const explicitOps = trimEnv(import.meta.env.VITE_OPS_API_ORIGIN)
 
   if (!health) {
     return {
       server: serverEntry,
       massive: explicitMassive ?? '',
       docs: explicitDocs ?? '',
+      ops: explicitOps ?? '',
     }
   }
 
   const rows = Array.isArray(health.utilized_services) ? health.utilized_services : []
   const massEnv = envForService(rows, 'massive')
   const docsEnv = envForService(rows, 'docs')
+  const opsEnv = envForService(rows, 'ops')
   const srvEnv =
     envForService(rows, 'server') ??
     envForService(rows, 'main') ??
@@ -122,17 +128,23 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
     docs = baseForEnvRole(docsEnv, 'docs', health)
   }
 
+  let ops = explicitOps ?? ''
+  if (!ops && opsEnv) {
+    ops = baseForEnvRole(opsEnv, 'ops', health)
+  }
+
   let server = serverEntry
   if (!server && srvEnv) {
     server = baseForEnvRole(srvEnv, 'server', health)
   }
 
-  return { server, massive, docs }
+  return { server, massive, docs, ops }
 }
 
 let serverBase = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
 let massiveBase = ''
 let docsBase = ''
+let opsBase = ''
 
 let initPromise: Promise<void> | null = null
 
@@ -146,6 +158,10 @@ export function getMassiveApiBase(): string {
 
 export function getDocsApiBase(): string {
   return docsBase
+}
+
+export function getOpsApiBase(): string {
+  return opsBase
 }
 
 async function loadHealth(): Promise<HealthRoutingFields | null> {
@@ -169,6 +185,7 @@ export function initApiRouting(): Promise<void> {
       serverBase = b.server
       massiveBase = b.massive
       docsBase = b.docs
+      opsBase = b.ops
     })()
   }
   return initPromise

@@ -234,6 +234,10 @@ export {
   subscribeDocsLogs,
   clearDocsLogs,
   trimDocsLogs,
+  fetchOpsLogs,
+  subscribeOpsLogs,
+  clearOpsLogs,
+  trimOpsLogs,
   trimCeleryLogs,
   trimDaemonLogs,
   trimServerLogs,
@@ -247,3 +251,14 @@ export {
 } from './monitor'
 export type { SseQueueMetrics, SseQueueCategory } from './monitor'
 export { fetchRiskSummary, fetchPerformance, getTransactions, postTransactionsFetch } from './performance'
+export {
+  fetchOpsHealth,
+  fetchOpsHealthAtOrigin,
+  fetchOpsWorkers,
+  fetchOpsWorkerDetail,
+  submitOpsCommand,
+  fetchOpsCommand,
+  fetchOpsCommands,
+  fetchOpsAudit,
+  pollOpsCommand,
+} from './ops'

@@ -33,6 +33,7 @@ redis:
 server:
   massive_port: 8766
   docs_port: 8767
+  ops_port: 8768
 
 frontend:
   port: 5173

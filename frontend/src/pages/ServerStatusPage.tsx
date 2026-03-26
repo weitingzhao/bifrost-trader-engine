@@ -11,6 +11,7 @@ import {
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import { useDeferredStart } from '../hooks/useDeferredStart'
 import {
   MONITOR_REASON_LABELS,
   MONITOR_SELF_CHECK_LABELS,
@@ -32,11 +33,13 @@ export function ServerStatusPage({
   const [monitorCtrlMsg, setMonitorCtrlMsg] = useState({ text: '', isErr: false })
   const [lastHealthAt, setLastHealthAt] = useState<number | null>(null)
   const [healthTick, setHealthTick] = useState(0)
+  const deferredStart = useDeferredStart()
   const monitorCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const serverConsole = useLogConsole({
     fetchLogs: fetchServerLogs,
     subscribeLogs: subscribeServerLogs,
     clearLogs: clearServerLogs,
+    enabled: deferredStart,
   })
 
   const runMonitorAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, { onSuccess: loadStatus })
@@ -49,10 +52,11 @@ export function ServerStatusPage({
   }, [])
 
   useEffect(() => {
+    if (!deferredStart) return
     fetchHealth()
       .then(() => setLastHealthAt(Date.now() / 1000))
       .catch(() => setLastHealthAt(null))
-  }, [])
+  }, [deferredStart])
 
   useEffect(() => {
     if (lastHealthAt == null) return

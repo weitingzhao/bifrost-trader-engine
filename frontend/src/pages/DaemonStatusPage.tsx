@@ -13,6 +13,7 @@ import {
 } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import { useDeferredStart } from '../hooks/useDeferredStart'
 import { fmtTs, fmtUsd } from '../utils/format'
 import {
   DAEMON_REASON_LABELS,
@@ -47,6 +48,7 @@ export function DaemonStatusPage({
   const [releaseTickerLoading, setReleaseTickerLoading] = useState(false)
   const [syncTickerMsg, setSyncTickerMsg] = useState({ text: '', isErr: false })
   const [tick, setTick] = useState(0)
+  const deferredStart = useDeferredStart()
   const ctrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hedgeCtrlMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncTickerMsgClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -54,6 +56,7 @@ export function DaemonStatusPage({
     fetchLogs: fetchDaemonLogs,
     subscribeLogs: subscribeDaemonLogs,
     clearLogs: clearDaemonLogs,
+    enabled: deferredStart,
   })
 
   const runCtrlAction = useControlAction(setCtrlMsg, ctrlMsgClearRef, { onSuccess: loadStatus })
