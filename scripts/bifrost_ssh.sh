@@ -136,23 +136,42 @@ EOF
   fi
 }
 
-# Paint Server / Engine / Celery rows under the banner (fixed order). Uses BIFROST_INTERACTIVE_STATUS_*.
+# One line for interactive banner: flower: RUNNING … | flower: NOT RUNNING (no sudo; pgrep on remote).
+_bifrost_remote_print_flower_status() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local _port="${FLOWER_PORT:-5555}"
+  ssh_remote "${REMOTE}" \
+    FLOWER_PORT="${_port}" \
+    DEPLOY_HOST="${DEPLOY_HOST}" \
+    bash -s <<'REMOTE_FLOWER_LINE_EOF'
+set -euo pipefail
+if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
+  pid=$(pgrep -f 'scripts/run_flower\\.py' | head -n 1)
+  echo "flower: RUNNING (PID=${pid} · http://${DEPLOY_HOST}:${FLOWER_PORT}/)"
+else
+  echo "flower: NOT RUNNING"
+fi
+REMOTE_FLOWER_LINE_EOF
+}
+
+# Paint Server / Engine / Celery / Flower rows under the banner (fixed order). Uses BIFROST_INTERACTIVE_STATUS_*.
 _interactive_paint_remote_status_block() {
   local u label line rest
   if [[ -z "${BIFROST_INTERACTIVE_STATUS_RAW:-}" ]]; then
-    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads Server, Engine, Celery status from ${DEPLOY_HOST}.)${C_RESET}"
+    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads Server, Engine, Celery, Flower from ${DEPLOY_HOST}.)${C_RESET}"
     return 0
   fi
   echo "${C_BLUE}${C_BOLD}  Units on ${DEPLOY_HOST}${C_RESET} ${C_DIM}· refreshed ${BIFROST_INTERACTIVE_STATUS_AT:-?}${C_RESET}"
   # sudo may prefix stderr merged into capture (2>&1); lines may look like "[sudo] … bifrost-server: RUNNING …"
-  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|celery):'; then
+  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|celery):|flower:'; then
     echo "${C_YELLOW}  $(echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | head -n 1)${C_RESET}"
   fi
-  for u in bifrost-server bifrost-engine bifrost-celery; do
+  for u in bifrost-server bifrost-engine bifrost-celery flower; do
     case "$u" in
       bifrost-server) label="Server" ;;
       bifrost-engine) label="Engine" ;;
       bifrost-celery) label="Celery" ;;
+      flower) label="Flower" ;;
       *) label="$u" ;;
     esac
     # grep returns 1 when no match — with pipefail + set -e, bare $(...) would abort the script.
@@ -178,11 +197,12 @@ _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} one unit or all ${C_DIM}(units 1–3 + 4=all; e.g. engine restart, ${C_BOLD}43${C_DIM} = all+restart)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(1 Server / 2 Engine / 3 Celery / 4 All; append ${C_BOLD}R${C_DIM} to restart after deploy, e.g. 2R)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}Server + Engine + Celery on host (colored summary above)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}Server + Engine + Celery + Flower on host (colored summary above)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} Clear stored sudo password"
   echo "  ${C_GREEN}${C_BOLD}6)${C_RESET} ${C_BOLD}DB: Refresh schema${C_RESET} ${C_DIM}(choose Dev=local --dev or Prod=remote --prod; pg_ddl / script changes — stays in this menu)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}7)${C_RESET} ${C_BOLD}DB: Release locks${C_RESET} ${C_DIM}(choose Dev=local or Prod=remote; dry-run then optional terminate)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}8)${C_RESET} ${C_BOLD}Flower:${C_RESET} Celery UI on ${DEPLOY_HOST} ${C_DIM}(start / stop / restart / status)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
@@ -232,6 +252,8 @@ Usage (from repo root):
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
       sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (5) Clear.
       Main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
+      Menu (3) Status refreshes systemd units (bifrost-server, engine, celery) and Flower (run_flower.py) on the host.
+      Menu (8) Flower: start, stop, restart, or status on the host (non-systemd background process).
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
       kept in memory only for this process. Warning: --password may be visible in process listings.
 
@@ -267,6 +289,12 @@ Usage (from repo root):
     --db-release-locks-terminate  Remote: db_release_dblock.py --prod --yes.
     --db-release-locks-terminate-dev  Local: db_release_dblock.py --dev --yes.
 
+    --flower-start                remote: start Celery Flower (run_flower.py --prod, nohup, prod config).
+                                  Binds FLOWER_ADDRESS (default 0.0.0.0) and FLOWER_PORT (default 5555).
+    --flower-stop                 remote: stop background Flower (pkill run_flower.py).
+    --flower-restart              remote: stop then start Flower (same env as --flower-start).
+    --flower-status               remote: print whether Flower is running + hint URL.
+
     --password VALUE | -p VALUE | --password=VALUE
                                 remote sudo password for sudo -S (interactive: skip password prompt;
                                 CLI: non-interactive sudo without NOPASSWD). Same as env DEPLOY_SUDO_PASSWORD.
@@ -279,6 +307,8 @@ Usage (from repo root):
     DEPLOY_USER   (default vision)
     DEPLOY_PATH   (default /home/vision/bifrost-trader-engine)
     DEPLOY_SUDO_PASSWORD  optional; same effect as --password (skips interactive sudo prompt)
+    FLOWER_PORT   optional; passed to remote run_flower.py (default 5555)
+    FLOWER_ADDRESS  optional; passed to remote run_flower.py (default 0.0.0.0 for --flower-start)
 
 Examples:
 
@@ -295,6 +325,12 @@ Examples:
   ./scripts/bifrost_ssh.sh --db-release-locks-dev
   ./scripts/bifrost_ssh.sh --db-release-locks-terminate
   ./scripts/bifrost_ssh.sh --db-release-locks-terminate-dev
+
+  ./scripts/bifrost_ssh.sh --flower-start
+  FLOWER_PORT=5556 ./scripts/bifrost_ssh.sh --flower-start
+  ./scripts/bifrost_ssh.sh --flower-status
+  ./scripts/bifrost_ssh.sh --flower-restart
+  ./scripts/bifrost_ssh.sh --flower-stop
 
 systemctl over SSH uses ssh -t when stdin is a TTY so sudo can prompt; non-interactive needs NOPASSWD for systemctl.
 With --password, --status uses sudo -S like start/stop/restart; without it, status runs as the SSH user (often sufficient for is-active).
@@ -699,22 +735,28 @@ _interactive_pick_db_env() {
   esac
 }
 
-# Interactive menu 3: always query all bifrost units on DEPLOY_HOST; store colored summary for banner (no sub-prompt).
+# Interactive menu 3: systemd units + Flower (pgrep) on DEPLOY_HOST; store colored summary for banner (no sub-prompt).
 _interactive_show_status() {
-  local _raw _ec
+  local _raw _flower _ec_sys _fec _ec
   _bifrost_restore_session_sudo
-  _msg_info "Fetching systemd status (Server, Engine, Celery) on ${DEPLOY_HOST} …"
+  _msg_info "Fetching status (Server, Engine, Celery, Flower) on ${DEPLOY_HOST} …"
   echo ""
   set +e
   _raw="$(_bifrost_remote_print_unit_status "bifrost-server bifrost-celery bifrost-engine" 2>&1)"
-  _ec=$?
+  _ec_sys=$?
+  _flower="$(_bifrost_remote_print_flower_status 2>&1)"
+  _fec=$?
   set -e
-  BIFROST_INTERACTIVE_STATUS_RAW="${_raw}"
+  _ec=0
+  [[ ${_ec_sys} -ne 0 ]] && _ec=${_ec_sys}
+  [[ ${_fec} -ne 0 ]] && _ec=${_fec}
+  BIFROST_INTERACTIVE_STATUS_RAW="${_raw}"$'\n'"${_flower}"
   BIFROST_INTERACTIVE_STATUS_AT="$(date '+%Y-%m-%d %H:%M:%S')"
   if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
     {
-      echo "--- Status refresh (${BIFROST_INTERACTIVE_STATUS_AT}) exit ${_ec} ---"
+      echo "--- Status refresh (${BIFROST_INTERACTIVE_STATUS_AT}) exit ${_ec} (systemd=${_ec_sys}, flower=${_fec}) ---"
       echo "${_raw}"
+      echo "${_flower}"
     } >"${BIFROST_SSH_LAST_LOG}"
   fi
   _msg_info "Status refresh finished (exit ${_ec}). Redrawing menu…"
@@ -899,6 +941,162 @@ _cli_local_db_release_locks() {
   _local_run_python_script db_release_dblock.py --dev ${extra}
 }
 
+# Remote: Celery Flower (scripts/run_flower.py --prod). Does not require sudo.
+# Use ssh_remote_stdin_pipe (-T), not ssh_remote_tty (-tt): heredoc-fed bash -s must not get a PTY
+# or the remote can drop into an interactive shell and hang when stdout is piped to tee (interactive menu).
+_cli_remote_flower_start() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local _port="${FLOWER_PORT:-5555}"
+  local _addr="${FLOWER_ADDRESS:-0.0.0.0}"
+  _bifrost_restore_session_sudo
+  ssh_remote_stdin_pipe "${REMOTE}" \
+    DEPLOY_PATH="${DEPLOY_PATH}" \
+    FLOWER_PORT="${_port}" \
+    FLOWER_ADDRESS="${_addr}" \
+    bash -s <<'REMOTE_FLOWER_START_EOF'
+set -euo pipefail
+cd "$DEPLOY_PATH"
+if [[ ! -f .venv/bin/activate ]]; then
+  echo "ERROR: .venv missing on remote. Deploy first: ./scripts/bifrost_ssh.sh --deploy-only" >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source .venv/bin/activate
+if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
+  echo "Flower already running (scripts/run_flower.py). Stop with: ./scripts/bifrost_ssh.sh --flower-stop"
+  exit 0
+fi
+export FLOWER_PORT="${FLOWER_PORT}"
+export FLOWER_ADDRESS="${FLOWER_ADDRESS}"
+export BIFROST_CONFIG=config/config.prod.yaml
+nohup python scripts/run_flower.py --prod >>/tmp/bifrost-flower.log 2>&1 &
+echo $! >/tmp/bifrost-flower.pid
+sleep 1
+if ps -p "$(cat /tmp/bifrost-flower.pid)" >/dev/null 2>&1; then
+  echo "Flower started PID $(cat /tmp/bifrost-flower.pid); log: /tmp/bifrost-flower.log"
+else
+  echo "WARN: process exited; check /tmp/bifrost-flower.log" >&2
+  tail -n 20 /tmp/bifrost-flower.log 2>/dev/null || true
+  exit 1
+fi
+REMOTE_FLOWER_START_EOF
+  local _ec=$?
+  echo ""
+  _msg_info "Open in browser: ${C_BOLD}http://${DEPLOY_HOST}:${_port}/${C_RESET}"
+  return "${_ec}"
+}
+
+_cli_remote_flower_stop() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  _bifrost_restore_session_sudo
+  ssh_remote_stdin_pipe "${REMOTE}" bash -s <<'REMOTE_FLOWER_STOP_EOF'
+set -euo pipefail
+if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
+  pkill -f "scripts/run_flower\\.py" || true
+  echo "Stopped Flower (scripts/run_flower.py)."
+else
+  echo "Flower not running."
+fi
+rm -f /tmp/bifrost-flower.pid
+REMOTE_FLOWER_STOP_EOF
+}
+
+# Remote: stop then start Flower (same FLOWER_PORT / FLOWER_ADDRESS as --flower-start).
+_cli_remote_flower_restart() {
+  local _es _ec
+  _cli_remote_flower_stop
+  _es=$?
+  sleep 1
+  _cli_remote_flower_start
+  _ec=$?
+  if [[ ${_es} -ne 0 ]] || [[ ${_ec} -ne 0 ]]; then
+    return 1
+  fi
+  return 0
+}
+
+_cli_remote_flower_status() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local _port="${FLOWER_PORT:-5555}"
+  _bifrost_restore_session_sudo
+  ssh_remote_stdin_pipe "${REMOTE}" FLOWER_PORT="${_port}" DEPLOY_HOST="${DEPLOY_HOST}" bash -s <<'REMOTE_FLOWER_STATUS_EOF'
+set -euo pipefail
+if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
+  echo "Flower: RUNNING (PID $(pgrep -f 'scripts/run_flower\\.py' | head -n 1))"
+  echo "Log: /tmp/bifrost-flower.log"
+  echo "URL (LAN): http://${DEPLOY_HOST}:${FLOWER_PORT}/"
+else
+  echo "Flower: NOT RUNNING"
+fi
+REMOTE_FLOWER_STATUS_EOF
+}
+
+# Interactive menu 8: Flower start / stop / restart / status on DEPLOY_HOST.
+_interactive_flower_menu() {
+  local _pick _ec
+  echo ""
+  echo "${C_BLUE}${C_BOLD}--- Flower (Celery monitoring UI) ---${C_RESET}"
+  echo "  ${C_DIM}1)${C_RESET} Start ${C_DIM}(nohup, prod config)${C_RESET}"
+  echo "  ${C_DIM}2)${C_RESET} Stop"
+  echo "  ${C_DIM}3)${C_RESET} Restart ${C_DIM}(stop, wait, start)${C_RESET}"
+  echo "  ${C_DIM}4)${C_RESET} Status"
+  echo "  ${C_DIM}0 = cancel${C_RESET}"
+  while true; do
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[0-4]${C_RESET} "
+    read -r _pick
+    _pick=$(echo "${_pick}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    case "${_pick}" in
+      0|'')
+        _msg_info "Cancelled."
+        return 0
+        ;;
+      1)
+        _bifrost_restore_session_sudo
+        _msg_info "Remote: start Flower …"
+        echo ""
+        set +e
+        _cli_remote_flower_start 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+        _ec=${PIPESTATUS[0]}
+        set -e
+        ;;
+      2)
+        _bifrost_restore_session_sudo
+        _msg_info "Remote: stop Flower …"
+        echo ""
+        set +e
+        _cli_remote_flower_stop 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+        _ec=${PIPESTATUS[0]}
+        set -e
+        ;;
+      3)
+        _bifrost_restore_session_sudo
+        _msg_info "Remote: restart Flower …"
+        echo ""
+        set +e
+        _cli_remote_flower_restart 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+        _ec=${PIPESTATUS[0]}
+        set -e
+        ;;
+      4)
+        _bifrost_restore_session_sudo
+        _msg_info "Remote: Flower status …"
+        echo ""
+        set +e
+        _cli_remote_flower_status 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+        _ec=${PIPESTATUS[0]}
+        set -e
+        ;;
+      *) _msg_warn "Invalid — enter 0–4."; continue ;;
+    esac
+    {
+      echo ""
+      echo "--- exit code: ${_ec} ---"
+    } >>"${BIFROST_SSH_LAST_LOG}"
+    # Next iteration of interactive_mode runs _interactive_paint_full → main menu.
+    return 0
+  done
+}
+
 # Map token -> bifrost unit name, or ALL for all three units (empty if unknown).
 _interactive_map_unit_token() {
   case "$1" in
@@ -1049,7 +1247,7 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-8|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
       1) _interactive_systemctl_one_service ;;
@@ -1076,12 +1274,13 @@ interactive_mode() {
         ;;
       6) _interactive_db_refresh_schema ;;
       7) _interactive_db_release_locks ;;
+      8) _interactive_flower_menu ;;
       q|Q)
         echo "[INFO] Bye." >"${BIFROST_SSH_LAST_LOG}"
         _interactive_paint_full
         break
         ;;
-      *) echo "[WARN] Unknown choice — try 1–7 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
+      *) echo "[WARN] Unknown choice — try 1–8 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
     esac
   done
   _ssh_control_cleanup
@@ -1147,6 +1346,10 @@ CLI_DB_REL_DRY=0
 CLI_DB_REL_DRY_DEV=0
 CLI_DB_REL_YES=0
 CLI_DB_REL_YES_DEV=0
+CLI_FLOWER_START=0
+CLI_FLOWER_STOP=0
+CLI_FLOWER_RESTART=0
+CLI_FLOWER_STATUS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1158,6 +1361,10 @@ while [[ $# -gt 0 ]]; do
     --db-release-locks-dev) CLI_DB_REL_DRY_DEV=1 ;;
     --db-release-locks-terminate) CLI_DB_REL_YES=1 ;;
     --db-release-locks-terminate-dev) CLI_DB_REL_YES_DEV=1 ;;
+    --flower-start) CLI_FLOWER_START=1 ;;
+    --flower-stop) CLI_FLOWER_STOP=1 ;;
+    --flower-restart) CLI_FLOWER_RESTART=1 ;;
+    --flower-status) CLI_FLOWER_STATUS=1 ;;
     --server|-server) _restart_add_unit bifrost-server ;;
     --engine|-engine) _restart_add_unit bifrost-engine ;;
     --celery|-celery) _restart_add_unit bifrost-celery ;;
@@ -1193,7 +1400,11 @@ done
 
 # DB-only: schema refresh or lock release (local or remote; no rsync / systemctl).
 _db_cli_count=$((CLI_DB_REFRESH + CLI_DB_REFRESH_DEV + CLI_DB_REL_DRY + CLI_DB_REL_DRY_DEV + CLI_DB_REL_YES + CLI_DB_REL_YES_DEV))
+_flower_cli_count=$((CLI_FLOWER_START + CLI_FLOWER_STOP + CLI_FLOWER_RESTART + CLI_FLOWER_STATUS))
 if [[ "${_db_cli_count}" -gt 0 ]]; then
+  if [[ "${_flower_cli_count}" -gt 0 ]]; then
+    usage_error "cannot combine --db-* with --flower-*."
+  fi
   if [[ "${_db_cli_count}" -gt 1 ]]; then
     usage_error "use only one of --db-refresh / --db-refresh-dev / --db-release-locks / --db-release-locks-dev / --db-release-locks-terminate / --db-release-locks-terminate-dev."
   fi
@@ -1223,6 +1434,33 @@ if [[ "${_db_cli_count}" -gt 0 ]]; then
   fi
   if [[ "${CLI_DB_REL_YES}" == "1" ]]; then
     _cli_remote_db_release_locks --yes
+    exit $?
+  fi
+fi
+
+# Flower-only: remote Celery Flower (no rsync / systemctl / sudo).
+if [[ "${_flower_cli_count}" -gt 0 ]]; then
+  if [[ "${_flower_cli_count}" -gt 1 ]]; then
+    usage_error "use only one of --flower-start / --flower-stop / --flower-restart / --flower-status."
+  fi
+  if [[ "${DO_DEPLOY}" == "1" ]] || [[ "${DO_DEPLOY_ONLY}" == "1" ]] || [[ -n "${ACTION:-}" ]] || [[ "${DO_STATUS}" == "1" ]] \
+    || [[ "${RESTART_ALL}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]] || [[ "${DO_MIGRATE}" == "1" ]] || [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
+    usage_error "Flower flags cannot be combined with deploy, systemctl, --migrate, or --sync-prod-config."
+  fi
+  if [[ "${CLI_FLOWER_START}" == "1" ]]; then
+    _cli_remote_flower_start
+    exit $?
+  fi
+  if [[ "${CLI_FLOWER_STOP}" == "1" ]]; then
+    _cli_remote_flower_stop
+    exit $?
+  fi
+  if [[ "${CLI_FLOWER_RESTART}" == "1" ]]; then
+    _cli_remote_flower_restart
+    exit $?
+  fi
+  if [[ "${CLI_FLOWER_STATUS}" == "1" ]]; then
+    _cli_remote_flower_status
     exit $?
   fi
 fi
