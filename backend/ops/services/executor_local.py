@@ -44,9 +44,20 @@ class RestrictedExecutor:
 
     @staticmethod
     def worker_to_unit(worker_id: str) -> str:
-        """Convert Celery worker name (e.g. ``celery@worker1``) to systemd unit."""
-        name = worker_id.split("@", 1)[-1] if "@" in worker_id else worker_id
-        return f"{_WORKER_UNIT_BASE}@{name}.service"
+        """Map Celery nodename to ``bifrost-celery-worker@<instance>.service``.
+
+        ``run_celery.py`` sets ``-n worker{instance}@{hostname}`` (e.g. ``workerib-1@myhost``).
+        The part after ``@`` is the **host**, not the systemd instance id — use the nodename
+        prefix ``worker`` + instance. Legacy names like ``celery@worker1`` keep the old rule
+        (second segment = logical id).
+        """
+        if "@" not in worker_id:
+            return f"{_WORKER_UNIT_BASE}@{worker_id}.service"
+        nodename, tail = worker_id.split("@", 1)
+        if nodename.startswith("worker") and len(nodename) > len("worker"):
+            instance_id = nodename[len("worker") :]
+            return f"{_WORKER_UNIT_BASE}@{instance_id}.service"
+        return f"{_WORKER_UNIT_BASE}@{tail}.service"
 
     @staticmethod
     def instance_unit(instance_id: str) -> str:

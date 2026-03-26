@@ -9,6 +9,8 @@ User=vision
 Group=vision
 WorkingDirectory=/home/vision/bifrost-trader-engine
 Environment=BIFROST_ENV=prod
+# Ops Console SSE runs journalctl as User=vision; sudo is required unless vision is in group systemd-journal.
+Environment=BIFROST_JOURNAL_USE_SUDO=1
 ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_server_ops.py --prod
 Restart=on-failure
 RestartSec=5

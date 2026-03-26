@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from typing import Any, AsyncGenerator, Dict, Optional
+import os
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
@@ -459,20 +461,52 @@ def list_commands(
 # ── Console log streaming (SSE) ───────────────────────────────────────
 
 
+def _journalctl_cmd(unit: str, lines: int) -> List[str]:
+    """Build journalctl argv. Use ``BIFROST_JOURNAL_USE_SUDO=1`` when the Ops user
+    cannot read system journals without sudo (see ``deploy/sudoers/bifrost-ops-journalctl``).
+    """
+    base = [
+        "journalctl",
+        "-u",
+        unit,
+        "-f",
+        "--no-pager",
+        "-o",
+        "short-iso",
+        "-n",
+        str(lines),
+    ]
+    if os.environ.get("BIFROST_JOURNAL_USE_SUDO", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return ["sudo", "-n"] + base
+    return base
+
+
 async def _journal_sse(
     unit: str, lines: int = 200, request: Request | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream journalctl -f output as SSE events."""
-    cmd = [
-        "journalctl", "-u", unit,
-        "-f", "--no-pager", "-o", "short-iso",
-        "-n", str(lines),
-    ]
+    cmd = _journalctl_cmd(unit, lines)
+    logger.debug("Console SSE journal cmd: %s", cmd)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+
+    async def _drain_stderr(p: asyncio.subprocess.Process) -> None:
+        if p.stderr is None:
+            return
+        while True:
+            raw = await p.stderr.readline()
+            if not raw:
+                break
+            logger.warning("journalctl stderr: %s", raw.decode("utf-8", errors="replace").rstrip())
+
+    drain = asyncio.create_task(_drain_stderr(proc))
     try:
         assert proc.stdout is not None
         while True:
@@ -488,8 +522,14 @@ async def _journal_sse(
             text = line.decode("utf-8", errors="replace").rstrip()
             yield f"data: {text}\n\n"
     finally:
+        drain.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await drain
         proc.kill()
-        await proc.wait()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            proc.kill()
 
 
 @router.get("/ops/console/worker/{worker_id:path}")

@@ -1,0 +1,11 @@
+# /etc/sudoers.d/bifrost-ops-journalctl
+#
+# Allows the Ops API user (vision) to run journalctl for Console SSE (same visibility as
+# interactive ``sudo journalctl -u ...``). Install next to bifrost-agent sudoers:
+#   sudo cp deploy/sudoers/bifrost-ops-journalctl /etc/sudoers.d/bifrost-ops-journalctl
+#   sudo chmod 0440 /etc/sudoers.d/bifrost-ops-journalctl
+#   sudo visudo -c
+#
+# Alternative: ``sudo usermod -aG systemd-journal vision`` and omit BIFROST_JOURNAL_USE_SUDO.
+
+vision ALL=(root) NOPASSWD: /usr/bin/journalctl
