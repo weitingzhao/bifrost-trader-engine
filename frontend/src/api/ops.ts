@@ -11,6 +11,33 @@ function opsBase(): string {
   return getOpsApiBase()
 }
 
+const OPS_TOKEN_KEY = 'bifrost_ops_token'
+
+export function getOpsToken(): string {
+  return sessionStorage.getItem(OPS_TOKEN_KEY) ?? ''
+}
+
+export function setOpsToken(token: string): void {
+  if (token) {
+    sessionStorage.setItem(OPS_TOKEN_KEY, token)
+  } else {
+    sessionStorage.removeItem(OPS_TOKEN_KEY)
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getOpsToken()
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  return headers
+}
+
+function jsonAuthHeaders(): Record<string, string> {
+  return { 'Content-Type': 'application/json', ...authHeaders() }
+}
+
 async function parseJsonResponse<T>(r: Response): Promise<T> {
   const text = await r.text()
   try {
@@ -21,6 +48,20 @@ async function parseJsonResponse<T>(r: Response): Promise<T> {
       `Ops API returned non-JSON response (HTTP ${r.status}${snippet ? `, body: ${snippet}` : ''}).`,
     )
   }
+}
+
+// ── Auth / capabilities ──────────────────────────────────────────────────────
+
+export interface OpsCapabilities {
+  ok: boolean
+  identity: { name: string; role: string; authenticated: boolean }
+  capabilities: { can_view: boolean; can_operate: boolean; can_admin: boolean }
+  auth_required: boolean
+}
+
+export async function fetchOpsCapabilities(): Promise<OpsCapabilities> {
+  const r = await fetch(`${opsBase()}/ops/auth/capabilities`, { headers: authHeaders() })
+  return parseJsonResponse(r)
 }
 
 export type ApiOriginBase = '' | string
@@ -106,7 +147,7 @@ export async function fetchOpsWorkers(): Promise<{
   count: number
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/workers`)
+  const r = await fetch(`${opsBase()}/ops/workers`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -115,7 +156,7 @@ export async function fetchOpsWorkerDetail(workerId: string): Promise<{
   worker?: WorkerDetail
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/workers/${encodeURIComponent(workerId)}`)
+  const r = await fetch(`${opsBase()}/ops/workers/${encodeURIComponent(workerId)}`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -134,7 +175,7 @@ export async function submitOpsCommand(params: {
 }> {
   const r = await fetch(`${opsBase()}/ops/commands`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonAuthHeaders(),
     body: JSON.stringify({
       action: params.action,
       target_type: params.target_type ?? 'worker',
@@ -151,7 +192,7 @@ export async function fetchOpsCommand(commandId: string): Promise<{
   command?: CommandRecord
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/commands/${encodeURIComponent(commandId)}`)
+  const r = await fetch(`${opsBase()}/ops/commands/${encodeURIComponent(commandId)}`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -161,7 +202,7 @@ export async function fetchOpsCommands(limit = 50): Promise<{
   count: number
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/commands?limit=${limit}`)
+  const r = await fetch(`${opsBase()}/ops/commands?limit=${limit}`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -173,7 +214,7 @@ export async function fetchOpsAudit(limit = 100): Promise<{
   count: number
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/audit?limit=${limit}`)
+  const r = await fetch(`${opsBase()}/ops/audit?limit=${limit}`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -192,7 +233,7 @@ export async function updateWorkerQueues(
 }> {
   const r = await fetch(`${opsBase()}/ops/workers/${encodeURIComponent(workerId)}/queues`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonAuthHeaders(),
     body: JSON.stringify({ add: params.add ?? [], remove: params.remove ?? [] }),
   })
   return parseJsonResponse(r)
@@ -215,7 +256,7 @@ export async function scaleWorker(params: {
 }> {
   const r = await fetch(`${opsBase()}/ops/workers/scale`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonAuthHeaders(),
     body: JSON.stringify({
       action: params.action,
       instance_id: params.instance_id,
@@ -239,7 +280,7 @@ export async function fetchWorkerInstances(): Promise<{
   count: number
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/workers/instances`)
+  const r = await fetch(`${opsBase()}/ops/workers/instances`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -256,7 +297,7 @@ export async function fetchBrokerStatusExtended(): Promise<{
   broker: ExtendedBrokerStatus
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/broker/status`)
+  const r = await fetch(`${opsBase()}/ops/broker/status`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -268,7 +309,7 @@ export async function controlBroker(action: BrokerAction): Promise<{
 }> {
   const r = await fetch(`${opsBase()}/ops/broker/control`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: jsonAuthHeaders(),
     body: JSON.stringify({ action }),
   })
   return parseJsonResponse(r)
@@ -294,7 +335,7 @@ export async function fetchOpsHealth(): Promise<{
   port?: number
   config_path?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/health`)
+  const r = await fetch(`${opsBase()}/ops/health`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 

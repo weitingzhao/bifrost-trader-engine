@@ -1,0 +1,30 @@
+# /etc/sudoers.d/bifrost-agent
+#
+# Minimal sudoers for the Bifrost Local Control Agent.
+# The agent runs as user "bifrost-agent" and needs sudo only for systemctl
+# on whitelisted units. No shell access, no wildcard escalation.
+#
+# Install:
+#   sudo cp deploy/sudoers/bifrost-agent /etc/sudoers.d/bifrost-agent
+#   sudo chmod 0440 /etc/sudoers.d/bifrost-agent
+#   sudo visudo -c   # validate syntax
+#
+# IMPORTANT: Do NOT add broader wildcards or NOPASSWD: ALL.
+
+# Celery worker template instances
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-celery-worker@*.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-celery-worker@*.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-celery-worker@*.service
+
+# Celery beat
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-celery-beat.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-celery-beat.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-celery-beat.service
+
+# Redis (local broker) — only enable if Redis is locally managed
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start redis
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop redis
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart redis
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start redis.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop redis.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart redis.service

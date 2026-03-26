@@ -1,0 +1,28 @@
+[Unit]
+Description=Bifrost Local Control Agent (privileged systemd executor)
+After=network.target
+Documentation=https://github.com/your-org/bifrost-trader-engine
+
+[Service]
+Type=simple
+User=bifrost-agent
+Group=bifrost-agent
+ExecStart=/usr/bin/python3 -m backend.ops.agent.server --socket /var/run/bifrost-agent.sock --log-level INFO
+WorkingDirectory=/opt/bifrost
+RuntimeDirectory=bifrost-agent
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/run
+PrivateTmp=true
+
+# Socket permissions: group-writable so Ops API user (in bifrost-agent group) can connect
+ExecStartPost=/bin/chmod 0660 /var/run/bifrost-agent.sock
+ExecStartPost=/bin/chgrp bifrost-agent /var/run/bifrost-agent.sock
+
+[Install]
+WantedBy=multi-user.target

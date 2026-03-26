@@ -9,6 +9,7 @@ import {
   submitOpsCommand,
   pollOpsCommand,
   fetchOpsAudit,
+  fetchOpsCapabilities,
   updateWorkerQueues,
   scaleWorker,
   fetchWorkerInstances,
@@ -16,6 +17,7 @@ import {
   controlBroker,
   workerConsoleUrl,
   brokerConsoleUrl,
+  setOpsToken,
   type WorkerSummary,
   type BrokerStatus,
   type CommandRecord,
@@ -24,6 +26,7 @@ import {
   type SystemdInstance,
   type ExtendedBrokerStatus,
   type BrokerAction,
+  type OpsCapabilities,
 } from '../api/ops'
 
 export interface DashboardPageProps {
@@ -108,9 +111,15 @@ const INITIAL_CONFIRM: ConfirmDialogState = {
 // ── Audit helpers ────────────────────────────────────────────────────────────
 
 function auditOutcomeBadge(outcome: string): { label: string; className: string } {
-  if (outcome === 'submitted') return { label: 'Submitted', className: 'dashboard-audit-badge--submitted' }
-  if (outcome === 'denied') return { label: 'Denied', className: 'dashboard-audit-badge--denied' }
-  return { label: outcome, className: '' }
+  switch (outcome) {
+    case 'success': return { label: 'Success', className: 'dashboard-audit-badge--success' }
+    case 'submitted': return { label: 'Submitted', className: 'dashboard-audit-badge--submitted' }
+    case 'denied': return { label: 'Denied', className: 'dashboard-audit-badge--denied' }
+    case 'rejected': return { label: 'Rejected', className: 'dashboard-audit-badge--rejected' }
+    case 'failed': return { label: 'Failed', className: 'dashboard-audit-badge--failed' }
+    case 'partial': return { label: 'Partial', className: 'dashboard-audit-badge--partial' }
+    default: return { label: outcome, className: '' }
+  }
 }
 
 // \u2500\u2500 Log Console (SSE) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -213,7 +222,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   const [expandedCmdId, setExpandedCmdId] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [cmdFilter, setCmdFilter] = useState<'all' | CommandAction | 'failed'>('all')
-  const [auditFilter, setAuditFilter] = useState<'all' | 'submitted' | 'denied'>('all')
+  const [auditFilter, setAuditFilter] = useState<'all' | 'success' | 'submitted' | 'denied' | 'rejected' | 'failed'>('all')
   const [svcStopBusy, setSvcStopBusy] = useState<ServiceId | 'all' | null>(null)
   const [svcMsg, setSvcMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const pollCancelRef = useRef(false)
@@ -240,6 +249,24 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   type ConsoleTarget = 'none' | 'broker' | string
   const [consoleTarget, setConsoleTarget] = useState<ConsoleTarget>('none')
   const [consoleUrl, setConsoleUrl] = useState('')
+
+  // Auth / capabilities
+  const [caps, setCaps] = useState<OpsCapabilities | null>(null)
+  const [tokenInput, setTokenInput] = useState('')
+  const [authPanelOpen, setAuthPanelOpen] = useState(false)
+
+  const canOperate = caps?.capabilities.can_operate ?? false
+  const canAdmin = caps?.capabilities.can_admin ?? false
+  const isAuthenticated = caps?.identity.authenticated ?? false
+  const authRequired = caps?.auth_required ?? false
+  const currentRole = caps?.identity.role ?? 'viewer'
+
+  const loadCaps = useCallback(async () => {
+    try {
+      const res = await fetchOpsCapabilities()
+      if (res.ok) setCaps(res)
+    } catch { /* ignore */ }
+  }, [])
 
   const loadAll = useCallback(async () => {
     try {
@@ -289,18 +316,36 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   }, [])
 
   useEffect(() => {
+    loadCaps()
     loadAll()
     loadAudit()
     const t = setInterval(() => {
       loadAll()
       loadAudit()
     }, 5000)
+    const capsTimer = setInterval(loadCaps, 30000)
     const tickTimer = setInterval(() => setTick(n => n + 1), 1000)
     return () => {
       clearInterval(t)
+      clearInterval(capsTimer)
       clearInterval(tickTimer)
     }
-  }, [loadAll, loadAudit])
+  }, [loadAll, loadAudit, loadCaps])
+
+  const handleLogin = useCallback(() => {
+    setOpsToken(tokenInput.trim())
+    setTokenInput('')
+    setAuthPanelOpen(false)
+    loadCaps()
+    loadAll()
+    loadAudit()
+  }, [tokenInput, loadCaps, loadAll, loadAudit])
+
+  const handleLogout = useCallback(() => {
+    setOpsToken('')
+    setAuthPanelOpen(false)
+    loadCaps()
+  }, [loadCaps])
 
   void tick
 
@@ -692,6 +737,60 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
         )}
       </div>
 
+      {/* ── Auth bar ── */}
+      <div className="dashboard-auth-bar">
+        <div className="dashboard-auth-info">
+          <span className={`dashboard-auth-role dashboard-auth-role--${currentRole}`}>
+            {currentRole.toUpperCase()}
+          </span>
+          {caps?.identity.name && caps.identity.name !== 'anonymous' && (
+            <span className="dashboard-auth-name">{caps.identity.name}</span>
+          )}
+          {isAuthenticated && (
+            <span className="dashboard-auth-badge">Authenticated</span>
+          )}
+          {authRequired && !isAuthenticated && (
+            <span className="dashboard-auth-badge dashboard-auth-badge--warn">Token required for control actions</span>
+          )}
+        </div>
+        <div className="dashboard-auth-actions">
+          {isAuthenticated ? (
+            <button type="button" className="dashboard-console-btn" onClick={handleLogout}>
+              Sign out
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="dashboard-console-btn"
+              onClick={() => setAuthPanelOpen(!authPanelOpen)}
+            >
+              Authenticate
+            </button>
+          )}
+        </div>
+        {authPanelOpen && !isAuthenticated && (
+          <div className="dashboard-auth-panel">
+            <input
+              type="password"
+              className="dashboard-ctrl-input"
+              placeholder="Ops API token…"
+              value={tokenInput}
+              onChange={e => setTokenInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && tokenInput.trim()) handleLogin() }}
+              autoFocus
+            />
+            <button
+              type="button"
+              className="btn-resume dashboard-btn dashboard-btn--start"
+              onClick={handleLogin}
+              disabled={!tokenInput.trim()}
+            >
+              Connect
+            </button>
+          </div>
+        )}
+      </div>
+
       {error ? (
         <div className="dashboard-inline-alert msg err" role="status">
           {error}. Keep previous data on screen; retrying in next poll cycle.
@@ -740,8 +839,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                 type="button"
                 className="btn-resume dashboard-btn dashboard-btn--start"
                 onClick={() => onActionClick('start')}
-                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton}
-                title="Start the selected worker via systemd"
+                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton || !canOperate}
+                title={canOperate ? 'Start the selected worker via systemd' : 'Requires operator role'}
               >
                 {inflightCmd === 'start' ? 'Starting…' : 'Start'}
               </button>
@@ -749,8 +848,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                 type="button"
                 className="btn-resume dashboard-btn dashboard-btn--restart"
                 onClick={() => onActionClick('restart')}
-                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton}
-                title="Stop then start the selected worker"
+                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton || !canOperate}
+                title={canOperate ? 'Stop then start the selected worker' : 'Requires operator role'}
               >
                 {inflightCmd === 'restart' ? 'Restarting…' : 'Restart'}
               </button>
@@ -758,8 +857,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                 type="button"
                 className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
                 onClick={() => onActionClick('stop')}
-                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton}
-                title="Stop the selected worker"
+                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton || !canOperate}
+                title={canOperate ? 'Stop the selected worker' : 'Requires operator role'}
               >
                 {inflightCmd === 'stop' ? 'Stopping…' : 'Stop'}
               </button>
@@ -974,8 +1073,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                           type="button"
                           className="dashboard-queue-tag-remove"
                           onClick={() => onRemoveQueue(q)}
-                          disabled={queueBusy}
-                          title={`Remove queue "${q}"`}
+                          disabled={queueBusy || !canOperate}
+                          title={canOperate ? `Remove queue "${q}"` : 'Requires operator role'}
                           aria-label={`Remove queue ${q}`}
                         >
                           &times;
@@ -999,7 +1098,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                     type="button"
                     className="btn-resume dashboard-btn dashboard-btn--start"
                     onClick={onAddQueue}
-                    disabled={queueBusy || !queueAddInput.trim()}
+                    disabled={queueBusy || !queueAddInput.trim() || !canOperate}
                   >
                     {queueBusy ? 'Updating…' : 'Add Queue'}
                   </button>
@@ -1033,8 +1132,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                         const match = inst.unit.match(/@([^.]+)\.service/)
                         if (match) onScale('remove', match[1])
                       }}
-                      disabled={scaleBusy}
-                      title={`Stop and remove ${inst.unit}`}
+                      disabled={scaleBusy || !canOperate}
+                      title={canOperate ? `Stop and remove ${inst.unit}` : 'Requires operator role'}
                     >
                       Remove
                     </button>
@@ -1057,7 +1156,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                 type="button"
                 className="btn-resume dashboard-btn dashboard-btn--start"
                 onClick={() => onScale('add')}
-                disabled={scaleBusy || !scaleInstanceId.trim()}
+                disabled={scaleBusy || !scaleInstanceId.trim() || !canOperate}
               >
                 {scaleBusy ? 'Working…' : 'Add Instance'}
               </button>
@@ -1087,7 +1186,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                       type="button"
                       className="btn-resume dashboard-btn dashboard-btn--start"
                       onClick={() => onBrokerAction('start')}
-                      disabled={brokerBusy}
+                      disabled={brokerBusy || !canAdmin}
                     >
                       Start
                     </button>
@@ -1095,7 +1194,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                       type="button"
                       className="btn-resume dashboard-btn dashboard-btn--restart"
                       onClick={() => onBrokerAction('restart')}
-                      disabled={brokerBusy}
+                      disabled={brokerBusy || !canAdmin}
                     >
                       Restart
                     </button>
@@ -1103,7 +1202,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                       type="button"
                       className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
                       onClick={() => onBrokerAction('stop')}
-                      disabled={brokerBusy}
+                      disabled={brokerBusy || !canAdmin}
                     >
                       Stop
                     </button>
@@ -1260,7 +1359,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               </h3>
               {hasAuditPermission && (
                 <div className="dashboard-filter-row">
-                  {(['all', 'submitted', 'denied'] as const).map(f => (
+                  {(['all', 'success', 'submitted', 'denied', 'rejected', 'failed'] as const).map(f => (
                     <button
                       key={f}
                       type="button"

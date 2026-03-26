@@ -81,24 +81,56 @@ def create_ops_app(
     from servers.celery_app import app as celery_app
 
     from backend.ops.services.command_bus import CommandBus
-    from backend.ops.services.executor_local import RestrictedExecutor
     from backend.ops.services.worker_state import WorkerStateService
 
     worker_svc = WorkerStateService(celery_app, broker_url)
     command_bus = CommandBus()
 
-    use_redis_stop = (config.get("ops") or {}).get("use_redis_stop", True)
-    executor = RestrictedExecutor(
-        allowed_units=allowed_units,
-        broker_url=broker_url,
-        use_redis_stop=use_redis_stop,
-    )
+    ops_cfg = config.get("ops") or {}
+    use_redis_stop = ops_cfg.get("use_redis_stop", True)
+    executor_mode = ops_cfg.get("executor_mode", "local")
+
+    if executor_mode == "agent":
+        from backend.ops.services.executor_agent import AgentExecutor
+
+        agent_socket = ops_cfg.get("agent_socket", "/var/run/bifrost-agent.sock")
+        executor = AgentExecutor(
+            socket_path=agent_socket,
+            allowed_units=allowed_units,
+            broker_url=broker_url,
+            use_redis_stop=use_redis_stop,
+        )
+        logger.info("Executor mode: agent (socket=%s)", agent_socket)
+    else:
+        from backend.ops.services.executor_local import RestrictedExecutor
+
+        executor = RestrictedExecutor(
+            allowed_units=allowed_units,
+            broker_url=broker_url,
+            use_redis_stop=use_redis_stop,
+        )
+        logger.info("Executor mode: local (direct systemd)")
+
     command_bus.set_executor(executor)
 
     app.state.worker_state_service = worker_svc
     app.state.command_bus = command_bus
     app.state.executor = executor
     app.state.audit_log: list = []
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+
+    from backend.ops.auth import AuthConfig, OpsAuth
+
+    auth_config = AuthConfig.from_config(config)
+    app.state.ops_auth = OpsAuth(auth_config)
+
+    # ── Audit store ───────────────────────────────────────────────────────────
+
+    from backend.ops.services.audit_store import AuditStore
+
+    audit_store = AuditStore.from_config(config)
+    app.state.audit_store = audit_store
 
     redis_cfg = config.get("redis") or {}
     import os
@@ -128,6 +160,9 @@ def create_ops_app(
         out["port"] = int(srv.get("ops_port") or DEFAULT_OPS_PORT)
         if resolved_config_path:
             out["config_path"] = str(Path(resolved_config_path).resolve())
+        out["executor_mode"] = executor_mode
+        out["auth_required"] = app.state.ops_auth.has_tokens
+        out["audit_mode"] = audit_store.stats().get("mode", "memory")
         return out
 
     @app.get("/health")

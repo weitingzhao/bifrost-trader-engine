@@ -42,14 +42,21 @@ def _audit_log(request: Request) -> list:
     return getattr(request.app.state, "audit_log", [])
 
 
+def _ops_auth(request: Request):
+    from backend.ops.auth import OpsAuth
+    return getattr(request.app.state, "ops_auth", OpsAuth.__new__(OpsAuth))
+
+
+def _identity(request: Request):
+    return _ops_auth(request).resolve(request)
+
+
 def _operator(request: Request) -> str:
-    """Phase 1: header-based identity."""
-    return request.headers.get("X-Operator", "anonymous")
+    return _identity(request).name
 
 
 def _role(request: Request) -> str:
-    """Phase 1: header-based role.  viewer | operator | admin."""
-    return request.headers.get("X-Role", "viewer")
+    return _identity(request).role
 
 
 def _audit(
@@ -60,8 +67,9 @@ def _audit(
     command_id: Optional[str] = None,
     detail: Optional[str] = None,
 ) -> None:
+    ident = _identity(request)
     entry = AuditEntry(
-        operator=_operator(request),
+        operator=ident.name,
         source_ip=request.client.host if request.client else None,
         action=action,
         target=target,
@@ -69,30 +77,34 @@ def _audit(
         outcome=outcome,
         detail=detail,
     )
-    _audit_log(request).append(entry)
+    audit_store = getattr(request.app.state, "audit_store", None)
+    if audit_store is not None:
+        audit_store.append(entry)
+    else:
+        _audit_log(request).append(entry)
     logger.info(
         "AUDIT: %s %s -> %s by %s from %s",
         action,
         target,
         outcome,
-        entry.operator,
+        ident.name,
         entry.source_ip,
     )
 
 
 def _require_role(request: Request, minimum: str) -> Optional[JSONResponse]:
     """Return a 403 JSONResponse if the caller lacks the required role, else None."""
-    hierarchy = {"viewer": 0, "operator": 1, "admin": 2}
-    role = _role(request)
-    if hierarchy.get(role, -1) < hierarchy.get(minimum, 99):
-        return JSONResponse(
-            status_code=403,
-            content={
-                "ok": False,
-                "error": f"Insufficient permissions; {minimum} role required (current: {role}).",
-            },
-        )
-    return None
+    _, denied = _ops_auth(request).require_role(request, minimum)
+    return denied
+
+
+# ── Auth / capabilities ───────────────────────────────────────────────────────
+
+
+@router.get("/ops/auth/capabilities")
+def auth_capabilities(request: Request) -> Dict[str, Any]:
+    """Return the caller's identity, role, and capabilities."""
+    return _ops_auth(request).capabilities(request)
 
 
 # ── Worker status ─────────────────────────────────────────────────────────────
@@ -489,8 +501,12 @@ def list_audit(
     denied = _require_role(request, "admin")
     if denied:
         return denied
-    log = _audit_log(request)
-    entries = sorted(log, key=lambda e: e.timestamp, reverse=True)[:limit]
+    audit_store = getattr(request.app.state, "audit_store", None)
+    if audit_store is not None:
+        entries = audit_store.list_recent(limit=limit)
+    else:
+        log = _audit_log(request)
+        entries = sorted(log, key=lambda e: e.timestamp, reverse=True)[:limit]
     return {
         "ok": True,
         "entries": [e.model_dump() for e in entries],
