@@ -4,6 +4,7 @@ import {
   postDocsShutdown,
   type DocsApiHealthResponse,
 } from '../api'
+import { getDocsApiBase } from '../api/apiRouting'
 import {
   clearDocsLogs,
   fetchDocsLogs,
@@ -22,10 +23,12 @@ const PROFILE_LABELS: Record<string, string> = {
   prod: 'Production',
 }
 
-/** Base URL for Docs Swagger/ReDoc: optional VITE_DOCS_API_ORIGIN, else same host + port from health. */
+/** Base URL for Docs Swagger/ReDoc: VITE_DOCS_API_ORIGIN, else origin from utilized.services (GET /health), else same host + port from health. */
 function docsApiDocsBase(health: DocsApiHealthResponse | null): string {
   const explicit = import.meta.env.VITE_DOCS_API_ORIGIN?.trim()
   if (explicit) return explicit.replace(/\/$/, '')
+  const routed = getDocsApiBase().replace(/\/$/, '')
+  if (routed) return routed
   const port = health?.port ?? 8767
   if (typeof window === 'undefined') return ''
   return `${window.location.protocol}//${window.location.hostname}:${port}`

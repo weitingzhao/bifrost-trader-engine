@@ -162,10 +162,17 @@ async function resolveColumnPlans(): Promise<{
   const devEnv = trimEnv(import.meta.env.VITE_DEV_API_ORIGIN)
   const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
   if (devEnv && prodEnv) {
+    let utilizedServices: UtilizedServiceRow[] = []
+    try {
+      const h = await fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+      utilizedServices = normalizeUtilizedServices(h?.utilized_services)
+    } catch {
+      // same-origin /health may be unreachable; leave Services empty
+    }
     return {
       dev: { display: devEnv, probe: { kind: 'single', origin: devEnv } },
       prod: { display: prodEnv, probe: { kind: 'single', origin: prodEnv } },
-      utilizedServices: [],
+      utilizedServices,
     }
   }
 
@@ -361,7 +368,7 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
                 <div>
                   <h2 id="api-overview-head" className="daemon-card-title page-title-with-tooltip">
                     API Overview
-                    <InfoTooltip text="Services: from YAML utilized.services (via GET /health). Health: Development and Production columns probe FastAPI endpoints; each request times out so a dead service does not freeze the page. Override bases with VITE_DEV_API_ORIGIN and VITE_PROD_API_ORIGIN." />
+                    <InfoTooltip text="Services: from YAML utilized.services (via GET /health). The rest of this app uses the same rules to call Massive/Docs APIs (prod vs dev) so a dead dev stack does not break the UI when everything is declared prod. Health: Development and Production columns probe FastAPI endpoints; each request times out so a dead service does not freeze the page. Override bases with VITE_DEV_API_ORIGIN and VITE_PROD_API_ORIGIN." />
                   </h2>
                   <p className="massive-api-doc-hint">
                     Last refresh: {lastRefresh}
@@ -378,7 +385,7 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
                 <div className="api-overview-services-section" aria-labelledby="api-overview-services-head">
                   <h3 id="api-overview-services-head" className="api-overview-subsection-title">
                     Services
-                    <InfoTooltip text="Declared in YAML as utilized.services (e.g. Massive and Docs mapped to Development or Production). Exposed on GET /health as utilized_services from the bifrost-server process you are connected to." />
+                    <InfoTooltip text="Declared in YAML as utilized.services (which sidecar stack each service uses). Values come from GET /health on the running bifrost-server (loaded at process start from your merged config — edit YAML alone does not apply until you restart that server). Not the same as the Health section column titles: those probe frontend.dev_path vs frontend.prod_path hosts." />
                   </h3>
                   {resolved.utilizedServices.length === 0 ? (
                     <p className="api-overview-services-empty massive-api-doc-hint">

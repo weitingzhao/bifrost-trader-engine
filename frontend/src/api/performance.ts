@@ -1,8 +1,8 @@
 import type { RiskSummaryResponse, PerformanceResponse, AccountTransaction } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 export async function fetchRiskSummary(): Promise<RiskSummaryResponse> {
-  const r = await fetch(`${API}/risk_summary`)
+  const r = await fetch(`${apiBase()}/risk_summary`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -28,7 +28,7 @@ export async function fetchPerformance(params?: {
   if (params?.strategy_instance_id != null) search.set('strategy_instance_id', String(params.strategy_instance_id))
   if (params?.source_scope) search.set('source_scope', params.source_scope)
   if (params?.summary_only) search.set('summary_only', 'true')
-  const r = await fetch(`${API}/performance?${search}`)
+  const r = await fetch(`${apiBase()}/performance?${search}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -45,14 +45,14 @@ export async function getTransactions(params?: {
   if (params?.until_ts != null) search.set('until_ts', String(params.until_ts))
   if (params?.account_id) search.set('account_id', params.account_id)
   if (params?.limit != null) search.set('limit', String(params.limit))
-  const r = await fetch(`${API}/transactions?${search}`)
+  const r = await fetch(`${apiBase()}/transactions?${search}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 /** POST /transactions/fetch: fetch cash transactions from IB Flex and upsert. Optional body: { from_date?, to_date? } yyyyMMdd, max 366 days. */
 export async function postTransactionsFetch(body?: { from_date?: string; to_date?: string }): Promise<{ ok: boolean; count?: number; message?: string; error?: string; by_account?: number }> {
-  const r = await fetch(`${API}/transactions/fetch`, {
+  const r = await fetch(`${apiBase()}/transactions/fetch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,

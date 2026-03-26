@@ -1,5 +1,5 @@
 import type { WatchlistItem } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 export async function postWatchlistEodRefresh(
   options?: { override_days?: number; is_test?: boolean; api_interval_sec?: number },
@@ -8,7 +8,7 @@ export async function postWatchlistEodRefresh(
   if (options?.override_days != null) params.set('override_days', String(options.override_days))
   if (options?.is_test === true) params.set('is_test', '1')
   if (options?.api_interval_sec != null) params.set('api_interval_sec', String(options.api_interval_sec))
-  const r = await fetch(`${API}/bars/watchlist/eod-refresh?${params}`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/bars/watchlist/eod-refresh?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: j.ok === true,
@@ -77,7 +77,7 @@ export async function fetchWatchlistEodRefreshPreview(
   const params = new URLSearchParams()
   if (options?.override_days != null) params.set('override_days', String(options.override_days))
   if (options?.api_interval_sec != null) params.set('api_interval_sec', String(options.api_interval_sec))
-  const r = await fetch(`${API}/bars/watchlist/eod-refresh/preview?${params}`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/bars/watchlist/eod-refresh/preview?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: j.ok === true,
@@ -101,7 +101,7 @@ export async function fetchWatchlistEodRefreshPreview(
 
 /** R-A3: Watchlist list. */
 export async function fetchWatchlist(): Promise<{ items: WatchlistItem[] }> {
-  const r = await fetch(`${API}/watchlist`)
+  const r = await fetch(`${apiBase()}/watchlist`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -119,7 +119,7 @@ export async function postWatchlist(item: {
   category_id?: number | null
   optionable?: boolean | null
 }): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/watchlist`, {
+  const r = await fetch(`${apiBase()}/watchlist`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(item),
@@ -131,7 +131,7 @@ export async function postWatchlist(item: {
 /** R-A3: Delete Watchlist item by contract_key. */
 export async function deleteWatchlist(by: { contract_key: string }): Promise<{ ok: boolean; error?: string }> {
   const params = new URLSearchParams({ contract_key: by.contract_key })
-  const r = await fetch(`${API}/watchlist?${params}`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/watchlist?${params}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: j.ok === true, error: j.error }
 }

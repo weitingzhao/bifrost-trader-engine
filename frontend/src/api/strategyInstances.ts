@@ -1,5 +1,5 @@
 import type { StrategyInstance } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 export interface StrategyInstancesParams {
   account_id?: string
@@ -22,13 +22,13 @@ export async function fetchStrategyInstances(
   if (params?.opened_at_from != null) search.set('opened_at_from', String(params.opened_at_from))
   if (params?.opened_at_until != null) search.set('opened_at_until', String(params.opened_at_until))
   const q = search.toString()
-  const r = await fetch(`${API}/strategies/instances${q ? `?${q}` : ''}`)
+  const r = await fetch(`${apiBase()}/strategies/instances${q ? `?${q}` : ''}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchStrategyInstance(id: number): Promise<StrategyInstance> {
-  const r = await fetch(`${API}/strategies/instances/${id}`)
+  const r = await fetch(`${apiBase()}/strategies/instances/${id}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -44,7 +44,7 @@ export interface CreateStrategyInstancePayload {
 export async function createStrategyInstance(
   payload: CreateStrategyInstancePayload
 ): Promise<{ strategy_instance_id: number }> {
-  const r = await fetch(`${API}/strategies/instances`, {
+  const r = await fetch(`${apiBase()}/strategies/instances`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -60,7 +60,7 @@ export async function updateStrategyInstance(
   strategy_instance_id: number,
   payload: { label?: string; notes?: string; created_at?: string; opened_at?: string }
 ): Promise<void> {
-  const r = await fetch(`${API}/strategies/instances/${strategy_instance_id}`, {
+  const r = await fetch(`${apiBase()}/strategies/instances/${strategy_instance_id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -69,7 +69,7 @@ export async function updateStrategyInstance(
 }
 
 export async function deleteStrategyInstance(strategy_instance_id: number): Promise<void> {
-  const r = await fetch(`${API}/strategies/instances/${strategy_instance_id}`, {
+  const r = await fetch(`${apiBase()}/strategies/instances/${strategy_instance_id}`, {
     method: 'DELETE',
   })
   if (!r.ok) {

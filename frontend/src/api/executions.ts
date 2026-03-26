@@ -7,12 +7,12 @@ import type {
   ExecutionsFlexUploadResponse,
   PositionAttributionResponse,
 } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 /** R-A2: API fetches executions from IB and writes to DB; no daemon. days: 1=today, 3=3d, 7=7d */
 export async function postExecutionsFetch(days: 1 | 3 | 7 = 1): Promise<ControlResponse & { count?: number }> {
   const params = new URLSearchParams({ days: String(days) })
-  const r = await fetch(`${API}/executions/fetch?${params}`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/executions/fetch?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), count: j.count }
 }
@@ -44,7 +44,7 @@ export async function postExecutionsFetchFlex(
     }>
   }
 > {
-  const r = await fetch(`${API}/executions/fetch-flex`, {
+  const r = await fetch(`${apiBase()}/executions/fetch-flex`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
@@ -78,7 +78,7 @@ export async function fetchPositionAttribution(
   const params = new URLSearchParams()
   if (account_id) params.set('account_id', account_id)
   if (sec_type) params.set('sec_type', sec_type)
-  const r = await fetch(`${API}/executions/position-attribution?${params}`)
+  const r = await fetch(`${apiBase()}/executions/position-attribution?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -101,7 +101,7 @@ export async function fetchExecutionLinkCandidates(params: {
   if (params.strike != null && Number.isFinite(params.strike)) q.set('strike', String(params.strike))
   if (params.option_right?.trim()) q.set('option_right', params.option_right.trim().slice(0, 1))
   if (params.limit != null) q.set('limit', String(params.limit))
-  const r = await fetch(`${API}/executions/link-candidates?${q}`)
+  const r = await fetch(`${apiBase()}/executions/link-candidates?${q}`)
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
     return { executions: [], error: (j as { error?: string }).error || r.statusText }
@@ -127,21 +127,21 @@ export async function fetchExecutions(
   if (strategy_opportunity_id != null) params.set('strategy_opportunity_id', String(strategy_opportunity_id))
   if (strategy_instance_id != null) params.set('strategy_instance_id', String(strategy_instance_id))
   if (source_scope) params.set('source_scope', source_scope)
-  const r = await fetch(`${API}/executions?${params}`)
+  const r = await fetch(`${apiBase()}/executions?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 /** GET /executions/freshness: latest exec_time per (account_id, source) from account_executions. */
 export async function fetchExecutionsFreshness(): Promise<ExecutionsFreshnessResponse> {
-  const r = await fetch(`${API}/executions/freshness`)
+  const r = await fetch(`${apiBase()}/executions/freshness`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 /** POST /executions/fetch-flex-upload: upsert executions from uploaded Flex Trades XML. */
 export async function postExecutionsFetchFlexUpload(xml: string): Promise<ExecutionsFlexUploadResponse> {
-  const r = await fetch(`${API}/executions/fetch-flex-upload`, {
+  const r = await fetch(`${apiBase()}/executions/fetch-flex-upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ xml }),
@@ -158,7 +158,7 @@ export async function postExecutionsFetchFlexUpload(xml: string): Promise<Execut
 
 /** R-A2: Add one execution manually (historical entry). */
 export async function createExecution(body: Record<string, unknown>): Promise<{ ok: boolean; account_executions_id?: number; error?: string }> {
-  const r = await fetch(`${API}/executions`, {
+  const r = await fetch(`${apiBase()}/executions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -179,7 +179,7 @@ export async function createExecution(body: Record<string, unknown>): Promise<{ 
 
 /** R-A2: Update one execution by account_executions_id (manual correction). */
 export async function updateExecution(account_executions_id: number, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/executions/${account_executions_id}`, {
+  const r = await fetch(`${apiBase()}/executions/${account_executions_id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -200,7 +200,7 @@ export async function updateExecution(account_executions_id: number, body: Recor
 
 /** R-A2: Delete one execution by account_executions_id. */
 export async function deleteExecution(account_executions_id: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/executions/${account_executions_id}`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/executions/${account_executions_id}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   const ok = Boolean((j as any).ok) && r.ok
   const detail = (j as any).detail

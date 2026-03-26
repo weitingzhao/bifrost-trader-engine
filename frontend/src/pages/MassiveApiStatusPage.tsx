@@ -6,6 +6,7 @@ import {
   type MassiveApiHealthResponse,
   type MassiveStatusResponse,
 } from '../api'
+import { getMassiveApiBase } from '../api/apiRouting'
 import {
   clearMassiveLogs,
   fetchMassiveLogs,
@@ -31,10 +32,12 @@ const TIER_LABELS: Record<string, string> = {
   business: 'Business',
 }
 
-/** Base URL for Massive Swagger/ReDoc: optional VITE_MASSIVE_API_ORIGIN, else same host + port from health (not UI origin — fixes wrong port when dev server proxies API). */
+/** Base URL for Massive Swagger/ReDoc: VITE_MASSIVE_API_ORIGIN, else origin from utilized.services (GET /health), else same host + port from health. */
 function massiveApiDocsBase(health: MassiveApiHealthResponse | null): string {
   const explicit = import.meta.env.VITE_MASSIVE_API_ORIGIN?.trim()
   if (explicit) return explicit.replace(/\/$/, '')
+  const routed = getMassiveApiBase().replace(/\/$/, '')
+  if (routed) return routed
   const port = health?.port ?? 8766
   if (typeof window === 'undefined') return ''
   return `${window.location.protocol}//${window.location.hostname}:${port}`

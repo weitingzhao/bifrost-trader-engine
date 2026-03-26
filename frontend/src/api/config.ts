@@ -1,8 +1,8 @@
 import type { ControlResponse, IbConfig, FlexAccountItem } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 export async function postSetHeartbeatInterval(heartbeat_interval_sec: number): Promise<ControlResponse & { heartbeat_interval_sec?: number }> {
-  const r = await fetch(`${API}/control/set_heartbeat_interval`, {
+  const r = await fetch(`${apiBase()}/control/set_heartbeat_interval`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ heartbeat_interval_sec }),
@@ -17,7 +17,7 @@ export async function postIbConfig(accounts: {
   stream_host_account_id?: string | null
   stream_secondary_account_id?: string | null
 }): Promise<ControlResponse & Partial<IbConfig>> {
-  const r = await fetch(`${API}/config/ib`, {
+  const r = await fetch(`${apiBase()}/config/ib`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(accounts),
@@ -34,7 +34,7 @@ export async function postFlexConfig(
   flexDefaultRangeDays?: number | null,
   flexInitRangeDays?: number | null
 ): Promise<ControlResponse & { accounts?: FlexAccountItem[]; host_token?: string; secondary_token?: string; flex_default_range_days?: number; flex_init_range_days?: number }> {
-  const r = await fetch(`${API}/config/flex`, {
+  const r = await fetch(`${apiBase()}/config/flex`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -59,13 +59,13 @@ export async function fetchMarketHolidays(year?: number, exchange?: string): Pro
   const params = new URLSearchParams()
   if (year != null) params.set('year', String(year))
   if (exchange && exchange.trim()) params.set('exchange', exchange.trim())
-  const r = await fetch(`${API}/market/holidays?${params}`)
+  const r = await fetch(`${apiBase()}/market/holidays?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function postMarketHoliday(payload: { date: string; label?: string; exchange?: string }): Promise<{ date: string; exchange: string; label: string | null }> {
-  const r = await fetch(`${API}/market/holidays`, {
+  const r = await fetch(`${apiBase()}/market/holidays`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -81,6 +81,6 @@ export async function postMarketHoliday(payload: { date: string; label?: string;
 export async function deleteMarketHoliday(dateStr: string, exchange?: string): Promise<void> {
   const params = new URLSearchParams({ date: (dateStr || '').trim().slice(0, 10) })
   if (exchange && exchange.trim()) params.set('exchange', exchange.trim())
-  const r = await fetch(`${API}/market/holidays?${params}`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/market/holidays?${params}`, { method: 'DELETE' })
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? r.statusText)
 }

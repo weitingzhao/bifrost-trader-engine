@@ -1,5 +1,13 @@
-import { API } from './constants'
+import { apiBase } from './constants'
+import { getMassiveApiBase, getDocsApiBase, joinServiceBase } from './apiRouting'
 import { fetchWithTimeout } from './fetchTimeout'
+
+function massiveUrl(path: string): string {
+  return joinServiceBase(getMassiveApiBase(), path)
+}
+function docsUrl(path: string): string {
+  return joinServiceBase(getDocsApiBase(), path)
+}
 
 /** Per-page Massive REST debug for option-expirations (redacted URLs; full response JSON). */
 export interface MassiveOptionExpirationsDebug {
@@ -32,7 +40,7 @@ export async function fetchOptionExpirations(
   const dbg = options?.debug ? '&debug=1' : ''
   const exp = options?.expiration ? `&expiration=${encodeURIComponent(options.expiration)}` : ''
   const r = await fetch(
-    `${API}/research/option-expirations?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}${dbg}${exp}`,
+    `${apiBase()}/research/option-expirations?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}${dbg}${exp}`,
   )
   const j = await r.json().catch(() => ({}))
   const strikes: number[] | undefined = Array.isArray(j.strikes)
@@ -89,7 +97,7 @@ export async function fetchOptionSnapshot(
     return { symbol: s, expiration: e, rows: [], error: 'symbol and expiration are required' }
   }
   const body = { symbol: s, expiration: e, ...(strikes != null ? { strikes } : {}) }
-  const r = await fetch(`${API}/research/option-snapshot`, {
+  const r = await fetch(`${apiBase()}/research/option-snapshot`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -128,7 +136,7 @@ export interface MassiveApiHealthResponse {
 }
 
 export async function fetchMassiveApiHealth(options?: { timeoutMs?: number }): Promise<MassiveApiHealthResponse> {
-  const url = `${API}/research/massive/health`
+  const url = massiveUrl('/research/massive/health')
   const r =
     options?.timeoutMs != null
       ? await fetchWithTimeout(url, {}, options.timeoutMs)
@@ -160,7 +168,7 @@ export interface DocsApiHealthResponse {
 }
 
 export async function fetchDocsApiHealth(): Promise<DocsApiHealthResponse> {
-  const r = await fetch(`${API}/research/docs/health`)
+  const r = await fetch(docsUrl('/research/docs/health'))
   if (!r.ok) throw new Error(`Docs API health: ${r.status}`)
   const j = await r.json()
   return {
@@ -257,7 +265,7 @@ export async function fetchDocsApiHealthAtOrigin(
 }
 
 export async function postDocsShutdown(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/research/docs/shutdown`, { method: 'POST' })
+  const r = await fetch(docsUrl('/research/docs/shutdown'), { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,
@@ -266,7 +274,7 @@ export async function postDocsShutdown(): Promise<{ ok: boolean; error?: string 
 }
 
 export async function postMassiveShutdown(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/research/massive/shutdown`, { method: 'POST' })
+  const r = await fetch(massiveUrl('/research/massive/shutdown'), { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,
@@ -282,7 +290,7 @@ export interface MassiveStatusResponse {
 }
 
 export async function fetchMassiveStatus(): Promise<MassiveStatusResponse> {
-  const r = await fetch(`${API}/research/massive/status`)
+  const r = await fetch(massiveUrl('/research/massive/status'))
   const j = await r.json().catch(() => ({}))
   return {
     configured: Boolean(j.configured),
@@ -331,7 +339,7 @@ export async function fetchMassiveDailyChecklist(params: {
   const q = new URLSearchParams({ symbols: syms.join(',') })
   const td = (params.tradeDate || '').trim()
   if (td) q.set('trade_date', td)
-  const r = await fetch(`${API}/research/massive/daily-checklist?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/daily-checklist?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed' }
@@ -380,7 +388,7 @@ export async function fetchMaxPainCompute(params: {
   const q = new URLSearchParams({ symbol: sym, expiry: exp })
   const td = (params.tradeDate || '').trim()
   if (td) q.set('trade_date', td)
-  const r = await fetch(`${API}/research/max-pain/compute?${q.toString()}`)
+  const r = await fetch(`${apiBase()}/research/max-pain/compute?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed' }
@@ -428,7 +436,7 @@ export async function fetchMaxPainComputeHistory(params: {
   if (!sym || !exp) return { ok: false, error: 'symbol and expiry are required', series: [] }
   const q = new URLSearchParams({ symbol: sym, expiry: exp })
   if (params.lookbackDays != null && params.lookbackDays > 0) q.set('lookback_days', String(params.lookbackDays))
-  const r = await fetch(`${API}/research/max-pain/compute/history?${q.toString()}`)
+  const r = await fetch(`${apiBase()}/research/max-pain/compute/history?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed', series: [] }
@@ -450,7 +458,7 @@ export async function postMassiveSync(
   kind: string,
   payload: Record<string, unknown>,
 ): Promise<{ ok: boolean; job_id?: string; error?: string; message?: string }> {
-  const r = await fetch(`${API}/research/massive/sync`, {
+  const r = await fetch(massiveUrl('/research/massive/sync'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ kind, payload }),
@@ -473,7 +481,7 @@ export async function postMassiveApiCoverageSync(): Promise<{
   target?: string
   size_bytes?: number
 }> {
-  const r = await fetch(`${API}/research/massive/api-coverage/sync`, {
+  const r = await fetch(massiveUrl('/research/massive/api-coverage/sync'), {
     method: 'POST',
   })
   const j = await r.json().catch(() => ({}))
@@ -507,7 +515,7 @@ export async function fetchMassiveJobsList(options?: {
   if (options?.offset != null) q.set('offset', String(options.offset))
   if (options?.status?.trim()) q.set('status', options.status.trim())
   if (options?.kind?.trim()) q.set('kind', options.kind.trim())
-  const r = await fetch(`${API}/research/massive/jobs?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/jobs?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return {
@@ -530,7 +538,7 @@ export async function fetchMassiveJobsList(options?: {
 }
 
 export async function deleteMassiveJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/research/massive/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  const r = await fetch(massiveUrl(`/research/massive/jobs/${encodeURIComponent(jobId)}`), { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: typeof j.error === 'string' ? j.error : undefined }
 }
@@ -543,7 +551,7 @@ export async function deleteAllMassiveJobs(status?: string | null): Promise<{
   const params = new URLSearchParams()
   if (status && status !== 'all') params.set('status', status)
   const qs = params.toString()
-  const r = await fetch(`${API}/research/massive/jobs/purge${qs ? `?${qs}` : ''}`, { method: 'POST' })
+  const r = await fetch(massiveUrl(`/research/massive/jobs/purge${qs ? `?${qs}` : ''}`), { method: 'POST' })
   const j = (await r.json().catch(() => ({}))) as { ok?: boolean; deleted?: number; error?: string; detail?: string }
   const err =
     typeof j.error === 'string'
@@ -560,7 +568,7 @@ export async function deleteAllMassiveJobs(status?: string | null): Promise<{
 
 export async function trimMassiveJobs(keep: number): Promise<{ ok: boolean; deleted: number; error?: string }> {
   const params = new URLSearchParams({ keep: String(keep) })
-  const r = await fetch(`${API}/research/massive/jobs/trim?${params}`, { method: 'POST' })
+  const r = await fetch(massiveUrl(`/research/massive/jobs/trim?${params}`), { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,
@@ -577,7 +585,7 @@ export function subscribeMassiveJobEvents(
 ): { close: () => void } {
   const qs = new URLSearchParams()
   if (options?.timeoutSec != null) qs.set('timeout_sec', String(options.timeoutSec))
-  const url = `${API}/research/massive/jobs/${encodeURIComponent(jobId)}/events?${qs.toString()}`
+  const url = massiveUrl(`/research/massive/jobs/${encodeURIComponent(jobId)}/events?${qs.toString()}`)
   const es = new EventSource(url)
   es.onmessage = (ev: MessageEvent<string>) => {
     try {
@@ -611,7 +619,7 @@ export async function fetchMassiveJob(jobId: string): Promise<{
     updated_ts?: number
   }
 }> {
-  const r = await fetch(`${API}/research/massive/jobs/${encodeURIComponent(jobId)}`)
+  const r = await fetch(massiveUrl(`/research/massive/jobs/${encodeURIComponent(jobId)}`))
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Unknown error' }
@@ -651,7 +659,7 @@ export async function fetchOptionSnapshotsPg(
   const e = (expiration || '').trim()
   const q = new URLSearchParams({ symbol: s, expiration: e, source })
   if (strikesCsv && strikesCsv.trim()) q.set('strikes', strikesCsv.trim())
-  const r = await fetch(`${API}/research/option-snapshots?${q.toString()}`)
+  const r = await fetch(`${apiBase()}/research/option-snapshots?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   const rows: OptionSnapshotRow[] = Array.isArray(j.rows)
     ? j.rows.map((row: Record<string, unknown>) => ({
@@ -706,7 +714,7 @@ export async function fetchResearchOptionOi(
   if (!s) return { rows: [], error: 'symbol is required' }
   const q = new URLSearchParams({ symbol: s })
   if (options?.limit != null) q.set('limit', String(options.limit))
-  const r = await fetch(`${API}/research/option-oi?${q.toString()}`)
+  const r = await fetch(`${apiBase()}/research/option-oi?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   const rows = Array.isArray(j.rows) ? j.rows : []
   return { rows, error: typeof j.error === 'string' ? j.error : undefined }
@@ -727,7 +735,7 @@ export async function fetchResearchOptionTrades(
   if (!s) return { ok: false, status: 0, trades: [], error: 'symbol is required' }
   const q = new URLSearchParams({ symbol: s })
   if (options?.limit != null) q.set('limit', String(options.limit))
-  const r = await fetch(`${API}/research/option-trades?${q.toString()}`)
+  const r = await fetch(`${apiBase()}/research/option-trades?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   const trades = Array.isArray(j.trades) ? j.trades : []
   return {
@@ -746,7 +754,7 @@ export async function fetchCorporateActions(
   const q = new URLSearchParams({ symbol: (symbol || '').trim() })
   if (options?.action_type) q.set('action_type', options.action_type)
   if (options?.limit != null) q.set('limit', String(options.limit))
-  const r = await fetch(`${API}/research/massive/corporate-actions?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/corporate-actions?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   if (!j.ok) return { ok: false, rows: [], error: typeof j.error === 'string' ? j.error : 'Request failed' }
   const rows: CorporateActionRow[] = Array.isArray(j.rows)
@@ -800,7 +808,7 @@ export async function fetchGreeksCoverage(
   if (!s) return { ok: false, error: 'symbol is required' }
   const q = new URLSearchParams({ symbol: s, source })
   if (expiration?.trim()) q.set('expiration', expiration.trim())
-  const r = await fetch(`${API}/research/massive/greeks-coverage?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/greeks-coverage?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -844,7 +852,7 @@ export async function fetchContractsCoverage(
   if (!s) return { ok: false, error: 'symbol is required' }
   const q = new URLSearchParams({ symbol: s })
   if (expiration?.trim()) q.set('expiration', expiration.trim())
-  const r = await fetch(`${API}/research/massive/contracts-coverage?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/contracts-coverage?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -866,7 +874,7 @@ export async function fetchMassiveMarketConditions(opts?: {
   if (opts?.asset_class) q.set('asset_class', opts.asset_class)
   if (opts?.data_type) q.set('data_type', opts.data_type)
   if (opts?.limit) q.set('limit', String(opts.limit))
-  const r = await fetch(`${API}/research/massive/market-ops/conditions?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/market-ops/conditions?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   return { ok: Boolean(j.ok), results: Array.isArray(j.results) ? j.results : [], count: j.count, error: j.error }
 }
@@ -878,7 +886,7 @@ export async function fetchMassiveMarketExchanges(opts?: {
   const q = new URLSearchParams()
   if (opts?.asset_class) q.set('asset_class', opts.asset_class)
   if (opts?.locale) q.set('locale', opts.locale)
-  const r = await fetch(`${API}/research/massive/market-ops/exchanges?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/market-ops/exchanges?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   return { ok: Boolean(j.ok), results: Array.isArray(j.results) ? j.results : [], count: j.count, error: j.error }
 }
@@ -898,7 +906,7 @@ export interface MassiveMarketHolidaysResponse {
 }
 
 export async function fetchMassiveMarketHolidays(): Promise<MassiveMarketHolidaysResponse> {
-  const r = await fetch(`${API}/research/massive/market-ops/holidays`)
+  const r = await fetch(massiveUrl('/research/massive/market-ops/holidays'))
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -912,7 +920,7 @@ export async function fetchMassiveMarketHolidays(): Promise<MassiveMarketHoliday
 }
 
 export async function fetchMassiveMarketStatus(): Promise<{ ok: boolean; status?: Record<string, unknown>; error?: string }> {
-  const r = await fetch(`${API}/research/massive/market-ops/status`)
+  const r = await fetch(massiveUrl('/research/massive/market-ops/status'))
   const j = await r.json().catch(() => ({}))
   return { ok: Boolean(j.ok), status: j.status, error: j.error }
 }
@@ -953,7 +961,7 @@ export async function fetchTechnicalIndicator(
     if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
   }
   const r = await fetch(
-    `${API}/research/massive/technical-indicators/${indicator}/${encodeURIComponent(ticker)}?${q.toString()}`,
+    massiveUrl(`/research/massive/technical-indicators/${indicator}/${encodeURIComponent(ticker)}?${q.toString()}`),
   )
   const j = await r.json().catch(() => ({}))
   return {
@@ -973,7 +981,7 @@ export async function fetchMassiveLastTrade(
 ): Promise<{ ok: boolean; results?: Record<string, unknown>; error?: string }> {
   const ot = (optionsTicker || '').trim()
   if (!ot) return { ok: false, error: 'options_ticker is required' }
-  const r = await fetch(`${API}/research/massive/trades-quotes/last-trade/${encodeURIComponent(ot)}`)
+  const r = await fetch(massiveUrl(`/research/massive/trades-quotes/last-trade/${encodeURIComponent(ot)}`))
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -998,7 +1006,7 @@ export async function fetchMassiveHistQuotes(
   if (options?.timestamp_lte) q.set('timestamp_lte', options.timestamp_lte)
   if (options?.limit) q.set('limit', String(options.limit))
   if (options?.sort) q.set('order', options.sort)
-  const r = await fetch(`${API}/research/massive/trades-quotes/quotes/${encodeURIComponent(ot)}?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/trades-quotes/quotes/${encodeURIComponent(ot)}?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -1024,7 +1032,7 @@ export async function fetchMassiveHistTrades(
   if (options?.timestamp_lte) q.set('timestamp_lte', options.timestamp_lte)
   if (options?.limit) q.set('limit', String(options.limit))
   if (options?.sort) q.set('order', options.sort)
-  const r = await fetch(`${API}/research/massive/trades-quotes/trades/${encodeURIComponent(ot)}?${q.toString()}`)
+  const r = await fetch(massiveUrl(`/research/massive/trades-quotes/trades/${encodeURIComponent(ot)}?${q.toString()}`))
   const j = await r.json().catch(() => ({}))
   if (r.status === 403) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Developer tier required' }
@@ -1093,7 +1101,7 @@ export async function fetchLiquiditySummary(
     right: (right || '').trim(),
     source,
   })
-  const r = await fetch(`${API}/research/option-contract/liquidity-summary?${q.toString()}`)
+  const r = await fetch(`${apiBase()}/research/option-contract/liquidity-summary?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -1140,7 +1148,7 @@ export async function fetchRelativeValue(
     right: (right || '').trim(),
     source,
   })
-  const r = await fetch(`${API}/research/option-contract/relative-value?${q.toString()}`)
+  const r = await fetch(`${apiBase()}/research/option-contract/relative-value?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -1182,7 +1190,7 @@ export async function fetchIvTermStructure(
     expirations: expirations.join(','),
     source,
   })
-  const r = await fetch(`${API}/research/iv-term-structure?${params}`)
+  const r = await fetch(`${apiBase()}/research/iv-term-structure?${params}`)
   const j = await r.json().catch(() => ({}))
   const pts: IvTermStructurePoint[] = Array.isArray(j.points)
     ? j.points.map((p: Record<string, unknown>) => ({

@@ -1,5 +1,5 @@
 import type { Bar, BarsResponse, BarStatsResponse, BarsCoverageResponse } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 /** R-A3: API fetches bars from IB and writes to DB (no daemon). smart_duration: server computes duration from latest bar. */
 export async function postBarsFetch(
@@ -10,7 +10,7 @@ export async function postBarsFetch(
 ): Promise<{ ok: boolean; error?: string; bars?: Bar[]; count?: number }> {
   const params = new URLSearchParams({ symbol, period, duration })
   if (smartDuration) params.set('smart_duration', 'true')
-  const r = await fetch(`${API}/bars/fetch?${params}`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/bars/fetch?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: j.ok === true,
@@ -23,7 +23,7 @@ export async function postBarsFetch(
 /** R-A3: Get latest bar time for symbol+period (for smart fetch). */
 export async function fetchBarsLatest(symbol: string, period = '1 D'): Promise<{ latest: number | null }> {
   const params = new URLSearchParams({ symbol, period })
-  const r = await fetch(`${API}/bars/latest?${params}`)
+  const r = await fetch(`${apiBase()}/bars/latest?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -42,7 +42,7 @@ export async function postBarsBackfill(
   if (options?.queue !== false) params.set('queue', '1')
   if (options?.is_test === true) params.set('is_test', '1')
   if (options?.api_interval_sec != null) params.set('api_interval_sec', String(options.api_interval_sec))
-  const r = await fetch(`${API}/bars/backfill?${params}`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/bars/backfill?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: j.ok === true,
@@ -65,7 +65,7 @@ export interface BarsJob {
 }
 
 export async function fetchBarsJob(jobId: string): Promise<{ ok: boolean; job?: BarsJob; error?: string }> {
-  const r = await fetch(`${API}/bars/jobs/${encodeURIComponent(jobId)}`)
+  const r = await fetch(`${apiBase()}/bars/jobs/${encodeURIComponent(jobId)}`)
   const j = await r.json().catch(() => ({}))
   return { ok: j.ok === true, job: j.job, error: j.error }
 }
@@ -80,7 +80,7 @@ export async function fetchBarsJobs(
   params.set('limit', String(limit))
   params.set('offset', String(offset))
   if (status && status !== 'all') params.set('status', status)
-  const r = await fetch(`${API}/bars/jobs?${params}`)
+  const r = await fetch(`${apiBase()}/bars/jobs?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   const j = await r.json().catch(() => ({}))
   return {
@@ -91,7 +91,7 @@ export async function fetchBarsJobs(
 }
 
 export async function deleteBarsJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/bars/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/bars/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
@@ -99,7 +99,7 @@ export async function deleteBarsJob(jobId: string): Promise<{ ok: boolean; error
 export async function deleteAllBarsJobs(status?: string | null): Promise<{ ok: boolean; deleted: number; error?: string }> {
   const params = new URLSearchParams()
   if (status && status !== 'all') params.set('status', status)
-  const r = await fetch(`${API}/bars/jobs?${params}`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/bars/jobs?${params}`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,
@@ -110,7 +110,7 @@ export async function deleteAllBarsJobs(status?: string | null): Promise<{ ok: b
 
 export async function trimBarsJobs(keep: number): Promise<{ ok: boolean; deleted: number; error?: string }> {
   const params = new URLSearchParams({ keep: String(keep) })
-  const r = await fetch(`${API}/bars/jobs/trim?${params}`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/bars/jobs/trim?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,
@@ -124,7 +124,7 @@ export async function fetchBars(symbol?: string, period = '1 D', limit = 100): P
   if (symbol) params.set('symbol', symbol)
   params.set('period', period)
   params.set('limit', String(limit))
-  const r = await fetch(`${API}/bars?${params}`)
+  const r = await fetch(`${apiBase()}/bars?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -155,7 +155,7 @@ export async function fetchOptionBars(params: {
   })
   const src = params.source
   if (src === 'ib' || src === 'massive') q.set('source', src)
-  const res = await fetch(`${API}/bars?${q}`)
+  const res = await fetch(`${apiBase()}/bars?${q}`)
   if (!res.ok) throw new Error(res.statusText)
   return res.json()
 }
@@ -163,7 +163,7 @@ export async function fetchOptionBars(params: {
 /** Bar row count in stock_day / stock_min for symbol (Data page analysis). */
 export async function fetchBarStats(symbol: string): Promise<BarStatsResponse> {
   const params = new URLSearchParams({ symbol: symbol.trim() })
-  const r = await fetch(`${API}/bars/stats?${params}`)
+  const r = await fetch(`${apiBase()}/bars/stats?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -172,7 +172,7 @@ export async function fetchBarStats(symbol: string): Promise<BarStatsResponse> {
 export async function fetchMarketTradingDay(dateStr?: string): Promise<{ date: string; is_trading_day: boolean }> {
   const params = new URLSearchParams()
   if (dateStr && dateStr.trim()) params.set('date', dateStr.trim().slice(0, 10))
-  const r = await fetch(`${API}/market/trading-day?${params}`)
+  const r = await fetch(`${apiBase()}/market/trading-day?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -181,7 +181,7 @@ export async function fetchMarketTradingDay(dateStr?: string): Promise<{ date: s
 export async function fetchBarsCoverage(symbols?: string[]): Promise<BarsCoverageResponse> {
   const params = new URLSearchParams()
   if (symbols && symbols.length > 0) params.set('symbols', symbols.join(','))
-  const r = await fetch(`${API}/bars/coverage?${params}`)
+  const r = await fetch(`${apiBase()}/bars/coverage?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -195,7 +195,7 @@ export async function postIndicesRefresh(options?: { symbol?: string; days?: num
   const params = new URLSearchParams()
   if (options?.symbol != null && options.symbol.trim()) params.set('symbol', options.symbol.trim())
   if (options?.days != null && options.days > 0) params.set('days', String(options.days))
-  const r = await fetch(`${API}/indices/refresh?${params}`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/indices/refresh?${params}`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ok: j.ok === true,
@@ -215,7 +215,7 @@ export async function fetchBarsBenchmark(
   if (list.length === 0) return { benchmarks: {} }
   const params = new URLSearchParams({ symbols: list.join(',') })
   if (date && date.trim()) params.set('date', date.trim().slice(0, 10))
-  const r = await fetch(`${API}/bars/benchmark?${params}`)
+  const r = await fetch(`${apiBase()}/bars/benchmark?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -226,7 +226,7 @@ export async function deleteBarsForSymbol(
   periods?: string[],
 ): Promise<{ ok: boolean; error?: string; deleted_day?: number; deleted_min?: number; message?: string }> {
   const params = new URLSearchParams({ symbol: symbol.trim() })
-  const url = `${API}/bars/symbol?${params}`
+  const url = `${apiBase()}/bars/symbol?${params}`
   const init: RequestInit = { method: 'DELETE' }
   if (periods && periods.length > 0) {
     init.headers = { 'Content-Type': 'application/json' }

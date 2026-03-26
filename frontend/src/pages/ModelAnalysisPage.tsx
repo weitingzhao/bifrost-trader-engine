@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse, IbAccountSnapshot } from '../types'
-import { API } from '../api/constants'
+import { apiBase } from '../api/constants'
 import { fmtUsd } from '../utils/format'
 import {
   CAR_SECTION_INTRO,
@@ -154,7 +154,7 @@ export function ModelAnalysisPage({ status }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const r = await fetch(`${API}/portfolio/model-analysis?account_id=${encodeURIComponent(accountId)}`)
+      const r = await fetch(`${apiBase()}/portfolio/model-analysis?account_id=${encodeURIComponent(accountId)}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const d: ModelAnalysisResponse = await r.json()
       setData(d)

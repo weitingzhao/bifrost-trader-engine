@@ -1,16 +1,16 @@
 import type { OpenOrder, OperationsResponse, StatusResponse } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 import { fetchWithTimeout } from './fetchTimeout'
 
 export async function fetchStatus(): Promise<StatusResponse | null> {
-  const r = await fetch(`${API}/status`)
+  const r = await fetch(`${apiBase()}/status`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 /** R-A5: GET /open-orders — current unfilled orders from DB (daemon event-driven write). */
 export async function fetchOpenOrders(): Promise<{ open_orders: OpenOrder[] }> {
-  const r = await fetch(`${API}/open-orders`)
+  const r = await fetch(`${apiBase()}/open-orders`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -37,7 +37,7 @@ export async function fetchHealth(options?: { timeoutMs?: number }): Promise<{
   /** From YAML utilized.services — which sidecar stack each service uses (e.g. dev vs prod). */
   utilized_services?: Array<{ service: string; env: string }>
 }> {
-  const url = `${API}/health`
+  const url = `${apiBase()}/health`
   const r =
     options?.timeoutMs != null
       ? await fetchWithTimeout(url, {}, options.timeoutMs)
@@ -47,7 +47,7 @@ export async function fetchHealth(options?: { timeoutMs?: number }): Promise<{
 }
 
 export async function fetchOperations(limit = 20): Promise<OperationsResponse> {
-  const r = await fetch(`${API}/operations?limit=${limit}`)
+  const r = await fetch(`${apiBase()}/operations?limit=${limit}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }

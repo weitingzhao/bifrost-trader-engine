@@ -1,18 +1,18 @@
 import type { RealtimeQuote, QuotesResponse } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 /** R-RM*: Get real-time quotes from API (GET /quotes). Empty symbols = server watchlist. */
 export async function fetchQuotes(symbols?: string[]): Promise<QuotesResponse> {
   const params = new URLSearchParams()
   if (symbols?.length) params.set('symbols', symbols.join(','))
-  const r = await fetch(`${API}/quotes?${params}`)
+  const r = await fetch(`${apiBase()}/quotes?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 /** R-RM*: SSE subscribe to quote stream. Returns unsubscribe. No Redis = connection fails. */
 export function subscribeQuotes(onQuote: (q: RealtimeQuote) => void): () => void {
-  const url = `${API || ''}/quotes/stream`
+  const url = `${apiBase()}/quotes/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {

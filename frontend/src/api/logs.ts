@@ -1,46 +1,46 @@
-import { API } from './constants'
+import { apiBase } from './constants'
 
 export async function fetchCeleryLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${API}/api/celery/logs?${params}`)
+  const r = await fetch(`${apiBase()}/api/celery/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function fetchDaemonLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${API}/api/daemon/logs?${params}`)
+  const r = await fetch(`${apiBase()}/api/daemon/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function fetchServerLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${API}/api/server/logs?${params}`)
+  const r = await fetch(`${apiBase()}/api/server/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function clearCeleryLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/celery/logs`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/api/celery/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function clearDaemonLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/daemon/logs`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/api/daemon/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function clearServerLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/server/logs`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/api/server/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function trimCeleryLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/celery/logs/trim`, {
+  const r = await fetch(`${apiBase()}/api/celery/logs/trim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -50,7 +50,7 @@ export async function trimCeleryLogs(maxLines: number): Promise<{ ok: boolean; e
 }
 
 export async function trimDaemonLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/daemon/logs/trim`, {
+  const r = await fetch(`${apiBase()}/api/daemon/logs/trim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -60,7 +60,7 @@ export async function trimDaemonLogs(maxLines: number): Promise<{ ok: boolean; e
 }
 
 export async function trimServerLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/server/logs/trim`, {
+  const r = await fetch(`${apiBase()}/api/server/logs/trim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -70,7 +70,7 @@ export async function trimServerLogs(maxLines: number): Promise<{ ok: boolean; e
 }
 
 export function subscribeCeleryLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${API || ''}/api/celery/logs/stream`
+  const url = `${apiBase()}/api/celery/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -90,7 +90,7 @@ export function subscribeCeleryLogs(onLine: (line: string) => void, onError?: ()
 }
 
 export function subscribeDaemonLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${API || ''}/api/daemon/logs/stream`
+  const url = `${apiBase()}/api/daemon/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -110,7 +110,7 @@ export function subscribeDaemonLogs(onLine: (line: string) => void, onError?: ()
 }
 
 export function subscribeServerLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${API || ''}/api/server/logs/stream`
+  const url = `${apiBase()}/api/server/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -131,19 +131,19 @@ export function subscribeServerLogs(onLine: (line: string) => void, onError?: ()
 
 export async function fetchMassiveLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${API}/api/massive/logs?${params}`)
+  const r = await fetch(`${apiBase()}/api/massive/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function clearMassiveLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/massive/logs`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/api/massive/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function trimMassiveLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/massive/logs/trim`, {
+  const r = await fetch(`${apiBase()}/api/massive/logs/trim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -153,7 +153,7 @@ export async function trimMassiveLogs(maxLines: number): Promise<{ ok: boolean; 
 }
 
 export function subscribeMassiveLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${API || ''}/api/massive/logs/stream`
+  const url = `${apiBase()}/api/massive/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {
@@ -174,19 +174,19 @@ export function subscribeMassiveLogs(onLine: (line: string) => void, onError?: (
 
 export async function fetchDocsLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${API}/api/docs/logs?${params}`)
+  const r = await fetch(`${apiBase()}/api/docs/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
 export async function clearDocsLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/docs/logs`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/api/docs/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
 export async function trimDocsLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${API}/api/docs/logs/trim`, {
+  const r = await fetch(`${apiBase()}/api/docs/logs/trim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -196,7 +196,7 @@ export async function trimDocsLogs(maxLines: number): Promise<{ ok: boolean; err
 }
 
 export function subscribeDocsLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${API || ''}/api/docs/logs/stream`
+  const url = `${apiBase()}/api/docs/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {

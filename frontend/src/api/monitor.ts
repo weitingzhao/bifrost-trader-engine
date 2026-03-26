@@ -1,5 +1,5 @@
 import type { ControlResponse } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 export interface SseQueueCategory {
   connection_count: number
@@ -20,7 +20,7 @@ export interface SseQueueMetrics {
 }
 
 export async function fetchSseQueueMetrics(): Promise<SseQueueMetrics> {
-  const r = await fetch(`${API}/api/monitor/sse-queue-metrics`)
+  const r = await fetch(`${apiBase()}/api/monitor/sse-queue-metrics`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -31,7 +31,7 @@ export async function postMonitorStop(): Promise<ControlResponse & { monitor_ena
   const ac = new AbortController()
   const timeoutId = setTimeout(() => ac.abort(), MONITOR_STOP_FETCH_TIMEOUT_MS)
   try {
-    const r = await fetch(`${API}/control/monitor_stop`, { method: 'POST', signal: ac.signal })
+    const r = await fetch(`${apiBase()}/control/monitor_stop`, { method: 'POST', signal: ac.signal })
     const j = await r.json().catch(() => ({}))
     return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText), monitor_enabled: j.monitor_enabled }
   } catch (e) {
@@ -48,13 +48,13 @@ export async function postMonitorStop(): Promise<ControlResponse & { monitor_ena
 }
 
 export async function postMonitorReleaseIb(): Promise<ControlResponse> {
-  const r = await fetch(`${API}/control/monitor_release_ib`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/control/monitor_release_ib`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
 export async function postCeleryStop(): Promise<ControlResponse> {
-  const r = await fetch(`${API}/control/celery_stop`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/control/celery_stop`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
@@ -65,7 +65,7 @@ export async function postMonitorConnect(): Promise<
     market?: { requested?: boolean; success?: boolean; error?: string | null }
   }
 > {
-  const r = await fetch(`${API}/control/monitor_connect`, { method: 'POST' })
+  const r = await fetch(`${apiBase()}/control/monitor_connect`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))
   return {
     ...j,

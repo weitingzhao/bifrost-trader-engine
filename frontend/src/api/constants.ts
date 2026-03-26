@@ -1,2 +1,20 @@
-/** Same origin; Vite proxy forwards /status, /operations, /control */
-export const API = ''
+import {
+  getServerApiBase,
+  getMassiveApiBase,
+  getDocsApiBase,
+  initApiRouting,
+  joinServiceBase,
+} from './apiRouting'
+
+export {
+  getServerApiBase,
+  getMassiveApiBase,
+  getDocsApiBase,
+  initApiRouting,
+  joinServiceBase,
+}
+
+/** Main bifrost-server API prefix (empty = same origin). Set after `initApiRouting()` in main.tsx. */
+export function apiBase(): string {
+  return getServerApiBase()
+}

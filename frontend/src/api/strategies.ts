@@ -1,5 +1,5 @@
 import type { ControlResponse } from '../types'
-import { API } from './constants'
+import { apiBase } from './constants'
 
 export interface StrategyStructure {
   strategy_structure_id: number
@@ -305,13 +305,13 @@ export interface StrategyHistoryRow {
 export async function fetchStructures(activeOnly = true): Promise<{ items: StrategyStructure[] }> {
   const params = new URLSearchParams()
   params.set('active_only', String(activeOnly))
-  const r = await fetch(`${API}/strategies/structures?${params}`)
+  const r = await fetch(`${apiBase()}/strategies/structures?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchStructure(id: number): Promise<StrategyStructure> {
-  const r = await fetch(`${API}/strategies/structures/${id}`)
+  const r = await fetch(`${apiBase()}/strategies/structures/${id}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -350,25 +350,25 @@ export interface StrategyDimRow {
 
 export async function fetchTemplates(activeOnly = true): Promise<{ items: StrategyTemplateRow[] }> {
   const params = new URLSearchParams({ active_only: String(activeOnly) })
-  const r = await fetch(`${API}/strategies/templates?${params}`)
+  const r = await fetch(`${apiBase()}/strategies/templates?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchTemplateDetail(templateId: number): Promise<StrategyTemplateDetail> {
-  const r = await fetch(`${API}/strategies/templates/${templateId}`)
+  const r = await fetch(`${apiBase()}/strategies/templates/${templateId}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchDimsGrouped(): Promise<{ by_type: Record<string, StrategyDimRow[]> }> {
-  const r = await fetch(`${API}/strategies/dims`)
+  const r = await fetch(`${apiBase()}/strategies/dims`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchDimsForType(dimType: string): Promise<{ items: StrategyDimRow[] }> {
-  const r = await fetch(`${API}/strategies/dims/${encodeURIComponent(dimType)}/items`)
+  const r = await fetch(`${apiBase()}/strategies/dims/${encodeURIComponent(dimType)}/items`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -395,25 +395,25 @@ async function templateConfigFetch(
 }
 
 export async function fetchParamKindOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/templates/options/param-kind`)
+  const r = await fetch(`${apiBase()}/strategies/templates/options/param-kind`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchLegRoleOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/templates/options/leg-role`)
+  const r = await fetch(`${apiBase()}/strategies/templates/options/leg-role`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchLegDirectionOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/templates/options/leg-direction`)
+  const r = await fetch(`${apiBase()}/strategies/templates/options/leg-direction`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchLegOptionRightOptions(): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/templates/options/leg-option-right`)
+  const r = await fetch(`${apiBase()}/strategies/templates/options/leg-option-right`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -421,7 +421,7 @@ export async function fetchLegOptionRightOptions(): Promise<{ options: Structure
 export async function fetchMetaKeyOptions(
   _structureType?: string
 ): Promise<{ options: StructureTypeConfigOption[] }> {
-  const r = await fetch(`${API}/strategies/templates/options/meta-keys`)
+  const r = await fetch(`${apiBase()}/strategies/templates/options/meta-keys`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -431,13 +431,13 @@ export async function fetchMetaValueOptions(
   metaKey: string
 ): Promise<{ options: StructureTypeConfigOption[] }> {
   const params = new URLSearchParams({ meta_key: metaKey })
-  const r = await fetch(`${API}/strategies/templates/options/meta-values?${params}`)
+  const r = await fetch(`${apiBase()}/strategies/templates/options/meta-values?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function createTemplate(payload: Record<string, unknown>): Promise<{ strategy_template_id: number }> {
-  return templateConfigFetch(`${API}/strategies/templates`, {
+  return templateConfigFetch(`${apiBase()}/strategies/templates`, {
     method: 'POST',
     body: JSON.stringify(payload),
   }) as Promise<{ strategy_template_id: number }>
@@ -447,14 +447,14 @@ export async function updateTemplate(
   templateId: number,
   payload: Record<string, unknown>
 ): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/templates/${templateId}`, {
+  return templateConfigFetch(`${apiBase()}/strategies/templates/${templateId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   }) as Promise<{ ok: boolean }>
 }
 
 export async function deleteTemplate(templateId: number): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/templates/${templateId}`, {
+  return templateConfigFetch(`${apiBase()}/strategies/templates/${templateId}`, {
     method: 'DELETE',
   }) as Promise<{ ok: boolean }>
 }
@@ -463,7 +463,7 @@ export async function replaceTemplateLegs(
   templateId: number,
   legs: StructureTypeLegPayload[]
 ): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/templates/${templateId}/legs`, {
+  return templateConfigFetch(`${apiBase()}/strategies/templates/${templateId}/legs`, {
     method: 'PUT',
     body: JSON.stringify({ legs }),
   }) as Promise<{ ok: boolean }>
@@ -473,7 +473,7 @@ export async function replaceTemplateParams(
   templateId: number,
   items: MetaParamPayload[]
 ): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/templates/${templateId}/params`, {
+  return templateConfigFetch(`${apiBase()}/strategies/templates/${templateId}/params`, {
     method: 'PUT',
     body: JSON.stringify({ items }),
   }) as Promise<{ ok: boolean }>
@@ -483,14 +483,14 @@ export async function replaceTemplateCharacteristics(
   templateId: number,
   items: string[]
 ): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/templates/${templateId}/characteristics`, {
+  return templateConfigFetch(`${apiBase()}/strategies/templates/${templateId}/characteristics`, {
     method: 'PUT',
     body: JSON.stringify({ items }),
   }) as Promise<{ ok: boolean }>
 }
 
 export async function createDim(dimType: string, body: Record<string, unknown>): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/dims/${encodeURIComponent(dimType)}`, {
+  return templateConfigFetch(`${apiBase()}/strategies/dims/${encodeURIComponent(dimType)}`, {
     method: 'POST',
     body: JSON.stringify(body),
   }) as Promise<{ ok: boolean }>
@@ -500,20 +500,20 @@ export async function updateDim(
   strategyDimId: number,
   body: Record<string, unknown>
 ): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/dims/by-id/${strategyDimId}`, {
+  return templateConfigFetch(`${apiBase()}/strategies/dims/by-id/${strategyDimId}`, {
     method: 'PUT',
     body: JSON.stringify(body),
   }) as Promise<{ ok: boolean }>
 }
 
 export async function deleteDim(strategyDimId: number): Promise<{ ok: boolean }> {
-  return templateConfigFetch(`${API}/strategies/dims/by-id/${strategyDimId}`, {
+  return templateConfigFetch(`${apiBase()}/strategies/dims/by-id/${strategyDimId}`, {
     method: 'DELETE',
   }) as Promise<{ ok: boolean }>
 }
 
 export async function createStructure(payload: StructurePayload): Promise<{ strategy_structure_id: number }> {
-  const r = await fetch(`${API}/strategies/structures`, {
+  const r = await fetch(`${apiBase()}/strategies/structures`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -524,7 +524,7 @@ export async function createStructure(payload: StructurePayload): Promise<{ stra
 }
 
 export async function updateStructure(id: number, payload: StructurePayload): Promise<{ ok: boolean }> {
-  const r = await fetch(`${API}/strategies/structures/${id}`, {
+  const r = await fetch(`${apiBase()}/strategies/structures/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -535,7 +535,7 @@ export async function updateStructure(id: number, payload: StructurePayload): Pr
 }
 
 export async function deleteStructure(id: number): Promise<void> {
-  const r = await fetch(`${API}/strategies/structures/${id}`, { method: 'DELETE' })
+  const r = await fetch(`${apiBase()}/strategies/structures/${id}`, { method: 'DELETE' })
   if (!r.ok) {
     const j = await r.json().catch(() => ({}))
     throw new Error((j as { detail?: string }).detail || r.statusText)
@@ -558,7 +558,7 @@ export async function fetchStrategyHistory(
   if (params.strategy_structure_id != null)
     search.set('strategy_structure_id', String(params.strategy_structure_id))
   if (params.limit != null) search.set('limit', String(Math.min(500, Math.max(1, params.limit))))
-  const r = await fetch(`${API}/strategies/history?${search}`)
+  const r = await fetch(`${apiBase()}/strategies/history?${search}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
@@ -566,19 +566,19 @@ export async function fetchStrategyHistory(
 export async function fetchOpportunities(activeOnly = true): Promise<{ items: StrategyOpportunity[] }> {
   const params = new URLSearchParams()
   params.set('active_only', String(activeOnly))
-  const r = await fetch(`${API}/strategies/opportunities?${params}`)
+  const r = await fetch(`${apiBase()}/strategies/opportunities?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchOpportunity(id: number): Promise<StrategyOpportunity> {
-  const r = await fetch(`${API}/strategies/opportunities/${id}`)
+  const r = await fetch(`${apiBase()}/strategies/opportunities/${id}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function createOpportunity(payload: OpportunityPayload): Promise<{ strategy_opportunity_id: number }> {
-  const r = await fetch(`${API}/strategies/opportunities`, {
+  const r = await fetch(`${apiBase()}/strategies/opportunities`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -589,7 +589,7 @@ export async function createOpportunity(payload: OpportunityPayload): Promise<{ 
 }
 
 export async function updateOpportunity(id: number, payload: OpportunityPayload): Promise<{ ok: boolean }> {
-  const r = await fetch(`${API}/strategies/opportunities/${id}`, {
+  const r = await fetch(`${apiBase()}/strategies/opportunities/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -602,19 +602,19 @@ export async function updateOpportunity(id: number, payload: OpportunityPayload)
 export async function fetchAllocations(activeOnly = true): Promise<{ items: StrategyAllocation[] }> {
   const params = new URLSearchParams()
   params.set('active_only', String(activeOnly))
-  const r = await fetch(`${API}/strategies/allocations?${params}`)
+  const r = await fetch(`${apiBase()}/strategies/allocations?${params}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchAllocation(id: number): Promise<StrategyAllocation> {
-  const r = await fetch(`${API}/strategies/allocations/${id}`)
+  const r = await fetch(`${apiBase()}/strategies/allocations/${id}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function createAllocation(payload: AllocationPayload): Promise<{ strategy_allocation_id: number }> {
-  const r = await fetch(`${API}/strategies/allocations`, {
+  const r = await fetch(`${apiBase()}/strategies/allocations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -625,7 +625,7 @@ export async function createAllocation(payload: AllocationPayload): Promise<{ st
 }
 
 export async function updateAllocation(id: number, payload: Partial<AllocationPayload>): Promise<{ ok: boolean }> {
-  const r = await fetch(`${API}/strategies/allocations/${id}`, {
+  const r = await fetch(`${apiBase()}/strategies/allocations/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -636,19 +636,19 @@ export async function updateAllocation(id: number, payload: Partial<AllocationPa
 }
 
 export async function fetchGateSafetySets(): Promise<{ items: GateSafetySet[] }> {
-  const r = await fetch(`${API}/strategies/gate-safety`)
+  const r = await fetch(`${apiBase()}/strategies/gate-safety`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function fetchGateSafetyFull(id: number): Promise<GateSafetyFull> {
-  const r = await fetch(`${API}/strategies/gate-safety/${id}`)
+  const r = await fetch(`${apiBase()}/strategies/gate-safety/${id}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
 }
 
 export async function createGateSafety(payload: GateSafetyPayload): Promise<{ gate_safety_strategy_id: number }> {
-  const r = await fetch(`${API}/strategies/gate-safety`, {
+  const r = await fetch(`${apiBase()}/strategies/gate-safety`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -659,7 +659,7 @@ export async function createGateSafety(payload: GateSafetyPayload): Promise<{ ga
 }
 
 export async function updateGateSafety(id: number, payload: GateSafetyPayload): Promise<{ ok: boolean }> {
-  const r = await fetch(`${API}/strategies/gate-safety/${id}`, {
+  const r = await fetch(`${apiBase()}/strategies/gate-safety/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -680,7 +680,7 @@ export async function postActiveStrategy(
     active_strategy_allocation_id?: number | null
   }
 > {
-  const r = await fetch(`${API}/config/active-strategy`, {
+  const r = await fetch(`${apiBase()}/config/active-strategy`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
