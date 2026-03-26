@@ -563,6 +563,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
           setConfirmState(prev => ({ ...prev, confirming: true }))
           setScaleBusy(true)
           try {
+            // Auto-open console for this instance so failures are visible immediately.
+            openConsole(iid)
             const res = await scaleWorker({ action, instance_id: iid })
             setScaleMsg({ text: res.ok ? `Instance ${iid} removed` : (res.error ?? 'Failed'), isErr: !res.ok })
             await loadAll()
@@ -578,6 +580,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     }
     setScaleBusy(true)
     try {
+      // Auto-open console for this instance so failures are visible immediately.
+      openConsole(iid)
       const res = await scaleWorker({ action, instance_id: iid })
       if (res.ok) {
         setScaleMsg({ text: `Instance ${iid} started`, isErr: false })

@@ -103,6 +103,20 @@ class RestrictedExecutor:
     async def _systemctl(
         self, action: str, unit: str, timeout: int = _SYSTEMD_TIMEOUT_SEC,
     ) -> Dict[str, Any]:
+        # Preflight 1: verify sudo is non-interactive for this process user.
+        pre_sudo = await asyncio.create_subprocess_exec(
+            "sudo", "-n", "true",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, pre_sudo_err = await pre_sudo.communicate()
+        if pre_sudo.returncode != 0:
+            raise RuntimeError(
+                "Ops executor requires non-interactive sudo (NOPASSWD). "
+                "Current host returned: "
+                f"{(pre_sudo_err or b'').decode().strip() or 'sudo -n failed'}"
+            )
+
         cmd = ["sudo", "systemctl", action, unit]
         proc = await asyncio.create_subprocess_exec(
             *cmd,

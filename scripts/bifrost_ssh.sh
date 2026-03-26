@@ -33,7 +33,7 @@ SYNC_PROD_CONFIG="${DEPLOY_SYNC_PROD_CONFIG:-0}"
 RESTART_ALL=0
 ACTION=""
 DO_STATUS=0
-# When 1, systemctl targets all five core units (server, celery, engine, massive, docs).
+# When 1, systemctl targets all six auxiliary stack units (server, celery, engine, massive, docs, ops).
 RESTART_ALL_STACK=0
 declare -a RESTART_UNITS=()
 
@@ -160,21 +160,22 @@ REMOTE_FLOWER_LINE_EOF
 _interactive_paint_remote_status_block() {
   local u label line rest
   if [[ -z "${BIFROST_INTERACTIVE_STATUS_RAW:-}" ]]; then
-    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads Server, Engine, Celery, Massive, Docs, Flower from ${DEPLOY_HOST}.)${C_RESET}"
+    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads Server, Engine, Celery, Massive, Docs, Ops, Flower from ${DEPLOY_HOST}.)${C_RESET}"
     return 0
   fi
   echo "${C_BLUE}${C_BOLD}  Units on ${DEPLOY_HOST}${C_RESET} ${C_DIM}· refreshed ${BIFROST_INTERACTIVE_STATUS_AT:-?}${C_RESET}"
   # sudo may prefix stderr merged into capture (2>&1); lines may look like "[sudo] … bifrost-server: RUNNING …"
-  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|celery|massive|docs):|flower:'; then
+  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|celery|massive|docs|ops):|flower:'; then
     echo "${C_YELLOW}  $(echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | head -n 1)${C_RESET}"
   fi
-  for u in bifrost-server bifrost-engine bifrost-celery bifrost-massive bifrost-docs flower; do
+  for u in bifrost-server bifrost-engine bifrost-celery bifrost-massive bifrost-docs bifrost-ops flower; do
     case "$u" in
       bifrost-server) label="Server" ;;
       bifrost-engine) label="Engine" ;;
       bifrost-celery) label="Celery" ;;
       bifrost-massive) label="Massive" ;;
       bifrost-docs) label="Docs" ;;
+      bifrost-ops) label="Ops" ;;
       flower) label="Flower" ;;
       *) label="$u" ;;
     esac
@@ -199,9 +200,9 @@ _interactive_paint_remote_status_block() {
 
 _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} one unit or all ${C_DIM}(1–3 core, 4=all three, 5 Massive, 6 Docs, 7=all five; e.g. ${C_BOLD}73${C_DIM} = full stack+restart)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(1 Server / 2 Engine / 3 Celery / 4 all three / 5 Massive / 6 Docs / 7 all five; ${C_BOLD}R${C_DIM} = restart after deploy)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}Server + Engine + Celery + Massive + Docs + Flower (summary above)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} one unit or all ${C_DIM}(1–3 core, 4=all three, 5 Massive, 6 Docs, 7 Ops, 8=all six; e.g. ${C_BOLD}83${C_DIM} = full stack+restart)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(1 Server / 2 Engine / 3 Celery / 4 all three / 5 Massive / 6 Docs / 7 Ops / 8 all six; ${C_BOLD}R${C_DIM} = restart after deploy)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}Server + Engine + Celery + Massive + Docs + Ops + Flower (summary above)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} Clear stored sudo password"
   echo "  ${C_GREEN}${C_BOLD}6)${C_RESET} ${C_BOLD}DB: Refresh schema${C_RESET} ${C_DIM}(choose Dev=local --dev or Prod=remote --prod; pg_ddl / script changes — stays in this menu)${C_RESET}"
@@ -257,7 +258,7 @@ Usage (from repo root):
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
       sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (5) Clear.
       Main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
-      Menu (3) Status refreshes systemd units (server, engine, celery, massive, docs) and Flower (run_flower.py) on the host.
+      Menu (3) Status refreshes systemd units (server, engine, celery, massive, docs, ops) and Flower (run_flower.py) on the host.
       Menu (8) Flower: start, stop, restart, or status on the host (non-systemd background process).
       Menu (9) Install systemd: copy deploy/systemd/*.service into /etc/systemd/system and daemon-reload (sudo).
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
@@ -273,8 +274,9 @@ Usage (from repo root):
     --celery | -celery          systemd unit bifrost-celery
     --massive | -massive        systemd unit bifrost-massive (Massive API, run_server_massive.py)
     --docs | -docs              systemd unit bifrost-docs (merged OpenAPI docs, run_server_docs.py)
+    --ops | -ops                systemd unit bifrost-ops (Ops API, run_server_ops.py)
     --all | -all                all three core units (server, celery, engine)
-    --all-stack | -all-stack    all five units (server, celery, engine, massive, docs)
+    --all-stack | -all-stack    all six units (server, celery, engine, massive, docs, ops)
 
     --stop | -stop              sudo systemctl stop …
     --start | -start            sudo systemctl start …
@@ -306,7 +308,7 @@ Usage (from repo root):
 
     --install-systemd-units       remote: sudo cp deploy/systemd/*.service (under DEPLOY_PATH on host) to
                                   /etc/systemd/system/ and systemctl daemon-reload. One-shot; no other flags.
-                                  Run after rsync so unit files exist; then e.g. systemctl enable --now bifrost-massive.service.
+                                  Run after rsync so unit files exist; then e.g. systemctl enable --now bifrost-massive.service (and ops/docs as needed).
 
     --password VALUE | -p VALUE | --password=VALUE
                                 remote sudo password for sudo -S (interactive: skip password prompt;
@@ -331,6 +333,7 @@ Examples:
   ./scripts/bifrost_ssh.sh --all --restart -deploy
   ./scripts/bifrost_ssh.sh --all-stack --restart -deploy
   ./scripts/bifrost_ssh.sh -massive -restart -deploy
+  ./scripts/bifrost_ssh.sh -ops -restart -deploy
   ./scripts/bifrost_ssh.sh --all --status
   ./scripts/bifrost_ssh.sh -server -engine --status
 
@@ -511,6 +514,62 @@ _bifrost_restore_session_sudo() {
   fi
 }
 
+# After rsync: daemon-reload (clears "unit file changed on disk" warnings) and register any
+# *.service under deploy/systemd/ that systemd does not load yet (e.g. new bifrost-ops.service).
+_bifrost_remote_post_deploy_systemd() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local _qpath _body _q _ec
+  _qpath=$(printf '%q' "${DEPLOY_PATH}")
+  _bifrost_restore_session_sudo
+  _body=$(cat <<'POST_DEPLOY_SYSTEMD_EOF'
+set -euo pipefail
+shopt -s nullglob
+SRC="${DEPLOY_PATH}/deploy/systemd"
+if [[ ! -d "${SRC}" ]]; then
+  echo "WARN: ${SRC} missing; skip systemd sync."
+  exit 0
+fi
+systemctl daemon-reload
+for f in "${SRC}"/*.service; do
+  [[ -f "$f" ]] || continue
+  bn=$(basename "$f")
+  _load=$(systemctl show "${bn}" -p LoadState --value 2>/dev/null || true)
+  if [[ "${_load}" == "not-found" ]] || [[ -z "${_load}" ]]; then
+    echo "Registering unit ${bn} (not loaded yet) ..."
+    if systemctl enable "$f" 2>/dev/null; then
+      echo "  systemctl enable $f"
+    elif cp -f "$f" "/etc/systemd/system/${bn}"; then
+      echo "  cp -> /etc/systemd/system/${bn}"
+    else
+      echo "ERROR: could not register ${f}" >&2
+      exit 1
+    fi
+  fi
+done
+systemctl daemon-reload
+echo "systemd: daemon-reload done; units under ${SRC} are known to systemd."
+POST_DEPLOY_SYSTEMD_EOF
+)
+  _q=$(printf '%q' "${_body}")
+  _ec=0
+  if [[ -n "${SUDO_PASSWORD}" ]]; then
+    printf '%s\n' "${SUDO_PASSWORD}" | ssh_remote_stdin_pipe "${REMOTE}" "sudo -S -p '' env DEPLOY_PATH=${_qpath} bash -c ${_q}"
+    _ec=$?
+  elif [[ -r /dev/tty ]]; then
+    ssh_remote -tt "${REMOTE}" "sudo env DEPLOY_PATH=${_qpath} bash -c ${_q}" </dev/tty
+    _ec=$?
+  else
+    set +e
+    ssh_remote "${REMOTE}" "sudo -n env DEPLOY_PATH=${_qpath} bash -c ${_q}"
+    _ec=$?
+    set -e
+    if [[ ${_ec} -ne 0 ]]; then
+      _msg_err "post-deploy systemd sync failed (sudo). Run: ./scripts/bifrost_ssh.sh --install-systemd-units"
+    fi
+  fi
+  return "${_ec}"
+}
+
 _run_pipeline() {
   _bifrost_restore_session_sudo
   # Uses globals: DO_DEPLOY, DO_DEPLOY_ONLY, DO_MIGRATE, SYNC_PROD_CONFIG, ACTION, RESTART_UNITS, RESTART_ALL
@@ -520,7 +579,7 @@ _run_pipeline() {
   local DO_SYSTEMCTL=0
 
   if [[ "${RESTART_ALL_STACK}" == "1" ]]; then
-    RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs)
+    RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs bifrost-ops)
   elif [[ "${RESTART_ALL}" == "1" ]]; then
     RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine)
   fi
@@ -618,6 +677,7 @@ if [[ "${DO_MIGRATE}" == "1" ]]; then
 fi
 echo "Remote install/build finished."
 REMOTE_EOF
+      _bifrost_remote_post_deploy_systemd
     else
       echo "Skipping rsync / remote build."
     fi
@@ -680,12 +740,13 @@ _interactive_quick_deploy() {
   local _raw _norm _digit _want_r
   echo ""
   echo "${C_BLUE}${C_BOLD}--- Quick: Deploy ---${C_RESET}"
-  _msg_info "Remote: rsync + venv pip + npm build. Append R to restart after deploy."
-  echo "  ${C_GREEN}1${C_RESET} server  ${C_GREEN}2${C_RESET} engine  ${C_GREEN}3${C_RESET} celery  ${C_GREEN}4${C_RESET} all three  ${C_GREEN}5${C_RESET} massive  ${C_GREEN}6${C_RESET} docs  ${C_GREEN}7${C_RESET} all five"
-  echo "  Examples: ${C_DIM}4${C_RESET} = deploy only · ${C_DIM}2R${C_RESET} = deploy + restart engine · ${C_DIM}7R${C_RESET} = deploy + restart full stack"
+  _msg_info "Remote: rsync + venv pip + npm build (includes React SPA / Dashboard). Append R to restart systemd units after deploy."
+  echo "  ${C_GREEN}1${C_RESET} server  ${C_GREEN}2${C_RESET} engine  ${C_GREEN}3${C_RESET} celery  ${C_GREEN}4${C_RESET} all three  ${C_GREEN}5${C_RESET} massive  ${C_GREEN}6${C_RESET} docs  ${C_GREEN}7${C_RESET} ops  ${C_GREEN}8${C_RESET} all six"
+  echo "  Examples: ${C_DIM}4${C_RESET} = sync+build only · ${C_DIM}4R${C_RESET} = +restart server+celery+engine · ${C_DIM}1R${C_RESET} = +restart ${C_BOLD}bifrost-server${C_RESET} only · ${C_DIM}8R${C_RESET} = +restart full stack (six)"
+  echo "  ${C_DIM}Tip: Dashboard SPA is in frontend/dist; bifrost-server mounts /assets at process start — use 1R or 4R after UI changes if you did not append R.${C_RESET}"
   echo "  ${C_DIM}0 = cancel${C_RESET}"
   while true; do
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-7, optional R]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-8, optional R]${C_RESET} "
     read -r _raw
     _raw=$(echo "${_raw}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [[ -z "${_raw}" || "${_raw}" == "0" ]]; then
@@ -693,8 +754,8 @@ _interactive_quick_deploy() {
       return 0
     fi
     _norm=$(echo "${_raw}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
-    if [[ ! "${_norm}" =~ ^([1-7])(r)?$ ]]; then
-      _msg_warn "Invalid — enter 1–7, optionally with R (e.g. 2R, 7R). Or 0 to cancel."
+    if [[ ! "${_norm}" =~ ^([1-8])(r)?$ ]]; then
+      _msg_warn "Invalid — enter 1–8, optionally with R (e.g. 2R, 8R). Or 0 to cancel."
       continue
     fi
     _digit="${BASH_REMATCH[1]}"
@@ -710,7 +771,8 @@ _interactive_quick_deploy() {
         4) RESTART_ALL=1 ;;
         5) _restart_add_unit bifrost-massive ;;
         6) _restart_add_unit bifrost-docs ;;
-        7) RESTART_ALL_STACK=1 ;;
+        7) _restart_add_unit bifrost-ops ;;
+        8) RESTART_ALL_STACK=1 ;;
       esac
       echo "${C_CYAN}→ deploy + sudo systemctl restart …${C_RESET}"
     else
@@ -763,10 +825,10 @@ _interactive_pick_db_env() {
 _interactive_show_status() {
   local _raw _flower _ec_sys _fec _ec
   _bifrost_restore_session_sudo
-  _msg_info "Fetching status (Server, Engine, Celery, Massive, Docs, Flower) on ${DEPLOY_HOST} …"
+  _msg_info "Fetching status (Server, Engine, Celery, Massive, Docs, Ops, Flower) on ${DEPLOY_HOST} …"
   echo ""
   set +e
-  _raw="$(_bifrost_remote_print_unit_status "bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs" 2>&1)"
+  _raw="$(_bifrost_remote_print_unit_status "bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs bifrost-ops" 2>&1)"
   _ec_sys=$?
   _flower="$(_bifrost_remote_print_flower_status 2>&1)"
   _fec=$?
@@ -1123,7 +1185,7 @@ if [[ -z "${_load}" ]] || [[ "${_load}" == "not-found" ]]; then
   systemctl status bifrost-massive.service --no-pager -l 2>&1 || true
   exit 1
 fi
-echo "OK: bifrost-massive.service LoadState=${_load}. Next: sudo systemctl enable --now bifrost-massive.service (and docs if needed)."
+echo "OK: bifrost-massive.service LoadState=${_load}. Next: sudo systemctl enable --now bifrost-massive.service (and docs/ops if needed)."
 REMOTE_INSTALL_BODY
 )
   _remote_install_q=$(printf '%q' "${_remote_install_body}")
@@ -1240,7 +1302,8 @@ _interactive_map_unit_token() {
     4|all|a|all-three|all3|core) echo ALL ;;
     5|massive|m|bifrost-massive) echo bifrost-massive ;;
     6|docs|doc|bifrost-docs) echo bifrost-docs ;;
-    7|all-stack|full|everything|all5) echo ALL_STACK ;;
+    7|ops|o|bifrost-ops) echo bifrost-ops ;;
+    8|all-stack|full|everything|all6) echo ALL_STACK ;;
     *) echo "" ;;
   esac
 }
@@ -1255,15 +1318,15 @@ _interactive_map_action_token() {
   esac
 }
 
-# Interactive: systemctl on one bifrost-* unit or all (same action) — "<unit> <action>" or digit shorthand (unit 1–7, action 1–3).
+# Interactive: systemctl on one bifrost-* unit or all (same action) — "<unit> <action>" or digit shorthand (unit 1–8, action 1–3).
 _interactive_systemctl_one_service() {
   local _unit _act _t1 _t2 _u _a
   echo ""
   echo "${C_BLUE}${C_BOLD}--- systemctl (one unit or all) ---${C_RESET}"
   _msg_info "Enter unit + action on one line (examples below)."
-  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1${C_RESET} server  ${C_DIM}2${C_RESET} engine  ${C_DIM}3${C_RESET} celery  ${C_DIM}4${C_RESET} all three  ${C_DIM}5${C_RESET} massive  ${C_DIM}6${C_RESET} docs  ${C_DIM}7${C_RESET} all-stack (five)"
+  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1${C_RESET} server  ${C_DIM}2${C_RESET} engine  ${C_DIM}3${C_RESET} celery  ${C_DIM}4${C_RESET} all three  ${C_DIM}5${C_RESET} massive  ${C_DIM}6${C_RESET} docs  ${C_DIM}7${C_RESET} ops  ${C_DIM}8${C_RESET} all-stack (six)"
   echo "  ${C_GREEN}Action:${C_RESET} ${C_DIM}1${C_RESET}=start ${C_DIM}2${C_RESET}=stop ${C_DIM}3${C_RESET}=restart"
-  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_DIM}unit ${C_BOLD}1–7${C_DIM} + action ${C_BOLD}1–3${C_RESET} (e.g. ${C_BOLD}23${C_RESET} engine+restart · ${C_BOLD}43${C_RESET} three+restart · ${C_BOLD}73${C_RESET} full stack+restart)"
+  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_DIM}unit ${C_BOLD}1–8${C_DIM} + action ${C_BOLD}1–3${C_RESET} (e.g. ${C_BOLD}23${C_RESET} engine+restart · ${C_BOLD}43${C_RESET} three+restart · ${C_BOLD}83${C_RESET} full stack+restart)"
   echo "  ${C_DIM}0 or empty = cancel${C_RESET}"
   while true; do
     echo -n "${C_GREEN}${C_BOLD}>${C_RESET} "
@@ -1274,22 +1337,22 @@ _interactive_systemctl_one_service() {
       return 0
     fi
 
-    # Shorthand: first digit = unit 1–7 (4=three, 7=all-stack), second = action 1–3
+    # Shorthand: first digit = unit 1–8 (4=three, 8=all-stack), second = action 1–3
     _digits=$(echo "${_line}" | tr -cd '0-9')
     if [[ ${#_digits} -ge 2 ]]; then
       _d1="${_digits:0:1}"
       _d2="${_digits:1:1}"
-      if [[ "${_d1}" == [1234567] && "${_d2}" == [123] ]]; then
+      if [[ "${_d1}" == [12345678] && "${_d2}" == [123] ]]; then
         _u="$(_interactive_map_unit_token "${_d1}")"
         _a="$(_interactive_map_action_token "${_d2}")"
         if [[ -z "${_u}" || -z "${_a}" ]]; then
-          _msg_warn "Invalid shorthand — use unit 1–7 and action 1–3 (e.g. 43, 73). Or 0 to cancel."
+          _msg_warn "Invalid shorthand — use unit 1–8 and action 1–3 (e.g. 43, 83). Or 0 to cancel."
           continue
         fi
         if [[ "${_u}" == "ALL" ]]; then
           echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server bifrost-celery bifrost-engine${C_RESET}"
         elif [[ "${_u}" == "ALL_STACK" ]]; then
-          echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs${C_RESET}"
+          echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs bifrost-ops${C_RESET}"
         else
           echo "${C_CYAN}→ sudo systemctl ${_a} ${_u}${C_RESET}"
         fi
@@ -1309,7 +1372,7 @@ _interactive_systemctl_one_service() {
 
     set -- ${_line}
     if [[ $# -lt 2 ]]; then
-      _msg_warn "Invalid input — use two words (engine restart, all-stack restart) or digit shorthand (23, 73). Try again, or 0 to cancel."
+      _msg_warn "Invalid input — use two words (engine restart, all-stack restart) or digit shorthand (23, 83). Try again, or 0 to cancel."
       continue
     fi
     _t1="$1"
@@ -1326,14 +1389,14 @@ _interactive_systemctl_one_service() {
         _unit="${_u}"
         _act="${_a}"
       else
-        _msg_warn "Could not parse. Try engine restart, all-stack restart, 2 3, or 73. Or 0 to cancel."
+        _msg_warn "Could not parse. Try engine restart, all-stack restart, 2 3, or 83. Or 0 to cancel."
         continue
       fi
     fi
     if [[ "${_unit}" == "ALL" ]]; then
       echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server bifrost-celery bifrost-engine${C_RESET}"
     elif [[ "${_unit}" == "ALL_STACK" ]]; then
-      echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs${C_RESET}"
+      echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs bifrost-ops${C_RESET}"
     else
       echo "${C_CYAN}→ sudo systemctl ${_act} ${_unit}${C_RESET}"
     fi
@@ -1518,6 +1581,7 @@ while [[ $# -gt 0 ]]; do
     --celery|-celery) _restart_add_unit bifrost-celery ;;
     --massive|-massive) _restart_add_unit bifrost-massive ;;
     --docs|-docs) _restart_add_unit bifrost-docs ;;
+    --ops|-ops) _restart_add_unit bifrost-ops ;;
     --all|-all) RESTART_ALL=1 ;;
     --all-stack|-all-stack) RESTART_ALL_STACK=1 ;;
     --stop|-stop) _set_action stop ;;
@@ -1638,22 +1702,22 @@ if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
   fi
   if [[ "${RESTART_ALL}" == "1" ]] || [[ "${RESTART_ALL_STACK}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]]; then
     if [[ "${DO_STATUS}" != "1" ]]; then
-      usage_error "--deploy-only cannot be combined with service flags (--server, --engine, --celery, --massive, --docs, --all, --all-stack) unless --status is also set."
+      usage_error "--deploy-only cannot be combined with service flags (--server, --engine, --celery, --massive, --docs, --ops, --all, --all-stack) unless --status is also set."
     fi
   fi
   if [[ "${DO_STATUS}" == "1" ]]; then
     if [[ "${RESTART_ALL}" != "1" ]] && [[ "${RESTART_ALL_STACK}" != "1" ]] && [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
-      usage_error "--deploy-only --status requires a service flag (--server, --engine, --celery, --massive, --docs, --all, or --all-stack)."
+      usage_error "--deploy-only --status requires a service flag (--server, --engine, --celery, --massive, --docs, --ops, --all, or --all-stack)."
     fi
   fi
 fi
 
 if [[ "${RESTART_ALL}" == "1" ]] && [[ "${RESTART_ALL_STACK}" == "1" ]]; then
-  usage_error "use either --all (three core units) or --all-stack (five units), not both."
+  usage_error "use either --all (three core units) or --all-stack (six units), not both."
 fi
 
 if [[ "${RESTART_ALL_STACK}" == "1" ]]; then
-  RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs)
+  RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs bifrost-ops)
 elif [[ "${RESTART_ALL}" == "1" ]]; then
   RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine)
 fi
@@ -1667,7 +1731,7 @@ if [[ "${DO_DEPLOY_ONLY}" != "1" ]]; then
   fi
   if [[ -n "${ACTION}" || "${DO_STATUS}" == "1" ]]; then
     if [[ "${RESTART_ALL}" != "1" ]] && [[ "${RESTART_ALL_STACK}" != "1" ]] && [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
-      usage_error "missing service: specify at least one of --server, --engine, --celery, --massive, --docs, --all, or --all-stack."
+      usage_error "missing service: specify at least one of --server, --engine, --celery, --massive, --docs, --ops, --all, or --all-stack."
     fi
   fi
 fi
