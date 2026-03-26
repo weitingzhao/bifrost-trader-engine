@@ -105,8 +105,9 @@ class QueueControlRequest(BaseModel):
 
 class ScaleRequest(BaseModel):
     action: ScaleAction
-    instance_id: str
-    queues: List[str] = Field(default_factory=lambda: ["celery"])
+    instance_id: Optional[str] = None
+    worker_type: Optional[str] = None
+    queues: List[str] = Field(default_factory=list)
 
 
 class BrokerControlRequest(BaseModel):

@@ -13,6 +13,7 @@ import {
   updateWorkerQueues,
   scaleWorker,
   fetchWorkerInstances,
+  fetchWorkerProfiles,
   fetchBrokerStatusExtended,
   controlBroker,
   workerConsoleUrl,
@@ -27,6 +28,7 @@ import {
   type ExtendedBrokerStatus,
   type BrokerAction,
   type OpsCapabilities,
+  type WorkerProfileInfo,
 } from '../api/ops'
 
 export interface DashboardPageProps {
@@ -236,7 +238,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
 
   // Worker scaling
   const [instances, setInstances] = useState<SystemdInstance[]>([])
-  const [scaleInstanceId, setScaleInstanceId] = useState('')
+  const [workerProfiles, setWorkerProfiles] = useState<WorkerProfileInfo[]>([])
+  const [scaleWorkerType, setScaleWorkerType] = useState('')
   const [scaleBusy, setScaleBusy] = useState(false)
   const [scaleMsg, setScaleMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
 
@@ -270,11 +273,12 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
 
   const loadAll = useCallback(async () => {
     try {
-      const [wRes, cRes, iRes, bRes] = await Promise.all([
+      const [wRes, cRes, iRes, bRes, pRes] = await Promise.all([
         fetchOpsWorkers(),
         fetchOpsCommands(30),
         fetchWorkerInstances().catch(() => ({ ok: false, instances: [] as SystemdInstance[], count: 0 })),
         fetchBrokerStatusExtended().catch(() => null),
+        fetchWorkerProfiles().catch(() => ({ ok: false, profiles: [] as WorkerProfileInfo[], count: 0 })),
       ])
       if (wRes.ok) {
         setWorkers(wRes.workers)
@@ -286,6 +290,10 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
       if (cRes.ok) setCommands(cRes.commands)
       if (iRes.ok) setInstances(iRes.instances)
       if (bRes?.ok) setExtBroker(bRes.broker)
+      if (pRes.ok && pRes.profiles.length > 0) {
+        setWorkerProfiles(pRes.profiles)
+        setScaleWorkerType(prev => prev || pRes.profiles[0].key)
+      }
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load dashboard data')
@@ -547,45 +555,42 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   }
 
   // ── Scaling handlers ──────────────────────────────────────────────────
-  const onScale = async (action: 'add' | 'remove', instanceId?: string) => {
-    const iid = instanceId ?? scaleInstanceId.trim()
-    if (!iid) {
-      setScaleMsg({ text: 'Provide an instance ID', isErr: true })
-      return
-    }
-    if (action === 'remove') {
-      setConfirmState({
-        open: true,
-        title: `Remove worker instance ${iid}?`,
-        message: `This will stop bifrost-celery-worker@${iid}.service via systemd.`,
-        confirming: false,
-        action: async () => {
-          setConfirmState(prev => ({ ...prev, confirming: true }))
-          setScaleBusy(true)
-          try {
-            // Auto-open console for this instance so failures are visible immediately.
-            openConsole(iid)
-            const res = await scaleWorker({ action, instance_id: iid })
-            setScaleMsg({ text: res.ok ? `Instance ${iid} removed` : (res.error ?? 'Failed'), isErr: !res.ok })
-            await loadAll()
-          } catch (e) {
-            setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
-          } finally {
-            setScaleBusy(false)
-            setConfirmState(INITIAL_CONFIRM)
-          }
-        },
-      })
+  const onScaleRemove = async (instanceId: string) => {
+    setConfirmState({
+      open: true,
+      title: `Remove worker instance ${instanceId}?`,
+      message: `This will stop bifrost-celery-worker@${instanceId}.service via systemd.`,
+      confirming: false,
+      action: async () => {
+        setConfirmState(prev => ({ ...prev, confirming: true }))
+        setScaleBusy(true)
+        try {
+          openConsole(instanceId)
+          const res = await scaleWorker({ action: 'remove', instance_id: instanceId })
+          setScaleMsg({ text: res.ok ? `Instance ${instanceId} removed` : (res.error ?? 'Failed'), isErr: !res.ok })
+          await loadAll()
+        } catch (e) {
+          setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
+        } finally {
+          setScaleBusy(false)
+          setConfirmState(INITIAL_CONFIRM)
+        }
+      },
+    })
+  }
+
+  const onScaleAdd = async () => {
+    if (!scaleWorkerType) {
+      setScaleMsg({ text: 'Select a worker type', isErr: true })
       return
     }
     setScaleBusy(true)
     try {
-      // Auto-open console for this instance so failures are visible immediately.
-      openConsole(iid)
-      const res = await scaleWorker({ action, instance_id: iid })
+      const res = await scaleWorker({ action: 'add', worker_type: scaleWorkerType })
       if (res.ok) {
-        setScaleMsg({ text: `Instance ${iid} started`, isErr: false })
-        setScaleInstanceId('')
+        const iid = res.instance_id ?? res.unit ?? scaleWorkerType
+        openConsole(iid)
+        setScaleMsg({ text: `Instance ${iid} started (${scaleWorkerType})`, isErr: false })
         await loadAll()
       } else {
         setScaleMsg({ text: res.error ?? 'Failed', isErr: true })
@@ -1117,7 +1122,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
           <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
             <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
               Worker Instances
-              <InfoTooltip text="Manage systemd template instances (bifrost-celery-worker@<id>.service). Add to scale up, remove to scale down." />
+              <InfoTooltip text="Select a worker type and click Add — the system assigns a unique instance ID automatically." />
             </h3>
             {scaleMsg.text && (
               <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
@@ -1134,7 +1139,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                       className="dashboard-svc-stop-btn"
                       onClick={() => {
                         const match = inst.unit.match(/@([^.]+)\.service/)
-                        if (match) onScale('remove', match[1])
+                        if (match) onScaleRemove(match[1])
                       }}
                       disabled={scaleBusy || !canOperate}
                       title={canOperate ? `Stop and remove ${inst.unit}` : 'Requires operator role'}
@@ -1146,21 +1151,24 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               </div>
             )}
             <div className="dashboard-scale-add-row">
-              <input
-                type="text"
+              <select
                 className="dashboard-ctrl-input"
-                placeholder="Instance ID (e.g. 3, worker-gpu)…"
-                value={scaleInstanceId}
-                onChange={e => setScaleInstanceId(e.target.value)}
-                disabled={scaleBusy}
-                onKeyDown={e => { if (e.key === 'Enter') onScale('add') }}
-                maxLength={50}
-              />
+                value={scaleWorkerType}
+                onChange={e => setScaleWorkerType(e.target.value)}
+                disabled={scaleBusy || workerProfiles.length === 0}
+              >
+                {workerProfiles.length === 0 && <option value="">No profiles</option>}
+                {workerProfiles.map(p => (
+                  <option key={p.key} value={p.key}>
+                    {p.label} ({p.queues.join(', ')})
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 className="btn-resume dashboard-btn dashboard-btn--start"
-                onClick={() => onScale('add')}
-                disabled={scaleBusy || !scaleInstanceId.trim() || !canOperate}
+                onClick={onScaleAdd}
+                disabled={scaleBusy || !scaleWorkerType || !canOperate}
               >
                 {scaleBusy ? 'Working…' : 'Add Instance'}
               </button>

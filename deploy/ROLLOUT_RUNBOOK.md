@@ -56,7 +56,7 @@ Config: `config.dev.yaml` ships with `executor_mode: local` and `default_role: a
    ```yaml
    ops:
      executor_mode: "agent"
-     agent_socket: "/var/run/bifrost-agent.sock"
+     agent_socket: "/run/bifrost-agent/bifrost-agent.sock"
    ```
 
 6. Restart Ops API. Verify `/ops/health` shows `executor_mode: agent`.
@@ -121,7 +121,7 @@ journalctl -u bifrost-agent -n 50 --no-pager
 
 Check socket permissions:
 ```bash
-ls -la /var/run/bifrost-agent.sock
+ls -la /run/bifrost-agent/bifrost-agent.sock
 # Expected: srw-rw---- bifrost-agent bifrost-agent
 ```
 
@@ -151,7 +151,7 @@ If tokens are misconfigured and operators are locked out:
 ```yaml
 ops:
   executor_mode: "local"   # "local" = direct sudo, "agent" = UDS agent
-  agent_socket: "/var/run/bifrost-agent.sock"
+  agent_socket: "/run/bifrost-agent/bifrost-agent.sock"
   auth:
     default_role: "viewer"  # unauthenticated users get this role
     allow_unauthenticated_reads: true

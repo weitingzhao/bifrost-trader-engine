@@ -7,22 +7,23 @@ Documentation=https://github.com/your-org/bifrost-trader-engine
 Type=simple
 User=bifrost-agent
 Group=bifrost-agent
-ExecStart=/usr/bin/python3 -m backend.ops.agent.server --socket /var/run/bifrost-agent.sock --log-level INFO
-WorkingDirectory=/opt/bifrost
+# Same tree as bifrost-server.service; requires chmod o+x /home/vision so bifrost-agent can traverse.
+WorkingDirectory=/home/vision/bifrost-trader-engine
+# Socket under RuntimeDirectory — bind() in /run/ root fails with ProtectSystem=strict on some hosts.
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python -m backend.ops.agent.server --socket /run/bifrost-agent/bifrost-agent.sock --log-level INFO
 RuntimeDirectory=bifrost-agent
 Restart=on-failure
 RestartSec=5
 
-# Security hardening
+# Security hardening (ProtectHome=false: agent must read project under /home; alternative: deploy copy under /opt/bifrost + ProtectHome=true)
 NoNewPrivileges=false
 ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/run
+ProtectHome=false
+ReadWritePaths=/home/vision/bifrost-trader-engine
 PrivateTmp=true
 
-# Socket permissions: group-writable so Ops API user (in bifrost-agent group) can connect
-ExecStartPost=/bin/chmod 0660 /var/run/bifrost-agent.sock
-ExecStartPost=/bin/chgrp bifrost-agent /var/run/bifrost-agent.sock
+# Socket mode 0660 is set in backend.ops.agent.server after bind (no ExecStartPost: it races
+# Type=simple startup and fails before the socket exists, masking real Python/import errors).
 
 [Install]
 WantedBy=multi-user.target

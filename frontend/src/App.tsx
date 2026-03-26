@@ -279,6 +279,29 @@ export default function App() {
     return () => window.removeEventListener('hashchange', syncFromHash)
   }, [])
 
+  /** Deep links / bookmarks: #settings-dashboard, #settings-api-ops, etc. must switch to Settings tab.
+   * Without this, initial load stays on Live and SettingsPage never mounts (prod bookmarks looked "broken"). */
+  useEffect(() => {
+    const syncSettingsTabFromHash = () => {
+      const raw = window.location.hash
+      const h = raw.startsWith('#') ? raw.slice(1) : raw
+      if (!h) return
+      const impliesSettings =
+        h.startsWith('settings-') ||
+        h.startsWith('feed-') ||
+        h.startsWith('coverage-') ||
+        h.startsWith('ib-') ||
+        h === 'flex-preference' ||
+        h === 'settings-ib-connection' ||
+        h === FEED_MASSIVE_DAILY_DATA_ID ||
+        isMassiveOptionFeedHash(raw.startsWith('#') ? raw : `#${raw}`)
+      if (impliesSettings) setActiveTab('settings')
+    }
+    syncSettingsTabFromHash()
+    window.addEventListener('hashchange', syncSettingsTabFromHash)
+    return () => window.removeEventListener('hashchange', syncSettingsTabFromHash)
+  }, [])
+
   useEffect(() => {
     if (!headerMenuOpen) return
     const onDocClick = (e: MouseEvent) => {

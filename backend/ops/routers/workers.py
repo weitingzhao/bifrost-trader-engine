@@ -127,68 +127,108 @@ def list_workers(request: Request) -> Dict[str, Any]:
 # ── Scale / instances (static paths — must precede {worker_id:path}) ───────────
 
 
+@router.get("/ops/workers/profiles")
+def list_worker_profiles(request: Request) -> Dict[str, Any]:
+    """Return available worker profiles for the Add Instance dropdown."""
+    registry = getattr(request.app.state, "worker_profile_registry", None)
+    if registry is None:
+        return {"ok": True, "profiles": [], "count": 0}
+    profiles = registry.list_profiles()
+    return {"ok": True, "profiles": profiles, "count": len(profiles)}
+
+
 @router.post("/ops/workers/scale")
 async def scale_worker(
     request: Request, body: ScaleRequest = Body(...),
 ) -> Any:
-    """Add or remove a systemd template-instance worker."""
+    """Add or remove a systemd template-instance worker.
+
+    **add**: requires ``worker_type`` (profile key); backend allocates instance_id.
+    **remove**: requires ``instance_id``.
+    """
     denied = _require_role(request, "operator")
     if denied:
-        _audit(
-            request,
-            f"scale_{body.action.value}",
-            f"instance:{body.instance_id}",
-            "denied",
-            detail=f"role={_role(request)}",
-        )
+        target = body.instance_id or body.worker_type or "?"
+        _audit(request, f"scale_{body.action.value}", f"instance:{target}", "denied",
+               detail=f"role={_role(request)}")
         return denied
 
     exc = _executor(request)
+
+    if body.action.value == "add":
+        # Typed scaling: allocate instance_id from profile
+        if not body.worker_type:
+            return JSONResponse(status_code=400,
+                                content={"ok": False, "error": "worker_type is required for add."})
+
+        registry = getattr(request.app.state, "worker_profile_registry", None)
+        if registry is None or registry.get(body.worker_type) is None:
+            return JSONResponse(status_code=400,
+                                content={"ok": False,
+                                         "error": f"Unknown worker_type {body.worker_type!r}."})
+
+        from backend.ops.worker_profiles import allocate_instance_id
+
+        broker_url = getattr(request.app.state, "broker_url", "")
+        try:
+            existing = await exc.list_instances()
+            existing_units = [i.get("unit", "") for i in existing]
+        except Exception:
+            existing_units = []
+
+        try:
+            instance_id = allocate_instance_id(body.worker_type, broker_url, existing_units)
+        except Exception as e:
+            return JSONResponse(status_code=500,
+                                content={"ok": False, "error": f"ID allocation failed: {e}"})
+
+        try:
+            unit = exc.instance_unit(instance_id)
+        except ValueError as e:
+            return JSONResponse(status_code=400, content={"ok": False, "error": str(e)})
+
+        try:
+            exc._validate("start", unit)
+            result = await exc._systemctl("start", unit)
+        except PermissionError as e:
+            _audit(request, "scale_add", unit, "rejected", detail=str(e))
+            return JSONResponse(status_code=403, content={"ok": False, "error": str(e)})
+        except Exception as e:
+            _audit(request, "scale_add", unit, "failed", detail=str(e))
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+        profile = registry.get(body.worker_type)
+        _audit(request, "scale_add", unit, "success",
+               detail=f"worker_type={body.worker_type}, queues={profile.queues if profile else []}")
+        return {
+            "ok": True, "action": "add", "unit": unit,
+            "instance_id": instance_id, "worker_type": body.worker_type,
+            "result": result,
+        }
+
+    # ── remove ────────────────────────────────────────────────────────────
+    if not body.instance_id:
+        return JSONResponse(status_code=400,
+                            content={"ok": False, "error": "instance_id is required for remove."})
+
     try:
         unit = exc.instance_unit(body.instance_id)
     except ValueError as e:
-        return JSONResponse(
-            status_code=400,
-            content={"ok": False, "error": str(e)},
-        )
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(e)})
 
-    action = "start" if body.action.value == "add" else "stop"
     try:
-        exc._validate(action, unit)
-        result = await exc._systemctl(action, unit)
+        exc._validate("stop", unit)
+        result = await exc._systemctl("stop", unit)
     except PermissionError as e:
-        _audit(
-            request,
-            f"scale_{body.action.value}",
-            unit,
-            "rejected",
-            detail=str(e),
-        )
-        return JSONResponse(
-            status_code=403,
-            content={"ok": False, "error": str(e)},
-        )
+        _audit(request, "scale_remove", unit, "rejected", detail=str(e))
+        return JSONResponse(status_code=403, content={"ok": False, "error": str(e)})
     except Exception as e:
-        _audit(
-            request,
-            f"scale_{body.action.value}",
-            unit,
-            "failed",
-            detail=str(e),
-        )
-        return JSONResponse(
-            status_code=500,
-            content={"ok": False, "error": str(e)},
-        )
+        _audit(request, "scale_remove", unit, "failed", detail=str(e))
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
-    _audit(
-        request,
-        f"scale_{body.action.value}",
-        unit,
-        "success",
-        detail=f"queues={body.queues}",
-    )
-    return {"ok": True, "action": body.action.value, "unit": unit, "result": result}
+    _audit(request, "scale_remove", unit, "success")
+    return {"ok": True, "action": "remove", "unit": unit, "instance_id": body.instance_id,
+            "result": result}
 
 
 @router.get("/ops/workers/instances")

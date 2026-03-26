@@ -10,7 +10,7 @@ from backend.ops.agent.protocol import AgentRequest, AgentResponse
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SOCKET = "/var/run/bifrost-agent.sock"
+DEFAULT_SOCKET = "/run/bifrost-agent/bifrost-agent.sock"
 _CONNECT_TIMEOUT = 5
 _READ_TIMEOUT = 35
 

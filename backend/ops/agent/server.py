@@ -4,7 +4,7 @@ Runs as a separate systemd service under a dedicated user with minimal sudo righ
 Listens on a UDS, validates every request against the whitelist, executes via systemctl.
 
 Usage:
-    python -m backend.ops.agent.server [--socket /var/run/bifrost-agent.sock]
+    python -m backend.ops.agent.server [--socket /run/bifrost-agent/bifrost-agent.sock]
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from backend.ops.agent.protocol import (
 
 logger = logging.getLogger("bifrost.agent")
 
-DEFAULT_SOCKET = "/var/run/bifrost-agent.sock"
+DEFAULT_SOCKET = "/run/bifrost-agent/bifrost-agent.sock"
 MAX_MSG_SIZE = 8192
 _RATE_LIMIT_WINDOW = 10  # seconds
 _RATE_LIMIT_MAX = 5  # max commands per window per unit

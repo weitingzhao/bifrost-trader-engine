@@ -239,29 +239,50 @@ export async function updateWorkerQueues(
   return parseJsonResponse(r)
 }
 
+// ── Worker profiles ───────────────────────────────────────────────────────────
+
+export interface WorkerProfileInfo {
+  key: string
+  label: string
+  queues: string[]
+}
+
+export async function fetchWorkerProfiles(): Promise<{
+  ok: boolean
+  profiles: WorkerProfileInfo[]
+  count: number
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/workers/profiles`, { headers: authHeaders() })
+  return parseJsonResponse(r)
+}
+
 // ── Worker scaling ────────────────────────────────────────────────────────────
 
 export type ScaleAction = 'add' | 'remove'
 
-export async function scaleWorker(params: {
-  action: ScaleAction
-  instance_id: string
-  queues?: string[]
-}): Promise<{
+export interface ScaleResult {
   ok: boolean
   action?: string
   unit?: string
+  instance_id?: string
+  worker_type?: string
   result?: Record<string, unknown>
   error?: string
-}> {
+}
+
+export async function scaleWorker(params: {
+  action: ScaleAction
+  instance_id?: string
+  worker_type?: string
+}): Promise<ScaleResult> {
+  const body: Record<string, unknown> = { action: params.action }
+  if (params.instance_id) body.instance_id = params.instance_id
+  if (params.worker_type) body.worker_type = params.worker_type
   const r = await fetch(`${opsBase()}/ops/workers/scale`, {
     method: 'POST',
     headers: jsonAuthHeaders(),
-    body: JSON.stringify({
-      action: params.action,
-      instance_id: params.instance_id,
-      queues: params.queues ?? ['celery'],
-    }),
+    body: JSON.stringify(body),
   })
   return parseJsonResponse(r)
 }

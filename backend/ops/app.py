@@ -93,7 +93,10 @@ def create_ops_app(
     if executor_mode == "agent":
         from backend.ops.services.executor_agent import AgentExecutor
 
-        agent_socket = ops_cfg.get("agent_socket", "/var/run/bifrost-agent.sock")
+        agent_socket = ops_cfg.get(
+            "agent_socket",
+            "/run/bifrost-agent/bifrost-agent.sock",
+        )
         executor = AgentExecutor(
             socket_path=agent_socket,
             allowed_units=allowed_units,
@@ -138,6 +141,11 @@ def create_ops_app(
     app.state.redis_host = (
         redis_cfg.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1"
     ).strip()
+
+    # ── Worker profiles (typed scaling) ────────────────────────────────────
+    from backend.ops.worker_profiles import WorkerProfileRegistry
+
+    app.state.worker_profile_registry = WorkerProfileRegistry.from_config(config)
 
     # ── Router ────────────────────────────────────────────────────────────────
 

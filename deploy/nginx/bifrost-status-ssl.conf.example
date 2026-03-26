@@ -1,34 +1,23 @@
-# Reverse proxy: bifrost-server (8765), Massive API (8766), Docs API (8767).
+# HTTPS server block — copy or symlink AFTER Let's Encrypt (or other) certs exist.
 #
-# Docs / Massive paths:
-# - This file routes /research/docs → 8767 and /research/massive → 8766 on port 80 (HTTPS: separate ssl example).
-# - If you curl :80 and get empty/refused, nginx is not installed, not listening on :80, or this
-#   site is not enabled — fix nginx, not the Python apps.
-# - bifrost-server (8765) also proxies /research/docs and /research/massive to localhost when
-#   the repo includes servers/routers/research_sidecars.py — deploy latest code and restart
-#   bifrost-server so curl http://127.0.0.1:8765/research/docs/health works without nginx.
-#
-# Install (Debian/Ubuntu) — HTTP only; nginx -t passes without TLS files:
-#   sudo cp deploy/nginx/bifrost-status.conf /etc/nginx/sites-available/bifrost-status
-#   sudo ln -sf /etc/nginx/sites-available/bifrost-status /etc/nginx/sites-enabled/bifrost-status
+#   sudo cp deploy/nginx/bifrost-status-ssl.conf.example /etc/nginx/sites-available/bifrost-status-ssl
+#   # Edit ssl_certificate paths if your domain is not ai.trader
+#   sudo ln -sf /etc/nginx/sites-available/bifrost-status-ssl /etc/nginx/sites-enabled/
 #   sudo nginx -t && sudo systemctl reload nginx
 #
-# HTTPS (optional): after certbot PEMs exist, copy bifrost-status-ssl.conf.example → sites-available and enable.
-#
-# Hostname: add your DNS (e.g. ai.trader) to server_name; if https://... 404s, check nginx -T | grep server_name
-#
-# Uvicorn backends speak HTTP only. Do NOT use https://host:8766 — use nginx :443 after SSL is configured.
+# If nginx -t fails with "cannot load certificate", either fix PEM paths or remove this site from sites-enabled.
 
-# --- HTTP only (no ssl_certificate — nginx -t works on fresh hosts) ---
+# --- HTTPS (same routes as bifrost-status.conf HTTP block) ---
 server {
-    listen 80;
-    listen [::]:80;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ai.trader 192.168.10.70 127.0.0.1 localhost;
 
-    # Optional: redirect all HTTP to HTTPS (uncomment after :443 works)
-    # return 301 https://$host$request_uri;
+    ssl_certificate     /etc/letsencrypt/live/ai.trader/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ai.trader/privkey.pem;
+    # include /etc/letsencrypt/options-ssl-nginx.conf;
+    # ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    # Massive API (127.0.0.1:8766). Prefix without trailing slash so /research/massive matches.
     location ^~ /research/massive {
         proxy_pass http://127.0.0.1:8766;
         proxy_http_version 1.1;
@@ -42,7 +31,6 @@ server {
         proxy_read_timeout 86400s;
     }
 
-    # Docs API (127.0.0.1:8767). Same proxy pattern as Massive — full path forwarded.
     location ^~ /research/docs {
         proxy_pass http://127.0.0.1:8767;
         proxy_http_version 1.1;
@@ -65,9 +53,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Ops API (127.0.0.1:8768) — control plane. LAN-only access.
     location ^~ /ops {
-        # Restrict to LAN subnets (uncomment and adjust for production)
         # allow 192.168.10.0/24;
         # deny all;
 
