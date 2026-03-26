@@ -9,6 +9,7 @@ import {
   postMarketHoliday,
   deleteMarketHoliday,
   postCeleryStop,
+  fetchMassiveApiHealth,
   fetchMassiveStatus,
   type MarketHolidayRow,
   type MassiveStatusResponse,
@@ -53,6 +54,7 @@ import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
 import { CeleryPage } from './CeleryPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
+import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
@@ -202,6 +204,7 @@ export function SettingsPage({
     if (h && h.startsWith('coverage-')) return 'settings-coverage'
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
+    if (h && h.startsWith('settings-api')) return 'settings-api'
     if (h === 'feed-celery') return 'settings-system'
     if (h && isMassiveOptionFeedHash(`#${h}`)) return 'settings-feed'
     if (h && h.startsWith('feed-')) return 'settings-feed'
@@ -223,7 +226,9 @@ export function SettingsPage({
     ),
   )
   const [systemStatusExpanded, setSystemStatusExpanded] = useState(true)
+  const [apiExpanded, setApiExpanded] = useState(true)
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
+  const [massiveApiHealthOk, setMassiveApiHealthOk] = useState<boolean | null>(null)
   const [celeryStopBusy, setCeleryStopBusy] = useState(false)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
@@ -235,17 +240,19 @@ export function SettingsPage({
   const isSystemServerActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-server'
   const isSystemDaemonActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-daemon'
   const isSystemCeleryActive = activeSectionId === 'settings-system' && (currentHash === 'settings-system-celery' || currentHash === 'feed-celery')
+  const isApiSection = activeSectionId === 'settings-api'
+  const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
+  const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
 
   useEffect(() => {
     let cancelled = false
     const load = () => {
       fetchMassiveStatus()
-        .then(s => {
-          if (!cancelled) setMassiveStatus(s)
-        })
-        .catch(() => {
-          if (!cancelled) setMassiveStatus(null)
-        })
+        .then(s => { if (!cancelled) setMassiveStatus(s) })
+        .catch(() => { if (!cancelled) setMassiveStatus(null) })
+      fetchMassiveApiHealth()
+        .then(() => { if (!cancelled) setMassiveApiHealthOk(true) })
+        .catch(() => { if (!cancelled) setMassiveApiHealthOk(false) })
     }
     load()
     const t = window.setInterval(load, 20000)
@@ -466,6 +473,35 @@ export function SettingsPage({
               </div>
             </div>
           </div>
+          <div className="settings-sidebar-group">
+            <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
+              <a href="#settings-api-massive" className="settings-sidebar-parent-label">
+                <SettingsSectionIcon name="api" />
+                API
+              </a>
+              <button
+                type="button"
+                className={`settings-sidebar-chevron ${apiExpanded ? 'expanded' : ''}`}
+                onClick={() => setApiExpanded(e => !e)}
+                aria-expanded={apiExpanded}
+                aria-controls="settings-api-subs"
+                aria-label={apiExpanded ? 'Collapse API section' : 'Expand API section'}
+              >
+                ▼
+              </button>
+            </div>
+            <div id="settings-api-subs" className="settings-sidebar-subs" hidden={!apiExpanded}>
+              <a
+                href="#settings-api-massive"
+                className={`settings-sidebar-link settings-sidebar-link-sub ${isApiMassiveActive ? 'active' : ''}`}
+              >
+                <span className={`title-inline-lamp lamp-icon ${massiveApiLamp}`} title="Massive API health" aria-hidden>
+                  <SettingsSidebarLampGlyph id="api-massive" />
+                </span>
+                Massive
+              </a>
+            </div>
+          </div>
           <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
           <div className="settings-sidebar-group-label">Data Coverage</div>
           {COVERAGE_SUBSECTIONS.map((sub) => (
@@ -680,6 +716,8 @@ export function SettingsPage({
               celeryUiMode="relocated"
             />
           )
+        ) : isApiSection ? (
+          <MassiveApiStatusPage embeddedInSettings />
         ) : isCoverageSection ? (
           currentHash === 'coverage-stock' ? (
             <StockCoveragePage status={status} />

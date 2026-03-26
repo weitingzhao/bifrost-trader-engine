@@ -20,6 +20,7 @@ export type SettingsSidebarLampGlyphId =
   | 'server'
   | 'daemon'
   | 'celery'
+  | 'api-massive'
   | 'massive-option'
   | 'reference'
   | 'snapshot'
@@ -72,6 +73,13 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
       )
     /** Celery: async workers (lightning = task execution) */
     case 'celery':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      )
+    /** API Massive: lightning bolt (API service) */
+    case 'api-massive':
       return (
         <svg {...SVG_COMMON}>
           <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />

@@ -75,11 +75,6 @@ def create_app(
     # SSE 实时行情：每个连接一个 asyncio.Queue；Redis 订阅线程收到消息后广播到各 queue
     app.state.sse_queues: list = []
     app.state.sse_lock = threading.Lock()
-    # Massive options SSE (Redis massive:channel → per-connection queues)
-    app.state.massive_sse_queues: list = []
-    app.state.massive_sse_lock = threading.Lock()
-    app.state._massive_sse_subscriber_stop = threading.Event()
-    app.state._massive_sse_subscriber_thread: Optional[threading.Thread] = None
     app.state._sse_loop: Optional[asyncio.AbstractEventLoop] = None
     app.state._redis_subscriber_stop = threading.Event()
     app.state._redis_subscriber_thread: Optional[threading.Thread] = None
@@ -101,6 +96,12 @@ def create_app(
     app.state.server_log_lock = threading.Lock()
     app.state._server_log_thread: Optional[threading.Thread] = None
     app.state._server_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    # Massive API console log stream (run_server_massive.py → bifrost:massive_console)
+    app.state.massive_log_queues: list = []
+    app.state.massive_log_lock = threading.Lock()
+    app.state._massive_log_thread: Optional[threading.Thread] = None
+    app.state._massive_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # Monitor-side IB state (for AccountIbClient / MarketIbClient).
     app.state.monitor_enabled = True
@@ -124,7 +125,6 @@ def create_app(
         executions_router,
         logs_router,
         market_router,
-        massive_stream_router,
         monitor_metrics_router,
         portfolio_model_router,
         quotes_router,
@@ -144,7 +144,6 @@ def create_app(
     app.include_router(watchlist_router)
     app.include_router(research_router)
     app.include_router(reports_router)
-    app.include_router(massive_stream_router)
     app.include_router(daemon_router)
     app.include_router(config_router)
     app.include_router(strategies_router)
@@ -271,39 +270,6 @@ def create_app(
             app.state._redis_subscriber_thread.start()
             logger.info("Redis quotes SSE subscriber thread started")
 
-        # Massive options SSE: SUBSCRIBE massive:channel → broadcast to massive_sse_queues
-        try:
-            from servers.redis_url import redis_url_from_config
-            from servers.massive_sse import run_massive_channel_subscribe_loop
-
-            _massive_url = redis_url_from_config(reader._config)
-            if _massive_url:
-
-                def _broadcast_massive(evt: Dict[str, Any]) -> None:
-                    loop = getattr(app.state, "_sse_loop", None)
-                    if loop is None:
-                        return
-                    with app.state.massive_sse_lock:
-                        queues = list(app.state.massive_sse_queues)
-                    for q in queues:
-                        loop.call_soon_threadsafe(put_nowait_drop_oldest, q, evt)
-
-                app.state._massive_sse_subscriber_stop.clear()
-                app.state._massive_sse_subscriber_thread = threading.Thread(
-                    target=run_massive_channel_subscribe_loop,
-                    args=(
-                        _massive_url,
-                        app.state._massive_sse_subscriber_stop,
-                        _broadcast_massive,
-                    ),
-                    daemon=True,
-                    name="massive-channel-sse-subscriber",
-                )
-                app.state._massive_sse_subscriber_thread.start()
-                logger.info("Massive SSE Redis subscriber thread started")
-        except Exception as exc:
-            logger.warning("Massive SSE subscriber not started: %s", exc)
-
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
         """优雅断开监控端 IB 客户端，并停止 Redis 订阅线程。"""
@@ -311,10 +277,6 @@ def create_app(
         if getattr(app.state, "_redis_subscriber_thread", None) is not None:
             app.state._redis_subscriber_thread.join(timeout=2.0)
             app.state._redis_subscriber_thread = None
-        app.state._massive_sse_subscriber_stop.set()
-        if getattr(app.state, "_massive_sse_subscriber_thread", None) is not None:
-            app.state._massive_sse_subscriber_thread.join(timeout=2.0)
-            app.state._massive_sse_subscriber_thread = None
         try:
             client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
             if client is not None:

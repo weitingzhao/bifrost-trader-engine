@@ -115,6 +115,40 @@ export async function fetchOptionSnapshot(
   }
 }
 
+export interface MassiveApiHealthResponse {
+  status: string
+  service: string
+  ts: number
+  config_profile?: 'dev' | 'prod' | null
+  /** Listening port of the Massive FastAPI process (from YAML `server.massive_port`). */
+  port?: number
+  /** Resolved absolute path of the loaded config file (startup). */
+  config_path?: string | null
+}
+
+export async function fetchMassiveApiHealth(): Promise<MassiveApiHealthResponse> {
+  const r = await fetch(`${API}/research/massive/health`)
+  if (!r.ok) throw new Error(`Massive API health: ${r.status}`)
+  const j = await r.json()
+  return {
+    status: j.status ?? 'unknown',
+    service: j.service ?? 'bifrost-massive',
+    ts: typeof j.ts === 'number' ? j.ts : 0,
+    config_profile: j.config_profile ?? null,
+    port: typeof j.port === 'number' && Number.isFinite(j.port) ? j.port : undefined,
+    config_path: typeof j.config_path === 'string' ? j.config_path : null,
+  }
+}
+
+export async function postMassiveShutdown(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/research/massive/shutdown`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    error: j.error || (r.ok ? undefined : r.statusText || 'Request failed'),
+  }
+}
+
 export interface MassiveStatusResponse {
   configured: boolean
   tier: string

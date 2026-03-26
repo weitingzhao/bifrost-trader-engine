@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from servers.massive_client import MassiveClient
+from backend.massive.client import MassiveClient
 
 
 def _client() -> MassiveClient:

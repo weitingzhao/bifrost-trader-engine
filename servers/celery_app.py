@@ -63,7 +63,7 @@ app = Celery(
     "bifrost.bars",
     broker=broker_url,
     backend=result_backend,
-    include=["servers.bars_tasks", "servers.massive_tasks"],
+    include=["servers.bars_tasks", "backend.massive.tasks"],
 )
 app.conf.update(
     task_serializer="json",

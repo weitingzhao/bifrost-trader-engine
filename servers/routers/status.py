@@ -221,8 +221,8 @@ def get_status(request: Request) -> Dict[str, Any]:
             payload["celery_workers"] = []
         payload["celery_worker_last_updated_ts"] = get_job_bars_backfill_last_updated(control_via_db) if control_via_db else None
         try:
-            from servers.massive_config import get_massive_settings
-            from servers.reader.massive_jobs import count_pending_massive_jobs
+            from backend.massive.config import get_massive_settings
+            from backend.massive.reader import count_pending_massive_jobs
             from servers.redis_url import redis_url_from_config
 
             _ms = get_massive_settings(reader._config)

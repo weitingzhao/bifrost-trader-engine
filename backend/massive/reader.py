@@ -1389,7 +1389,7 @@ def upsert_option_contracts_from_reference_rows(
     contract_rows: List[Dict[str, Any]],
 ) -> int:
     """Upsert option_contracts from Polygon reference contract rows."""
-    from servers.massive_client import contract_key_from_parts
+    from backend.massive.client import contract_key_from_parts
 
     underlying = (underlying or "").strip().upper()
     if not contract_rows or not underlying:
@@ -1446,8 +1446,8 @@ def refresh_expirations_from_massive_api(
     skip_persist: bool = False,
 ) -> Dict[str, Any]:
     """Fetch expirations/strikes from Massive REST and persist contracts + expiration cache."""
-    from servers.massive_config import get_massive_settings
-    from servers.massive_client import MassiveClient
+    from backend.massive.config import get_massive_settings
+    from backend.massive.client import MassiveClient
 
     ms = get_massive_settings(config)
     if not ms["api_key"]:
@@ -1478,7 +1478,7 @@ def refresh_expirations_watchlist_batch(
     max_symbols: int = 24,
 ) -> Dict[str, Any]:
     """Refresh expiration cache + contracts for a batch of underlyings (Celery beat)."""
-    from servers.massive_config import get_massive_settings
+    from backend.massive.config import get_massive_settings
 
     ms = get_massive_settings(config)
     if not ms["api_key"]:

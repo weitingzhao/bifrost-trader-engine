@@ -92,7 +92,7 @@ def _apply_oi_daily_from_chain(
     snap_results: List[Dict[str, Any]],
 ) -> int:
     """Upsert option_contracts + option_open_interest_daily from chain snapshot items."""
-    from servers.massive_client import contract_key_from_parts
+    from backend.massive.client import contract_key_from_parts
 
     underlying = (underlying or "").strip().upper()
     n = 0
@@ -152,7 +152,7 @@ def _run_oi_watchlist_eod(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Fetch full chain snapshots for Watchlist STK symbols; write option_open_interest_daily."""
-    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+    from backend.massive.reader import get_watchlist_optionable_stk_symbols
 
     td_s = _eod_trade_date_str_et(payload)
     try:
@@ -263,7 +263,7 @@ def _run_max_pain(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Compute Max Pain from option_open_interest_daily for Watchlist symbols / trade_date."""
-    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+    from backend.massive.reader import get_watchlist_optionable_stk_symbols
 
     td_s = _eod_trade_date_str_et(payload)
     try:
@@ -345,7 +345,7 @@ def _run_reconcile(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Compare chain snapshot contract count vs DB OI rows for Watchlist symbols."""
-    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+    from backend.massive.reader import get_watchlist_optionable_stk_symbols
 
     td_s = _eod_trade_date_str_et(payload)
     try:
@@ -458,7 +458,7 @@ def _apply_snapshot(
     snap: Dict[str, Any],
 ) -> int:
     """Insert option_contracts + option_snapshots rows. Returns count inserted."""
-    from servers.massive_client import contract_key_from_parts
+    from backend.massive.client import contract_key_from_parts
 
     results = snap.get("results")
     if not isinstance(results, list):
@@ -692,9 +692,9 @@ def _apply_corporate_actions(
 def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     """Execute one job_massive_backfill row."""
     from src.app.config import read_config
-    from servers.massive_client import MassiveClient
-    from servers.massive_config import get_massive_settings
-    from servers.reader.massive_jobs import get_job_massive_backfill, update_job_massive_backfill_result
+    from backend.massive.client import MassiveClient
+    from backend.massive.config import get_massive_settings
+    from backend.massive.reader import get_job_massive_backfill, update_job_massive_backfill_result
     import psycopg2
     from src.sink.pg_connection import _get_conn_params
 
@@ -1221,7 +1221,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
 def _enqueue_massive_job(kind: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Insert job_massive_backfill and dispatch to Celery ``massive`` queue."""
     from src.app.config import read_config
-    from servers.reader.massive_jobs import (
+    from backend.massive.reader import (
         insert_job_massive_backfill,
         update_job_massive_backfill_celery_task_id,
     )
@@ -1249,7 +1249,7 @@ def beat_eod_pipeline() -> Dict[str, Any]:
 def beat_corporate_watchlist() -> Dict[str, Any]:
     """Celery Beat: enqueue ``corporate_action`` for all Watchlist optionable STK symbols."""
     from src.app.config import read_config
-    from servers.reader.massive_jobs import get_watchlist_optionable_stk_symbols
+    from backend.massive.reader import get_watchlist_optionable_stk_symbols
 
     cfg_path = _config_path_for_task()
     config, _ = read_config(cfg_path)
@@ -1276,8 +1276,8 @@ def beat_trim_massive_jobs() -> Dict[str, Any]:
 def beat_refresh_expirations() -> Dict[str, Any]:
     """Celery Beat: refresh option expiration cache + option_contracts for Watchlist optionable STK symbols."""
     from src.app.config import read_config
-    from servers.massive_config import get_expiration_cache_settings
-    from servers.reader.massive_jobs import (
+    from backend.massive.config import get_expiration_cache_settings
+    from backend.massive.reader import (
         get_watchlist_optionable_stk_symbols,
         refresh_expirations_watchlist_batch,
     )

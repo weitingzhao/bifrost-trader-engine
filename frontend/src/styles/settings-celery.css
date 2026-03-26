@@ -1160,3 +1160,114 @@
 [data-theme="light"] .settings-page-groups > .settings-ib-connection-group > .daemon-group:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
+
+/* ==========================================================================
+   8. Massive API Status Page (embedded in Settings)
+   ========================================================================== */
+
+.settings-main > .settings-page-card.massive-api-status-page--embedded {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.massive-api-status-page .massive-api-kv-table {
+  border-collapse: collapse;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+.massive-api-status-page .massive-api-kv-table td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.massive-api-status-page .massive-api-kv-label {
+  font-weight: 600;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  width: 10rem;
+}
+
+.massive-api-env-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 6px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.massive-api-env-badge--dev {
+  background: rgba(250, 204, 21, 0.15);
+  color: var(--color-lamp-yellow);
+  border: 1px solid rgba(250, 204, 21, 0.3);
+}
+.massive-api-env-badge--prod {
+  background: rgba(74, 222, 128, 0.12);
+  color: var(--color-lamp-green);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+.massive-api-env-badge--unknown {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--color-text-dim);
+  border: 1px solid var(--color-border);
+}
+.massive-api-env-badge--custom {
+  background: rgba(96, 165, 250, 0.12);
+  color: var(--color-link);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+
+.massive-api-kv-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-tiny);
+  word-break: break-all;
+  max-width: 36rem;
+}
+
+.massive-api-doc-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.massive-api-doc-links {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.massive-api-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-body);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.massive-api-doc-link:hover {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface));
+}
+.massive-api-doc-link-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+.massive-api-doc-link:hover .massive-api-doc-link-icon {
+  opacity: 1;
+}
+.massive-api-doc-link-ext {
+  font-size: 0.75rem;
+  opacity: 0.5;
+}

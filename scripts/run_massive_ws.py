@@ -61,7 +61,7 @@ def _load_config(config_path: str | None) -> dict:
 
 
 def _get_massive(cfg: dict) -> dict:
-    from servers.massive_config import get_massive_settings
+    from backend.massive.config import get_massive_settings
     return get_massive_settings(cfg)
 
 

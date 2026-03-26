@@ -11,7 +11,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from servers.redis_url import redis_url_from_config
-from servers.routers.research import _db_config
+from backend.massive.deps import db_config as _db_config
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def get_massive_reconciliation(
     trade_date: Optional[str] = Query(None, description="Match payload trade_date (YYYY-MM-DD)"),
 ) -> Dict[str, Any]:
     """Latest ``reconcile`` job result from job_massive_backfill."""
-    from servers.reader.massive_jobs import get_latest_massive_job_by_kind
+    from backend.massive.reader import get_latest_massive_job_by_kind
 
     db = _db_config(request)
     if not db:

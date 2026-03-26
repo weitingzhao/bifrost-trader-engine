@@ -30,6 +30,10 @@ redis:
   host: "127.0.0.1"
   port: 6379
 
+server:
+  massive_port: 8766
+  docs_port: 8767
+
 frontend:
   port: 5173
 

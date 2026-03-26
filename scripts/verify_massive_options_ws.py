@@ -39,7 +39,7 @@ logger = logging.getLogger("verify_massive_ws")
 
 def _load_settings(config_path: str | None) -> dict:
     from src.app.config import read_config
-    from servers.massive_config import get_massive_settings
+    from backend.massive.config import get_massive_settings
 
     cfg, _ = read_config(config_path)
     return get_massive_settings(cfg)

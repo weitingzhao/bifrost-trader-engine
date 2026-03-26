@@ -21,7 +21,7 @@ def get_max_pain_report(
     limit: int = Query(100, ge=1, le=500),
 ) -> Dict[str, Any]:
     """Query report_option_max_pain_daily (Massive EOD batch)."""
-    from servers.reader.massive_jobs import get_report_max_pain_rows
+    from backend.massive.reader import get_report_max_pain_rows
 
     db = _db_config(request)
     if not db:
@@ -44,7 +44,7 @@ def get_max_pain_latest(
     limit: int = Query(80, ge=1, le=500),
 ) -> Dict[str, Any]:
     """Latest trade_date batch in report_option_max_pain_daily."""
-    from servers.reader.massive_jobs import get_report_max_pain_latest_batch
+    from backend.massive.reader import get_report_max_pain_latest_batch
 
     db = _db_config(request)
     if not db:
@@ -61,7 +61,7 @@ def get_max_pain_compute(
     trade_date: Optional[str] = Query(None, description="OI as-of date YYYY-MM-DD (default: latest in PG)"),
 ) -> Dict[str, Any]:
     """Real-time Max Pain from EOD OI (not from report_option_max_pain_daily)."""
-    from servers.reader.massive_jobs import compute_max_pain_live_from_db
+    from backend.massive.reader import compute_max_pain_live_from_db
 
     db = _db_config(request)
     if not db:
@@ -77,7 +77,7 @@ def get_max_pain_compute_history(
     lookback_days: int = Query(90, ge=7, le=365, description="Calendar days back from latest OI date"),
 ) -> Dict[str, Any]:
     """Per-trade-date max pain series recomputed from OI (no stored report rows)."""
-    from servers.reader.massive_jobs import compute_max_pain_history_from_db
+    from backend.massive.reader import compute_max_pain_history_from_db
 
     db = _db_config(request)
     if not db:

@@ -15,6 +15,7 @@ export interface SseQueueMetrics {
   daemon_logs: SseQueueCategory
   server_logs: SseQueueCategory
   celery_logs: SseQueueCategory
+  massive_logs?: SseQueueCategory
 }
 
 export async function fetchSseQueueMetrics(): Promise<SseQueueMetrics> {
