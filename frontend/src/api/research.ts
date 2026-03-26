@@ -1,4 +1,5 @@
 import { API } from './constants'
+import { fetchWithTimeout } from './fetchTimeout'
 
 /** Per-page Massive REST debug for option-expirations (redacted URLs; full response JSON). */
 export interface MassiveOptionExpirationsDebug {
@@ -126,8 +127,12 @@ export interface MassiveApiHealthResponse {
   config_path?: string | null
 }
 
-export async function fetchMassiveApiHealth(): Promise<MassiveApiHealthResponse> {
-  const r = await fetch(`${API}/research/massive/health`)
+export async function fetchMassiveApiHealth(options?: { timeoutMs?: number }): Promise<MassiveApiHealthResponse> {
+  const url = `${API}/research/massive/health`
+  const r =
+    options?.timeoutMs != null
+      ? await fetchWithTimeout(url, {}, options.timeoutMs)
+      : await fetch(url)
   if (!r.ok) throw new Error(`Massive API health: ${r.status}`)
   const j = await r.json()
   return {
@@ -156,6 +161,87 @@ export interface DocsApiHealthResponse {
 
 export async function fetchDocsApiHealth(): Promise<DocsApiHealthResponse> {
   const r = await fetch(`${API}/research/docs/health`)
+  if (!r.ok) throw new Error(`Docs API health: ${r.status}`)
+  const j = await r.json()
+  return {
+    status: j.status ?? 'unknown',
+    service: j.service ?? 'bifrost-docs',
+    ts: typeof j.ts === 'number' ? j.ts : 0,
+    config_profile: j.config_profile ?? null,
+    port: typeof j.port === 'number' && Number.isFinite(j.port) ? j.port : undefined,
+    config_path: typeof j.config_path === 'string' ? j.config_path : null,
+    main_url: typeof j.main_url === 'string' ? j.main_url : '',
+    massive_url: typeof j.massive_url === 'string' ? j.massive_url : '',
+  }
+}
+
+/** Absolute origin (no trailing slash) or empty string for same-origin as the UI. */
+export type ApiOriginBase = string
+
+function joinApiOrigin(origin: ApiOriginBase, path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`
+  const o = origin.replace(/\/$/, '')
+  return o ? `${o}${p}` : p
+}
+
+/** GET /health on bifrost-server at the given origin (CORS must allow this UI origin when cross-origin). */
+export async function fetchHealthAtOrigin(
+  origin: ApiOriginBase,
+  options?: { timeoutMs?: number },
+): Promise<{
+  status: string
+  service: string
+  ts: number
+  config_profile?: 'dev' | 'prod'
+}> {
+  const url = joinApiOrigin(origin, '/health')
+  const init = { credentials: 'omit' as const }
+  const r =
+    options?.timeoutMs != null
+      ? await fetchWithTimeout(url, init, options.timeoutMs)
+      : await fetch(url, init)
+  if (!r.ok) throw new Error(`Health: ${r.status}`)
+  const j = await r.json()
+  return {
+    status: j.status ?? 'unknown',
+    service: j.service ?? 'bifrost-server',
+    ts: typeof j.ts === 'number' ? j.ts : 0,
+    config_profile: j.config_profile,
+  }
+}
+
+export async function fetchMassiveApiHealthAtOrigin(
+  origin: ApiOriginBase,
+  options?: { timeoutMs?: number },
+): Promise<MassiveApiHealthResponse> {
+  const url = joinApiOrigin(origin, '/research/massive/health')
+  const init = { credentials: 'omit' as const }
+  const r =
+    options?.timeoutMs != null
+      ? await fetchWithTimeout(url, init, options.timeoutMs)
+      : await fetch(url, init)
+  if (!r.ok) throw new Error(`Massive API health: ${r.status}`)
+  const j = await r.json()
+  return {
+    status: j.status ?? 'unknown',
+    service: j.service ?? 'bifrost-massive',
+    ts: typeof j.ts === 'number' ? j.ts : 0,
+    config_profile: j.config_profile ?? null,
+    port: typeof j.port === 'number' && Number.isFinite(j.port) ? j.port : undefined,
+    config_path: typeof j.config_path === 'string' ? j.config_path : null,
+  }
+}
+
+export async function fetchDocsApiHealthAtOrigin(
+  origin: ApiOriginBase,
+  options?: { timeoutMs?: number },
+): Promise<DocsApiHealthResponse> {
+  const url = joinApiOrigin(origin, '/research/docs/health')
+  const init = { credentials: 'omit' as const }
+  const r =
+    options?.timeoutMs != null
+      ? await fetchWithTimeout(url, init, options.timeoutMs)
+      : await fetch(url, init)
   if (!r.ok) throw new Error(`Docs API health: ${r.status}`)
   const j = await r.json()
   return {

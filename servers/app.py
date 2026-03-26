@@ -2,7 +2,8 @@
 
 When ``frontend/dist`` exists (``npm run build``), GET ``/`` serves the SPA and ``/assets`` is mounted; otherwise GET ``/`` returns a small API stub. Dev hot-reload: ``./scripts/run_frontend.sh dev``.
 
-Monitoring runs on a separate host from the trading daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server."""
+Monitoring runs on a separate host from the trading daemon (RE-5). Start of the daemon is only on the trading machine (run_engine.py); no subprocess/start on this server.
+"""
 
 import json
 import logging
@@ -10,10 +11,11 @@ import os
 import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import asyncio
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -57,6 +59,33 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _utilized_services_from_config(merged_config: Optional[dict]) -> List[Dict[str, str]]:
+    """Parse ``utilized.services`` from YAML into [{"service": "massive", "env": "dev"}, ...]."""
+    out: List[Dict[str, str]] = []
+    if not merged_config:
+        return out
+    raw = merged_config.get("utilized") or {}
+    services = raw.get("services")
+    if not isinstance(services, list):
+        return out
+    for x in services:
+        if isinstance(x, dict):
+            for k, v in x.items():
+                ks = str(k).strip()
+                vs = str(v).strip().strip("\"'")
+                if ks and vs:
+                    out.append({"service": ks, "env": vs})
+        elif isinstance(x, str):
+            part = x.strip()
+            if ":" in part:
+                left, _, right = part.partition(":")
+                name = left.strip()
+                env = right.strip().strip("\"'")
+                if name and env:
+                    out.append({"service": name, "env": env})
+    return out
+
+
 def create_app(
     reader: StatusReader,
     control_via_db: Optional[dict],
@@ -64,12 +93,22 @@ def create_app(
     redis_quotes: Optional[Any] = None,
     status_cfg_for_read: Optional[dict] = None,
     resolved_config_path: Optional[str] = None,
+    merged_config: Optional[dict] = None,
 ) -> FastAPI:
     """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*).
-    status_cfg_for_read: when set, GET /bars/jobs (and GET /bars/jobs/{id}) use this for DB read even if control_via_db is None (e.g. only PGHOST or postgres configured without sink=postgres)."""
+    status_cfg_for_read: when set, GET /bars/jobs (and GET /bars/jobs/{id}) use this for DB read even if control_via_db is None (e.g. only PGHOST or postgres configured without sink=postgres).
+    """
     app = FastAPI(
         title="Bifrost Trader API",
         description="Phase 2: status and control API; monitoring UI when frontend/dist is built.",
+    )
+    # Browser fetch from Vite / another host to this API (e.g. Settings → API Health split probes).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.state.redis_quotes = redis_quotes
     # SSE 实时行情：每个连接一个 asyncio.Queue；Redis 订阅线程收到消息后广播到各 queue
@@ -121,8 +160,38 @@ def create_app(
     app.state.data_lag_threshold_ms = data_lag_threshold_ms
     app.state.status_cfg_for_read = status_cfg_for_read
     app.state.bifrost_config_profile = (
-        config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
+        config_profile_from_resolved_path(resolved_config_path)
+        if resolved_config_path
+        else None
     )
+    _fe = (merged_config or {}).get("frontend") or {}
+
+    def _fe_str(key: str) -> Optional[str]:
+        v = _fe.get(key)
+        if v is None:
+            return None
+        t = str(v).strip()
+        return t or None
+
+    app.state.bifrost_frontend_public_origin = _fe_str("public_origin")
+    app.state.bifrost_frontend_dev_path = _fe_str("dev_path")
+    app.state.bifrost_frontend_prod_path = _fe_str("prod_path")
+
+    _scfg = (merged_config or {}).get("server") or {}
+    try:
+        app.state.bifrost_server_listen_port = int(_scfg.get("port") or 8765)
+    except (TypeError, ValueError):
+        app.state.bifrost_server_listen_port = 8765
+    try:
+        app.state.bifrost_massive_port = int(_scfg.get("massive_port") or 8766)
+    except (TypeError, ValueError):
+        app.state.bifrost_massive_port = 8766
+    try:
+        app.state.bifrost_docs_port = int(_scfg.get("docs_port") or 8767)
+    except (TypeError, ValueError):
+        app.state.bifrost_docs_port = 8767
+
+    app.state.bifrost_utilized_services = _utilized_services_from_config(merged_config)
 
     from servers.routers import (
         config_router,
@@ -140,6 +209,7 @@ def create_app(
         strategies_router,
         watchlist_router,
     )
+    from servers.routers.research_sidecars import router as research_sidecars_router
 
     app.include_router(core_router)
     app.include_router(quotes_router)
@@ -149,6 +219,7 @@ def create_app(
     app.include_router(market_router)
     app.include_router(watchlist_router)
     app.include_router(research_router)
+    app.include_router(research_sidecars_router)
     app.include_router(reports_router)
     app.include_router(daemon_router)
     app.include_router(config_router)
@@ -159,7 +230,9 @@ def create_app(
     _root = Path(__file__).resolve().parent.parent
     _dist_assets = _root / "frontend" / "dist" / "assets"
     if _dist_assets.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(_dist_assets)), name="dist_assets")
+        app.mount(
+            "/assets", StaticFiles(directory=str(_dist_assets)), name="dist_assets"
+        )
 
     @app.on_event("startup")
     async def startup_event() -> None:
@@ -167,7 +240,9 @@ def create_app(
         app.state._sse_loop = asyncio.get_running_loop()
         skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
         if skip_ib:
-            logger.info("skip_monitor_ib=true: skipping AccountIbClient / MarketIbClient initialisation (Management mode)")
+            logger.info(
+                "skip_monitor_ib=true: skipping AccountIbClient / MarketIbClient initialisation (Management mode)"
+            )
             app.state.account_ib_client = None
             app.state.market_ib_client = None
             app.state.account_ib_client_2 = None
@@ -212,6 +287,7 @@ def create_app(
                     getattr(app.state.account_ib_client, "client_id", None),
                     getattr(app.state.market_ib_client, "client_id", None),
                 )
+
                 # 后台尝试建立 IB 连接，不阻塞 startup，避免 GET /status、GET /health 等不到响应导致前端显示 Fetch failed
                 async def _connect_ib_in_background() -> None:
                     acc_client = getattr(app.state, "account_ib_client", None)
@@ -229,7 +305,9 @@ def create_app(
                     if acc_client_2 is not None:
                         try:
                             await acc_client_2.ensure_connected()
-                            logger.info("Monitor AccountIbClient2 (Secondary) connected on startup")
+                            logger.info(
+                                "Monitor AccountIbClient2 (Secondary) connected on startup"
+                            )
                         except Exception as e:
                             logger.warning(
                                 "AccountIbClient2 auto-connect on startup failed: %s (will retry on Connect or first use)",
@@ -247,14 +325,20 @@ def create_app(
 
                 asyncio.create_task(_connect_ib_in_background())
             except Exception as exc:  # pragma: no cover - defensive
-                logger.warning("Failed to initialize monitor IB clients: %s", exc, exc_info=True)
+                logger.warning(
+                    "Failed to initialize monitor IB clients: %s", exc, exc_info=True
+                )
                 app.state.account_ib_client = None
                 app.state.market_ib_client = None
                 app.state.account_ib_client_2 = None
 
         # R-RM* SSE: 若 Redis 行情可用，启动 SUBSCRIBE 线程，收到 daemon:quotes 后广播到各 SSE 连接的 queue
         rq = getattr(app.state, "redis_quotes", None)
-        if redis_run_subscribe_loop and rq is not None and getattr(rq, "available", False):
+        if (
+            redis_run_subscribe_loop
+            and rq is not None
+            and getattr(rq, "available", False)
+        ):
 
             def _broadcast_quote(quote: Dict[str, Any]) -> None:
                 loop = getattr(app.state, "_sse_loop", None)
@@ -284,19 +368,25 @@ def create_app(
             app.state._redis_subscriber_thread.join(timeout=2.0)
             app.state._redis_subscriber_thread = None
         try:
-            client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+            client: Optional[AccountIbClient] = getattr(
+                app.state, "account_ib_client", None
+            )
             if client is not None:
                 await client.disconnect()
         except Exception:
             pass
         try:
-            client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
+            client: Optional[AccountIbClient] = getattr(
+                app.state, "account_ib_client", None
+            )
             if client is not None:
                 await client.disconnect()
         except Exception:
             pass
         try:
-            mclient: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
+            mclient: Optional[MarketIbClient] = getattr(
+                app.state, "market_ib_client", None
+            )
             if mclient is not None:
                 await mclient.disconnect()
         except Exception:
@@ -340,7 +430,12 @@ def run_server(config: dict, resolved_config_path: Optional[str] = None) -> None
         redis_quotes=redis_quotes,
         status_cfg_for_read=status_cfg_for_read,
         resolved_config_path=resolved_config_path,
+        merged_config=config,
     )
     host = "0.0.0.0"
-    logger.info("Status server on %s:%s (control=daemon_control + daemon_run_status; start only on trading host)", host, port)
+    logger.info(
+        "Status server on %s:%s (control=daemon_control + daemon_run_status; start only on trading host)",
+        host,
+        port,
+    )
     uvicorn.run(app, host=host, port=int(port), log_level="info", log_config=None)

@@ -59,6 +59,8 @@ redis:
 
 frontend:
   port: 5173
+  # Optional: canonical URL for this deployment; bifrost-server GET /health returns it as frontend_public_origin (API Health UI).
+  # public_origin: "https://your-host"
 
 massive:
   api_key: ""

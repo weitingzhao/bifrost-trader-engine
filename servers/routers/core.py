@@ -64,4 +64,17 @@ def get_health(request: Request) -> Dict[str, Any]:
     profile = getattr(request.app.state, "bifrost_config_profile", None)
     if profile is not None:
         out["config_profile"] = profile
+    fe_pub = getattr(request.app.state, "bifrost_frontend_public_origin", None)
+    if fe_pub:
+        out["frontend_public_origin"] = fe_pub
+    fe_dev = getattr(request.app.state, "bifrost_frontend_dev_path", None)
+    if fe_dev:
+        out["frontend_dev_path"] = fe_dev
+    fe_prod = getattr(request.app.state, "bifrost_frontend_prod_path", None)
+    if fe_prod:
+        out["frontend_prod_path"] = fe_prod
+    out["server_port"] = int(getattr(request.app.state, "bifrost_server_listen_port", 8765))
+    out["massive_port"] = int(getattr(request.app.state, "bifrost_massive_port", 8766))
+    out["docs_port"] = int(getattr(request.app.state, "bifrost_docs_port", 8767))
+    out["utilized_services"] = list(getattr(request.app.state, "bifrost_utilized_services", []) or [])
     return out

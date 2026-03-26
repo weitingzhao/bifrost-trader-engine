@@ -36,6 +36,9 @@ server:
 
 frontend:
   port: 5173
+  # Optional: Settings → API Health (GET /health: frontend_dev_path / frontend_prod_path).
+  # dev_path: "http://192.168.x.x"     # host-only OK — server appends :port from ``port`` (Vite). Or full URL with port.
+  # prod_path: "https://your-prod-host" # no port when nginx :80/:443
 
 # Massive / Polygon options research (REST + Celery queue `massive`). Do not commit real API keys.
 # Prefer env: MASSIVE_API_KEY or POLYGON_API_KEY

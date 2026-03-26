@@ -57,6 +57,7 @@ import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { DocsApiStatusPage } from './DocsApiStatusPage'
+import { ApiHealthOverviewPage } from './ApiHealthOverviewPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
@@ -245,7 +246,9 @@ export function SettingsPage({
   const isSystemCeleryActive = activeSectionId === 'settings-system' && (currentHash === 'settings-system-celery' || currentHash === 'feed-celery')
   const isApiSection = activeSectionId === 'settings-api'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
-  const isApiDocsActive = isApiSection && currentHash !== 'settings-api-massive'
+  const isApiDocsActive = isApiSection && currentHash === 'settings-api-docs'
+  /** Any API hash other than Docs or Massive (e.g. settings-api-overview) shows API Overview. */
+  const isApiHealthOverviewActive = isApiSection && !isApiMassiveActive && !isApiDocsActive
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
   const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
 
@@ -322,6 +325,10 @@ export function SettingsPage({
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-system-celery`)
       setActiveSectionId('settings-system')
     }
+    if (h === '#settings-api-health') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-api-overview`)
+      setActiveSectionId('settings-api')
+    }
   }, [])
 
   const onAddHoliday = async () => {
@@ -396,374 +403,380 @@ export function SettingsPage({
   const sidebarContent = (
     <>
       <div className="settings-sidebar-group-block" role="group" aria-label="Status and feed">
-          <div className="settings-sidebar-group-label">Status</div>
-          <div className="settings-sidebar-group">
-            <div className={`settings-sidebar-parent ${activeSectionId === 'settings-system' ? 'active' : ''}`}>
-              <a href="#settings-system" className="settings-sidebar-parent-label">
-                <span
-                  className={`title-inline-lamp lamp-icon ${systemLamp === 'none' ? 'red' : systemLamp}`}
-                  title="Aggregated health of management monitor, Daemon, and Celery (expand for sub-pages)"
-                  aria-hidden
-                >
-                  <SettingsSidebarLampGlyph id="system-status" />
+        <div className="settings-sidebar-group-label">Status</div>
+        <div className="settings-sidebar-group">
+          <div className={`settings-sidebar-parent ${activeSectionId === 'settings-system' ? 'active' : ''}`}>
+            <a href="#settings-system" className="settings-sidebar-parent-label">
+              <span
+                className={`title-inline-lamp lamp-icon ${systemLamp === 'none' ? 'red' : systemLamp}`}
+                title="Aggregated health of management monitor, Daemon, and Celery (expand for sub-pages)"
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="system-status" />
+              </span>
+              System
+            </a>
+            <button
+              type="button"
+              className="settings-sidebar-celery-stop"
+              onClick={() => onOpenShutdownConfirm?.()}
+              title="Shutdown entire system"
+              aria-label="Shutdown entire system"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                <line x1="12" y1="2" x2="12" y2="12" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={`settings-sidebar-chevron ${systemStatusExpanded ? 'expanded' : ''}`}
+              onClick={() => setSystemStatusExpanded(e => !e)}
+              aria-expanded={systemStatusExpanded}
+              aria-controls="settings-system-status-subs"
+              aria-label={systemStatusExpanded ? 'Collapse System section' : 'Expand System section'}
+            >
+              ▼
+            </button>
+          </div>
+          <div id="settings-system-status-subs" className="settings-sidebar-subs" hidden={!systemStatusExpanded}>
+            <a
+              href="#settings-system-server"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemServerActive ? 'active' : ''}`}
+            >
+              <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Server (management / monitor)" aria-hidden>
+                <SettingsSidebarLampGlyph id="system" />
+              </span>
+              Server
+            </a>
+            <a
+              href="#settings-system-daemon"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemDaemonActive ? 'active' : ''}`}
+            >
+              <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon" aria-hidden>
+                <SettingsSidebarLampGlyph id="daemon" />
+              </span>
+              Daemon
+            </a>
+            <div className="settings-sidebar-celery-row">
+              <a
+                href="#settings-system-celery"
+                className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-celery ${isSystemCeleryActive ? 'active' : ''}`}
+              >
+                <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery" aria-hidden>
+                  <SettingsSidebarLampGlyph id="celery" />
                 </span>
-                System
+                Celery
+                {barsQueueActiveTotal != null ? (
+                  <span className="settings-sidebar-celery-queue-badge" title="Bars queue: pending + running">
+                    {barsQueueActiveTotal}
+                  </span>
+                ) : null}
               </a>
               <button
                 type="button"
                 className="settings-sidebar-celery-stop"
-                onClick={() => onOpenShutdownConfirm?.()}
-                title="Shutdown entire system"
-                aria-label="Shutdown entire system"
+                onClick={onSidebarCeleryStop}
+                disabled={celeryStopBusy}
+                title="Stop Celery worker"
+                aria-label="Stop Celery worker"
               >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-                  <line x1="12" y1="2" x2="12" y2="12" />
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
-              <button
-                type="button"
-                className={`settings-sidebar-chevron ${systemStatusExpanded ? 'expanded' : ''}`}
-                onClick={() => setSystemStatusExpanded(e => !e)}
-                aria-expanded={systemStatusExpanded}
-                aria-controls="settings-system-status-subs"
-                aria-label={systemStatusExpanded ? 'Collapse System section' : 'Expand System section'}
-              >
-                ▼
-              </button>
-            </div>
-            <div id="settings-system-status-subs" className="settings-sidebar-subs" hidden={!systemStatusExpanded}>
-              <a
-                href="#settings-system-server"
-                className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemServerActive ? 'active' : ''}`}
-              >
-                <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Server (management / monitor)" aria-hidden>
-                  <SettingsSidebarLampGlyph id="system" />
-                </span>
-                Server
-              </a>
-              <a
-                href="#settings-system-daemon"
-                className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemDaemonActive ? 'active' : ''}`}
-              >
-                <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon" aria-hidden>
-                  <SettingsSidebarLampGlyph id="daemon" />
-                </span>
-                Daemon
-              </a>
-              <div className="settings-sidebar-celery-row">
-                <a
-                  href="#settings-system-celery"
-                  className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-celery ${isSystemCeleryActive ? 'active' : ''}`}
-                >
-                  <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery" aria-hidden>
-                    <SettingsSidebarLampGlyph id="celery" />
-                  </span>
-                  Celery
-                  {barsQueueActiveTotal != null ? (
-                    <span className="settings-sidebar-celery-queue-badge" title="Bars queue: pending + running">
-                      {barsQueueActiveTotal}
-                    </span>
-                  ) : null}
-                </a>
-                <button
-                  type="button"
-                  className="settings-sidebar-celery-stop"
-                  onClick={onSidebarCeleryStop}
-                  disabled={celeryStopBusy}
-                  title="Stop Celery worker"
-                  aria-label="Stop Celery worker"
-                >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="settings-sidebar-group">
-            <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
-              <a href="#settings-api-docs" className="settings-sidebar-parent-label">
-                <SettingsSectionIcon name="api" />
-                API
-              </a>
-              <button
-                type="button"
-                className={`settings-sidebar-chevron ${apiExpanded ? 'expanded' : ''}`}
-                onClick={() => setApiExpanded(e => !e)}
-                aria-expanded={apiExpanded}
-                aria-controls="settings-api-subs"
-                aria-label={apiExpanded ? 'Collapse API section' : 'Expand API section'}
-              >
-                ▼
-              </button>
-            </div>
-            <div id="settings-api-subs" className="settings-sidebar-subs" hidden={!apiExpanded}>
-              <a
-                href="#settings-api-docs"
-                className={`settings-sidebar-link settings-sidebar-link-sub ${isApiDocsActive ? 'active' : ''}`}
-              >
-                <span className={`title-inline-lamp lamp-icon ${docsApiLamp}`} title="Docs API health" aria-hidden>
-                  <SettingsSidebarLampGlyph id="api-docs" />
-                </span>
-                Docs
-              </a>
-              <a
-                href="#settings-api-massive"
-                className={`settings-sidebar-link settings-sidebar-link-sub ${isApiMassiveActive ? 'active' : ''}`}
-              >
-                <span className={`title-inline-lamp lamp-icon ${massiveApiLamp}`} title="Massive API health" aria-hidden>
-                  <SettingsSidebarLampGlyph id="api-massive" />
-                </span>
-                Massive
-              </a>
-            </div>
-          </div>
-          <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
-          <div className="settings-sidebar-group-label">Data Coverage</div>
-          {COVERAGE_SUBSECTIONS.map((sub) => (
-            <a
-              key={sub.id}
-              href={`#${sub.id}`}
-              className={`settings-sidebar-link ${
-                isCoverageSection && (currentHash === sub.id || (sub.id === 'coverage-option' && currentHash === FEED_MASSIVE_DAILY_DATA_ID))
-                  ? 'active'
-                  : ''
-              }`}
-            >
-              <SettingsSectionIcon name={sub.icon} />
-              {sub.label}
-            </a>
-          ))}
-          <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
-          <div className="settings-sidebar-group-label">Feed</div>
-          {FEED_SUBSECTIONS.map((sub) => (
-            <a
-              key={sub.id}
-              href={`#${sub.id}`}
-              className={`settings-sidebar-link ${activeIbStockFeed ? 'active' : ''}`}
-            >
-              <SettingsSectionIcon name={sub.icon} />
-              {sub.label}
-            </a>
-          ))}
-          <div className="settings-sidebar-group">
-            <div className={`settings-sidebar-parent ${isMassiveOptionFeedActive ? 'active' : ''}`}>
-              <a href={`#${FEED_MASSIVE_OPTION_ID}`} className="settings-sidebar-parent-label">
-                <SettingsSectionIcon name="feed-massive" />
-                Massive Option
-              </a>
-              <button
-                type="button"
-                className={`settings-sidebar-chevron ${massiveOptionExpanded ? 'expanded' : ''}`}
-                onClick={() => setMassiveOptionExpanded(e => !e)}
-                aria-expanded={massiveOptionExpanded}
-                aria-controls="settings-feed-massive-subs"
-                aria-label={massiveOptionExpanded ? 'Collapse Massive Option capabilities' : 'Expand Massive Option capabilities'}
-              >
-                ▼
-              </button>
-            </div>
-            <div id="settings-feed-massive-subs" className="settings-sidebar-subs" hidden={!massiveOptionExpanded}>
-              {groupedChecklistRows().map(({ group, rows: groupRows }) => {
-                const capGroupOpen = massiveCapGroupExpanded[group]
-                const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
-                const groupHasActive = groupRows.some(row => {
-                  const anchor = feedMassiveSvcAnchorId(row.id)
-                  return currentHash === anchor || fromTab === row.id
-                })
-                return (
-                  <div key={group} className="settings-sidebar-massive-group">
-                    <div
-                      className={`settings-sidebar-massive-cap-group-head${
-                        groupHasActive ? ' settings-sidebar-massive-cap-group-head--active' : ''
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        className="settings-sidebar-massive-cap-group-toggle"
-                        aria-expanded={capGroupOpen}
-                        aria-controls={`settings-massive-cap-group-${group}`}
-                        id={`settings-massive-cap-group-head-${group}`}
-                        onClick={() =>
-                          setMassiveCapGroupExpanded(prev => ({ ...prev, [group]: !prev[group] }))
-                        }
-                      >
-                        <span
-                          className={`settings-sidebar-chevron settings-sidebar-massive-cap-group-chevron ${
-                            capGroupOpen ? 'expanded' : ''
-                          }`}
-                          aria-hidden
-                        >
-                          ▼
-                        </span>
-                        <span className="settings-sidebar-massive-cap-group-title">
-                          {CAPABILITY_GROUP_LABELS[group]}
-                        </span>
-                      </button>
-                    </div>
-                    <div
-                      id={`settings-massive-cap-group-${group}`}
-                      className="settings-sidebar-massive-cap-group-subs"
-                      hidden={!capGroupOpen}
-                      role="group"
-                      aria-labelledby={`settings-massive-cap-group-head-${group}`}
-                    >
-                      {groupRows.map(row => {
-                        const configured = Boolean(massiveStatus?.configured)
-                        const tierOk = tierOkForRow(row, massiveStatus, configured)
-                        const tradesOk = tradesOkForRow(row, massiveStatus)
-                        const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
-                        const isTierLimited = eff === 'not-on-tier'
-                        const anchor = feedMassiveSvcAnchorId(row.id)
-                        const childActive = currentHash === anchor || fromTab === row.id
-                        return (
-                          <a
-                            key={row.id}
-                            href={`#${anchor}`}
-                            className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
-                          >
-                            <span
-                              className={`title-inline-lamp lamp-icon ${isTierLimited ? 'tier' : 'none'}`}
-                              title={isTierLimited ? 'Not available on current plan tier' : undefined}
-                              aria-hidden
-                            >
-                              <SettingsSidebarLampGlyph id={row.id} />
-                            </span>
-                            <span className="settings-sidebar-massive-cap-label">{shortServiceLabel(row)}</span>
-                          </a>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
             </div>
           </div>
         </div>
-        <div className="settings-sidebar-group-block" role="group" aria-label="Configuration">
-          <div className="settings-sidebar-group-label">Configuration</div>
-          {CONFIG_SECTIONS.map(({ id, label, icon }) => {
-            if (id !== 'settings-ib-connection') {
+        <div className="settings-sidebar-group">
+          <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
+            <a href="#settings-api-overview" className="settings-sidebar-parent-label">
+              <SettingsSectionIcon name="api" />
+              API
+            </a>
+            <button
+              type="button"
+              className={`settings-sidebar-chevron ${apiExpanded ? 'expanded' : ''}`}
+              onClick={() => setApiExpanded(e => !e)}
+              aria-expanded={apiExpanded}
+              aria-controls="settings-api-subs"
+              aria-label={apiExpanded ? 'Collapse API section' : 'Expand API section'}
+            >
+              ▼
+            </button>
+          </div>
+          <div id="settings-api-subs" className="settings-sidebar-subs" hidden={!apiExpanded}>
+              <a
+                href="#settings-api-overview"
+                className={`settings-sidebar-link settings-sidebar-link-sub ${isApiHealthOverviewActive ? 'active' : ''}`}
+              >
+                <SettingsSectionIcon name="heartbeat" />
+                API Overview
+              </a>
+            <a
+              href="#settings-api-docs"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiDocsActive ? 'active' : ''}`}
+            >
+              <span className={`title-inline-lamp lamp-icon ${docsApiLamp}`} title="Docs API health" aria-hidden>
+                <SettingsSidebarLampGlyph id="api-docs" />
+              </span>
+              Docs
+            </a>
+            <a
+              href="#settings-api-massive"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiMassiveActive ? 'active' : ''}`}
+            >
+              <span className={`title-inline-lamp lamp-icon ${massiveApiLamp}`} title="Massive API health" aria-hidden>
+                <SettingsSidebarLampGlyph id="api-massive" />
+              </span>
+              Massive
+            </a>
+          </div>
+        </div>
+        <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
+        <div className="settings-sidebar-group-label">Data Coverage</div>
+        {COVERAGE_SUBSECTIONS.map((sub) => (
+          <a
+            key={sub.id}
+            href={`#${sub.id}`}
+            className={`settings-sidebar-link ${isCoverageSection && (currentHash === sub.id || (sub.id === 'coverage-option' && currentHash === FEED_MASSIVE_DAILY_DATA_ID))
+                ? 'active'
+                : ''
+              }`}
+          >
+            <SettingsSectionIcon name={sub.icon} />
+            {sub.label}
+          </a>
+        ))}
+        <div className="settings-sidebar-inline-split" role="presentation" aria-hidden />
+        <div className="settings-sidebar-group-label">Feed</div>
+        {FEED_SUBSECTIONS.map((sub) => (
+          <a
+            key={sub.id}
+            href={`#${sub.id}`}
+            className={`settings-sidebar-link ${activeIbStockFeed ? 'active' : ''}`}
+          >
+            <SettingsSectionIcon name={sub.icon} />
+            {sub.label}
+          </a>
+        ))}
+        <div className="settings-sidebar-group">
+          <div className={`settings-sidebar-parent ${isMassiveOptionFeedActive ? 'active' : ''}`}>
+            <a href={`#${FEED_MASSIVE_OPTION_ID}`} className="settings-sidebar-parent-label">
+              <SettingsSectionIcon name="feed-massive" />
+              Massive Option
+            </a>
+            <button
+              type="button"
+              className={`settings-sidebar-chevron ${massiveOptionExpanded ? 'expanded' : ''}`}
+              onClick={() => setMassiveOptionExpanded(e => !e)}
+              aria-expanded={massiveOptionExpanded}
+              aria-controls="settings-feed-massive-subs"
+              aria-label={massiveOptionExpanded ? 'Collapse Massive Option capabilities' : 'Expand Massive Option capabilities'}
+            >
+              ▼
+            </button>
+          </div>
+          <div id="settings-feed-massive-subs" className="settings-sidebar-subs" hidden={!massiveOptionExpanded}>
+            {groupedChecklistRows().map(({ group, rows: groupRows }) => {
+              const capGroupOpen = massiveCapGroupExpanded[group]
+              const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
+              const groupHasActive = groupRows.some(row => {
+                const anchor = feedMassiveSvcAnchorId(row.id)
+                return currentHash === anchor || fromTab === row.id
+              })
               return (
-                <a
-                  key={id}
-                  href={`#${id}`}
-                  className={`settings-sidebar-link ${activeSectionId === id ? 'active' : ''}`}
-                >
+                <div key={group} className="settings-sidebar-massive-group">
+                  <div
+                    className={`settings-sidebar-massive-cap-group-head${groupHasActive ? ' settings-sidebar-massive-cap-group-head--active' : ''
+                      }`}
+                  >
+                    <button
+                      type="button"
+                      className="settings-sidebar-massive-cap-group-toggle"
+                      aria-expanded={capGroupOpen}
+                      aria-controls={`settings-massive-cap-group-${group}`}
+                      id={`settings-massive-cap-group-head-${group}`}
+                      onClick={() =>
+                        setMassiveCapGroupExpanded(prev => ({ ...prev, [group]: !prev[group] }))
+                      }
+                    >
+                      <span
+                        className={`settings-sidebar-chevron settings-sidebar-massive-cap-group-chevron ${capGroupOpen ? 'expanded' : ''
+                          }`}
+                        aria-hidden
+                      >
+                        ▼
+                      </span>
+                      <span className="settings-sidebar-massive-cap-group-title">
+                        {CAPABILITY_GROUP_LABELS[group]}
+                      </span>
+                    </button>
+                  </div>
+                  <div
+                    id={`settings-massive-cap-group-${group}`}
+                    className="settings-sidebar-massive-cap-group-subs"
+                    hidden={!capGroupOpen}
+                    role="group"
+                    aria-labelledby={`settings-massive-cap-group-head-${group}`}
+                  >
+                    {groupRows.map(row => {
+                      const configured = Boolean(massiveStatus?.configured)
+                      const tierOk = tierOkForRow(row, massiveStatus, configured)
+                      const tradesOk = tradesOkForRow(row, massiveStatus)
+                      const eff = effectiveChecklistProjectStatus(row, configured, tierOk, tradesOk)
+                      const isTierLimited = eff === 'not-on-tier'
+                      const anchor = feedMassiveSvcAnchorId(row.id)
+                      const childActive = currentHash === anchor || fromTab === row.id
+                      return (
+                        <a
+                          key={row.id}
+                          href={`#${anchor}`}
+                          className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-massive-cap ${childActive ? 'active' : ''}`}
+                        >
+                          <span
+                            className={`title-inline-lamp lamp-icon ${isTierLimited ? 'tier' : 'none'}`}
+                            title={isTierLimited ? 'Not available on current plan tier' : undefined}
+                            aria-hidden
+                          >
+                            <SettingsSidebarLampGlyph id={row.id} />
+                          </span>
+                          <span className="settings-sidebar-massive-cap-label">{shortServiceLabel(row)}</span>
+                        </a>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+      <div className="settings-sidebar-group-block" role="group" aria-label="Configuration">
+        <div className="settings-sidebar-group-label">Configuration</div>
+        {CONFIG_SECTIONS.map(({ id, label, icon }) => {
+          if (id !== 'settings-ib-connection') {
+            return (
+              <a
+                key={id}
+                href={`#${id}`}
+                className={`settings-sidebar-link ${activeSectionId === id ? 'active' : ''}`}
+              >
+                <SettingsSectionIcon name={icon} />
+                {label}
+              </a>
+            )
+          }
+          return (
+            <div key={id} className="settings-sidebar-group">
+              <div className={`settings-sidebar-parent ${activeSectionId === id ? 'active' : ''}`}>
+                <a href={`#${id}`} className="settings-sidebar-parent-label">
                   <SettingsSectionIcon name={icon} />
                   {label}
                 </a>
-              )
-            }
-            return (
-              <div key={id} className="settings-sidebar-group">
-                <div className={`settings-sidebar-parent ${activeSectionId === id ? 'active' : ''}`}>
-                  <a href={`#${id}`} className="settings-sidebar-parent-label">
-                    <SettingsSectionIcon name={icon} />
-                    {label}
-                  </a>
-                  <button
-                    type="button"
-                    className={`settings-sidebar-chevron ${ibConnectionExpanded ? 'expanded' : ''}`}
-                    onClick={() => setIbConnectionExpanded((e) => !e)}
-                    aria-expanded={ibConnectionExpanded}
-                    aria-controls="settings-ib-connection-subs"
-                    aria-label={ibConnectionExpanded ? 'Collapse IB Configure' : 'Expand IB Configure'}
-                  >
-                    ▼
-                  </button>
-                </div>
-                <div id="settings-ib-connection-subs" className="settings-sidebar-subs" hidden={!ibConnectionExpanded}>
-                  {IB_CONNECTION_SUBSECTIONS.map((sub) => (
-                    <a
-                      key={sub.id}
-                      href={`#${sub.id}`}
-                      className={`settings-sidebar-link settings-sidebar-link-sub ${activeSubId === sub.id ? 'active' : ''}`}
-                    >
-                      <SettingsSectionIcon name={sub.icon} />
-                      {sub.label}
-                    </a>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  className={`settings-sidebar-chevron ${ibConnectionExpanded ? 'expanded' : ''}`}
+                  onClick={() => setIbConnectionExpanded((e) => !e)}
+                  aria-expanded={ibConnectionExpanded}
+                  aria-controls="settings-ib-connection-subs"
+                  aria-label={ibConnectionExpanded ? 'Collapse IB Configure' : 'Expand IB Configure'}
+                >
+                  ▼
+                </button>
               </div>
-            )
-          })}
-        </div>
+              <div id="settings-ib-connection-subs" className="settings-sidebar-subs" hidden={!ibConnectionExpanded}>
+                {IB_CONNECTION_SUBSECTIONS.map((sub) => (
+                  <a
+                    key={sub.id}
+                    href={`#${sub.id}`}
+                    className={`settings-sidebar-link settings-sidebar-link-sub ${activeSubId === sub.id ? 'active' : ''}`}
+                  >
+                    <SettingsSectionIcon name={sub.icon} />
+                    {sub.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </>
   )
 
   return (
     <SettingsShell sidebar={sidebarContent}>
-        {isSystemSection ? (
-          isSystemCeleryActive ? (
-            <CeleryPage
-              status={status}
-              loadStatus={loadStatus}
-              embeddedInSettings
-              breadcrumbLabel="Celery"
-            />
-          ) : isSystemDaemonActive ? (
-            <DaemonStatusPage
-              status={status}
-              loadStatus={loadStatus}
-              operations={operations}
-              onNavigateToStrategy={onNavigateToStrategy}
-              embeddedInSettings
-              breadcrumbLabel="Daemon"
-            />
-          ) : isSystemServerActive ? (
-            <ServerStatusPage
-              status={status}
-              loadStatus={loadStatus}
-              embeddedInSettings
-            />
-          ) : (
-            <StatusPage
-              status={status}
-              operations={operations}
-              loadStatus={loadStatus}
-              onNavigateToStrategy={onNavigateToStrategy}
-              showSectionTabs={false}
-              showAllSystemSections={true}
-              showSystemSection={true}
-              showConsoleSection={true}
-              showConsoleTabs={true}
-              consoleCardTitle="Console"
-              celeryUiMode="relocated"
-            />
-          )
-        ) : isApiSection ? (
-          isApiDocsActive ? (
-            <DocsApiStatusPage embeddedInSettings />
-          ) : (
-            <MassiveApiStatusPage embeddedInSettings />
-          )
-        ) : isCoverageSection ? (
-          currentHash === 'coverage-stock' ? (
-            <StockCoveragePage status={status} />
-          ) : (
-            <OptionCoveragePage status={status} />
-          )
-        ) : isFeedSection ? (
-          isMassiveOptionFeedHash(currentHash) ? (
-            <FeedMassiveOptionPage
-              status={status}
-              onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
-              onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
-              breadcrumbLabel="Massive Option"
-            />
-          ) : (
-            <DataPage
-              status={status}
-              embeddedInSettings
-              onBreadcrumbParent={() => { window.location.hash = '#settings-system' }}
-              breadcrumbParentLabel="Settings"
-              onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
-              breadcrumbLabel="IB Stock"
-            />
-          )
+      {isSystemSection ? (
+        isSystemCeleryActive ? (
+          <CeleryPage
+            status={status}
+            loadStatus={loadStatus}
+            embeddedInSettings
+            breadcrumbLabel="Celery"
+          />
+        ) : isSystemDaemonActive ? (
+          <DaemonStatusPage
+            status={status}
+            loadStatus={loadStatus}
+            operations={operations}
+            onNavigateToStrategy={onNavigateToStrategy}
+            embeddedInSettings
+            breadcrumbLabel="Daemon"
+          />
+        ) : isSystemServerActive ? (
+          <ServerStatusPage
+            status={status}
+            loadStatus={loadStatus}
+            embeddedInSettings
+          />
         ) : (
+          <StatusPage
+            status={status}
+            operations={operations}
+            loadStatus={loadStatus}
+            onNavigateToStrategy={onNavigateToStrategy}
+            showSectionTabs={false}
+            showAllSystemSections={true}
+            showSystemSection={true}
+            showConsoleSection={true}
+            showConsoleTabs={true}
+            consoleCardTitle="Console"
+            celeryUiMode="relocated"
+          />
+        )
+      ) : isApiSection ? (
+        isApiMassiveActive ? (
+          <MassiveApiStatusPage embeddedInSettings />
+        ) : isApiDocsActive ? (
+          <DocsApiStatusPage embeddedInSettings />
+        ) : (
+          <ApiHealthOverviewPage embeddedInSettings />
+        )
+      ) : isCoverageSection ? (
+        currentHash === 'coverage-stock' ? (
+          <StockCoveragePage status={status} />
+        ) : (
+          <OptionCoveragePage status={status} />
+        )
+      ) : isFeedSection ? (
+        isMassiveOptionFeedHash(currentHash) ? (
+          <FeedMassiveOptionPage
+            status={status}
+            onGoToFeed={() => { window.location.hash = '#feed-ib-stock' }}
+            onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
+            breadcrumbLabel="Massive Option"
+          />
+        ) : (
+          <DataPage
+            status={status}
+            embeddedInSettings
+            onBreadcrumbParent={() => { window.location.hash = '#settings-system' }}
+            breadcrumbParentLabel="Settings"
+            onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
+            breadcrumbLabel="IB Stock"
+          />
+        )
+      ) : (
         <div className="settings-page-card">
           <div className="settings-page-header">
             <div className="settings-page-title-group">
@@ -835,8 +848,8 @@ export function SettingsPage({
               onDeleteHoliday={onDeleteHoliday}
             />
           </div>
-      </div>
-        )}
+        </div>
+      )}
     </SettingsShell>
   )
 }

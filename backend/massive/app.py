@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.config import config_profile_from_resolved_path
 from servers.reader import StatusReader
@@ -36,6 +37,13 @@ def create_massive_app(
         docs_url="/research/massive/docs",
         redoc_url="/research/massive/redoc",
         openapi_url="/research/massive/openapi.json",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     # Shared deps expected by routers via request.app.state

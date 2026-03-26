@@ -1271,3 +1271,173 @@
   font-size: 0.75rem;
   opacity: 0.5;
 }
+
+/* ==========================================================================
+   9. API Health overview (Dev / Prod diagram in Settings)
+   ========================================================================== */
+
+.api-health-overview-loading {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+}
+
+.api-health-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-5);
+  margin-top: var(--space-3);
+  align-items: start;
+}
+
+.api-health-overview-column {
+  min-width: 0;
+  padding: var(--space-4);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+}
+
+.api-health-overview-column-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: var(--space-3);
+}
+
+.api-health-overview-env-title {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-text);
+}
+
+.api-health-overview-origin {
+  font-family: var(--font-mono);
+  font-size: var(--text-tiny);
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.api-health-overview-hint {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--color-text-dim);
+  line-height: 1.45;
+}
+
+.api-health-diagram {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin-bottom: var(--space-3);
+}
+
+.api-health-diagram-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.api-health-diagram-line {
+  width: 2px;
+  height: 1.25rem;
+  background: linear-gradient(
+    to bottom,
+    var(--color-border),
+    color-mix(in srgb, var(--color-border) 40%, transparent)
+  );
+  border-radius: 1px;
+}
+
+.api-health-diagram-node {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.api-health-diagram-node--green {
+  border-color: var(--color-lamp-green);
+  background: color-mix(in srgb, var(--color-lamp-green) 22%, var(--color-surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-lamp-green) 35%, transparent);
+}
+
+.api-health-diagram-node--red {
+  border-color: var(--color-lamp-red);
+  background: color-mix(in srgb, var(--color-lamp-red) 18%, var(--color-surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-lamp-red) 35%, transparent);
+}
+
+.api-health-diagram-node--none {
+  border-color: var(--color-border);
+  opacity: 0.85;
+}
+
+.api-health-diagram-label {
+  margin-top: 0.35rem;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--color-text-dim);
+  text-align: center;
+}
+
+.api-health-diagram-detail {
+  margin-top: 0.15rem;
+  margin-bottom: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.api-overview-services-section {
+  margin-top: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.api-overview-health-section {
+  margin-top: var(--space-4);
+}
+
+.api-overview-subsection-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-body);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.api-overview-services-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+  line-height: 1.65;
+}
+
+.api-overview-services-name {
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
+
+.api-overview-services-env {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.api-overview-services-empty {
+  margin: 0;
+}
