@@ -36,4 +36,5 @@ def get_sse_queue_metrics(request: Request) -> Dict[str, Any]:
         "server_logs": _snapshot_queues(app.state.server_log_lock, app.state.server_log_queues),
         "celery_logs": _snapshot_queues(app.state.celery_log_lock, app.state.celery_log_queues),
         "massive_logs": _snapshot_queues(app.state.massive_log_lock, app.state.massive_log_queues),
+        "docs_logs": _snapshot_queues(app.state.docs_log_lock, app.state.docs_log_queues),
     }

@@ -10,6 +10,7 @@ import {
   deleteMarketHoliday,
   postCeleryStop,
   fetchMassiveApiHealth,
+  fetchDocsApiHealth,
   fetchMassiveStatus,
   type MarketHolidayRow,
   type MassiveStatusResponse,
@@ -55,6 +56,7 @@ import { CeleryPage } from './CeleryPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
+import { DocsApiStatusPage } from './DocsApiStatusPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
@@ -229,6 +231,7 @@ export function SettingsPage({
   const [apiExpanded, setApiExpanded] = useState(true)
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [massiveApiHealthOk, setMassiveApiHealthOk] = useState<boolean | null>(null)
+  const [docsApiHealthOk, setDocsApiHealthOk] = useState<boolean | null>(null)
   const [celeryStopBusy, setCeleryStopBusy] = useState(false)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
@@ -242,7 +245,9 @@ export function SettingsPage({
   const isSystemCeleryActive = activeSectionId === 'settings-system' && (currentHash === 'settings-system-celery' || currentHash === 'feed-celery')
   const isApiSection = activeSectionId === 'settings-api'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
+  const isApiDocsActive = isApiSection && currentHash !== 'settings-api-massive'
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
+  const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
 
   useEffect(() => {
     let cancelled = false
@@ -253,6 +258,9 @@ export function SettingsPage({
       fetchMassiveApiHealth()
         .then(() => { if (!cancelled) setMassiveApiHealthOk(true) })
         .catch(() => { if (!cancelled) setMassiveApiHealthOk(false) })
+      fetchDocsApiHealth()
+        .then(() => { if (!cancelled) setDocsApiHealthOk(true) })
+        .catch(() => { if (!cancelled) setDocsApiHealthOk(false) })
     }
     load()
     const t = window.setInterval(load, 20000)
@@ -475,7 +483,7 @@ export function SettingsPage({
           </div>
           <div className="settings-sidebar-group">
             <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
-              <a href="#settings-api-massive" className="settings-sidebar-parent-label">
+              <a href="#settings-api-docs" className="settings-sidebar-parent-label">
                 <SettingsSectionIcon name="api" />
                 API
               </a>
@@ -491,6 +499,15 @@ export function SettingsPage({
               </button>
             </div>
             <div id="settings-api-subs" className="settings-sidebar-subs" hidden={!apiExpanded}>
+              <a
+                href="#settings-api-docs"
+                className={`settings-sidebar-link settings-sidebar-link-sub ${isApiDocsActive ? 'active' : ''}`}
+              >
+                <span className={`title-inline-lamp lamp-icon ${docsApiLamp}`} title="Docs API health" aria-hidden>
+                  <SettingsSidebarLampGlyph id="api-docs" />
+                </span>
+                Docs
+              </a>
               <a
                 href="#settings-api-massive"
                 className={`settings-sidebar-link settings-sidebar-link-sub ${isApiMassiveActive ? 'active' : ''}`}
@@ -717,7 +734,11 @@ export function SettingsPage({
             />
           )
         ) : isApiSection ? (
-          <MassiveApiStatusPage embeddedInSettings />
+          isApiDocsActive ? (
+            <DocsApiStatusPage embeddedInSettings />
+          ) : (
+            <MassiveApiStatusPage embeddedInSettings />
+          )
         ) : isCoverageSection ? (
           currentHash === 'coverage-stock' ? (
             <StockCoveragePage status={status} />

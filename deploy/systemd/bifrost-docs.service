@@ -1,5 +1,5 @@
 [Unit]
-Description=Bifrost merged OpenAPI docs server (run_server_docs.py)
+Description=Bifrost Docs API server (merged OpenAPI, run_server_docs.py)
 After=network-online.target bifrost-server.service bifrost-massive.service
 Wants=network-online.target
 
@@ -9,9 +9,9 @@ User=vision
 Group=vision
 WorkingDirectory=/home/vision/bifrost-trader-engine
 Environment=BIFROST_ENV=prod
-# When nginx proxies http://<host>/bifrost-api-docs/ -> 127.0.0.1:8767/ (see deploy/nginx/bifrost-status.conf):
+# Canonical URL behind nginx: https://<host>/research/docs/docs (see deploy/nginx/bifrost-status.conf).
+# Legacy path http://<host>/bifrost-api-docs/ -> 127.0.0.1:8767/ (stripped); set for correct Swagger openapi URL:
 # Environment=BIFROST_DOCS_ROOT_PATH=/bifrost-api-docs
-# Omit when using only http://<host>:8767/docs (direct port).
 ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_server_docs.py --prod
 Restart=on-failure
 RestartSec=5

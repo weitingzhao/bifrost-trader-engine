@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 DAEMON_LOG_STREAM_KEY = "bifrost:daemon_console"
 SERVER_LOG_STREAM_KEY = "bifrost:server_console"
 MASSIVE_LOG_STREAM_KEY = "bifrost:massive_console"
+DOCS_LOG_STREAM_KEY = "bifrost:docs_console"
 
 
 def daemon_log_redis_url() -> str:

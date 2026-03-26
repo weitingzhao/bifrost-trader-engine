@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Merged OpenAPI documentation server — aggregates Main + Massive specs.
+"""Standalone Docs API server — merged OpenAPI (same URL layout as Massive API).
 
 On startup, reads server.docs_port from config (default 8767) and frees the
-port if already in use, then starts the docs-only FastAPI via
-backend.docs.app.
+port if already in use, then starts the Docs FastAPI via backend.docs.app.
 
 Default config: ``config/config.dev.yaml``. Use ``--prod`` or
 ``BIFROST_ENV=prod`` for ``config/config.prod.yaml``, or ``BIFROST_CONFIG``
@@ -17,9 +16,18 @@ import subprocess
 import sys
 import time
 
+try:
+    import redis
+except ImportError:  # pragma: no cover
+    redis = None
+
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)
+
+from servers.routers.deps import DOCS_LOG_STREAM_KEY
+
+_DOCS_LOG_STREAM_MAXLEN = 50
 
 logging.basicConfig(force=True)
 
@@ -50,6 +58,48 @@ class ColoredFormatter(logging.Formatter):
             record.levelname = original_levelname
 
 
+class RedisStreamLogHandler(logging.Handler):
+    """Push Docs API log lines to Redis Stream (same pattern as run_server_massive.py)."""
+
+    def __init__(self, redis_url: str, stream_key: str, maxlen: int = 50) -> None:
+        super().__init__()
+        self._redis_url = redis_url
+        self._stream_key = stream_key
+        self._maxlen = maxlen
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if redis is None:
+            return
+        try:
+            line = self.format(record)
+            r = redis.from_url(self._redis_url)
+            r.xadd(
+                self._stream_key,
+                {"line": line},
+                maxlen=self._maxlen,
+                approximate=True,
+            )
+        except Exception:
+            pass
+
+
+def _console_log_redis_url() -> str:
+    try:
+        from src.app.config import read_config
+
+        config, _ = read_config()
+        r = config.get("redis") or {}
+    except (ImportError, OSError, ValueError, TypeError):
+        r = {}
+    host = (r.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1").strip()
+    port = int(r.get("port") or os.environ.get("REDIS_PORT") or 6379)
+    db = int(r.get("db") or os.environ.get("REDIS_DB") or 0)
+    password = (r.get("password") or os.environ.get("REDIS_PASSWORD") or "").strip()
+    if password:
+        return f"redis://:{password}@{host}:{port}/{db}"
+    return f"redis://{host}:{port}/{db}"
+
+
 def setup_logging() -> None:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
@@ -58,9 +108,21 @@ def setup_logging() -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
+    redis_handler = RedisStreamLogHandler(
+        _console_log_redis_url(),
+        DOCS_LOG_STREAM_KEY,
+        maxlen=_DOCS_LOG_STREAM_MAXLEN,
+    )
+    redis_handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(console_handler)
+    root.addHandler(redis_handler)
     root.setLevel(logging.INFO)
 
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
@@ -142,7 +204,8 @@ def main() -> None:
         print(f"Could not free port {port}. Run: lsof -i :{port}", file=sys.stderr)
         sys.exit(1)
     from backend.docs.app import run_docs_server
-    run_docs_server(config)
+
+    run_docs_server(config, resolved_config_path=resolved_config_path)
 
 
 if __name__ == "__main__":

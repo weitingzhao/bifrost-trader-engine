@@ -103,6 +103,12 @@ def create_app(
     app.state._massive_log_thread: Optional[threading.Thread] = None
     app.state._massive_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # Docs API console log stream (run_server_docs.py → bifrost:docs_console)
+    app.state.docs_log_queues: list = []
+    app.state.docs_log_lock = threading.Lock()
+    app.state._docs_log_thread: Optional[threading.Thread] = None
+    app.state._docs_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
     # Monitor-side IB state (for AccountIbClient / MarketIbClient).
     app.state.monitor_enabled = True
     app.state.account_ib_client = None

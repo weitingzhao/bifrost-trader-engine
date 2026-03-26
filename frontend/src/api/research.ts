@@ -140,6 +140,45 @@ export async function fetchMassiveApiHealth(): Promise<MassiveApiHealthResponse>
   }
 }
 
+/** Health from GET /research/docs/health (Docs FastAPI merged OpenAPI). */
+export interface DocsApiHealthResponse {
+  status: string
+  service: string
+  ts: number
+  config_profile?: 'dev' | 'prod' | null
+  /** Listening port of the Docs FastAPI process (from YAML `server.docs_port`). */
+  port?: number
+  config_path?: string | null
+  /** Upstream URLs used to build merged OpenAPI. */
+  main_url: string
+  massive_url: string
+}
+
+export async function fetchDocsApiHealth(): Promise<DocsApiHealthResponse> {
+  const r = await fetch(`${API}/research/docs/health`)
+  if (!r.ok) throw new Error(`Docs API health: ${r.status}`)
+  const j = await r.json()
+  return {
+    status: j.status ?? 'unknown',
+    service: j.service ?? 'bifrost-docs',
+    ts: typeof j.ts === 'number' ? j.ts : 0,
+    config_profile: j.config_profile ?? null,
+    port: typeof j.port === 'number' && Number.isFinite(j.port) ? j.port : undefined,
+    config_path: typeof j.config_path === 'string' ? j.config_path : null,
+    main_url: typeof j.main_url === 'string' ? j.main_url : '',
+    massive_url: typeof j.massive_url === 'string' ? j.massive_url : '',
+  }
+}
+
+export async function postDocsShutdown(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${API}/research/docs/shutdown`, { method: 'POST' })
+  const j = await r.json().catch(() => ({}))
+  return {
+    ok: r.ok && j.ok !== false,
+    error: j.error || (r.ok ? undefined : r.statusText || 'Request failed'),
+  }
+}
+
 export async function postMassiveShutdown(): Promise<{ ok: boolean; error?: string }> {
   const r = await fetch(`${API}/research/massive/shutdown`, { method: 'POST' })
   const j = await r.json().catch(() => ({}))

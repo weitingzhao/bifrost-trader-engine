@@ -21,6 +21,7 @@ export type SettingsSidebarLampGlyphId =
   | 'daemon'
   | 'celery'
   | 'api-massive'
+  | 'api-docs'
   | 'massive-option'
   | 'reference'
   | 'snapshot'
@@ -83,6 +84,15 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
       return (
         <svg {...SVG_COMMON}>
           <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      )
+    /** API Docs: merged OpenAPI documentation */
+    case 'api-docs':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          <path d="M8 7h8M8 11h6" />
         </svg>
       )
     /** Massive Option: options / market data trend */
