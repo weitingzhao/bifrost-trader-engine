@@ -1,0 +1,17 @@
+[Unit]
+Description=Bifrost Massive API (run_server_massive.py)
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_ENV=prod
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_server_massive.py --prod
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

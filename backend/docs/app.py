@@ -19,8 +19,18 @@ logger = logging.getLogger(__name__)
 def create_docs_app(
     main_openapi_url: str,
     massive_openapi_url: str,
+    *,
+    public_url_prefix: str = "",
 ) -> FastAPI:
-    """Build a docs-only FastAPI that serves merged OpenAPI from two upstream services."""
+    """Build a docs-only FastAPI that serves merged OpenAPI from two upstream services.
+
+    When nginx proxies this app under a subpath (e.g. ``/bifrost-api-docs/`` -> ``127.0.0.1:8767/``),
+    set ``public_url_prefix`` to that path (no trailing slash), e.g. via env ``BIFROST_DOCS_ROOT_PATH``,
+    so Swagger/ReDoc load ``/bifrost-api-docs/openapi.json`` instead of ``/openapi.json`` at site root.
+    """
+
+    _prefix = public_url_prefix.strip().rstrip("/")
+    _openapi_browser = f"{_prefix}/openapi.json" if _prefix else "/openapi.json"
 
     app = FastAPI(
         title="Bifrost API (merged)",
@@ -71,14 +81,14 @@ def create_docs_app(
     @app.get("/docs", include_in_schema=False)
     def swagger_ui() -> Any:
         return get_swagger_ui_html(
-            openapi_url="/openapi.json",
+            openapi_url=_openapi_browser,
             title="Bifrost API (merged) — Swagger UI",
         )
 
     @app.get("/redoc", include_in_schema=False)
     def redoc() -> Any:
         return get_redoc_html(
-            openapi_url="/openapi.json",
+            openapi_url=_openapi_browser,
             title="Bifrost API (merged) — ReDoc",
         )
 
@@ -110,7 +120,8 @@ def run_docs_server(
             f"http://127.0.0.1:{massive_port}/research/massive/openapi.json",
         )
 
-    app = create_docs_app(main_openapi_url, massive_openapi_url)
+    _public_prefix = os.environ.get("BIFROST_DOCS_ROOT_PATH", "").strip().rstrip("/")
+    app = create_docs_app(main_openapi_url, massive_openapi_url, public_url_prefix=_public_prefix)
     host = "0.0.0.0"
     logger.info("Docs server on %s:%s  (main=%s, massive=%s)", host, docs_port, main_openapi_url, massive_openapi_url)
     uvicorn.run(app, host=host, port=docs_port, log_level="info", log_config=None)
