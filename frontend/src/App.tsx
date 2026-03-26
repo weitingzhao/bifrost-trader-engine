@@ -218,6 +218,7 @@ export default function App() {
     if (
       h === FEED_MASSIVE_DAILY_DATA_ID ||
       h.startsWith('settings-system') ||
+      h.startsWith('settings-dashboard') ||
       h.startsWith('feed-') ||
       h.startsWith('coverage-')
     ) {

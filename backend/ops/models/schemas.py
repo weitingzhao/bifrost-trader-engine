@@ -29,6 +29,17 @@ class CommandAction(str, enum.Enum):
     RESTART = "restart"
 
 
+class ScaleAction(str, enum.Enum):
+    ADD = "add"
+    REMOVE = "remove"
+
+
+class BrokerAction(str, enum.Enum):
+    START = "start"
+    STOP = "stop"
+    RESTART = "restart"
+
+
 class CommandStatus(str, enum.Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -82,6 +93,24 @@ class CommandRecord(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+
+
+# ── Queue / Scale / Broker request models ────────────────────────────────────
+
+
+class QueueControlRequest(BaseModel):
+    add: List[str] = Field(default_factory=list)
+    remove: List[str] = Field(default_factory=list)
+
+
+class ScaleRequest(BaseModel):
+    action: ScaleAction
+    instance_id: str
+    queues: List[str] = Field(default_factory=lambda: ["celery"])
+
+
+class BrokerControlRequest(BaseModel):
+    action: BrokerAction
 
 
 # ── Audit ─────────────────────────────────────────────────────────────────────

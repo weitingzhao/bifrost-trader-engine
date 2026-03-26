@@ -127,6 +127,35 @@ class WorkerStateService:
             stats=s,
         )
 
+    def queue_control(
+        self,
+        worker_id: str,
+        add: List[str] | None = None,
+        remove: List[str] | None = None,
+    ) -> Dict[str, Any]:
+        """Add / remove queue consumers on a specific worker via Celery control."""
+        results: Dict[str, Any] = {"worker_id": worker_id, "added": [], "removed": []}
+        dest = [worker_id]
+        for q in add or []:
+            try:
+                self._celery.control.add_consumer(q, destination=dest)
+                results["added"].append(q)
+            except Exception as e:
+                logger.warning("add_consumer(%s, %s) failed: %s", q, worker_id, e)
+                results.setdefault("errors", []).append(
+                    {"queue": q, "op": "add", "error": str(e)}
+                )
+        for q in remove or []:
+            try:
+                self._celery.control.cancel_consumer(q, destination=dest)
+                results["removed"].append(q)
+            except Exception as e:
+                logger.warning("cancel_consumer(%s, %s) failed: %s", q, worker_id, e)
+                results.setdefault("errors", []).append(
+                    {"queue": q, "op": "remove", "error": str(e)}
+                )
+        return results
+
     def broker_status(self) -> Dict[str, Any]:
         connected = self._broker_connected()
         url_safe = (

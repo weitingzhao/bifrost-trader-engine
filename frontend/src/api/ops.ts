@@ -11,6 +11,18 @@ function opsBase(): string {
   return getOpsApiBase()
 }
 
+async function parseJsonResponse<T>(r: Response): Promise<T> {
+  const text = await r.text()
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    const snippet = text.slice(0, 120).replace(/\s+/g, ' ').trim()
+    throw new Error(
+      `Ops API returned non-JSON response (HTTP ${r.status}${snippet ? `, body: ${snippet}` : ''}).`,
+    )
+  }
+}
+
 export type ApiOriginBase = '' | string
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -95,7 +107,7 @@ export async function fetchOpsWorkers(): Promise<{
   error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/workers`)
-  return r.json()
+  return parseJsonResponse(r)
 }
 
 export async function fetchOpsWorkerDetail(workerId: string): Promise<{
@@ -104,7 +116,7 @@ export async function fetchOpsWorkerDetail(workerId: string): Promise<{
   error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/workers/${encodeURIComponent(workerId)}`)
-  return r.json()
+  return parseJsonResponse(r)
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -131,7 +143,7 @@ export async function submitOpsCommand(params: {
       idempotency_key: params.idempotency_key,
     }),
   })
-  return r.json()
+  return parseJsonResponse(r)
 }
 
 export async function fetchOpsCommand(commandId: string): Promise<{
@@ -140,7 +152,7 @@ export async function fetchOpsCommand(commandId: string): Promise<{
   error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/commands/${encodeURIComponent(commandId)}`)
-  return r.json()
+  return parseJsonResponse(r)
 }
 
 export async function fetchOpsCommands(limit = 50): Promise<{
@@ -150,7 +162,7 @@ export async function fetchOpsCommands(limit = 50): Promise<{
   error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/commands?limit=${limit}`)
-  return r.json()
+  return parseJsonResponse(r)
 }
 
 // ── Audit ────────────────────────────────────────────────────────────────────
@@ -162,7 +174,114 @@ export async function fetchOpsAudit(limit = 100): Promise<{
   error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/audit?limit=${limit}`)
-  return r.json()
+  return parseJsonResponse(r)
+}
+
+// ── Queue binding ─────────────────────────────────────────────────────────────
+
+export async function updateWorkerQueues(
+  workerId: string,
+  params: { add?: string[]; remove?: string[] },
+): Promise<{
+  ok: boolean
+  worker_id?: string
+  added?: string[]
+  removed?: string[]
+  errors?: { queue: string; op: string; error: string }[]
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/workers/${encodeURIComponent(workerId)}/queues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ add: params.add ?? [], remove: params.remove ?? [] }),
+  })
+  return parseJsonResponse(r)
+}
+
+// ── Worker scaling ────────────────────────────────────────────────────────────
+
+export type ScaleAction = 'add' | 'remove'
+
+export async function scaleWorker(params: {
+  action: ScaleAction
+  instance_id: string
+  queues?: string[]
+}): Promise<{
+  ok: boolean
+  action?: string
+  unit?: string
+  result?: Record<string, unknown>
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/workers/scale`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: params.action,
+      instance_id: params.instance_id,
+      queues: params.queues ?? ['celery'],
+    }),
+  })
+  return parseJsonResponse(r)
+}
+
+export interface SystemdInstance {
+  unit: string
+  load: string
+  active: string
+  sub: string
+  description: string
+}
+
+export async function fetchWorkerInstances(): Promise<{
+  ok: boolean
+  instances: SystemdInstance[]
+  count: number
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/workers/instances`)
+  return parseJsonResponse(r)
+}
+
+// ── Broker control ────────────────────────────────────────────────────────────
+
+export type BrokerAction = 'start' | 'stop' | 'restart'
+
+export interface ExtendedBrokerStatus extends BrokerStatus {
+  locally_managed: boolean
+}
+
+export async function fetchBrokerStatusExtended(): Promise<{
+  ok: boolean
+  broker: ExtendedBrokerStatus
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/broker/status`)
+  return parseJsonResponse(r)
+}
+
+export async function controlBroker(action: BrokerAction): Promise<{
+  ok: boolean
+  action?: string
+  result?: Record<string, unknown>
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/broker/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  })
+  return parseJsonResponse(r)
+}
+
+// ── Console SSE ──────────────────────────────────────────────────────────────
+
+export function workerConsoleUrl(workerId: string, lines = 200): string {
+  return `${opsBase()}/ops/console/worker/${encodeURIComponent(workerId)}?lines=${lines}`
+}
+
+export function brokerConsoleUrl(lines = 200): string {
+  return `${opsBase()}/ops/console/broker?lines=${lines}`
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────
@@ -176,7 +295,7 @@ export async function fetchOpsHealth(): Promise<{
   config_path?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/health`)
-  return r.json()
+  return parseJsonResponse(r)
 }
 
 export async function fetchOpsHealthAtOrigin(
@@ -198,7 +317,7 @@ export async function fetchOpsHealthAtOrigin(
     const credentials: RequestCredentials = origin ? 'omit' : 'same-origin'
     const r = await fetch(url, { signal: ac.signal, credentials })
     if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`)
-    return r.json()
+    return parseJsonResponse(r)
   } finally {
     window.clearTimeout(tid)
   }

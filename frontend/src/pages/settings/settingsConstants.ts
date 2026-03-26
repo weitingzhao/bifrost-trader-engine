@@ -12,6 +12,7 @@ export const DEFAULT_HEARTBEAT_SEC = 10
 /** Status / read-only view (sidebar group: Status). */
 export const STATUS_SECTIONS = [
   { id: 'settings-system', label: 'System', icon: 'system' as const },
+  { id: 'settings-dashboard', label: 'Dashboard', icon: 'dashboard' as const },
 ] as const
 
 /** Editable app config (sidebar group: Configuration). */

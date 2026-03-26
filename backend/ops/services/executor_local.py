@@ -6,9 +6,11 @@ Phase 1: single-host. Phase 2: remote agent protocol (host_id routing).
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import logging
-from typing import Any, Dict, Set
+import re
+from typing import Any, Dict, List, Set
 
 from backend.ops.models.schemas import CommandRecord
 
@@ -17,6 +19,8 @@ logger = logging.getLogger(__name__)
 _SYSTEMD_TIMEOUT_SEC = 30
 _STOP_SETTLE_SEC = 5
 _ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
+_WORKER_UNIT_BASE = "bifrost-celery-worker"
+_INSTANCE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class RestrictedExecutor:
@@ -36,15 +40,36 @@ class RestrictedExecutor:
         self._broker_url = broker_url
         self._use_redis_stop = use_redis_stop
 
+    # ── unit helpers ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def worker_to_unit(worker_id: str) -> str:
+        """Convert Celery worker name (e.g. ``celery@worker1``) to systemd unit."""
+        name = worker_id.split("@", 1)[-1] if "@" in worker_id else worker_id
+        return f"{_WORKER_UNIT_BASE}@{name}.service"
+
+    @staticmethod
+    def instance_unit(instance_id: str) -> str:
+        """Build template-instance unit for a numeric/named instance."""
+        if not _INSTANCE_ID_RE.match(instance_id):
+            raise ValueError(f"Invalid instance_id: {instance_id!r}")
+        return f"{_WORKER_UNIT_BASE}@{instance_id}.service"
+
     def _validate(self, action: str, unit: str) -> None:
         if action not in _ALLOWED_ACTIONS:
             raise PermissionError(
                 f"Action {action!r} not allowed; permitted: {sorted(_ALLOWED_ACTIONS)}"
             )
-        if self._allowed and unit not in self._allowed:
-            raise PermissionError(
-                f"Unit {unit!r} not in whitelist; permitted: {sorted(self._allowed)}"
-            )
+        if not self._allowed:
+            return
+        for allowed in self._allowed:
+            if unit == allowed or unit == f"{allowed}.service":
+                return
+            if fnmatch.fnmatch(unit, f"{allowed}@*.service"):
+                return
+        raise PermissionError(
+            f"Unit {unit!r} not in whitelist; permitted: {sorted(self._allowed)}"
+        )
 
     async def _redis_stop_celery(self) -> Dict[str, Any]:
         """Stop Celery worker via existing Redis key pattern."""
@@ -105,6 +130,53 @@ class RestrictedExecutor:
             "returncode": proc.returncode,
             "stdout": (stdout or b"").decode().strip(),
         }
+
+    async def list_instances(self) -> List[Dict[str, str]]:
+        """List active systemd template instances for bifrost-celery-worker@*."""
+        cmd = [
+            "systemctl", "list-units",
+            f"{_WORKER_UNIT_BASE}@*",
+            "--no-legend", "--no-pager", "--plain",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        lines = (stdout or b"").decode().strip().splitlines()
+        instances: List[Dict[str, str]] = []
+        for line in lines:
+            parts = line.split(None, 4)
+            if len(parts) >= 4:
+                instances.append({
+                    "unit": parts[0],
+                    "load": parts[1],
+                    "active": parts[2],
+                    "sub": parts[3],
+                    "description": parts[4] if len(parts) > 4 else "",
+                })
+        return instances
+
+    async def redis_is_local(self) -> bool:
+        """Check if Redis is managed locally via systemd."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "is-active", "redis",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            state = (stdout or b"").decode().strip()
+            return state in ("active", "inactive", "failed")
+        except Exception:
+            return False
+
+    async def systemctl_redis(self, action: str) -> Dict[str, Any]:
+        """Start / stop / restart local Redis via systemd."""
+        if action not in _ALLOWED_ACTIONS:
+            raise PermissionError(f"Action {action!r} not allowed for Redis")
+        return await self._systemctl(action, "redis")
 
     async def __call__(self, cmd: CommandRecord) -> Dict[str, Any]:
         action = cmd.action.value

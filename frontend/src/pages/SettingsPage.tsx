@@ -58,6 +58,7 @@ import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { DocsApiStatusPage } from './DocsApiStatusPage'
 import { OpsApiStatusPage } from './OpsApiStatusPage'
+import { DashboardPage } from './DashboardPage'
 import { ApiHealthOverviewPage } from './ApiHealthOverviewPage'
 import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
@@ -210,6 +211,7 @@ export function SettingsPage({
     if (h && h.startsWith('coverage-')) return 'settings-coverage'
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
+    if (h && h.startsWith('settings-dashboard')) return 'settings-dashboard'
     if (h && h.startsWith('settings-api')) return 'settings-api'
     if (h === 'feed-celery') return 'settings-system'
     if (h && isMassiveOptionFeedHash(`#${h}`)) return 'settings-feed'
@@ -408,6 +410,7 @@ export function SettingsPage({
       : null
 
   const isSystemSection = activeSectionId === 'settings-system'
+  const isDashboardSection = activeSectionId === 'settings-dashboard'
   const isCoverageSection = activeSectionId === 'settings-coverage'
   const isFeedSection = activeSectionId === 'settings-feed'
 
@@ -499,6 +502,19 @@ export function SettingsPage({
             </div>
           </div>
         </div>
+        <a
+          href="#settings-dashboard"
+          className={`settings-sidebar-link ${isDashboardSection ? 'active' : ''}`}
+        >
+          <span
+            className={`title-inline-lamp lamp-icon ${opsApiLamp === 'none' ? 'none' : opsApiLamp}`}
+            title="Dashboard (Ops control plane)"
+            aria-hidden
+          >
+            <SettingsSidebarLampGlyph id="dashboard" />
+          </span>
+          Dashboard
+        </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
             <a href="#settings-api-overview" className="settings-sidebar-parent-label">
@@ -764,6 +780,8 @@ export function SettingsPage({
             celeryUiMode="relocated"
           />
         )
+      ) : isDashboardSection ? (
+        <DashboardPage status={status} loadStatus={loadStatus} embeddedInSettings />
       ) : isApiSection ? (
         isApiMassiveActive ? (
           <MassiveApiStatusPage embeddedInSettings />

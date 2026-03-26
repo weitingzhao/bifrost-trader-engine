@@ -97,7 +97,15 @@ def create_ops_app(
 
     app.state.worker_state_service = worker_svc
     app.state.command_bus = command_bus
+    app.state.executor = executor
     app.state.audit_log: list = []
+
+    redis_cfg = config.get("redis") or {}
+    import os
+    app.state.broker_url = broker_url
+    app.state.redis_host = (
+        redis_cfg.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1"
+    ).strip()
 
     # ── Router ────────────────────────────────────────────────────────────────
 
