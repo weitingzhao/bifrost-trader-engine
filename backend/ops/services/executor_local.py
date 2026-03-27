@@ -12,12 +12,9 @@ import logging
 import re
 from typing import Any, Dict, List, Set
 
-from backend.ops.models.schemas import CommandRecord
-
 logger = logging.getLogger(__name__)
 
 _SYSTEMD_TIMEOUT_SEC = 30
-_STOP_SETTLE_SEC = 5
 _ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
 _WORKER_UNIT_BASE = "bifrost-celery-worker"
 _INSTANCE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -202,19 +199,3 @@ class RestrictedExecutor:
         if action not in _ALLOWED_ACTIONS:
             raise PermissionError(f"Action {action!r} not allowed for Redis")
         return await self._systemctl(action, "redis")
-
-    async def __call__(self, cmd: CommandRecord) -> Dict[str, Any]:
-        action = cmd.action.value
-        unit = cmd.target_id
-        self._validate(action, unit)
-
-        if action == "stop" and self._use_redis_stop:
-            return await self._redis_stop_celery()
-
-        if action == "restart" and self._use_redis_stop:
-            stop_result = await self._redis_stop_celery()
-            await asyncio.sleep(_STOP_SETTLE_SEC)
-            start_result = await self._systemctl("start", unit)
-            return {"stop": stop_result, "start": start_result}
-
-        return await self._systemctl(action, unit)

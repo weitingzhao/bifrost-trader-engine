@@ -268,6 +268,26 @@
   font-size: var(--text-caption);
   margin-bottom: 1px;
 }
+
+/* API submenu: Prod vs Dev stack from utilized.services (GET /health) */
+.settings-sidebar-service-env-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+}
+.settings-sidebar-service-env-badge--prod {
+  color: #4ade80;
+}
+.settings-sidebar-service-env-badge--dev {
+  color: #38bdf8;
+}
+.settings-sidebar-link.active .settings-sidebar-service-env-badge {
+  opacity: 1;
+}
+
 .settings-sidebar-link-sub .settings-sidebar-icon {
   width: 14px;
   height: 14px;
@@ -1483,38 +1503,6 @@
   font-size: 0.75rem;
 }
 
-/* ── Control Bar ── */
-
-.dashboard-control-bar {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--space-4);
-  background: var(--color-surface);
-}
-
-.dashboard-ctrl-row {
-  display: flex;
-  gap: var(--space-3);
-  align-items: flex-end;
-  flex-wrap: wrap;
-  margin-bottom: var(--space-3);
-}
-
-.dashboard-ctrl-label {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-text-dim);
-}
-
-.dashboard-ctrl-reason-label {
-  flex: 1;
-  min-width: 160px;
-}
-
-.dashboard-ctrl-select,
 .dashboard-ctrl-input {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
@@ -1522,17 +1510,7 @@
   background: var(--color-bg);
   color: var(--color-text);
   font-size: 0.8125rem;
-  min-width: 180px;
-}
-
-.dashboard-ctrl-input {
   min-width: 120px;
-}
-
-.dashboard-ctrl-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
 }
 
 .dashboard-btn {
@@ -1698,146 +1676,14 @@
   border-color: var(--color-accent);
 }
 
-/* ── Command Table ── */
-
 .dashboard-cmd-table-wrap {
   overflow-x: auto;
   min-width: 0;
 }
 
-.dashboard-cmd-table,
 .dashboard-audit-table {
   width: 100%;
   min-width: 0;
-}
-
-.dashboard-cmd-row {
-  display: grid;
-  grid-template-columns: 140px 70px 1fr 90px 90px 1fr;
-  gap: var(--space-2);
-  align-items: center;
-  padding: var(--space-2) var(--space-3);
-  cursor: pointer;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 0.8125rem;
-  transition: background 0.1s;
-}
-
-.dashboard-cmd-row:hover {
-  background: var(--color-surface);
-}
-
-.dashboard-cmd-row--expanded {
-  background: var(--color-surface);
-}
-
-.dashboard-cmd-cell {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.dashboard-cmd-cell--time {
-  font-size: 0.75rem;
-  color: var(--color-text-dim);
-}
-
-.dashboard-cmd-cell--target {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.75rem;
-}
-
-.dashboard-cmd-cell--operator {
-  font-size: 0.75rem;
-  color: var(--color-text-dim);
-}
-
-.dashboard-cmd-cell--reason {
-  font-size: 0.75rem;
-  color: var(--color-text-dim);
-}
-
-.dashboard-cmd-badge {
-  padding: 1px 6px;
-  border-radius: var(--radius);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  text-align: center;
-}
-
-.dashboard-cmd-badge--queued {
-  background: var(--color-surface);
-  color: var(--color-text-dim);
-}
-
-.dashboard-cmd-badge--running {
-  background: rgba(59, 130, 246, 0.15);
-  color: rgb(59, 130, 246);
-}
-
-.dashboard-cmd-badge--succeeded {
-  background: rgba(16, 185, 129, 0.15);
-  color: var(--color-green);
-}
-
-.dashboard-cmd-badge--failed {
-  background: rgba(239, 68, 68, 0.15);
-  color: var(--color-red);
-}
-
-.dashboard-cmd-badge--timeout {
-  background: rgba(245, 158, 11, 0.15);
-  color: var(--color-yellow, #e6a817);
-}
-
-/* ── Command Detail Expansion ── */
-
-.dashboard-cmd-detail {
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-bg);
-  border-top: 1px solid var(--color-border);
-  font-size: 0.75rem;
-}
-
-.dashboard-cmd-detail-row {
-  display: flex;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
-  align-items: flex-start;
-}
-
-.dashboard-cmd-detail-row:last-child {
-  margin-bottom: 0;
-}
-
-.dashboard-cmd-detail-label {
-  font-weight: 600;
-  color: var(--color-text-dim);
-  min-width: 100px;
-  flex-shrink: 0;
-}
-
-.dashboard-cmd-detail-row--error .msg {
-  margin: 0;
-  padding: var(--space-1) var(--space-2);
-  font-size: 0.75rem;
-}
-
-.dashboard-cmd-detail-json {
-  margin: 0;
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-surface);
-  font-size: 0.6875rem;
-  font-family: var(--font-mono, monospace);
-  max-height: 200px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 
 /* ── Audit Trail ── */
@@ -2001,7 +1847,46 @@
   cursor: not-allowed;
 }
 
-/* ── Queue Configuration ── */
+/* ── Queue summary (read-only) ── */
+
+.dashboard-queue-summary-note,
+.dashboard-queue-summary-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2);
+  line-height: 1.45;
+}
+
+.dashboard-queue-summary-hint {
+  color: var(--color-amber, #d97706);
+}
+
+.dashboard-queue-summary-table-wrap {
+  overflow-x: auto;
+}
+
+.dashboard-queue-summary-table th {
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.dashboard-queue-summary-table th .info-tooltip-wrap {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
+.dashboard-queue-name {
+  font-size: 0.8125rem;
+}
+
+.dashboard-queue-shared-mark {
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  margin-left: 2px;
+}
+
+/* ── Legacy queue tag styles (Celery page / elsewhere) ── */
 
 .dashboard-queue-current {
   display: flex;
@@ -2304,10 +2189,6 @@
 /* ── Responsive ── */
 
 @media (max-width: 960px) {
-  .dashboard-cmd-row {
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-1);
-  }
   .dashboard-workers-grid {
     grid-template-columns: 1fr;
   }

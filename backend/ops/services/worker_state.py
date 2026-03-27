@@ -7,20 +7,25 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.ops.models.schemas import WorkerDetail, WorkerStatus, WorkerSummary
+from servers.celery_app import CELERY_INSPECT_TIMEOUT_SEC
 
 logger = logging.getLogger(__name__)
+
+# Canonical Celery queues (see scripts/run_celery.py _DEFAULT_QUEUES, servers/celery_app.py).
+SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = ("bars", "massive_high", "massive")
 
 
 class WorkerStateService:
 
-    def __init__(self, celery_app: Any, broker_url: str) -> None:
+    def __init__(self, celery_app: Any, broker_url: str, config: Optional[Dict[str, Any]] = None) -> None:
         self._celery = celery_app
         self._broker_url = broker_url
+        self._config = config or {}
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
     def _inspect(
-        self, timeout: float = 5.0,
+        self, timeout: float = CELERY_INSPECT_TIMEOUT_SEC,
     ) -> Tuple[dict, dict, dict, dict, dict]:
         """Run Celery inspect. Returns (ping, stats, active, reserved, active_queues)."""
         empty: Tuple[dict, dict, dict, dict, dict] = ({}, {}, {}, {}, {})
@@ -127,34 +132,124 @@ class WorkerStateService:
             stats=s,
         )
 
-    def queue_control(
-        self,
-        worker_id: str,
-        add: List[str] | None = None,
-        remove: List[str] | None = None,
-    ) -> Dict[str, Any]:
-        """Add / remove queue consumers on a specific worker via Celery control."""
-        results: Dict[str, Any] = {"worker_id": worker_id, "added": [], "removed": []}
-        dest = [worker_id]
-        for q in add or []:
+    @staticmethod
+    def _task_routing_key(task: Dict[str, Any]) -> str:
+        di = task.get("delivery_info")
+        if isinstance(di, dict):
+            rk = di.get("routing_key")
+            if rk:
+                return str(rk).strip()
+        name = str(task.get("name") or "")
+        if "backfill_bars" in name:
+            return "bars"
+        return ""
+
+    def _count_celery_tasks_for_queue(self, queue_name: str) -> int:
+        _p, _s, active, reserved, _aq = self._inspect()
+        n = 0
+        for bucket in (active or {}, reserved or {}):
+            for _wid, tasks in bucket.items():
+                for t in tasks or []:
+                    if not isinstance(t, dict):
+                        continue
+                    if self._task_routing_key(t) == queue_name:
+                        n += 1
+        return n
+
+    def _broker_queue_depth(self, queue_name: str) -> int:
+        try:
+            import redis as _redis
+
+            r = _redis.from_url(
+                self._broker_url,
+                socket_connect_timeout=3,
+                socket_timeout=3,
+            )
+            r.ping()
+            return int(r.llen(queue_name))
+        except Exception as e:
+            logger.debug("broker_queue_depth(%s): %s", queue_name, e)
+        return 0
+
+    def _pg_status_counts(self) -> Tuple[Optional[Dict[str, int]], Optional[Dict[str, int]]]:
+        """Return (bars_status_counts, massive_status_counts) or Nones if DB unavailable."""
+        pg = self._config.get("postgres") or {}
+        host = str(pg.get("host") or "").strip()
+        if not host:
+            return None, None
+        try:
+            import psycopg2
+
+            port = int(pg.get("port") or 5432)
+            dbname = str(pg.get("database") or "options_db")
+            user = str(pg.get("user") or "bifrost")
+            password = str(pg.get("password") or "")
+            conn = psycopg2.connect(
+                host=host,
+                port=port,
+                dbname=dbname,
+                user=user,
+                password=password,
+                connect_timeout=5,
+            )
             try:
-                self._celery.control.add_consumer(q, destination=dest)
-                results["added"].append(q)
-            except Exception as e:
-                logger.warning("add_consumer(%s, %s) failed: %s", q, worker_id, e)
-                results.setdefault("errors", []).append(
-                    {"queue": q, "op": "add", "error": str(e)}
-                )
-        for q in remove or []:
-            try:
-                self._celery.control.cancel_consumer(q, destination=dest)
-                results["removed"].append(q)
-            except Exception as e:
-                logger.warning("cancel_consumer(%s, %s) failed: %s", q, worker_id, e)
-                results.setdefault("errors", []).append(
-                    {"queue": q, "op": "remove", "error": str(e)}
-                )
-        return results
+                bars_counts: Dict[str, int] = {"pending": 0, "running": 0, "done": 0, "failed": 0}
+                massive_counts: Dict[str, int] = {"pending": 0, "running": 0, "done": 0, "failed": 0}
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT status, COUNT(*)::bigint FROM job_bars_backfill GROUP BY status"
+                    )
+                    for row in cur.fetchall() or []:
+                        st = str(row[0] or "").strip().lower()
+                        if st in bars_counts:
+                            bars_counts[st] = int(row[1])
+                    cur.execute(
+                        "SELECT status, COUNT(*)::bigint FROM job_massive_backfill GROUP BY status"
+                    )
+                    for row in cur.fetchall() or []:
+                        st = str(row[0] or "").strip().lower()
+                        if st in massive_counts:
+                            massive_counts[st] = int(row[1])
+                return bars_counts, massive_counts
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("queue summary PG counts failed: %s", e)
+            return None, None
+
+    def queue_summaries(self) -> Dict[str, Any]:
+        """Per supported queue: broker backlog, Celery running tasks, DB job totals."""
+        bars_db, massive_db = self._pg_status_counts()
+        rows: List[Dict[str, Any]] = []
+        for q in SUPPORTED_CELERY_QUEUES:
+            pending_broker = self._broker_queue_depth(q)
+            running_celery = self._count_celery_tasks_for_queue(q)
+            if q == "bars":
+                done_db = bars_db.get("done") if bars_db else None
+                failed_db = bars_db.get("failed") if bars_db else None
+            else:
+                done_db = massive_db.get("done") if massive_db else None
+                failed_db = massive_db.get("failed") if massive_db else None
+            row: Dict[str, Any] = {
+                "name": q,
+                "pending_broker": pending_broker,
+                "running_celery": running_celery,
+                "done_db": done_db,
+                "failed_db": failed_db,
+            }
+            if q != "bars":
+                row["db_totals_shared"] = True
+            rows.append(row)
+        out: Dict[str, Any] = {
+            "queues": rows,
+            "db_connected": bars_db is not None,
+        }
+        if massive_db is not None:
+            out["massive_db_note"] = (
+                "Done and Failed for Massive queues are totals from job_massive_backfill "
+                "(not split between massive and massive_high)."
+            )
+        return out
 
     def broker_status(self) -> Dict[str, Any]:
         connected = self._broker_connected()

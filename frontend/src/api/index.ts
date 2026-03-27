@@ -256,9 +256,7 @@ export {
   fetchOpsHealthAtOrigin,
   fetchOpsWorkers,
   fetchOpsWorkerDetail,
-  submitOpsCommand,
-  fetchOpsCommand,
-  fetchOpsCommands,
   fetchOpsAudit,
-  pollOpsCommand,
+  fetchQueueSummary,
 } from './ops'
+export type { QueueSummaryRow } from './ops'

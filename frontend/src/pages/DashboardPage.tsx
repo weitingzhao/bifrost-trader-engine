@@ -5,12 +5,9 @@ import { postStop } from '../api/control'
 import { postMonitorStop, postCeleryStop } from '../api/monitor'
 import {
   fetchOpsWorkers,
-  fetchOpsCommands,
-  submitOpsCommand,
-  pollOpsCommand,
   fetchOpsAudit,
   fetchOpsCapabilities,
-  updateWorkerQueues,
+  fetchQueueSummary,
   scaleWorker,
   fetchWorkerInstances,
   fetchWorkerProfiles,
@@ -21,14 +18,13 @@ import {
   setOpsToken,
   type WorkerSummary,
   type BrokerStatus,
-  type CommandRecord,
-  type CommandAction,
   type AuditEntry,
   type SystemdInstance,
   type ExtendedBrokerStatus,
   type BrokerAction,
   type OpsCapabilities,
   type WorkerProfileInfo,
+  type QueueSummaryRow,
 } from '../api/ops'
 
 export interface DashboardPageProps {
@@ -59,17 +55,6 @@ function workerStatusLabel(status: string): string {
   return map[status] ?? status
 }
 
-function commandStatusBadge(status: string): { label: string; className: string } {
-  const map: Record<string, { label: string; className: string }> = {
-    queued: { label: 'Queued', className: 'dashboard-cmd-badge--queued' },
-    running: { label: 'Running', className: 'dashboard-cmd-badge--running' },
-    succeeded: { label: 'Succeeded', className: 'dashboard-cmd-badge--succeeded' },
-    failed: { label: 'Failed', className: 'dashboard-cmd-badge--failed' },
-    timeout: { label: 'Timeout', className: 'dashboard-cmd-badge--timeout' },
-  }
-  return map[status] ?? { label: status, className: '' }
-}
-
 function fmtRelative(epochSec: number | null): string {
   if (epochSec == null) return '—'
   const delta = Date.now() / 1000 - epochSec
@@ -92,6 +77,18 @@ function fmtTimestamp(epochSec: number): string {
   } catch {
     return String(epochSec)
   }
+}
+
+function fmtQueueCell(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  return String(n)
+}
+
+function formatQueueLabel(name: string): string {
+  if (name === 'massive_high') return 'Massive (high)'
+  if (name === 'massive') return 'Massive'
+  if (name === 'bars') return 'Bars (IB)'
+  return name
 }
 
 type ConfirmDialogState = {
@@ -211,30 +208,20 @@ const SERVICE_ACTIONS: ServiceAction[] = [
 export function DashboardPage({ status, loadStatus, embeddedInSettings }: DashboardPageProps) {
   const [workers, setWorkers] = useState<WorkerSummary[]>([])
   const [broker, setBroker] = useState<BrokerStatus | null>(null)
-  const [commands, setCommands] = useState<CommandRecord[]>([])
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
   const [auditError, setAuditError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedWorker, setSelectedWorker] = useState<string>('')
-  const [reason, setReason] = useState('')
-  const [inflightCmd, setInflightCmd] = useState<string | null>(null)
-  const [ctrlMsg, setCtrlMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const [confirmState, setConfirmState] = useState<ConfirmDialogState>(INITIAL_CONFIRM)
-  const [expandedCmdId, setExpandedCmdId] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
-  const [cmdFilter, setCmdFilter] = useState<'all' | CommandAction | 'failed'>('all')
   const [auditFilter, setAuditFilter] = useState<'all' | 'success' | 'submitted' | 'denied' | 'rejected' | 'failed'>('all')
   const [svcStopBusy, setSvcStopBusy] = useState<ServiceId | 'all' | null>(null)
   const [svcMsg, setSvcMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
-  const pollCancelRef = useRef(false)
-  const ctrlMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const svcMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Queue binding
-  const [queueAddInput, setQueueAddInput] = useState('')
-  const [queueBusy, setQueueBusy] = useState(false)
-  const [queueMsg, setQueueMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
+  const [queueSummary, setQueueSummary] = useState<QueueSummaryRow[]>([])
+  const [queueSummaryNote, setQueueSummaryNote] = useState<string | null>(null)
+  const [queueSummaryDb, setQueueSummaryDb] = useState<boolean | null>(null)
 
   // Worker scaling
   const [instances, setInstances] = useState<SystemdInstance[]>([])
@@ -273,9 +260,9 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
 
   const loadAll = useCallback(async () => {
     try {
-      const [wRes, cRes, iRes, bRes, pRes] = await Promise.all([
+      const [wRes, qRes, iRes, bRes, pRes] = await Promise.all([
         fetchOpsWorkers(),
-        fetchOpsCommands(30),
+        fetchQueueSummary().catch(() => ({ ok: false as const, queues: [] as QueueSummaryRow[] })),
         fetchWorkerInstances().catch(() => ({ ok: false, instances: [] as SystemdInstance[], count: 0 })),
         fetchBrokerStatusExtended().catch(() => null),
         fetchWorkerProfiles().catch(() => ({ ok: false, profiles: [] as WorkerProfileInfo[], count: 0 })),
@@ -283,11 +270,16 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
       if (wRes.ok) {
         setWorkers(wRes.workers)
         setBroker(wRes.broker)
-        if (!selectedWorker && wRes.workers.length > 0) {
-          setSelectedWorker(wRes.workers[0].worker_id)
-        }
       }
-      if (cRes.ok) setCommands(cRes.commands)
+      if (qRes.ok) {
+        setQueueSummary(qRes.queues)
+        setQueueSummaryNote(qRes.massive_db_note ?? null)
+        setQueueSummaryDb(qRes.db_connected ?? null)
+      } else {
+        setQueueSummary([])
+        setQueueSummaryNote(null)
+        setQueueSummaryDb(null)
+      }
       if (iRes.ok) setInstances(iRes.instances)
       if (bRes?.ok) setExtBroker(bRes.broker)
       if (pRes.ok && pRes.profiles.length > 0) {
@@ -300,7 +292,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     } finally {
       setLoading(false)
     }
-  }, [selectedWorker])
+  }, [])
 
   const loadAudit = useCallback(async () => {
     try {
@@ -359,17 +351,9 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
 
   useEffect(() => {
     return () => {
-      pollCancelRef.current = true
-      if (ctrlMsgTimerRef.current) clearTimeout(ctrlMsgTimerRef.current)
       if (svcMsgTimerRef.current) clearTimeout(svcMsgTimerRef.current)
     }
   }, [])
-
-  const showCtrlMsg = (text: string, isErr: boolean, autoHideMs = 5000) => {
-    setCtrlMsg({ text, isErr })
-    if (ctrlMsgTimerRef.current) clearTimeout(ctrlMsgTimerRef.current)
-    ctrlMsgTimerRef.current = setTimeout(() => setCtrlMsg({ text: '', isErr: false }), autoHideMs)
-  }
 
   const showSvcMsg = (text: string, isErr: boolean, autoHideMs = 5000) => {
     setSvcMsg({ text, isErr })
@@ -445,113 +429,6 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
         setConfirmState(INITIAL_CONFIRM)
       },
     })
-  }
-
-  const executeCommand = async (action: CommandAction) => {
-    if (!selectedWorker) {
-      showCtrlMsg('Select a worker first.', true)
-      return
-    }
-    setInflightCmd(action)
-    showCtrlMsg(`Sending ${action} command…`, false, 30000)
-    pollCancelRef.current = false
-    try {
-      const res = await submitOpsCommand({
-        action,
-        target_id: selectedWorker,
-        reason: reason.trim() || undefined,
-      })
-      if (!res.ok) {
-        showCtrlMsg(res.error ?? `${action} failed`, true)
-        setInflightCmd(null)
-        return
-      }
-      const cmdId = res.command?.command_id
-      if (!cmdId) {
-        showCtrlMsg('Command submitted but no ID returned.', true)
-        setInflightCmd(null)
-        return
-      }
-      showCtrlMsg(`Command accepted, tracking…`, false, 60000)
-      try {
-        const final = await pollOpsCommand(cmdId, { intervalMs: 1500, timeoutMs: 45000 })
-        if (pollCancelRef.current) return
-        if (final.status === 'succeeded') {
-          showCtrlMsg(`${action} succeeded.`, false)
-        } else {
-          showCtrlMsg(`${action} ${final.status}: ${final.error ?? 'unknown error'}`, true)
-        }
-      } catch {
-        if (!pollCancelRef.current) showCtrlMsg('Command sent; poll timed out — check status.', true)
-      }
-      await loadAll()
-      await loadAudit()
-      setReason('')
-    } catch (e) {
-      showCtrlMsg(e instanceof Error ? e.message : 'Network error', true)
-    } finally {
-      setInflightCmd(null)
-    }
-  }
-
-  const onActionClick = (action: CommandAction) => {
-    if (action === 'start') {
-      executeCommand(action)
-      return
-    }
-    setConfirmState({
-      open: true,
-      title: action === 'stop' ? 'Stop worker?' : 'Restart worker?',
-      message:
-        action === 'stop'
-          ? `This will stop worker "${selectedWorker}". Running tasks will be interrupted.`
-          : `This will restart worker "${selectedWorker}". There will be brief downtime.`,
-      confirming: false,
-      action: async () => {
-        setConfirmState(prev => ({ ...prev, confirming: true }))
-        await executeCommand(action)
-        setConfirmState(INITIAL_CONFIRM)
-      },
-    })
-  }
-
-  // ── Queue binding handlers ──────────────────────────────────────────────
-  const onAddQueue = async () => {
-    const q = queueAddInput.trim()
-    if (!q || !selectedWorker) return
-    setQueueBusy(true)
-    try {
-      const res = await updateWorkerQueues(selectedWorker, { add: [q] })
-      if (res.ok) {
-        setQueueMsg({ text: `Added queue "${q}"`, isErr: false })
-        setQueueAddInput('')
-        await loadAll()
-      } else {
-        setQueueMsg({ text: res.error ?? 'Failed', isErr: true })
-      }
-    } catch (e) {
-      setQueueMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
-    } finally {
-      setQueueBusy(false)
-    }
-  }
-
-  const onRemoveQueue = async (q: string) => {
-    if (!selectedWorker) return
-    setQueueBusy(true)
-    try {
-      const res = await updateWorkerQueues(selectedWorker, { remove: [q] })
-      if (res.ok) {
-        setQueueMsg({ text: `Removed queue "${q}"`, isErr: false })
-        await loadAll()
-      } else {
-        setQueueMsg({ text: res.error ?? 'Failed', isErr: true })
-      }
-    } catch (e) {
-      setQueueMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
-    } finally {
-      setQueueBusy(false)
-    }
   }
 
   // ── Scaling handlers ──────────────────────────────────────────────────
@@ -654,8 +531,6 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     }
   }
 
-  const selectedWorkerObj = workers.find(w => w.worker_id === selectedWorker)
-
   const hb = status?.daemon_heartbeat
   const daemonLamp: LampColor = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
   const serverLamp: LampColor = status?.monitor_lamp ? (status.monitor_lamp as LampColor) : 'red'
@@ -673,19 +548,13 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     return 'green'
   })()
 
-  const filteredCommands = commands.filter(c => {
-    if (cmdFilter === 'all') return true
-    if (cmdFilter === 'failed') return c.status === 'failed' || c.status === 'timeout'
-    return c.action === cmdFilter
-  })
-
   const filteredAudit = auditEntries.filter(e => {
     if (auditFilter === 'all') return true
     return e.outcome === auditFilter
   })
 
   const hasAuditPermission = auditError == null || (!auditError.includes('admin') && !auditError.includes('403'))
-  const showInitialSkeleton = loading && workers.length === 0 && commands.length === 0
+  const showInitialSkeleton = loading && workers.length === 0
 
   return (
     <div className={`settings-page-card ${embeddedInSettings ? 'dashboard-page dashboard-page--embedded' : 'dashboard-page'}`}>
@@ -735,15 +604,12 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               </svg>
             </span>
             Dashboard
-            <InfoTooltip text="Celery worker control plane. Start, stop, restart workers and track command history with audit trail." />
+            <InfoTooltip text="Celery worker control plane. Services, runtime snapshot, worker instances, and audit trail." />
           </h2>
           <p className="settings-page-subtitle">
-            Worker control, runtime snapshot, command history, and audit trail.
+            Services, runtime snapshot, worker instances, and audit trail.
           </p>
         </div>
-        {ctrlMsg.text && (
-          <span className={`settings-page-msg ${ctrlMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{ctrlMsg.text}</span>
-        )}
       </div>
 
       {/* ── Auth bar ── */}
@@ -806,75 +672,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
         </div>
       ) : null}
       <div className="dashboard-grid settings-page-groups">
-          {/* ── Control Bar ──────────────────────────────────── */}
-          <section className="replay-section dashboard-section dashboard-control-bar" aria-labelledby="dashboard-ctrl-head">
-            <h3 id="dashboard-ctrl-head" className="page-title-with-tooltip">
-              Control
-              <InfoTooltip text="Select a target worker, choose an action, and optionally provide a reason. Stop and Restart require confirmation." />
-            </h3>
-            <div className="dashboard-ctrl-row">
-              <label className="dashboard-ctrl-label">
-                Target
-                <select
-                  className="dashboard-ctrl-select"
-                  value={selectedWorker}
-                  onChange={e => setSelectedWorker(e.target.value)}
-                  disabled={!!inflightCmd || showInitialSkeleton}
-                >
-                  {showInitialSkeleton && <option value="">Loading workers…</option>}
-                  {!showInitialSkeleton && workers.length === 0 && <option value="">No workers found</option>}
-                  {workers.map(w => (
-                    <option key={w.worker_id} value={w.worker_id}>
-                      {w.worker_id} ({workerStatusLabel(w.status)})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="dashboard-ctrl-label dashboard-ctrl-reason-label">
-                Reason
-                <input
-                  type="text"
-                  className="dashboard-ctrl-input"
-                  placeholder="Optional reason…"
-                  value={reason}
-                  onChange={e => setReason(e.target.value)}
-                  disabled={!!inflightCmd || showInitialSkeleton}
-                  maxLength={200}
-                />
-              </label>
-            </div>
-            <div className="dashboard-ctrl-actions">
-              <button
-                type="button"
-                className="btn-resume dashboard-btn dashboard-btn--start"
-                onClick={() => onActionClick('start')}
-                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton || !canOperate}
-                title={canOperate ? 'Start the selected worker via systemd' : 'Requires operator role'}
-              >
-                {inflightCmd === 'start' ? 'Starting…' : 'Start'}
-              </button>
-              <button
-                type="button"
-                className="btn-resume dashboard-btn dashboard-btn--restart"
-                onClick={() => onActionClick('restart')}
-                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton || !canOperate}
-                title={canOperate ? 'Stop then start the selected worker' : 'Requires operator role'}
-              >
-                {inflightCmd === 'restart' ? 'Restarting…' : 'Restart'}
-              </button>
-              <button
-                type="button"
-                className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
-                onClick={() => onActionClick('stop')}
-                disabled={!!inflightCmd || !selectedWorker || showInitialSkeleton || !canOperate}
-                title={canOperate ? 'Stop the selected worker' : 'Requires operator role'}
-              >
-                {inflightCmd === 'stop' ? 'Stopping…' : 'Stop'}
-              </button>
-            </div>
-          </section>
-
-          {/* ── Services Overview (P3) ──────────────────────────── */}
+          {/* ── Services Overview ──────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-services" aria-labelledby="dashboard-svc-head">
             <div className="dashboard-section-header-row">
               <h3 id="dashboard-svc-head" className="page-title-with-tooltip">
@@ -1035,11 +833,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                   return (
                     <div
                       key={w.worker_id}
-                      className={`dashboard-worker-card ${selectedWorker === w.worker_id ? 'dashboard-worker-card--selected' : ''}`}
-                      onClick={() => setSelectedWorker(w.worker_id)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelectedWorker(w.worker_id) }}
+                      className="dashboard-worker-card"
                     >
                       <div className="dashboard-worker-header">
                         <span className={`title-inline-lamp lamp-icon ${lamp}`} aria-hidden>●</span>
@@ -1061,60 +855,64 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
             )}
           </section>
 
-          {/* ── Queue Binding ──────────────────────────────────── */}
-          <section className="replay-section dashboard-section dashboard-queue-config" aria-labelledby="dashboard-queue-head">
-            <h3 id="dashboard-queue-head" className="page-title-with-tooltip">
-              Queue Configuration
-              <InfoTooltip text="Add or remove queue consumers on the selected worker. Changes take effect immediately via Celery control." />
+          {/* ── Queue summary ──────────────────────────────────── */}
+          <section className="replay-section dashboard-section dashboard-queue-summary" aria-labelledby="dashboard-queue-summary-head">
+            <h3 id="dashboard-queue-summary-head" className="page-title-with-tooltip">
+              Queue summary
+              <InfoTooltip text="Supported Celery queues: pending messages on the Redis broker, tasks currently executing on workers (routing key), and Done/Failed counts from PostgreSQL job tables (job_bars_backfill, job_massive_backfill)." />
             </h3>
-            {queueMsg.text && (
-              <span className={`settings-page-msg ${queueMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{queueMsg.text}</span>
+            {queueSummaryDb === false && (
+              <p className="dashboard-queue-summary-hint">PostgreSQL job totals unavailable (check ops config or DB).</p>
             )}
-            {selectedWorkerObj ? (
-              <>
-                <div className="dashboard-queue-current">
-                  <span className="dashboard-queue-label">Active queues on <strong>{selectedWorker}</strong>:</span>
-                  <div className="dashboard-queue-tags">
-                    {selectedWorkerObj.queues.length > 0 ? selectedWorkerObj.queues.map(q => (
-                      <span key={q} className="dashboard-queue-tag">
-                        {q}
-                        <button
-                          type="button"
-                          className="dashboard-queue-tag-remove"
-                          onClick={() => onRemoveQueue(q)}
-                          disabled={queueBusy || !canOperate}
-                          title={canOperate ? `Remove queue "${q}"` : 'Requires operator role'}
-                          aria-label={`Remove queue ${q}`}
-                        >
-                          &times;
-                        </button>
-                      </span>
-                    )) : <span className="dashboard-empty-inline">No queues bound</span>}
-                  </div>
-                </div>
-                <div className="dashboard-queue-add-row">
-                  <input
-                    type="text"
-                    className="dashboard-ctrl-input"
-                    placeholder="Queue name…"
-                    value={queueAddInput}
-                    onChange={e => setQueueAddInput(e.target.value)}
-                    disabled={queueBusy}
-                    onKeyDown={e => { if (e.key === 'Enter') onAddQueue() }}
-                    maxLength={100}
-                  />
-                  <button
-                    type="button"
-                    className="btn-resume dashboard-btn dashboard-btn--start"
-                    onClick={onAddQueue}
-                    disabled={queueBusy || !queueAddInput.trim() || !canOperate}
-                  >
-                    {queueBusy ? 'Updating…' : 'Add Queue'}
-                  </button>
-                </div>
-              </>
+            {queueSummaryNote && (
+              <p className="dashboard-queue-summary-note">{queueSummaryNote}</p>
+            )}
+            {queueSummary.length === 0 ? (
+              <div className="dashboard-empty">
+                {loading ? 'Loading queue summary…' : 'No queue summary from Ops API.'}
+              </div>
             ) : (
-              <div className="dashboard-empty">Select a worker to configure queues.</div>
+              <div className="dashboard-queue-summary-table-wrap">
+                <table className="table-operations dashboard-queue-summary-table">
+                  <thead>
+                    <tr>
+                      <th>Queue</th>
+                      <th>
+                        Pending
+                        <InfoTooltip text="Messages waiting on the Redis broker (LLEN)." />
+                      </th>
+                      <th>
+                        Running
+                        <InfoTooltip text="Celery tasks currently active or reserved for this queue (delivery routing key)." />
+                      </th>
+                      <th>
+                        Done
+                        <InfoTooltip text="Rows with status done in the job table for this pipeline." />
+                      </th>
+                      <th>
+                        Failed
+                        <InfoTooltip text="Rows with status failed in the job table for this pipeline." />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queueSummary.map(row => (
+                      <tr key={row.name}>
+                        <td>
+                          <code className="dashboard-queue-name">{formatQueueLabel(row.name)}</code>
+                          {row.db_totals_shared ? (
+                            <span className="dashboard-queue-shared-mark" title="DB totals shared (see note above)"> *</span>
+                          ) : null}
+                        </td>
+                        <td>{fmtQueueCell(row.pending_broker)}</td>
+                        <td>{fmtQueueCell(row.running_celery)}</td>
+                        <td>{fmtQueueCell(row.done_db)}</td>
+                        <td>{fmtQueueCell(row.failed_db)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
 
@@ -1260,109 +1058,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
             )}
           </section>
 
-          {/* ── Command Timeline ──────────────────────────────── */}
-          <section className="replay-section dashboard-section dashboard-commands" aria-labelledby="dashboard-cmd-head">
-            <div className="dashboard-section-header-row">
-              <h3 id="dashboard-cmd-head" className="page-title-with-tooltip">
-                Command History
-                <InfoTooltip text="Recent control commands sent via Ops API. Click a row to expand result/error details." />
-              </h3>
-              <div className="dashboard-filter-row">
-                {(['all', 'start', 'stop', 'restart', 'failed'] as const).map(f => (
-                  <button
-                    key={f}
-                    type="button"
-                    className={`dashboard-filter-btn ${cmdFilter === f ? 'active' : ''}`}
-                    onClick={() => setCmdFilter(f)}
-                  >
-                    {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {showInitialSkeleton ? (
-              <div className="dashboard-empty">Loading command history…</div>
-            ) : filteredCommands.length === 0 ? (
-              <div className="dashboard-empty">
-                {commands.length === 0
-                  ? 'No commands yet. Use the control bar above to send your first command.'
-                  : 'No commands match the current filter.'}
-              </div>
-            ) : (
-              <div className="dashboard-cmd-table-wrap">
-                <table className="table-operations dashboard-cmd-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Action</th>
-                      <th>Target</th>
-                      <th>Status</th>
-                      <th>Operator</th>
-                      <th>Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredCommands.map(c => {
-                      const badge = commandStatusBadge(c.status)
-                      const isExpanded = expandedCmdId === c.command_id
-                      return (
-                        <tr key={c.command_id} className="dashboard-cmd-row-group">
-                          <td colSpan={6} style={{ padding: 0 }}>
-                            <div
-                              className={`dashboard-cmd-row ${isExpanded ? 'dashboard-cmd-row--expanded' : ''}`}
-                              onClick={() => setExpandedCmdId(isExpanded ? null : c.command_id)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setExpandedCmdId(isExpanded ? null : c.command_id) }}
-                            >
-                              <span className="dashboard-cmd-cell dashboard-cmd-cell--time">{fmtTimestamp(c.created_at)}</span>
-                              <span className="dashboard-cmd-cell dashboard-cmd-cell--action">{c.action}</span>
-                              <span className="dashboard-cmd-cell dashboard-cmd-cell--target" title={c.target_id}>{c.target_id}</span>
-                              <span className={`dashboard-cmd-cell dashboard-cmd-badge ${badge.className}`}>{badge.label}</span>
-                              <span className="dashboard-cmd-cell dashboard-cmd-cell--operator">{c.operator ?? '—'}</span>
-                              <span className="dashboard-cmd-cell dashboard-cmd-cell--reason" title={c.reason ?? ''}>{c.reason || '—'}</span>
-                            </div>
-                            {isExpanded && (
-                              <div className="dashboard-cmd-detail">
-                                <div className="dashboard-cmd-detail-row">
-                                  <span className="dashboard-cmd-detail-label">Command ID</span>
-                                  <code>{c.command_id}</code>
-                                </div>
-                                <div className="dashboard-cmd-detail-row">
-                                  <span className="dashboard-cmd-detail-label">Updated</span>
-                                  <span>{fmtTimestamp(c.updated_at)}</span>
-                                </div>
-                                {c.idempotency_key && (
-                                  <div className="dashboard-cmd-detail-row">
-                                    <span className="dashboard-cmd-detail-label">Idempotency key</span>
-                                    <code>{c.idempotency_key}</code>
-                                  </div>
-                                )}
-                                {c.error && (
-                                  <div className="dashboard-cmd-detail-row dashboard-cmd-detail-row--error">
-                                    <span className="dashboard-cmd-detail-label">Error</span>
-                                    <span className="msg err">{c.error}</span>
-                                  </div>
-                                )}
-                                {c.result && (
-                                  <div className="dashboard-cmd-detail-row">
-                                    <span className="dashboard-cmd-detail-label">Result</span>
-                                    <pre className="dashboard-cmd-detail-json">{JSON.stringify(c.result, null, 2)}</pre>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
-          {/* ── Audit Trail (P2) ──────────────────────────────── */}
+          {/* ── Audit Trail ──────────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-audit" aria-labelledby="dashboard-audit-head">
             <div className="dashboard-section-header-row">
               <h3 id="dashboard-audit-head" className="page-title-with-tooltip">

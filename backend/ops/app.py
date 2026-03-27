@@ -54,7 +54,7 @@ def create_ops_app(
 
     app = FastAPI(
         title="Bifrost Ops API",
-        description="Unified control plane: Celery worker status, commands, audit.",
+        description="Unified control plane: Celery worker status, scaling, audit.",
         docs_url="/ops/docs",
         redoc_url="/ops/redoc",
         openapi_url="/ops/openapi.json",
@@ -80,11 +80,9 @@ def create_ops_app(
 
     from servers.celery_app import app as celery_app
 
-    from backend.ops.services.command_bus import CommandBus
     from backend.ops.services.worker_state import WorkerStateService
 
-    worker_svc = WorkerStateService(celery_app, broker_url)
-    command_bus = CommandBus()
+    worker_svc = WorkerStateService(celery_app, broker_url, config)
 
     ops_cfg = config.get("ops") or {}
     use_redis_stop = ops_cfg.get("use_redis_stop", True)
@@ -114,10 +112,7 @@ def create_ops_app(
         )
         logger.info("Executor mode: local (direct systemd)")
 
-    command_bus.set_executor(executor)
-
     app.state.worker_state_service = worker_svc
-    app.state.command_bus = command_bus
     app.state.executor = executor
     app.state.audit_log: list = []
 

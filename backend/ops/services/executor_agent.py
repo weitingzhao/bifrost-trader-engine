@@ -6,16 +6,13 @@ The Ops API process runs without sudo; all privileged operations go through the 
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Set
 
 from backend.ops.agent.client import AgentClient
-from backend.ops.models.schemas import CommandRecord
 from backend.ops.services.executor_local import (
     _ALLOWED_ACTIONS,
-    _STOP_SETTLE_SEC,
     RestrictedExecutor,
 )
 
@@ -26,7 +23,7 @@ class AgentExecutor:
     """Execute whitelisted systemd unit actions via the Local Control Agent.
 
     Maintains the same public interface as RestrictedExecutor so the router
-    and command bus can use it as a drop-in replacement.
+    can use it as a drop-in replacement.
     """
 
     def __init__(
@@ -105,19 +102,3 @@ class AgentExecutor:
         if action not in _ALLOWED_ACTIONS:
             raise PermissionError(f"Action {action!r} not allowed for Redis")
         return await self._systemctl(action, "redis")
-
-    async def __call__(self, cmd: CommandRecord) -> Dict[str, Any]:
-        action = cmd.action.value
-        unit = cmd.target_id
-        self._validate(action, unit)
-
-        if action == "stop" and self._use_redis_stop:
-            return await self._redis_stop_celery()
-
-        if action == "restart" and self._use_redis_stop:
-            stop_result = await self._redis_stop_celery()
-            await asyncio.sleep(_STOP_SETTLE_SEC)
-            start_result = await self._systemctl("start", unit)
-            return {"stop": stop_result, "start": start_result}
-
-        return await self._systemctl(action, unit)

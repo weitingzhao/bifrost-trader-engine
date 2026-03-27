@@ -120,6 +120,10 @@ def get_celery_broker_connected() -> bool:
         return False
 
 
+# Inspect ping/stats must outlast solo-worker busy windows (e.g. bars between-job cooldown ~10s)
+# so Dashboard/Ops do not flip to Degraded when the worker is healthy but slow to answer control.
+CELERY_INSPECT_TIMEOUT_SEC = 15.0
+
 WORKER_IB_STATUS_KEY = "bifrost:worker_ib_status"
 WORKER_IB_STATUS_TTL_SEC = 90
 WORKER_STOP_REQUESTED_KEY = "bifrost:worker_stop_requested"
@@ -144,7 +148,7 @@ def get_worker_ib_status() -> Optional[dict]:
         return None
 
 
-def get_celery_workers_ping(timeout: float = 5.0) -> list[str]:
+def get_celery_workers_ping(timeout: float = CELERY_INSPECT_TIMEOUT_SEC) -> list[str]:
     """Ping Celery workers via broker; return list of worker names that responded. Used for UI 'Running workers' list."""
     try:
         i = app.control.inspect(timeout=timeout)

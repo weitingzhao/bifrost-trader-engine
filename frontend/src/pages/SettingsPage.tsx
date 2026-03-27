@@ -12,9 +12,12 @@ import {
   fetchMassiveApiHealth,
   fetchDocsApiHealth,
   fetchMassiveStatus,
+  fetchHealth,
   type MarketHolidayRow,
   type MassiveStatusResponse,
 } from '../api'
+import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/fetchTimeout'
+import { normalizeUtilizedServices, utilizedEnvFor, type UtilizedServiceRow } from '../utils/utilizedServices'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   DEFAULT_BARS_FETCH,
@@ -67,6 +70,27 @@ import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
 import { fetchOpsHealth } from '../api/ops'
+
+/** Stack indicator from GET /health utilized_services (YAML). */
+function SettingsSidebarServiceEnvBadge({ stack }: { stack: 'prod' | 'dev' | null }) {
+  if (stack == null) return null
+  const label = stack === 'prod' ? 'Production stack' : 'Development stack'
+  return (
+    <span
+      className={`settings-sidebar-service-env-badge settings-sidebar-service-env-badge--${stack}`}
+      title={`${label} (from utilized.services in server config)`}
+      aria-label={label}
+    >
+      <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden>
+        {stack === 'prod' ? (
+          <circle cx="6" cy="6" r="4" fill="currentColor" />
+        ) : (
+          <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        )}
+      </svg>
+    </span>
+  )
+}
 
 export interface SettingsPageProps {
   status: StatusResponse | null
@@ -239,6 +263,7 @@ export function SettingsPage({
   const [massiveApiHealthOk, setMassiveApiHealthOk] = useState<boolean | null>(null)
   const [docsApiHealthOk, setDocsApiHealthOk] = useState<boolean | null>(null)
   const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
+  const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
   const deferredStart = useDeferredStart(280)
   const [celeryStopBusy, setCeleryStopBusy] = useState(false)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
@@ -260,6 +285,9 @@ export function SettingsPage({
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
   const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
   const opsApiLamp: 'green' | 'red' | 'none' = opsApiHealthOk === true ? 'green' : opsApiHealthOk === false ? 'red' : 'none'
+  const docsStackEnv = utilizedEnvFor(utilizedServices, 'docs')
+  const massiveStackEnv = utilizedEnvFor(utilizedServices, 'massive')
+  const opsStackEnv = utilizedEnvFor(utilizedServices, 'ops')
 
   useEffect(() => {
     if (!deferredStart) return
@@ -277,6 +305,13 @@ export function SettingsPage({
       fetchOpsHealth()
         .then(() => { if (!cancelled) setOpsApiHealthOk(true) })
         .catch(() => { if (!cancelled) setOpsApiHealthOk(false) })
+      fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+        .then(h => {
+          if (!cancelled) setUtilizedServices(normalizeUtilizedServices(h.utilized_services))
+        })
+        .catch(() => {
+          if (!cancelled) setUtilizedServices([])
+        })
     }
     load()
     const t = window.setInterval(load, 20000)
@@ -548,6 +583,7 @@ export function SettingsPage({
                 <SettingsSidebarLampGlyph id="api-docs" />
               </span>
               Docs
+              <SettingsSidebarServiceEnvBadge stack={docsStackEnv} />
             </a>
             <a
               href="#settings-api-massive"
@@ -557,6 +593,7 @@ export function SettingsPage({
                 <SettingsSidebarLampGlyph id="api-massive" />
               </span>
               Massive
+              <SettingsSidebarServiceEnvBadge stack={massiveStackEnv} />
             </a>
             <a
               href="#settings-api-ops"
@@ -566,6 +603,7 @@ export function SettingsPage({
                 <SettingsSidebarLampGlyph id="api-ops" />
               </span>
               Ops
+              <SettingsSidebarServiceEnvBadge stack={opsStackEnv} />
             </a>
           </div>
         </div>

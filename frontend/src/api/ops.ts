@@ -77,15 +77,6 @@ export type WorkerStatus =
   | 'failed'
   | 'unknown'
 
-export type CommandAction = 'start' | 'stop' | 'restart'
-
-export type CommandStatusValue =
-  | 'queued'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'timeout'
-
 export interface WorkerSummary {
   worker_id: string
   status: WorkerStatus
@@ -110,21 +101,6 @@ export interface BrokerStatus {
   used_memory_human?: string
   connected_clients?: number
   queues?: Record<string, number>
-}
-
-export interface CommandRecord {
-  command_id: string
-  action: CommandAction
-  target_type: string
-  target_id: string
-  status: CommandStatusValue
-  reason: string | null
-  idempotency_key: string | null
-  operator: string | null
-  created_at: number
-  updated_at: number
-  result: Record<string, unknown> | null
-  error: string | null
 }
 
 export interface AuditEntry {
@@ -160,52 +136,6 @@ export async function fetchOpsWorkerDetail(workerId: string): Promise<{
   return parseJsonResponse(r)
 }
 
-// ── Commands ─────────────────────────────────────────────────────────────────
-
-export async function submitOpsCommand(params: {
-  action: CommandAction
-  target_id: string
-  target_type?: string
-  reason?: string
-  idempotency_key?: string
-}): Promise<{
-  ok: boolean
-  command?: CommandRecord
-  error?: string
-}> {
-  const r = await fetch(`${opsBase()}/ops/commands`, {
-    method: 'POST',
-    headers: jsonAuthHeaders(),
-    body: JSON.stringify({
-      action: params.action,
-      target_type: params.target_type ?? 'worker',
-      target_id: params.target_id,
-      reason: params.reason,
-      idempotency_key: params.idempotency_key,
-    }),
-  })
-  return parseJsonResponse(r)
-}
-
-export async function fetchOpsCommand(commandId: string): Promise<{
-  ok: boolean
-  command?: CommandRecord
-  error?: string
-}> {
-  const r = await fetch(`${opsBase()}/ops/commands/${encodeURIComponent(commandId)}`, { headers: authHeaders() })
-  return parseJsonResponse(r)
-}
-
-export async function fetchOpsCommands(limit = 50): Promise<{
-  ok: boolean
-  commands: CommandRecord[]
-  count: number
-  error?: string
-}> {
-  const r = await fetch(`${opsBase()}/ops/commands?limit=${limit}`, { headers: authHeaders() })
-  return parseJsonResponse(r)
-}
-
 // ── Audit ────────────────────────────────────────────────────────────────────
 
 export async function fetchOpsAudit(limit = 100): Promise<{
@@ -218,24 +148,25 @@ export async function fetchOpsAudit(limit = 100): Promise<{
   return parseJsonResponse(r)
 }
 
-// ── Queue binding ─────────────────────────────────────────────────────────────
+// ── Queue summary (read-only) ───────────────────────────────────────────────
 
-export async function updateWorkerQueues(
-  workerId: string,
-  params: { add?: string[]; remove?: string[] },
-): Promise<{
+export interface QueueSummaryRow {
+  name: string
+  pending_broker: number
+  running_celery: number
+  done_db: number | null
+  failed_db: number | null
+  db_totals_shared?: boolean
+}
+
+export async function fetchQueueSummary(): Promise<{
   ok: boolean
-  worker_id?: string
-  added?: string[]
-  removed?: string[]
-  errors?: { queue: string; op: string; error: string }[]
+  queues: QueueSummaryRow[]
+  db_connected?: boolean
+  massive_db_note?: string
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/workers/${encodeURIComponent(workerId)}/queues`, {
-    method: 'POST',
-    headers: jsonAuthHeaders(),
-    body: JSON.stringify({ add: params.add ?? [], remove: params.remove ?? [] }),
-  })
+  const r = await fetch(`${opsBase()}/ops/queues/summary`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -385,26 +316,3 @@ export async function fetchOpsHealthAtOrigin(
   }
 }
 
-// ── Polling helper ───────────────────────────────────────────────────────────
-
-/**
- * Poll a command until terminal status or timeout.
- * Returns the final CommandRecord.
- */
-export async function pollOpsCommand(
-  commandId: string,
-  opts?: { intervalMs?: number; timeoutMs?: number },
-): Promise<CommandRecord> {
-  const interval = opts?.intervalMs ?? 2000
-  const timeout = opts?.timeoutMs ?? 60_000
-  const start = Date.now()
-  const terminal: CommandStatusValue[] = ['succeeded', 'failed', 'timeout']
-  while (Date.now() - start < timeout) {
-    const res = await fetchOpsCommand(commandId)
-    if (res.command && terminal.includes(res.command.status)) {
-      return res.command
-    }
-    await new Promise(resolve => setTimeout(resolve, interval))
-  }
-  throw new Error(`Polling command ${commandId} timed out after ${timeout}ms`)
-}

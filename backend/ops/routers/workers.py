@@ -1,4 +1,4 @@
-"""Ops API routes: worker state, commands, audit log, broker status, console SSE."""
+"""Ops API routes: worker state, audit log, broker status, console SSE."""
 
 from __future__ import annotations
 
@@ -15,8 +15,6 @@ from starlette.responses import StreamingResponse
 from backend.ops.models.schemas import (
     AuditEntry,
     BrokerControlRequest,
-    CommandRequest,
-    QueueControlRequest,
     ScaleRequest,
 )
 
@@ -30,10 +28,6 @@ router = APIRouter(tags=["ops"])
 
 def _worker_svc(request: Request):
     return request.app.state.worker_state_service
-
-
-def _cmd_bus(request: Request):
-    return request.app.state.command_bus
 
 
 def _executor(request: Request):
@@ -266,46 +260,15 @@ def get_worker(request: Request, worker_id: str) -> Any:
     return {"ok": True, "worker": detail.model_dump()}
 
 
-# ── Queue binding ─────────────────────────────────────────────────────────────
+# ── Queue summary (read-only) ────────────────────────────────────────────────
 
 
-@router.post("/ops/workers/{worker_id:path}/queues")
-def worker_queue_control(
-    request: Request,
-    worker_id: str,
-    body: QueueControlRequest = Body(...),
-) -> Any:
-    """Add or remove queue consumers on a specific worker."""
-    denied = _require_role(request, "operator")
-    if denied:
-        _audit(
-            request,
-            "queue_control",
-            worker_id,
-            "denied",
-            detail=f"role={_role(request)}",
-        )
-        return denied
-
-    if not body.add and not body.remove:
-        return JSONResponse(
-            status_code=400,
-            content={"ok": False, "error": "Provide at least one queue in 'add' or 'remove'."},
-        )
-
+@router.get("/ops/queues/summary")
+def queue_summary(request: Request) -> Dict[str, Any]:
+    """Per-queue broker backlog, Celery running count, and PostgreSQL job totals."""
     svc = _worker_svc(request)
-    result = svc.queue_control(worker_id, add=body.add, remove=body.remove)
-
-    has_errors = bool(result.get("errors"))
-    outcome = "partial" if has_errors else "success"
-    _audit(
-        request,
-        "queue_control",
-        worker_id,
-        outcome,
-        detail=f"add={body.add}, remove={body.remove}",
-    )
-    return {"ok": not has_errors, **result}
+    data = svc.queue_summaries()
+    return {"ok": True, **data}
 
 
 # ── Broker ────────────────────────────────────────────────────────────────────
@@ -377,85 +340,6 @@ async def broker_control(
         "success",
     )
     return {"ok": True, "action": body.action.value, "result": result}
-
-
-# ── Commands (start / stop / restart) ─────────────────────────────────────────
-
-
-@router.post("/ops/commands")
-async def submit_command(
-    request: Request, body: CommandRequest = Body(...),
-) -> Any:
-    """Submit an async control command.  Requires operator or admin role."""
-    denied = _require_role(request, "operator")
-    if denied:
-        _audit(
-            request,
-            body.action.value,
-            body.target_id,
-            "denied",
-            detail=f"role={_role(request)}",
-        )
-        return denied
-
-    bus = _cmd_bus(request)
-    try:
-        cmd = bus.submit(
-            action=body.action,
-            target_type=body.target_type,
-            target_id=body.target_id,
-            reason=body.reason,
-            idempotency_key=body.idempotency_key,
-            operator=_operator(request),
-        )
-    except ValueError as e:
-        return JSONResponse(
-            status_code=409, content={"ok": False, "error": str(e)},
-        )
-
-    _audit(
-        request,
-        cmd.action.value,
-        cmd.target_id,
-        "submitted",
-        command_id=cmd.command_id,
-        detail=cmd.reason,
-    )
-
-    asyncio.create_task(bus.execute(cmd.command_id))
-
-    return JSONResponse(
-        status_code=202,
-        content={"ok": True, "command": cmd.model_dump()},
-    )
-
-
-@router.get("/ops/commands/{command_id}")
-def get_command(request: Request, command_id: str) -> Any:
-    """Poll command execution status."""
-    bus = _cmd_bus(request)
-    cmd = bus.get(command_id)
-    if cmd is None:
-        return JSONResponse(
-            status_code=404,
-            content={"ok": False, "error": "Command not found."},
-        )
-    return {"ok": True, "command": cmd.model_dump()}
-
-
-@router.get("/ops/commands")
-def list_commands(
-    request: Request,
-    limit: int = Query(50, ge=1, le=200),
-) -> Dict[str, Any]:
-    """Recent commands (newest first)."""
-    bus = _cmd_bus(request)
-    cmds = bus.list_recent(limit=limit)
-    return {
-        "ok": True,
-        "commands": [c.model_dump() for c in cmds],
-        "count": len(cmds),
-    }
 
 
 # ── Console log streaming (SSE) ───────────────────────────────────────

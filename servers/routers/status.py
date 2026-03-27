@@ -204,10 +204,15 @@ def get_status(request: Request) -> Dict[str, Any]:
         rq = getattr(app.state, "redis_quotes", None)
         payload["redis_quotes_connected"] = bool(rq and getattr(rq, "available", False))
         try:
-            from servers.celery_app import get_celery_broker_connected, get_worker_ib_status, get_celery_workers_ping
+            from servers.celery_app import (
+                CELERY_INSPECT_TIMEOUT_SEC,
+                get_celery_broker_connected,
+                get_worker_ib_status,
+                get_celery_workers_ping,
+            )
 
             payload["celery_broker_connected"] = get_celery_broker_connected()
-            workers_ping = get_celery_workers_ping(timeout=1.0)
+            workers_ping = get_celery_workers_ping(timeout=CELERY_INSPECT_TIMEOUT_SEC)
             payload["celery_workers"] = workers_ping
             worker_ib = get_worker_ib_status()
             payload["celery_worker_ib_connected"] = bool(

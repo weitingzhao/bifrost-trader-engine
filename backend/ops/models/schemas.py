@@ -1,10 +1,9 @@
-"""Pydantic models for the Ops control plane API (commands, worker state, audit)."""
+"""Pydantic models for the Ops control plane API (worker state, scaling, audit)."""
 
 from __future__ import annotations
 
 import enum
 import time
-import uuid
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -23,12 +22,6 @@ class WorkerStatus(str, enum.Enum):
     UNKNOWN = "unknown"
 
 
-class CommandAction(str, enum.Enum):
-    START = "start"
-    STOP = "stop"
-    RESTART = "restart"
-
-
 class ScaleAction(str, enum.Enum):
     ADD = "add"
     REMOVE = "remove"
@@ -39,13 +32,6 @@ class BrokerAction(str, enum.Enum):
     STOP = "stop"
     RESTART = "restart"
 
-
-class CommandStatus(str, enum.Enum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    TIMEOUT = "timeout"
 
 
 # ── Worker models ─────────────────────────────────────────────────────────────
@@ -69,38 +55,8 @@ class WorkerDetail(WorkerSummary):
     stats: Dict[str, Any] = {}
 
 
-# ── Command models ────────────────────────────────────────────────────────────
-
-
-class CommandRequest(BaseModel):
-    action: CommandAction
-    target_type: str = "worker"
-    target_id: str
-    reason: Optional[str] = None
-    idempotency_key: Optional[str] = None
-
-
-class CommandRecord(BaseModel):
-    command_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    action: CommandAction
-    target_type: str = "worker"
-    target_id: str
-    status: CommandStatus = CommandStatus.QUEUED
-    reason: Optional[str] = None
-    idempotency_key: Optional[str] = None
-    operator: Optional[str] = None
-    created_at: float = Field(default_factory=time.time)
-    updated_at: float = Field(default_factory=time.time)
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
 
 # ── Queue / Scale / Broker request models ────────────────────────────────────
-
-
-class QueueControlRequest(BaseModel):
-    add: List[str] = Field(default_factory=list)
-    remove: List[str] = Field(default_factory=list)
 
 
 class ScaleRequest(BaseModel):

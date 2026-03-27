@@ -10,6 +10,7 @@ import {
 } from '../api'
 import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/fetchTimeout'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { normalizeUtilizedServices, type UtilizedServiceRow } from '../utils/utilizedServices'
 
 export interface ApiHealthOverviewPageProps {
   embeddedInSettings?: boolean
@@ -63,23 +64,7 @@ function trimEnv(s: string | undefined): string | undefined {
   return t ? t.replace(/\/$/, '') : undefined
 }
 
-export interface UtilizedServiceRow {
-  service: string
-  env: string
-}
-
-function normalizeUtilizedServices(raw: unknown): UtilizedServiceRow[] {
-  if (!Array.isArray(raw)) return []
-  const out: UtilizedServiceRow[] = []
-  for (const x of raw) {
-    if (x != null && typeof x === 'object' && 'service' in x && 'env' in x) {
-      const s = String((x as { service: unknown }).service).trim()
-      const e = String((x as { env: unknown }).env).trim()
-      if (s && e) out.push({ service: s, env: e })
-    }
-  }
-  return out
-}
+export type { UtilizedServiceRow }
 
 function formatServiceLabel(service: string): string {
   const t = service.toLowerCase()
