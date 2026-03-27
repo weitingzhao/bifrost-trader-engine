@@ -46,6 +46,24 @@ def _allowed_units_from_config(config: dict) -> List[str]:
     return list(DEFAULT_ALLOWED_UNITS)
 
 
+def _project_root_for_subprocess_executor(
+    config: dict, resolved_config_path: Optional[str],
+) -> Path:
+    """Infer repo root for ``run_celery.py`` when ``ops.local_control=subprocess``."""
+    ops_cfg = config.get("ops") or {}
+    raw = (ops_cfg.get("project_root") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    if not resolved_config_path:
+        raise ValueError(
+            "ops.local_control=subprocess requires ops.project_root or resolved_config_path"
+        )
+    p = Path(resolved_config_path).resolve()
+    if p.parent.name == "config":
+        return p.parent.parent
+    return p.parent
+
+
 def create_ops_app(
     config: dict,
     resolved_config_path: Optional[str] = None,
@@ -80,6 +98,18 @@ def create_ops_app(
 
     from servers.celery_app import app as celery_app
 
+    # ``servers.celery_app`` resolves broker at import time; ensure Ops ``read_config`` URL wins
+    # so ``control.inspect`` hits the same Redis as workers and Flower.
+    _prev_broker = celery_app.conf.get("broker_url")
+    if _prev_broker != broker_url:
+        logger.info(
+            "Ops: aligning Celery app broker with ops config (was %r, now %r)",
+            _prev_broker,
+            broker_url,
+        )
+    celery_app.conf.broker_url = broker_url
+    celery_app.conf.result_backend = broker_url
+
     from backend.ops.services.worker_state import WorkerStateService
 
     worker_svc = WorkerStateService(celery_app, broker_url, config)
@@ -87,6 +117,10 @@ def create_ops_app(
     ops_cfg = config.get("ops") or {}
     use_redis_stop = ops_cfg.get("use_redis_stop", True)
     executor_mode = ops_cfg.get("executor_mode", "local")
+    local_control_raw = str(ops_cfg.get("local_control") or "systemd").strip().lower()
+    local_control = (
+        local_control_raw if local_control_raw in ("systemd", "subprocess") else "systemd"
+    )
 
     if executor_mode == "agent":
         from backend.ops.services.executor_agent import AgentExecutor
@@ -102,6 +136,20 @@ def create_ops_app(
             use_redis_stop=use_redis_stop,
         )
         logger.info("Executor mode: agent (socket=%s)", agent_socket)
+    elif local_control == "subprocess":
+        from backend.ops.services.executor_local import SubprocessLocalExecutor
+
+        project_root = _project_root_for_subprocess_executor(config, resolved_config_path)
+        executor = SubprocessLocalExecutor(
+            allowed_units=allowed_units,
+            broker_url=broker_url,
+            use_redis_stop=use_redis_stop,
+            project_root=project_root,
+        )
+        logger.info(
+            "Executor mode: local subprocess (run_celery.py, project=%s)",
+            project_root,
+        )
     else:
         from backend.ops.services.executor_local import RestrictedExecutor
 
@@ -110,7 +158,7 @@ def create_ops_app(
             broker_url=broker_url,
             use_redis_stop=use_redis_stop,
         )
-        logger.info("Executor mode: local (direct systemd)")
+        logger.info("Executor mode: local (systemd)")
 
     app.state.worker_state_service = worker_svc
     app.state.executor = executor
@@ -164,6 +212,8 @@ def create_ops_app(
         if resolved_config_path:
             out["config_path"] = str(Path(resolved_config_path).resolve())
         out["executor_mode"] = executor_mode
+        if executor_mode == "local":
+            out["local_control"] = local_control
         out["auth_required"] = app.state.ops_auth.has_tokens
         out["audit_mode"] = audit_store.stats().get("mode", "memory")
         return out

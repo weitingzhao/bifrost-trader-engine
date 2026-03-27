@@ -9,7 +9,11 @@ import asyncio
 import fnmatch
 import json
 import logging
+import os
 import re
+import signal
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Set
 
 logger = logging.getLogger(__name__)
@@ -199,3 +203,166 @@ class RestrictedExecutor:
         if action not in _ALLOWED_ACTIONS:
             raise PermissionError(f"Action {action!r} not allowed for Redis")
         return await self._systemctl(action, "redis")
+
+
+class SubprocessLocalExecutor:
+    """Local executor without systemd: start/stop workers via ``scripts/run_celery.py``.
+
+    Use on macOS or any host where ``systemctl`` is unavailable. Same API as
+    :class:`RestrictedExecutor` for the Ops router (scale, list_instances).
+
+    Redis broker control still goes through :class:`RestrictedExecutor` (systemd),
+    so ``systemctl_redis`` requires Linux + sudo like before.
+
+    Worker start spawns a detached child process; worker stop matches
+    ``pgrep`` + ``SIGTERM`` (same idea as ``run_celery.py`` duplicate kill).
+    """
+
+    worker_to_unit = staticmethod(RestrictedExecutor.worker_to_unit)
+    instance_unit = staticmethod(RestrictedExecutor.instance_unit)
+
+    def __init__(
+        self,
+        allowed_units: list[str],
+        broker_url: str,
+        use_redis_stop: bool,
+        project_root: Path | str,
+        python_executable: str | None = None,
+    ) -> None:
+        self._project_root = Path(project_root).resolve()
+        self._python = python_executable or sys.executable
+        self._systemd = RestrictedExecutor(
+            allowed_units=allowed_units,
+            broker_url=broker_url,
+            use_redis_stop=use_redis_stop,
+        )
+
+    def _validate(self, action: str, unit: str) -> None:
+        self._systemd._validate(action, unit)  # noqa: SLF001
+
+    async def _redis_stop_celery(self) -> Dict[str, Any]:
+        return await self._systemd._redis_stop_celery()  # noqa: SLF001
+
+    @staticmethod
+    def _instance_from_worker_unit(unit: str) -> str:
+        prefix = f"{_WORKER_UNIT_BASE}@"
+        if not unit.startswith(prefix) or not unit.endswith(".service"):
+            raise ValueError(
+                f"Not a {_WORKER_UNIT_BASE}@ template unit: {unit!r}"
+            )
+        return unit[len(prefix) : -len(".service")]
+
+    async def _start_worker_unit(self, unit: str) -> Dict[str, Any]:
+        instance_id = self._instance_from_worker_unit(unit)
+        script = self._project_root / "scripts" / "run_celery.py"
+        if not script.is_file():
+            raise RuntimeError(f"run_celery.py not found at {script}")
+        cmd = [self._python, str(script), "--instance", instance_id]
+        env = os.environ.copy()
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(self._project_root),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+            env=env,
+        )
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.5)
+            err = (await proc.stderr.read()).decode(errors="replace") if proc.stderr else ""
+            raise RuntimeError(
+                f"Worker exited immediately (rc={proc.returncode}): {err.strip() or 'no stderr'}"
+            )
+        except asyncio.TimeoutError:
+            pass
+        return {
+            "method": "subprocess",
+            "action": "start",
+            "unit": unit,
+            "pid": proc.pid,
+            "message": "Worker process started in background (run_celery.py).",
+        }
+
+    async def _stop_worker_unit(self, unit: str) -> Dict[str, Any]:
+        instance_id = self._instance_from_worker_unit(unit)
+        safe = instance_id.replace("\\", "\\\\").replace(".", "\\.")
+        pattern = f"python.*run_celery\\.py.*--instance {safe}"
+        pg = await asyncio.create_subprocess_exec(
+            "pgrep", "-f", pattern,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(pg.communicate(), timeout=15)
+        if pg.returncode != 0:
+            return {
+                "method": "subprocess",
+                "action": "stop",
+                "unit": unit,
+                "message": "No matching worker process (already stopped).",
+            }
+        pids = [x.strip() for x in stdout.decode().strip().splitlines() if x.strip().isdigit()]
+        killed: List[str] = []
+        for pid_str in pids:
+            try:
+                os.kill(int(pid_str), signal.SIGTERM)
+                killed.append(pid_str)
+            except (ProcessLookupError, ValueError):
+                pass
+        return {
+            "method": "subprocess",
+            "action": "stop",
+            "unit": unit,
+            "pids": killed,
+            "message": f"SIGTERM sent to {killed}" if killed else "No PIDs killed",
+        }
+
+    async def _systemctl(
+        self, action: str, unit: str, timeout: int = _SYSTEMD_TIMEOUT_SEC,
+    ) -> Dict[str, Any]:
+        if unit == "redis":
+            return await self._systemd._systemctl(action, unit, timeout=timeout)  # noqa: SLF001
+        if action == "start":
+            return await self._start_worker_unit(unit)
+        if action == "stop":
+            return await self._stop_worker_unit(unit)
+        if action == "restart":
+            await self._stop_worker_unit(unit)
+            return await self._start_worker_unit(unit)
+        raise PermissionError(f"Action {action!r} not supported for subprocess worker control")
+
+    async def list_instances(self) -> List[Dict[str, str]]:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep", "-fl", "run_celery.py",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode not in (0, 1):
+            return []
+        text = (stdout or b"").decode(errors="replace").strip()
+        if not text:
+            return []
+        inst_re = re.compile(r"--instance\s+(\S+)")
+        instances: List[Dict[str, str]] = []
+        for line in text.splitlines():
+            m = inst_re.search(line)
+            if not m:
+                continue
+            instance_id = m.group(1)
+            unit = f"{_WORKER_UNIT_BASE}@{instance_id}.service"
+            parts = line.split(None, 1)
+            pid = parts[0] if parts else "?"
+            instances.append({
+                "unit": unit,
+                "load": "loaded",
+                "active": "active",
+                "sub": "running",
+                "description": f"subprocess pid={pid}",
+            })
+        return instances
+
+    async def redis_is_local(self) -> bool:
+        return await self._systemd.redis_is_local()
+
+    async def systemctl_redis(self, action: str) -> Dict[str, Any]:
+        return await self._systemd.systemctl_redis(action)

@@ -134,16 +134,80 @@ function LogConsole({ url, maxLines = 500 }: { url: string; maxLines?: number })
 
   useEffect(() => {
     if (!url) return
+    // #region agent log
+    let firstMsg = true
+    fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
+      body: JSON.stringify({
+        sessionId: 'e2efc4',
+        hypothesisId: 'H3',
+        location: 'DashboardPage.tsx:LogConsole',
+        message: 'EventSource creating',
+        data: { url },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
     const es = new EventSource(url)
     esRef.current = es
-    es.onopen = () => setConnected(true)
+    es.onopen = () => {
+      setConnected(true)
+      // #region agent log
+      fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
+        body: JSON.stringify({
+          sessionId: 'e2efc4',
+          hypothesisId: 'H3',
+          location: 'DashboardPage.tsx:LogConsole',
+          message: 'EventSource open',
+          data: { url, readyState: es.readyState },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {})
+      // #endregion
+    }
     es.onmessage = (ev) => {
+      // #region agent log
+      if (firstMsg) {
+        firstMsg = false
+        fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
+          body: JSON.stringify({
+            sessionId: 'e2efc4',
+            hypothesisId: 'H3',
+            location: 'DashboardPage.tsx:LogConsole',
+            message: 'EventSource first message',
+            data: { url, dataLen: ev.data?.length ?? 0 },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {})
+      }
+      // #endregion
       setLines(prev => {
         const next = [...prev, ev.data]
         return next.length > maxLines ? next.slice(next.length - maxLines) : next
       })
     }
-    es.onerror = () => setConnected(false)
+    es.onerror = () => {
+      setConnected(false)
+      // #region agent log
+      fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
+        body: JSON.stringify({
+          sessionId: 'e2efc4',
+          hypothesisId: 'H3',
+          location: 'DashboardPage.tsx:LogConsole',
+          message: 'EventSource error',
+          data: { url, readyState: es.readyState },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {})
+      // #endregion
+    }
     return () => { es.close(); esRef.current = null }
   }, [url, maxLines])
 
@@ -245,6 +309,11 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   const [tokenInput, setTokenInput] = useState('')
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
 
+  /** Coalesce concurrent /ops/workers (Celery inspect) calls — 5s poll + void refresh must not stack. */
+  const workersRefreshPromiseRef = useRef<Promise<void> | null>(null)
+  /** When Phase 1 is slow, 5s interval must not stack duplicate summary/instances/ops calls. */
+  const loadAllPromiseRef = useRef<Promise<void> | null>(null)
+
   const canOperate = caps?.capabilities.can_operate ?? false
   const canAdmin = caps?.capabilities.can_admin ?? false
   const isAuthenticated = caps?.identity.authenticated ?? false
@@ -258,41 +327,110 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     } catch { /* ignore */ }
   }, [])
 
-  const loadAll = useCallback(async () => {
-    try {
-      const [wRes, qRes, iRes, bRes, pRes] = await Promise.all([
-        fetchOpsWorkers(),
-        fetchQueueSummary().catch(() => ({ ok: false as const, queues: [] as QueueSummaryRow[] })),
-        fetchWorkerInstances().catch(() => ({ ok: false, instances: [] as SystemdInstance[], count: 0 })),
-        fetchBrokerStatusExtended().catch(() => null),
-        fetchWorkerProfiles().catch(() => ({ ok: false, profiles: [] as WorkerProfileInfo[], count: 0 })),
-      ])
-      if (wRes.ok) {
-        setWorkers(wRes.workers)
-        setBroker(wRes.broker)
-      }
-      if (qRes.ok) {
-        setQueueSummary(qRes.queues)
-        setQueueSummaryNote(qRes.massive_db_note ?? null)
-        setQueueSummaryDb(qRes.db_connected ?? null)
-      } else {
-        setQueueSummary([])
-        setQueueSummaryNote(null)
-        setQueueSummaryDb(null)
-      }
-      if (iRes.ok) setInstances(iRes.instances)
-      if (bRes?.ok) setExtBroker(bRes.broker)
-      if (pRes.ok && pRes.profiles.length > 0) {
-        setWorkerProfiles(pRes.profiles)
-        setScaleWorkerType(prev => prev || pRes.profiles[0].key)
-      }
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load dashboard data')
-    } finally {
-      setLoading(false)
+  const refreshOpsWorkersSnapshot = useCallback(async () => {
+    if (workersRefreshPromiseRef.current) {
+      return workersRefreshPromiseRef.current
     }
+    const run = (async () => {
+      try {
+        const wRes = await fetchOpsWorkers()
+        if (wRes.ok) {
+          setWorkers(wRes.workers)
+          setBroker(wRes.broker)
+          setExtBroker(prev => ({
+            ...wRes.broker,
+            locally_managed: prev?.locally_managed ?? false,
+          }))
+        }
+      } catch {
+        /* workers snapshot optional */
+      }
+    })()
+    const tracked = run.finally(() => {
+      workersRefreshPromiseRef.current = null
+    })
+    workersRefreshPromiseRef.current = tracked
+    return tracked
   }, [])
+
+  /** Phase 1: queues, instances, broker extension, profiles. Phase 2: /ops/workers (Celery inspect, slow). */
+  const loadAll = useCallback(
+    async (opts?: { awaitWorkers?: boolean }) => {
+      if (loadAllPromiseRef.current) {
+        return loadAllPromiseRef.current
+      }
+      const awaitWorkers = opts?.awaitWorkers === true
+      const run = (async () => {
+        try {
+          // Phase 1: fast endpoints only — /ops/workers can take wall_sec (Celery inspect); do not block first paint.
+          const settled = await Promise.allSettled([
+            fetchQueueSummary().catch(() => ({ ok: false as const, queues: [] as QueueSummaryRow[] })),
+            fetchWorkerInstances().catch(() => ({ ok: false, instances: [] as SystemdInstance[], count: 0 })),
+            fetchBrokerStatusExtended().catch(() => null),
+            fetchWorkerProfiles().catch(() => ({ ok: false, profiles: [] as WorkerProfileInfo[], count: 0 })),
+          ])
+          const qRes =
+            settled[0].status === 'fulfilled'
+              ? settled[0].value
+              : { ok: false as const, queues: [] as QueueSummaryRow[] }
+          const iRes =
+            settled[1].status === 'fulfilled'
+              ? settled[1].value
+              : { ok: false, instances: [] as SystemdInstance[], count: 0 }
+          const bRes = settled[2].status === 'fulfilled' ? settled[2].value : null
+          const pRes =
+            settled[3].status === 'fulfilled'
+              ? settled[3].value
+              : { ok: false, profiles: [] as WorkerProfileInfo[], count: 0 }
+
+          if (qRes.ok) {
+            setQueueSummary(qRes.queues)
+            setQueueSummaryNote(qRes.massive_db_note ?? null)
+            setQueueSummaryDb(qRes.db_connected ?? null)
+          } else {
+            setQueueSummary([])
+            setQueueSummaryNote(null)
+            setQueueSummaryDb(null)
+          }
+          if (iRes.ok) setInstances(iRes.instances)
+          if (bRes?.ok && bRes.broker) {
+            setExtBroker(bRes.broker)
+            const eb = bRes.broker
+            setBroker({
+              connected: eb.connected,
+              url_masked: eb.url_masked,
+              used_memory_human: eb.used_memory_human,
+              connected_clients: eb.connected_clients,
+              queues: eb.queues,
+            })
+          } else {
+            setExtBroker(null)
+          }
+          if (pRes.ok && pRes.profiles.length > 0) {
+            setWorkerProfiles(pRes.profiles)
+            setScaleWorkerType(prev => prev || pRes.profiles[0].key)
+          }
+          setError(null)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Failed to load dashboard data')
+        } finally {
+          setLoading(false)
+        }
+
+        if (awaitWorkers) {
+          await refreshOpsWorkersSnapshot()
+        } else {
+          void refreshOpsWorkersSnapshot()
+        }
+      })()
+      const tracked = run.finally(() => {
+        loadAllPromiseRef.current = null
+      })
+      loadAllPromiseRef.current = tracked
+      return tracked
+    },
+    [refreshOpsWorkersSnapshot],
+  )
 
   const loadAudit = useCallback(async () => {
     try {
@@ -786,11 +924,20 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
             </div>
           </section>
 
+          {/* ── Celery (runtime, queues, instances, console, broker) ── */}
+          <div
+            className="dashboard-celery-group"
+            aria-labelledby="dashboard-celery-head"
+          >
+            <h2 id="dashboard-celery-head" className="dashboard-celery-group-title">
+              Celery
+            </h2>
+
           {/* ── Runtime Snapshot ──────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
             <h3 id="dashboard-snapshot-head" className="page-title-with-tooltip">
               Runtime Snapshot
-              <InfoTooltip text="Live broker and worker status. Polled every 5 seconds from Ops API." />
+              <InfoTooltip text="Broker from Redis; workers from Celery inspect (who responds on the broker). Worker Instances below lists OS processes — not the same data source." />
             </h3>
 
             {/* Broker */}
@@ -824,7 +971,18 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               <div className="dashboard-empty">Loading broker and worker snapshot…</div>
             ) : workers.length === 0 ? (
               <div className="dashboard-empty">
-                No workers detected. Start a Celery worker: <code>python scripts/run_celery.py</code>
+                {instances.length > 0 ? (
+                  <p className="dashboard-empty-hint">
+                    Worker Instances lists matching OS processes (e.g. <code>run_celery.py</code>). Runtime Snapshot
+                    only shows workers returned by <strong>Celery inspect</strong> on the configured broker. If you
+                    just added an instance, wait a few seconds for the next poll; if this stays empty, check the
+                    worker terminal for errors and that it uses the same Redis as Ops.
+                  </p>
+                ) : (
+                  <>
+                    No workers detected. Start a Celery worker: <code>python scripts/run_celery.py</code>
+                  </>
+                )}
               </div>
             ) : (
               <div className="dashboard-workers-grid">
@@ -973,59 +1131,6 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
             </div>
           </section>
 
-          {/* ── Broker Control ─────────────────────────────────── */}
-          <section className="replay-section dashboard-section dashboard-broker-ctrl" aria-labelledby="dashboard-broker-ctrl-head">
-            <h3 id="dashboard-broker-ctrl-head" className="page-title-with-tooltip">
-              Broker Control
-              <InfoTooltip text="Start, stop, or restart the Redis broker. Only available when Redis is locally managed via systemd." />
-            </h3>
-            {brokerMsg.text && (
-              <span className={`settings-page-msg ${brokerMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{brokerMsg.text}</span>
-            )}
-            {extBroker ? (
-              <div className="dashboard-broker-ctrl-body">
-                <div className="dashboard-broker-ctrl-info">
-                  <span>Connected: <strong>{extBroker.connected ? 'Yes' : 'No'}</strong></span>
-                  <span>Locally managed: <strong>{extBroker.locally_managed ? 'Yes' : 'No'}</strong></span>
-                  {extBroker.used_memory_human && <span>Memory: {extBroker.used_memory_human}</span>}
-                  {extBroker.connected_clients != null && <span>Clients: {extBroker.connected_clients}</span>}
-                </div>
-                {extBroker.locally_managed ? (
-                  <div className="dashboard-broker-ctrl-actions">
-                    <button
-                      type="button"
-                      className="btn-resume dashboard-btn dashboard-btn--start"
-                      onClick={() => onBrokerAction('start')}
-                      disabled={brokerBusy || !canAdmin}
-                    >
-                      Start
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-resume dashboard-btn dashboard-btn--restart"
-                      onClick={() => onBrokerAction('restart')}
-                      disabled={brokerBusy || !canAdmin}
-                    >
-                      Restart
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
-                      onClick={() => onBrokerAction('stop')}
-                      disabled={brokerBusy || !canAdmin}
-                    >
-                      Stop
-                    </button>
-                  </div>
-                ) : (
-                  <div className="dashboard-empty">Redis is externally managed — control buttons disabled.</div>
-                )}
-              </div>
-            ) : (
-              <div className="dashboard-empty">Loading broker status…</div>
-            )}
-          </section>
-
           {/* ── Console Monitor ────────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-console-section" aria-labelledby="dashboard-console-head">
             <h3 id="dashboard-console-head" className="page-title-with-tooltip">
@@ -1057,6 +1162,71 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               <div className="dashboard-empty">Select a target above to open a live console stream.</div>
             )}
           </section>
+
+          {/* ── Broker Control ─────────────────────────────────── */}
+          <section className="replay-section dashboard-section dashboard-broker-ctrl" aria-labelledby="dashboard-broker-ctrl-head">
+            <h3 id="dashboard-broker-ctrl-head" className="page-title-with-tooltip">
+              Redis / Broker
+              <InfoTooltip text="Live metrics (reachability, memory, clients, Celery-related keys) come from the configured Redis. Start, stop, and restart only apply when Redis is managed by systemd on the same host as Ops." />
+            </h3>
+            {brokerMsg.text && (
+              <span className={`settings-page-msg ${brokerMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{brokerMsg.text}</span>
+            )}
+            {extBroker ? (
+              <div className="dashboard-broker-ctrl-body">
+                <div className="dashboard-broker-ctrl-info">
+                  <span>Connected: <strong>{extBroker.connected ? 'Yes' : 'No'}</strong></span>
+                  <span>Systemd on this host: <strong>{extBroker.locally_managed ? 'Yes' : 'No'}</strong></span>
+                  {extBroker.used_memory_human && <span>Memory: {extBroker.used_memory_human}</span>}
+                  {extBroker.connected_clients != null && <span>Clients: {extBroker.connected_clients}</span>}
+                  {extBroker.queues && Object.keys(extBroker.queues).length > 0 && (
+                    <span>
+                      Celery keys:{' '}
+                      {Object.entries(extBroker.queues)
+                        .map(([q, n]) => `${q}(${n})`)
+                        .join(', ')}
+                    </span>
+                  )}
+                </div>
+                {extBroker.locally_managed ? (
+                  <div className="dashboard-broker-ctrl-actions">
+                    <button
+                      type="button"
+                      className="btn-resume dashboard-btn dashboard-btn--start"
+                      onClick={() => onBrokerAction('start')}
+                      disabled={brokerBusy || !canAdmin}
+                    >
+                      Start
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-resume dashboard-btn dashboard-btn--restart"
+                      onClick={() => onBrokerAction('restart')}
+                      disabled={brokerBusy || !canAdmin}
+                    >
+                      Restart
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-shutdown-all dashboard-btn dashboard-btn--stop"
+                      onClick={() => onBrokerAction('stop')}
+                      disabled={brokerBusy || !canAdmin}
+                    >
+                      Stop
+                    </button>
+                  </div>
+                ) : (
+                  <p className="dashboard-broker-ctrl-readonly">
+                    Broker is reachable from Ops using the configured Redis URL (read-only view). Start/stop/restart via systemd are not available unless Redis runs on this machine under systemd.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="dashboard-empty">Loading broker status…</div>
+            )}
+          </section>
+
+          </div>
 
           {/* ── Audit Trail ──────────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-audit" aria-labelledby="dashboard-audit-head">

@@ -203,11 +203,15 @@ export default function App() {
   const [benchmarks, setBenchmarks] = useState<
     Record<string, { bar_time: number; close: number; prev_close?: number | null; is_today?: boolean; is_stale?: boolean }>
   >({})
-  /** Celery bars worker queue counts (polled every 3s for dashboard) */
+  /** Celery bars worker queue counts (polled for header lamp) */
   const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
   const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
+  /** When GET /status is slow, setInterval would stack concurrent fetches — coalesce to one in-flight request. */
+  const statusFetchRef = useRef<Promise<StatusResponse | null> | null>(null)
+  const operationsFetchRef = useRef<Promise<void> | null>(null)
+  const barsJobsPollRef = useRef<Promise<void> | null>(null)
 
   /** When on Settings tab: which section is shown (system vs Massive vs config). Drives header menu highlight. */
   const hashToSettingsViewSection = useCallback((hash: string): 'system' | 'config' | 'massive' => {
@@ -339,23 +343,42 @@ export default function App() {
   }, [theme])
 
   const loadStatus = useCallback(async () => {
-    try {
-      const j = await fetchStatus()
-      setStatus(j)
-      return j
-    } catch {
-      // Keep previous status on failure so UI keeps updating (e.g. after Celery stop, one slow/timeout poll won't blank the page)
-      return null
+    if (statusFetchRef.current) {
+      return statusFetchRef.current
     }
+    const run = (async (): Promise<StatusResponse | null> => {
+      try {
+        const j = await fetchStatus()
+        setStatus(j)
+        return j
+      } catch {
+        return null
+      }
+    })()
+    const tracked = run.finally(() => {
+      statusFetchRef.current = null
+    })
+    statusFetchRef.current = tracked
+    return tracked
   }, [])
 
   const loadOperations = useCallback(async () => {
-    try {
-      const j = await fetchOperations(20)
-      setOperations(j.operations || [])
-    } catch {
-      setOperations([])
+    if (operationsFetchRef.current) {
+      return operationsFetchRef.current
     }
+    const run = (async () => {
+      try {
+        const j = await fetchOperations(20)
+        setOperations(j.operations || [])
+      } catch {
+        setOperations([])
+      }
+    })()
+    const tracked = run.finally(() => {
+      operationsFetchRef.current = null
+    })
+    operationsFetchRef.current = tracked
+    return tracked
   }, [])
 
   const isDetailMode =
@@ -377,7 +400,10 @@ export default function App() {
   useEffect(() => {
     if (isDetailMode) return
     const pollWorkerJobs = () => {
-      Promise.all([
+      if (barsJobsPollRef.current) {
+        return
+      }
+      const run = Promise.all([
         fetchBarsJobs(1, 0, 'pending'),
         fetchBarsJobs(1, 0, 'running'),
       ])
@@ -389,9 +415,13 @@ export default function App() {
           setWorkerJobPending(null)
           setWorkerJobRunning(null)
         })
+      const tracked = run.finally(() => {
+        barsJobsPollRef.current = null
+      })
+      barsJobsPollRef.current = tracked
     }
     pollWorkerJobs()
-    const t = setInterval(pollWorkerJobs, 3000)
+    const t = setInterval(pollWorkerJobs, 10000)
     return () => clearInterval(t)
   }, [isDetailMode])
 

@@ -13,11 +13,14 @@ Solo pool: single process, one IB connection (client_id). Stop-poll runs in work
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
+import threading
+import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # Ensure project root on path and cwd when worker imports this
 _here = Path(__file__).resolve().parent
@@ -130,12 +133,73 @@ WORKER_STOP_REQUESTED_KEY = "bifrost:worker_stop_requested"
 CELERY_LOG_STREAM_KEY = "bifrost:celery_console"
 CELERY_LOG_STREAM_MAXLEN = 50
 
+# Ops Dashboard Runtime Snapshot: fast worker list via Redis keys (no Celery control.inspect).
+OPS_WORKER_PRESENCE_KEY_PREFIX = "bifrost:ops:worker_presence:"
+OPS_WORKER_PRESENCE_TTL_SEC = 45
+OPS_WORKER_PRESENCE_INTERVAL_SEC = 15
+
+
+def _presence_queue_names_for_worker(worker: object) -> List[str]:
+    """Best-effort queue names for JSON payload (may be empty)."""
+    out: List[str] = []
+    try:
+        app = getattr(worker, "app", None)
+        if app is not None:
+            for q in getattr(app.conf, "task_queues", None) or []:
+                name = getattr(q, "name", None) or (q.get("name") if isinstance(q, dict) else None)
+                if name:
+                    out.append(str(name))
+        consumer = getattr(worker, "consumer", None)
+        if consumer and getattr(consumer, "queues", None):
+            for q in consumer.queues:
+                name = getattr(q, "name", None)
+                if name:
+                    out.append(str(name))
+    except Exception:
+        pass
+    return sorted(set(out))
+
+
+def _start_ops_worker_presence_heartbeat(worker: object) -> None:
+    """Background SETEX so Ops can list workers via SCAN without control.inspect."""
+    try:
+        wid = getattr(worker, "hostname", None)
+    except Exception:
+        wid = None
+    if not wid or not isinstance(wid, str):
+        return
+
+    def loop() -> None:
+        import redis
+
+        r = redis.from_url(
+            broker_url,
+            decode_responses=True,
+            socket_connect_timeout=3,
+            socket_timeout=3,
+        )
+        key = f"{OPS_WORKER_PRESENCE_KEY_PREFIX}{wid}"
+        while True:
+            try:
+                payload = {
+                    "worker_id": wid,
+                    "queues": _presence_queue_names_for_worker(worker),
+                    "ts": time.time(),
+                }
+                r.setex(key, OPS_WORKER_PRESENCE_TTL_SEC, json.dumps(payload))
+            except Exception as e:
+                logger.debug("ops worker presence heartbeat: %s", e)
+            time.sleep(OPS_WORKER_PRESENCE_INTERVAL_SEC)
+
+    t = threading.Thread(target=loop, daemon=True, name="bifrost-ops-presence")
+    t.start()
+
 
 def get_worker_ib_status() -> Optional[dict]:
     """Read Worker IB connection status from Redis (written by bars worker). Returns {connected, client_id} or None."""
     try:
         import redis
-        import json
+
         r = redis.from_url(broker_url)
         raw = r.get(WORKER_IB_STATUS_KEY)
         if not raw:
@@ -271,4 +335,5 @@ def _on_worker_process_init(**kwargs: object) -> None:
 
 @worker_ready.connect
 def _on_worker_ready(sender, **kwargs) -> None:
-    pass
+    if sender is not None:
+        _start_ops_worker_presence_heartbeat(sender)

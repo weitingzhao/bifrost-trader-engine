@@ -1477,6 +1477,23 @@
   gap: var(--space-5);
 }
 
+/* Celery umbrella: snapshot, queues, instances, console, Redis/broker */
+.dashboard-celery-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.dashboard-celery-group-title {
+  margin: 0 0 var(--space-1);
+  padding-top: var(--space-1);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+  letter-spacing: 0.02em;
+}
+
 .dashboard-section {
   min-width: 0;
 }
@@ -1501,6 +1518,13 @@
 
 .dashboard-empty code {
   font-size: 0.75rem;
+}
+
+.dashboard-empty-hint {
+  margin: 0 auto;
+  max-width: 52ch;
+  line-height: 1.5;
+  text-align: left;
 }
 
 .dashboard-ctrl-input {
@@ -2016,6 +2040,14 @@
 .dashboard-broker-ctrl-actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.dashboard-broker-ctrl-readonly {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--color-text-dim);
+  max-width: 52ch;
 }
 
 /* ── Console ── */

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
+import sys
+import time
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Query, Request
@@ -21,6 +25,35 @@ from backend.ops.models.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ops"])
+
+# #region agent log
+_AGENT_DEBUG_LOG = Path(
+    "/Users/vision-mac-trader/Desktop/stocks/bifrost-trader-engine/.cursor/debug-e2efc4.log"
+)
+
+
+def _agent_dbg(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: Dict[str, Any],
+) -> None:
+    try:
+        payload = {
+            "sessionId": "e2efc4",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with _AGENT_DEBUG_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# #endregion
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -375,22 +408,45 @@ async def _journal_sse(
     """Stream journalctl -f output as SSE events."""
     cmd = _journalctl_cmd(unit, lines)
     logger.debug("Console SSE journal cmd: %s", cmd)
+    # #region agent log
+    _agent_dbg(
+        "H1",
+        "workers._journal_sse:entry",
+        "journalctl stream start",
+        {"unit": unit, "cmd": cmd, "platform": sys.platform},
+    )
+    # #endregion
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
 
+    stderr_first = True
+
     async def _drain_stderr(p: asyncio.subprocess.Process) -> None:
+        nonlocal stderr_first
         if p.stderr is None:
             return
         while True:
             raw = await p.stderr.readline()
             if not raw:
                 break
-            logger.warning("journalctl stderr: %s", raw.decode("utf-8", errors="replace").rstrip())
+            text = raw.decode("utf-8", errors="replace").rstrip()
+            logger.warning("journalctl stderr: %s", text)
+            # #region agent log
+            if stderr_first:
+                stderr_first = False
+                _agent_dbg(
+                    "H4",
+                    "workers._journal_sse:stderr",
+                    "first stderr line",
+                    {"text": text[:500]},
+                )
+            # #endregion
 
     drain = asyncio.create_task(_drain_stderr(proc))
+    stdout_first = True
     try:
         assert proc.stdout is not None
         while True:
@@ -404,6 +460,16 @@ async def _journal_sse(
             if not line:
                 break
             text = line.decode("utf-8", errors="replace").rstrip()
+            # #region agent log
+            if stdout_first:
+                stdout_first = False
+                _agent_dbg(
+                    "H5",
+                    "workers._journal_sse:stdout",
+                    "first journal line",
+                    {"text": text[:300], "unit": unit},
+                )
+            # #endregion
             yield f"data: {text}\n\n"
     finally:
         drain.cancel()
@@ -425,6 +491,14 @@ async def worker_console(
     """SSE stream of a worker's systemd journal output."""
     exc = _executor(request)
     unit = exc.worker_to_unit(worker_id)
+    # #region agent log
+    _agent_dbg(
+        "H2",
+        "workers.worker_console",
+        "worker_id to unit",
+        {"worker_id": worker_id, "unit": unit},
+    )
+    # #endregion
     return StreamingResponse(
         _journal_sse(unit, lines=lines, request=request),
         media_type="text/event-stream",
