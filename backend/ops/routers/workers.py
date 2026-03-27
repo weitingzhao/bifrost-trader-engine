@@ -7,8 +7,8 @@ import contextlib
 import json
 import logging
 import os
-import sys
-import time
+import shutil
+import threading
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -16,6 +16,7 @@ from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 
+from backend.ops.celery_redis_logs import celery_log_reader_single_stream
 from backend.ops.models.schemas import (
     AuditEntry,
     BrokerControlRequest,
@@ -25,35 +26,6 @@ from backend.ops.models.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ops"])
-
-# #region agent log
-_AGENT_DEBUG_LOG = Path(
-    "/Users/vision-mac-trader/Desktop/stocks/bifrost-trader-engine/.cursor/debug-e2efc4.log"
-)
-
-
-def _agent_dbg(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: Dict[str, Any],
-) -> None:
-    try:
-        payload = {
-            "sessionId": "e2efc4",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with _AGENT_DEBUG_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-# #endregion
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -140,10 +112,16 @@ def auth_capabilities(request: Request) -> Dict[str, Any]:
 
 
 @router.get("/ops/workers")
-def list_workers(request: Request) -> Dict[str, Any]:
+def list_workers(
+    request: Request,
+    force_refresh: bool = Query(
+        False,
+        description="Re-scan Redis worker presence keys only (bifrost:ops:worker_presence:*); no Celery inspect.",
+    ),
+) -> Dict[str, Any]:
     """All workers with aggregated status + broker overview."""
     svc = _worker_svc(request)
-    workers = svc.list_workers()
+    workers = svc.list_workers(force_refresh=force_refresh)
     broker = svc.broker_status()
     return {
         "ok": True,
@@ -378,6 +356,41 @@ async def broker_control(
 # ── Console log streaming (SSE) ───────────────────────────────────────
 
 
+def _ops_broker_ping_ok(request: Request) -> bool:
+    try:
+        import redis
+
+        r = redis.from_url(request.app.state.broker_url)
+        r.ping()
+        return True
+    except Exception:
+        return False
+
+
+def _journalctl_available() -> bool:
+    return shutil.which("journalctl") is not None
+
+
+def _tail_available() -> bool:
+    return shutil.which("tail") is not None
+
+
+def _console_tail_file(unit: str, request: Request | None) -> Optional[Path]:
+    """When ``journalctl`` is unavailable (e.g. macOS), tail broker log file if configured."""
+    if unit == "redis" or unit == "redis.service":
+        raw = (os.environ.get("BIFROST_BROKER_CONSOLE_LOG") or "").strip()
+        return Path(raw).expanduser().resolve() if raw else None
+    return None
+
+
+def _console_fallback_notice(_unit: str, _tail_path: Optional[Path]) -> str:
+    return (
+        "Console: journalctl not found (typical on macOS). "
+        "Set BIFROST_BROKER_CONSOLE_LOG to a Redis log file to stream via tail -F, "
+        "or use the Ops API on Linux with systemd."
+    )
+
+
 def _journalctl_cmd(unit: str, lines: int) -> List[str]:
     """Build journalctl argv. Use ``BIFROST_JOURNAL_USE_SUDO=1`` when the Ops user
     cannot read system journals without sudo (see ``deploy/sudoers/bifrost-ops-journalctl``).
@@ -402,30 +415,28 @@ def _journalctl_cmd(unit: str, lines: int) -> List[str]:
     return base
 
 
-async def _journal_sse(
-    unit: str, lines: int = 200, request: Request | None = None,
-) -> AsyncGenerator[str, None]:
-    """Stream journalctl -f output as SSE events."""
-    cmd = _journalctl_cmd(unit, lines)
-    logger.debug("Console SSE journal cmd: %s", cmd)
-    # #region agent log
-    _agent_dbg(
-        "H1",
-        "workers._journal_sse:entry",
-        "journalctl stream start",
-        {"unit": unit, "cmd": cmd, "platform": sys.platform},
-    )
-    # #endregion
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+def _tail_follow_cmd(path: str, lines: int) -> List[str]:
+    return ["tail", "-n", str(lines), "-F", path]
 
-    stderr_first = True
+
+async def _stream_command_sse(
+    cmd: List[str],
+    request: Request | None,
+    *,
+    stderr_label: str,
+) -> AsyncGenerator[str, None]:
+    logger.debug("Console SSE cmd: %s", cmd)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError as e:
+        yield f"data: Console: failed to spawn {cmd[0]!r}: {e}\n\n"
+        return
 
     async def _drain_stderr(p: asyncio.subprocess.Process) -> None:
-        nonlocal stderr_first
         if p.stderr is None:
             return
         while True:
@@ -433,20 +444,9 @@ async def _journal_sse(
             if not raw:
                 break
             text = raw.decode("utf-8", errors="replace").rstrip()
-            logger.warning("journalctl stderr: %s", text)
-            # #region agent log
-            if stderr_first:
-                stderr_first = False
-                _agent_dbg(
-                    "H4",
-                    "workers._journal_sse:stderr",
-                    "first stderr line",
-                    {"text": text[:500]},
-                )
-            # #endregion
+            logger.warning("%s stderr: %s", stderr_label, text)
 
     drain = asyncio.create_task(_drain_stderr(proc))
-    stdout_first = True
     try:
         assert proc.stdout is not None
         while True:
@@ -460,16 +460,6 @@ async def _journal_sse(
             if not line:
                 break
             text = line.decode("utf-8", errors="replace").rstrip()
-            # #region agent log
-            if stdout_first:
-                stdout_first = False
-                _agent_dbg(
-                    "H5",
-                    "workers._journal_sse:stdout",
-                    "first journal line",
-                    {"text": text[:300], "unit": unit},
-                )
-            # #endregion
             yield f"data: {text}\n\n"
     finally:
         drain.cancel()
@@ -482,28 +472,167 @@ async def _journal_sse(
             proc.kill()
 
 
-@router.get("/ops/console/worker/{worker_id:path}")
+async def _journal_sse(
+    unit: str, lines: int = 200, request: Request | None = None,
+) -> AsyncGenerator[str, None]:
+    """Stream journald (Linux) or ``tail -F`` on a log file (macOS / dev)."""
+    if _journalctl_available():
+        async for chunk in _stream_command_sse(
+            _journalctl_cmd(unit, lines),
+            request,
+            stderr_label="journalctl",
+        ):
+            yield chunk
+        return
+
+    tail_path = _console_tail_file(unit, request)
+    if tail_path and _tail_available():
+        async for chunk in _stream_command_sse(
+            _tail_follow_cmd(str(tail_path), lines),
+            request,
+            stderr_label="tail",
+        ):
+            yield chunk
+        return
+
+    notice = _console_fallback_notice(unit, tail_path)
+    yield f"data: {notice}\n\n"
+
+
+@router.get("/ops/celery/logs")
+def get_ops_celery_logs(
+    request: Request,
+    worker: str = Query(
+        ...,
+        min_length=1,
+        description="Celery worker nodename (same as worker_id from /status or inspect)",
+    ),
+    tail: int = Query(1000, ge=1, le=5000, description="Latest N lines, oldest-first in response"),
+) -> Dict[str, Any]:
+    """Last N lines from this worker's Celery console Redis stream (same data as former bifrost-server GET /api/celery/logs)."""
+    try:
+        import redis
+        from servers.celery_app import celery_console_stream_key
+
+        r = redis.from_url(request.app.state.broker_url)
+        key = celery_console_stream_key(worker)
+        raw = r.xrevrange(key, count=tail)
+        lines_out: List[str] = []
+        for _eid, fields in reversed(raw):
+            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            lines_out.append(line)
+        return {"lines": lines_out}
+    except Exception as e:
+        logger.warning("get_ops_celery_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/ops/celery/logs")
+def delete_ops_celery_logs(
+    request: Request,
+    worker: str = Query(
+        ...,
+        min_length=1,
+        description="Celery worker nodename whose console stream to delete",
+    ),
+) -> Dict[str, Any]:
+    try:
+        import redis
+        from servers.celery_app import celery_console_stream_key
+
+        r = redis.from_url(request.app.state.broker_url)
+        r.delete(celery_console_stream_key(worker))
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("delete_ops_celery_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/ops/celery/logs/trim")
+def trim_ops_celery_logs(
+    request: Request,
+    worker: str = Query(
+        ...,
+        min_length=1,
+        description="Celery worker nodename whose console stream to trim",
+    ),
+    body: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        from servers.celery_app import celery_console_stream_key
+
+        r = redis.from_url(request.app.state.broker_url)
+        r.xtrim(celery_console_stream_key(worker), maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_ops_celery_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/ops/console/worker/{worker_id:path}", response_model=None)
 async def worker_console(
     request: Request,
     worker_id: str,
     lines: int = Query(200, ge=10, le=2000),
-) -> StreamingResponse:
-    """SSE stream of a worker's systemd journal output."""
-    exc = _executor(request)
-    unit = exc.worker_to_unit(worker_id)
-    # #region agent log
-    _agent_dbg(
-        "H2",
-        "workers.worker_console",
-        "worker_id to unit",
-        {"worker_id": worker_id, "unit": unit},
+):
+    """SSE: live lines from this worker's Celery console Redis stream (same as former bifrost-server /api/celery/logs/stream).
+
+    Query ``lines`` is accepted for API compatibility; the live stream does not use it.
+    """
+    from servers.celery_app import celery_console_stream_key
+
+    if not _ops_broker_ping_ok(request):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Celery broker (Redis) not available"},
+        )
+    stream_key = celery_console_stream_key(worker_id)
+    broker_url = request.app.state.broker_url
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    stop = threading.Event()
+    with app.state.celery_log_lock:
+        app.state.celery_log_queues.append(queue)
+        if app.state._celery_log_loop is None:
+            app.state._celery_log_loop = asyncio.get_running_loop()
+    reader = threading.Thread(
+        target=celery_log_reader_single_stream,
+        args=(app, broker_url, stream_key, queue, stop),
+        name="ops-celery-log-reader",
+        daemon=True,
     )
-    # #endregion
+    reader.start()
+
+    async def event_gen() -> AsyncGenerator[str, None]:
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            stop.set()
+            reader.join(timeout=5.0)
+            with app.state.celery_log_lock:
+                if queue in app.state.celery_log_queues:
+                    app.state.celery_log_queues.remove(queue)
+
     return StreamingResponse(
-        _journal_sse(unit, lines=lines, request=request),
+        event_gen(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )
@@ -514,7 +643,7 @@ async def broker_console(
     request: Request,
     lines: int = Query(200, ge=10, le=2000),
 ) -> StreamingResponse:
-    """SSE stream of the Redis broker's systemd journal output."""
+    """SSE stream of Redis logs (journald on Linux, else ``BIFROST_BROKER_CONSOLE_LOG`` tail -F)."""
     return StreamingResponse(
         _journal_sse("redis", lines=lines, request=request),
         media_type="text/event-stream",

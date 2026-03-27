@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 import sys
 import threading
 import time
@@ -130,8 +131,13 @@ CELERY_INSPECT_TIMEOUT_SEC = 15.0
 WORKER_IB_STATUS_KEY = "bifrost:worker_ib_status"
 WORKER_IB_STATUS_TTL_SEC = 90
 WORKER_STOP_REQUESTED_KEY = "bifrost:worker_stop_requested"
-CELERY_LOG_STREAM_KEY = "bifrost:celery_console"
+# Per-worker Redis Stream keys: bifrost:celery_console:w:{celery_nodename} (nodename from -n, e.g. workerib-1@host).
 CELERY_LOG_STREAM_MAXLEN = 50
+
+
+def celery_console_stream_key(worker_id: str) -> str:
+    """Redis Stream key for one Celery worker's console log (UI tail). Uses worker nodename verbatim for visibility in Redis."""
+    return f"bifrost:celery_console:w:{worker_id.strip()}"
 
 # Ops Dashboard Runtime Snapshot: fast worker list via Redis keys (no Celery control.inspect).
 OPS_WORKER_PRESENCE_KEY_PREFIX = "bifrost:ops:worker_presence:"
@@ -298,15 +304,38 @@ def _start_stop_polling() -> None:
 from celery.signals import worker_ready, worker_process_init, worker_init  # noqa: E402
 
 
-def _attach_redis_stream_log_handler() -> None:
-    """Attach Redis stream log handler to root logger so all Celery/worker logs go to Redis (for UI console)."""
+def _resolve_celery_worker_id(sender: object | None) -> str:
+    """Celery nodename (e.g. workermassive-8@host.local); must match Dashboard / inspect worker_id.
+
+    ``worker_init`` / ``worker_process_init`` often run before ``Worker.hostname`` is set (solo / sender=None),
+    so ``scripts/run_celery.py`` sets ``BIFROST_CELERY_NODENAME`` to match ``-n`` when using ``--instance``.
+    """
+    env_id = (os.environ.get("BIFROST_CELERY_NODENAME") or "").strip()
+    if env_id:
+        return env_id
+    if sender is not None:
+        wid = getattr(sender, "hostname", None)
+        if isinstance(wid, str) and wid.strip():
+            return wid.strip()
+    host = socket.gethostname()
+    logger.warning(
+        "Celery worker hostname unavailable; using fallback worker id unknown@%s",
+        host,
+    )
+    return f"unknown@{host}"
+
+
+def _attach_redis_stream_log_handler(sender: object | None = None) -> None:
+    """Attach Redis stream log handler to this worker process (one stream per worker nodename)."""
     root = logging.getLogger()
     for h in root.handlers[:]:
         if isinstance(h, _RedisStreamLogHandler):
             return
+    worker_id = _resolve_celery_worker_id(sender)
+    stream_key = celery_console_stream_key(worker_id)
     handler = _RedisStreamLogHandler(
         broker_url,
-        CELERY_LOG_STREAM_KEY,
+        stream_key,
         maxlen=CELERY_LOG_STREAM_MAXLEN,
     )
     handler.setFormatter(
@@ -317,8 +346,7 @@ def _attach_redis_stream_log_handler() -> None:
 
 @worker_init.connect
 def _on_worker_init(sender=None, **kwargs: object) -> None:
-    """Attach Redis log handler; with solo pool also start stop-poll (single process, no worker_process_init)."""
-    _attach_redis_stream_log_handler()
+    """Solo pool: start stop-poll (single process, no worker_process_init). Redis console attaches in worker_ready."""
     # Solo pool: single process, tasks run in this process. Start stop-poll here so Stop button works.
     if sender is not None and getattr(sender, "pool", None) is not None:
         pool_module = getattr(type(sender.pool), "__module__", "") or ""
@@ -327,13 +355,14 @@ def _on_worker_init(sender=None, **kwargs: object) -> None:
 
 
 @worker_process_init.connect
-def _on_worker_process_init(**kwargs: object) -> None:
-    _attach_redis_stream_log_handler()
+def _on_worker_process_init(sender=None, **kwargs: object) -> None:
     # Stop polling must run in worker process (the one with IB connection when concurrency=1), not main process.
     _start_stop_polling()
 
 
 @worker_ready.connect
 def _on_worker_ready(sender, **kwargs) -> None:
+    # Hostname/nodename is reliable here; worker_init often runs too early (hostname still unset → unknown@).
+    _attach_redis_stream_log_handler(sender)
     if sender is not None:
         _start_ops_worker_presence_heartbeat(sender)

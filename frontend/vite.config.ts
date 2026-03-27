@@ -7,7 +7,12 @@ export default defineConfig({
     port: 5173,
     allowedHosts: ['labtop-vs-mac-pro'],
     proxy: {
-      '/ops': { target: 'http://127.0.0.1:8768', changeOrigin: true },
+      '/ops': {
+        target: 'http://127.0.0.1:8768',
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
       '/status': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/health': { target: 'http://127.0.0.1:8765', changeOrigin: true },
       '/operations': { target: 'http://127.0.0.1:8765', changeOrigin: true },

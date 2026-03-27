@@ -1,8 +1,22 @@
-import { apiBase } from './constants'
+import { apiBase, getOpsApiBase, joinServiceBase } from './constants'
+import { getOpsToken, workerConsoleUrl } from './ops'
 
-export async function fetchCeleryLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
-  const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${apiBase()}/api/celery/logs?${params}`)
+function opsAuthHeaders(): Record<string, string> {
+  const token = getOpsToken()
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  return headers
+}
+
+export async function fetchCeleryLogs(
+  workerId: string,
+  tail = 50,
+): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail), worker: workerId })
+  const url = joinServiceBase(getOpsApiBase(), `/ops/celery/logs?${params}`)
+  const r = await fetch(url, { headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
@@ -21,8 +35,10 @@ export async function fetchServerLogs(tail = 50): Promise<{ lines: string[]; err
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
-export async function clearCeleryLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/celery/logs`, { method: 'DELETE' })
+export async function clearCeleryLogs(workerId: string): Promise<{ ok: boolean; error?: string }> {
+  const q = new URLSearchParams({ worker: workerId })
+  const url = joinServiceBase(getOpsApiBase(), `/ops/celery/logs?${q}`)
+  const r = await fetch(url, { method: 'DELETE', headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
@@ -39,10 +55,15 @@ export async function clearServerLogs(): Promise<{ ok: boolean; error?: string }
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
-export async function trimCeleryLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/celery/logs/trim`, {
+export async function trimCeleryLogs(
+  maxLines: number,
+  workerId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const q = new URLSearchParams({ worker: workerId })
+  const url = joinServiceBase(getOpsApiBase(), `/ops/celery/logs/trim?${q}`)
+  const r = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...opsAuthHeaders() },
     body: JSON.stringify({ max_lines: maxLines }),
   })
   const j = await r.json().catch(() => ({}))
@@ -69,8 +90,12 @@ export async function trimServerLogs(maxLines: number): Promise<{ ok: boolean; e
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
-export function subscribeCeleryLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${apiBase()}/api/celery/logs/stream`
+export function subscribeCeleryLogs(
+  onLine: (line: string) => void,
+  onError: (() => void) | undefined,
+  workerId: string,
+): () => void {
+  const url = workerConsoleUrl(workerId)
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {

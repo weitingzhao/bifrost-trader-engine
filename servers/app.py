@@ -118,10 +118,9 @@ def create_app(
     app.state._redis_subscriber_stop = threading.Event()
     app.state._redis_subscriber_thread: Optional[threading.Thread] = None
 
-    # Celery console log stream (Redis Stream): reader thread + per-connection queues
+    # Celery console: per-SSE reader thread + per-connection queues (one Redis stream per worker)
     app.state.celery_log_queues: list = []
     app.state.celery_log_lock = threading.Lock()
-    app.state._celery_log_thread: Optional[threading.Thread] = None
     app.state._celery_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # Daemon console log stream (Redis Stream): reader thread + per-connection queues

@@ -103,21 +103,28 @@ def _hash_token(token: str) -> str:
 
 
 class OpsAuth:
-    """Resolve request identity from ``Authorization: Bearer <token>`` header."""
+    """Resolve identity from ``Authorization: Bearer`` or query ``token`` / ``access_token``."""
 
     def __init__(self, auth_config: AuthConfig) -> None:
         self._cfg = auth_config
 
     def resolve(self, request: Request) -> Identity:
+        raw_token = ""
         auth_header = request.headers.get("Authorization", "").strip()
         if auth_header.lower().startswith("bearer "):
             raw_token = auth_header[7:].strip()
-            if raw_token:
-                token_hash = _hash_token(raw_token)
-                ident = self._cfg.tokens.get(token_hash)
-                if ident is not None:
-                    return ident
-                return Identity(name="invalid-token", role="viewer", authenticated=False)
+        if not raw_token:
+            raw_token = (
+                request.query_params.get("token")
+                or request.query_params.get("access_token")
+                or ""
+            ).strip()
+        if raw_token:
+            token_hash = _hash_token(raw_token)
+            ident = self._cfg.tokens.get(token_hash)
+            if ident is not None:
+                return ident
+            return Identity(name="invalid-token", role="viewer", authenticated=False)
 
         return Identity(
             name="anonymous",

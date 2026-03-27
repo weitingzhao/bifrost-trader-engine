@@ -6,6 +6,7 @@ import concurrent.futures
 import json
 import logging
 import time
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.ops.models.schemas import WorkerDetail, WorkerStatus, WorkerSummary
@@ -45,6 +46,16 @@ class WorkerStateService:
         self._worker_list_fallback_inspect = bool(
             ops_cfg.get("worker_list_fallback_inspect", True)
         )
+        self._worker_list_inspect_cache_ttl_sec = float(
+            ops_cfg.get("worker_list_inspect_cache_ttl_sec", 8.0)
+        )
+        self._worker_list_inspect_quick_timeout_sec = float(
+            ops_cfg.get("worker_list_inspect_quick_timeout_sec", 2.0)
+        )
+        self._inspect_cache_lock = threading.Lock()
+        self._inspect_cache_workers: List[WorkerSummary] = []
+        self._inspect_cache_ts = 0.0
+        self._inspect_refreshing = False
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
@@ -231,18 +242,92 @@ class WorkerStateService:
         finally:
             pool.shutdown(wait=False)
 
-    def list_workers(self) -> List[WorkerSummary]:
-        """Worker list: Redis presence (fast) or Celery inspect, per ``ops.worker_list_mode``."""
+    def _refresh_inspect_cache_async(self) -> None:
+        """Refresh inspect cache in background, so /ops/workers can return quickly."""
+        def _run() -> None:
+            try:
+                fresh = self._list_workers_inspect_bounded()
+                with self._inspect_cache_lock:
+                    self._inspect_cache_workers = fresh
+                    self._inspect_cache_ts = time.time()
+            finally:
+                with self._inspect_cache_lock:
+                    self._inspect_refreshing = False
+
+        t = threading.Thread(target=_run, daemon=True, name="ops-worker-inspect-cache-refresh")
+        t.start()
+
+    def _get_inspect_cache_for_presence(self, presence_ids: set[str]) -> List[WorkerSummary]:
+        """Return inspect cache snapshot; trigger async refresh when stale/incomplete."""
+        now = time.time()
+        with self._inspect_cache_lock:
+            cached = list(self._inspect_cache_workers)
+            cache_age_sec = now - self._inspect_cache_ts if self._inspect_cache_ts > 0 else 1e9
+            cached_ids = {w.worker_id for w in cached}
+            missing_in_cache = sorted([wid for wid in presence_ids if wid not in cached_ids])
+            stale = cache_age_sec > max(1.0, self._worker_list_inspect_cache_ttl_sec)
+            need_refresh = stale or (len(cached) == 0) or (len(missing_in_cache) > 0)
+            will_start_refresh = need_refresh and (not self._inspect_refreshing)
+            if will_start_refresh:
+                self._inspect_refreshing = True
+        # Cold cache: run one quick sync inspect for correctness, then keep async refresh behavior.
+        if len(cached) == 0:
+            quick_timeout = max(0.5, min(self._inspect_timeout, self._worker_list_inspect_quick_timeout_sec))
+            quick_ping, quick_stats, _a, _r, quick_active_queues = self._inspect_for_worker_list(timeout=quick_timeout)
+            quick_names = sorted(set(quick_stats.keys()) | set(quick_active_queues.keys()) | set(quick_ping.keys()))
+            if quick_names:
+                quick_workers: List[WorkerSummary] = [
+                    WorkerSummary(
+                        worker_id=name,
+                        status=WorkerStatus.RUNNING_HEALTHY,
+                        queues=self._queues_for(name, quick_active_queues),
+                        concurrency=self._concurrency_from_stats(quick_stats.get(name, {})),
+                        active_tasks=0,
+                        reserved_tasks=0,
+                        last_heartbeat=time.time(),
+                    )
+                    for name in quick_names
+                ]
+                with self._inspect_cache_lock:
+                    self._inspect_cache_workers = quick_workers
+                    self._inspect_cache_ts = time.time()
+                cached = quick_workers
+        if will_start_refresh:
+            self._refresh_inspect_cache_async()
+        return cached
+
+    def list_workers(self, force_refresh: bool = False) -> List[WorkerSummary]:
+        """Worker list: per ``ops.worker_list_mode``.
+
+        ``redis_presence`` (default): scan ``bifrost:ops:worker_presence:*`` then merge with
+        Celery inspect when ``worker_list_fallback_inspect`` is true, so incomplete presence
+        keys do not hide live workers.
+
+        ``force_refresh``: re-scan Redis presence keys only (same as ``redis_only``); no Celery
+        inspect — fast path for UI refresh after scale/remove without broker RPC cost.
+        """
+        if force_refresh:
+            return self._list_workers_from_redis_presence()
         mode = self._worker_list_mode or "redis_presence"
         if mode == "inspect":
             return self._list_workers_inspect_bounded()
         if mode == "redis_only":
             return self._list_workers_from_redis_presence()
-        # redis_presence (default): Redis keys first; optional inspect fallback for old workers.
-        out = self._list_workers_from_redis_presence()
-        if out or not self._worker_list_fallback_inspect:
-            return out
-        return self._list_workers_inspect_bounded()
+        # redis_presence (default): SCAN presence keys (fast) + merge with Celery inspect.
+        # Presence alone can be incomplete (not every worker may write bifrost:ops:worker_presence:*);
+        # serve quickly from inspect cache and refresh inspect in background.
+        presence = self._list_workers_from_redis_presence()
+        if not self._worker_list_fallback_inspect:
+            return presence
+        presence_ids = {x.worker_id for x in presence}
+        inspected = self._get_inspect_cache_for_presence(presence_ids)
+        if not presence:
+            return inspected
+        by_id: Dict[str, WorkerSummary] = {w.worker_id: w for w in inspected}
+        for p in presence:
+            if p.worker_id not in by_id:
+                by_id[p.worker_id] = p
+        return sorted(by_id.values(), key=lambda x: x.worker_id)
 
     def get_worker(self, worker_id: str) -> Optional[WorkerDetail]:
         ping, stats, active, reserved, active_queues = self._inspect()
@@ -361,17 +446,18 @@ class WorkerStateService:
             return None, None
 
     def queue_summaries(self) -> Dict[str, Any]:
-        """Per supported queue: broker backlog, Celery running tasks, DB job totals."""
+        """Per supported queue from DB-only job totals (no Redis/Celery inspect)."""
         bars_db, massive_db = self._pg_status_counts()
-        _ping, _stats, active_ins, reserved_ins, _aq = self._inspect()
         rows: List[Dict[str, Any]] = []
         for q in SUPPORTED_CELERY_QUEUES:
-            pending_broker = self._broker_queue_depth(q)
-            running_celery = self._count_celery_tasks_for_queue(q, active_ins, reserved_ins)
             if q == "bars":
+                pending_broker = bars_db.get("pending") if bars_db else None
+                running_celery = bars_db.get("running") if bars_db else None
                 done_db = bars_db.get("done") if bars_db else None
                 failed_db = bars_db.get("failed") if bars_db else None
             else:
+                pending_broker = massive_db.get("pending") if massive_db else None
+                running_celery = massive_db.get("running") if massive_db else None
                 done_db = massive_db.get("done") if massive_db else None
                 failed_db = massive_db.get("failed") if massive_db else None
             row: Dict[str, Any] = {
@@ -390,8 +476,8 @@ class WorkerStateService:
         }
         if massive_db is not None:
             out["massive_db_note"] = (
-                "Done and Failed for Massive queues are totals from job_massive_backfill "
-                "(not split between massive and massive_high)."
+                "Pending/Running/Done/Failed for Massive queues are DB totals from "
+                "job_massive_backfill (not split between massive and massive_high)."
             )
         return out
 

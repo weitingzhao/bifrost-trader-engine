@@ -8,15 +8,27 @@ from __future__ import annotations
 
 import logging
 import time
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.app.config import config_profile_from_resolved_path
 
 logger = logging.getLogger(__name__)
+
+
+class AccessControlAllowPrivateNetworkMiddleware(BaseHTTPMiddleware):
+    """Chrome Private Network Access: public / local pages calling a private IP need this header."""
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
+
 
 DEFAULT_OPS_PORT = 8768
 DEFAULT_ALLOWED_UNITS = [
@@ -84,6 +96,7 @@ def create_ops_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(AccessControlAllowPrivateNetworkMiddleware)
 
     app.state.bifrost_config_profile = (
         config_profile_from_resolved_path(resolved_config_path)
@@ -163,6 +176,12 @@ def create_ops_app(
     app.state.worker_state_service = worker_svc
     app.state.executor = executor
     app.state.audit_log: list = []
+    try:
+        app.state.ops_project_root = _project_root_for_subprocess_executor(
+            config, resolved_config_path,
+        )
+    except ValueError:
+        app.state.ops_project_root = None
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -184,6 +203,11 @@ def create_ops_app(
     app.state.redis_host = (
         redis_cfg.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1"
     ).strip()
+
+    # Celery worker console SSE (Redis Stream per worker nodename; same as former bifrost-server /api/celery/logs/stream)
+    app.state.celery_log_queues: list = []
+    app.state.celery_log_lock = threading.Lock()
+    app.state._celery_log_loop: Any = None
 
     # ── Worker profiles (typed scaling) ────────────────────────────────────
     from backend.ops.worker_profiles import WorkerProfileRegistry

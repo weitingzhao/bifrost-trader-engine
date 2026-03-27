@@ -182,6 +182,9 @@ if __name__ == "__main__":
     worker_argv = ["worker", "-l", "info", "-Q", queue_str, "--pool=solo"]
     if instance is not None:
         host = socket.gethostname()
-        worker_argv.extend(["-n", f"worker{instance}@{host}"])
+        nodename = f"worker{instance}@{host}"
+        worker_argv.extend(["-n", nodename])
+        # worker_init runs before Celery sets Worker.hostname; Redis console key must match -n (see celery_app._resolve_celery_worker_id).
+        os.environ["BIFROST_CELERY_NODENAME"] = nodename
 
     app.worker_main(argv=worker_argv)

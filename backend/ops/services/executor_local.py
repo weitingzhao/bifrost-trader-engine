@@ -259,19 +259,36 @@ class SubprocessLocalExecutor:
             raise RuntimeError(f"run_celery.py not found at {script}")
         cmd = [self._python, str(script), "--instance", instance_id]
         env = os.environ.copy()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(self._project_root),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-            env=env,
-        )
+        log_dir = self._project_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"celery-{instance_id}.log"
+        log_fp = open(log_file, "ab", buffering=0)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(self._project_root),
+                stdout=log_fp,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+                env=env,
+            )
+        finally:
+            log_fp.close()
         try:
             await asyncio.wait_for(proc.wait(), timeout=2.5)
-            err = (await proc.stderr.read()).decode(errors="replace") if proc.stderr else ""
+            tail = ""
+            if log_file.is_file():
+                try:
+                    with open(log_file, "rb") as lf:
+                        lf.seek(0, os.SEEK_END)
+                        sz = lf.tell()
+                        lf.seek(max(0, sz - 4000))
+                        tail = lf.read().decode("utf-8", errors="replace")
+                except OSError:
+                    tail = ""
             raise RuntimeError(
-                f"Worker exited immediately (rc={proc.returncode}): {err.strip() or 'no stderr'}"
+                f"Worker exited immediately (rc={proc.returncode}). "
+                f"Log: {log_file}. Tail: {tail.strip() or '(empty)'}"
             )
         except asyncio.TimeoutError:
             pass

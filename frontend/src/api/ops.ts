@@ -116,14 +116,16 @@ export interface AuditEntry {
 
 // ── Workers ──────────────────────────────────────────────────────────────────
 
-export async function fetchOpsWorkers(): Promise<{
+/** `forceRefresh` re-scans Redis presence keys on the server only; does not run Celery inspect. */
+export async function fetchOpsWorkers(opts?: { forceRefresh?: boolean }): Promise<{
   ok: boolean
   workers: WorkerSummary[]
   broker: BrokerStatus
   count: number
   error?: string
 }> {
-  const r = await fetch(`${opsBase()}/ops/workers`, { headers: authHeaders() })
+  const q = opts?.forceRefresh ? '?force_refresh=true' : ''
+  const r = await fetch(`${opsBase()}/ops/workers${q}`, { headers: authHeaders() })
   return parseJsonResponse(r)
 }
 
@@ -269,12 +271,26 @@ export async function controlBroker(action: BrokerAction): Promise<{
 
 // ── Console SSE ──────────────────────────────────────────────────────────────
 
+function consoleStreamQuery(lines: number): URLSearchParams {
+  const q = new URLSearchParams()
+  q.set('lines', String(lines))
+  const token = getOpsToken()
+  if (token) q.set('token', token)
+  return q
+}
+
+/**
+ * SSE console URL. Uses relative `/ops/...` when ops base is empty (Vite proxy, same origin).
+ * Token is passed as `token` query param so the browser need not send `Authorization` on GET (CORS + Private Network Access).
+ */
 export function workerConsoleUrl(workerId: string, lines = 200): string {
-  return `${opsBase()}/ops/console/worker/${encodeURIComponent(workerId)}?lines=${lines}`
+  const path = `/ops/console/worker/${encodeURIComponent(workerId)}?${consoleStreamQuery(lines)}`
+  return joinServiceBase(opsBase(), path)
 }
 
 export function brokerConsoleUrl(lines = 200): string {
-  return `${opsBase()}/ops/console/broker?lines=${lines}`
+  const path = `/ops/console/broker?${consoleStreamQuery(lines)}`
+  return joinServiceBase(opsBase(), path)
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────

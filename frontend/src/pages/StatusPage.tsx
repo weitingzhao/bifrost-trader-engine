@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
-import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postReleaseTickerSubscriptions, fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
+import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postReleaseTickerSubscriptions, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'
+import { useCeleryWorkerConsoleBindings } from '../hooks/useCeleryWorkerConsoleBindings'
 import { fmtTs, fmtUsd } from '../utils/format'
 import {
   DAEMON_REASON_LABELS,
@@ -102,11 +103,15 @@ export function StatusPage({
     clearLogs: clearServerLogs,
     enabled: deferredStart && showConsoleSection && consoleTab === 'server-console',
   })
+  const celeryWorkerBindings = useCeleryWorkerConsoleBindings(
+    status,
+    deferredStart && showConsoleSection && celeryUiMode !== 'relocated' && consoleTab === 'console',
+  )
   const celeryConsole = useLogConsole({
-    fetchLogs: fetchCeleryLogs,
-    subscribeLogs: subscribeCeleryLogs,
-    clearLogs: clearCeleryLogs,
-    enabled: deferredStart && showConsoleSection && celeryUiMode !== 'relocated' && consoleTab === 'console',
+    fetchLogs: celeryWorkerBindings.fetchLogs,
+    subscribeLogs: celeryWorkerBindings.subscribeLogs,
+    clearLogs: celeryWorkerBindings.clearLogs,
+    enabled: celeryWorkerBindings.consoleEnabled,
   })
 
   useEffect(() => {
@@ -931,12 +936,31 @@ export function StatusPage({
           <div id="celery-section-panel-console" role="tabpanel" aria-labelledby="celery-tab-console"
             style={{ marginTop: 'var(--space-3)' }}
           >
+            {celeryWorkerBindings.workerIds.length > 1 && (
+              <div className="celery-worker-log-picker" style={{ marginBottom: '0.75rem' }}>
+                <label htmlFor="status-page-worker-log-select" className="section-hint" style={{ marginRight: '0.5rem' }}>
+                  Log for
+                </label>
+                <select
+                  id="status-page-worker-log-select"
+                  style={{ minWidth: '14rem', maxWidth: '100%' }}
+                  value={celeryWorkerBindings.selectedWorkerId ?? ''}
+                  onChange={e => celeryWorkerBindings.setSelectedWorkerId(e.target.value)}
+                >
+                  {celeryWorkerBindings.workerIds.map(id => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <LogConsolePanel
               controller={celeryConsole}
               loadingText="Connecting…"
               errorText="Unable to load (Redis/Celery broker may be down)."
               emptyText="No log lines yet. Start Worker: python scripts/run_celery.py"
-              infoTooltipText="Real-time Worker log (Redis Stream). Run `python scripts/run_celery.py` to see output."
+              infoTooltipText="Per-worker Worker log (Redis Stream). Run `python scripts/run_celery.py` to see output."
               resizeAriaLabel="Resize console height"
               clearTitle="Clear displayed log and Redis stream; new lines will continue to appear when Worker runs"
             />

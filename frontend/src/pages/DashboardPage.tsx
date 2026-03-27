@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import {
+  fetchCeleryLogs,
+  subscribeCeleryLogs,
+  clearCeleryLogs,
+} from '../api/logs'
 import { postStop } from '../api/control'
 import { postMonitorStop, postCeleryStop } from '../api/monitor'
 import {
@@ -13,8 +19,8 @@ import {
   fetchWorkerProfiles,
   fetchBrokerStatusExtended,
   controlBroker,
-  workerConsoleUrl,
   brokerConsoleUrl,
+  getOpsToken,
   setOpsToken,
   type WorkerSummary,
   type BrokerStatus,
@@ -91,6 +97,46 @@ function formatQueueLabel(name: string): string {
   return name
 }
 
+/** Worker console: per-worker Redis stream via Ops `/ops/console/worker/{nodename}` (SSE). */
+function DashboardWorkerRedisConsole({ workerId }: { workerId: string }) {
+  const fetchLogs = useCallback(
+    (tail?: number) => fetchCeleryLogs(workerId, tail ?? 50),
+    [workerId],
+  )
+  const subscribeLogs = useCallback(
+    (onLine: (line: string) => void, onError?: () => void) =>
+      subscribeCeleryLogs(onLine, onError, workerId),
+    [workerId],
+  )
+  const clearLogs = useCallback(() => clearCeleryLogs(workerId), [workerId])
+  const ctrl = useLogConsole({
+    fetchLogs,
+    subscribeLogs,
+    clearLogs,
+    initialMaxLines: 500,
+    enabled: true,
+  })
+  return (
+    <LogConsolePanel
+      controller={ctrl}
+      loadingText="Connecting…"
+      errorText="Unable to load (Redis/Celery broker may be down)."
+      emptyText="No log lines yet. Start Worker: python scripts/run_celery.py"
+      infoTooltipText="Per-worker Redis console stream for this nodename (Ops GET /ops/celery/logs, SSE /ops/console/worker/…)."
+      resizeAriaLabel="Resize worker console height"
+      clearTitle="Clear displayed log and this worker's Redis stream; new lines continue when Worker runs"
+    />
+  )
+}
+
+function workerIdToInstanceId(workerId: string): string | null {
+  const [node] = workerId.split('@', 1)
+  if (node && node.startsWith('worker') && node.length > 'worker'.length) {
+    return node.slice('worker'.length)
+  }
+  return null
+}
+
 type ConfirmDialogState = {
   open: boolean
   title: string
@@ -106,6 +152,9 @@ const INITIAL_CONFIRM: ConfirmDialogState = {
   confirming: false,
   action: null,
 }
+
+const AUDIT_PAGE_SIZES = [5, 10, 20, 50] as const
+type AuditPageSize = (typeof AUDIT_PAGE_SIZES)[number]
 
 // ── Audit helpers ────────────────────────────────────────────────────────────
 
@@ -127,88 +176,84 @@ function LogConsole({ url, maxLines = 500 }: { url: string; maxLines?: number })
   const [lines, setLines] = useState<string[]>([])
   const [connected, setConnected] = useState(false)
   const [paused, setPaused] = useState(false)
+  const [streamError, setStreamError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const esRef = useRef<EventSource | null>(null)
   const pausedRef = useRef(paused)
   pausedRef.current = paused
 
+  /**
+   * EventSource cannot send Authorization; Vite proxy often buffers or drops SSE.
+   * Use fetch() + ReadableStream. Prefer `token` query param (no custom headers → simpler CORS / PNA).
+   */
   useEffect(() => {
     if (!url) return
-    // #region agent log
-    let firstMsg = true
-    fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
-      body: JSON.stringify({
-        sessionId: 'e2efc4',
-        hypothesisId: 'H3',
-        location: 'DashboardPage.tsx:LogConsole',
-        message: 'EventSource creating',
-        data: { url },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-    const es = new EventSource(url)
-    esRef.current = es
-    es.onopen = () => {
-      setConnected(true)
-      // #region agent log
-      fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
-        body: JSON.stringify({
-          sessionId: 'e2efc4',
-          hypothesisId: 'H3',
-          location: 'DashboardPage.tsx:LogConsole',
-          message: 'EventSource open',
-          data: { url, readyState: es.readyState },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {})
-      // #endregion
-    }
-    es.onmessage = (ev) => {
-      // #region agent log
-      if (firstMsg) {
-        firstMsg = false
-        fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
-          body: JSON.stringify({
-            sessionId: 'e2efc4',
-            hypothesisId: 'H3',
-            location: 'DashboardPage.tsx:LogConsole',
-            message: 'EventSource first message',
-            data: { url, dataLen: ev.data?.length ?? 0 },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {})
+    const ac = new AbortController()
+    let cancelled = false
+    setLines([])
+    setStreamError(null)
+    setConnected(false)
+    void (async () => {
+      try {
+        let tokenInUrl = false
+        try {
+          const u = new URL(url, window.location.origin)
+          tokenInUrl = u.searchParams.has('token') || u.searchParams.has('access_token')
+        } catch {
+          tokenInUrl = false
+        }
+        const token = getOpsToken()
+        const headers: Record<string, string> = { Accept: 'text/event-stream' }
+        if (token && !tokenInUrl) headers.Authorization = `Bearer ${token}`
+        const crossOrigin = /^https?:\/\//i.test(url)
+        const res = await fetch(url, {
+          method: 'GET',
+          headers,
+          signal: ac.signal,
+          credentials: crossOrigin ? 'omit' : 'same-origin',
+          cache: 'no-store',
+        })
+        if (!res.ok) {
+          const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 160)
+          throw new Error(snippet ? `HTTP ${res.status}: ${snippet}` : `HTTP ${res.status}`)
+        }
+        const body = res.body
+        if (!body) throw new Error('No response body')
+        setConnected(true)
+        const reader = body.getReader()
+        const dec = new TextDecoder()
+        let buffer = ''
+        while (!cancelled) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += dec.decode(value, { stream: true })
+          let sep: number
+          while ((sep = buffer.indexOf('\n\n')) >= 0) {
+            const block = buffer.slice(0, sep)
+            buffer = buffer.slice(sep + 2)
+            for (const rawLine of block.split('\n')) {
+              const line = rawLine.replace(/\r$/, '')
+              if (!line.startsWith('data:')) continue
+              const data = line.slice(5).replace(/^\s/, '')
+              if (cancelled || ac.signal.aborted) break
+              setLines(prev => {
+                const next = [...prev, data]
+                return next.length > maxLines ? next.slice(next.length - maxLines) : next
+              })
+            }
+          }
+        }
+        if (!cancelled) setConnected(false)
+      } catch (e) {
+        if (cancelled || ac.signal.aborted) return
+        if (e instanceof Error && e.name === 'AbortError') return
+        setConnected(false)
+        setStreamError(e instanceof Error ? e.message : 'Stream failed')
       }
-      // #endregion
-      setLines(prev => {
-        const next = [...prev, ev.data]
-        return next.length > maxLines ? next.slice(next.length - maxLines) : next
-      })
+    })()
+    return () => {
+      cancelled = true
+      ac.abort()
     }
-    es.onerror = () => {
-      setConnected(false)
-      // #region agent log
-      fetch('http://127.0.0.1:7643/ingest/39d5b41d-72dc-45c0-877a-447f8de8d20e', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e2efc4' },
-        body: JSON.stringify({
-          sessionId: 'e2efc4',
-          hypothesisId: 'H3',
-          location: 'DashboardPage.tsx:LogConsole',
-          message: 'EventSource error',
-          data: { url, readyState: es.readyState },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {})
-      // #endregion
-    }
-    return () => { es.close(); esRef.current = null }
   }, [url, maxLines])
 
   useEffect(() => {
@@ -235,15 +280,22 @@ function LogConsole({ url, maxLines = 500 }: { url: string; maxLines?: number })
         <button
           type="button"
           className="dashboard-console-btn"
-          onClick={() => setLines([])}
+          onClick={() => { setLines([]); setStreamError(null) }}
           title="Clear console"
         >
           Clear
         </button>
       </div>
+      {streamError ? (
+        <div className="dashboard-console-stream-error" role="alert">
+          {streamError}
+        </div>
+      ) : null}
       <pre className="dashboard-console-output">
-        {lines.length === 0 ? (
+        {lines.length === 0 && !streamError ? (
           <span className="dashboard-console-placeholder">Waiting for log output…</span>
+        ) : lines.length === 0 && streamError ? (
+          <span className="dashboard-console-placeholder">No log lines received.</span>
         ) : (
           lines.map((l, i) => <span key={i} className="dashboard-console-line">{l}{'\n'}</span>)
         )}
@@ -279,6 +331,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   const [confirmState, setConfirmState] = useState<ConfirmDialogState>(INITIAL_CONFIRM)
   const [tick, setTick] = useState(0)
   const [auditFilter, setAuditFilter] = useState<'all' | 'success' | 'submitted' | 'denied' | 'rejected' | 'failed'>('all')
+  const [auditPage, setAuditPage] = useState(1)
+  const [auditPageSize, setAuditPageSize] = useState<AuditPageSize>(10)
   const [svcStopBusy, setSvcStopBusy] = useState<ServiceId | 'all' | null>(null)
   const [svcMsg, setSvcMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const svcMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -293,6 +347,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   const [scaleWorkerType, setScaleWorkerType] = useState('')
   const [scaleBusy, setScaleBusy] = useState(false)
   const [scaleMsg, setScaleMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
+  const [snapshotRefreshBusy, setSnapshotRefreshBusy] = useState(false)
 
   // Broker control
   const [extBroker, setExtBroker] = useState<ExtendedBrokerStatus | null>(null)
@@ -313,6 +368,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   const workersRefreshPromiseRef = useRef<Promise<void> | null>(null)
   /** When Phase 1 is slow, 5s interval must not stack duplicate summary/instances/ops calls. */
   const loadAllPromiseRef = useRef<Promise<void> | null>(null)
+  const consoleSectionRef = useRef<HTMLElement | null>(null)
 
   const canOperate = caps?.capabilities.can_operate ?? false
   const canAdmin = caps?.capabilities.can_admin ?? false
@@ -327,13 +383,13 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     } catch { /* ignore */ }
   }, [])
 
-  const refreshOpsWorkersSnapshot = useCallback(async () => {
+  const refreshOpsWorkersSnapshot = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     if (workersRefreshPromiseRef.current) {
       return workersRefreshPromiseRef.current
     }
     const run = (async () => {
       try {
-        const wRes = await fetchOpsWorkers()
+        const wRes = await fetchOpsWorkers({ forceRefresh: opts?.forceRefresh })
         if (wRes.ok) {
           setWorkers(wRes.workers)
           setBroker(wRes.broker)
@@ -352,6 +408,15 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     workersRefreshPromiseRef.current = tracked
     return tracked
   }, [])
+
+  const onBrokerSnapshotRefresh = useCallback(async () => {
+    setSnapshotRefreshBusy(true)
+    try {
+      await refreshOpsWorkersSnapshot({ forceRefresh: true })
+    } finally {
+      setSnapshotRefreshBusy(false)
+    }
+  }, [refreshOpsWorkersSnapshot])
 
   /** Phase 1: queues, instances, broker extension, profiles. Phase 2: /ops/workers (Celery inspect, slow). */
   const loadAll = useCallback(
@@ -434,7 +499,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
 
   const loadAudit = useCallback(async () => {
     try {
-      const res = await fetchOpsAudit(50)
+      const res = await fetchOpsAudit(500)
       if (res.ok) {
         setAuditEntries(res.entries)
         setAuditError(null)
@@ -580,10 +645,10 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
         setConfirmState(prev => ({ ...prev, confirming: true }))
         setScaleBusy(true)
         try {
-          openConsole(instanceId)
           const res = await scaleWorker({ action: 'remove', instance_id: instanceId })
           setScaleMsg({ text: res.ok ? `Instance ${instanceId} removed` : (res.error ?? 'Failed'), isErr: !res.ok })
           await loadAll()
+          if (res.ok) await refreshOpsWorkersSnapshot({ forceRefresh: true })
         } catch (e) {
           setScaleMsg({ text: e instanceof Error ? e.message : 'Error', isErr: true })
         } finally {
@@ -604,7 +669,6 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
       const res = await scaleWorker({ action: 'add', worker_type: scaleWorkerType })
       if (res.ok) {
         const iid = res.instance_id ?? res.unit ?? scaleWorkerType
-        openConsole(iid)
         setScaleMsg({ text: `Instance ${iid} started (${scaleWorkerType})`, isErr: false })
         await loadAll()
       } else {
@@ -655,6 +719,28 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
   }
 
   // ── Console handlers ──────────────────────────────────────────────────
+  /** Opens a console stream (used by Runtime Snapshot cards; does not toggle off). */
+  const selectConsole = useCallback((target: ConsoleTarget) => {
+    if (target === 'none') {
+      setConsoleTarget('none')
+      setConsoleUrl('')
+      return
+    }
+    setConsoleTarget(target)
+    if (target === 'broker') {
+      setConsoleUrl(brokerConsoleUrl())
+    } else {
+      setConsoleUrl('')
+    }
+  }, [])
+
+  const scrollConsoleIntoView = useCallback(() => {
+    requestAnimationFrame(() => {
+      consoleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [])
+
+  /** Toggle same target off (filter buttons only). */
   const openConsole = (target: ConsoleTarget) => {
     if (target === consoleTarget) {
       setConsoleTarget('none')
@@ -665,9 +751,18 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     if (target === 'broker') {
       setConsoleUrl(brokerConsoleUrl())
     } else if (target !== 'none') {
-      setConsoleUrl(workerConsoleUrl(target))
+      setConsoleUrl('')
     }
   }
+
+  useEffect(() => {
+    if (consoleTarget === 'none' || consoleTarget === 'broker') return
+    const stillExists = workers.some(w => w.worker_id === consoleTarget)
+    if (!stillExists) {
+      setConsoleTarget('none')
+      setConsoleUrl('')
+    }
+  }, [workers, consoleTarget])
 
   const hb = status?.daemon_heartbeat
   const daemonLamp: LampColor = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
@@ -690,6 +785,25 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     if (auditFilter === 'all') return true
     return e.outcome === auditFilter
   })
+
+  useEffect(() => {
+    setAuditPage(1)
+  }, [auditFilter])
+
+  useEffect(() => {
+    const n = filteredAudit.length
+    const maxPage = Math.max(1, Math.ceil(n / auditPageSize) || 1)
+    if (auditPage > maxPage) setAuditPage(maxPage)
+  }, [auditPage, auditPageSize, filteredAudit.length])
+
+  const auditTotalFiltered = filteredAudit.length
+  const auditTotalPages = Math.max(1, Math.ceil(auditTotalFiltered / auditPageSize) || 1)
+  const auditRangeStart = auditTotalFiltered === 0 ? 0 : (auditPage - 1) * auditPageSize + 1
+  const auditRangeEnd = Math.min(auditPage * auditPageSize, auditTotalFiltered)
+  const paginatedAudit = filteredAudit.slice(
+    (auditPage - 1) * auditPageSize,
+    (auditPage - 1) * auditPageSize + auditPageSize,
+  )
 
   const hasAuditPermission = auditError == null || (!auditError.includes('admin') && !auditError.includes('403'))
   const showInitialSkeleton = loading && workers.length === 0
@@ -933,6 +1047,45 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               Celery
             </h2>
 
+          {/* ── Console Monitor ────────────────────────────────── */}
+          <section
+            ref={consoleSectionRef}
+            id="dashboard-console-section"
+            className={`replay-section dashboard-section dashboard-console-section${consoleTarget !== 'none' && (consoleTarget === 'broker' ? !!consoleUrl : true) ? ' dashboard-console-section--active' : ''}`}
+            aria-labelledby="dashboard-console-head"
+          >
+            <h3 id="dashboard-console-head" className="page-title-with-tooltip">
+              Console
+              <InfoTooltip text="Broker: Ops SSE (journald or tail of BIFROST_BROKER_CONSOLE_LOG on macOS). Worker: per-worker Redis stream via Ops /ops/console/worker (tail/clear: /ops/celery/logs)." />
+            </h3>
+            <div className="dashboard-console-selector">
+              <button
+                type="button"
+                className={`dashboard-filter-btn ${consoleTarget === 'broker' ? 'active' : ''}`}
+                onClick={() => openConsole('broker')}
+              >
+                Broker (Redis)
+              </button>
+              {workers.map(w => (
+                <button
+                  key={w.worker_id}
+                  type="button"
+                  className={`dashboard-filter-btn ${consoleTarget === w.worker_id ? 'active' : ''}`}
+                  onClick={() => openConsole(w.worker_id)}
+                >
+                  {w.worker_id}
+                </button>
+              ))}
+            </div>
+            {consoleTarget === 'broker' && consoleUrl ? (
+              <LogConsole url={consoleUrl} />
+            ) : consoleTarget !== 'none' && consoleTarget !== 'broker' ? (
+              <DashboardWorkerRedisConsole key={consoleTarget} workerId={consoleTarget} />
+            ) : (
+              <div className="dashboard-empty">Select a target above to open a live console stream.</div>
+            )}
+          </section>
+
           {/* ── Runtime Snapshot ──────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
             <h3 id="dashboard-snapshot-head" className="page-title-with-tooltip">
@@ -941,13 +1094,37 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
             </h3>
 
             {/* Broker */}
-            <div className="dashboard-broker-card">
+            <div
+              className={`dashboard-broker-card${consoleTarget === 'broker' ? ' dashboard-broker-card--console-active' : ''}`}
+              title="Open broker console stream"
+              onClick={() => {
+                selectConsole('broker')
+                scrollConsoleIntoView()
+              }}
+            >
               <div className="dashboard-broker-header">
                 <span className={`title-inline-lamp lamp-icon ${brokerLamp}`} aria-hidden>●</span>
                 <strong>Broker</strong>
                 <span className="dashboard-broker-status">
                   {broker?.connected ? 'Connected' : 'Disconnected'}
                 </span>
+                <button
+                  type="button"
+                  className={`celery-queue-icon-btn celery-queue-icon-btn--refresh dashboard-broker-snapshot-refresh${snapshotRefreshBusy ? ' celery-queue-icon-btn--refreshing' : ''}`}
+                  disabled={snapshotRefreshBusy}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void onBrokerSnapshotRefresh()
+                  }}
+                  title="Refresh worker list (Redis presence)"
+                  aria-label="Refresh worker list from Redis"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M23 4v6h-6" />
+                    <path d="M1 20v-6h6" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                </button>
               </div>
               {broker && (
                 <div className="dashboard-broker-details">
@@ -991,7 +1168,12 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                   return (
                     <div
                       key={w.worker_id}
-                      className="dashboard-worker-card"
+                      className={`dashboard-worker-card${consoleTarget === w.worker_id ? ' dashboard-worker-card--selected' : ''}`}
+                      title={`Open console for ${w.worker_id}`}
+                      onClick={() => {
+                        selectConsole(w.worker_id)
+                        scrollConsoleIntoView()
+                      }}
                     >
                       <div className="dashboard-worker-header">
                         <span className={`title-inline-lamp lamp-icon ${lamp}`} aria-hidden>●</span>
@@ -999,6 +1181,27 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                         <span className={`dashboard-worker-status dashboard-worker-status--${lamp}`}>
                           {workerStatusLabel(w.status)}
                         </span>
+                        <button
+                          type="button"
+                          className="dashboard-worker-remove-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const instanceId = workerIdToInstanceId(w.worker_id)
+                            if (!instanceId) {
+                              setScaleMsg({ text: `Cannot infer instance ID from ${w.worker_id}`, isErr: true })
+                              return
+                            }
+                            onScaleRemove(instanceId)
+                          }}
+                          disabled={scaleBusy || !canOperate}
+                          title={canOperate ? 'Remove this worker instance' : 'Requires operator role'}
+                          aria-label={`Remove ${w.worker_id}`}
+                        >
+                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
                       </div>
                       <div className="dashboard-worker-meta">
                         <span>Queues: {w.queues.length > 0 ? w.queues.join(', ') : '—'}</span>
@@ -1131,38 +1334,6 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
             </div>
           </section>
 
-          {/* ── Console Monitor ────────────────────────────────── */}
-          <section className="replay-section dashboard-section dashboard-console-section" aria-labelledby="dashboard-console-head">
-            <h3 id="dashboard-console-head" className="page-title-with-tooltip">
-              Console
-              <InfoTooltip text="Live log output from systemd journal (journalctl -f). Select a worker or broker to stream." />
-            </h3>
-            <div className="dashboard-console-selector">
-              <button
-                type="button"
-                className={`dashboard-filter-btn ${consoleTarget === 'broker' ? 'active' : ''}`}
-                onClick={() => openConsole('broker')}
-              >
-                Broker (Redis)
-              </button>
-              {workers.map(w => (
-                <button
-                  key={w.worker_id}
-                  type="button"
-                  className={`dashboard-filter-btn ${consoleTarget === w.worker_id ? 'active' : ''}`}
-                  onClick={() => openConsole(w.worker_id)}
-                >
-                  {w.worker_id}
-                </button>
-              ))}
-            </div>
-            {consoleTarget !== 'none' && consoleUrl ? (
-              <LogConsole url={consoleUrl} />
-            ) : (
-              <div className="dashboard-empty">Select a target above to open a live console stream.</div>
-            )}
-          </section>
-
           {/* ── Broker Control ─────────────────────────────────── */}
           <section className="replay-section dashboard-section dashboard-broker-ctrl" aria-labelledby="dashboard-broker-ctrl-head">
             <h3 id="dashboard-broker-ctrl-head" className="page-title-with-tooltip">
@@ -1267,37 +1438,86 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                   : 'No entries match the current filter.'}
               </div>
             ) : (
-              <div className="dashboard-cmd-table-wrap">
-                <table className="table-operations dashboard-audit-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Operator</th>
-                      <th>Action</th>
-                      <th>Target</th>
-                      <th>Outcome</th>
-                      <th>Source IP</th>
-                      <th>Detail</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredAudit.map((entry, i) => {
-                      const badge = auditOutcomeBadge(entry.outcome)
-                      return (
-                        <tr key={`${entry.timestamp}-${i}`}>
-                          <td>{fmtTimestamp(entry.timestamp)}</td>
-                          <td>{entry.operator}</td>
-                          <td>{entry.action}</td>
-                          <td title={entry.target}>{entry.target}</td>
-                          <td><span className={`dashboard-audit-badge ${badge.className}`}>{badge.label}</span></td>
-                          <td>{entry.source_ip ?? '—'}</td>
-                          <td className="dashboard-audit-detail-cell" title={entry.detail ?? ''}>{entry.detail || '—'}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <div className="dashboard-audit-pagination-bar" role="navigation" aria-label="Audit log pagination">
+                  <label className="dashboard-audit-page-size">
+                    <span className="dashboard-audit-page-size-label">Rows per page</span>
+                    <select
+                      className="dashboard-ctrl-input dashboard-audit-page-size-select"
+                      value={auditPageSize}
+                      onChange={e => {
+                        const v = Number(e.target.value) as AuditPageSize
+                        setAuditPageSize(v)
+                        setAuditPage(1)
+                      }}
+                      aria-label="Rows per page"
+                    >
+                      {AUDIT_PAGE_SIZES.map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="dashboard-audit-page-info">
+                    {auditTotalFiltered === 0
+                      ? '0 entries'
+                      : `Showing ${auditRangeStart}–${auditRangeEnd} of ${auditTotalFiltered}`}
+                  </span>
+                  <div className="dashboard-audit-page-nav">
+                    <button
+                      type="button"
+                      className="dashboard-console-btn"
+                      disabled={auditPage <= 1}
+                      onClick={() => setAuditPage(p => Math.max(1, p - 1))}
+                      aria-label="Previous page"
+                    >
+                      Previous
+                    </button>
+                    <span className="dashboard-audit-page-of" aria-live="polite">
+                      Page {auditTotalFiltered === 0 ? 0 : auditPage} of {auditTotalFiltered === 0 ? 0 : auditTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="dashboard-console-btn"
+                      disabled={auditPage >= auditTotalPages || auditTotalFiltered === 0}
+                      onClick={() => setAuditPage(p => Math.min(auditTotalPages, p + 1))}
+                      aria-label="Next page"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+                <div className="dashboard-cmd-table-wrap">
+                  <table className="table-operations dashboard-audit-table">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Operator</th>
+                        <th>Action</th>
+                        <th>Target</th>
+                        <th>Outcome</th>
+                        <th>Source IP</th>
+                        <th>Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedAudit.map((entry, i) => {
+                        const badge = auditOutcomeBadge(entry.outcome)
+                        return (
+                          <tr key={`${entry.timestamp}-${auditPage}-${i}`}>
+                            <td>{fmtTimestamp(entry.timestamp)}</td>
+                            <td>{entry.operator}</td>
+                            <td>{entry.action}</td>
+                            <td title={entry.target}>{entry.target}</td>
+                            <td><span className={`dashboard-audit-badge ${badge.className}`}>{badge.label}</span></td>
+                            <td>{entry.source_ip ?? '—'}</td>
+                            <td className="dashboard-audit-detail-cell" title={entry.detail ?? ''}>{entry.detail || '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </section>
         </div>
