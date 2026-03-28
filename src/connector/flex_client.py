@@ -1,10 +1,15 @@
-"""
-IB Flex Web Service client for fetching:
+"""IB Flex Web Service client (HTTPS + XML).
+
+Complements :mod:`src.connector.ib` (TWS / ib_insync). Process-agnostic; used by monitor API,
+portfolio fetch services, and scripts.
+
+Fetches:
 
 - Cash Transactions（资金流水，deposits/withdrawals/transfers/dividends 等）
 - Trades（成交明细，Flex Trades 报表，用于补全 account_executions）
 
 Used by:
+
 - Performance Phase 0: POST /transactions/fetch → account_transactions（现金流水）
 - Executions history: POST /executions/fetch-flex → account_executions/account_execution_commissions（成交）
 

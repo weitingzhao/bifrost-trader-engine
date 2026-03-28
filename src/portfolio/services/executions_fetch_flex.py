@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from src.portfolio.integrations.flex_client import fetch_trades, parse_trades_xml
+from src.connector.flex_client import fetch_trades, parse_trades_xml
 from src.portfolio.services.execution_utils import rows_span
 from servers.reader import write_account_executions_to_db
 

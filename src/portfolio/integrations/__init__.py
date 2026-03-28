@@ -1,1 +1,4 @@
-"""Integrations used by portfolio domain (e.g. IB Flex)."""
+"""Portfolio-specific integrations.
+
+IB Flex Web Service client lives in ``src.connector.flex_client`` (shared with monitor and scripts).
+"""

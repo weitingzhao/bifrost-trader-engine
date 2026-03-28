@@ -154,7 +154,7 @@ def main() -> int:
         print("Calling Flex SendRequest (no date range, use query default)...", file=sys.stderr, flush=True)
 
     try:
-        from src.portfolio.integrations.flex_client import request_report, get_statement, parse_trades_xml
+        from src.connector.flex_client import request_report, get_statement, parse_trades_xml
     except ImportError as e:
         print("Import error: %s" % e, file=sys.stderr)
         return 1

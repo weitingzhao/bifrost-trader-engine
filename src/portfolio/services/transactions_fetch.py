@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.portfolio.integrations.flex_client import fetch_cash_transactions
+from src.connector.flex_client import fetch_cash_transactions
 from servers.reader import upsert_account_transactions
 
 logger = logging.getLogger(__name__)

@@ -192,7 +192,7 @@ def main() -> int:
         )
 
     try:
-        from src.portfolio.integrations.flex_client import (
+        from src.connector.flex_client import (
             request_report,
             get_statement,
             parse_trades_xml,

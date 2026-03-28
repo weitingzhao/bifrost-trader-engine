@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.app.config import config_profile_from_resolved_path, get_effective_ib_config
-from src.portfolio.integrations.flex_client import fetch_cash_transactions, fetch_trades
+from src.connector.flex_client import fetch_cash_transactions, fetch_trades
 from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
     StatusReader,
@@ -41,7 +41,7 @@ from servers.reader import (
     get_job_bars_backfill_last_updated,
     upsert_account_transactions,
 )
-from src.portfolio.integrations.flex_client import parse_trades_xml
+from src.connector.flex_client import parse_trades_xml
 from src.monitor.self_check import derive_daemon_self_check, derive_self_check
 from servers.sse_queue_utils import put_nowait_drop_oldest
 
