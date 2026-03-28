@@ -6,7 +6,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from src.connector.flex_client import fetch_cash_transactions
-from servers.reader import upsert_account_transactions
+from src.monitor.reader import upsert_account_transactions
 
 logger = logging.getLogger(__name__)
 

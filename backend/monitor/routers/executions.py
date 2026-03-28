@@ -10,7 +10,7 @@ from src.portfolio.services.executions_fetch_flex import (
     upsert_executions_from_uploaded_flex_xml,
 )
 from src.portfolio.services.transactions_fetch import fetch_cash_transactions_from_flex
-from servers.reader import (
+from src.monitor.reader import (
     write_account_executions_to_db,
     update_execution_commission,
     insert_one_execution,

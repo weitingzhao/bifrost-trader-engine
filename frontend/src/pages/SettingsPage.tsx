@@ -16,7 +16,7 @@ import {
   type MarketHolidayRow,
   type MassiveStatusResponse,
 } from '../api'
-import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/fetchTimeout'
+import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/shared/fetchTimeout'
 import { normalizeUtilizedServices, utilizedEnvFor, type UtilizedServiceRow } from '../utils/utilizedServices'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
@@ -69,7 +69,7 @@ import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
-import { fetchOpsHealth } from '../api/ops'
+import { fetchOpsHealth } from '../api/ops/ops'
 
 /** Stack indicator from GET /health utilized_services (YAML). */
 function SettingsSidebarServiceEnvBadge({ stack }: { stack: 'prod' | 'dev' | null }) {

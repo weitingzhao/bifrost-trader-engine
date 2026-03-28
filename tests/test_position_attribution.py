@@ -1,6 +1,6 @@
 """Unit tests for Position × Instance attribution (net-estimated method).
 
-Tests _build_attribution_rows from servers.reader.executions to verify:
+Tests _build_attribution_rows from src.monitor.reader.executions to verify:
 - Single-instance attribution (ratio=1)
 - Multi-instance (mixed) attribution with proportional split
 - Unassigned (no strategy) handling
@@ -13,7 +13,7 @@ import math
 
 import pytest
 
-from servers.reader.executions import _build_attribution_rows
+from src.monitor.reader.executions import _build_attribution_rows
 
 
 def _pos_row(

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { getOpsApiBase, getServerApiBase, joinServiceBase } from '../api/apiRouting'
-import { fetchOpsHealth } from '../api/ops'
+import { getOpsApiBase, getServerApiBase, joinServiceBase } from '../api/shared/apiRouting'
+import { fetchOpsHealth } from '../api/ops/ops'
 import {
   clearOpsLogs,
   fetchOpsLogs,
   subscribeOpsLogs,
-} from '../api/logs'
+} from '../api/monitor/logs'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'

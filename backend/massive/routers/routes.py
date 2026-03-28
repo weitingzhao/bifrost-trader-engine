@@ -404,7 +404,7 @@ def get_massive_market_holidays(request: Request) -> Dict[str, Any]:
     db = _db_config(request)
     if db:
         try:
-            from servers.reader.market import get_market_holidays
+            from src.monitor.reader.market import get_market_holidays
             local_holidays = get_market_holidays(db, exchange="NYSE")
         except Exception:
             pass

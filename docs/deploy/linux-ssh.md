@@ -61,16 +61,36 @@ Prod stack on a single host (e.g. `192.168.10.70`): Engine, status server, Celer
    # or: DEPLOY_SYNC_PROD_CONFIG=1 ./scripts/bifrost_ssh.sh --deploy-only
    ```
 
-4. Install systemd units (paths assume deploy dir `/home/vision/bifrost-trader-engine`; edit files if you use another path):
+4. Install systemd units (paths assume deploy dir `/home/vision/bifrost-trader-engine`; edit files if you use another path).
+
+   **Core three** (engine, Celery, Monitor):
 
    ```bash
    sudo cp deploy/systemd/bifrost-engine.service deploy/systemd/bifrost-server.service deploy/systemd/bifrost-celery.service /etc/systemd/system/
+   ```
+
+   **HTTP APIs** (Research, Docs, Ops, Trading, Strategy, Portfolio, Market — match `server.*_port` in YAML):
+
+   ```bash
+   sudo cp deploy/systemd/bifrost-massive.service deploy/systemd/bifrost-docs.service deploy/systemd/bifrost-ops.service \
+     deploy/systemd/bifrost-trading.service deploy/systemd/bifrost-strategy.service deploy/systemd/bifrost-portfolio.service \
+     deploy/systemd/bifrost-market.service /etc/systemd/system/
+   ```
+
+   **Optional**: `bifrost-apis.target` groups the eight HTTP API units for `enable` (copy like other units). **Agent** (Ops executor): `bifrost-agent.service`.
+
+   Then reload and enable what you need:
+
+   ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable bifrost-engine bifrost-server bifrost-celery
    sudo systemctl start bifrost-server bifrost-celery bifrost-engine
+   # enable/start additional API units as required, e.g. bifrost-trading bifrost-strategy …
    ```
 
-   Later, use `bifrost_ssh.sh` with **service flags** (`--server` / `--engine` / `--celery` or `--all`) and **one action** (`--stop` / `--start` / `--restart`), optionally with **`--deploy`** to rsync + build before `systemctl`.
+   From your laptop, **menu (9)** or `./scripts/bifrost_ssh.sh --install-systemd-units` registers every `deploy/systemd/*.service` and `*.target` on the host (`systemctl enable` path or `cp` + `daemon-reload`).
+
+   Later, use `bifrost_ssh.sh` with **service flags** (`--server`, `--engine`, `--celery`, per-API flags, `--all`, **`--apis`** for all eight HTTP APIs, or **`--all-stack`** for full 11-unit stack) and **one action** (`--stop` / `--start` / `--restart`), optionally with **`--deploy`** to rsync + build before `systemctl`.
 
 5. Optional: schema refresh against Prod DB (only when you intend to run DDL; review `scripts/db_refresh_schema.py` first). **`--migrate` must be used with `--deploy` or `--deploy-only`:**
 
@@ -92,7 +112,7 @@ Run `./scripts/bifrost_ssh.sh` or `./scripts/bifrost_ssh.sh -i` / `--interactive
 
 CLI summary (see `./scripts/bifrost_ssh.sh --help`):
 
-- **Services** (at least one, or `--all`): `--server`, `--engine`, `--celery`, `--all`
+- **Services**: at least one unit flag, or **`--all`** (server + celery + engine), or **`--apis`** (eight HTTP API units), or **`--all-stack`** (those eight + celery + engine + agent).
 - **Action** (exactly one): `--stop`, `--start`, `--restart`
 - **Optional** `--deploy`: rsync + remote `pip` + `npm build`, then run `systemctl` on the selected units
 - **`--deploy-only`**: only rsync + build (no `systemctl`); cannot combine with service/action flags
@@ -103,8 +123,11 @@ Examples:
 # Push code + deps + frontend build, then restart only the engine
 ./scripts/bifrost_ssh.sh -engine -restart -deploy
 
-# Same for all three units
+# Same for all three core units
 ./scripts/bifrost_ssh.sh --all --restart -deploy
+
+# Restart every HTTP API (Monitor + research + docs + ops + domain APIs)
+./scripts/bifrost_ssh.sh --apis --restart -deploy
 
 # Only remote systemctl (no rsync) — e.g. restart engine after you already synced
 ./scripts/bifrost_ssh.sh -engine -restart
@@ -130,7 +153,7 @@ After changing code or config, **restart** the systemd units so a new process lo
 
 ## systemd actions
 
-The script runs **one** `systemctl` subcommand (`stop`, `start`, or `restart`) on the **selected** unit names in a single remote invocation (e.g. `sudo systemctl restart bifrost-server bifrost-engine`). With **`--all`**, units are `bifrost-server`, `bifrost-celery`, `bifrost-engine` in that order. Schedule maintenance if restarting the trading engine during market hours.
+The script runs **one** `systemctl` subcommand (`stop`, `start`, or `restart`) on the **selected** unit names in a single remote invocation (e.g. `sudo systemctl restart bifrost-server bifrost-engine`). With **`--all`**, units are `bifrost-server`, `bifrost-celery`, `bifrost-engine` in that order. With **`--apis`**, units are the eight HTTP services (Monitor, massive, docs, ops, trading, strategy, portfolio, market). With **`--all-stack`**, Celery, engine, and agent are included after the HTTP set. Schedule maintenance if restarting the trading engine during market hours.
 
 ### SSH / sudo
 
@@ -191,4 +214,4 @@ Open `http://192.168.10.70/` (port 80 via Nginx) or `http://192.168.10.70:8765/`
 
 ## Changing the deploy path
 
-If `DEPLOY_PATH` is not `/home/vision/bifrost-trader-engine`, update `WorkingDirectory` and `ExecStart` paths in `deploy/systemd/*.service` to match, reinstall units, and `daemon-reload`.
+If `DEPLOY_PATH` is not `/home/vision/bifrost-trader-engine`, update `WorkingDirectory` and `ExecStart` paths in `deploy/systemd/*.service` (and any copied `.target` files) to match, reinstall units, and `daemon-reload`.

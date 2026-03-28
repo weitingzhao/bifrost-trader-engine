@@ -9,7 +9,7 @@
 | 文档 | 角色 |
 |------|------|
 | **REQUIREMENTS.md** | 产品功能需求唯一定义：监控、控制、历史、回测、交易基础等（R-M*/R-C*/R-H*/R-B*/R-A*）；环境与部署约束（R-DV*）。 |
-| **本文档 (ARCHITECTURE.md)** | 系统级架构：**运行环境与部署约束**（§2）、三大组成部分、组件划分、数据流、部署视图、需求→组件→阶段映射。 |
+| **本文档 (ARCHITECTURE.md)** | 系统级架构：**运行环境与部署约束**（§2）、三大组成部分、**HTTP 服务拆分（backend/*，§4.0）**、组件划分、数据流、部署视图、需求→组件→阶段映射。 |
 | **CAPABILITY_TRACKING.md** | 能力维度拆解与当前进度（木桶原理）。 |
 | **research/STATE_SPACE_MAPPING.md**、**FSM_LINKAGE.md**、**research/CONFIG_SAFETY_TAXONOMY.md** | 状态空间、FSM、配置安全边界等专项，此处不重复。 |
 
@@ -84,7 +84,7 @@
 
 **要求**：
 - **队列**：拉取任务（如 backfill 请求）写入**队列**；当前实现采用 **Celery + Redis**（broker 与 result backend 使用同一 Redis，与实时行情可选共用实例、不同 db）；任务行仍写入 **job_bars_backfill** 表（job_id 即 Celery task_id），便于 GET /bars/jobs 与前端轮询。
-- **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A servers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
+- **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A backend.workers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
 - **API 行为**：监控/数据 API 收到 backfill 等请求时**仅入队并返回 job_id**；客户端通过 **GET /bars/jobs/{job_id}**（或等效）轮询任务状态与结果；任务完成后可刷新 coverage/列表。
 - **限速与串行**：Worker 串行处理任务并在任务间留间隔（如 2s），以符合 IB 官方历史数据 Pacing 限制。
 
@@ -109,7 +109,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 - **不运行 Celery**（`scripts/run_celery.py`）：bars worker 会通过 IB 拉取数据并写 `stock_*` 等业务表，Management 主机不应有此行为。
 - **不运行 Engine**（`scripts/run_engine.py`）：守护进程连接 IB 下单/写心跳，仅在 Prod（或 Dev 调试时临时）主机运行。
-- **仅运行 Server + Frontend**：`run_server.py` + `run_frontend.sh`，依赖 Daemon 写入 PostgreSQL 与 Redis 的数据；前端通过 SSE 消费 Redis 行情。
+- **仅运行 Monitor API + Frontend**：`run_server.py` + `run_frontend.sh`（若 UI 调用其他域接口，需另起对应 `run_server_*.py`），依赖 Daemon 写入 PostgreSQL 与 Redis 的数据；前端通过 SSE 消费 Redis 行情。
 - **Redis 地址**：若 Management 主机需要读取另一台（如 192.168.10.70）上 Daemon 写入的行情，将 `redis.host` 指向该服务器 IP。
 - **可选**：`server.skip_monitor_ib: true`（config 中），启用后 `run_server.py` **不**校验 YAML 中的 `ib` 段，且 `startup_event` 不初始化 `AccountIbClient` / `MarketIbClient`，避免 Management 机器连接 IB。正常运行 Status Server（与 Engine 同栈或需监控 IB）时应提供完整 `ib:`，勿依赖此项。
 
@@ -153,11 +153,13 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
            │
            ▼
 ┌──────────────────────────────────────────────────┐
-│  Status Server (FastAPI)                          │
+│  FastAPI（Monitor 与/或 Research 等独立进程）      │
 │  GET /research/... → 读 PG                        │
 │  SSE / WS 推前端 (从 Redis 转发)                   │
 └──────────────────────────────────────────────────┘
 ```
+
+**部署说明**：上图逻辑不变；物理上 `/research/...` 等路由可由 **独立 FastAPI 进程**（如 `scripts/run_server_massive.py` → `backend.research`）提供，与 Monitor（`run_server.py`）分端口监听，见 §4.0。
 
 #### 2.10.1 REST API 行为约定
 
@@ -191,7 +193,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **Celery queue**：`massive`（与 IB `bars` 分离）；`concurrency` 按 Massive 限流设 1–N。
 - **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
 - **重试与幂等**：429/5xx 指数退避；写入按供应商唯一 ID（`massive_trade_id`、bar 唯一键）UPSERT。
-- **启动**：`celery -A servers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
+- **启动**：`celery -A backend.workers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
 
 #### 2.10.5 Feature flag 约定
 
@@ -203,9 +205,9 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 升级后仅修改配置并重启相关进程（Server + Worker + 可选 WS Ingest），无需 schema 迁移。
 
-#### 2.10.6 详细落地与分项计划
+#### 2.10.6 详细说明与追踪
 
-上述 §2.10 定义了 Massive 数据源的**架构约定**与**行为边界**。更细粒度的**落地方案**（数据库升级、WebSocket ingest 进程、Worker 调度与对账、FastAPI 缓存与推送、UI Checklist 与数据补全、Max Pain 报表）见 **[Option 数据 Feed 架构与实施计划](plans/option-data-feed/README.md)**。
+上述 §2.10 定义了 Massive 数据源的**架构约定**与**行为边界**。表结构、迁移与实现进度以 **[DATABASE.md](DATABASE.md)** 与 **[plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)** 为准；历史分项实施计划文档已移除，不再单独维护。
 
 ---
 
@@ -242,6 +244,25 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 ---
 
 ## 4. 组件总览
+
+### 4.0 HTTP 服务拆分（backend/*）
+
+监控与业务 HTTP 由多个 **FastAPI 应用**组成，代码在 **`backend/<domain>/`**，按域独立进程部署；与守护进程（Engine）仍仅通过 **PostgreSQL**（及可选 **Redis**）耦合，不违背 RE-5。典型 **Prod** 可同机起多进程；也可用反向代理将多端口聚合为单一对外入口。端口键名以合并后的 YAML 为准，示例见 **`config/config.dev.yaml.example`** / **`config/config.yaml.example`**（`server` 段）：
+
+| 域（逻辑） | Python 包 | 启动脚本 | 配置端口键（示例默认） |
+|------------|-----------|----------|-------------------------|
+| Monitor（状态、控制、日志等） | `backend.monitor` | `scripts/run_server.py` | `server.port`（未配置时 **`run_server.py` 默认 8765**；可在 YAML `server.port` 覆盖） |
+| Research（含 Massive 研究路由等；脚本名沿用 massive） | `backend.research` | `scripts/run_server_massive.py` | `server.massive_port`（8766） |
+| Docs（合并 OpenAPI 等） | `backend.docs` | `scripts/run_server_docs.py` | `server.docs_port`（8767） |
+| Ops（队列、Worker、Bars 任务等） | `backend.ops` | `scripts/run_server_ops.py` | `server.ops_port`（8768） |
+| Trading（成交、绩效等） | `backend.trading` | `scripts/run_server_trading.py` | `server.trading_port`（8769） |
+| Strategy | `backend.strategy` | `scripts/run_server_strategy.py` | `server.strategy_port`（8770） |
+| Portfolio | `backend.portfolio` | `scripts/run_server_portfolio.py` | `server.portfolio_port`（8771） |
+| Market（行情、Watchlist 等） | `backend.market` | `scripts/run_server_market.py` | `server.market_port`（8772） |
+
+**Celery**：任务应用模块为 **`backend.workers.celery_app`**（与 `scripts/run_celery.py` 一致）。**`backend.massive`** 等包可作为库被 Research/任务引用，未必对应单独 HTTP 进程。
+
+**前端**：开发环境下对各 API 基址的配置需与上述多进程一致；详见 **[docs/index.md](index.md)**「项目组成与启动」。
 
 ### 4.1 自动交易（守护进程内）
 
@@ -285,7 +306,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | 组件 | 说明 | 交付 |
 |------|------|------|
 | **任务队列** | backfill 等非实时拉取请求入队；**实现**：**Celery + Redis**（broker/result backend），任务行仍写 job_bars_backfill 表。 | 阶段 3（与 R-A3 一并） |
-| **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A servers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
+| **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A backend.workers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
 | **API 入队与查询** | POST /bars/backfill（或等效）入队并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态。 | 阶段 3 |
 
 ### 4.5 Massive 期权研究数据（R-A6）
@@ -378,8 +399,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 ## 6. 部署视图
 
 - **TWS 主机（Mac Mini ×2）**：**两台 Mac Mini** 各运行一套 TWS（或 IB Gateway），分别承载 Host 与 Secondary 账户（RE-1，§2.1）；用户通过远程桌面登录该机进行手动交易。
-- **Prod 全栈（Linux 服务器 192.168.10.70）**：运行 Engine（`run_engine.py`）、Server（`run_server.py`）、Redis、Celery bars worker；经 IB API 跨网连接两台 Mac Mini 上的 TWS。单机仅一个 Engine 进程（RE-6，§2.5）。
-- **Dev 开发机（Mac）**：运行 Server、Redis、Celery（Engine 可选）；连接 Dev DB 与同一两台 Mac Mini（使用与 Prod 不同的 client_id）。
+- **Prod 全栈（Linux 服务器 192.168.10.70）**：运行 Engine（`run_engine.py`）、**一个或多个 FastAPI 进程**（至少 Monitor：`run_server.py`；按需增加 `run_server_ops.py`、`run_server_trading.py` 等，见 §4.0）、Redis、Celery worker（`bars` / `massive` 等队列）；经 IB API 跨网连接两台 Mac Mini 上的 TWS。单机仅一个 Engine 进程（RE-6，§2.5）。
+- **Dev 开发机（Mac）**：运行 **Monitor 及各域 API**（按功能按需）、Redis、Celery（Engine 可选）；连接 Dev DB 与同一两台 Mac Mini（使用与 Prod 不同的 client_id）。
 - **PostgreSQL（独立主机 192.168.10.80）**：承载 **Prod DB** 与 **Dev DB**（不同 database 名，R-DV1，§2.8）；Prod 与 Dev 各连各库。
 - **监控与守护（RE-5，§2.4）**：Prod 上 Engine 与 Server 同机但**进程级分离**；可选监控机物理分离变体。
 - **回测与统计**：与守护程序同仓库、同 Python 环境；回测不连 TWS，统计只读 DB，可在本机或能访问 DB 的环境运行。
@@ -391,10 +412,10 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **TWS 主机（Mac Mini ×2）**：仅运行 TWS（或 IB Gateway）；操作者通过远程桌面登录进行手动交易。
 - **Prod 主机（Linux 服务器 192.168.10.70）**：
   - **守护进程**（`run_engine.py`）：连接 Mac Mini 上的 TWS（Prod `client_id`），执行全部对冲逻辑（Gamma Scalping、FSM、写 status/operations）；轮询 Prod DB（`daemon_control`、`daemon_run_status`）。**运行不依赖 IB**（RE-7）：若 TWS 不可用则进入 WAITING_IB，持续写心跳（`ib_connected=false`、`next_retry_ts`）、轮询 stop/retry_ib，并按配置间隔**自动重试**连接；监控端显示**黄灯**（degraded）。收到 **stop** 则消费并退出；**suspend** / **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED。
-  - **Server**（`run_server.py`）：读 Prod DB，提供 GET /status、GET /operations、POST /control/stop 等。不提供「启动」；守护进程在本机执行 `run_engine.py`（systemd/手动）。
-  - **Redis + Celery bars worker**：同机部署，串行执行 backfill 任务。
-- **Dev 开发机（Mac）**：运行 Server（+ 可选 Engine/Redis/Celery）；连接 **Dev DB**；连接 TWS 时使用与 Prod 不同的 `client_id`。Dev Engine **不得**与 Prod Engine 同时对同一 IB 账户下单（R-DV3，§2.1）。
-- **PostgreSQL（192.168.10.80）**：Prod DB 与 Dev DB 在同一服务器上不同 `database`；守护进程、Server、Worker 均连本环境对应库。
+  - **HTTP API**（§4.0）：**Monitor**（`run_server.py`）读 Prod DB，提供 GET /status、GET /operations、POST /control/* 等；**不提供**守护进程「启动」。其余域（Ops、Trading、Research 等）按需同机另起进程。守护进程在本机执行 `run_engine.py`（systemd/手动）。
+  - **Redis + Celery worker**：同机部署；`bars` / `massive` 等队列见 `scripts/run_celery.py`。
+- **Dev 开发机（Mac）**：运行 Monitor 及各域 API（+ 可选 Engine/Redis/Celery）；连接 **Dev DB**；连接 TWS 时使用与 Prod 不同的 `client_id`。Dev Engine **不得**与 Prod Engine 同时对同一 IB 账户下单（R-DV3，§2.1）。
+- **PostgreSQL（192.168.10.80）**：Prod DB 与 Dev DB 在同一服务器上不同 `database`；守护进程、各 FastAPI 进程、Worker 均连本环境对应库。
 
 **启停语义**：
 
@@ -422,8 +443,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
    ▼                     ▼
 ┌─────────────────────┐  ┌─────────────────────┐
 │  Prod (Linux 70)    │  │  Dev (开发机 Mac)    │
-│  Engine             │  │  Server              │
-│  Server             │  │  Redis + Celery      │
+│  Engine             │  │  Monitor + 域 API    │
+│  Monitor + 域 API   │  │  Redis + Celery      │
 │  Redis + Celery     │  │  Engine（可选）       │
 └────────┬────────────┘  └────────┬────────────┘
          │ postgres                │ postgres
@@ -511,7 +532,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 **后台**：GET /status 返回 active_strategy_structure_id、active_gate_safety_strategy_id 及对应 name；GET /strategies/structures、/structures/{id}、/history、/gate-safety、/gate-safety/{id} 及 POST/PUT /gate-safety 供管理与策略使用情况查询及 CRUD。**监控前端**在 **Research → Strategy** 提供策略管理页（当前生效、列表、Set active）；在 **Research → Gates** 提供 Gates 配置管理页（列表、创建、编辑、Set active、复制）。
 
-**策略实例页面**：监控前端提供**策略实例**独立页面（列表 + 详情）。列表按账户、机会策略、时间范围筛选，展示 instance 元数据与汇总 PnL；详情页以单条 strategy_instance 为主体，分块展示：策略信息（来自 strategy_opportunity / strategy_structure）、盈亏（调用 GET /performance?strategy_instance_id、GET /executions?strategy_instance_id 等）、预留风险/回测/资金占用等区块。数据流：GET /strategies/instances（列表）、GET /strategies/instances/{id}（详情元数据）、GET /executions、GET /performance 按 strategy_instance_id 筛选；与 Strategy 定义页（Structure/Opportunity/Allocations）、Portfolio 账户视角（Accounts/Trade ledger/Performance）并列。
+**策略实例 UI**：**策略实例**列表与详情作为 **Strategy 域**子视图（如 **Strategy → Instances**），与 Structure / Opportunity / Allocations 同一导航分组；数据模型与表结构见 [DATABASE.md](DATABASE.md) §2.24.11。API 侧可按 `strategy_instance_id` 筛选 GET /executions、GET /performance 等（具体路由以各 `backend/*` 应用为准）。
 
 **回测**：支持从 DB 按 gate_safety_strategy_id 加载配置，或继续使用“配置文件路径 + 覆盖”。回测结果可记录 **config_hash** 或 **gate_safety_strategy_id**，与 sink 历史中的 config_summary 对齐。
 

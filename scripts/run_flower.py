@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Start Celery Flower (web UI) for broker/worker/task monitoring.
 
-Uses the same Redis broker as ``run_celery.py`` (via ``BIFROST_CONFIG`` → ``servers.celery_app``).
+Uses the same Redis broker as ``run_celery.py`` (via ``BIFROST_CONFIG`` → ``backend.workers.celery_app``).
 
 Requires: ``pip install flower`` (listed in requirements.txt).
 
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         "-m",
         "celery",
         "-A",
-        "servers.celery_app",
+        "backend.workers.celery_app",
         "flower",
         "-l",
         "info",

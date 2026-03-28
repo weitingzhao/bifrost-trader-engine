@@ -8,7 +8,7 @@ import {
   fetchOpsHealthAtOrigin,
   type ApiOriginBase,
 } from '../api'
-import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/fetchTimeout'
+import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/shared/fetchTimeout'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { normalizeUtilizedServices, type UtilizedServiceRow } from '../utils/utilizedServices'
 

@@ -5,8 +5,7 @@ Connects to the Massive Options WS, dynamically subscribes to channels for
 Watchlist symbols, writes latest quotes to Redis, samples 1-minute bars to
 PostgreSQL (option_snapshots), and publishes update notifications.
 
-Architecture reference: docs/ARCHITECTURE.md §2.10.2
-Design document:       docs/plans/option-data-feed/WEBSOCKET_PLAN.md
+Architecture reference: docs/ARCHITECTURE.md §2.10.2 (WebSocket ingest behavior)
 
 Usage
 ─────

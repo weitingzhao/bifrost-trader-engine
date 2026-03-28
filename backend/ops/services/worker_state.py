@@ -10,7 +10,7 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.ops.models.schemas import WorkerDetail, WorkerStatus, WorkerSummary
-from servers.celery_app import (
+from backend.workers.celery_app import (
     CELERY_INSPECT_TIMEOUT_SEC,
     OPS_WORKER_PRESENCE_KEY_PREFIX,
 )

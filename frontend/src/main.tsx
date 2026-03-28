@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { initApiRouting } from './api/apiRouting'
+import { initApiRouting } from './api/shared/apiRouting'
 import App from './App'
 
 void initApiRouting().then(() => {

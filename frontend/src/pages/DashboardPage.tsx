@@ -6,9 +6,9 @@ import {
   fetchCeleryLogs,
   subscribeCeleryLogs,
   clearCeleryLogs,
-} from '../api/logs'
-import { postStop } from '../api/control'
-import { postMonitorStop, postCeleryStop } from '../api/monitor'
+} from '../api/monitor/logs'
+import { postStop } from '../api/monitor/control'
+import { postMonitorStop, postCeleryStop } from '../api/monitor/monitor'
 import {
   fetchOpsWorkers,
   fetchOpsAudit,
@@ -31,7 +31,7 @@ import {
   type OpsCapabilities,
   type WorkerProfileInfo,
   type QueueSummaryRow,
-} from '../api/ops'
+} from '../api/ops/ops'
 import { CeleryJobQueuesSection } from './celery/CeleryJobQueuesSection'
 
 export interface DashboardPageProps {

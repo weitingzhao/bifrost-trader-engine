@@ -1,0 +1,7 @@
+[Unit]
+Description=Bifrost HTTP API stack (Monitor + domain FastAPI apps)
+Wants=bifrost-server.service bifrost-massive.service bifrost-docs.service bifrost-ops.service bifrost-trading.service bifrost-strategy.service bifrost-portfolio.service bifrost-market.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 2: Standalone status/control server. Reads PostgreSQL; GET /status, GET /operations, POST /control/stop.
 
-On startup, reads server.port from config and frees the port if already in use (kills existing process), then starts the server (servers.app).
+On startup, reads server.port from config and frees the port if already in use (kills existing process), then starts the Monitor FastAPI app (``backend.monitor.app``).
 
 Default config: ``config/config.dev.yaml``. Use ``--prod`` or ``BIFROST_ENV=prod`` for ``config/config.prod.yaml``, or ``BIFROST_CONFIG`` / first positional path."""
 
@@ -222,7 +222,7 @@ def main() -> None:
     if not _free_port(port):
         print(f"Could not free port {port}. Run: lsof -i :{port}", file=sys.stderr)
         sys.exit(1)
-    from servers.app import run_server
+    from backend.monitor.app import run_server
     run_server(config, resolved_config_path=resolved_config_path)
 
 

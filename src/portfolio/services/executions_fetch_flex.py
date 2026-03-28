@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from src.connector.flex_client import fetch_trades, parse_trades_xml
 from src.portfolio.services.execution_utils import rows_span
-from servers.reader import write_account_executions_to_db
+from src.monitor.reader import write_account_executions_to_db
 
 logger = logging.getLogger(__name__)
 

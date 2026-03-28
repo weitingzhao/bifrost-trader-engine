@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from servers.sse_queue_utils import put_nowait_drop_oldest
+from src.core.sse.queue_utils import put_nowait_drop_oldest
 
 
 @pytest.mark.asyncio

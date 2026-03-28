@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from 'react'
 import type { IbAccountSnapshot, StatusResponse, Operation, RealtimeQuote } from './types'
 import {
   fetchStatus,
@@ -10,8 +10,8 @@ import {
   fetchBarsBenchmark,
   fetchBarsJobs,
 } from './api'
-import { postStop } from './api/control'
-import { postMonitorStop, postCeleryStop } from './api/monitor'
+import { postStop } from './api/monitor/control'
+import { postMonitorStop, postCeleryStop } from './api/monitor/monitor'
 import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
@@ -32,7 +32,7 @@ import { StrategyAllocationPage } from './pages/StrategyAllocationPage'
 import { GatesConfigPage } from './pages/GatesConfigPage'
 import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
-import { MainTabIcon, SubmenuIcon, type TabId } from './components/AppNavIcons'
+import { MainTabIcon, SubmenuIcon, NavGroupDivider, type TabId, type TabGroup } from './components/AppNavIcons'
 import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
 import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
@@ -670,11 +670,11 @@ export default function App() {
     }
   }, [benchmarkSymbols.join(',')])
 
-  const tabList: { id: TabId; label: string; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
-    { id: 'live', label: 'Live', lamp: liveLamp },
-    { id: 'strategy', label: 'Strategy', lamp: strategyLamp },
-    { id: 'replay', label: 'Portfolio' },
-    { id: 'research', label: 'Research' },
+  const tabList: { id: TabId; label: string; group: TabGroup; lamp?: 'green' | 'yellow' | 'red' | 'none' }[] = [
+    { id: 'live', label: 'Live', group: 'market', lamp: liveLamp },
+    { id: 'strategy', label: 'Strategy', group: 'strategy', lamp: strategyLamp },
+    { id: 'replay', label: 'Portfolio', group: 'portfolio' },
+    { id: 'research', label: 'Research', group: 'research' },
   ]
 
   /** Research dropdown: Discovery vs Risk & tools (same pattern as Strategy / Portfolio groups). */
@@ -866,157 +866,173 @@ export default function App() {
         <div className="app-header-left">
           <img src={logoImg} alt="Bifrost Trader" className="app-logo" />
           <nav className="app-tabs" aria-label="Live, Strategy, Portfolio, Research">
-            {tabList.map(({ id, label, lamp }) => {
+            {tabList.map(({ id, label, group, lamp }, idx) => {
+              const showDivider = idx > 0 && tabList[idx - 1].group !== group
+              const divider = showDivider ? <NavGroupDivider key={`div-${group}`} /> : null
               if (id === 'replay') {
                 return (
-                  <div key={id} className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
-                    <button
-                      type="button"
-                      className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
-                      onClick={() => setActiveTab(id)}
-                      aria-current={activeTab === id ? 'page' : undefined}
-                      aria-haspopup="menu"
-                    >
-                      <MainTabIcon id={id} />
-                      <span>{label}</span>
-                      <span className="app-tab-caret" aria-hidden>▾</span>
-                    </button>
-                    <div className="app-submenu" role="menu" aria-label="Portfolio sections">
-                      {portfolioSubmenuGroups.map((group) => (
-                        <div
-                          key={group.id}
-                          role="group"
-                          className="app-submenu-group"
-                          aria-labelledby={`portfolio-submenu-${group.id}`}
-                        >
-                          <div id={`portfolio-submenu-${group.id}`} className="app-submenu-group-label">
-                            {group.label}
+                  <Fragment key={id}>
+                    {divider}
+                    <div className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
+                      <button
+                        type="button"
+                        className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
+                        onClick={() => setActiveTab(id)}
+                        aria-current={activeTab === id ? 'page' : undefined}
+                        aria-haspopup="menu"
+                      >
+                        <MainTabIcon id={id} />
+                        <span>{label}</span>
+                        <span className="app-tab-caret" aria-hidden>▾</span>
+                      </button>
+                      <div className="app-submenu" role="menu" aria-label="Portfolio sections">
+                        {portfolioSubmenuGroups.map((group) => (
+                          <div
+                            key={group.id}
+                            role="group"
+                            className="app-submenu-group"
+                            aria-labelledby={`portfolio-submenu-${group.id}`}
+                          >
+                            <div id={`portfolio-submenu-${group.id}`} className="app-submenu-group-label">
+                              {group.label}
+                            </div>
+                            {group.items.map(({ id: viewId, label: viewLabel }) => (
+                              <button
+                                key={viewId}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={activeTab === 'replay' && portfolioView === viewId}
+                                className={`app-submenu-item ${activeTab === 'replay' && portfolioView === viewId ? 'active' : ''}`}
+                                onClick={() => {
+                                  setActiveTab('replay')
+                                  setPortfolioView(viewId)
+                                }}
+                              >
+                                <SubmenuIcon name={viewId} />
+                                <span>{viewLabel}</span>
+                              </button>
+                            ))}
                           </div>
-                          {group.items.map(({ id: viewId, label: viewLabel }) => (
-                            <button
-                              key={viewId}
-                              type="button"
-                              role="menuitemradio"
-                              aria-checked={activeTab === 'replay' && portfolioView === viewId}
-                              className={`app-submenu-item ${activeTab === 'replay' && portfolioView === viewId ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveTab('replay')
-                                setPortfolioView(viewId)
-                              }}
-                            >
-                              <SubmenuIcon name={viewId} />
-                              <span>{viewLabel}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  </Fragment>
                 )
               }
               if (id === 'research') {
                 return (
-                  <div key={id} className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
-                    <button
-                      type="button"
-                      className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
-                      onClick={() => setActiveTab(id)}
-                      aria-current={activeTab === id ? 'page' : undefined}
-                      aria-haspopup="menu"
-                    >
-                      <MainTabIcon id={id} />
-                      <span>{label}</span>
-                      <span className="app-tab-caret" aria-hidden>▾</span>
-                    </button>
-                    <div className="app-submenu" role="menu" aria-label="Research sections">
-                      {researchSubmenuGroups.map((group) => (
-                        <div
-                          key={group.id}
-                          role="group"
-                          className="app-submenu-group"
-                          aria-labelledby={`research-submenu-${group.id}`}
-                        >
-                          <div id={`research-submenu-${group.id}`} className="app-submenu-group-label">
-                            {group.label}
+                  <Fragment key={id}>
+                    {divider}
+                    <div className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
+                      <button
+                        type="button"
+                        className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
+                        onClick={() => setActiveTab(id)}
+                        aria-current={activeTab === id ? 'page' : undefined}
+                        aria-haspopup="menu"
+                      >
+                        <MainTabIcon id={id} />
+                        <span>{label}</span>
+                        <span className="app-tab-caret" aria-hidden>▾</span>
+                      </button>
+                      <div className="app-submenu" role="menu" aria-label="Research sections">
+                        {researchSubmenuGroups.map((group) => (
+                          <div
+                            key={group.id}
+                            role="group"
+                            className="app-submenu-group"
+                            aria-labelledby={`research-submenu-${group.id}`}
+                          >
+                            <div id={`research-submenu-${group.id}`} className="app-submenu-group-label">
+                              {group.label}
+                            </div>
+                            {group.items.map(({ id: viewId, label: viewLabel }) => (
+                              <button
+                                key={viewId}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={activeTab === 'research' && researchView === viewId}
+                                className={`app-submenu-item ${activeTab === 'research' && researchView === viewId ? 'active' : ''}`}
+                                onClick={() => {
+                                  setActiveTab('research')
+                                  setResearchView(viewId)
+                                }}
+                              >
+                                <SubmenuIcon name={viewId} />
+                                <span>{viewLabel}</span>
+                              </button>
+                            ))}
                           </div>
-                          {group.items.map(({ id: viewId, label: viewLabel }) => (
-                            <button
-                              key={viewId}
-                              type="button"
-                              role="menuitemradio"
-                              aria-checked={activeTab === 'research' && researchView === viewId}
-                              className={`app-submenu-item ${activeTab === 'research' && researchView === viewId ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveTab('research')
-                                setResearchView(viewId)
-                              }}
-                            >
-                              <SubmenuIcon name={viewId} />
-                              <span>{viewLabel}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  </Fragment>
                 )
               }
               if (id === 'strategy') {
                 return (
-                  <div key={id} className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
-                    <button
-                      type="button"
-                      className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
-                      onClick={() => setActiveTab(id)}
-                      aria-current={activeTab === id ? 'page' : undefined}
-                      aria-haspopup="menu"
-                    >
-                      {lamp != null && (
-                        <span className={`app-tab-lamp-icon lamp-icon ${lamp}`} aria-hidden>
-                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                            <path d="M2 17l10 5 10-5" />
-                          </svg>
-                        </span>
-                      )}
-                      <span>{label}</span>
-                      <span className="app-tab-caret" aria-hidden>▾</span>
-                    </button>
-                    <div className="app-submenu" role="menu" aria-label="Strategy sections">
-                      {strategySubmenuGroups.map((group) => (
-                        <div
-                          key={group.id}
-                          role="group"
-                          className="app-submenu-group"
-                          aria-labelledby={`strategy-submenu-${group.id}`}
-                        >
-                          <div id={`strategy-submenu-${group.id}`} className="app-submenu-group-label">
-                            {group.label}
+                  <Fragment key={id}>
+                    {divider}
+                    <div className={`app-tab-group ${activeTab === id ? 'active' : ''}`}>
+                      <button
+                        type="button"
+                        className={`app-tab app-tab-has-menu ${activeTab === id ? 'active' : ''}`}
+                        onClick={() => setActiveTab(id)}
+                        aria-current={activeTab === id ? 'page' : undefined}
+                        aria-haspopup="menu"
+                      >
+                        {lamp != null && (
+                          <span className={`app-tab-lamp-icon lamp-icon ${lamp}`} aria-hidden>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                              <path d="M2 17l10 5 10-5" />
+                            </svg>
+                          </span>
+                        )}
+                        <span>{label}</span>
+                        <span className="app-tab-caret" aria-hidden>▾</span>
+                      </button>
+                      <div className="app-submenu" role="menu" aria-label="Strategy sections">
+                        {strategySubmenuGroups.map((group) => (
+                          <div
+                            key={group.id}
+                            role="group"
+                            className="app-submenu-group"
+                            aria-labelledby={`strategy-submenu-${group.id}`}
+                          >
+                            <div id={`strategy-submenu-${group.id}`} className="app-submenu-group-label">
+                              {group.label}
+                            </div>
+                            {group.items.map(({ id: viewId, label: viewLabel }) => (
+                              <button
+                                key={viewId}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={activeTab === 'strategy' && strategyView === viewId}
+                                className={`app-submenu-item ${activeTab === 'strategy' && strategyView === viewId ? 'active' : ''}`}
+                                onClick={() => {
+                                  setActiveTab('strategy')
+                                  setStrategyView(viewId)
+                                }}
+                              >
+                                <SubmenuIcon name={viewId} />
+                                <span>{viewLabel}</span>
+                              </button>
+                            ))}
                           </div>
-                          {group.items.map(({ id: viewId, label: viewLabel }) => (
-                            <button
-                              key={viewId}
-                              type="button"
-                              role="menuitemradio"
-                              aria-checked={activeTab === 'strategy' && strategyView === viewId}
-                              className={`app-submenu-item ${activeTab === 'strategy' && strategyView === viewId ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveTab('strategy')
-                                setStrategyView(viewId)
-                              }}
-                            >
-                              <SubmenuIcon name={viewId} />
-                              <span>{viewLabel}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  </Fragment>
                 )
               }
 
-              return renderTabButton(id, label, lamp)
+              return (
+                <Fragment key={id}>
+                  {divider}
+                  {renderTabButton(id, label, lamp)}
+                </Fragment>
+              )
             })}
           </nav>
         </div>

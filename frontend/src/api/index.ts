@@ -1,4 +1,4 @@
-export { fetchStatus, fetchHealth, fetchOperations, fetchOpenOrders } from './status'
+export { fetchStatus, fetchHealth, fetchOperations, fetchOpenOrders } from './monitor/status'
 export {
   postSuspend,
   postResume,
@@ -11,7 +11,7 @@ export {
   postReleaseTickerSubscriptions,
   postInitTickerSubscriptions,
   postStop,
-} from './control'
+} from './monitor/control'
 export {
   postExecutionsFetch,
   postExecutionsFetchFlex,
@@ -22,7 +22,7 @@ export {
   updateExecution,
   deleteExecution,
   fetchExecutionLinkCandidates,
-} from './executions'
+} from './trading/executions'
 export {
   postBarsFetch,
   fetchBarsLatest,
@@ -40,16 +40,16 @@ export {
   postIndicesRefresh,
   fetchBarsBenchmark,
   deleteBarsForSymbol,
-} from './bars'
-export type { BarsJob } from './bars'
+} from './ops/bars'
+export type { BarsJob } from './ops/bars'
 export {
   postWatchlistEodRefresh,
   fetchWatchlistEodRefreshPreview,
   fetchWatchlist,
   postWatchlist,
   deleteWatchlist,
-} from './watchlist'
-export type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from './watchlist'
+} from './market/watchlist'
+export type { WatchlistEodRefreshPreviewItem, WatchlistEodRefreshPreviewResponse } from './market/watchlist'
 export {
   fetchOptionExpirations,
   fetchOptionSnapshot,
@@ -90,7 +90,7 @@ export {
   fetchMaxPainCompute,
   fetchMaxPainComputeHistory,
   fetchIvTermStructure,
-} from './research'
+} from './research/research'
 export type {
   OptionSnapshotRow,
   IvTermStructurePoint,
@@ -115,7 +115,7 @@ export type {
   LiquiditySummaryResponse,
   RelativeValueResponse,
   OptionSnapshotsPgResult,
-} from './research'
+} from './research/research'
 export {
   postSetHeartbeatInterval,
   postIbConfig,
@@ -123,8 +123,8 @@ export {
   fetchMarketHolidays,
   postMarketHoliday,
   deleteMarketHoliday,
-} from './config'
-export type { MarketHolidayRow } from './config'
+} from './monitor/config'
+export type { MarketHolidayRow } from './monitor/config'
 export {
   fetchStructures,
   fetchStructure,
@@ -164,15 +164,15 @@ export {
   createGateSafety,
   updateGateSafety,
   postActiveStrategy,
-} from './strategies'
+} from './strategy/strategies'
 export {
   fetchStrategyInstances,
   fetchStrategyInstance,
   createStrategyInstance,
   updateStrategyInstance,
   deleteStrategyInstance,
-} from './strategyInstances'
-export type { StrategyInstancesParams, CreateStrategyInstancePayload } from './strategyInstances'
+} from './strategy/strategyInstances'
+export type { StrategyInstancesParams, CreateStrategyInstancePayload } from './strategy/strategyInstances'
 export type {
   StrategyStructure,
   StructureLeg,
@@ -204,8 +204,8 @@ export type {
   StrategyTemplateRow,
   StrategyTemplateDetail,
   StrategyDimRow,
-} from './strategies'
-export { fetchQuotes, subscribeQuotes } from './quotes'
+} from './strategy/strategies'
+export { fetchQuotes, subscribeQuotes } from './market/quotes'
 export {
   fetchPositionCategories,
   postPositionCategory,
@@ -215,7 +215,7 @@ export {
   putPositionCategoryTag,
   fetchMarketStreamsSymbolOrder,
   putMarketStreamsSymbolOrder,
-} from './positionCategories'
+} from './portfolio/positionCategories'
 export {
   fetchCeleryLogs,
   subscribeCeleryLogs,
@@ -241,14 +241,14 @@ export {
   trimCeleryLogs,
   trimDaemonLogs,
   trimServerLogs,
-} from './logs'
+} from './monitor/logs'
 export {
   postMonitorStop,
   postMonitorReleaseIb,
   postCeleryStop,
   postMonitorConnect,
-} from './monitor'
-export { fetchRiskSummary, fetchPerformance, getTransactions, postTransactionsFetch } from './performance'
+} from './monitor/monitor'
+export { fetchRiskSummary, fetchPerformance, getTransactions, postTransactionsFetch } from './trading/performance'
 export {
   fetchOpsHealth,
   fetchOpsHealthAtOrigin,
@@ -256,5 +256,5 @@ export {
   fetchOpsWorkerDetail,
   fetchOpsAudit,
   fetchQueueSummary,
-} from './ops'
-export type { QueueSummaryRow } from './ops'
+} from './ops/ops'
+export type { QueueSummaryRow } from './ops/ops'

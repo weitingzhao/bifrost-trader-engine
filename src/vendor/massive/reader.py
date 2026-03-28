@@ -291,7 +291,7 @@ def _publish_massive_job_redis(job_id: int, status: str, result: Optional[Dict[s
     try:
         import redis
 
-        from servers.celery_app import broker_url
+        from backend.workers.celery_app import broker_url
 
         r = redis.from_url(broker_url, socket_connect_timeout=2.0)
         r.publish(

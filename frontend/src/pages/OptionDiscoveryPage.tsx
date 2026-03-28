@@ -895,7 +895,7 @@ export function OptionDiscoveryPage({
     setTermError(null)
     setTermPoints([])
     try {
-      const { fetchIvTermStructure } = await import('../api/research')
+      const { fetchIvTermStructure } = await import('../api/research/research')
       const res = await fetchIvTermStructure(sym, ordered.slice(0, IV_TERM_MAX_EXPIRATIONS), 'massive')
       if (!res.ok) {
         setTermError(res.error ?? 'Failed to load IV term structure')

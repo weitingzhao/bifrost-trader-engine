@@ -57,6 +57,16 @@ redis:
   host: "127.0.0.1"
   port: 6379
 
+server:
+  port: 8765           # Monitor API (run_server.py)
+  massive_port: 8766   # massive/research API server
+  docs_port: 8767      # docs API server
+  ops_port: 8768       # ops API server
+  trading_port: 8769   # trading API server
+  strategy_port: 8770  # strategy API server
+  portfolio_port: 8771 # portfolio API server
+  market_port: 8772    # market API server
+
 frontend:
   port: 5173
   # Optional: canonical URL for this deployment; bifrost-server GET /health returns it as frontend_public_origin (API Health UI).

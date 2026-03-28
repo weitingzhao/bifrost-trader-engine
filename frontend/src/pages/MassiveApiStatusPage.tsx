@@ -6,12 +6,12 @@ import {
   type MassiveApiHealthResponse,
   type MassiveStatusResponse,
 } from '../api'
-import { getMassiveApiBase } from '../api/apiRouting'
+import { getMassiveApiBase } from '../api/shared/apiRouting'
 import {
   clearMassiveLogs,
   fetchMassiveLogs,
   subscribeMassiveLogs,
-} from '../api/logs'
+} from '../api/monitor/logs'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'

@@ -11,7 +11,7 @@ import os
 import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import asyncio
 from fastapi import FastAPI, HTTPException, Query
@@ -22,37 +22,9 @@ from fastapi.staticfiles import StaticFiles
 from src.app.config import config_profile_from_resolved_path, get_effective_ib_config
 from src.connector.flex_client import fetch_cash_transactions, fetch_trades
 from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
-from servers.reader import (
-    StatusReader,
-    write_ohlc_bars_to_db,
-    write_stock_bars,
-    delete_stock_bars_for_symbol,
-    write_account_executions_to_db,
-    update_execution_commission,
-    insert_one_execution,
-    update_one_execution,
-    delete_one_execution,
-    insert_job_bars_backfill,
-    get_job_bars_backfill_list,
-    get_job_bars_backfill,
-    delete_job_bars_backfill,
-    delete_all_job_bars_backfill,
-    trim_job_bars_backfill,
-    get_job_bars_backfill_last_updated,
-    upsert_account_transactions,
-)
+from src.monitor.reader import StatusReader
 from src.connector.flex_client import parse_trades_xml
 from src.monitor.self_check import derive_daemon_self_check, derive_self_check
-from servers.sse_queue_utils import put_nowait_drop_oldest
-
-try:
-    from src.core.realtime import (
-        create_reader_from_config as create_redis_quotes,
-        run_subscribe_loop as redis_run_subscribe_loop,
-    )
-except ImportError:
-    create_redis_quotes = None  # type: ignore
-    redis_run_subscribe_loop = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +60,11 @@ def create_app(
     reader: StatusReader,
     control_via_db: Optional[dict],
     data_lag_threshold_ms: Optional[float],
-    redis_quotes: Optional[Any] = None,
     status_cfg_for_read: Optional[dict] = None,
     resolved_config_path: Optional[str] = None,
     merged_config: Optional[dict] = None,
 ) -> FastAPI:
-    """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*).
+    """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB).
     status_cfg_for_read: when set, read paths that use DB without control channel (e.g. only PGHOST or postgres configured without sink=postgres). Job queue APIs are on Ops: GET /ops/bars/jobs.
     """
     app = FastAPI(
@@ -108,14 +79,6 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.state.redis_quotes = redis_quotes
-    # SSE 实时行情：每个连接一个 asyncio.Queue；Redis 订阅线程收到消息后广播到各 queue
-    app.state.sse_queues: list = []
-    app.state.sse_lock = threading.Lock()
-    app.state._sse_loop: Optional[asyncio.AbstractEventLoop] = None
-    app.state._redis_subscriber_stop = threading.Event()
-    app.state._redis_subscriber_thread: Optional[threading.Thread] = None
-
     # Daemon console log stream (Redis Stream): reader thread + per-connection queues
     app.state.daemon_log_queues: list = []
     app.state.daemon_log_lock = threading.Lock()
@@ -192,6 +155,22 @@ def create_app(
         app.state.bifrost_ops_port = int(_scfg.get("ops_port") or 8768)
     except (TypeError, ValueError):
         app.state.bifrost_ops_port = 8768
+    try:
+        app.state.bifrost_trading_port = int(_scfg.get("trading_port") or 8769)
+    except (TypeError, ValueError):
+        app.state.bifrost_trading_port = 8769
+    try:
+        app.state.bifrost_strategy_port = int(_scfg.get("strategy_port") or 8770)
+    except (TypeError, ValueError):
+        app.state.bifrost_strategy_port = 8770
+    try:
+        app.state.bifrost_portfolio_port = int(_scfg.get("portfolio_port") or 8771)
+    except (TypeError, ValueError):
+        app.state.bifrost_portfolio_port = 8771
+    try:
+        app.state.bifrost_market_port = int(_scfg.get("market_port") or 8772)
+    except (TypeError, ValueError):
+        app.state.bifrost_market_port = 8772
 
     app.state.bifrost_utilized_services = _utilized_services_from_config(merged_config)
 
@@ -199,33 +178,15 @@ def create_app(
         config_router,
         core_router,
         daemon_router,
-        executions_router,
         logs_router,
-        market_router,
-        portfolio_model_router,
-        quotes_router,
-        reports_router,
-        research_router,
         status_router,
-        strategies_router,
-        watchlist_router,
     )
-    from backend.monitor.routers.research_sidecars import router as research_sidecars_router
 
     app.include_router(core_router)
-    app.include_router(quotes_router)
     app.include_router(logs_router)
     app.include_router(status_router)
-    app.include_router(executions_router)
-    app.include_router(market_router)
-    app.include_router(watchlist_router)
-    app.include_router(research_router)
-    app.include_router(research_sidecars_router)
-    app.include_router(reports_router)
     app.include_router(daemon_router)
     app.include_router(config_router)
-    app.include_router(strategies_router)
-    app.include_router(portfolio_model_router)
 
     _root = Path(__file__).resolve().parent.parent
     _dist_assets = _root / "frontend" / "dist" / "assets"
@@ -236,8 +197,7 @@ def create_app(
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        """初始化监控端 IB 客户端（账户 + 行情），使用 config.yaml 的 host/port/client_id。若启用 Redis 行情，启动 SUBSCRIBE 线程供 SSE 推送。"""
-        app.state._sse_loop = asyncio.get_running_loop()
+        """初始化监控端 IB 客户端（账户 + 行情），使用 config.yaml 的 host/port/client_id。"""
         skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
         if skip_ib:
             logger.info(
@@ -332,49 +292,10 @@ def create_app(
                 app.state.market_ib_client = None
                 app.state.account_ib_client_2 = None
 
-        # R-RM* SSE: 若 Redis 行情可用，启动 SUBSCRIBE 线程，收到 daemon:quotes 后广播到各 SSE 连接的 queue
-        rq = getattr(app.state, "redis_quotes", None)
-        if (
-            redis_run_subscribe_loop
-            and rq is not None
-            and getattr(rq, "available", False)
-        ):
-
-            def _broadcast_quote(quote: Dict[str, Any]) -> None:
-                loop = getattr(app.state, "_sse_loop", None)
-                if loop is None:
-                    return
-                with app.state.sse_lock:
-                    queues = list(app.state.sse_queues)
-                for q in queues:
-                    # put_nowait runs inside the loop callback; QueueFull must be handled there (put_nowait_drop_oldest).
-                    loop.call_soon_threadsafe(put_nowait_drop_oldest, q, quote)
-
-            app.state._redis_subscriber_stop.clear()
-            app.state._redis_subscriber_thread = threading.Thread(
-                target=redis_run_subscribe_loop,
-                args=(rq, _broadcast_quote, app.state._redis_subscriber_stop),
-                daemon=True,
-                name="redis-quotes-subscriber",
-            )
-            app.state._redis_subscriber_thread.start()
-            logger.info("Redis quotes SSE subscriber thread started")
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        """优雅断开监控端 IB 客户端，并停止 Redis 订阅线程。"""
-        app.state._redis_subscriber_stop.set()
-        if getattr(app.state, "_redis_subscriber_thread", None) is not None:
-            app.state._redis_subscriber_thread.join(timeout=2.0)
-            app.state._redis_subscriber_thread = None
-        try:
-            client: Optional[AccountIbClient] = getattr(
-                app.state, "account_ib_client", None
-            )
-            if client is not None:
-                await client.disconnect()
-        except Exception:
-            pass
+        """优雅断开监控端 IB 客户端。"""
         try:
             client: Optional[AccountIbClient] = getattr(
                 app.state, "account_ib_client", None
@@ -389,12 +310,6 @@ def create_app(
             )
             if mclient is not None:
                 await mclient.disconnect()
-        except Exception:
-            pass
-        try:
-            rq = getattr(app.state, "redis_quotes", None)
-            if rq is not None and getattr(rq, "close", None):
-                rq.close()
         except Exception:
             pass
 
@@ -420,14 +335,10 @@ def run_server(config: dict, resolved_config_path: Optional[str] = None) -> None
 
     reader = StatusReader(config)
     control_via_db = config if use_db_control else None
-    redis_quotes = None
-    if create_redis_quotes:
-        redis_quotes = create_redis_quotes(config)
     app = create_app(
         reader,
         control_via_db,
         data_lag_ms,
-        redis_quotes=redis_quotes,
         status_cfg_for_read=status_cfg_for_read,
         resolved_config_path=resolved_config_path,
         merged_config=config,

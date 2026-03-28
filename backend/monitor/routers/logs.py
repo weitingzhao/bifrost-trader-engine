@@ -18,7 +18,7 @@ from backend.monitor.routers.deps import (
     SERVER_LOG_STREAM_KEY,
     daemon_log_redis_url,
 )
-from servers.sse_queue_utils import put_nowait_drop_oldest
+from src.core.sse.queue_utils import put_nowait_drop_oldest
 
 logger = logging.getLogger(__name__)
 

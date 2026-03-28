@@ -53,7 +53,7 @@ class AgentExecutor:
         try:
             import redis
 
-            from servers.celery_app import (
+            from backend.workers.celery_app import (
                 WORKER_IB_STATUS_KEY,
                 WORKER_IB_STATUS_TTL_SEC,
                 WORKER_STOP_REQUESTED_KEY,

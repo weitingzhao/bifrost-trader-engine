@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse, IbAccountSnapshot } from '../types'
-import { apiBase } from '../api/constants'
+import { apiBase } from '../api/shared/constants'
 import { fmtUsd } from '../utils/format'
 import {
   CAR_SECTION_INTRO,

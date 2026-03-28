@@ -6,7 +6,7 @@
 
 ## 前置条件
 
-1. **后端已启动**：API 服务（如 `servers/app.py`）可访问，且已配置数据库（`control_via_db`）。
+1. **后端已启动**：相关 FastAPI 进程已启动（通常含 **Monitor** `run_server.py` 与 **Strategy** `run_server_strategy.py` 等，视前端 API 基址配置），且已配置数据库。
 2. **前端已启动**：例如 `./scripts/run_frontend.sh dev`，浏览器打开对应地址。
 3. **至少有一条结构策略**：机会策略必须关联一条 Structure；若库中还没有，需先在 Strategy 页的「Strategy structures」区块创建一条。
 

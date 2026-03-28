@@ -31,15 +31,35 @@ redis:
   port: 6379
 
 server:
+  port: 8765 # Monitor API (run_server.py); omit only if you rely on script default
   massive_port: 8766
   docs_port: 8767
   ops_port: 8768
+  trading_port: 8769   # trading API server
+  strategy_port: 8770  # strategy API server
+  portfolio_port: 8771 # portfolio API server
+  market_port: 8772    # market API server
 
 frontend:
   port: 5173
-  # Optional: Settings → API Health (GET /health: frontend_dev_path / frontend_prod_path).
-  # dev_path: "http://192.168.x.x"     # host-only OK — server appends :port from ``port`` (Vite). Or full URL with port.
-  # prod_path: "https://your-prod-host" # no port when nginx :80/:443
+  # Optional: Settings → API Health + browser API routing (GET /health).
+  # When config_profile is dev and dev_path is set, the UI builds trading/strategy/portfolio/market
+  # origins as this host + server.trading_port / strategy_port / portfolio_port / market_port from YAML
+  # even if utilized.services omits those rows. Massive/Docs still follow utilized.services.
+  # dev_path: "http://192.168.x.x"     # host — ports come from server.*_port in this file
+  # prod_path: "https://your-prod-host"
+
+# Optional: per-service env for API routing (see GET /health utilized_services). Omit split rows if you use frontend.dev_path in dev.
+# utilized:
+#   services:
+#     - server:"dev"
+#     - massive:"dev"
+#     - docs:"dev"
+#     - ops:"dev"
+#     - trading:"dev"
+#     - strategy:"dev"
+#     - portfolio:"dev"
+#     - market:"dev"
 
 # Massive / Polygon options research (REST + Celery queue `massive`). Do not commit real API keys.
 # Prefer env: MASSIVE_API_KEY or POLYGON_API_KEY

@@ -7,11 +7,11 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from servers.reader import (
+from src.monitor.reader import (
     write_flex_config,
     write_ib_config,
 )
-from servers.reader.settings import write_active_strategy_and_gates
+from src.monitor.reader.settings import write_active_strategy_and_gates
 
 logger = logging.getLogger(__name__)
 

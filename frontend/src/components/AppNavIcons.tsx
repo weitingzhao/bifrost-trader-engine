@@ -1,4 +1,10 @@
 export type TabId = 'live' | 'replay' | 'research' | 'strategy' | 'settings'
+export type TabGroup = 'market' | 'portfolio' | 'research' | 'strategy'
+
+/** Vertical divider rendered between navigation groups in the header nav. */
+export function NavGroupDivider() {
+  return <span className="app-tab-nav-divider" aria-hidden />
+}
 
 /** Small outline icon for submenu items (Portfolio & Research). */
 export function SubmenuIcon({ name }: { name: string }) {

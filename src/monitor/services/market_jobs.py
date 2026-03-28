@@ -111,7 +111,7 @@ def enqueue_job_bars_backfill(
         span_hours,
     )
     try:
-        from servers.bars_tasks import backfill_bars
+        from src.bars.tasks import backfill_bars
 
         backfill_bars.apply_async(
             args=[symbol, period],

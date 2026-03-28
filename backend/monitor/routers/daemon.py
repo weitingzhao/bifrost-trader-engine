@@ -15,7 +15,7 @@ from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
 from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
-from servers.reader import (
+from src.monitor.reader import (
     sync_accounts_snapshot_to_db,
     write_control_command,
     write_heartbeat_interval,
@@ -100,7 +100,7 @@ def post_celery_stop() -> JSONResponse:
     Uses a short Redis timeout so the request does not hang if the broker is unreachable."""
     try:
         import redis
-        from servers.celery_app import (
+        from backend.workers.celery_app import (
             WORKER_IB_STATUS_KEY,
             WORKER_IB_STATUS_TTL_SEC,
             WORKER_STOP_REQUESTED_KEY,

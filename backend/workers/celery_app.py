@@ -1,8 +1,8 @@
 """Celery app for bars backfill worker. Broker and result backend use Redis from config.
 
 Usage:
-  celery -A servers.celery_app worker -l info -Q bars --pool=solo
-  celery -A servers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon option sync (no IB)
+  celery -A backend.workers.celery_app worker -l info -Q bars --pool=solo
+  celery -A backend.workers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon option sync (no IB)
 
 Or: python scripts/run_celery.py [config_path]
 
@@ -282,7 +282,7 @@ def _start_stop_polling() -> None:
                             pass
                     # connection closed; disconnect IB and exit
                     try:
-                        from servers.bars_tasks import disconnect_worker_ib_sync
+                        from src.bars.tasks import disconnect_worker_ib_sync
                         disconnect_worker_ib_sync(timeout=5.0)
                     except Exception as e:
                         logger.warning("Worker stop: disconnect_worker_ib_sync failed: %s", e)

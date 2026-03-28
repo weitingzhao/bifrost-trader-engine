@@ -5,11 +5,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from servers.reader import gate_safety_write as gate_safety_write_module
-from servers.reader import strategy_allocation_write as strategy_allocation_write_module
-from servers.reader import strategy_opportunity_write as strategy_opportunity_write_module
-from servers.reader import strategy_structure_write as strategy_structure_write_module
-from servers.reader import template_config_write as template_config_write_module
+from src.monitor.reader import gate_safety_write as gate_safety_write_module
+from src.monitor.reader import strategy_allocation_write as strategy_allocation_write_module
+from src.monitor.reader import strategy_opportunity_write as strategy_opportunity_write_module
+from src.monitor.reader import strategy_structure_write as strategy_structure_write_module
+from src.monitor.reader import template_config_write as template_config_write_module
 from src.monitor.schemas.strategies import (
     AllocationBody,
     AllocationUpdateBody,

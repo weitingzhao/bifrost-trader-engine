@@ -1,4 +1,4 @@
-"""Celery worker console: Redis Stream XREAD (same keys as workers writing via servers.celery_app)."""
+"""Celery worker console: Redis Stream XREAD (same keys as workers writing via backend.workers.celery_app)."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def celery_log_reader_single_stream(
                         )
                         loop = getattr(app_ref.state, "_celery_log_loop", None)
                         if loop and not loop.is_closed():
-                            from servers.sse_queue_utils import put_nowait_drop_oldest
+                            from src.core.sse.queue_utils import put_nowait_drop_oldest
 
                             loop.call_soon_threadsafe(put_nowait_drop_oldest, queue, line)
             except redis.ConnectionError:

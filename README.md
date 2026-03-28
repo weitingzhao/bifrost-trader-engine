@@ -56,13 +56,13 @@ Run as a daemon via systemd, supervisor, or Docker.
 
 ### Phase 2: Status server (monitoring and control)
 
-The **status server** (monitoring and control) is a **separate process** from the trading daemon (RE-5). **Default deployment** is **cross-host**: status server on one machine (monitoring host), daemon (`run_engine.py`) on another (trading host, same machine as IB). The daemon must run on the same machine as IB; the status server can run anywhere that can reach PostgreSQL. Control (stop/flatten/suspend/resume) uses **PostgreSQL** (`daemon_control`, `daemon_run_status`); no shared filesystem is required. Run the status server; it reads PostgreSQL (`daemon_auto_status_current`, `daemon_auto_operations`) and exposes HTTP API.
+The **Monitor API** (`scripts/run_server.py`, package `backend.monitor`) is a **separate process** from the trading daemon (RE-5). **Default deployment** is **cross-host**: monitoring APIs on one machine, daemon (`run_engine.py`) on another (trading host, same machine as IB). The daemon must run on the same machine as IB; the API processes can run anywhere that can reach PostgreSQL. Control (stop/flatten/suspend/resume) uses **PostgreSQL** (`daemon_control`, `daemon_run_status`); no shared filesystem is required. The full UI also uses **additional FastAPI apps** (Ops, Trading, Strategy, etc.); see **[docs/index.md](docs/index.md)**「项目组成与启动」and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4.0.
 
 **Config** (in `config/config.yaml`):
 
 - `postgres`: same DB config as Phase 1; control uses the same DB and tables (see [docs/DATABASE.md](docs/DATABASE.md) §2.4–2.5).
 - `server.port`: HTTP port (default 8765).
-- **API only**: Port 8765 serves FastAPI (GET /status, GET /operations, POST /control/*). **Monitoring UI** is the separate frontend in `frontend/` (e.g. `cd frontend && npm run dev` then open the dev server URL, or build and deploy the frontend elsewhere; it calls this API). **Start** the daemon on the **daemon host** (Mac Mini or Linux server): run `python scripts/run_engine.py config/config.yaml`. TWS runs on a dedicated Mac Mini; the daemon connects to it (same machine or over network from Linux). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §6.1 and §2.3–2.4 (run environment).
+- **Monitor API** (default port 8765): GET /status, GET /operations, POST /control/*, etc. **Monitoring UI** is the frontend in `frontend/`; it may call **multiple backend ports** (see `config` `server.*_port` in `config/config.dev.yaml.example`). **Start** the daemon on the **daemon host**: `python scripts/run_engine.py`. TWS runs on a dedicated Mac Mini; the daemon connects over the network when on Linux. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §4.0, §6.1 and §2.3–2.4.
 
 **Start**:
 

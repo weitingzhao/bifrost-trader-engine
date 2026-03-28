@@ -4,12 +4,12 @@ import {
   postDocsShutdown,
   type DocsApiHealthResponse,
 } from '../api'
-import { getDocsApiBase } from '../api/apiRouting'
+import { getDocsApiBase } from '../api/shared/apiRouting'
 import {
   clearDocsLogs,
   fetchDocsLogs,
   subscribeDocsLogs,
-} from '../api/logs'
+} from '../api/monitor/logs'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'

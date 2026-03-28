@@ -1,13 +1,14 @@
 """Status endpoints: run status, operations, risk summary."""
 
 import logging
+import os
 import threading
 import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
-from servers.reader import get_job_bars_backfill_last_updated
+from src.monitor.reader import get_job_bars_backfill_last_updated
 from src.monitor.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,12 @@ _status_cache_lock = threading.Lock()
 _status_cache: Dict[str, Any] = {}
 _status_cache_ts: float = 0.0
 _STATUS_CACHE_TTL = 2.0
+
+# GET /status polls often; Celery control.inspect waits the full timeout when no worker replies.
+# Ops uses longer CELERY_INSPECT_TIMEOUT_SEC in celery_app (e.g. 15s) for worker snapshots.
+_STATUS_CELERY_INSPECT_TIMEOUT_SEC = float(
+    os.environ.get("BIFROST_STATUS_CELERY_INSPECT_TIMEOUT_SEC", "2.0")
+)
 
 
 @router.get("/status")
@@ -205,15 +212,14 @@ def get_status(request: Request) -> Dict[str, Any]:
         rq = getattr(app.state, "redis_quotes", None)
         payload["redis_quotes_connected"] = bool(rq and getattr(rq, "available", False))
         try:
-            from servers.celery_app import (
-                CELERY_INSPECT_TIMEOUT_SEC,
+            from backend.workers.celery_app import (
                 get_celery_broker_connected,
                 get_worker_ib_status,
                 get_celery_workers_ping,
             )
 
             payload["celery_broker_connected"] = get_celery_broker_connected()
-            workers_ping = get_celery_workers_ping(timeout=CELERY_INSPECT_TIMEOUT_SEC)
+            workers_ping = get_celery_workers_ping(timeout=_STATUS_CELERY_INSPECT_TIMEOUT_SEC)
             payload["celery_workers"] = workers_ping
             worker_ib = get_worker_ib_status()
             payload["celery_worker_ib_connected"] = bool(

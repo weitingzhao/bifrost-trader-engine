@@ -790,6 +790,16 @@ body::before {
   gap: var(--space-2);
 }
 
+.app-tab-nav-divider {
+  display: inline-block;
+  width: 1px;
+  height: 1.25rem;
+  background: var(--border-muted, rgba(255, 255, 255, 0.15));
+  margin: 0 var(--space-1);
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 .app-tab {
   display: inline-flex;
   align-items: center;
