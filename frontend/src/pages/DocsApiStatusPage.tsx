@@ -245,7 +245,7 @@ export function DocsApiStatusPage({ embeddedInSettings }: DocsApiStatusPageProps
         <section className="replay-section" aria-labelledby="docs-api-upstream-head">
           <h3 id="docs-api-upstream-head" className="page-title-with-tooltip">
             Upstream OpenAPI sources
-            <InfoTooltip text="URLs the Docs server uses to fetch and merge OpenAPI JSON (Main API and Massive API). Set via YAML ports or BIFROST_DOCS_MAIN_OPENAPI / BIFROST_DOCS_MASSIVE_OPENAPI." />
+            <InfoTooltip text="URLs the Docs server uses to fetch and merge OpenAPI JSON (Main, Massive, Research). Set via YAML ports or BIFROST_DOCS_MAIN_OPENAPI / BIFROST_DOCS_MASSIVE_OPENAPI / BIFROST_DOCS_RESEARCH_OPENAPI." />
           </h3>
           <table className="massive-api-kv-table">
             <tbody>
@@ -256,6 +256,10 @@ export function DocsApiStatusPage({ embeddedInSettings }: DocsApiStatusPageProps
               <tr>
                 <td className="massive-api-kv-label">Massive API</td>
                 <td className="massive-api-kv-path">{health?.massive_url || '–'}</td>
+              </tr>
+              <tr>
+                <td className="massive-api-kv-label">Research API</td>
+                <td className="massive-api-kv-path">{health?.research_url || '–'}</td>
               </tr>
             </tbody>
           </table>

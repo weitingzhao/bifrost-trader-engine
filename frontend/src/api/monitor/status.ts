@@ -36,6 +36,8 @@ export async function fetchHealth(options?: { timeoutMs?: number }): Promise<{
   /** From YAML server.ops_port — Ops FastAPI port. */
   ops_port?: number
   docs_port?: number
+  /** From YAML server.research_port — Research API (option discovery, max pain). */
+  research_port?: number
   /** From YAML utilized.services — which sidecar stack each service uses (e.g. dev vs prod). */
   utilized_services?: Array<{ service: string; env: string }>
 }> {

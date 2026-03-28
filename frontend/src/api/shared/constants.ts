@@ -3,6 +3,7 @@ import {
   getMassiveApiBase,
   getDocsApiBase,
   getOpsApiBase,
+  getResearchApiBase,
   initApiRouting,
   joinServiceBase,
 } from './apiRouting'
@@ -12,6 +13,7 @@ export {
   getMassiveApiBase,
   getDocsApiBase,
   getOpsApiBase,
+  getResearchApiBase,
   initApiRouting,
   joinServiceBase,
 }

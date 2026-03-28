@@ -171,6 +171,10 @@ def create_app(
         app.state.bifrost_market_port = int(_scfg.get("market_port") or 8772)
     except (TypeError, ValueError):
         app.state.bifrost_market_port = 8772
+    try:
+        app.state.bifrost_research_port = int(_scfg.get("research_port") or 8773)
+    except (TypeError, ValueError):
+        app.state.bifrost_research_port = 8773
 
     app.state.bifrost_utilized_services = _utilized_services_from_config(merged_config)
 

@@ -25,6 +25,7 @@ def _make_client(
     app = create_docs_app(
         "http://127.0.0.1:1/openapi.json",
         "http://127.0.0.1:2/research/massive/openapi.json",
+        "http://127.0.0.1:3/openapi.json",
         config=config or {},
         resolved_config_path=resolved_config_path,
     )
@@ -42,6 +43,7 @@ class TestDocsHealth:
         assert "ts" in body
         assert "main_url" in body
         assert "massive_url" in body
+        assert "research_url" in body
 
     def test_prefixed_health(self):
         client = _make_client(config={"server": {"docs_port": 9902}})
@@ -78,7 +80,11 @@ class TestDocsOpenApi:
     def test_prefixed_openapi_json(self):
         client = _make_client()
         with patch("backend.docs.app.fetch_openapi") as m:
-            m.side_effect = [_minimal_openapi("Main"), _minimal_openapi("Massive")]
+            m.side_effect = [
+                _minimal_openapi("Main"),
+                _minimal_openapi("Massive"),
+                _minimal_openapi("Research"),
+            ]
             r = client.get(f"{DOCS_PATH_PREFIX}/openapi.json")
         assert r.status_code == 200
         spec = r.json()
@@ -87,7 +93,7 @@ class TestDocsOpenApi:
     def test_swagger_ui_prefixed(self):
         client = _make_client()
         with patch("backend.docs.app.fetch_openapi") as m:
-            m.side_effect = [_minimal_openapi(), _minimal_openapi()]
+            m.side_effect = [_minimal_openapi(), _minimal_openapi(), _minimal_openapi()]
             r = client.get(f"{DOCS_PATH_PREFIX}/docs")
         assert r.status_code == 200
         assert "swagger" in r.text.lower() or "text/html" in r.headers.get("content-type", "")
@@ -95,6 +101,6 @@ class TestDocsOpenApi:
     def test_redoc_prefixed(self):
         client = _make_client()
         with patch("backend.docs.app.fetch_openapi") as m:
-            m.side_effect = [_minimal_openapi(), _minimal_openapi()]
+            m.side_effect = [_minimal_openapi(), _minimal_openapi(), _minimal_openapi()]
             r = client.get(f"{DOCS_PATH_PREFIX}/redoc")
         assert r.status_code == 200

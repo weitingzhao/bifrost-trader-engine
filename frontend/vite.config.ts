@@ -10,6 +10,7 @@ const TRADING = 'http://127.0.0.1:8769'
 const STRATEGY = 'http://127.0.0.1:8770'
 const PORTFOLIO = 'http://127.0.0.1:8771'
 const MARKET = 'http://127.0.0.1:8772'
+const RESEARCH = 'http://127.0.0.1:8773'
 
 export default defineConfig({
   plugins: [react()],
@@ -31,7 +32,9 @@ export default defineConfig({
       '/quotes': { target: MARKET, changeOrigin: true },
       '/research/massive': { target: MASSIVE, changeOrigin: true },
       '/research/docs': { target: DOCS, changeOrigin: true },
-      '/research': { target: MONITOR, changeOrigin: true },
+      '/research/option': { target: RESEARCH, changeOrigin: true },
+      '/research/iv-term-structure': { target: RESEARCH, changeOrigin: true },
+      '/research/max-pain': { target: RESEARCH, changeOrigin: true },
       '/risk_summary': { target: MONITOR, changeOrigin: true },
       '/executions': { target: TRADING, changeOrigin: true },
       '/performance': { target: TRADING, changeOrigin: true },

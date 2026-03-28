@@ -2,7 +2,7 @@
 """Standalone Massive API server — /research/massive/* endpoints + SSE stream.
 
 On startup, reads server.massive_port from config and frees the port if
-already in use, then starts the Massive FastAPI via backend.massive.app.
+already in use, then starts the Massive FastAPI via ``backend.massive.app``.
 
 Default config: ``config/config.dev.yaml``. Use ``--prod`` or
 ``BIFROST_ENV=prod`` for ``config/config.prod.yaml``, or ``BIFROST_CONFIG``
@@ -197,8 +197,9 @@ def main() -> None:
     if not _free_port(port):
         print(f"Could not free port {port}. Run: lsof -i :{port}", file=sys.stderr)
         sys.exit(1)
-    from backend.research.app import run_research_server
-    run_research_server(config, resolved_config_path=resolved_config_path)
+    from backend.massive.app import run_massive_server
+
+    run_massive_server(config, resolved_config_path=resolved_config_path)
 
 
 if __name__ == "__main__":

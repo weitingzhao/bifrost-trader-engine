@@ -57,6 +57,7 @@ export {
   fetchDocsApiHealth,
   fetchHealthAtOrigin,
   fetchMassiveApiHealthAtOrigin,
+  fetchResearchApiHealthAtOrigin,
   fetchDocsApiHealthAtOrigin,
   postMassiveShutdown,
   postDocsShutdown,

@@ -18,6 +18,7 @@ export interface HealthRoutingFields {
   strategy_port?: number
   portfolio_port?: number
   market_port?: number
+  research_port?: number
   utilized_services?: Array<{ service: string; env: string }>
 }
 
@@ -49,7 +50,16 @@ function envForService(
  */
 function baseForEnvRole(
   env: 'dev' | 'prod',
-  role: 'server' | 'massive' | 'docs' | 'ops' | 'trading' | 'strategy' | 'portfolio' | 'market',
+  role:
+    | 'server'
+    | 'massive'
+    | 'docs'
+    | 'ops'
+    | 'trading'
+    | 'strategy'
+    | 'portfolio'
+    | 'market'
+    | 'research',
   h: HealthRoutingFields,
 ): string {
   const devEnv = trimEnv(import.meta.env.VITE_DEV_API_ORIGIN)
@@ -62,6 +72,8 @@ function baseForEnvRole(
   const stp = typeof h.strategy_port === 'number' && Number.isFinite(h.strategy_port) ? h.strategy_port : 8770
   const pfp = typeof h.portfolio_port === 'number' && Number.isFinite(h.portfolio_port) ? h.portfolio_port : 8771
   const mkp = typeof h.market_port === 'number' && Number.isFinite(h.market_port) ? h.market_port : 8772
+  const rp =
+    typeof h.research_port === 'number' && Number.isFinite(h.research_port) ? h.research_port : 8773
   const cfgDev = trimEnv(h.frontend_dev_path)
   const cfgProd = trimEnv(h.frontend_prod_path)
   const pub = trimEnv(h.frontend_public_origin)
@@ -84,6 +96,7 @@ function baseForEnvRole(
         else if (role === 'strategy') port = stp
         else if (role === 'portfolio') port = pfp
         else if (role === 'market') port = mkp
+        else if (role === 'research') port = rp
         else port = sp
         return `${scheme}://${host}:${port}`
       } catch {
@@ -113,6 +126,7 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   strategy: string
   portfolio: string
   market: string
+  research: string
 } {
   const serverEntry = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
 
@@ -123,6 +137,7 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   const explicitStrategy = trimEnv(import.meta.env.VITE_STRATEGY_API_ORIGIN)
   const explicitPortfolio = trimEnv(import.meta.env.VITE_PORTFOLIO_API_ORIGIN)
   const explicitMarket = trimEnv(import.meta.env.VITE_MARKET_API_ORIGIN)
+  const explicitResearch = trimEnv(import.meta.env.VITE_RESEARCH_API_ORIGIN)
 
   if (!health) {
     return {
@@ -134,6 +149,7 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
       strategy: explicitStrategy ?? '',
       portfolio: explicitPortfolio ?? '',
       market: explicitMarket ?? '',
+      research: explicitResearch ?? '',
     }
   }
 
@@ -145,6 +161,7 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
   let strategyEnv = envForService(rows, 'strategy')
   let portfolioEnv = envForService(rows, 'portfolio')
   let marketEnv = envForService(rows, 'market')
+  let researchEnv = envForService(rows, 'research')
   const srvEnv =
     envForService(rows, 'server') ??
     envForService(rows, 'main') ??
@@ -158,6 +175,7 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
     if (!strategyEnv) strategyEnv = splitDevEnv
     if (!portfolioEnv) portfolioEnv = splitDevEnv
     if (!marketEnv) marketEnv = splitDevEnv
+    if (!researchEnv) researchEnv = splitDevEnv
   }
 
   let massive = explicitMassive ?? ''
@@ -195,12 +213,17 @@ function resolveBasesFromHealth(health: HealthRoutingFields | null): {
     market = baseForEnvRole(marketEnv, 'market', health)
   }
 
+  let research = explicitResearch ?? ''
+  if (!research && researchEnv) {
+    research = baseForEnvRole(researchEnv, 'research', health)
+  }
+
   let server = serverEntry
   if (!server && srvEnv) {
     server = baseForEnvRole(srvEnv, 'server', health)
   }
 
-  return { server, massive, docs, ops, trading, strategy, portfolio, market }
+  return { server, massive, docs, ops, trading, strategy, portfolio, market, research }
 }
 
 let serverBase = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
@@ -211,6 +234,7 @@ let tradingBase = ''
 let strategyBase = ''
 let portfolioBase = ''
 let marketBase = ''
+let researchBase = ''
 
 let initPromise: Promise<void> | null = null
 
@@ -246,6 +270,10 @@ export function getMarketApiBase(): string {
   return marketBase
 }
 
+export function getResearchApiBase(): string {
+  return researchBase
+}
+
 async function loadHealth(): Promise<HealthRoutingFields | null> {
   const entry = trimEnv(import.meta.env.VITE_API_BASE) ?? ''
   const url = joinServiceBase(entry, '/health')
@@ -272,6 +300,7 @@ export function initApiRouting(): Promise<void> {
       strategyBase = b.strategy
       portfolioBase = b.portfolio
       marketBase = b.market
+      researchBase = b.research
     })()
   }
   return initPromise

@@ -1,8 +1,7 @@
-"""Research domain FastAPI app — merges Massive + Option Discovery + Max Pain."""
+"""Research domain FastAPI app — option discovery (IB) and max pain reports only."""
 
 import asyncio
 import logging
-import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -11,9 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.config import config_profile_from_resolved_path
 from src.monitor.reader import StatusReader
-from src.monitor.redis_url import redis_url_from_config
-from src.core.sse.queue_utils import put_nowait_drop_oldest
-from backend.research.sse import run_massive_channel_subscribe_loop
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +21,13 @@ def create_research_app(
     resolved_config_path: Optional[str] = None,
     merged_config: Optional[dict] = None,
 ) -> FastAPI:
-    """Build the Research domain FastAPI app (Massive + Option Discovery + Reports)."""
+    """Build the Research API app (option discovery + max pain)."""
     app = FastAPI(
         title="Bifrost Research API",
-        description="Massive/Polygon option research, option discovery, and max pain reports.",
-        docs_url="/research/massive/docs",
-        redoc_url="/research/massive/redoc",
-        openapi_url="/research/massive/openapi.json",
+        description="Option discovery (IB-backed) and max pain reports.",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
     )
     app.add_middleware(
         CORSMiddleware,
@@ -50,26 +46,15 @@ def create_research_app(
         config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
     )
 
-    # Massive SSE fan-out state
-    app.state.massive_sse_queues: list = []
-    app.state.massive_sse_lock = threading.Lock()
-    app.state._massive_sse_subscriber_stop = threading.Event()
-    app.state._massive_sse_subscriber_thread: Optional[threading.Thread] = None
-    app.state._sse_loop: Optional[asyncio.AbstractEventLoop] = None
-
     _scfg = (merged_config or {}).get("server") or {}
     try:
-        app.state.bifrost_massive_port = int(_scfg.get("massive_port") or 8766)
+        app.state.bifrost_research_port = int(_scfg.get("research_port") or 8773)
     except (TypeError, ValueError):
-        app.state.bifrost_massive_port = 8766
+        app.state.bifrost_research_port = 8773
 
-    from backend.research.routers.stream import router as stream_router
-    from backend.research.routers.routes import router as routes_router
     from backend.research.routers.option_discovery import router as option_discovery_router
     from backend.research.routers.max_pain import router as max_pain_router
 
-    app.include_router(stream_router)
-    app.include_router(routes_router)
     app.include_router(option_discovery_router)
     app.include_router(max_pain_router)
 
@@ -80,26 +65,20 @@ def create_research_app(
         if profile is not None:
             out["config_profile"] = profile
         _srv = reader._config.get("server") or {}
-        out["port"] = int(_srv.get("massive_port") or 8766)
+        out["port"] = int(_srv.get("research_port") or 8773)
         if resolved_config_path:
             out["config_path"] = str(Path(resolved_config_path).resolve())
         return out
 
     @app.get("/health")
-    def research_health_root() -> Dict[str, Any]:
-        return _health_payload()
-
-    @app.get("/research/massive/health")
-    def research_health_prefixed() -> Dict[str, Any]:
+    def research_health() -> Dict[str, Any]:
         return _health_payload()
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        app.state._sse_loop = asyncio.get_running_loop()
-
-        # Optional: MarketIbClient for option discovery endpoints
         from src.app.config import get_effective_ib_config
         from src.monitor.integrations.ib_clients import MarketIbClient
+
         skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
         if not skip_ib:
             try:
@@ -110,6 +89,7 @@ def create_research_app(
                     client_id=ib_cfg["client_id_markets"],
                     name="ResearchMarketIbClient",
                 )
+
                 async def _connect() -> None:
                     client = getattr(app.state, "market_ib_client", None)
                     if client is not None:
@@ -117,45 +97,14 @@ def create_research_app(
                             await client.ensure_connected()
                         except Exception as e:
                             logger.warning("ResearchMarketIbClient auto-connect failed: %s", e)
+
                 asyncio.create_task(_connect())
             except Exception as exc:
                 logger.warning("Research IB client init failed: %s", exc, exc_info=True)
                 app.state.market_ib_client = None
 
-        try:
-            _massive_url = redis_url_from_config(reader._config)
-            if _massive_url:
-                def _broadcast_massive(evt: Dict[str, Any]) -> None:
-                    loop = getattr(app.state, "_sse_loop", None)
-                    if loop is None:
-                        return
-                    with app.state.massive_sse_lock:
-                        queues = list(app.state.massive_sse_queues)
-                    for q in queues:
-                        loop.call_soon_threadsafe(put_nowait_drop_oldest, q, evt)
-
-                app.state._massive_sse_subscriber_stop.clear()
-                app.state._massive_sse_subscriber_thread = threading.Thread(
-                    target=run_massive_channel_subscribe_loop,
-                    args=(
-                        _massive_url,
-                        app.state._massive_sse_subscriber_stop,
-                        _broadcast_massive,
-                    ),
-                    daemon=True,
-                    name="massive-channel-sse-subscriber",
-                )
-                app.state._massive_sse_subscriber_thread.start()
-                logger.info("Massive SSE Redis subscriber thread started")
-        except Exception as exc:
-            logger.warning("Massive SSE subscriber not started: %s", exc)
-
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        app.state._massive_sse_subscriber_stop.set()
-        if getattr(app.state, "_massive_sse_subscriber_thread", None) is not None:
-            app.state._massive_sse_subscriber_thread.join(timeout=2.0)
-            app.state._massive_sse_subscriber_thread = None
         client = getattr(app.state, "market_ib_client", None)
         if client is not None:
             try:
@@ -175,7 +124,7 @@ def run_research_server(config: dict, resolved_config_path: Optional[str] = None
     status_cfg_for_read = config if has_postgres else None
     control_via_db = config if has_postgres else None
 
-    port = config.get("server", {}).get("massive_port") or 8766
+    port = config.get("server", {}).get("research_port") or 8773
 
     reader = StatusReader(config)
     app = create_research_app(

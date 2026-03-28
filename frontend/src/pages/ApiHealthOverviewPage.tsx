@@ -6,6 +6,7 @@ import {
   fetchMassiveApiHealth,
   fetchMassiveApiHealthAtOrigin,
   fetchOpsHealthAtOrigin,
+  fetchResearchApiHealthAtOrigin,
   type ApiOriginBase,
 } from '../api'
 import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/shared/fetchTimeout'
@@ -19,7 +20,7 @@ export interface ApiHealthOverviewPageProps {
 type Lamp = 'green' | 'red' | 'none'
 
 type ProbeKind =
-  | { kind: 'single'; origin: ApiOriginBase }
+  | { kind: 'single'; origin: ApiOriginBase; researchPort?: number }
   | {
       kind: 'split'
       scheme: string
@@ -28,6 +29,7 @@ type ProbeKind =
       massivePort: number
       docsPort: number
       opsPort: number
+      researchPort: number
     }
 
 interface ColumnPlan {
@@ -46,6 +48,7 @@ interface ProbeResult {
   massive: ServiceProbe
   docs: ServiceProbe
   ops: ServiceProbe
+  research: ServiceProbe
 }
 
 interface ColumnState {
@@ -71,6 +74,7 @@ function formatServiceLabel(service: string): string {
   if (t === 'massive') return 'Massive'
   if (t === 'docs') return 'Docs'
   if (t === 'ops') return 'Ops'
+  if (t === 'research') return 'Research'
   return service.charAt(0).toUpperCase() + service.slice(1)
 }
 
@@ -87,16 +91,45 @@ function lampFor(ok: boolean | null): Lamp {
   return 'none'
 }
 
+function _researchProbeOrigin(kind: ProbeKind): string {
+  const rp =
+    kind.kind === 'split'
+      ? kind.researchPort
+      : (kind.researchPort ?? 8773)
+  if (kind.kind === 'split') {
+    return `${kind.scheme}://${kind.host}:${rp}`
+  }
+  const o = kind.origin
+  try {
+    const raw =
+      o && o.trim() !== ''
+        ? o.includes('://')
+          ? o
+          : `http://${o}`
+        : typeof window !== 'undefined'
+          ? window.location.origin
+          : 'http://127.0.0.1'
+    const u = new URL(raw)
+    const scheme = (u.protocol || 'http:').replace(':', '') || 'http'
+    const host = u.hostname || '127.0.0.1'
+    return `${scheme}://${host}:${rp}`
+  } catch {
+    return `http://127.0.0.1:${rp}`
+  }
+}
+
 async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
   const tmo = { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS }
+  const oRes = _researchProbeOrigin(kind)
   if (kind.kind === 'single') {
     const o = kind.origin
     const baseLabel = o === '' ? '(same origin as this app)' : o
-    const [sr, mr, dr, or] = await Promise.allSettled([
+    const [sr, mr, dr, or, rr] = await Promise.allSettled([
       fetchHealthAtOrigin(o, tmo),
       fetchMassiveApiHealthAtOrigin(o, tmo),
       fetchDocsApiHealthAtOrigin(o, tmo),
       fetchOpsHealthAtOrigin(o, tmo),
+      fetchResearchApiHealthAtOrigin(oRes, tmo),
     ])
     return {
       server: {
@@ -119,6 +152,11 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
         ts: or.status === 'fulfilled' ? or.value.ts : undefined,
         base: baseLabel,
       },
+      research: {
+        ok: rr.status === 'fulfilled',
+        ts: rr.status === 'fulfilled' ? rr.value.ts : undefined,
+        base: oRes,
+      },
     }
   }
   const { scheme, host, serverPort, massivePort, docsPort, opsPort } = kind
@@ -126,11 +164,12 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
   const oM = `${scheme}://${host}:${massivePort}`
   const oD = `${scheme}://${host}:${docsPort}`
   const oO = `${scheme}://${host}:${opsPort}`
-  const [sr, mr, dr, or] = await Promise.allSettled([
+  const [sr, mr, dr, or, rr] = await Promise.allSettled([
     fetchHealthAtOrigin(oS, tmo),
     fetchMassiveApiHealthAtOrigin(oM, tmo),
     fetchDocsApiHealthAtOrigin(oD, tmo),
     fetchOpsHealthAtOrigin(oO, tmo),
+    fetchResearchApiHealthAtOrigin(oRes, tmo),
   ])
   return {
     server: {
@@ -153,6 +192,11 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
       ts: or.status === 'fulfilled' ? or.value.ts : undefined,
       base: oO,
     },
+    research: {
+      ok: rr.status === 'fulfilled',
+      ts: rr.status === 'fulfilled' ? rr.value.ts : undefined,
+      base: oRes,
+    },
   }
 }
 
@@ -165,15 +209,19 @@ async function resolveColumnPlans(): Promise<{
   const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
   if (devEnv && prodEnv) {
     let utilizedServices: UtilizedServiceRow[] = []
+    let researchPort = 8773
     try {
       const h = await fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
       utilizedServices = normalizeUtilizedServices(h?.utilized_services)
+      if (typeof h?.research_port === 'number' && Number.isFinite(h.research_port)) {
+        researchPort = h.research_port
+      }
     } catch {
       // same-origin /health may be unreachable; leave Services empty
     }
     return {
-      dev: { display: devEnv, probe: { kind: 'single', origin: devEnv } },
-      prod: { display: prodEnv, probe: { kind: 'single', origin: prodEnv } },
+      dev: { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort } },
+      prod: { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort } },
       utilizedServices,
     }
   }
@@ -188,9 +236,10 @@ async function resolveColumnPlans(): Promise<{
     const mh = mhr.status === 'fulfilled' ? mhr.value : undefined
 
     if (!h && !mh) {
+      const d = 8773
       return {
-        dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv } } : null,
-        prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv } } : null,
+        dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort: d } } : null,
+        prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort: d } } : null,
         utilizedServices: [],
       }
     }
@@ -205,11 +254,13 @@ async function resolveColumnPlans(): Promise<{
     const mp = typeof h?.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
     const dp = typeof h?.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
     const op = typeof h?.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
+    const rp =
+      typeof h?.research_port === 'number' && Number.isFinite(h.research_port) ? h.research_port : 8773
     const noYamlPaths = cfgDev == null && cfgProd == null
 
     let dev: ColumnPlan | null = null
     if (devEnv) {
-      dev = { display: devEnv, probe: { kind: 'single', origin: devEnv } }
+      dev = { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort: rp } }
     } else if (cfgDev) {
       try {
         const raw = cfgDev.includes('://') ? cfgDev : `http://${cfgDev}`
@@ -219,37 +270,47 @@ async function resolveColumnPlans(): Promise<{
         if (!host) throw new Error('no host')
         dev = {
           display: cfgDev.replace(/\/$/, ''),
-          probe: { kind: 'split', scheme, host, serverPort: sp, massivePort: mp, docsPort: dp, opsPort: op },
+          probe: {
+            kind: 'split',
+            scheme,
+            host,
+            serverPort: sp,
+            massivePort: mp,
+            docsPort: dp,
+            opsPort: op,
+            researchPort: rp,
+          },
         }
       } catch {
         const o = cfgDev.replace(/\/$/, '')
-        dev = { display: o, probe: { kind: 'single', origin: o } }
+        dev = { display: o, probe: { kind: 'single', origin: o, researchPort: rp } }
       }
     } else if (noYamlPaths && prof === 'dev') {
       dev = {
         display: pub || 'Same as this app',
-        probe: { kind: 'single', origin: pub ?? '' },
+        probe: { kind: 'single', origin: pub ?? '', researchPort: rp },
       }
     }
 
     let prod: ColumnPlan | null = null
     if (prodEnv) {
-      prod = { display: prodEnv, probe: { kind: 'single', origin: prodEnv } }
+      prod = { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort: rp } }
     } else if (cfgProd) {
       const o = cfgProd.replace(/\/$/, '')
-      prod = { display: o, probe: { kind: 'single', origin: o } }
+      prod = { display: o, probe: { kind: 'single', origin: o, researchPort: rp } }
     } else if (noYamlPaths && prof === 'prod') {
       prod = {
         display: pub || 'Same as this app',
-        probe: { kind: 'single', origin: pub ?? '' },
+        probe: { kind: 'single', origin: pub ?? '', researchPort: rp },
       }
     }
 
     return { dev, prod, utilizedServices }
   } catch {
+    const d = 8773
     return {
-      dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv } } : null,
-      prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv } } : null,
+      dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort: d } } : null,
+      prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort: d } } : null,
       utilizedServices: [],
     }
   }
@@ -285,6 +346,7 @@ function buildColumn(title: string, display: string | null, probe: ProbeResult |
       row('Massive API', probe.massive, 'GET /research/massive/health failed'),
       row('Docs API', probe.docs, 'GET /research/docs/health failed'),
       row('Ops API', probe.ops, 'GET /ops/health failed'),
+      row('Research API', probe.research, 'GET /health failed'),
     ],
   }
 }

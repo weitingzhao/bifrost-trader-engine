@@ -81,5 +81,6 @@ def get_health(request: Request) -> Dict[str, Any]:
     out["strategy_port"] = int(getattr(request.app.state, "bifrost_strategy_port", 8770))
     out["portfolio_port"] = int(getattr(request.app.state, "bifrost_portfolio_port", 8771))
     out["market_port"] = int(getattr(request.app.state, "bifrost_market_port", 8772))
+    out["research_port"] = int(getattr(request.app.state, "bifrost_research_port", 8773))
     out["utilized_services"] = list(getattr(request.app.state, "bifrost_utilized_services", []) or [])
     return out

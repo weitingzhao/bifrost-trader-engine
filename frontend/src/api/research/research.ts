@@ -1,10 +1,13 @@
-import { apiBase } from '../shared/constants'
-import { getMassiveApiBase, getDocsApiBase, getOpsApiBase, joinServiceBase } from '../shared/apiRouting'
+import { getMassiveApiBase, getDocsApiBase, getOpsApiBase, getResearchApiBase, joinServiceBase } from '../shared/apiRouting'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
 import { opsAuthHeaders } from '../ops/ops'
 
 function massiveUrl(path: string): string {
   return joinServiceBase(getMassiveApiBase(), path)
+}
+
+function researchApiUrl(path: string): string {
+  return joinServiceBase(getResearchApiBase(), path)
 }
 function docsUrl(path: string): string {
   return joinServiceBase(getDocsApiBase(), path)
@@ -49,7 +52,7 @@ export async function fetchOptionExpirations(
   const dbg = options?.debug ? '&debug=1' : ''
   const exp = options?.expiration ? `&expiration=${encodeURIComponent(options.expiration)}` : ''
   const r = await fetch(
-    `${apiBase()}/research/option-expirations?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}${dbg}${exp}`,
+    `${researchApiUrl('/research/option-expirations')}?symbol=${encodeURIComponent(s)}&provider=${encodeURIComponent(provider)}${dbg}${exp}`,
   )
   const j = await r.json().catch(() => ({}))
   const strikes: number[] | undefined = Array.isArray(j.strikes)
@@ -106,7 +109,7 @@ export async function fetchOptionSnapshot(
     return { symbol: s, expiration: e, rows: [], error: 'symbol and expiration are required' }
   }
   const body = { symbol: s, expiration: e, ...(strikes != null ? { strikes } : {}) }
-  const r = await fetch(`${apiBase()}/research/option-snapshot`, {
+  const r = await fetch(researchApiUrl('/research/option-snapshot'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -174,6 +177,7 @@ export interface DocsApiHealthResponse {
   /** Upstream URLs used to build merged OpenAPI. */
   main_url: string
   massive_url: string
+  research_url: string
 }
 
 export async function fetchDocsApiHealth(): Promise<DocsApiHealthResponse> {
@@ -189,6 +193,7 @@ export async function fetchDocsApiHealth(): Promise<DocsApiHealthResponse> {
     config_path: typeof j.config_path === 'string' ? j.config_path : null,
     main_url: typeof j.main_url === 'string' ? j.main_url : '',
     massive_url: typeof j.massive_url === 'string' ? j.massive_url : '',
+    research_url: typeof j.research_url === 'string' ? j.research_url : '',
   }
 }
 
@@ -249,6 +254,55 @@ export async function fetchMassiveApiHealthAtOrigin(
   }
 }
 
+export interface ResearchApiHealthResponse {
+  status: string
+  service: string
+  ts: number
+  config_profile?: 'dev' | 'prod' | null
+  port?: number
+  config_path?: string | null
+}
+
+export async function fetchResearchApiHealth(options?: { timeoutMs?: number }): Promise<ResearchApiHealthResponse> {
+  const url = researchApiUrl('/health')
+  const r =
+    options?.timeoutMs != null
+      ? await fetchWithTimeout(url, {}, options.timeoutMs)
+      : await fetch(url)
+  if (!r.ok) throw new Error(`Research API health: ${r.status}`)
+  const j = await r.json()
+  return {
+    status: j.status ?? 'unknown',
+    service: j.service ?? 'bifrost-research',
+    ts: typeof j.ts === 'number' ? j.ts : 0,
+    config_profile: j.config_profile ?? null,
+    port: typeof j.port === 'number' && Number.isFinite(j.port) ? j.port : undefined,
+    config_path: typeof j.config_path === 'string' ? j.config_path : null,
+  }
+}
+
+export async function fetchResearchApiHealthAtOrigin(
+  origin: ApiOriginBase,
+  options?: { timeoutMs?: number },
+): Promise<ResearchApiHealthResponse> {
+  const url = joinApiOrigin(origin, '/health')
+  const init = { credentials: 'omit' as const }
+  const r =
+    options?.timeoutMs != null
+      ? await fetchWithTimeout(url, init, options.timeoutMs)
+      : await fetch(url, init)
+  if (!r.ok) throw new Error(`Research API health: ${r.status}`)
+  const j = await r.json()
+  return {
+    status: j.status ?? 'unknown',
+    service: j.service ?? 'bifrost-research',
+    ts: typeof j.ts === 'number' ? j.ts : 0,
+    config_profile: j.config_profile ?? null,
+    port: typeof j.port === 'number' && Number.isFinite(j.port) ? j.port : undefined,
+    config_path: typeof j.config_path === 'string' ? j.config_path : null,
+  }
+}
+
 export async function fetchDocsApiHealthAtOrigin(
   origin: ApiOriginBase,
   options?: { timeoutMs?: number },
@@ -270,6 +324,7 @@ export async function fetchDocsApiHealthAtOrigin(
     config_path: typeof j.config_path === 'string' ? j.config_path : null,
     main_url: typeof j.main_url === 'string' ? j.main_url : '',
     massive_url: typeof j.massive_url === 'string' ? j.massive_url : '',
+    research_url: typeof j.research_url === 'string' ? j.research_url : '',
   }
 }
 
@@ -397,7 +452,7 @@ export async function fetchMaxPainCompute(params: {
   const q = new URLSearchParams({ symbol: sym, expiry: exp })
   const td = (params.tradeDate || '').trim()
   if (td) q.set('trade_date', td)
-  const r = await fetch(`${apiBase()}/research/max-pain/compute?${q.toString()}`)
+  const r = await fetch(`${researchApiUrl('/research/max-pain/compute')}?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed' }
@@ -445,7 +500,7 @@ export async function fetchMaxPainComputeHistory(params: {
   if (!sym || !exp) return { ok: false, error: 'symbol and expiry are required', series: [] }
   const q = new URLSearchParams({ symbol: sym, expiry: exp })
   if (params.lookbackDays != null && params.lookbackDays > 0) q.set('lookback_days', String(params.lookbackDays))
-  const r = await fetch(`${apiBase()}/research/max-pain/compute/history?${q.toString()}`)
+  const r = await fetch(`${researchApiUrl('/research/max-pain/compute/history')}?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Request failed', series: [] }
@@ -674,7 +729,7 @@ export async function fetchOptionSnapshotsPg(
   const e = (expiration || '').trim()
   const q = new URLSearchParams({ symbol: s, expiration: e, source })
   if (strikesCsv && strikesCsv.trim()) q.set('strikes', strikesCsv.trim())
-  const r = await fetch(`${apiBase()}/research/option-snapshots?${q.toString()}`)
+  const r = await fetch(`${researchApiUrl('/research/option-snapshots')}?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   const rows: OptionSnapshotRow[] = Array.isArray(j.rows)
     ? j.rows.map((row: Record<string, unknown>) => ({
@@ -729,7 +784,7 @@ export async function fetchResearchOptionOi(
   if (!s) return { rows: [], error: 'symbol is required' }
   const q = new URLSearchParams({ symbol: s })
   if (options?.limit != null) q.set('limit', String(options.limit))
-  const r = await fetch(`${apiBase()}/research/option-oi?${q.toString()}`)
+  const r = await fetch(`${researchApiUrl('/research/option-oi')}?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   const rows = Array.isArray(j.rows) ? j.rows : []
   return { rows, error: typeof j.error === 'string' ? j.error : undefined }
@@ -750,7 +805,7 @@ export async function fetchResearchOptionTrades(
   if (!s) return { ok: false, status: 0, trades: [], error: 'symbol is required' }
   const q = new URLSearchParams({ symbol: s })
   if (options?.limit != null) q.set('limit', String(options.limit))
-  const r = await fetch(`${apiBase()}/research/option-trades?${q.toString()}`)
+  const r = await fetch(`${researchApiUrl('/research/option-trades')}?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   const trades = Array.isArray(j.trades) ? j.trades : []
   return {
@@ -1116,7 +1171,7 @@ export async function fetchLiquiditySummary(
     right: (right || '').trim(),
     source,
   })
-  const r = await fetch(`${apiBase()}/research/option-contract/liquidity-summary?${q.toString()}`)
+  const r = await fetch(`${researchApiUrl('/research/option-contract/liquidity-summary')}?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -1163,7 +1218,7 @@ export async function fetchRelativeValue(
     right: (right || '').trim(),
     source,
   })
-  const r = await fetch(`${apiBase()}/research/option-contract/relative-value?${q.toString()}`)
+  const r = await fetch(`${researchApiUrl('/research/option-contract/relative-value')}?${q.toString()}`)
   const j = await r.json().catch(() => ({}))
   return {
     ok: Boolean(j.ok),
@@ -1205,7 +1260,7 @@ export async function fetchIvTermStructure(
     expirations: expirations.join(','),
     source,
   })
-  const r = await fetch(`${apiBase()}/research/iv-term-structure?${params}`)
+  const r = await fetch(`${researchApiUrl('/research/iv-term-structure')}?${params}`)
   const j = await r.json().catch(() => ({}))
   const pts: IvTermStructurePoint[] = Array.isArray(j.points)
     ? j.points.map((p: Record<string, unknown>) => ({
