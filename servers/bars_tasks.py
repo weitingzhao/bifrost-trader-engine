@@ -14,7 +14,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
-from src.daemon.connector.ib import IBConnectionDroppedError
+from src.connector.ib import IBConnectionDroppedError
 
 # Project root for config
 _here = Path(__file__).resolve().parent

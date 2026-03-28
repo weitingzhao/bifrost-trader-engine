@@ -91,7 +91,7 @@ def main() -> int:
                 import yaml
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
-                from src.daemon.sink.postgres_sink import _get_conn_params
+                from src.persistence.postgres.connection import _get_conn_params
             except ImportError as e:
                 print(f"Missing dependency: {e}", file=sys.stderr)
                 return 1

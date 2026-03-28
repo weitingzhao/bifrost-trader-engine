@@ -1,6 +1,6 @@
 """Normalize and write accounts_snapshot into account and account_positions tables.
 
-Used by the sink (write_snapshot) and by the legacy reader. See docs/DATABASE.md.
+Used by PostgreSQLSink (write_snapshot) and by the legacy reader. See docs/DATABASE.md.
 """
 
 import math

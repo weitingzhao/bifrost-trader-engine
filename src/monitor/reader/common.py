@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
 
-from src.daemon.sink.postgres_sink import _get_conn_params
+from src.persistence.postgres.connection import _get_conn_params
 
 from src.app.config import get_effective_ib_config
 

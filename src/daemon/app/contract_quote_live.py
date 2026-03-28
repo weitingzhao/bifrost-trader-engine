@@ -154,8 +154,13 @@ async def init_ticker_subscriptions(app: Any) -> None:
     if not conn or not conn.is_connected:
         return
     subscribed: Set[str] = set()
-    if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
-        subscribed = app._redis_quotes.get_subscribed_symbols()
+    rq_read = getattr(app, "_redis_quotes_reader", None)
+    if rq_read and rq_read.available:
+        subscribed = rq_read.get_subscribed_symbols()
+    elif getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
+        logger.warning(
+            "[Daemon] init_ticker_subscriptions: Redis reader unavailable; skipping subscribed-set guard"
+        )
     if subscribed:
         msg = "Clear subscriptions first (Redis ticker subscribed set is non-empty)."
         if app._status_sink and hasattr(app._status_sink, "write_daemon_control_message"):
@@ -198,9 +203,9 @@ async def sync_ticker_subscriptions_from_redis(
     conn = _ticker_connector(app)
     if not conn or not conn.is_connected:
         return
-    rq = getattr(app, "_redis_quotes", None)
+    rq = getattr(app, "_redis_quotes_reader", None)
     if not rq or not rq.available:
-        logger.debug("[Daemon] sync_ticker_subscriptions_from_redis: Redis unavailable, skip")
+        logger.debug("[Daemon] sync_ticker_subscriptions_from_redis: Redis reader unavailable, skip")
         return
     desired = _build_init_desired_symbols(app)
     subscribed, ages = rq.get_subscribed_symbols_with_ages_sec()
@@ -256,7 +261,7 @@ async def refresh_ticker_subscriptions(app: Any) -> None:
     """Sync: use Redis subscription state and per-symbol age; refresh stale (>30s), subscribe new, unsubscribe removed. If Redis unavailable, fallback to Release then Init."""
     if not _ticker_connector(app) or not _ticker_connector(app).is_connected:
         return
-    rq = getattr(app, "_redis_quotes", None)
+    rq = getattr(app, "_redis_quotes_reader", None)
     if rq and rq.available:
         await sync_ticker_subscriptions_from_redis(app, stale_sec=STALE_TICKER_SEC)
     else:
@@ -360,13 +365,14 @@ def sync_contract_quote_live_from_redis(app: Any) -> None:
         app._status_sink, "write_contract_quote_live"
     ):
         return
-    if not getattr(app, "_redis_quotes", None) or not app._redis_quotes.available:
+    rq_read = getattr(app, "_redis_quotes_reader", None)
+    if not rq_read or not rq_read.available:
         return
     instruments = get_position_stk_instruments(app)
     if not instruments:
         return
     symbols = [m["symbol"] for m in instruments.values()]
-    quotes = app._redis_quotes.get_quotes(symbols)
+    quotes = rq_read.get_quotes(symbols)
     if not quotes:
         return
     symbol_to_ck = {m["symbol"]: ck for ck, m in instruments.items()}

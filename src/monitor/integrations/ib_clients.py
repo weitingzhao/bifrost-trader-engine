@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.daemon.connector.ib import IBConnector, IBConnectionDroppedError
+from src.connector.ib import IBConnector, IBConnectionDroppedError
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ class AccountIbClient(BaseMonitorIbClient):
         return await self._run_on_client_loop(self._fetch_accounts_snapshot_impl())
 
     async def _fetch_accounts_snapshot_impl(self) -> List[Dict[str, Any]]:
-        """R-A1: 从 IB 拉取多账户摘要与持仓，返回与 postgres_sink 一致的 accounts_snapshot 列表形状。
+        """R-A1: 从 IB 拉取多账户摘要与持仓，返回与 persistence（accounts_sync / PostgreSQLSink）一致的 accounts_snapshot 列表形状。
         供监控端「刷新」按钮通过长连接 Account Client 立即拉取并写库。
         """
         await self._ensure_connected_impl()

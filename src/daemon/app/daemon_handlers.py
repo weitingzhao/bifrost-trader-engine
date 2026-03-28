@@ -501,6 +501,11 @@ async def handle_stopping(app: Any) -> DaemonState:
             app._redis_quotes.close()
         except Exception as e:
             logger.debug("Redis quotes close: %s", e)
+    if getattr(app, "_redis_quotes_reader", None):
+        try:
+            app._redis_quotes_reader.close()
+        except Exception as e:
+            logger.debug("Redis quotes reader close: %s", e)
     await app.connector.disconnect()
     listener = getattr(app, "listener_connector", None)
     if listener:

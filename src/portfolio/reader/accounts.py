@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from src.daemon.sink.postgres_sink import _get_conn_params, sync_accounts_snapshot_to_tables
+from src.persistence.postgres.accounts_sync import sync_accounts_snapshot_to_tables
+from src.persistence.postgres.connection import _get_conn_params
 
 from src.monitor.reader import market as market_module
 from src.portfolio.reader.accounts_helpers import (
@@ -24,7 +25,7 @@ from src.portfolio.reader.accounts_helpers import (
 
 logger = logging.getLogger(__name__)
 
-# Logical account_executions_id in unified views → physical raw table + PK (see pg_ddl account_executions / account_executions_final).
+# Logical account_executions_id in unified views → physical raw table + PK (see persistence postgres ddl account_executions / account_executions_final).
 _JOURNAL_ID_OFFSET = 1000000000
 
 

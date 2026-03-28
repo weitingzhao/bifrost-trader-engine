@@ -13,7 +13,7 @@ from src.config.settings import (
     get_structure_config,
     get_risk_config,
 )
-from src.daemon.connector.ib import IBConnector
+from src.connector.ib import IBConnector
 from src.daemon.core.metrics import get_metrics
 from src.daemon.core.state.composite import CompositeState
 from src.daemon.core.state.snapshot import StateSnapshot
@@ -25,9 +25,9 @@ from src.daemon.fsm.trading_fsm import TradingFSM
 from src.daemon.market.market_data import MarketData
 from src.portfolio.positions.position_book import PositionBook
 from src.daemon.guards.execution_guard import ExecutionGuard
-from src.daemon.sink import StatusSink
-from src.daemon.sink.postgres_sink import PostgreSQLSink
-from src.daemon.realtime.redis_quotes import create_from_config as create_redis_quotes
+from src.persistence.postgres.postgres_sink import PostgreSQLSink
+from src.persistence.status_sink import StatusSink
+from src.core.realtime import create_reader_from_config, create_writer_from_config
 from src.app.config import read_config, get_effective_ib_config
 from src.portfolio import accounts as _accounts
 from src.daemon.app import snapshot as _snapshot
@@ -193,8 +193,15 @@ class GsTrading:
         )
         # R-M6: 首次有持仓时全量 IB 拉价一次；之后心跳用 Redis（Event）更新，仅 Refresh 时再全量拉价
         self._contract_quote_live_initialized = False
-        # R-RM*: optional Redis real-time quotes (daemon is sole writer)
-        self._redis_quotes = create_redis_quotes(config)
+        # R-RM*: optional Redis real-time quotes (daemon is sole writer; reader for GET/sync paths)
+        self._redis_quotes = create_writer_from_config(config)
+        self._redis_quotes_reader = (
+            create_reader_from_config(config) if self._redis_quotes else None
+        )
+        if self._redis_quotes_reader is None and self._redis_quotes:
+            logger.warning(
+                "Redis quotes writer connected but reader failed; subscribe/read paths in daemon may be incomplete"
+            )
         if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
             logger.info(
                 "Redis quotes: connected (Event ticker → quote:{symbol}, channel daemon:quotes)"
@@ -243,14 +250,23 @@ class GsTrading:
             blackout_days_after=self._hedge_cfg["blackout_days_after"],
             trading_hours_only=self._hedge_cfg["trading_hours_only"],
         )
-        # R-RM*: try to (re)create Redis quotes client on config reload (e.g. Redis was down at daemon start)
+        # R-RM*: try to (re)create Redis quotes writer/reader on config reload (e.g. Redis was down at daemon start)
+        if getattr(self, "_redis_quotes_reader", None) is not None:
+            try:
+                self._redis_quotes_reader.close()
+            except Exception:
+                pass
+            self._redis_quotes_reader = None
         if getattr(self, "_redis_quotes", None) is not None:
             try:
                 self._redis_quotes.close()
             except Exception:
                 pass
             self._redis_quotes = None
-        self._redis_quotes = create_redis_quotes(config)
+        self._redis_quotes = create_writer_from_config(config)
+        self._redis_quotes_reader = (
+            create_reader_from_config(config) if self._redis_quotes else None
+        )
 
     async def _reload_config_loop(self) -> None:
         """Periodically check config file mtime and reload if changed."""

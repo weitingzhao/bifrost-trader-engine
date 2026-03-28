@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from src.daemon.connector.ib import IBConnector
+from src.connector.ib import IBConnector
 
 
 @pytest.mark.ib

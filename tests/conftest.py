@@ -48,7 +48,7 @@ def ib_config(config: dict) -> dict:
 @pytest.fixture
 def connector(ib_config: dict):
     """IBConnector instance from config. Use with pytest -m ib for live tests."""
-    from src.daemon.connector.ib import IBConnector
+    from src.connector.ib import IBConnector
 
     return IBConnector(
         host=ib_config.get("host", "127.0.0.1"),

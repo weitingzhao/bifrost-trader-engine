@@ -46,14 +46,12 @@ from src.monitor.self_check import derive_daemon_self_check, derive_self_check
 from servers.sse_queue_utils import put_nowait_drop_oldest
 
 try:
-    from src.daemon.realtime.redis_quotes import (
-        RedisQuotesClient,
-        create_from_config as create_redis_quotes,
+    from src.core.realtime import (
+        create_reader_from_config as create_redis_quotes,
         run_subscribe_loop as redis_run_subscribe_loop,
     )
 except ImportError:
     create_redis_quotes = None  # type: ignore
-    RedisQuotesClient = None  # type: ignore
     redis_run_subscribe_loop = None  # type: ignore
 
 logger = logging.getLogger(__name__)

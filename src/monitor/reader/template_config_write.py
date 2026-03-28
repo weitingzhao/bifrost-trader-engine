@@ -8,7 +8,7 @@ import psycopg2
 
 from src.monitor.reader import structure_type_config_constants as _const
 from src.monitor.reader import template_config
-from src.daemon.sink.postgres_sink import _get_conn_params
+from src.persistence.postgres.connection import _get_conn_params
 
 logger = logging.getLogger(__name__)
 

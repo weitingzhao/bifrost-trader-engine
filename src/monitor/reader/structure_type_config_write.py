@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 
-from src.daemon.sink.postgres_sink import _get_conn_params
+from src.persistence.postgres.connection import _get_conn_params
 
 from src.monitor.reader import structure_type_config_constants as _const
 

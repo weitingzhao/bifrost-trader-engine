@@ -696,7 +696,7 @@ def run_massive_job(self, job_id: int) -> Dict[str, Any]:
     from src.vendor.massive.config import get_massive_settings
     from src.vendor.massive.reader import get_job_massive_backfill, update_job_massive_backfill_result
     import psycopg2
-    from src.daemon.sink.pg_connection import _get_conn_params
+    from src.persistence.postgres.connection import _get_conn_params
 
     cfg_path = _config_path_for_task()
     config, _ = read_config(cfg_path)

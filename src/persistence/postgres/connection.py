@@ -1,4 +1,4 @@
-"""Shared PostgreSQL connection and lock helpers for the sink and scripts/servers.
+"""Shared PostgreSQL connection and lock helpers for persistence, scripts, and servers.
 
 Config shape and env vars (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD) match docs/DATABASE.md §1.
 """

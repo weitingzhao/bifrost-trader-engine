@@ -15,7 +15,7 @@ import psycopg2
 from psycopg2 import ProgrammingError
 from psycopg2.extras import RealDictCursor
 
-from src.daemon.sink.postgres_sink import _get_conn_params
+from src.persistence.postgres.connection import _get_conn_params
 
 logger = logging.getLogger(__name__)
 

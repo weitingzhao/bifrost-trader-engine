@@ -10,25 +10,26 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
 
-from src.daemon.sink.base import (
+from src.persistence.status_sink import (
     ACCOUNTS_SNAPSHOT_KEY,
     OPERATION_KEYS,
     SNAPSHOT_KEYS,
     StatusSink,
 )
-from src.daemon.sink.pg_connection import (
+from src.persistence.postgres.connection import (
     _DAEMON_LOCK_TABLES,
     _get_conn_params,
     _is_lock_timeout_error,
     release_pg_locks_for_tables,
 )
-from src.daemon.sink.pg_ddl import _ensure_tables
-from src.daemon.sink.accounts_sync import (
+from src.persistence.postgres.ddl import _ensure_tables
+from src.persistence.postgres.accounts_sync import (
     _has_meaningful_commission,
     sync_accounts_snapshot_to_tables,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class PostgreSQLSink(StatusSink):
     """Writes snapshot to daemon_auto_status_current (and optionally daemon_auto_status_history) and operations to daemon_auto_operations table."""

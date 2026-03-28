@@ -80,7 +80,7 @@ def _redis_client(cfg: dict):
 
 def _pg_conn(cfg: dict):
     import psycopg2
-    from src.daemon.sink.pg_connection import _get_conn_params
+    from src.persistence.postgres.connection import _get_conn_params
     status_cfg = cfg.get("status") or cfg
     params = _get_conn_params(status_cfg)
     return psycopg2.connect(**params)
@@ -90,7 +90,7 @@ def _watchlist_option_symbols(cfg: dict) -> Set[str]:
     """Read Watchlist STK symbols that are optionable."""
     try:
         import psycopg2
-        from src.daemon.sink.pg_connection import _get_conn_params
+        from src.persistence.postgres.connection import _get_conn_params
         status_cfg = cfg.get("status") or cfg
         params = _get_conn_params(status_cfg)
         conn = psycopg2.connect(**params)

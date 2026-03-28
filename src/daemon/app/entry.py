@@ -17,7 +17,7 @@ def _inject_gates_from_db_if_configured(config: dict) -> dict:
         return config
     try:
         import psycopg2
-        from src.daemon.sink.postgres_sink import _get_conn_params
+        from src.persistence.postgres.connection import _get_conn_params
         from src.monitor.reader.gate_safety import get_active_gate_safety_strategy_id, get_gates_by_id
         params = _get_conn_params(config)
         conn = psycopg2.connect(**params)
@@ -41,7 +41,7 @@ def _inject_structure_from_db_if_configured(config: dict) -> dict:
         return config
     try:
         import psycopg2
-        from src.daemon.sink.postgres_sink import _get_conn_params
+        from src.persistence.postgres.connection import _get_conn_params
         from src.monitor.reader.gate_safety import get_active_strategy_structure_id
         from src.monitor.reader.strategy import get_structure_by_id
         params = _get_conn_params(config)

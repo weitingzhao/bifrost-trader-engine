@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
-from src.daemon.connector.ib import IBConnectionDroppedError
+from src.connector.ib import IBConnectionDroppedError
 
 if TYPE_CHECKING:
     from servers.reader import StatusReader

@@ -427,7 +427,7 @@ async def heartbeat(app: Any) -> None:
                             "R-M6 initial refresh_position_prices: %s", e
                         )
                 try:
-                    if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
+                    if getattr(app, "_redis_quotes_reader", None) and app._redis_quotes_reader.available:
                         app._sync_contract_quote_live_from_redis()
                     else:
                         await app._refresh_position_prices()
@@ -460,8 +460,9 @@ async def heartbeat(app: Any) -> None:
             await app._refresh_ticker_subscriptions()
             # Write actual subscribed list to DB so status API / UI show current state (e.g. 0 tickers right after Release).
             if app._status_sink and hasattr(app._status_sink, "write_daemon_subscribed_tickers"):
-                if getattr(app, "_redis_quotes", None) and app._redis_quotes.available:
-                    current = sorted(app._redis_quotes.get_subscribed_symbols())
+                rq_read = getattr(app, "_redis_quotes_reader", None)
+                if rq_read and rq_read.available:
+                    current = sorted(rq_read.get_subscribed_symbols())
                 else:
                     current = sorted(listener.get_subscribed_ticker_symbols())
                 app._status_sink.write_daemon_subscribed_tickers(current)

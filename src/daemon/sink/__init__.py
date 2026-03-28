@@ -1,11 +1,17 @@
-"""Status sink package: persist state snapshot and operations (Phase 1: PostgreSQL)."""
+"""Compatibility re-exports for StatusSink; PostgreSQL implementation lives in src.persistence."""
 
-from src.daemon.sink.base import OPERATION_KEYS, SNAPSHOT_KEYS, StatusSink
+from typing import TYPE_CHECKING
 
-# Lazy import so the package loads without psycopg2 when it is optional.
+from src.persistence.status_sink import OPERATION_KEYS, SNAPSHOT_KEYS, StatusSink
+
+if TYPE_CHECKING:
+    from src.persistence.postgres.postgres_sink import PostgreSQLSink
+
+
 def __getattr__(name: str):
     if name == "PostgreSQLSink":
-        from src.daemon.sink.postgres_sink import PostgreSQLSink
+        from src.persistence.postgres.postgres_sink import PostgreSQLSink
+
         return PostgreSQLSink
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

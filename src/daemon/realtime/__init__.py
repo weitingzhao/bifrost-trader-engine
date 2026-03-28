@@ -1,1 +1,1 @@
-"""Real-time market data: Redis quote cache and daemon–monitor linkage."""
+"""Daemon-side real-time hooks; Redis quote I/O lives in ``src.core.realtime``."""

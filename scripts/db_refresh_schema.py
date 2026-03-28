@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh PostgreSQL schema via PostgreSQLSink._ensure_tables (CREATE IF NOT EXISTS + indexes).
+"""Refresh PostgreSQL schema via persistence postgres ddl._ensure_tables (CREATE IF NOT EXISTS + indexes).
 
 Use an empty database or recreate objects as needed; this script does not migrate existing tables.
 
@@ -30,7 +30,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.chdir(_PROJECT_ROOT)
 
 # Expected schema objects by category (canonical list for reporting / presence check only).
-# Actual DDL is defined in src/sink/pg_ddl.py::_ensure_tables — this dict does NOT limit what gets created.
+# Actual DDL is defined in src/persistence/postgres/ddl.py::_ensure_tables — this dict does NOT limit what gets created.
 # Naming: category "account" = account snapshot tables only; tables named account_* that belong to
 # executions / commissions / splits are listed under "execution".
 # NOTE: `account_executions`, `account_executions_final`, and `account_executions_fly` are VIEWs.
@@ -184,7 +184,8 @@ def main() -> int:
     try:
         import yaml
         import psycopg2
-        from src.daemon.sink.postgres_sink import _ensure_tables, _get_conn_params
+        from src.persistence.postgres.ddl import _ensure_tables
+        from src.persistence.postgres.connection import _get_conn_params
     except ImportError as e:
         print(f"{_c(no_color, RED, 'Missing dependency:')} {e}", file=sys.stderr)
         print("  Install with: pip install -e .  (or pip install pyyaml psycopg2-binary)", file=sys.stderr)
