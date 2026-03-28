@@ -357,7 +357,7 @@ async def post_bars_fetch(
     duration: Optional[str] = Query("30 D", description="IB durationStr (e.g. 30 D, 5 D)"),
     smart_duration: bool = Query(False, description="Compute duration from latest bar gap"),
 ) -> Dict[str, Any]:
-    """Fetch bars via monitor MarketIbClient and write to stock_day/stock_min."""
+    """Fetch bars via IB Gateway and write to stock_day/stock_min."""
     app = request.app
     reader = app.state.reader
     control_via_db = app.state.control_via_db
@@ -368,10 +368,9 @@ async def post_bars_fetch(
         return {"ok": False, "error": "PostgreSQL is required to write bar tables.", "bars": [], "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
         return {"ok": False, "error": "Monitor stopped; cannot fetch bars.", "bars": [], "count": 0}
-    from src.monitor.integrations.ib_clients import MarketIbClient
-    client = getattr(app.state, "market_ib_client", None)
-    if client is None:
-        return {"ok": False, "error": "MarketIbClient is not initialized.", "bars": [], "count": 0}
+    gw = getattr(app.state, "ib_gateway_client", None)
+    if gw is None:
+        return {"ok": False, "error": "IB Gateway client is not configured.", "bars": [], "count": 0}
     per = (period or "1 D").strip()
     dur = (duration or "30 D").strip()
     if per.lower() in ("1 min", "1min"):
@@ -389,11 +388,20 @@ async def post_bars_fetch(
             else:
                 gap_days = min(max(1, int(gap_sec / 86400) + 1), 7)
                 dur = f"{gap_days} D"
-    try:
-        await client.ensure_connected()
-    except Exception as e:
-        return {"ok": False, "error": f"Failed to connect to IB: {e}", "bars": [], "count": 0}
-    raw = await client.fetch_bars(sym, per, dur)
+    env = await gw.request_async(
+        "fetch_bars",
+        {"symbol": sym, "period": per, "duration": dur},
+        caller="market_bars_fetch",
+    )
+    if not env.get("ok"):
+        return {
+            "ok": False,
+            "error": str(env.get("error") or "IB gateway error"),
+            "bars": [],
+            "count": 0,
+        }
+    data = env.get("data") or {}
+    raw = list(data.get("bars") or [])
     if not raw:
         return {"ok": True, "message": "IB returned no bar data.", "bars": [], "count": 0}
     rows = [dict(b, symbol=sym, period=per) for b in raw]

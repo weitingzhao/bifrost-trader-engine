@@ -119,8 +119,8 @@ def _ttl_sec_expiration_cache(config: dict) -> int:
 
 async def _option_expirations_ib(request: Request, symbol: str) -> Dict[str, Any]:
     """IB reqSecDefOptParams; same shape as legacy /research/option-expirations."""
-    client = getattr(request.app.state, "market_ib_client", None)
-    if client is None:
+    gw = getattr(request.app.state, "ib_gateway_client", None)
+    if gw is None:
         return {
             "symbol": symbol,
             "expirations": [],
@@ -135,14 +135,17 @@ async def _option_expirations_ib(request: Request, symbol: str) -> Dict[str, Any
             "error": "Monitor IB client disabled",
         }
 
-    try:
-        await client.ensure_connected()
-    except Exception as e:
+    env = await gw.request_async(
+        "fetch_option_expirations",
+        {"symbol": symbol},
+        caller="research_option_expirations",
+    )
+    if not env.get("ok"):
         return {
             "symbol": symbol,
             "expirations": [],
             "strikes": [],
-            "error": f"IB connection failed: {e}",
+            "error": str(env.get("error") or "IB gateway error"),
         }
 
     last_price: Optional[float] = None
@@ -152,7 +155,7 @@ async def _option_expirations_ib(request: Request, symbol: str) -> Dict[str, Any
         if fallback and fallback[0] is not None and fallback[0] > 0:
             last_price = float(fallback[0])
 
-    result = await client.fetch_option_expirations(symbol)
+    result = env.get("data") or {}
     expirations: List[str] = result.get("expirations") or []
     strikes_raw: List[float] = result.get("strikes") or []
     strikes = _filter_option_strikes(strikes_raw, last_price)
@@ -802,8 +805,8 @@ async def post_option_snapshot(
             "error": "symbol and expiration are required",
         }
 
-    client = getattr(request.app.state, "market_ib_client", None)
-    if client is None:
+    gw = getattr(request.app.state, "ib_gateway_client", None)
+    if gw is None:
         return {
             "symbol": symbol,
             "expiration": expiration,
@@ -816,16 +819,6 @@ async def post_option_snapshot(
             "expiration": expiration,
             "rows": [],
             "error": "Monitor IB client disabled",
-        }
-
-    try:
-        await client.ensure_connected()
-    except Exception as e:
-        return {
-            "symbol": symbol,
-            "expiration": expiration,
-            "rows": [],
-            "error": f"IB connection failed: {e}",
         }
 
     strikes_raw = body.get("strikes")
@@ -842,8 +835,14 @@ async def post_option_snapshot(
                 spot_from_stock_day = float(fallback[0])
                 strikes = _strikes_around_spot(spot_from_stock_day)
         if not strikes:
-            result = await client.fetch_option_expirations(symbol)
-            strikes = result.get("strikes") or []
+            env_e = await gw.request_async(
+                "fetch_option_expirations",
+                {"symbol": symbol},
+                caller="research_option_snapshot",
+            )
+            if env_e.get("ok"):
+                result = env_e.get("data") or {}
+                strikes = result.get("strikes") or []
     # When frontend sends strikes, allow up to 30 strikes (60 contracts); else cap at 10
     if strikes:
         max_contracts = min(MAX_OPTION_SNAPSHOT_CONTRACTS_EXTENDED, max(MAX_OPTION_SNAPSHOT_CONTRACTS, len(strikes) * 2))
@@ -854,17 +853,25 @@ async def post_option_snapshot(
     out: Dict[str, Any] = {"symbol": symbol, "expiration": expiration, "rows": []}
     if spot_from_stock_day is not None:
         out["underlying_price"] = spot_from_stock_day
-    err: Optional[str] = None
-    try:
-        rows, underlying_price = await client.fetch_option_snapshot(
-            symbol, expiration, strikes, max_contracts=max_contracts, pacing_sec=0.35
-        )
-        out["rows"] = rows
-        if underlying_price is not None:
-            out["underlying_price"] = underlying_price
-    except Exception as e:
-        err = str(e)
-        out["error"] = err
+    env_s = await gw.request_async(
+        "fetch_option_snapshot",
+        {
+            "symbol": symbol,
+            "expiration": expiration,
+            "strikes": strikes,
+            "max_contracts": max_contracts,
+            "pacing_sec": 0.35,
+        },
+        caller="research_option_snapshot",
+    )
+    if not env_s.get("ok"):
+        out["error"] = str(env_s.get("error") or "IB gateway error")
+        return out
+    snap = env_s.get("data") or {}
+    out["rows"] = list(snap.get("rows") or [])
+    up = snap.get("underlying_price")
+    if up is not None:
+        out["underlying_price"] = up
     return out
 
 

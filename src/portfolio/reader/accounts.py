@@ -832,8 +832,19 @@ def write_account_executions_to_db(status_config: dict, rows: List[Dict[str, Any
                                 """,
                                 vals,
                             )
-                    except Exception:
-                        pass  # raw tables may not exist on older DBs
+                    except Exception as _raw_e:
+                        # Older deployments without split raw tables: ignore missing relation only.
+                        if getattr(_raw_e, "pgcode", None) == "42P01":
+                            pass
+                        else:
+                            logger.warning(
+                                "write_account_executions_to_db: raw insert failed table=%s exec_id=%r: %s",
+                                raw_table,
+                                exec_id,
+                                _raw_e,
+                                exc_info=True,
+                            )
+                            raise
 
                     commission = r.get("commission")
                     realized_pnl = r.get("realized_pnl")

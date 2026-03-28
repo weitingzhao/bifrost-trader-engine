@@ -136,43 +136,14 @@ def get_status(request: Request) -> Dict[str, Any]:
         except Exception:
             payload["active_strategy_allocation_name"] = None
         try:
-            from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
+            from src.ib_gateway.client import build_monitor_ib_status
 
             ib_cfg = payload.get("ib_config") or {}
-            monitor_ib_status: Dict[str, Any] = {}
-            acc_client = getattr(app.state, "account_ib_client", None)
-            acc_client_2 = getattr(app.state, "account_ib_client_2", None)
-            mkt_client = getattr(app.state, "market_ib_client", None)
-            if acc_client is not None:
-                monitor_ib_status["account"] = {
-                    "connected": bool(acc_client.connected),
-                    "client_id": acc_client.client_id,
-                    "last_error": acc_client.last_error,
-                }
-            if acc_client_2 is not None:
-                monitor_ib_status["account2"] = {
-                    "connected": bool(acc_client_2.connected),
-                    "client_id": acc_client_2.client_id,
-                    "last_error": acc_client_2.last_error,
-                }
+            gw_status = build_monitor_ib_status(reader._config, ib_cfg if isinstance(ib_cfg, dict) else None)
+            if gw_status is not None:
+                payload["monitor_ib_status"] = gw_status
             else:
-                # Expose account2 when Second IB is configured in Settings (host set and/or client_id changed from default).
-                ib2_host = (ib_cfg or {}).get("ib2_host") or ""
-                ib2_host = (ib2_host or "").strip() if isinstance(ib2_host, str) else ""
-                cid2 = int((ib_cfg or {}).get("ib2_client_id_account", 102))
-                if ib2_host or cid2 != 102:
-                    monitor_ib_status["account2"] = {
-                        "connected": False,
-                        "client_id": cid2,
-                        "last_error": "Restart Management to apply" if ib2_host else "Set Second IB host in Settings to enable",
-                    }
-            if mkt_client is not None:
-                monitor_ib_status["market"] = {
-                    "connected": bool(mkt_client.connected),
-                    "client_id": mkt_client.client_id,
-                    "last_error": mkt_client.last_error,
-                }
-            payload["monitor_ib_status"] = monitor_ib_status or None
+                payload["monitor_ib_status"] = None
         except Exception:
             payload["monitor_ib_status"] = None
         monitor_enabled = bool(getattr(app.state, "monitor_enabled", True))
@@ -212,7 +183,7 @@ def get_status(request: Request) -> Dict[str, Any]:
         rq = getattr(app.state, "redis_quotes", None)
         payload["redis_quotes_connected"] = bool(rq and getattr(rq, "available", False))
         try:
-            from backend.workers.celery_app import (
+            from src.workers.celery_app import (
                 get_celery_broker_connected,
                 get_worker_ib_status,
                 get_celery_workers_ping,

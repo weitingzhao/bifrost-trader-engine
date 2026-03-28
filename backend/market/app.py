@@ -53,8 +53,7 @@ def create_market_app(
     app.state.status_cfg_for_read = status_cfg_for_read
     app.state.monitor_enabled = True
     app.state.redis_quotes = redis_quotes
-    app.state.market_ib_client = None
-    app.state.account_ib_client = None
+    app.state.ib_gateway_client = None
 
     # SSE for live quotes
     app.state.sse_queues: list = []
@@ -95,39 +94,10 @@ def create_market_app(
     async def startup_event() -> None:
         app.state._sse_loop = asyncio.get_running_loop()
 
-        # IB clients
-        from src.app.config import get_effective_ib_config
-        from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
-        skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
-        if not skip_ib:
-            try:
-                ib_cfg = get_effective_ib_config(reader._config)
-                host = ib_cfg["host"]
-                port = ib_cfg["port"]
-                app.state.market_ib_client = MarketIbClient(
-                    host=host, port=port,
-                    client_id=ib_cfg["client_id_markets"],
-                    name="MarketIbClient",
-                )
-                app.state.account_ib_client = AccountIbClient(
-                    host=host, port=port,
-                    client_id=ib_cfg["client_id_account"],
-                    name="MarketAccountIbClient",
-                )
+        from src.ib_gateway.client import IbGatewayClient
 
-                async def _connect() -> None:
-                    for attr in ("market_ib_client", "account_ib_client"):
-                        c = getattr(app.state, attr, None)
-                        if c is not None:
-                            try:
-                                await c.ensure_connected()
-                            except Exception as e:
-                                logger.warning("%s auto-connect failed: %s", attr, e)
-                asyncio.create_task(_connect())
-            except Exception as exc:
-                logger.warning("Market IB clients init failed: %s", exc, exc_info=True)
-                app.state.market_ib_client = None
-                app.state.account_ib_client = None
+        cfg = merged_config or reader._config
+        app.state.ib_gateway_client = IbGatewayClient.from_merged_config(cfg)
 
         # Redis quotes subscriber
         rq = getattr(app.state, "redis_quotes", None)
@@ -161,13 +131,12 @@ def create_market_app(
         if getattr(app.state, "_redis_subscriber_thread", None) is not None:
             app.state._redis_subscriber_thread.join(timeout=2.0)
             app.state._redis_subscriber_thread = None
-        for attr in ("market_ib_client", "account_ib_client"):
-            c = getattr(app.state, attr, None)
-            if c is not None:
-                try:
-                    await c.disconnect()
-                except Exception:
-                    pass
+        gw = getattr(app.state, "ib_gateway_client", None)
+        if gw is not None:
+            try:
+                gw.close()
+            except Exception:
+                pass
         rq = getattr(app.state, "redis_quotes", None)
         if rq is not None and getattr(rq, "close", None):
             try:

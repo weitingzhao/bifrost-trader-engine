@@ -7,12 +7,12 @@ Requires Redis (config.redis or REDIS_* env) and postgres. Usage:
   python scripts/run_celery.py --prod
   BIFROST_ENV=prod python scripts/run_celery.py
 
-Before starting, kills any existing Celery worker process for this app (same script or celery -A backend.workers.celery_app worker -Q bars)
+Before starting, kills any existing Celery worker process for this app (same script or celery -A src.workers.celery_app worker -Q bars)
 so the port/process is not left occupied. Uses --pool=solo (single process) so Stop button and IB connection work reliably.
 Massive/Polygon option sync uses a separate queue (no IB):
-  celery -A backend.workers.celery_app worker -l info -Q massive --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q massive --pool=solo
 Or run Celery directly:
-  celery -A backend.workers.celery_app worker -l info -Q bars --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q bars --pool=solo
 
 Default config: config/config.dev.yaml (or BIFROST_CONFIG / first positional path / BIFROST_ENV=prod → config.prod.yaml).
 """
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     queue_str = _resolve_queues_for_instance(instance, config_path)
     sys.stderr.write(f"[run_celery] queues={queue_str} instance={instance}\n")
 
-    from backend.workers.celery_app import app
+    from src.workers.celery_app import app
 
     worker_argv = ["worker", "-l", "info", "-Q", queue_str, "--pool=solo"]
     if instance is not None:

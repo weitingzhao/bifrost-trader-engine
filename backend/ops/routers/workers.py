@@ -512,7 +512,7 @@ def get_ops_celery_logs(
     """Last N lines from this worker's Celery console Redis stream (same data as former bifrost-server GET /api/celery/logs)."""
     try:
         import redis
-        from backend.workers.celery_app import celery_console_stream_key
+        from src.workers.celery_app import celery_console_stream_key
 
         r = redis.from_url(request.app.state.broker_url)
         key = celery_console_stream_key(worker)
@@ -538,7 +538,7 @@ def delete_ops_celery_logs(
 ) -> Dict[str, Any]:
     try:
         import redis
-        from backend.workers.celery_app import celery_console_stream_key
+        from src.workers.celery_app import celery_console_stream_key
 
         r = redis.from_url(request.app.state.broker_url)
         r.delete(celery_console_stream_key(worker))
@@ -566,7 +566,7 @@ def trim_ops_celery_logs(
         if max_lines < 1 or max_lines > 10000:
             return {"ok": False, "error": "max_lines must be between 1 and 10000"}
         import redis
-        from backend.workers.celery_app import celery_console_stream_key
+        from src.workers.celery_app import celery_console_stream_key
 
         r = redis.from_url(request.app.state.broker_url)
         r.xtrim(celery_console_stream_key(worker), maxlen=max_lines, approximate=True)
@@ -586,7 +586,7 @@ async def worker_console(
 
     Query ``lines`` is accepted for API compatibility; the live stream does not use it.
     """
-    from backend.workers.celery_app import celery_console_stream_key
+    from src.workers.celery_app import celery_console_stream_key
 
     if not _ops_broker_ping_ok(request):
         return JSONResponse(

@@ -612,7 +612,7 @@ def get_massive_hist_trades(
 def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Enqueue Celery job on queue `massive`. Body: kind + payload."""
     from src.vendor.massive.config import get_massive_settings
-    from backend.massive.tasks import run_massive_job
+    from src.massive.tasks import run_massive_job
     from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
 
     reader = getattr(request.app.state, "reader", None)

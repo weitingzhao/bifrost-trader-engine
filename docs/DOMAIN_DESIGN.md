@@ -293,7 +293,7 @@ Gate Safety 配置      vs  ExecutionGuard 运行时检查
 
 ### 阶段一（基础清理）：servers/ → src/
 
-**已完成**：历史 `servers/` 下 bars、SSE、reader、portfolio_model 等已迁入 **`src/bars/`**、**`src/core/sse/`**、**`src/monitor/reader/`**、**`src/portfolio/model/`** 等；HTTP 入口迁至 **`backend/*`**，Celery 应用为 **`backend.workers.celery_app`**。
+**已完成**：历史 `servers/` 下 bars、SSE、reader、portfolio_model 等已迁入 **`src/bars/`**、**`src/core/sse/`**、**`src/monitor/reader/`**、**`src/portfolio/model/`** 等；HTTP 入口迁至 **`backend/*`**，Celery 应用为 **`src.workers.celery_app`**。
 
 ### 阶段二（backend 域拆分）
 

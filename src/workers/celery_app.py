@@ -1,8 +1,8 @@
 """Celery app for bars backfill worker. Broker and result backend use Redis from config.
 
 Usage:
-  celery -A backend.workers.celery_app worker -l info -Q bars --pool=solo
-  celery -A backend.workers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon option sync (no IB)
+  celery -A src.workers.celery_app worker -l info -Q bars --pool=solo
+  celery -A src.workers.celery_app worker -l info -Q massive --pool=solo   # Massive/Polygon option sync (no IB)
 
 Or: python scripts/run_celery.py [config_path]
 
@@ -63,7 +63,7 @@ app = Celery(
     "bifrost.bars",
     broker=broker_url,
     backend=result_backend,
-    include=["servers.bars_tasks", "backend.massive.tasks"],
+    include=["src.bars.tasks", "src.massive.tasks"],
 )
 app.conf.update(
     task_serializer="json",
@@ -71,7 +71,7 @@ app.conf.update(
     result_serializer="json",
     task_default_queue="bars",
     task_routes={
-        "servers.bars_tasks.backfill_bars": {"queue": "bars"},
+        "src.bars.tasks.backfill_bars": {"queue": "bars"},
         "servers.massive_tasks.run_massive_job": {"queue": "massive"},
         "servers.massive_tasks.beat_eod_pipeline": {"queue": "massive"},
         "servers.massive_tasks.beat_corporate_watchlist": {"queue": "massive"},

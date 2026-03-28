@@ -4,7 +4,6 @@ import logging
 import threading
 from typing import Any, Optional
 
-import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -41,8 +40,7 @@ def create_trading_app(
     app.state.control_via_db = control_via_db
     app.state.status_cfg_for_read = status_cfg_for_read
     app.state.monitor_enabled = True
-    app.state.account_ib_client = None
-    app.state.account_ib_client_2 = None
+    app.state.ib_gateway_client = None
     app.state.bifrost_config_profile = (
         config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
     )
@@ -68,54 +66,19 @@ def create_trading_app(
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        from src.app.config import get_effective_ib_config
-        from src.monitor.integrations.ib_clients import AccountIbClient
-        skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
-        if skip_ib:
-            return
-        try:
-            ib_cfg = get_effective_ib_config(reader._config)
-            host = ib_cfg["host"]
-            port = ib_cfg["port"]
-            app.state.account_ib_client = AccountIbClient(
-                host=host,
-                port=port,
-                client_id=ib_cfg["client_id_account"],
-                name="TradingAccountIbClient",
-            )
-            ib2_host = ib_cfg.get("ib2_host") or ""
-            if ib2_host:
-                app.state.account_ib_client_2 = AccountIbClient(
-                    host=ib2_host,
-                    port=ib_cfg["ib2_port"],
-                    client_id=ib_cfg["ib2_client_id_account"],
-                    name="TradingAccountIbClient2",
-                )
+        from src.ib_gateway.client import IbGatewayClient
 
-            async def _connect() -> None:
-                for attr in ("account_ib_client", "account_ib_client_2"):
-                    client = getattr(app.state, attr, None)
-                    if client is not None:
-                        try:
-                            await client.ensure_connected()
-                        except Exception as e:
-                            logger.warning("%s auto-connect failed: %s", attr, e)
-
-            asyncio.create_task(_connect())
-        except Exception as exc:
-            logger.warning("Trading IB clients init failed: %s", exc, exc_info=True)
-            app.state.account_ib_client = None
-            app.state.account_ib_client_2 = None
+        cfg = merged_config or reader._config
+        app.state.ib_gateway_client = IbGatewayClient.from_merged_config(cfg)
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        for attr in ("account_ib_client", "account_ib_client_2"):
-            client = getattr(app.state, attr, None)
-            if client is not None:
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
+        gw = getattr(app.state, "ib_gateway_client", None)
+        if gw is not None:
+            try:
+                gw.close()
+            except Exception:
+                pass
 
     return app
 

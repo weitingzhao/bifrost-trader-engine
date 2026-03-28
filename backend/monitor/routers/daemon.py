@@ -14,7 +14,7 @@ MONITOR_STOP_EXIT_DELAY = 3.0  # seconds; give client time to receive 200 before
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
-from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
+from src.ib_gateway.client import IbGatewayClient
 from src.monitor.reader import (
     sync_accounts_snapshot_to_db,
     write_control_command,
@@ -42,26 +42,20 @@ async def post_monitor_stop(request: Request) -> JSONResponse:
     app = request.app
     app.state.monitor_enabled = False
 
-    async def _disconnect_with_timeout(client: Any, name: str) -> None:
+    gw: Optional[IbGatewayClient] = getattr(app.state, "ib_gateway_client", None)
+    if gw is not None:
         try:
-            await asyncio.wait_for(client.disconnect(), timeout=MONITOR_STOP_DISCONNECT_TIMEOUT)
+            await asyncio.wait_for(
+                gw.request_async("disconnect_all", {}, caller="monitor_stop"),
+                timeout=MONITOR_STOP_DISCONNECT_TIMEOUT,
+            )
         except asyncio.TimeoutError:
-            logger.warning("monitor_stop: %s disconnect timed out after %.1fs; process will exit anyway.", name, MONITOR_STOP_DISCONNECT_TIMEOUT)
+            logger.warning(
+                "monitor_stop: IB Gateway disconnect_all timed out after %.1fs; process will exit anyway.",
+                MONITOR_STOP_DISCONNECT_TIMEOUT,
+            )
         except Exception as e:
-            logger.debug("monitor_stop: %s disconnect error (ignored): %s", name, e)
-
-    tasks: list = []
-    client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
-    if client is not None:
-        tasks.append(_disconnect_with_timeout(client, "account_ib_client"))
-    mclient: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
-    if mclient is not None:
-        tasks.append(_disconnect_with_timeout(mclient, "market_ib_client"))
-    acc2 = getattr(app.state, "account_ib_client_2", None)
-    if acc2 is not None:
-        tasks.append(_disconnect_with_timeout(acc2, "account_ib_client_2"))
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+            logger.debug("monitor_stop: gateway disconnect_all error (ignored): %s", e)
 
     threading.Thread(target=_exit_after_send, daemon=True).start()
     return JSONResponse(status_code=200, content={"ok": True, "monitor_enabled": False})
@@ -69,27 +63,25 @@ async def post_monitor_stop(request: Request) -> JSONResponse:
 
 @router.post("/control/monitor_release_ib")
 async def post_monitor_release_ib(request: Request) -> JSONResponse:
-    """Release Monitor IB connections only (Account + Market + Account2 client_id). Monitor process keeps running."""
+    """Release IB Gateway TWS connections (Account + Market + Account2). Monitor process keeps running."""
     app = request.app
+    gw: Optional[IbGatewayClient] = getattr(app.state, "ib_gateway_client", None)
+    if gw is None:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "IB Gateway client not configured (Redis / ib_gateway)."},
+        )
     try:
-        acc_client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
-        if acc_client is not None:
-            await acc_client.disconnect()
+        env = await gw.request_async("disconnect_all", {}, caller="monitor_release_ib")
+        if not env.get("ok"):
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": env.get("error") or "disconnect_all failed"},
+            )
     except Exception as e:
-        logger.warning("monitor_release_ib account disconnect: %s", e)
-    try:
-        acc_client_2 = getattr(app.state, "account_ib_client_2", None)
-        if acc_client_2 is not None:
-            await acc_client_2.disconnect()
-    except Exception as e:
-        logger.warning("monitor_release_ib account2 disconnect: %s", e)
-    try:
-        mkt_client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
-        if mkt_client is not None:
-            await mkt_client.disconnect()
-    except Exception as e:
-        logger.warning("monitor_release_ib market disconnect: %s", e)
-    return JSONResponse(status_code=200, content={"ok": True, "message": "Monitor IB connections released."})
+        logger.warning("monitor_release_ib gateway: %s", e)
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    return JSONResponse(status_code=200, content={"ok": True, "message": "IB Gateway connections released."})
 
 
 CELERY_STOP_REDIS_TIMEOUT = 5  # seconds; avoid hang if Redis is unreachable
@@ -100,7 +92,7 @@ def post_celery_stop() -> JSONResponse:
     Uses a short Redis timeout so the request does not hang if the broker is unreachable."""
     try:
         import redis
-        from backend.workers.celery_app import (
+        from src.workers.celery_app import (
             WORKER_IB_STATUS_KEY,
             WORKER_IB_STATUS_TTL_SEC,
             WORKER_STOP_REQUESTED_KEY,
@@ -128,54 +120,48 @@ def post_celery_stop() -> JSONResponse:
 
 @router.post("/control/monitor_connect")
 async def post_monitor_connect(request: Request) -> JSONResponse:
-    """Establish monitor IB connections (account + account2 + market). On success, /status monitor_ib_status.*.connected becomes true."""
+    """Reconnect IB Gateway (account + account2 + market). On success, /status monitor_ib_status reflects gateway health."""
     app = request.app
     if not getattr(app.state, "monitor_enabled", True):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Monitor stopped; cannot connect IB."})
-    acc_client: Optional[AccountIbClient] = getattr(app.state, "account_ib_client", None)
-    acc_client_2: Optional[AccountIbClient] = getattr(app.state, "account_ib_client_2", None)
-    mkt_client: Optional[MarketIbClient] = getattr(app.state, "market_ib_client", None)
-    if acc_client is None and acc_client_2 is None and mkt_client is None:
+    gw: Optional[IbGatewayClient] = getattr(app.state, "ib_gateway_client", None)
+    if gw is None:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "IB Gateway client not configured (Redis / ib_gateway)."},
+        )
+    try:
+        env = await gw.request_async("reconnect_all", {}, caller="monitor_connect")
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    if not env.get("ok"):
         return JSONResponse(
             status_code=500,
-            content={"ok": False, "error": "Monitor IB clients not initialized (check startup logs or DB IB settings)."},
+            content={"ok": False, "error": env.get("error") or "reconnect_all failed"},
         )
-    acc_ok: Optional[bool] = None
-    acc_err: Optional[str] = None
-    acc2_ok: Optional[bool] = None
-    acc2_err: Optional[str] = None
-    mkt_ok: Optional[bool] = None
-    mkt_err: Optional[str] = None
-    if acc_client is not None:
-        try:
-            await acc_client.ensure_connected()
-            acc_ok = True
-        except Exception as e:
-            acc_ok = False
-            acc_err = str(e)
-    if acc_client_2 is not None:
-        try:
-            await acc_client_2.ensure_connected()
-            acc2_ok = True
-        except Exception as e:
-            acc2_ok = False
-            acc2_err = str(e)
-    if mkt_client is not None:
-        try:
-            await mkt_client.ensure_connected()
-            mkt_ok = True
-        except Exception as e:
-            mkt_ok = False
-            mkt_err = str(e)
-    ok = (acc_ok is not False) and (acc2_ok is not False) and (mkt_ok is not False)
+    h = env.get("data") or {}
+    acc = h.get("account") or {}
+    mkt = h.get("market") or {}
+    acc2 = h.get("account2")
+    acc_ok = bool(acc.get("connected"))
+    mkt_ok = bool(mkt.get("connected"))
+    if acc2 is None:
+        acc2_requested = False
+        acc2_ok = None
+        acc2_err = None
+    else:
+        acc2_requested = True
+        acc2_ok = bool(acc2.get("connected"))
+        acc2_err = acc2.get("last_error")
+    ok = acc_ok and mkt_ok and (not acc2_requested or bool(acc2_ok))
     status_code = 200 if ok else 500
     return JSONResponse(
         status_code=status_code,
         content={
             "ok": ok,
-            "account": {"requested": acc_client is not None, "success": acc_ok, "error": acc_err},
-            "account2": {"requested": acc_client_2 is not None, "success": acc2_ok, "error": acc2_err},
-            "market": {"requested": mkt_client is not None, "success": mkt_ok, "error": mkt_err},
+            "account": {"requested": True, "success": acc_ok, "error": acc.get("last_error")},
+            "account2": {"requested": acc2_requested, "success": acc2_ok, "error": acc2_err},
+            "market": {"requested": True, "success": mkt_ok, "error": mkt.get("last_error")},
         },
     )
 
@@ -253,22 +239,44 @@ async def post_control_refresh_accounts(request: Request) -> JSONResponse:
     control_via_db = request.app.state.control_via_db
     if not control_via_db:
         return JSONResponse(status_code=503, content={"error": "control via DB not available (postgres required)"})
-    acc_client = getattr(request.app.state, "account_ib_client", None)
-    if acc_client is None:
+    gw: Optional[IbGatewayClient] = getattr(request.app.state, "ib_gateway_client", None)
+    if gw is None:
         return JSONResponse(
             status_code=503,
-            content={"error": "Monitor Account Client not initialized; check service startup and IB config (Settings)."},
+            content={"error": "IB Gateway client not configured; start run_ib_gateway.py and enable Redis / ib_gateway."},
         )
     try:
-        accounts_list = await acc_client.fetch_accounts_snapshot()
-        acc_client_2 = getattr(request.app.state, "account_ib_client_2", None)
-        if acc_client_2 is not None:
-            try:
-                accounts_list_2 = await acc_client_2.fetch_accounts_snapshot()
-                if accounts_list_2:
-                    accounts_list = (accounts_list or []) + accounts_list_2
-            except Exception as e2:
-                logger.warning("refresh_accounts AccountIbClient2 failed: %s", e2)
+        env = await gw.request_async(
+            "fetch_accounts_snapshot",
+            {"account_slot": "primary"},
+            caller="refresh_accounts",
+        )
+        if not env.get("ok"):
+            return JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": env.get("error") or "fetch_accounts_snapshot failed"},
+            )
+        data = env.get("data") or {}
+        accounts_list = list(data.get("accounts") or [])
+        from src.app.config import get_effective_ib_config
+
+        try:
+            ibc = get_effective_ib_config(request.app.state.reader._config)
+            if (ibc.get("ib2_host") or "").strip():
+                env2 = await gw.request_async(
+                    "fetch_accounts_snapshot",
+                    {"account_slot": "secondary"},
+                    caller="refresh_accounts",
+                )
+                if env2.get("ok"):
+                    d2 = env2.get("data") or {}
+                    al2 = list(d2.get("accounts") or [])
+                    if al2:
+                        accounts_list = (accounts_list or []) + al2
+                else:
+                    logger.warning("refresh_accounts secondary: %s", env2.get("error"))
+        except Exception as e2:
+            logger.warning("refresh_accounts secondary check failed: %s", e2)
         if not accounts_list:
             return JSONResponse(
                 status_code=200,
@@ -281,7 +289,7 @@ async def post_control_refresh_accounts(request: Request) -> JSONResponse:
             content={"ok": True, "message": "Accounts/positions fetched from IB via monitor and written to DB."},
         )
     except Exception as e:
-        logger.warning("refresh_accounts via AccountIbClient failed: %s", e, exc_info=True)
+        logger.warning("refresh_accounts via IB Gateway failed: %s", e, exc_info=True)
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 

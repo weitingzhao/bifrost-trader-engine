@@ -12,7 +12,6 @@ from src.portfolio.services.executions_fetch_flex import (
 from src.portfolio.services.transactions_fetch import fetch_cash_transactions_from_flex
 from src.monitor.reader import (
     write_account_executions_to_db,
-    update_execution_commission,
     insert_one_execution,
     update_one_execution,
     delete_one_execution,
@@ -250,7 +249,7 @@ async def post_executions_fetch(
     request: Request,
     days: int = Query(1, ge=1, le=7, description="1=today, 3=last 3 days, 7=last 7 days (TWS Trade Log)"),
 ) -> Dict[str, Any]:
-    """Fetch executions from IB via monitor AccountIbClient and write to account_executions."""
+    """Fetch executions from IB via IB Gateway and write to account_executions."""
     app = request.app
     reader = app.state.reader
     control_via_db = app.state.control_via_db
@@ -258,32 +257,37 @@ async def post_executions_fetch(
         return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
         return {"ok": False, "error": "Monitor stopped; cannot fetch executions.", "count": 0}
-    client = getattr(app.state, "account_ib_client", None)
-    if client is None:
-        return {"ok": False, "error": "AccountIbClient is not initialized.", "count": 0}
-    try:
-        await client.ensure_connected()
-    except Exception as e:
-        return {"ok": False, "error": f"Failed to connect to IB: {e}", "count": 0}
-    await client.set_commission_report_callback(
-        lambda eid, c, pnl, cur, y_, yrd: update_execution_commission(control_via_db, eid, c, pnl, cur, y_, yrd)
+    gw = getattr(app.state, "ib_gateway_client", None)
+    if gw is None:
+        return {"ok": False, "error": "IB Gateway client is not configured.", "count": 0}
+    env = await gw.request_async(
+        "fetch_executions",
+        {"days": days, "account_slot": "primary"},
+        caller="trading_executions_fetch",
     )
+    if not env.get("ok"):
+        return {"ok": False, "error": str(env.get("error") or "IB gateway error"), "count": 0}
+    data = env.get("data") or {}
+    all_execs = list(data.get("executions") or [])
+    from src.app.config import get_effective_ib_config
+
     try:
-        all_execs = await client.fetch_executions(days=days)
-    finally:
-        try:
-            await client.set_commission_report_callback(None)
-        except Exception:
-            pass
-    client_2 = getattr(app.state, "account_ib_client_2", None)
-    if client_2 is not None:
-        try:
-            await client_2.ensure_connected()
-            execs_2 = await client_2.fetch_executions(days=days)
-            if execs_2:
-                all_execs = (all_execs or []) + execs_2
-        except Exception as e2:
-            logger.warning("executions/fetch AccountIbClient2: %s", e2)
+        ibc = get_effective_ib_config(reader._config)
+        if (ibc.get("ib2_host") or "").strip():
+            env2 = await gw.request_async(
+                "fetch_executions",
+                {"days": days, "account_slot": "secondary"},
+                caller="trading_executions_fetch",
+            )
+            if env2.get("ok"):
+                d2 = env2.get("data") or {}
+                ex2 = list(d2.get("executions") or [])
+                if ex2:
+                    all_execs = (all_execs or []) + ex2
+            else:
+                logger.warning("executions/fetch secondary: %s", env2.get("error"))
+    except Exception as e2:
+        logger.warning("executions/fetch secondary check: %s", e2)
     if not all_execs:
         return {
             "ok": True,

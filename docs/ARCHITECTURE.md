@@ -84,7 +84,7 @@
 
 **要求**：
 - **队列**：拉取任务（如 backfill 请求）写入**队列**；当前实现采用 **Celery + Redis**（broker 与 result backend 使用同一 Redis，与实时行情可选共用实例、不同 db）；任务行仍写入 **job_bars_backfill** 表（job_id 即 Celery task_id），便于 GET /bars/jobs 与前端轮询。
-- **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A backend.workers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
+- **独立 Worker 进程**：单独进程从队列取任务并执行拉取（如调用 IB 历史数据接口、写 stock_day/stock_min）；**与 status server（API）进程、守护进程分离**，可部署于同一主机或不同主机，只需能连同一 PostgreSQL（及 Redis）与 IB（若 Worker 直连 TWS）。启动方式：`python scripts/run_celery.py` 或 `celery -A src.workers.celery_app worker -l info -Q bars --concurrency=1`（必须单进程，否则多进程会争用同一 IB client_id）。
 - **API 行为**：监控/数据 API 收到 backfill 等请求时**仅入队并返回 job_id**；客户端通过 **GET /bars/jobs/{job_id}**（或等效）轮询任务状态与结果；任务完成后可刷新 coverage/列表。
 - **限速与串行**：Worker 串行处理任务并在任务间留间隔（如 2s），以符合 IB 官方历史数据 Pacing 限制。
 
@@ -193,7 +193,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **Celery queue**：`massive`（与 IB `bars` 分离）；`concurrency` 按 Massive 限流设 1–N。
 - **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
 - **重试与幂等**：429/5xx 指数退避；写入按供应商唯一 ID（`massive_trade_id`、bar 唯一键）UPSERT。
-- **启动**：`celery -A backend.workers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
+- **启动**：`celery -A src.workers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
 
 #### 2.10.5 Feature flag 约定
 
@@ -260,7 +260,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | Portfolio | `backend.portfolio` | `scripts/run_server_portfolio.py` | `server.portfolio_port`（8771） |
 | Market（行情、Watchlist 等） | `backend.market` | `scripts/run_server_market.py` | `server.market_port`（8772） |
 
-**Celery**：任务应用模块为 **`backend.workers.celery_app`**（与 `scripts/run_celery.py` 一致）。**`backend.massive`** 等包可作为库被 Research/任务引用，未必对应单独 HTTP 进程。
+**Celery**：任务应用模块为 **`src.workers.celery_app`**（与 `scripts/run_celery.py` 一致）。Massive/Polygon 等队列任务在 **`src.massive.tasks`**；**`backend.massive`** 为对应 HTTP（含 WebSocket/SSE）服务。
 
 **前端**：开发环境下对各 API 基址的配置需与上述多进程一致；详见 **[docs/index.md](index.md)**「项目组成与启动」。
 
@@ -306,7 +306,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | 组件 | 说明 | 交付 |
 |------|------|------|
 | **任务队列** | backfill 等非实时拉取请求入队；**实现**：**Celery + Redis**（broker/result backend），任务行仍写 job_bars_backfill 表。 | 阶段 3（与 R-A3 一并） |
-| **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A backend.workers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
+| **独立 Worker 进程** | Celery worker（`scripts/run_celery.py` 或 `celery -A src.workers.celery_app worker -Q bars`）取任务，串行执行拉取（IB 历史数据、写 stock_day/stock_min 等），任务间间隔以满足 IB Pacing。 | 阶段 3 |
 | **API 入队与查询** | POST /bars/backfill（或等效）入队并返回 job_id；GET /bars/jobs、GET /bars/jobs/{id} 查询状态与结果；前端轮询 job 状态。 | 阶段 3 |
 
 ### 4.5 Massive 期权研究数据（R-A6）

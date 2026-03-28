@@ -22,9 +22,9 @@ _project_root = _here.parent.parent  # src/bars/ -> src/ -> project root
 if str(_project_root) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_project_root))
 
-from backend.workers.celery_app import app  # noqa: E402
-from backend.workers.celery_app import WORKER_IB_STATUS_KEY, WORKER_IB_STATUS_TTL_SEC  # noqa: E402
-from backend.workers.celery_app import WORKER_STOP_REQUESTED_KEY  # noqa: E402
+from src.workers.celery_app import app  # noqa: E402
+from src.workers.celery_app import WORKER_IB_STATUS_KEY, WORKER_IB_STATUS_TTL_SEC  # noqa: E402
+from src.workers.celery_app import WORKER_STOP_REQUESTED_KEY  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ async def _worker_connect_poll_loop() -> None:
         first_run = False
         try:
             import redis
-            from backend.workers.celery_app import broker_url
+            from src.workers.celery_app import broker_url
             r = redis.from_url(broker_url)
             if r.get(WORKER_STOP_REQUESTED_KEY):
                 if _worker_ib_client is not None:
@@ -194,7 +194,7 @@ def _write_worker_ib_status(connected: bool, client_id: int) -> None:
     """Write Worker IB status to Redis for API/UI (same semantics as Monitor/Daemon IB)."""
     try:
         import redis
-        from backend.workers.celery_app import broker_url
+        from src.workers.celery_app import broker_url
         r = redis.from_url(broker_url)
         r.setex(
             WORKER_IB_STATUS_KEY,
@@ -293,7 +293,7 @@ def _start_worker_ib_heartbeat(client_id: int) -> None:
             await asyncio.sleep(30)
             try:
                 import redis
-                from backend.workers.celery_app import broker_url
+                from src.workers.celery_app import broker_url
                 r = redis.from_url(broker_url)
                 if r.get(WORKER_STOP_REQUESTED_KEY):
                     if _worker_ib_client is not None:

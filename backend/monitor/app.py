@@ -19,9 +19,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.app.config import config_profile_from_resolved_path, get_effective_ib_config
+from src.app.config import config_profile_from_resolved_path
 from src.connector.flex_client import fetch_cash_transactions, fetch_trades
-from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
+from src.ib_gateway.client import IbGatewayClient
 from src.monitor.reader import StatusReader
 from src.connector.flex_client import parse_trades_xml
 from src.monitor.self_check import derive_daemon_self_check, derive_self_check
@@ -109,11 +109,9 @@ def create_app(
     app.state._ops_log_thread: Optional[threading.Thread] = None
     app.state._ops_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # Monitor-side IB state (for AccountIbClient / MarketIbClient).
+    # IB access via Redis IB Gateway only (no in-process TWS clients).
     app.state.monitor_enabled = True
-    app.state.account_ib_client = None
-    app.state.market_ib_client = None
-    app.state.account_ib_client_2 = None  # Second TWS (manual-only account, R-A4)
+    app.state.ib_gateway_client = None
 
     # Shared deps for routers (reader, control_via_db, etc.)
     app.state.reader = reader
@@ -201,121 +199,26 @@ def create_app(
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        """初始化监控端 IB 客户端（账户 + 行情），使用 config.yaml 的 host/port/client_id。"""
-        skip_ib = (reader._config.get("server") or {}).get("skip_monitor_ib", False)
-        if skip_ib:
-            logger.info(
-                "skip_monitor_ib=true: skipping AccountIbClient / MarketIbClient initialisation (Management mode)"
-            )
-            app.state.account_ib_client = None
-            app.state.market_ib_client = None
-            app.state.account_ib_client_2 = None
+        """IB 经 Redis Gateway；本进程不连接 TWS。"""
+        cfg = merged_config or reader._config
+        app.state.ib_gateway_client = IbGatewayClient.from_merged_config(cfg)
+        if app.state.ib_gateway_client is not None:
+            logger.info("Monitor IB Gateway client enabled (Redis RPC)")
+        elif (cfg.get("server") or {}).get("skip_monitor_ib", False):
+            logger.info("skip_monitor_ib=true: IB Gateway client not used (Management mode)")
         else:
-            try:
-                ib_cfg = get_effective_ib_config(reader._config)
-                host = ib_cfg["host"]
-                port = ib_cfg["port"]
-
-                app.state.account_ib_client = AccountIbClient(
-                    host=host,
-                    port=port,
-                    client_id=ib_cfg["client_id_account"],
-                    name="AccountIbClient",
-                )
-                app.state.market_ib_client = MarketIbClient(
-                    host=host,
-                    port=port,
-                    client_id=ib_cfg["client_id_markets"],
-                    name="MarketIbClient",
-                )
-                ib2_host = ib_cfg.get("ib2_host") or ""
-                if ib2_host:
-                    app.state.account_ib_client_2 = AccountIbClient(
-                        host=ib2_host,
-                        port=ib_cfg["ib2_port"],
-                        client_id=ib_cfg["ib2_client_id_account"],
-                        name="AccountIbClient2",
-                    )
-                    logger.info(
-                        "Monitor AccountIbClient2 (second IB) initialized host=%s port=%s client_id=%s",
-                        ib2_host,
-                        ib_cfg["ib2_port"],
-                        ib_cfg["ib2_client_id_account"],
-                    )
-                else:
-                    app.state.account_ib_client_2 = None
-                logger.info(
-                    "Monitor IB clients initialized (host=%s port=%s account_id=%s market_id=%s)",
-                    host,
-                    port,
-                    getattr(app.state.account_ib_client, "client_id", None),
-                    getattr(app.state.market_ib_client, "client_id", None),
-                )
-
-                # 后台尝试建立 IB 连接，不阻塞 startup，避免 GET /status、GET /health 等不到响应导致前端显示 Fetch failed
-                async def _connect_ib_in_background() -> None:
-                    acc_client = getattr(app.state, "account_ib_client", None)
-                    acc_client_2 = getattr(app.state, "account_ib_client_2", None)
-                    mkt_client = getattr(app.state, "market_ib_client", None)
-                    if acc_client is not None:
-                        try:
-                            await acc_client.ensure_connected()
-                            logger.info("Monitor AccountIbClient connected on startup")
-                        except Exception as e:
-                            logger.warning(
-                                "AccountIbClient auto-connect on startup failed: %s (will retry on first use)",
-                                e,
-                            )
-                    if acc_client_2 is not None:
-                        try:
-                            await acc_client_2.ensure_connected()
-                            logger.info(
-                                "Monitor AccountIbClient2 (Secondary) connected on startup"
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "AccountIbClient2 auto-connect on startup failed: %s (will retry on Connect or first use)",
-                                e,
-                            )
-                    if mkt_client is not None:
-                        try:
-                            await mkt_client.ensure_connected()
-                            logger.info("Monitor MarketIbClient connected on startup")
-                        except Exception as e:
-                            logger.warning(
-                                "MarketIbClient auto-connect on startup failed: %s (will retry on first use)",
-                                e,
-                            )
-
-                asyncio.create_task(_connect_ib_in_background())
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "Failed to initialize monitor IB clients: %s", exc, exc_info=True
-                )
-                app.state.account_ib_client = None
-                app.state.market_ib_client = None
-                app.state.account_ib_client_2 = None
-
+            logger.warning(
+                "IB Gateway client unavailable (enable Redis and ib_gateway.enabled, or set skip_monitor_ib)"
+            )
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        """优雅断开监控端 IB 客户端。"""
-        try:
-            client: Optional[AccountIbClient] = getattr(
-                app.state, "account_ib_client", None
-            )
-            if client is not None:
-                await client.disconnect()
-        except Exception:
-            pass
-        try:
-            mclient: Optional[MarketIbClient] = getattr(
-                app.state, "market_ib_client", None
-            )
-            if mclient is not None:
-                await mclient.disconnect()
-        except Exception:
-            pass
+        gw = getattr(app.state, "ib_gateway_client", None)
+        if gw is not None:
+            try:
+                gw.close()
+            except Exception:
+                pass
 
     return app
 

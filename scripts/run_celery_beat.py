@@ -2,7 +2,7 @@
 """Start Celery Beat for Massive scheduled tasks (EOD pipeline, corporate actions, reconcile, trim).
 
 Requires the same Redis broker as ``run_celery.py``. Schedule is defined in
-``backend/workers/celery_app.py`` (``beat_schedule``). Run a **worker** that consumes the
+``src/workers/celery_app.py`` (``beat_schedule``). Run a **worker** that consumes the
 ``massive`` queue in parallel (e.g. ``python scripts/run_celery.py``).
 
 Usage::
@@ -38,7 +38,7 @@ if __name__ == "__main__":
                 "-m",
                 "celery",
                 "-A",
-                "backend.workers.celery_app",
+                "src.workers.celery_app",
                 "beat",
                 "-l",
                 "info",

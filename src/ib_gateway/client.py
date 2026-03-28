@@ -1,0 +1,208 @@
+"""Call IB Gateway from API processes via Redis (sync + async helper)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from typing import Any, Dict, Optional
+
+import redis
+
+from src.ib_gateway.config import effective_ib_gateway_settings
+from src.ib_gateway.protocol import PROTOCOL_VERSION, new_req_id, result_key
+
+logger = logging.getLogger(__name__)
+
+
+class IbGatewayClient:
+    """Publish commands to the gateway stream and poll for result keys."""
+
+    def __init__(
+        self,
+        *,
+        redis_url: str,
+        stream: str,
+        result_prefix: str,
+        default_timeout_sec: float = 120.0,
+    ) -> None:
+        self._redis_url = redis_url
+        self._stream = stream
+        self._result_prefix = result_prefix
+        self._default_timeout_sec = float(default_timeout_sec)
+        self._r: Optional[redis.Redis] = None
+
+    @classmethod
+    def from_merged_config(cls, config: Dict[str, Any]) -> Optional["IbGatewayClient"]:
+        """Return client if gateway + Redis are enabled; else None."""
+        if (config.get("server") or {}).get("skip_monitor_ib", False):
+            return None
+        s = effective_ib_gateway_settings(config)
+        if not s["enabled"] or not s["redis_url"]:
+            return None
+        return cls(
+            redis_url=s["redis_url"],
+            stream=s["stream"],
+            result_prefix=s["result_prefix"],
+            default_timeout_sec=s["request_timeout_sec"],
+        )
+
+    def _conn(self) -> redis.Redis:
+        if self._r is None:
+            self._r = redis.from_url(self._redis_url, decode_responses=True)
+        return self._r
+
+    def close(self) -> None:
+        if self._r is not None:
+            try:
+                self._r.close()
+            except Exception:
+                pass
+            self._r = None
+
+    def request(
+        self,
+        op: str,
+        payload: Optional[Dict[str, Any]] = None,
+        *,
+        timeout_sec: Optional[float] = None,
+        caller: str = "fastapi",
+    ) -> Dict[str, Any]:
+        """Blocking request. Returns gateway envelope ``{ok, error?, data?}``."""
+        payload = payload or {}
+        timeout = float(timeout_sec if timeout_sec is not None else self._default_timeout_sec)
+        if timeout <= 0:
+            return {"ok": False, "error": "invalid_timeout"}
+
+        r = self._conn()
+        req_id = new_req_id()
+        deadline_ms = int(time.time() * 1000 + timeout * 1000)
+        fields = {
+            "req_id": req_id,
+            "v": PROTOCOL_VERSION,
+            "op": op,
+            "payload": json.dumps(payload, separators=(",", ":"), default=str),
+            "caller": caller,
+            "deadline_ms": str(deadline_ms),
+        }
+        try:
+            r.xadd(self._stream, fields)
+        except Exception as e:
+            logger.warning("ib_gateway xadd failed: %s", e)
+            return {"ok": False, "error": f"redis_xadd:{e}"}
+
+        rk = result_key(self._result_prefix, req_id)
+        poll_interval = 0.05
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                raw = r.get(rk)
+            except Exception as e:
+                return {"ok": False, "error": f"redis_get:{e}"}
+            if raw:
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError:
+                    return {"ok": False, "error": "invalid_result_json"}
+            time.sleep(poll_interval)
+
+        return {"ok": False, "error": "timeout_waiting_for_gateway"}
+
+    async def request_async(
+        self,
+        op: str,
+        payload: Optional[Dict[str, Any]] = None,
+        *,
+        timeout_sec: Optional[float] = None,
+        caller: str = "fastapi",
+    ) -> Dict[str, Any]:
+        return await asyncio.to_thread(
+            self.request,
+            op,
+            payload,
+            timeout_sec=timeout_sec,
+            caller=caller,
+        )
+
+
+def read_gateway_health(redis_url: str, health_key: str) -> Optional[Dict[str, Any]]:
+    """Best-effort read of gateway health JSON (sync)."""
+    try:
+        r = redis.from_url(redis_url, decode_responses=True)
+        try:
+            raw = r.get(health_key)
+        finally:
+            r.close()
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def build_monitor_ib_status(
+    config: Dict[str, Any],
+    ib_cfg: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Build ``monitor_ib_status`` for GET /status when IB Gateway + Redis are enabled."""
+    if (config.get("server") or {}).get("skip_monitor_ib", False):
+        return None
+    s = effective_ib_gateway_settings(config)
+    if not s["enabled"] or not s["redis_url"]:
+        return None
+    ib = ib_cfg or {}
+    health = read_gateway_health(s["redis_url"], s["health_key"])
+    unreachable = "IB gateway unreachable (is run_ib_gateway.py running?)"
+
+    def _slot(
+        key: str,
+        cid_key: str,
+        *,
+        fallback_err: Optional[str],
+    ) -> Dict[str, Any]:
+        cid = ib.get(cid_key)
+        try:
+            cid_i = int(cid) if cid is not None else 0
+        except (TypeError, ValueError):
+            cid_i = 0
+        if health and isinstance(health.get(key), dict):
+            h = health[key]
+            return {
+                "connected": bool(h.get("connected")),
+                "client_id": int(h.get("client_id") or cid_i),
+                "last_error": h.get("last_error"),
+            }
+        return {
+            "connected": False,
+            "client_id": cid_i,
+            "last_error": unreachable if not health else fallback_err,
+        }
+
+    out: Dict[str, Any] = {
+        "account": _slot("account", "ib_client_id_account", fallback_err=None),
+        "market": _slot("market", "ib_client_id_markets", fallback_err=None),
+    }
+    ib2_host = ib.get("ib2_host") or ""
+    ib2_host = ib2_host.strip() if isinstance(ib2_host, str) else ""
+    try:
+        cid2 = int(ib.get("ib2_client_id_account") or 102)
+    except (TypeError, ValueError):
+        cid2 = 102
+    if ib2_host or cid2 != 102:
+        if health and health.get("account2") is not None and isinstance(health.get("account2"), dict):
+            a2 = health["account2"]
+            out["account2"] = {
+                "connected": bool(a2.get("connected")),
+                "client_id": int(a2.get("client_id") or cid2),
+                "last_error": a2.get("last_error"),
+            }
+        else:
+            out["account2"] = {
+                "connected": False,
+                "client_id": cid2,
+                "last_error": unreachable
+                if not health
+                else ("Set Second IB host in Settings to enable" if not ib2_host else None),
+            }
+    return out

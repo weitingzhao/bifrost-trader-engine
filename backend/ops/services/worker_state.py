@@ -10,14 +10,14 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.ops.models.schemas import WorkerDetail, WorkerStatus, WorkerSummary
-from backend.workers.celery_app import (
+from src.workers.celery_app import (
     CELERY_INSPECT_TIMEOUT_SEC,
     OPS_WORKER_PRESENCE_KEY_PREFIX,
 )
 
 logger = logging.getLogger(__name__)
 
-# Canonical Celery queues (see scripts/run_celery.py _DEFAULT_QUEUES, servers/celery_app.py).
+# Canonical Celery queues (see scripts/run_celery.py _DEFAULT_QUEUES, src/workers/celery_app.py).
 SUPPORTED_CELERY_QUEUES: Tuple[str, ...] = ("bars", "massive_high", "massive")
 
 

@@ -100,9 +100,9 @@ def create_ops_app(
 
     # ── Wire services ─────────────────────────────────────────────────────────
 
-    from backend.workers.celery_app import app as celery_app
+    from src.workers.celery_app import app as celery_app
 
-    # ``backend.workers.celery_app`` resolves broker at import time; ensure Ops ``read_config`` URL wins
+    # ``src.workers.celery_app`` resolves broker at import time; ensure Ops ``read_config`` URL wins
     # so ``control.inspect`` hits the same Redis as workers and Flower.
     _prev_broker = celery_app.conf.get("broker_url")
     if _prev_broker != broker_url:

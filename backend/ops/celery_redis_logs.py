@@ -1,4 +1,4 @@
-"""Celery worker console: Redis Stream XREAD (same keys as workers writing via backend.workers.celery_app)."""
+"""Celery worker console: Redis Stream XREAD (same keys as workers writing via src.workers.celery_app)."""
 
 from __future__ import annotations
 

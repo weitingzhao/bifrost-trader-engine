@@ -13,11 +13,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 _here = Path(__file__).resolve().parent
-_project_root = _here.parent
+_project_root = _here.parent.parent  # src/massive -> project root
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from backend.workers.celery_app import app  # noqa: E402
+from src.workers.celery_app import app  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
