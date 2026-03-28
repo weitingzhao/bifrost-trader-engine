@@ -21,6 +21,7 @@ export type SettingsSidebarLampGlyphId =
   | 'server'
   | 'daemon'
   | 'celery'
+  | 'api'
   | 'api-massive'
   | 'api-docs'
   | 'api-ops'
@@ -89,6 +90,13 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
       return (
         <svg {...SVG_COMMON}>
           <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      )
+    /** API parent (FastAPI aggregate): same zigzag as SettingsSectionIcon api */
+    case 'api':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.12.12 0 0 1 .2.07v8.26h6.68a1 1 0 0 1 .78 1.63l-9.9 10.2a.12.12 0 0 1-.2-.07v-8.26H4z" />
         </svg>
       )
     /** API Massive: lightning bolt (API service) */

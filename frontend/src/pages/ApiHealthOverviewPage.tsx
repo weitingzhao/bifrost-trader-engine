@@ -637,3 +637,48 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
     </div>
   )
 }
+
+/**
+ * Sidebar / parent API lamp: red if any Architecture probe fails in any column;
+ * yellow if Architecture all green everywhere but any other group fails; green if all green.
+ * Uses the same column plans and probes as Services Overview Health.
+ */
+export async function computeApiHealthAggregateLamp(): Promise<'green' | 'yellow' | 'red' | 'none'> {
+  try {
+    const plans = await resolveColumnPlans()
+    const [dSettled, pSettled] = await Promise.allSettled([
+      plans.dev != null ? probeServices(plans.dev.probe) : Promise.resolve(null),
+      plans.prod != null ? probeServices(plans.prod.probe) : Promise.resolve(null),
+    ])
+    const dProbe = dSettled.status === 'fulfilled' ? dSettled.value : null
+    const pProbe = pSettled.status === 'fulfilled' ? pSettled.value : null
+    const cols = [
+      buildColumn('_', plans.dev?.display ?? null, dProbe),
+      buildColumn('_', plans.prod?.display ?? null, pProbe),
+    ]
+    const withData = cols.filter(c => c.display != null && c.groups.length > 0 && !c.hint)
+    if (withData.length === 0) return 'none'
+
+    let hasRed = false
+    let hasYellow = false
+    for (const col of withData) {
+      const arch = col.groups.find(g => g.title === 'Architecture')
+      const archOk =
+        arch != null &&
+        arch.rows.length > 0 &&
+        arch.rows.every(r => r.lamp === 'green')
+      if (!archOk) {
+        hasRed = true
+        break
+      }
+      const others = col.groups.filter(g => g.title !== 'Architecture')
+      const restOk = others.every(g => g.rows.length > 0 && g.rows.every(r => r.lamp === 'green'))
+      if (!restOk) hasYellow = true
+    }
+    if (hasRed) return 'red'
+    if (hasYellow) return 'yellow'
+    return 'green'
+  } catch {
+    return 'none'
+  }
+}

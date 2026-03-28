@@ -61,13 +61,15 @@ import { DocsApiStatusPage } from './DocsApiStatusPage'
 import { OpsApiStatusPage } from './OpsApiStatusPage'
 import { DashboardPage } from './DashboardPage'
 import { CeleryControlPage } from './CeleryControlPage'
-import { ApiHealthOverviewPage } from './ApiHealthOverviewPage'
+import { ApiHealthOverviewPage, computeApiHealthAggregateLamp } from './ApiHealthOverviewPage'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
 import { fetchOpsHealth } from '../api/ops/ops'
+
+const API_SETTINGS_DETAIL_HASHES = ['settings-api-docs', 'settings-api-massive', 'settings-api-ops'] as const
 
 /** Stack indicator from GET /health utilized_services (YAML). */
 function SettingsSidebarServiceEnvBadge({ stack }: { stack: 'prod' | 'dev' | null }) {
@@ -233,7 +235,7 @@ export function SettingsPage({
     if (h && h.startsWith('settings-system')) return 'settings-system'
     if (h === 'settings-celery' || h === 'settings-dashboard-celery') return 'settings-celery'
     if (h && h.startsWith('settings-dashboard')) return 'settings-dashboard'
-    if (h === 'settings-services-overview') return 'settings-services'
+    if (h === 'settings-services-overview') return 'settings-api'
     if (h && h.startsWith('settings-api')) return 'settings-api'
     if (h === 'feed-celery' || h === 'settings-system-celery') return 'settings-celery'
     if (h && isMassiveOptionFeedHash(`#${h}`)) return 'settings-feed'
@@ -262,6 +264,7 @@ export function SettingsPage({
   const [docsApiHealthOk, setDocsApiHealthOk] = useState<boolean | null>(null)
   const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
   const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
+  const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
   const deferredStart = useDeferredStart(280)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
@@ -272,6 +275,9 @@ export function SettingsPage({
   const isSystemServerActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-server'
   const isSystemDaemonActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-daemon'
   const isApiSection = activeSectionId === 'settings-api'
+  const isApiDetailSubPage =
+    isApiSection && API_SETTINGS_DETAIL_HASHES.includes(currentHash as (typeof API_SETTINGS_DETAIL_HASHES)[number])
+  const isApiOverviewMain = isApiSection && !isApiDetailSubPage
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
   const isApiDocsActive = isApiSection && currentHash === 'settings-api-docs'
   const isApiOpsActive = isApiSection && currentHash === 'settings-api-ops'
@@ -304,6 +310,13 @@ export function SettingsPage({
         })
         .catch(() => {
           if (!cancelled) setUtilizedServices([])
+        })
+      computeApiHealthAggregateLamp()
+        .then((l) => {
+          if (!cancelled) setApiAggregateLamp(l)
+        })
+        .catch(() => {
+          if (!cancelled) setApiAggregateLamp('none')
         })
     }
     load()
@@ -343,6 +356,11 @@ export function SettingsPage({
         window.history.replaceState(null, '', next)
         h = '#settings-celery'
       }
+      if (h === '#settings-services-overview') {
+        const next = `${window.location.pathname}${window.location.search}#settings-api`
+        window.history.replaceState(null, '', next)
+        h = '#settings-api'
+      }
       return h
     }
     const syncFromHash = () => {
@@ -361,13 +379,9 @@ export function SettingsPage({
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-system-server`)
       setActiveSectionId('settings-system')
     }
-    if (h === '#settings-api-health') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-services-overview`)
-      setActiveSectionId('settings-services')
-    }
-    if (h === '#settings-api-overview') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-services-overview`)
-      setActiveSectionId('settings-services')
+    if (h === '#settings-api-health' || h === '#settings-api-overview') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-api`)
+      setActiveSectionId('settings-api')
     }
   }, [])
 
@@ -435,7 +449,6 @@ export function SettingsPage({
   const isSystemSection = activeSectionId === 'settings-system'
   const isDashboardSection = activeSectionId === 'settings-dashboard'
   const isCeleryControlSection = activeSectionId === 'settings-celery'
-  const isServicesOverviewSection = activeSectionId === 'settings-services'
   const isCoverageSection = activeSectionId === 'settings-coverage'
   const isFeedSection = activeSectionId === 'settings-feed'
 
@@ -513,13 +526,6 @@ export function SettingsPage({
           Dashboard
         </a>
         <a
-          href="#settings-services-overview"
-          className={`settings-sidebar-link ${isServicesOverviewSection ? 'active' : ''}`}
-        >
-          <SettingsSectionIcon name="heartbeat" />
-          Services Overview
-        </a>
-        <a
           href="#settings-celery"
           className={`settings-sidebar-link ${isCeleryControlSection ? 'active' : ''}`}
         >
@@ -534,8 +540,14 @@ export function SettingsPage({
         </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
-            <a href="#settings-api-docs" className="settings-sidebar-parent-label">
-              <SettingsSectionIcon name="api" />
+            <a href="#settings-api" className="settings-sidebar-parent-label">
+              <span
+                className={`title-inline-lamp lamp-icon ${apiAggregateLamp === 'none' ? 'none' : apiAggregateLamp}`}
+                title="API health: Architecture (Monitor, Ops, Docs) must be up; other FastAPIs drive yellow if any fail."
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="api" />
+              </span>
               API
             </a>
             <button
@@ -789,17 +801,17 @@ export function SettingsPage({
         <DashboardPage status={status} loadStatus={loadStatus} embeddedInSettings />
       ) : isCeleryControlSection ? (
         <CeleryControlPage embeddedInSettings celeryLamp={celeryLamp} />
-      ) : isServicesOverviewSection ? (
-        <ApiHealthOverviewPage embeddedInSettings />
       ) : isApiSection ? (
-        isApiMassiveActive ? (
+        isApiOverviewMain ? (
+          <ApiHealthOverviewPage embeddedInSettings />
+        ) : isApiMassiveActive ? (
           <MassiveApiStatusPage embeddedInSettings />
         ) : isApiDocsActive ? (
           <DocsApiStatusPage embeddedInSettings />
         ) : isApiOpsActive ? (
           <OpsApiStatusPage embeddedInSettings />
         ) : (
-          <DocsApiStatusPage embeddedInSettings />
+          <ApiHealthOverviewPage embeddedInSettings />
         )
       ) : isCoverageSection ? (
         currentHash === 'coverage-stock' ? (
