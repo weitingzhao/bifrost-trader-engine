@@ -1,4 +1,4 @@
-"""Shared dependencies for Massive routers (no circular imports back to servers.routers)."""
+"""Shared dependencies for Massive routers (no circular imports back to monitor HTTP routers)."""
 
 from __future__ import annotations
 

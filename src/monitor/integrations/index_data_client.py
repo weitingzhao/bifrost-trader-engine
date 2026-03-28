@@ -122,7 +122,7 @@ def refresh_reference_indices(
     if not config.get("postgres") and not __import__("os").environ.get("PGHOST"):
         return {"ok": False, "updated": [], "errors": ["postgres config required to write index bars"]}
 
-    from servers.reader import StatusReader, write_ohlc_bars_to_db
+    from src.monitor.reader import StatusReader, write_ohlc_bars_to_db
 
     if reader is None:
         reader = StatusReader(config)
@@ -188,7 +188,7 @@ def refresh_one_index(
         return {"ok": False, "updated": [], "errors": [f"symbol {sym} not in reference_indices"]}
     if not config.get("postgres") and not __import__("os").environ.get("PGHOST"):
         return {"ok": False, "updated": [], "errors": ["postgres config required"]}
-    from servers.reader import StatusReader, write_ohlc_bars_to_db
+    from src.monitor.reader import StatusReader, write_ohlc_bars_to_db
     if reader is None:
         reader = StatusReader(config)
     tv_symbol = (item.get("tv_symbol") or "").strip()

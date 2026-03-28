@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from src.core.state.composite import CompositeState
-from src.core.state.enums import (
+from src.daemon.core.state.composite import CompositeState
+from src.daemon.core.state.enums import (
     DeltaDeviationState,
     ExecutionState,
     LiquidityState,
@@ -13,9 +13,9 @@ from src.core.state.enums import (
     OptionPositionState,
     SystemHealthState,
 )
-from src.strategy.gamma_scalper import HedgeIntent, compute_target_position
-from src.strategy.hedge_gate import apply_hedge_gates, should_output_target
-from src.guards.execution_guard import ExecutionGuard
+from src.daemon.strategy.gamma_scalper import HedgeIntent, compute_target_position
+from src.daemon.strategy.hedge_gate import apply_hedge_gates, should_output_target
+from src.daemon.guards.execution_guard import ExecutionGuard
 
 
 def _cs(

@@ -10,7 +10,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from servers.routers.deps import (
+from backend.monitor.routers.deps import (
     DAEMON_LOG_STREAM_KEY,
     DOCS_LOG_STREAM_KEY,
     MASSIVE_LOG_STREAM_KEY,

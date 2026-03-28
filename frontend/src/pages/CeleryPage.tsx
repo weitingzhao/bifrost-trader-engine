@@ -1,8 +1,7 @@
 import type { StatusResponse } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { StatusCeleryPanel, StatusSseQueuesPanel } from './status/panels'
+import { StatusCeleryPanel } from './status/panels'
 import { celeryMetricsFromStatus, useCeleryStopControl } from './status/celeryMetrics'
-import { CeleryJobQueuesSection } from './celery/CeleryJobQueuesSection'
 
 export interface CeleryPageProps {
   status: StatusResponse | null
@@ -27,10 +26,10 @@ export function CeleryPage({
         <div className="settings-page-title-group">
           <h2 className="settings-page-title">
             {breadcrumbLabel}
-            <InfoTooltip text="Celery worker health, SSE backlog for Celery logs, and queue job tables. Use Dashboard → Console for per-worker Redis logs." />
+            <InfoTooltip text="Celery worker health. Massive / bars job queues live on Dashboard → Celery. Use Dashboard → Console for per-worker Redis logs." />
           </h2>
           <p className="settings-page-subtitle">
-            Health, stop worker, Celery log SSE backlog, and Massive / bars job queues.
+            Health, stop worker, and Massive / bars job queues.
           </p>
         </div>
       </div>
@@ -53,12 +52,6 @@ export function CeleryPage({
             celeryCtrlMsg={celeryCtrlMsg}
           />
         </section>
-
-        <div className="celery-page-cell celery-page-cell--sse">
-          <StatusSseQueuesPanel categoryKeys={['celery_logs']} heading="Celery log SSE backlog" />
-        </div>
-
-        <CeleryJobQueuesSection />
 
         <section className="replay-section celery-page-cell celery-page-cell--config" aria-labelledby="celery-config-head">
           <h3 id="celery-config-head" className="page-title-with-tooltip">

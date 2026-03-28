@@ -61,7 +61,7 @@ def _load_config(config_path: str | None) -> dict:
 
 
 def _get_massive(cfg: dict) -> dict:
-    from backend.massive.config import get_massive_settings
+    from src.vendor.massive.config import get_massive_settings
     return get_massive_settings(cfg)
 
 
@@ -80,7 +80,7 @@ def _redis_client(cfg: dict):
 
 def _pg_conn(cfg: dict):
     import psycopg2
-    from src.sink.pg_connection import _get_conn_params
+    from src.daemon.sink.pg_connection import _get_conn_params
     status_cfg = cfg.get("status") or cfg
     params = _get_conn_params(status_cfg)
     return psycopg2.connect(**params)
@@ -90,7 +90,7 @@ def _watchlist_option_symbols(cfg: dict) -> Set[str]:
     """Read Watchlist STK symbols that are optionable."""
     try:
         import psycopg2
-        from src.sink.pg_connection import _get_conn_params
+        from src.daemon.sink.pg_connection import _get_conn_params
         status_cfg = cfg.get("status") or cfg
         params = _get_conn_params(status_cfg)
         conn = psycopg2.connect(**params)

@@ -25,7 +25,7 @@ from typing import List, Optional
 
 # Ensure project root on path and cwd when worker imports this
 _here = Path(__file__).resolve().parent
-_project_root = _here.parent
+_project_root = _here.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 if os.getcwd() != str(_project_root):
@@ -41,6 +41,8 @@ def _redis_url_from_config() -> str:
     """Build Redis URL from config (same redis as realtime quotes; use db 1 for Celery to avoid clash)."""
     try:
         from src.app.config import read_config
+        from src.core.redis_url import effective_redis_dict, format_redis_url
+
         config, _ = read_config()
     except Exception as e:
         logger.warning("read_config for Celery failed: %s; using default Redis URL", e)
@@ -48,13 +50,7 @@ def _redis_url_from_config() -> str:
     r = config.get("redis") or {}
     if not r.get("enabled", True) and "enabled" in r:
         return "redis://127.0.0.1:6379/1"
-    host = (r.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1").strip()
-    port = int(r.get("port") or os.environ.get("REDIS_PORT") or 6379)
-    db = int(r.get("db") or os.environ.get("REDIS_DB") or 1)  # 1 for Celery to avoid quotes db 0
-    password = (r.get("password") or os.environ.get("REDIS_PASSWORD") or "").strip()
-    if password:
-        return f"redis://:{password}@{host}:{port}/{db}"
-    return f"redis://{host}:{port}/{db}"
+    return format_redis_url(effective_redis_dict(config, default_db=1))
 
 
 broker_url = _redis_url_from_config()

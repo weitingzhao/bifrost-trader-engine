@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.app.gs_trading import GsTrading
-from src.core.state.enums import TradingState
+from src.daemon.app.gs_trading import GsTrading
+from src.daemon.core.state.enums import TradingState
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ async def test_handle_connected_bootstraps_trading_fsm(minimal_config):
     app.connector.get_managed_accounts = MagicMock(return_value=[])
     app.connector.get_account_summary = AsyncMock(return_value=[])
 
-    from src.fsm.daemon_fsm import DaemonState
+    from src.daemon.fsm.daemon_fsm import DaemonState
 
     next_state = await app._handle_connected()
     assert next_state == DaemonState.RUNNING

@@ -44,7 +44,7 @@ def main() -> int:
     try:
         import yaml
         import psycopg2
-        from src.sink.postgres_sink import _get_conn_params
+        from src.daemon.sink.postgres_sink import _get_conn_params
     except ImportError as e:
         print(f"Missing dependency: {e}", file=sys.stderr)
         return 1

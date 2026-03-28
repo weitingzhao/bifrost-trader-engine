@@ -25,13 +25,18 @@ export function setOpsToken(token: string): void {
   }
 }
 
-function authHeaders(): Record<string, string> {
+/** Bearer token for Ops API (same as other Dashboard / control-plane calls). */
+export function opsAuthHeaders(): Record<string, string> {
   const token = getOpsToken()
   const headers: Record<string, string> = {}
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
   return headers
+}
+
+function authHeaders(): Record<string, string> {
+  return opsAuthHeaders()
 }
 
 function jsonAuthHeaders(): Record<string, string> {

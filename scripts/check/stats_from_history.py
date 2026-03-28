@@ -50,7 +50,7 @@ def _connect(status_config: dict):
     try:
         import psycopg2
         from psycopg2.extras import RealDictCursor
-        from src.sink.postgres_sink import _get_conn_params
+        from src.daemon.sink.postgres_sink import _get_conn_params
     except ImportError as e:
         print(f"Missing dependency: {e}", file=sys.stderr)
         print("  Install with: pip install -e .  (or pip install psycopg2-binary)", file=sys.stderr)

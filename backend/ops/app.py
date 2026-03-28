@@ -7,6 +7,7 @@ Reads config from the shared YAML config system.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import threading
 from pathlib import Path
@@ -35,19 +36,6 @@ DEFAULT_ALLOWED_UNITS = [
     "bifrost-celery-worker",
     "bifrost-celery-beat",
 ]
-
-
-def _broker_url_from_config(config: dict) -> str:
-    r = config.get("redis") or {}
-    import os
-
-    host = (r.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1").strip()
-    port = int(r.get("port") or os.environ.get("REDIS_PORT") or 6379)
-    db = int(r.get("db") or os.environ.get("REDIS_DB") or 1)
-    password = (r.get("password") or os.environ.get("REDIS_PASSWORD") or "").strip()
-    if password:
-        return f"redis://:{password}@{host}:{port}/{db}"
-    return f"redis://{host}:{port}/{db}"
 
 
 def _allowed_units_from_config(config: dict) -> List[str]:
@@ -82,6 +70,10 @@ def create_ops_app(
 ) -> FastAPI:
     """Build the Ops control plane FastAPI app."""
 
+    from src.core.redis_url import effective_redis_dict, format_redis_url
+
+    broker_url = format_redis_url(effective_redis_dict(config, default_db=1))
+
     app = FastAPI(
         title="Bifrost Ops API",
         description="Unified control plane: Celery worker status, scaling, audit.",
@@ -104,7 +96,6 @@ def create_ops_app(
         else None
     )
 
-    broker_url = _broker_url_from_config(config)
     allowed_units = _allowed_units_from_config(config)
 
     # ── Wire services ─────────────────────────────────────────────────────────
@@ -197,12 +188,13 @@ def create_ops_app(
     audit_store = AuditStore.from_config(config)
     app.state.audit_store = audit_store
 
-    redis_cfg = config.get("redis") or {}
-    import os
+    has_postgres = bool(config.get("postgres") or os.environ.get("PGHOST"))
+    use_db_control = has_postgres
+    app.state.control_via_db = config if use_db_control else None
+    app.state.status_cfg_for_read = config if has_postgres else None
+
     app.state.broker_url = broker_url
-    app.state.redis_host = (
-        redis_cfg.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1"
-    ).strip()
+    app.state.redis_host = effective_redis_dict(config, default_db=1)["host"]
 
     # Celery worker console SSE (Redis Stream per worker nodename; same as former bifrost-server /api/celery/logs/stream)
     app.state.celery_log_queues: list = []
@@ -217,7 +209,9 @@ def create_ops_app(
     # ── Router ────────────────────────────────────────────────────────────────
 
     from backend.ops.routers.workers import router as ops_router
+    from backend.ops.routers.job_queues import router as job_queues_router
 
+    app.include_router(job_queues_router)
     app.include_router(ops_router)
 
     # ── Health ────────────────────────────────────────────────────────────────

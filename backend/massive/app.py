@@ -15,8 +15,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.config import config_profile_from_resolved_path
-from servers.reader import StatusReader
-from servers.redis_url import redis_url_from_config
+from src.monitor.reader import StatusReader
+from src.monitor.redis_url import redis_url_from_config
 from servers.sse_queue_utils import put_nowait_drop_oldest
 from backend.massive.sse import run_massive_channel_subscribe_loop
 

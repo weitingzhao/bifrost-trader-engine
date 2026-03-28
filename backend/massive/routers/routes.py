@@ -68,22 +68,12 @@ def _massive_job_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _purge_all_massive_jobs_response(request: Request, status: Optional[str]) -> Dict[str, Any]:
-    from backend.massive.reader import delete_all_job_massive_backfill
-
-    db = _db_config(request)
-    if not db:
-        return {"ok": False, "error": "No DB", "deleted": 0}
-    deleted = delete_all_job_massive_backfill(db, status_filter=status)
-    return {"ok": True, "deleted": deleted}
-
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/research/massive/status")
 def get_massive_status(request: Request) -> Dict[str, Any]:
     """Massive/Polygon configuration summary (no API key returned)."""
-    from backend.massive.config import get_massive_settings, massive_delay_notice_english
+    from src.vendor.massive.config import get_massive_settings, massive_delay_notice_english
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -122,7 +112,7 @@ def get_massive_daily_checklist(
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from backend.massive.reader import get_massive_daily_checklist_data
+    from src.vendor.massive.reader import get_massive_daily_checklist_data
 
     db = _db_config(request)
     if not db:
@@ -354,8 +344,8 @@ def get_massive_market_conditions(
     limit: int = Query(1000, ge=1, le=1000),
 ) -> Dict[str, Any]:
     """Condition codes from Massive REST (read-only, no DB write)."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -376,8 +366,8 @@ def get_massive_market_exchanges(
     locale: Optional[str] = Query(None, description="us | global"),
 ) -> Dict[str, Any]:
     """Exchange list from Massive REST (read-only, no DB write)."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -394,8 +384,8 @@ def get_massive_market_exchanges(
 @router.get("/research/massive/market-ops/holidays")
 def get_massive_market_holidays(request: Request) -> Dict[str, Any]:
     """Upcoming market holidays from Massive REST + local reference_us_holidays comparison."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -443,8 +433,8 @@ def get_massive_market_holidays(request: Request) -> Dict[str, Any]:
 @router.get("/research/massive/market-ops/status")
 def get_massive_market_status(request: Request) -> Dict[str, Any]:
     """Current market trading status from Massive REST (read-only)."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -476,8 +466,8 @@ def get_massive_technical_indicator(
     signal_window: Optional[int] = Query(None, ge=1, description="MACD only"),
 ) -> Dict[str, Any]:
     """SMA / EMA / RSI / MACD from Massive REST (read-only, no DB write)."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     allowed = {"sma", "ema", "rsi", "macd"}
     if indicator not in allowed:
@@ -525,8 +515,8 @@ def get_massive_technical_indicator(
 @router.get("/research/massive/trades-quotes/last-trade/{options_ticker}")
 def get_massive_last_trade(request: Request, options_ticker: str) -> Dict[str, Any]:
     """GET /v2/last/trade/{optionsTicker} — most recent trade for a contract (read-only, Starter)."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -551,8 +541,8 @@ def get_massive_hist_quotes(
     order: str = Query("asc"),
 ) -> Dict[str, Any]:
     """GET /v3/quotes/{optionsTicker} — historical BBO quotes (read-only, Starter)."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -585,8 +575,8 @@ def get_massive_hist_trades(
     order: str = Query("asc"),
 ) -> Any:
     """GET /v3/trades/{optionsTicker} — tick-level trades (read-only, Developer tier gate)."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -621,9 +611,9 @@ def get_massive_hist_trades(
 @router.post("/research/massive/sync")
 def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """Enqueue Celery job on queue `massive`. Body: kind + payload."""
-    from backend.massive.config import get_massive_settings
+    from src.vendor.massive.config import get_massive_settings
     from backend.massive.tasks import run_massive_job
-    from backend.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
+    from src.vendor.massive.reader import insert_job_massive_backfill, update_job_massive_backfill_celery_task_id
 
     reader = getattr(request.app.state, "reader", None)
     cfg = reader._config if reader else {}
@@ -693,59 +683,6 @@ def post_massive_sync(request: Request, body: Dict[str, Any] = Body(...)) -> Dic
     return {"ok": True, "job_id": str(jid)}
 
 
-@router.get("/research/massive/jobs")
-def list_massive_jobs(
-    request: Request,
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    status: Optional[str] = Query(None, description="Filter by job status"),
-    kind: Optional[str] = Query(None, description="Filter by job kind"),
-) -> Dict[str, Any]:
-    from backend.massive.reader import list_job_massive_backfill
-
-    db = _db_config(request)
-    if not db:
-        return {"ok": False, "error": "No DB", "jobs": []}
-    rows = list_job_massive_backfill(
-        db, limit=limit, offset=offset, status_filter=status, kind_filter=kind
-    )
-    jobs = [_massive_job_to_api(dict(r)) for r in rows]
-    return {"ok": True, "jobs": jobs}
-
-
-@router.post("/research/massive/jobs/trim")
-def trim_massive_jobs(
-    request: Request,
-    keep: int = Query(200, ge=1, le=50000, description="Keep newest N jobs by id; delete older rows"),
-) -> Dict[str, Any]:
-    """Trim Massive job table to the newest `keep` rows (same idea as bars trim)."""
-    from backend.massive.reader import trim_job_massive_backfill
-
-    db = _db_config(request)
-    if not db:
-        return {"ok": False, "error": "No DB", "deleted": 0}
-    deleted = trim_job_massive_backfill(db, keep=keep)
-    return {"ok": True, "deleted": deleted}
-
-
-@router.delete("/research/massive/jobs")
-def delete_all_massive_jobs(
-    request: Request,
-    status: Optional[str] = Query(None, description="If set, only delete jobs with this status"),
-) -> Dict[str, Any]:
-    """Delete all Massive jobs, or only those matching status."""
-    return _purge_all_massive_jobs_response(request, status)
-
-
-@router.post("/research/massive/jobs/purge")
-def purge_all_massive_jobs(
-    request: Request,
-    status: Optional[str] = Query(None, description="If set, only delete jobs with this status"),
-) -> Dict[str, Any]:
-    """Same as DELETE /research/massive/jobs. POST for clients or proxies that block DELETE on collection URLs."""
-    return _purge_all_massive_jobs_response(request, status)
-
-
 @router.get("/research/massive/jobs/{job_id}/events")
 async def stream_massive_job_events(
     request: Request,
@@ -755,7 +692,7 @@ async def stream_massive_job_events(
     """SSE: poll job row until terminal status or timeout (1s interval)."""
     import time
 
-    from backend.massive.reader import get_job_massive_backfill
+    from src.vendor.massive.reader import get_job_massive_backfill
 
     db = _db_config(request)
 
@@ -788,33 +725,6 @@ async def stream_massive_job_events(
     )
 
 
-@router.get("/research/massive/jobs/{job_id}")
-def get_massive_job(request: Request, job_id: str) -> Dict[str, Any]:
-    """Poll Massive sync job status (same idea as GET /bars/jobs/{id})."""
-    from backend.massive.reader import get_job_massive_backfill
-
-    db = _db_config(request)
-    if not db:
-        return {"ok": False, "error": "No DB"}
-    job = get_job_massive_backfill(db, job_id)
-    if job is None:
-        return {"ok": False, "error": "Job not found"}
-    return {"ok": True, "job": _massive_job_to_api(job)}
-
-
-@router.delete("/research/massive/jobs/{job_id}")
-def delete_massive_job(request: Request, job_id: str) -> Dict[str, Any]:
-    """Delete one Massive sync job row."""
-    from backend.massive.reader import delete_job_massive_backfill
-
-    db = _db_config(request)
-    if not db:
-        return {"ok": False, "error": "No DB"}
-    if delete_job_massive_backfill(db, job_id):
-        return {"ok": True}
-    return {"ok": False, "error": "Delete failed"}
-
-
 @router.get("/research/massive/corporate-actions")
 def get_massive_corporate_actions(
     request: Request,
@@ -823,7 +733,7 @@ def get_massive_corporate_actions(
     limit: int = Query(50, ge=1, le=500),
 ) -> Dict[str, Any]:
     """Corporate actions persisted by Massive sync (dividends, splits)."""
-    from backend.massive.reader import get_corporate_actions
+    from src.vendor.massive.reader import get_corporate_actions
 
     db = _db_config(request)
     if not db:

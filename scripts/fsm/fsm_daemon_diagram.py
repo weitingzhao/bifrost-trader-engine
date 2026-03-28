@@ -11,7 +11,7 @@ from pathlib import Path
 _project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_project_root))
 
-from src.fsm.daemon_fsm import DaemonState
+from src.daemon.fsm.daemon_fsm import DaemonState
 
 # (from_state, to_state) -> (trigger_method, trigger_class, trigger_file, condition)
 # condition: short note e.g. "connect ok" / "connect fail"

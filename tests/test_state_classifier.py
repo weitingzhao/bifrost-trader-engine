@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.state.classifier import StateClassifier
-from src.core.state.composite import CompositeState
-from src.core.state.enums import (
+from src.daemon.core.state.classifier import StateClassifier
+from src.daemon.core.state.composite import CompositeState
+from src.daemon.core.state.enums import (
     DeltaDeviationState,
     ExecutionState,
     LiquidityState,
@@ -15,7 +15,7 @@ from src.core.state.enums import (
     OptionPositionState,
     SystemHealthState,
 )
-from src.positions.portfolio import OptionLeg
+from src.portfolio.positions.portfolio import OptionLeg
 
 
 def _future_yyyymmdd(days: int) -> str:

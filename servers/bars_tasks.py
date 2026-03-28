@@ -14,7 +14,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
-from src.connector.ib import IBConnectionDroppedError
+from src.daemon.connector.ib import IBConnectionDroppedError
 
 # Project root for config
 _here = Path(__file__).resolve().parent
@@ -235,7 +235,7 @@ def _ensure_worker_loop() -> None:
 async def _get_or_create_worker_ib_client(ib_cfg: Dict[str, Any]) -> Any:
     """Create or return the process-wide MarketIbClient. Must run inside worker loop."""
     global _worker_ib_client
-    from servers.ib_clients import MarketIbClient
+    from src.monitor.integrations.ib_clients import MarketIbClient
     host = (ib_cfg.get("ib_host") or "127.0.0.1").strip()
     port_type = (ib_cfg.get("ib_port_type") or "tws_paper").strip().lower()
     port_map = {"tws_live": 7496, "tws_paper": 7497, "gateway": 4002}

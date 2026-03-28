@@ -255,7 +255,7 @@ export function CeleryJobQueuesSection() {
   const err = tab === 'massive' ? massiveError : barsError
 
   return (
-    <section className="replay-section celery-page-cell celery-page-cell--queues" aria-labelledby="celery-queues-head">
+    <section className="replay-section dashboard-section dashboard-celery-queues" aria-labelledby="celery-queues-head">
       <div className="celery-queues-header">
         <h3 id="celery-queues-head" className="page-title-with-tooltip" style={{ margin: 0 }}>
           Queues

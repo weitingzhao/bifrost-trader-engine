@@ -117,7 +117,7 @@ def get_schema_from_db(
     conn: Any, structure_type: str, subtype: Optional[str]
 ) -> Optional[Dict[str, Any]]:
     """Build schema from DB: subtype legs if any, else type legs. None when DB has no legs for type."""
-    from servers.reader import structure_type_config
+    from src.monitor.reader import structure_type_config
 
     key_type = (structure_type or "").strip()
     if not key_type:

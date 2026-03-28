@@ -802,39 +802,12 @@
    6. Celery Page Grid & Queue UI
    ========================================================================== */
 
-/* Celery page: responsive grid (wide: status | SSE, log full width, massive | bars, config full width) */
+/* Celery page: responsive grid (wide: worker status; config; queues moved to Dashboard) */
 .celery-page-grid {
   display: flex;
   flex-direction: column;
   gap: var(--settings-section-gap);
   min-width: 0;
-}
-
-/* SSE backlog cell (Celery page): grid minmax(0) + fixed table — no extra horizontal scrollbar / empty min-height gap */
-.celery-page-cell--sse {
-  min-width: 0;
-  max-width: 100%;
-}
-.celery-page-cell--sse .system-tab-panel {
-  min-width: 0;
-  max-width: 100%;
-  min-height: 0;
-}
-.celery-page-cell--sse .table-scroll-x {
-  overflow-x: hidden;
-  max-width: 100%;
-}
-.celery-page-cell--sse .table-operations {
-  width: 100%;
-  max-width: 100%;
-  table-layout: fixed;
-}
-.celery-page-cell--sse .table-operations tbody td {
-  word-break: break-word;
-}
-.celery-page-cell--sse .table-operations .sse-depths-cell {
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 /* Breakpoint = var(--settings-embedded-bp) — @media can't use var(), keep in sync manually */
@@ -843,8 +816,7 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-      'celery-status celery-sse'
-      'celery-queues celery-queues'
+      'celery-status celery-status'
       'celery-config celery-config';
     gap: var(--settings-section-gap);
     align-items: start;
@@ -853,15 +825,14 @@
   .celery-page-cell--status {
     grid-area: celery-status;
   }
-  .celery-page-cell--sse {
-    grid-area: celery-sse;
-  }
-  .celery-page-cell--queues {
-    grid-area: celery-queues;
-  }
   .celery-page-cell--config {
     grid-area: celery-config;
   }
+}
+
+/* Dashboard: job queues (Massive / bars) reused from Celery page styles */
+.dashboard-celery-queues {
+  min-width: 0;
 }
 
 /* Settings sidebar layout: prevent grid tracks from expanding past main column */

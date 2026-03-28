@@ -1,5 +1,14 @@
 import type { Bar, BarsResponse, BarStatsResponse, BarsCoverageResponse } from '../types'
-import { apiBase } from './constants'
+import { apiBase, getOpsApiBase, joinServiceBase } from './constants'
+import { opsAuthHeaders } from './ops'
+
+function opsBarsJobsUrl(path: string): string {
+  if (path.startsWith('?')) {
+    return joinServiceBase(getOpsApiBase(), `/ops/bars/jobs${path}`)
+  }
+  const p = path.startsWith('/') ? path : `/${path}`
+  return joinServiceBase(getOpsApiBase(), `/ops/bars/jobs${p}`)
+}
 
 /** R-A3: API fetches bars from IB and writes to DB (no daemon). smart_duration: server computes duration from latest bar. */
 export async function postBarsFetch(
@@ -65,7 +74,7 @@ export interface BarsJob {
 }
 
 export async function fetchBarsJob(jobId: string): Promise<{ ok: boolean; job?: BarsJob; error?: string }> {
-  const r = await fetch(`${apiBase()}/bars/jobs/${encodeURIComponent(jobId)}`)
+  const r = await fetch(opsBarsJobsUrl(`/${encodeURIComponent(jobId)}`), { headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   return { ok: j.ok === true, job: j.job, error: j.error }
 }
@@ -80,7 +89,7 @@ export async function fetchBarsJobs(
   params.set('limit', String(limit))
   params.set('offset', String(offset))
   if (status && status !== 'all') params.set('status', status)
-  const r = await fetch(`${apiBase()}/bars/jobs?${params}`)
+  const r = await fetch(opsBarsJobsUrl(`?${params}`), { headers: opsAuthHeaders() })
   if (!r.ok) throw new Error(r.statusText)
   const j = await r.json().catch(() => ({}))
   return {
@@ -91,7 +100,10 @@ export async function fetchBarsJobs(
 }
 
 export async function deleteBarsJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/bars/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+  const r = await fetch(opsBarsJobsUrl(`/${encodeURIComponent(jobId)}`), {
+    method: 'DELETE',
+    headers: opsAuthHeaders(),
+  })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
@@ -99,7 +111,7 @@ export async function deleteBarsJob(jobId: string): Promise<{ ok: boolean; error
 export async function deleteAllBarsJobs(status?: string | null): Promise<{ ok: boolean; deleted: number; error?: string }> {
   const params = new URLSearchParams()
   if (status && status !== 'all') params.set('status', status)
-  const r = await fetch(`${apiBase()}/bars/jobs?${params}`, { method: 'DELETE' })
+  const r = await fetch(opsBarsJobsUrl(`?${params}`), { method: 'DELETE', headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,
@@ -110,7 +122,7 @@ export async function deleteAllBarsJobs(status?: string | null): Promise<{ ok: b
 
 export async function trimBarsJobs(keep: number): Promise<{ ok: boolean; deleted: number; error?: string }> {
   const params = new URLSearchParams({ keep: String(keep) })
-  const r = await fetch(`${apiBase()}/bars/jobs/trim?${params}`, { method: 'POST' })
+  const r = await fetch(opsBarsJobsUrl(`/trim?${params}`), { method: 'POST', headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,

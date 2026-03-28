@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.core.state.enums import ExecutionState, HedgeState
-from src.fsm.events import TargetPositionEvent
-from src.fsm.hedge_fsm import HedgeFSM
+from src.daemon.core.state.enums import ExecutionState, HedgeState
+from src.daemon.fsm.events import TargetPositionEvent
+from src.daemon.fsm.hedge_fsm import HedgeFSM
 
 
 def _target(target_shares: int, side: str = "BUY", quantity: int = 0) -> TargetPositionEvent:

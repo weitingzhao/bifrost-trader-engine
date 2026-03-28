@@ -20,8 +20,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.app.config import config_profile_from_resolved_path, get_effective_ib_config
-from servers.flex_client import fetch_cash_transactions, fetch_trades
-from servers.ib_clients import AccountIbClient, MarketIbClient
+from src.portfolio.integrations.flex_client import fetch_cash_transactions, fetch_trades
+from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
     StatusReader,
     write_ohlc_bars_to_db,
@@ -41,12 +41,12 @@ from servers.reader import (
     get_job_bars_backfill_last_updated,
     upsert_account_transactions,
 )
-from servers.flex_client import parse_trades_xml
-from servers.self_check import derive_daemon_self_check, derive_self_check
+from src.portfolio.integrations.flex_client import parse_trades_xml
+from src.monitor.self_check import derive_daemon_self_check, derive_self_check
 from servers.sse_queue_utils import put_nowait_drop_oldest
 
 try:
-    from src.realtime.redis_quotes import (
+    from src.daemon.realtime.redis_quotes import (
         RedisQuotesClient,
         create_from_config as create_redis_quotes,
         run_subscribe_loop as redis_run_subscribe_loop,
@@ -96,7 +96,7 @@ def create_app(
     merged_config: Optional[dict] = None,
 ) -> FastAPI:
     """Build FastAPI app: reader, control channel (stop/flatten/suspend/resume via DB). Optional redis_quotes for GET /quotes (R-RM*).
-    status_cfg_for_read: when set, GET /bars/jobs (and GET /bars/jobs/{id}) use this for DB read even if control_via_db is None (e.g. only PGHOST or postgres configured without sink=postgres).
+    status_cfg_for_read: when set, read paths that use DB without control channel (e.g. only PGHOST or postgres configured without sink=postgres). Job queue APIs are on Ops: GET /ops/bars/jobs.
     """
     app = FastAPI(
         title="Bifrost Trader API",
@@ -117,11 +117,6 @@ def create_app(
     app.state._sse_loop: Optional[asyncio.AbstractEventLoop] = None
     app.state._redis_subscriber_stop = threading.Event()
     app.state._redis_subscriber_thread: Optional[threading.Thread] = None
-
-    # Celery console: per-SSE reader thread + per-connection queues (one Redis stream per worker)
-    app.state.celery_log_queues: list = []
-    app.state.celery_log_lock = threading.Lock()
-    app.state._celery_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # Daemon console log stream (Redis Stream): reader thread + per-connection queues
     app.state.daemon_log_queues: list = []
@@ -202,14 +197,13 @@ def create_app(
 
     app.state.bifrost_utilized_services = _utilized_services_from_config(merged_config)
 
-    from servers.routers import (
+    from backend.monitor.routers import (
         config_router,
         core_router,
         daemon_router,
         executions_router,
         logs_router,
         market_router,
-        monitor_metrics_router,
         portfolio_model_router,
         quotes_router,
         reports_router,
@@ -218,7 +212,7 @@ def create_app(
         strategies_router,
         watchlist_router,
     )
-    from servers.routers.research_sidecars import router as research_sidecars_router
+    from backend.monitor.routers.research_sidecars import router as research_sidecars_router
 
     app.include_router(core_router)
     app.include_router(quotes_router)
@@ -233,7 +227,6 @@ def create_app(
     app.include_router(daemon_router)
     app.include_router(config_router)
     app.include_router(strategies_router)
-    app.include_router(monitor_metrics_router)
     app.include_router(portfolio_model_router)
 
     _root = Path(__file__).resolve().parent.parent

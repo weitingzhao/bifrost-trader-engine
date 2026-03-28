@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.positions.portfolio import OptionLeg, get_option_legs, get_stock_shares, portfolio_delta
+from src.portfolio.positions.portfolio import OptionLeg, get_option_legs, get_stock_shares, portfolio_delta
 
 
 def _make_mock_position(symbol: str, sec_type: str, expiry: str, strike: float, right: str, position: int, multiplier: int = 100):

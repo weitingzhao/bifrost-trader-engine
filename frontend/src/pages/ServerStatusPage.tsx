@@ -17,7 +17,7 @@ import {
   MONITOR_SELF_CHECK_LABELS,
 } from './status/statusLabels'
 import { useControlAction } from './status/useControlAction'
-import { StatusMonitorPanel, StatusSseQueuesPanel } from './status/panels'
+import { StatusMonitorPanel } from './status/panels'
 
 export interface ServerStatusPageProps {
   status: StatusResponse | null
@@ -136,8 +136,6 @@ export function ServerStatusPage({
             monitorCtrlMsg={monitorCtrlMsg}
           />
         </section>
-
-        <StatusSseQueuesPanel excludeCategories={['celery_logs']} heading="System SSE backlog" />
 
         <section className="replay-section" aria-labelledby="server-console-head">
           <h3 id="server-console-head" className="page-title-with-tooltip">

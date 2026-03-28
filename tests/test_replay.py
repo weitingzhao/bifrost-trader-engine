@@ -6,13 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.state.classifier import StateClassifier
-from src.core.state.composite import CompositeState
-from src.core.state.enums import DeltaDeviationState, ExecutionState, OptionPositionState, TradingState
-from src.core.state.snapshot import StateSnapshot, GreeksSnapshot
-from src.fsm.events import TradingEvent
-from src.fsm.trading_fsm import TradingFSM
-from src.strategy.hedge_gate import should_output_target
+from src.daemon.core.state.classifier import StateClassifier
+from src.daemon.core.state.composite import CompositeState
+from src.daemon.core.state.enums import DeltaDeviationState, ExecutionState, OptionPositionState, TradingState
+from src.daemon.core.state.snapshot import StateSnapshot, GreeksSnapshot
+from src.daemon.fsm.events import TradingEvent
+from src.daemon.fsm.trading_fsm import TradingFSM
+from src.daemon.strategy.hedge_gate import should_output_target
 
 
 class ReplayFeed:

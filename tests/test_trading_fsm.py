@@ -2,16 +2,16 @@
 
 import pytest
 
-from src.core.state.enums import (
+from src.daemon.core.state.enums import (
     ExecutionState,
     LiquidityState,
     OptionPositionState,
     SystemHealthState,
 )
-from src.core.state.snapshot import StateSnapshot, GreeksSnapshot, default_snapshot
-from src.core.state.enums import TradingState
-from src.fsm.events import TradingEvent
-from src.fsm.trading_fsm import TradingFSM
+from src.daemon.core.state.snapshot import StateSnapshot, GreeksSnapshot, default_snapshot
+from src.daemon.core.state.enums import TradingState
+from src.daemon.fsm.events import TradingEvent
+from src.daemon.fsm.trading_fsm import TradingFSM
 
 
 def _snap(
@@ -26,7 +26,7 @@ def _snap(
     greeks_valid=True,
     last_hedge_price=None,
 ) -> StateSnapshot:
-    from src.core.state.enums import DeltaDeviationState, MarketRegimeState
+    from src.daemon.core.state.enums import DeltaDeviationState, MarketRegimeState
     eps = 10.0
     D = DeltaDeviationState.IN_BAND if abs(net_delta) <= eps else DeltaDeviationState.HEDGE_NEEDED
     g = GreeksSnapshot(delta=net_delta, gamma=0.02, valid=greeks_valid) if greeks_valid else None

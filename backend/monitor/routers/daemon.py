@@ -14,7 +14,7 @@ MONITOR_STOP_EXIT_DELAY = 3.0  # seconds; give client time to receive 200 before
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
-from servers.ib_clients import AccountIbClient, MarketIbClient
+from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
 from servers.reader import (
     sync_accounts_snapshot_to_db,
     write_control_command,

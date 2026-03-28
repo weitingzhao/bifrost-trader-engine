@@ -7,21 +7,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
 
-from src.sink.postgres_sink import _get_conn_params
+from src.daemon.sink.postgres_sink import _get_conn_params
 
 from src.app.config import get_effective_ib_config
 
-from servers.reader import accounts as accounts_module
-from servers.reader import executions as executions_module
-from servers.reader import gate_safety as gate_safety_module
-from servers.reader import market as market_module
-from servers.reader import strategy as strategy_module
-from servers.reader import strategy_instance as strategy_instance_module
-from servers.reader import template_config as template_config_module
-from servers.reader import position_categories as position_categories_module
-from servers.reader import settings as settings_module
-from servers.reader import status as status_module
-from servers.reader import watchlist as watchlist_module
+from src.portfolio.reader import accounts as accounts_module
+from src.portfolio.reader import executions as executions_module
+from src.monitor.reader import gate_safety as gate_safety_module
+from src.monitor.reader import market as market_module
+from src.monitor.reader import strategy as strategy_module
+from src.monitor.reader import strategy_instance as strategy_instance_module
+from src.monitor.reader import template_config as template_config_module
+from src.portfolio.reader import position_categories as position_categories_module
+from src.monitor.reader import settings as settings_module
+from src.monitor.reader import status as status_module
+from src.monitor.reader import watchlist as watchlist_module
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +262,7 @@ class StatusReader:
         source: str = "massive",
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
-        from servers.reader import massive_jobs as massive_jobs_module
+        from src.monitor.reader import massive_jobs as massive_jobs_module
 
         return massive_jobs_module.get_option_bars(
             self._config,
@@ -596,12 +596,9 @@ class StatusReader:
     def get_model_analysis(self, account_id: str) -> Optional[Dict[str, Any]]:
         if not self._connect():
             return None
-        from servers.portfolio_model import compute_model_analysis
-        try:
-            result = compute_model_analysis(self._conn, account_id)
-        except Exception as exc:
-            logger.exception("get_model_analysis failed for %s: %s", account_id, exc)
-            result = None
+        from src.portfolio.reader.portfolio_facade import get_model_analysis_for_account
+
+        result = get_model_analysis_for_account(self._conn, account_id)
         self._end_read_txn()
         return result
 

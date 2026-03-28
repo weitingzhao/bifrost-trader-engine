@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from src.guards.execution_guard import ExecutionGuard
+from src.daemon.guards.execution_guard import ExecutionGuard
 
 
 class TestExecutionGuard:

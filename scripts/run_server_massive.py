@@ -25,7 +25,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)
 
-from servers.routers.deps import MASSIVE_LOG_STREAM_KEY
+from backend.monitor.routers.deps import MASSIVE_LOG_STREAM_KEY
 
 _MASSIVE_LOG_STREAM_MAXLEN = 50
 
@@ -86,18 +86,12 @@ class RedisStreamLogHandler(logging.Handler):
 def _console_log_redis_url() -> str:
     try:
         from src.app.config import read_config
+        from src.core.redis_url import effective_redis_dict, format_redis_url
 
         config, _ = read_config()
-        r = config.get("redis") or {}
     except (ImportError, OSError, ValueError, TypeError):
-        r = {}
-    host = (r.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1").strip()
-    port = int(r.get("port") or os.environ.get("REDIS_PORT") or 6379)
-    db = int(r.get("db") or os.environ.get("REDIS_DB") or 0)
-    password = (r.get("password") or os.environ.get("REDIS_PASSWORD") or "").strip()
-    if password:
-        return f"redis://:{password}@{host}:{port}/{db}"
-    return f"redis://{host}:{port}/{db}"
+        config = {}
+    return format_redis_url(effective_redis_dict(config, default_db=0))
 
 
 def setup_logging() -> None:

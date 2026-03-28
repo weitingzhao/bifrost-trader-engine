@@ -7,18 +7,18 @@ This test ensures no transition is "orphaned" (defined but never used).
 
 import pytest
 
-from src.fsm.daemon_fsm import DaemonFSM, DaemonState
+from src.daemon.fsm.daemon_fsm import DaemonFSM, DaemonState
 
 # Export transitions for verification (add to daemon_fsm if not already)
 # We import the module to access _TRANSITIONS via getattr
-import src.fsm.daemon_fsm as daemon_fsm_module
+import src.daemon.fsm.daemon_fsm as daemon_fsm_module
 
 _TRANSITIONS = daemon_fsm_module._TRANSITIONS
 
 
 def test_all_non_terminal_states_have_handlers_in_gs_trading():
     """Every state except STOPPED must have a handler in GsTrading._get_state_handlers()."""
-    from src.app.gs_trading import GsTrading
+    from src.daemon.app.gs_trading import GsTrading
 
     # Create minimal config to instantiate GsTrading
     config = {

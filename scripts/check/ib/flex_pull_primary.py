@@ -91,7 +91,7 @@ def main() -> int:
                 import yaml
                 import psycopg2
                 from psycopg2.extras import RealDictCursor
-                from src.sink.postgres_sink import _get_conn_params
+                from src.daemon.sink.postgres_sink import _get_conn_params
             except ImportError as e:
                 print(f"Missing dependency: {e}", file=sys.stderr)
                 return 1
@@ -154,7 +154,7 @@ def main() -> int:
         print("Calling Flex SendRequest (no date range, use query default)...", file=sys.stderr, flush=True)
 
     try:
-        from servers.flex_client import request_report, get_statement, parse_trades_xml
+        from src.portfolio.integrations.flex_client import request_report, get_statement, parse_trades_xml
     except ImportError as e:
         print("Import error: %s" % e, file=sys.stderr)
         return 1

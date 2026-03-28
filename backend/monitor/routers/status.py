@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request
 
 from servers.reader import get_job_bars_backfill_last_updated
-from servers.self_check import derive_daemon_self_check, derive_self_check
+from src.monitor.self_check import derive_daemon_self_check, derive_self_check
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +129,9 @@ def get_status(request: Request) -> Dict[str, Any]:
         except Exception:
             payload["active_strategy_allocation_name"] = None
         try:
-            from servers.ib_clients import AccountIbClient, MarketIbClient
+            from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
 
+            ib_cfg = payload.get("ib_config") or {}
             monitor_ib_status: Dict[str, Any] = {}
             acc_client = getattr(app.state, "account_ib_client", None)
             acc_client_2 = getattr(app.state, "account_ib_client_2", None)
@@ -226,9 +227,9 @@ def get_status(request: Request) -> Dict[str, Any]:
             payload["celery_workers"] = []
         payload["celery_worker_last_updated_ts"] = get_job_bars_backfill_last_updated(control_via_db) if control_via_db else None
         try:
-            from backend.massive.config import get_massive_settings
-            from backend.massive.reader import count_pending_massive_jobs
-            from servers.redis_url import redis_url_from_config
+            from src.vendor.massive.config import get_massive_settings
+            from src.vendor.massive.reader import count_pending_massive_jobs
+            from src.monitor.redis_url import redis_url_from_config
 
             _ms = get_massive_settings(reader._config)
             _pending_m = count_pending_massive_jobs(control_via_db) if control_via_db else 0

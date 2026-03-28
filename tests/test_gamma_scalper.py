@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.strategy.gamma_scalper import HedgeOrder, compute_target_and_need, gamma_scalper_hedge
+from src.daemon.strategy.gamma_scalper import HedgeOrder, compute_target_and_need, gamma_scalper_hedge
 
 
 class TestComputeTargetAndNeed:

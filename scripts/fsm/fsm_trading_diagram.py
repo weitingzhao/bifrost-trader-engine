@@ -11,8 +11,8 @@ from pathlib import Path
 _project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_project_root))
 
-from src.core.state.enums import TradingState
-from src.fsm.events import TradingEvent
+from src.daemon.core.state.enums import TradingState
+from src.daemon.fsm.events import TradingEvent
 
 # (from_state, event, to_state, guard_short)
 # Guard: short description for diagram; empty = no guard

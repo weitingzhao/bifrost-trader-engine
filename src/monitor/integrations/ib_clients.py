@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.connector.ib import IBConnector, IBConnectionDroppedError
+from src.daemon.connector.ib import IBConnector, IBConnectionDroppedError
 
 logger = logging.getLogger(__name__)
 

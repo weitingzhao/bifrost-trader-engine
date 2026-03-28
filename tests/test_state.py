@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from src.core.store import Store
+from src.daemon.core.store import Store
 
 
 class TestStore:

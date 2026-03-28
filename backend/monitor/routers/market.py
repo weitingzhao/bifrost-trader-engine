@@ -3,7 +3,7 @@
 import logging
 import time
 from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.exceptions import HTTPException
@@ -12,126 +12,24 @@ from pydantic import BaseModel
 from servers.reader import (
     write_ohlc_bars_to_db,
     delete_stock_bars_for_symbol,
-    insert_job_bars_backfill,
-    get_job_bars_backfill_list,
-    get_job_bars_backfill,
-    delete_job_bars_backfill,
-    delete_all_job_bars_backfill,
     trim_job_bars_backfill,
-    update_job_bars_backfill_result,
+)
+from src.monitor.services.market_jobs import (
+    TOLERANCE_END_SEC_NON_TRADING,
+    TOLERANCE_END_SEC_TRADING_DAY,
+    WATCHLIST_EOD_PERIODS,
+    coverage_status,
+    enqueue_job_bars_backfill,
+    get_watchlist_stock_symbols,
+    job_row_to_api,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["market"])
 
-# End-gap tolerance: when "today" is a US trading day (excl. weekends & holidays), allow at most 1 day;
-# when not (weekend/holiday), allow 2 days so we don't falsely flag gap.
-_TOLERANCE_END_SEC_TRADING_DAY = 1 * 86400
-_TOLERANCE_END_SEC_NON_TRADING = 2 * 86400
-_WATCHLIST_EOD_PERIODS = ["1 D", "1 hour", "5 mins", "1 min"]
-
-
-def _coverage_status(
-    min_ts: Optional[float],
-    max_ts: Optional[float],
-    count: int,
-    target_start_ts: float,
-    target_end_ts: float,
-    tolerance_end_sec: float,
-) -> str:
-    """Return ok | gap_end | missing. Only end gap is checked."""
-    if count == 0:
-        return "missing"
-    gap_end = max_ts is None or max_ts < target_end_ts - tolerance_end_sec
-    if gap_end:
-        return "gap_end"
-    return "ok"
-
-
-def _job_row_to_api(j: Dict[str, Any]) -> Dict[str, Any]:
-    """Map DB row to API shape (job_id, created_ts, updated_ts, ...)."""
-    created_ts = j.get("created_at")
-    if hasattr(created_ts, "timestamp"):
-        created_ts = created_ts.timestamp()
-    updated_ts = j.get("updated_at")
-    if hasattr(updated_ts, "timestamp"):
-        updated_ts = updated_ts.timestamp()
-    return {
-        "job_id": str(j.get("job_bars_backfill_id", "")),
-        "type": "backfill",
-        "symbol": j.get("symbol"),
-        "period": j.get("period"),
-        "years": j.get("years"),
-        "days": j.get("days"),
-        "override_days": j.get("override_days"),
-        "status": j.get("status"),
-        "result": j.get("result"),
-        "created_ts": created_ts,
-        "updated_ts": updated_ts,
-    }
-
-
-def _get_watchlist_stock_symbols(reader) -> List[str]:
-    """Return unique stock symbols from Watchlist in insertion order."""
-    watchlist = reader.get_watchlist()
-    sym_list: List[str] = []
-    for w in watchlist:
-        sec = (w.get("sec_type") or "STK").strip().upper()
-        if sec == "OPT":
-            continue
-        sym = (w.get("symbol") or "").strip()
-        if not sym and w.get("contract_key"):
-            parts = (w["contract_key"] or "").split("|")
-            sym = (parts[0] or "").strip() if parts else ""
-        if sym:
-            sym_list.append(sym.upper())
-    return list(dict.fromkeys(sym_list))
-
-
-def _enqueue_job_bars_backfill(
-    control_via_db,
-    symbol: str,
-    period: str,
-    *,
-    years: Optional[float] = None,
-    days: Optional[int] = None,
-    override_days: Optional[float] = None,
-    span_hours: Optional[float] = None,
-    is_test: bool = False,
-    api_interval_sec: int = 10,
-) -> Tuple[bool, Optional[str], Optional[str]]:
-    """Insert one job_bars_backfill row and enqueue the matching Celery task."""
-    jid = insert_job_bars_backfill(
-        control_via_db,
-        symbol,
-        period,
-        years,
-        days,
-        override_days,
-        span_hours=span_hours,
-        skip_ib=is_test,
-        api_interval_sec=api_interval_sec,
-    )
-    if jid is None:
-        return False, None, "Enqueue failed."
-    logger.info(
-        "bars/backfill enqueue job_id=%s symbol=%s period=%s years=%s days=%s override_days=%s span_hours=%s",
-        jid, symbol, period, years, days, override_days, span_hours,
-    )
-    try:
-        from servers.bars_tasks import backfill_bars
-        backfill_bars.apply_async(
-            args=[symbol, period],
-            kwargs={"years": years, "days": days, "override_days": override_days, "span_hours": span_hours},
-            task_id=str(jid),
-        )
-    except Exception as e:
-        logger.exception("Celery enqueue failed: %s", e)
-        update_job_bars_backfill_result(control_via_db, jid, "failed", {"ok": False, "error": str(e)})
-        return False, None, f"Celery enqueue failed: {e}"
-    return True, str(jid), None
-
+# Back-compat for ops job_queues (delegate to service).
+_job_row_to_api = job_row_to_api
 
 # --- Bars read ---
 
@@ -344,7 +242,7 @@ def get_bars_coverage(
     if symbols is not None and str(symbols).strip():
         sym_list = [s.strip() for s in str(symbols).split(",") if s and s.strip()]
     else:
-        sym_list = list(_get_watchlist_stock_symbols(reader))
+        sym_list = list(get_watchlist_stock_symbols(reader))
         for ref in (control_via_db or {}).get("reference_indices") or []:
             s = (ref.get("symbol") or "").strip()
             if s and s not in sym_list:
@@ -375,23 +273,23 @@ def get_bars_coverage(
         is_trading_today = reader.get_is_us_trading_day(today_str)
     except Exception:
         is_trading_today = True
-    tolerance_end_sec = _TOLERANCE_END_SEC_TRADING_DAY if is_trading_today else _TOLERANCE_END_SEC_NON_TRADING
+    tolerance_end_sec = TOLERANCE_END_SEC_TRADING_DAY if is_trading_today else TOLERANCE_END_SEC_NON_TRADING
     enriched = []
     for item in coverage:
         day = item.get("stock_day") or {}
         day_ts_s = day.get("min_ts")
         day_ts_e = day.get("max_ts")
         day_cnt = day.get("count") or 0
-        day_status = _coverage_status(day_ts_s, day_ts_e, day_cnt, target_daily_start, target_end_ts, tolerance_end_sec)
+        day_status = coverage_status(day_ts_s, day_ts_e, day_cnt, target_daily_start, target_end_ts, tolerance_end_sec)
         stock_day_enriched = {**day, "target_start_ts": target_daily_start, "target_end_ts": target_end_ts, "status": day_status}
         mins = item.get("stock_min") or {}
         min_1 = mins.get("1 min") or {}
         min_5 = mins.get("5 mins") or {}
         min_1h = mins.get("1 hour") or {}
         stock_min_enriched = {
-            "1 min": {**min_1, "target_start_ts": target_min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1.get("min_ts"), min_1.get("max_ts"), min_1.get("count") or 0, target_min_start, target_end_ts, tolerance_end_sec)},
-            "5 mins": {**min_5, "target_start_ts": target_5min_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_5.get("min_ts"), min_5.get("max_ts"), min_5.get("count") or 0, target_5min_start, target_end_ts, tolerance_end_sec)},
-            "1 hour": {**min_1h, "target_start_ts": target_1hour_start, "target_end_ts": target_end_ts, "status": _coverage_status(min_1h.get("min_ts"), min_1h.get("max_ts"), min_1h.get("count") or 0, target_1hour_start, target_end_ts, tolerance_end_sec)},
+            "1 min": {**min_1, "target_start_ts": target_min_start, "target_end_ts": target_end_ts, "status": coverage_status(min_1.get("min_ts"), min_1.get("max_ts"), min_1.get("count") or 0, target_min_start, target_end_ts, tolerance_end_sec)},
+            "5 mins": {**min_5, "target_start_ts": target_5min_start, "target_end_ts": target_end_ts, "status": coverage_status(min_5.get("min_ts"), min_5.get("max_ts"), min_5.get("count") or 0, target_5min_start, target_end_ts, tolerance_end_sec)},
+            "1 hour": {**min_1h, "target_start_ts": target_1hour_start, "target_end_ts": target_end_ts, "status": coverage_status(min_1h.get("min_ts"), min_1h.get("max_ts"), min_1h.get("count") or 0, target_1hour_start, target_end_ts, tolerance_end_sec)},
         }
         enriched.append({"symbol": item.get("symbol"), "stock_day": stock_day_enriched, "stock_min": stock_min_enriched})
     return {"coverage": enriched, "policy": policy}
@@ -409,7 +307,7 @@ def post_indices_refresh(
     if not control_via_db:
         return {"ok": False, "updated": [], "errors": ["Postgres config required."]}
     try:
-        from servers.index_data_client import refresh_reference_indices, refresh_one_index
+        from src.monitor.integrations.index_data_client import refresh_reference_indices, refresh_one_index
         if symbol and (symbol := symbol.strip()):
             result = refresh_one_index(control_via_db, symbol, days=days, reader=reader)
         else:
@@ -470,7 +368,7 @@ async def post_bars_fetch(
         return {"ok": False, "error": "PostgreSQL is required to write bar tables.", "bars": [], "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
         return {"ok": False, "error": "Monitor stopped; cannot fetch bars.", "bars": [], "count": 0}
-    from servers.ib_clients import MarketIbClient
+    from src.monitor.integrations.ib_clients import MarketIbClient
     client = getattr(app.state, "market_ib_client", None)
     if client is None:
         return {"ok": False, "error": "MarketIbClient is not initialized.", "bars": [], "count": 0}
@@ -521,8 +419,8 @@ async def post_watchlist_eod_refresh_preview(
     if not control_via_db:
         return {"ok": False, "error": "PostgreSQL is required to read bar tables and Watchlist."}
     from servers.bars_backfill import build_backfill_preview
-    symbols = _get_watchlist_stock_symbols(reader)
-    periods = _WATCHLIST_EOD_PERIODS
+    symbols = get_watchlist_stock_symbols(reader)
+    periods = WATCHLIST_EOD_PERIODS
     items = []
     failures = []
     total_override_records = 0
@@ -583,13 +481,13 @@ async def post_bars_backfill(
     per = (period or "1 D").strip()
     if not queue:
         return {"ok": False, "error": "Backfill requires queue=true (Celery worker pulls in background; IB rate limits).", "count": 0}
-    ok, job_id, error = _enqueue_job_bars_backfill(
+    ok, job_id, error = enqueue_job_bars_backfill(
         control_via_db, sym, per, years=years, days=days, override_days=override_days, span_hours=span_hours, is_test=is_test, api_interval_sec=api_interval_sec
     )
     if not ok or not job_id:
         return {"ok": False, "error": error or "Enqueue failed.", "count": 0}
     trim_job_bars_backfill(control_via_db, keep=200)
-    return {"ok": True, "job_id": job_id, "message": "Queued (Celery). Poll GET /bars/jobs/{job_id} for status."}
+    return {"ok": True, "job_id": job_id, "message": "Queued (Celery). Poll GET /ops/bars/jobs/{job_id} on Ops API for status."}
 
 
 @router.post("/bars/watchlist/eod-refresh")
@@ -607,15 +505,15 @@ async def post_watchlist_eod_refresh(
         return {"ok": False, "error": "PostgreSQL is required to write bar tables.", "queued_count": 0}
     if not getattr(app.state, "monitor_enabled", True):
         return {"ok": False, "error": "Monitor stopped; cannot backfill bars.", "queued_count": 0}
-    symbols = _get_watchlist_stock_symbols(reader)
-    periods = _WATCHLIST_EOD_PERIODS
+    symbols = get_watchlist_stock_symbols(reader)
+    periods = WATCHLIST_EOD_PERIODS
     if not symbols:
         return {"ok": True, "queued_count": 0, "failed_count": 0, "symbols_count": 0, "symbols": [], "periods": periods, "override_days": override_days, "message": "No stock symbols in Watchlist; nothing to enqueue for close refresh."}
     queued_jobs = []
     failures = []
     for sym in symbols:
         for per in periods:
-            ok, job_id, error = _enqueue_job_bars_backfill(control_via_db, sym, per, override_days=override_days, is_test=is_test, api_interval_sec=api_interval_sec)
+            ok, job_id, error = enqueue_job_bars_backfill(control_via_db, sym, per, override_days=override_days, is_test=is_test, api_interval_sec=api_interval_sec)
             if ok and job_id:
                 queued_jobs.append({"job_id": job_id, "symbol": sym, "period": per})
             else:
@@ -629,80 +527,3 @@ async def post_watchlist_eod_refresh(
     if failed_count > 0:
         message += f" Failed: {failed_count}."
     return {"ok": True, "message": message, "queued_count": queued_count, "failed_count": failed_count, "symbols_count": len(symbols), "symbols": symbols, "periods": periods, "override_days": override_days, "queued_jobs": queued_jobs, "failures": failures}
-
-
-# --- Bars jobs ---
-
-@router.get("/bars/jobs")
-def get_bars_jobs(
-    request: Request,
-    limit: int = Query(20, ge=0, le=500),
-    offset: int = Query(0, ge=0),
-    status: Optional[str] = Query(None, description="Filter: pending, running, done, failed"),
-) -> Dict[str, Any]:
-    """List backfill jobs with pagination and optional status filter."""
-    control_via_db = request.app.state.control_via_db
-    status_cfg_for_read = request.app.state.status_cfg_for_read
-    db_config = control_via_db or status_cfg_for_read
-    if not db_config:
-        logger.info("GET /bars/jobs: no Postgres config, returning empty list")
-        return {"jobs": [], "total": 0, "error": "No Postgres config. Set postgres in config or PGHOST."}
-    effective_limit = limit if limit and limit > 0 else 500
-    try:
-        rows, total = get_job_bars_backfill_list(db_config, limit=effective_limit, offset=offset, status=status)
-    except Exception as e:
-        logger.warning("GET /bars/jobs: get_job_bars_backfill_list failed: %s", e)
-        return {"jobs": [], "total": 0, "error": str(e)}
-    list_jobs = [_job_row_to_api(r) for r in rows]
-    return {"jobs": list_jobs, "total": total}
-
-
-@router.get("/bars/jobs/{job_id}")
-def get_bars_job(request: Request, job_id: str) -> Dict[str, Any]:
-    """Get one backfill job status and result."""
-    control_via_db = request.app.state.control_via_db
-    status_cfg_for_read = request.app.state.status_cfg_for_read
-    db_config = control_via_db or status_cfg_for_read
-    if not db_config:
-        return {"ok": False, "error": "No DB"}
-    job = get_job_bars_backfill(db_config, job_id)
-    if job is None:
-        return {"ok": False, "error": "Job not found"}
-    return {"ok": True, "job": _job_row_to_api(job)}
-
-
-@router.delete("/bars/jobs/{job_id}")
-def delete_bars_job(request: Request, job_id: str) -> Dict[str, Any]:
-    """Delete one backfill job by id."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "No DB"}
-    if delete_job_bars_backfill(control_via_db, job_id):
-        return {"ok": True}
-    return {"ok": False, "error": "Delete failed"}
-
-
-@router.delete("/bars/jobs")
-def delete_all_bars_jobs(
-    request: Request,
-    status: Optional[str] = Query(None, description="If set, only delete jobs with this status"),
-) -> Dict[str, Any]:
-    """Delete all backfill jobs, or only those matching status filter."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "No DB", "deleted": 0}
-    deleted = delete_all_job_bars_backfill(control_via_db, status_filter=status)
-    return {"ok": True, "deleted": deleted}
-
-
-@router.post("/bars/jobs/trim")
-def trim_bars_jobs(
-    request: Request,
-    keep: int = Query(200, ge=1, le=50000, description="Keep newest N bars backfill jobs by id; delete older rows"),
-) -> Dict[str, Any]:
-    """Trim job_bars_backfill to the newest `keep` rows."""
-    control_via_db = request.app.state.control_via_db
-    if not control_via_db:
-        return {"ok": False, "error": "No DB", "deleted": 0}
-    deleted = trim_job_bars_backfill(control_via_db, keep=keep)
-    return {"ok": True, "deleted": deleted}

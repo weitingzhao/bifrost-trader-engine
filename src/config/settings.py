@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from src.core.dict_merge import deep_merge
+
 # Lazy-loaded example config (single source of truth for defaults)
 _EXAMPLE_CONFIG: Optional[Dict[str, Any]] = None
 
@@ -23,20 +25,9 @@ def _load_example_config() -> Dict[str, Any]:
     return _EXAMPLE_CONFIG
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """Merge override into base. Override values take precedence."""
-    out = dict(base)
-    for k, v in override.items():
-        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
-
-
 def _merged_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Merge config with example so missing keys come from config file."""
-    return _deep_merge(_load_example_config(), cfg)
+    return deep_merge(_load_example_config(), cfg)
 
 
 def _gates_section(cfg: Dict[str, Any], gate: str, section: str) -> Dict[str, Any]:

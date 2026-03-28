@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 
-from servers.reader import structure_type_schema
-from servers.reader import template_config
-from src.sink.postgres_sink import _get_conn_params
+from src.monitor.reader import structure_type_schema
+from src.monitor.reader import template_config
+from src.daemon.sink.postgres_sink import _get_conn_params
 
 logger = logging.getLogger(__name__)
 

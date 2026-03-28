@@ -184,7 +184,7 @@ def main() -> int:
     try:
         import yaml
         import psycopg2
-        from src.sink.postgres_sink import _ensure_tables, _get_conn_params
+        from src.daemon.sink.postgres_sink import _ensure_tables, _get_conn_params
     except ImportError as e:
         print(f"{_c(no_color, RED, 'Missing dependency:')} {e}", file=sys.stderr)
         print("  Install with: pip install -e .  (or pip install pyyaml psycopg2-binary)", file=sys.stderr)

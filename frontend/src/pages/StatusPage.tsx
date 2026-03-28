@@ -17,7 +17,7 @@ import {
 } from './status/statusLabels'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
 import { useControlAction } from './status/useControlAction'
-import { StatusDaemonPanel, StatusMonitorPanel, StatusCeleryPanel, StatusStrategyPanel, StatusSseQueuesPanel } from './status/panels'
+import { StatusDaemonPanel, StatusMonitorPanel, StatusCeleryPanel, StatusStrategyPanel } from './status/panels'
 import { celeryMetricsFromStatus, useCeleryStopControl } from './status/celeryMetrics'
 
 export type CeleryUiMode = 'full' | 'relocated'
@@ -43,7 +43,7 @@ export interface StatusPageProps {
   consoleCardDescription?: string
   /** When set, scroll to this system section and add highlight (e.g. from header lamp link). */
   highlightSection?: 'daemon' | 'monitor' | 'celery'
-  /** Settings embed: Celery UI lives under Feed → Celery; hide duplicate Celery column, console tab, and celery_logs SSE row. */
+  /** Settings embed: Celery UI lives under Feed → Celery; hide duplicate Celery column and console tab. */
   celeryUiMode?: CeleryUiMode
 }
 
@@ -831,15 +831,6 @@ export function StatusPage({
             </div>
           </div>
         </div>
-      </div>
-      )}
-
-      {showConsoleSection && (
-      <div className="card process-section system-tabs-wrapper">
-        <StatusSseQueuesPanel
-          className={showAllSystemSections ? 'system-stack-section' : undefined}
-          excludeCategories={celeryUiMode === 'relocated' ? ['celery_logs'] : undefined}
-        />
       </div>
       )}
 

@@ -4,9 +4,9 @@ import time
 
 import pytest
 
-from src.core.store import Store
-from src.guards.execution_guard import ExecutionGuard
-from src.strategy.gamma_scalper import gamma_scalper_hedge
+from src.daemon.core.store import Store
+from src.daemon.guards.execution_guard import ExecutionGuard
+from src.daemon.strategy.gamma_scalper import gamma_scalper_hedge
 
 
 class TestHedgeFlowIntegration:

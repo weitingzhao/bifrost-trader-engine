@@ -50,7 +50,7 @@ def _load_config(config_path: str) -> dict:
 
 
 def _conn_params_from_root_config(config: dict) -> dict:
-    from src.sink.postgres_sink import _get_conn_params
+    from src.daemon.sink.postgres_sink import _get_conn_params
 
     return _get_conn_params(config)
 

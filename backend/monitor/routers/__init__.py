@@ -1,19 +1,18 @@
-"""Domain-based API routers. Each module exposes a single `router` (APIRouter)."""
+"""Domain-based API routers for the monitor FastAPI app."""
 
-from servers.routers.core import router as core_router
-from servers.routers.quotes import router as quotes_router
-from servers.routers.logs import router as logs_router
-from servers.routers.status import router as status_router
-from servers.routers.executions import router as executions_router
-from servers.routers.market import router as market_router
-from servers.routers.watchlist import router as watchlist_router
-from servers.routers.research import router as research_router
-from servers.routers.reports import router as reports_router
-from servers.routers.daemon import router as daemon_router
-from servers.routers.config import router as config_router
-from servers.routers.strategies import router as strategies_router
-from servers.routers.monitor_metrics import router as monitor_metrics_router
-from servers.routers.portfolio_model import router as portfolio_model_router
+from backend.monitor.routers.core import router as core_router
+from backend.monitor.routers.quotes import router as quotes_router
+from backend.monitor.routers.logs import router as logs_router
+from backend.monitor.routers.status import router as status_router
+from backend.monitor.routers.executions import router as executions_router
+from backend.monitor.routers.market import router as market_router
+from backend.monitor.routers.watchlist import router as watchlist_router
+from backend.monitor.routers.research import router as research_router
+from backend.monitor.routers.reports import router as reports_router
+from backend.monitor.routers.daemon import router as daemon_router
+from backend.monitor.routers.config import router as config_router
+from backend.monitor.routers.strategies import router as strategies_router
+from backend.monitor.routers.portfolio_model import router as portfolio_model_router
 
 __all__ = [
     "core_router",
@@ -28,6 +27,5 @@ __all__ = [
     "daemon_router",
     "config_router",
     "strategies_router",
-    "monitor_metrics_router",
     "portfolio_model_router",
 ]

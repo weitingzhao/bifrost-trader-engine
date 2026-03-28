@@ -4,71 +4,30 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field
 
 from servers.reader import gate_safety_write as gate_safety_write_module
 from servers.reader import strategy_allocation_write as strategy_allocation_write_module
 from servers.reader import strategy_opportunity_write as strategy_opportunity_write_module
 from servers.reader import strategy_structure_write as strategy_structure_write_module
-from servers.reader import structure_type_config_constants as structure_type_config_constants_module
-from servers.reader import template_config as template_config_module
 from servers.reader import template_config_write as template_config_write_module
+from src.monitor.schemas.strategies import (
+    AllocationBody,
+    AllocationUpdateBody,
+    OpportunityBody,
+    OpportunityUpdateBody,
+    StrategyInstanceCreateBody,
+    StrategyInstanceUpdateBody,
+)
+from src.monitor.services import option_strategy_templates
+from src.monitor.services.strategy_parsing import (
+    parse_opened_at_to_unix,
+    parse_optional_timestamp,
+    parse_strategy_instance_ids_csv,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
-
-
-class EntryConditionBody(BaseModel):
-    """One entry condition row for opportunity create/update."""
-
-    condition_type: str = Field(..., description="e.g. iv_min, iv_max, dte_min, dte_max, earnings_blackout_days, min_volume")
-    value_text: Optional[str] = None
-    value_numeric: Optional[float] = None
-
-
-class OpportunityBody(BaseModel):
-    """Request body for create strategy opportunity (scope_type + symbols + entry_conditions, no jsonb)."""
-
-    name: str = Field(..., min_length=1)
-    strategy_structure_id: int
-    default_gate_safety_strategy_id: Optional[int] = None
-    scope_type: Optional[str] = Field(None, description="e.g. watchlist_stk, explicit_symbols")
-    symbols: Optional[List[str]] = Field(default_factory=list, description="Symbol list when scope_type is explicit_symbols")
-    entry_conditions: Optional[List[EntryConditionBody]] = Field(default_factory=list)
-    is_active: bool = True
-
-
-class OpportunityUpdateBody(BaseModel):
-    """Request body for update strategy opportunity; all fields optional for partial update."""
-
-    name: Optional[str] = Field(None, min_length=1)
-    strategy_structure_id: Optional[int] = None
-    default_gate_safety_strategy_id: Optional[int] = None
-    scope_type: Optional[str] = None
-    symbols: Optional[List[str]] = None
-    entry_conditions: Optional[List[EntryConditionBody]] = None
-    is_active: Optional[bool] = None
-
-
-class AllocationBody(BaseModel):
-    """Request body for create strategy allocation."""
-
-    name: str = Field(..., min_length=1)
-    strategy_opportunity_ids: List[int] = Field(..., description="List of strategy_opportunity_id")
-    gate_safety_strategy_id: Optional[int] = None
-    allocation_limits: Optional[Dict[str, Any]] = Field(None, description="e.g. max_positions, max_bp_pct")
-    is_active: bool = True
-
-
-class AllocationUpdateBody(BaseModel):
-    """Request body for update strategy allocation; all fields optional for partial update."""
-
-    name: Optional[str] = Field(None, min_length=1)
-    strategy_opportunity_ids: Optional[List[int]] = None
-    gate_safety_strategy_id: Optional[int] = None
-    allocation_limits: Optional[Dict[str, Any]] = None
-    is_active: Optional[bool] = None
 
 
 def _require_control_via_db(request: Request) -> Optional[dict]:
@@ -127,42 +86,34 @@ def delete_dim_endpoint(request: Request, strategy_dim_id: int) -> Dict[str, Any
 
 @router.get("/templates/options/param-kind")
 def template_param_kind_options() -> Dict[str, Any]:
-    return {"options": structure_type_config_constants_module.get_param_kind_options_with_labels()}
+    return option_strategy_templates.param_kind_options_payload()
 
 
 @router.get("/templates/options/leg-role")
 def template_leg_role_options() -> Dict[str, Any]:
-    return {"options": structure_type_config_constants_module.get_leg_role_options_with_labels()}
+    return option_strategy_templates.leg_role_options_payload()
 
 
 @router.get("/templates/options/leg-direction")
 def template_leg_direction_options() -> Dict[str, Any]:
-    return {"options": structure_type_config_constants_module.get_leg_direction_options_with_labels()}
+    return option_strategy_templates.leg_direction_options_payload()
 
 
 @router.get("/templates/options/leg-option-right")
 def template_leg_option_right_options() -> Dict[str, Any]:
-    return {"options": structure_type_config_constants_module.get_leg_option_right_options_with_labels()}
+    return option_strategy_templates.leg_option_right_options_payload()
 
 
 @router.get("/templates/options/meta-keys")
 def template_meta_key_options() -> Dict[str, Any]:
-    return {
-        "options": structure_type_config_constants_module.get_meta_key_options_with_labels(
-            "covered_call"
-        )
-    }
+    return option_strategy_templates.meta_key_options_payload("covered_call")
 
 
 @router.get("/templates/options/meta-values")
 def template_meta_value_options(
     meta_key: str = Query(..., description="meta_key"),
 ) -> Dict[str, Any]:
-    return {
-        "options": structure_type_config_constants_module.get_meta_value_options_with_labels(
-            "covered_call", meta_key
-        )
-    }
+    return option_strategy_templates.meta_value_options_payload("covered_call", meta_key)
 
 
 @router.get("/templates")
@@ -392,50 +343,6 @@ def update_opportunity_endpoint(request: Request, opportunity_id: int, body: Opp
     return {"ok": True}
 
 
-class StrategyInstanceCreateBody(BaseModel):
-    """Request body for create strategy instance (SI.2)."""
-
-    strategy_opportunity_id: int = Field(..., description="Parent opportunity ID")
-    account_id: str = Field(..., min_length=1, description="Account ID")
-    opened_at: str = Field(..., description="Opened at (ISO 8601 or Unix timestamp string)")
-    label: Optional[str] = Field(None, description="Optional label")
-    notes: Optional[str] = Field(None, description="Optional notes")
-
-
-class StrategyInstanceUpdateBody(BaseModel):
-    """Request body for PATCH strategy instance; label, notes, created_at, opened_at optional."""
-
-    label: Optional[str] = None
-    notes: Optional[str] = None
-    created_at: Optional[str] = None  # ISO 8601 or Unix seconds (number as string)
-    opened_at: Optional[str] = None  # ISO 8601 or Unix seconds (number as string)
-
-
-def _parse_strategy_instance_ids_csv(value: Optional[str]) -> Optional[List[int]]:
-    """Parse comma-separated positive integer IDs; dedupe preserving order. None/empty => no filter."""
-    if value is None:
-        return None
-    s = str(value).strip()
-    if not s:
-        return None
-    out: List[int] = []
-    seen: set = set()
-    for part in s.split(","):
-        p = part.strip()
-        if not p:
-            continue
-        try:
-            n = int(p, 10)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid strategy instance id: {p!r}")
-        if n <= 0:
-            raise HTTPException(status_code=400, detail="strategy_instance_ids must be positive integers")
-        if n not in seen:
-            seen.add(n)
-            out.append(n)
-    return out if out else None
-
-
 @router.get("/instances")
 def list_strategy_instances(
     request: Request,
@@ -450,7 +357,10 @@ def list_strategy_instances(
 ) -> Dict[str, Any]:
     """Return list of strategy_instance rows (SI.2). Optional filters: account_id, strategy_opportunity_id, strategy_instance_ids, opened_at range."""
     reader = request.app.state.reader
-    ids = _parse_strategy_instance_ids_csv(strategy_instance_ids)
+    try:
+        ids = parse_strategy_instance_ids_csv(strategy_instance_ids)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     items: List[Dict[str, Any]] = reader.list_strategy_instances(
         account_id=account_id,
         strategy_opportunity_id=strategy_opportunity_id,
@@ -478,15 +388,10 @@ def create_strategy_instance_endpoint(request: Request, body: StrategyInstanceCr
     control_via_db = getattr(request.app.state, "control_via_db", None)
     if not control_via_db:
         raise HTTPException(status_code=503, detail="Database control not configured")
-    opened_at_val: Any = body.opened_at
     try:
-        if isinstance(opened_at_val, str) and opened_at_val.strip().replace(".", "").replace("-", "").replace(":", "", 1).isdigit():
-            opened_at_val = float(opened_at_val.strip())
-        elif isinstance(opened_at_val, str):
-            from datetime import datetime
-            opened_at_val = datetime.fromisoformat(opened_at_val.replace("Z", "+00:00")).timestamp()
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(status_code=400, detail="opened_at must be ISO 8601 or Unix timestamp") from exc
+        opened_at_val = parse_opened_at_to_unix(body.opened_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     sid = reader.create_strategy_instance(
         strategy_opportunity_id=body.strategy_opportunity_id,
         account_id=body.account_id.strip(),
@@ -497,31 +402,6 @@ def create_strategy_instance_endpoint(request: Request, body: StrategyInstanceCr
     if sid is None:
         raise HTTPException(status_code=500, detail="Failed to create strategy instance")
     return {"strategy_instance_id": sid}
-
-
-def _parse_optional_ts(value: Any, field_name: str) -> Any:
-    """Parse optional timestamp from payload: ISO 8601 or Unix seconds. Returns float or None."""
-    if value is None:
-        return None
-    try:
-        if isinstance(value, (int, float)):
-            return float(value)
-        if isinstance(value, str):
-            s = value.strip()
-            if s.replace(".", "").replace("-", "").replace(":", "").replace("Z", "").isdigit():
-                return float(s)
-            from datetime import datetime, timezone
-            # ISO 8601: support Z and +00:00 (Python 3.10 fromisoformat accepts +00:00)
-            normalized = s.replace("Z", "+00:00")
-            try:
-                return datetime.fromisoformat(normalized).timestamp()
-            except ValueError:
-                # Fallback: date-only YYYY-MM-DD
-                if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-                    return datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
-    except (ValueError, TypeError):
-        pass
-    raise HTTPException(status_code=400, detail=f"{field_name} must be ISO 8601 or Unix timestamp")
 
 
 @router.get("/instances/{strategy_instance_id}/open-option-legs")
@@ -557,8 +437,20 @@ def update_strategy_instance_endpoint(
     payload = body.model_dump(exclude_unset=True)
     if not payload:
         return {"ok": True}
-    created_at_val = _parse_optional_ts(payload.get("created_at"), "created_at") if "created_at" in payload else payload.get("created_at")
-    opened_at_val = _parse_optional_ts(payload.get("opened_at"), "opened_at") if "opened_at" in payload else payload.get("opened_at")
+    if "created_at" in payload:
+        try:
+            created_at_val = parse_optional_timestamp(payload.get("created_at"), "created_at")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    else:
+        created_at_val = payload.get("created_at")
+    if "opened_at" in payload:
+        try:
+            opened_at_val = parse_optional_timestamp(payload.get("opened_at"), "opened_at")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    else:
+        opened_at_val = payload.get("opened_at")
     ok = reader.update_strategy_instance(
         strategy_instance_id,
         label=payload.get("label"),

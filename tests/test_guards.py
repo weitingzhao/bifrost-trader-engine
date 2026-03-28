@@ -5,15 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.state.enums import (
+from src.daemon.core.state.enums import (
     DeltaDeviationState,
     ExecutionState,
     LiquidityState,
     OptionPositionState,
     SystemHealthState,
 )
-from src.guards.trading_guard import TradingGuard
-from src.core.state.snapshot import StateSnapshot, GreeksSnapshot, default_snapshot
+from src.daemon.guards.trading_guard import TradingGuard
+from src.daemon.core.state.snapshot import StateSnapshot, GreeksSnapshot, default_snapshot
 
 
 def _make_snap(
@@ -27,7 +27,7 @@ def _make_snap(
     last_hedge_price=None,
     O=OptionPositionState.LONG_GAMMA,
 ) -> StateSnapshot:
-    from src.core.state.enums import MarketRegimeState
+    from src.daemon.core.state.enums import MarketRegimeState
 
     g = (
         GreeksSnapshot(delta=net_delta, gamma=0.02, valid=greeks_valid)

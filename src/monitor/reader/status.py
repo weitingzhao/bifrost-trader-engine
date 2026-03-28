@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from src.sink.postgres_sink import _get_conn_params
+from src.daemon.sink.postgres_sink import _get_conn_params
 
 logger = logging.getLogger(__name__)
 

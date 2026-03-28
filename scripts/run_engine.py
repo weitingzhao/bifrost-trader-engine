@@ -88,18 +88,12 @@ def _daemon_log_redis_url() -> str:
     """Build Redis URL for daemon console stream from config/env. Falls back to local Redis."""
     try:
         from src.app.config import read_config
+        from src.core.redis_url import effective_redis_dict, format_redis_url
 
         config, _ = read_config()
-        r = config.get("redis") or {}
     except (ImportError, OSError, ValueError, TypeError):
-        r = {}
-    host = (r.get("host") or os.environ.get("REDIS_HOST") or "127.0.0.1").strip()
-    port = int(r.get("port") or os.environ.get("REDIS_PORT") or 6379)
-    db = int(r.get("db") or os.environ.get("REDIS_DB") or 0)
-    password = (r.get("password") or os.environ.get("REDIS_PASSWORD") or "").strip()
-    if password:
-        return f"redis://:{password}@{host}:{port}/{db}"
-    return f"redis://{host}:{port}/{db}"
+        config = {}
+    return format_redis_url(effective_redis_dict(config, default_db=0))
 
 
 def setup_logging(debug: bool = False) -> None:
@@ -142,6 +136,6 @@ if __name__ == "__main__":
     else:
         setup_logging(debug=False)
 
-    from src.app.entry import run_daemon
+    from src.daemon.app.entry import run_daemon
 
     run_daemon(config_path)

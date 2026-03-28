@@ -32,6 +32,7 @@ import {
   type WorkerProfileInfo,
   type QueueSummaryRow,
 } from '../api/ops'
+import { CeleryJobQueuesSection } from './celery/CeleryJobQueuesSection'
 
 export interface DashboardPageProps {
   status?: StatusResponse | null
@@ -1396,6 +1397,8 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               <div className="dashboard-empty">Loading broker status…</div>
             )}
           </section>
+
+          <CeleryJobQueuesSection />
 
           </div>
 

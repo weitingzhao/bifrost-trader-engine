@@ -15,7 +15,7 @@ import psycopg2
 from psycopg2 import ProgrammingError
 from psycopg2.extras import RealDictCursor
 
-from src.sink.postgres_sink import _get_conn_params
+from src.daemon.sink.postgres_sink import _get_conn_params
 
 logger = logging.getLogger(__name__)
 
@@ -889,7 +889,7 @@ def get_massive_daily_checklist_data(
     # WS status: global (same for all symbols)
     ws_block: Dict[str, Any] = {"status": "missing", "connected": False}
     try:
-        from servers.redis_url import redis_url_from_config
+        from src.monitor.redis_url import redis_url_from_config
 
         rurl = redis_url_from_config(status_config)
         if rurl:
@@ -1002,7 +1002,7 @@ def compute_max_pain_live_from_db(
     trade_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Real-time Max Pain from option_open_interest_daily (no report table)."""
-    from servers.reader.max_pain_math import (
+    from src.monitor.reader.max_pain_math import (
         compute_max_pain_curve,
         normalize_expiry_for_oi,
         strike_map_for_expiry,
@@ -1102,7 +1102,7 @@ def compute_max_pain_history_from_db(
     lookback_days: int = 90,
 ) -> Dict[str, Any]:
     """Time series of max pain per trade_date (recomputed from OI; no report table)."""
-    from servers.reader.max_pain_math import (
+    from src.monitor.reader.max_pain_math import (
         compute_max_pain_curve,
         normalize_expiry_for_oi,
         strike_map_for_expiry,
@@ -1389,7 +1389,7 @@ def upsert_option_contracts_from_reference_rows(
     contract_rows: List[Dict[str, Any]],
 ) -> int:
     """Upsert option_contracts from Polygon reference contract rows."""
-    from backend.massive.client import contract_key_from_parts
+    from src.vendor.massive.client import contract_key_from_parts
 
     underlying = (underlying or "").strip().upper()
     if not contract_rows or not underlying:
@@ -1446,8 +1446,8 @@ def refresh_expirations_from_massive_api(
     skip_persist: bool = False,
 ) -> Dict[str, Any]:
     """Fetch expirations/strikes from Massive REST and persist contracts + expiration cache."""
-    from backend.massive.config import get_massive_settings
-    from backend.massive.client import MassiveClient
+    from src.vendor.massive.config import get_massive_settings
+    from src.vendor.massive.client import MassiveClient
 
     ms = get_massive_settings(config)
     if not ms["api_key"]:
@@ -1478,7 +1478,7 @@ def refresh_expirations_watchlist_batch(
     max_symbols: int = 24,
 ) -> Dict[str, Any]:
     """Refresh expiration cache + contracts for a batch of underlyings (Celery beat)."""
-    from backend.massive.config import get_massive_settings
+    from src.vendor.massive.config import get_massive_settings
 
     ms = get_massive_settings(config)
     if not ms["api_key"]:

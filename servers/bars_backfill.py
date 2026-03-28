@@ -4,11 +4,11 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
-from src.connector.ib import IBConnectionDroppedError
+from src.daemon.connector.ib import IBConnectionDroppedError
 
 if TYPE_CHECKING:
     from servers.reader import StatusReader
-    from servers.ib_clients import MarketIbClient
+    from src.monitor.integrations.ib_clients import MarketIbClient
 
 logger = logging.getLogger(__name__)
 

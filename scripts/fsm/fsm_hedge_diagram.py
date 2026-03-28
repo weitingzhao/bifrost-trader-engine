@@ -11,9 +11,9 @@ from pathlib import Path
 _project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_project_root))
 
-from src.core.state.enums import HedgeState
-from src.fsm.events import HedgeEvent
-from src.fsm.hedge_fsm import _TRANSITIONS
+from src.daemon.core.state.enums import HedgeState
+from src.daemon.fsm.events import HedgeEvent
+from src.daemon.fsm.hedge_fsm import _TRANSITIONS
 
 # on_method -> (class_name, file_path)
 ON_METHOD_SOURCE: dict[str, tuple[str, str]] = {

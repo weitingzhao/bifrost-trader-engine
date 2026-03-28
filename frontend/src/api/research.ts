@@ -1,12 +1,21 @@
 import { apiBase } from './constants'
-import { getMassiveApiBase, getDocsApiBase, joinServiceBase } from './apiRouting'
+import { getMassiveApiBase, getDocsApiBase, getOpsApiBase, joinServiceBase } from './apiRouting'
 import { fetchWithTimeout } from './fetchTimeout'
+import { opsAuthHeaders } from './ops'
 
 function massiveUrl(path: string): string {
   return joinServiceBase(getMassiveApiBase(), path)
 }
 function docsUrl(path: string): string {
   return joinServiceBase(getDocsApiBase(), path)
+}
+
+function opsMassiveJobsUrl(path: string): string {
+  if (path.startsWith('?')) {
+    return joinServiceBase(getOpsApiBase(), `/ops/research/massive/jobs${path}`)
+  }
+  const p = path.startsWith('/') ? path : `/${path}`
+  return joinServiceBase(getOpsApiBase(), `/ops/research/massive/jobs${p}`)
 }
 
 /** Per-page Massive REST debug for option-expirations (redacted URLs; full response JSON). */
@@ -515,7 +524,7 @@ export async function fetchMassiveJobsList(options?: {
   if (options?.offset != null) q.set('offset', String(options.offset))
   if (options?.status?.trim()) q.set('status', options.status.trim())
   if (options?.kind?.trim()) q.set('kind', options.kind.trim())
-  const r = await fetch(massiveUrl(`/research/massive/jobs?${q.toString()}`))
+  const r = await fetch(opsMassiveJobsUrl(`?${q.toString()}`), { headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return {
@@ -538,7 +547,10 @@ export async function fetchMassiveJobsList(options?: {
 }
 
 export async function deleteMassiveJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(massiveUrl(`/research/massive/jobs/${encodeURIComponent(jobId)}`), { method: 'DELETE' })
+  const r = await fetch(opsMassiveJobsUrl(`/${encodeURIComponent(jobId)}`), {
+    method: 'DELETE',
+    headers: opsAuthHeaders(),
+  })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: typeof j.error === 'string' ? j.error : undefined }
 }
@@ -551,7 +563,10 @@ export async function deleteAllMassiveJobs(status?: string | null): Promise<{
   const params = new URLSearchParams()
   if (status && status !== 'all') params.set('status', status)
   const qs = params.toString()
-  const r = await fetch(massiveUrl(`/research/massive/jobs/purge${qs ? `?${qs}` : ''}`), { method: 'POST' })
+  const r = await fetch(opsMassiveJobsUrl(`/purge${qs ? `?${qs}` : ''}`), {
+    method: 'POST',
+    headers: opsAuthHeaders(),
+  })
   const j = (await r.json().catch(() => ({}))) as { ok?: boolean; deleted?: number; error?: string; detail?: string }
   const err =
     typeof j.error === 'string'
@@ -568,7 +583,7 @@ export async function deleteAllMassiveJobs(status?: string | null): Promise<{
 
 export async function trimMassiveJobs(keep: number): Promise<{ ok: boolean; deleted: number; error?: string }> {
   const params = new URLSearchParams({ keep: String(keep) })
-  const r = await fetch(massiveUrl(`/research/massive/jobs/trim?${params}`), { method: 'POST' })
+  const r = await fetch(opsMassiveJobsUrl(`/trim?${params}`), { method: 'POST', headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   return {
     ok: r.ok && j.ok !== false,
@@ -619,7 +634,7 @@ export async function fetchMassiveJob(jobId: string): Promise<{
     updated_ts?: number
   }
 }> {
-  const r = await fetch(massiveUrl(`/research/massive/jobs/${encodeURIComponent(jobId)}`))
+  const r = await fetch(opsMassiveJobsUrl(`/${encodeURIComponent(jobId)}`), { headers: opsAuthHeaders() })
   const j = await r.json().catch(() => ({}))
   if (!j.ok) {
     return { ok: false, error: typeof j.error === 'string' ? j.error : 'Unknown error' }

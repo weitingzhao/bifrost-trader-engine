@@ -24,7 +24,7 @@ import {
 } from './status/statusLabels'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
 import { useControlAction } from './status/useControlAction'
-import { StatusDaemonPanel, StatusStrategyPanel, StatusSseQueuesPanel } from './status/panels'
+import { StatusDaemonPanel, StatusStrategyPanel } from './status/panels'
 
 export interface DaemonStatusPageProps {
   status: StatusResponse | null
@@ -404,8 +404,6 @@ export function DaemonStatusPage({
             </div>
           </div>
         </section>
-
-        <StatusSseQueuesPanel excludeCategories={['celery_logs']} heading="Daemon SSE backlog" />
 
         <section className="replay-section" aria-labelledby="daemon-console-head">
           <h3 id="daemon-console-head" className="page-title-with-tooltip">
