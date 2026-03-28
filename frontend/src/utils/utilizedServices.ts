@@ -20,11 +20,9 @@ export function normalizeUtilizedServices(raw: unknown): UtilizedServiceRow[] {
 
 export type UtilizedStackEnv = 'prod' | 'dev'
 
-export function utilizedEnvFor(
-  rows: UtilizedServiceRow[],
-  service: 'docs' | 'massive' | 'ops',
-): UtilizedStackEnv | null {
-  const row = rows.find(r => r.service.toLowerCase() === service)
+export function utilizedEnvFor(rows: UtilizedServiceRow[], service: string): UtilizedStackEnv | null {
+  const key = service.toLowerCase()
+  const row = rows.find(r => r.service.toLowerCase() === key)
   if (!row) return null
   const e = row.env.toLowerCase()
   if (e === 'prod') return 'prod'

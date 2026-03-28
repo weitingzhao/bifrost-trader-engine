@@ -8,10 +8,16 @@ import {
   fetchQuotes,
   subscribeQuotes,
   fetchBarsBenchmark,
-  fetchBarsJobs,
 } from './api'
 import { postStop } from './api/monitor/control'
-import { postMonitorStop, postCeleryStop } from './api/monitor/monitor'
+import { postMonitorStop } from './api/monitor/monitor'
+import { fetchOpsWorkers, fetchQueueSummary } from './api/ops/ops'
+import { celeryMetricsFromStatus } from './pages/status/celeryMetrics'
+import {
+  celeryQueuePendingBadgeTotal,
+  computeCeleryRuntimeLamp,
+  supportedQueueNamesFromSummary,
+} from './utils/celeryRuntime'
 import { LivePage } from './pages/LivePage'
 import { AccountsPage } from './pages/AccountsPage'
 import { MarketDataPage } from './pages/MarketDataPage'
@@ -203,15 +209,15 @@ export default function App() {
   const [benchmarks, setBenchmarks] = useState<
     Record<string, { bar_time: number; close: number; prev_close?: number | null; is_today?: boolean; is_stale?: boolean }>
   >({})
-  /** Celery bars worker queue counts (polled for header lamp) */
-  const [workerJobPending, setWorkerJobPending] = useState<number | null>(null)
-  const [workerJobRunning, setWorkerJobRunning] = useState<number | null>(null)
+  /** Celery: Ops /ops/workers + /ops/queues/summary (header lamp + badge; falls back to /status if Ops fails). */
+  const [celeryRuntimeLampOverride, setCeleryRuntimeLampOverride] = useState<LampId | null>(null)
+  const [celeryQueuePendingTotal, setCeleryQueuePendingTotal] = useState<number | null>(null)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const headerMenuRef = useRef<HTMLDivElement>(null)
   /** When GET /status is slow, setInterval would stack concurrent fetches — coalesce to one in-flight request. */
   const statusFetchRef = useRef<Promise<StatusResponse | null> | null>(null)
   const operationsFetchRef = useRef<Promise<void> | null>(null)
-  const barsJobsPollRef = useRef<Promise<void> | null>(null)
+  const celeryOpsPollRef = useRef<Promise<void> | null>(null)
 
   /** When on Settings tab: which section is shown (system vs Massive vs config). Drives header menu highlight. */
   const hashToSettingsViewSection = useCallback((hash: string): 'system' | 'config' | 'massive' => {
@@ -399,29 +405,31 @@ export default function App() {
 
   useEffect(() => {
     if (isDetailMode) return
-    const pollWorkerJobs = () => {
-      if (barsJobsPollRef.current) {
-        return
-      }
-      const run = Promise.all([
-        fetchBarsJobs(1, 0, 'pending'),
-        fetchBarsJobs(1, 0, 'running'),
-      ])
-        .then(([pendingRes, runningRes]) => {
-          setWorkerJobPending(pendingRes.total)
-          setWorkerJobRunning(runningRes.total)
+    const pollCeleryOps = () => {
+      if (celeryOpsPollRef.current) return
+      const run = Promise.all([fetchOpsWorkers(), fetchQueueSummary()])
+        .then(([wRes, qRes]) => {
+          const supported = supportedQueueNamesFromSummary(qRes.ok ? qRes.queues : [])
+          const brokerOk = wRes.ok && wRes.broker?.connected === true
+          const wrks = wRes.ok ? wRes.workers : []
+          setCeleryRuntimeLampOverride(computeCeleryRuntimeLamp(brokerOk, wrks, supported))
+          if (qRes.ok && qRes.queues.length > 0) {
+            setCeleryQueuePendingTotal(celeryQueuePendingBadgeTotal(qRes.queues))
+          } else {
+            setCeleryQueuePendingTotal(null)
+          }
         })
         .catch(() => {
-          setWorkerJobPending(null)
-          setWorkerJobRunning(null)
+          setCeleryRuntimeLampOverride(null)
+          setCeleryQueuePendingTotal(null)
         })
       const tracked = run.finally(() => {
-        barsJobsPollRef.current = null
+        celeryOpsPollRef.current = null
       })
-      barsJobsPollRef.current = tracked
+      celeryOpsPollRef.current = tracked
     }
-    pollWorkerJobs()
-    const t = setInterval(pollWorkerJobs, 10000)
+    pollCeleryOps()
+    const t = setInterval(pollCeleryOps, 10000)
     return () => clearInterval(t)
   }, [isDetailMode])
 
@@ -516,7 +524,7 @@ export default function App() {
   const strategyLamp: LampId =
     !hb || !hb.daemon_alive ? 'red' : j?.trading_suspended === true ? 'yellow' : 'green'
   const celeryLamp: LampId =
-    status?.celery_broker_connected && (status?.celery_workers?.length ?? 0) > 0 ? 'green' : 'red'
+    celeryRuntimeLampOverride ?? celeryMetricsFromStatus(status).celeryLamp
   const cl = celeryLamp as 'green' | 'yellow' | 'red'
   const systemLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
     if (dl === 'red' || ml === 'red' || cl === 'red') return 'red'
@@ -766,12 +774,16 @@ export default function App() {
     window.location.hash = '#settings-heartbeat'
   }
 
-  /** Open Settings → System Status sub-page (Server / Daemon / Celery). `#settings-system-server` = management monitor (API / IB). */
-  const openSystemInSettingsToSection = (section: 'system' | 'daemon' | 'celery') => {
+  /** Open Settings → System Status sub-page (Server / Daemon). `#settings-system-server` = management monitor (API / IB). */
+  const openSystemInSettingsToSection = (section: 'system' | 'daemon') => {
     setActiveTab('settings')
-    const hashSeg =
-      section === 'system' ? 'server' : section === 'daemon' ? 'daemon' : 'celery'
+    const hashSeg = section === 'system' ? 'server' : 'daemon'
     window.location.hash = `#settings-system-${hashSeg}`
+  }
+
+  const openDashboardCelerySection = () => {
+    setActiveTab('settings')
+    window.location.hash = '#settings-dashboard-celery'
   }
 
   const doShutdownAll = async () => {
@@ -779,9 +791,6 @@ export default function App() {
     setShutdownAllLoading(true)
     const errors: string[] = []
     try {
-      setShutdownAllMsg({ text: 'Stopping Celery…', isErr: false })
-      const r3 = await postCeleryStop()
-      if (!r3.ok) errors.push(`Celery: ${r3.error ?? r3.statusText ?? 'failed'}`)
       setShutdownAllMsg({ text: 'Stopping Daemon…', isErr: false })
       const r1 = await postStop()
       if (!r1.ok) errors.push(`Daemon: ${r1.error ?? r1.statusText ?? 'failed'}`)
@@ -845,7 +854,7 @@ export default function App() {
           <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
             <h3 id="shutdown-modal-title">Shutdown entire system?</h3>
             <p>
-              Celery, then Daemon, then Server will be stopped in order. This cannot be undone.
+              Daemon, then Server (management monitor) will be stopped in order. This cannot be undone.
             </p>
             <div className="data-reset-modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
@@ -1132,7 +1141,7 @@ export default function App() {
               >
                 <span
                   className={`lamp-icon ${celeryLamp}`}
-                  title="Celery: red = broker not connected, yellow = no workers, green = broker + workers OK"
+                  title="Celery: red = broker down; yellow = broker OK but no workers or incomplete queue coverage; green = all supported queues covered by workers (see Dashboard → Celery)"
                   aria-hidden
                 >
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1144,30 +1153,19 @@ export default function App() {
                     <button
                       type="button"
                       className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                      onClick={() => { openSystemInSettingsToSection('celery'); setLampHoverPopover(null) }}
-                      title="Go to System Status → Celery"
+                      onClick={() => { openDashboardCelerySection(); setLampHoverPopover(null) }}
+                      title="Go to Dashboard → Celery"
                     >
                       Celery
                     </button>
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                className="app-header-lamp-switch"
-                onClick={() => runQuickStop(postCeleryStop, 'Stop Celery')}
-                title="Stop Celery"
-                aria-label="Stop Celery"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
               <span
                 className="app-header-queue-value"
-                title="Pending jobs (hover lamp for Celery)"
+                title="Queue summary Pending total (deduped: bars + massive once) — jobs waiting in queue"
               >
-                {workerJobPending != null ? (workerJobPending > 99 ? '99+' : String(workerJobPending)) : '—'}
+                {celeryQueuePendingTotal != null ? (celeryQueuePendingTotal > 99 ? '99+' : String(celeryQueuePendingTotal)) : '—'}
               </span>
             </div>
           </div>
@@ -1461,8 +1459,6 @@ export default function App() {
           loadStatus={loadStatus}
           operations={operations}
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
-          barsQueuePending={workerJobPending}
-          barsQueueRunning={workerJobRunning}
           systemLamp={systemLamp}
           onOpenShutdownConfirm={() => setShutdownConfirmOpen(true)}
         />

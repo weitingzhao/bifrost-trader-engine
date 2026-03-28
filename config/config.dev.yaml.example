@@ -49,17 +49,19 @@ frontend:
   # dev_path: "http://192.168.x.x"     # host — ports come from server.*_port in this file
   # prod_path: "https://your-prod-host"
 
-# Optional: per-service env for API routing (see GET /health utilized_services). Omit split rows if you use frontend.dev_path in dev.
+# Optional: per FastAPI microservice — dev or prod for browser API routing (GET /health utilized_services).
+# Prefer a mapping (one key per service). Legacy list form (e.g. - massive:"dev") still works.
 # utilized:
 #   services:
-#     - server:"dev"
-#     - massive:"dev"
-#     - docs:"dev"
-#     - ops:"dev"
-#     - trading:"dev"
-#     - strategy:"dev"
-#     - portfolio:"dev"
-#     - market:"dev"
+#     server: dev
+#     massive: dev
+#     docs: dev
+#     ops: dev
+#     trading: dev
+#     strategy: dev
+#     portfolio: dev
+#     market: dev
+#     research: dev
 
 # Massive / Polygon options research (REST + Celery queue `massive`). Do not commit real API keys.
 # Prefer env: MASSIVE_API_KEY or POLYGON_API_KEY

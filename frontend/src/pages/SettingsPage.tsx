@@ -8,7 +8,6 @@ import {
   fetchMarketHolidays,
   postMarketHoliday,
   deleteMarketHoliday,
-  postCeleryStop,
   fetchMassiveApiHealth,
   fetchDocsApiHealth,
   fetchMassiveStatus,
@@ -55,7 +54,6 @@ import { HolidaysSection } from './settings/HolidaysSection'
 import { StatusPage } from './StatusPage'
 import { DataPage } from './DataPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
-import { CeleryPage } from './CeleryPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
@@ -63,7 +61,6 @@ import { DocsApiStatusPage } from './DocsApiStatusPage'
 import { OpsApiStatusPage } from './OpsApiStatusPage'
 import { DashboardPage } from './DashboardPage'
 import { ApiHealthOverviewPage } from './ApiHealthOverviewPage'
-import { celeryMetricsFromStatus } from './status/celeryMetrics'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
@@ -97,9 +94,6 @@ export interface SettingsPageProps {
   loadStatus: () => Promise<StatusResponse | null>
   operations?: Operation[]
   onNavigateToStrategy?: () => void
-  /** Bars backfill queue counts (same source as header; App pollers). */
-  barsQueuePending?: number | null
-  barsQueueRunning?: number | null
   /** Aggregated System Status lamp (daemon + monitor + celery worst). */
   systemLamp?: 'green' | 'yellow' | 'red' | 'none'
   /** Open the global shutdown confirmation modal (lives in App.tsx). */
@@ -111,8 +105,6 @@ export function SettingsPage({
   loadStatus,
   operations = [],
   onNavigateToStrategy,
-  barsQueuePending = null,
-  barsQueueRunning = null,
   systemLamp = 'none',
   onOpenShutdownConfirm,
 }: SettingsPageProps) {
@@ -236,8 +228,9 @@ export function SettingsPage({
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
     if (h && h.startsWith('settings-dashboard')) return 'settings-dashboard'
+    if (h === 'settings-services-overview') return 'settings-services'
     if (h && h.startsWith('settings-api')) return 'settings-api'
-    if (h === 'feed-celery') return 'settings-system'
+    if (h === 'feed-celery' || h === 'settings-system-celery') return 'settings-dashboard'
     if (h && isMassiveOptionFeedHash(`#${h}`)) return 'settings-feed'
     if (h && h.startsWith('feed-')) return 'settings-feed'
     return h || SETTINGS_SECTIONS[0].id
@@ -265,23 +258,18 @@ export function SettingsPage({
   const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
   const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
   const deferredStart = useDeferredStart(280)
-  const [celeryStopBusy, setCeleryStopBusy] = useState(false)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
-  const celeryLamp = celeryMetricsFromStatus(status).celeryLamp
   const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
   const monitorLamp: 'green' | 'yellow' | 'red' = ((status?.monitor_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
   const isSystemServerActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-server'
   const isSystemDaemonActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-daemon'
-  const isSystemCeleryActive = activeSectionId === 'settings-system' && (currentHash === 'settings-system-celery' || currentHash === 'feed-celery')
   const isApiSection = activeSectionId === 'settings-api'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
   const isApiDocsActive = isApiSection && currentHash === 'settings-api-docs'
   const isApiOpsActive = isApiSection && currentHash === 'settings-api-ops'
-  /** Any API hash other than Docs or Massive (e.g. settings-api-overview) shows API Overview. */
-  const isApiHealthOverviewActive = isApiSection && !isApiMassiveActive && !isApiDocsActive && !isApiOpsActive
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
   const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
   const opsApiLamp: 'green' | 'red' | 'none' = opsApiHealthOk === true ? 'green' : opsApiHealthOk === false ? 'red' : 'none'
@@ -342,24 +330,23 @@ export function SettingsPage({
     })
   }, [currentHash])
 
-  const onSidebarCeleryStop = async (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (celeryStopBusy) return
-    setCeleryStopBusy(true)
-    try {
-      await postCeleryStop()
-      await loadStatus()
-    } finally {
-      setCeleryStopBusy(false)
-    }
-  }
-
   useEffect(() => {
-    const onHashChange = () => setActiveSectionId(hashToSectionId(window.location.hash))
-    window.addEventListener('hashchange', onHashChange)
-    if (window.location.hash) setActiveSectionId(hashToSectionId(window.location.hash))
-    return () => window.removeEventListener('hashchange', onHashChange)
+    const normalizeHash = (): string => {
+      let h = window.location.hash
+      if (h === '#feed-celery' || h === '#settings-system-celery') {
+        const next = `${window.location.pathname}${window.location.search}#settings-dashboard-celery`
+        window.history.replaceState(null, '', next)
+        h = '#settings-dashboard-celery'
+      }
+      return h
+    }
+    const syncFromHash = () => {
+      const h = normalizeHash()
+      setActiveSectionId(hashToSectionId(h))
+    }
+    window.addEventListener('hashchange', syncFromHash)
+    syncFromHash()
+    return () => window.removeEventListener('hashchange', syncFromHash)
   }, [])
 
   useEffect(() => {
@@ -369,13 +356,13 @@ export function SettingsPage({
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-system-server`)
       setActiveSectionId('settings-system')
     }
-    if (h === '#feed-celery') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-system-celery`)
-      setActiveSectionId('settings-system')
-    }
     if (h === '#settings-api-health') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-api-overview`)
-      setActiveSectionId('settings-api')
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-services-overview`)
+      setActiveSectionId('settings-services')
+    }
+    if (h === '#settings-api-overview') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-services-overview`)
+      setActiveSectionId('settings-services')
     }
   }, [])
 
@@ -439,13 +426,10 @@ export function SettingsPage({
     }
   }
 
-  const barsQueueActiveTotal =
-    barsQueuePending != null || barsQueueRunning != null
-      ? (barsQueuePending ?? 0) + (barsQueueRunning ?? 0)
-      : null
 
   const isSystemSection = activeSectionId === 'settings-system'
   const isDashboardSection = activeSectionId === 'settings-dashboard'
+  const isServicesOverviewSection = activeSectionId === 'settings-services'
   const isCoverageSection = activeSectionId === 'settings-coverage'
   const isFeedSection = activeSectionId === 'settings-feed'
 
@@ -467,7 +451,7 @@ export function SettingsPage({
             </a>
             <button
               type="button"
-              className="settings-sidebar-celery-stop"
+              className="settings-sidebar-system-shutdown"
               onClick={() => onOpenShutdownConfirm?.()}
               title="Shutdown entire system"
               aria-label="Shutdown entire system"
@@ -507,34 +491,6 @@ export function SettingsPage({
               </span>
               Daemon
             </a>
-            <div className="settings-sidebar-celery-row">
-              <a
-                href="#settings-system-celery"
-                className={`settings-sidebar-link settings-sidebar-link-sub settings-sidebar-link-celery ${isSystemCeleryActive ? 'active' : ''}`}
-              >
-                <span className={`title-inline-lamp lamp-icon ${celeryLamp}`} title="Celery" aria-hidden>
-                  <SettingsSidebarLampGlyph id="celery" />
-                </span>
-                Celery
-                {barsQueueActiveTotal != null ? (
-                  <span className="settings-sidebar-celery-queue-badge" title="Bars queue: pending + running">
-                    {barsQueueActiveTotal}
-                  </span>
-                ) : null}
-              </a>
-              <button
-                type="button"
-                className="settings-sidebar-celery-stop"
-                onClick={onSidebarCeleryStop}
-                disabled={celeryStopBusy}
-                title="Stop Celery worker"
-                aria-label="Stop Celery worker"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
           </div>
         </div>
         <a
@@ -550,9 +506,16 @@ export function SettingsPage({
           </span>
           Dashboard
         </a>
+        <a
+          href="#settings-services-overview"
+          className={`settings-sidebar-link ${isServicesOverviewSection ? 'active' : ''}`}
+        >
+          <SettingsSectionIcon name="heartbeat" />
+          Services Overview
+        </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
-            <a href="#settings-api-overview" className="settings-sidebar-parent-label">
+            <a href="#settings-api-docs" className="settings-sidebar-parent-label">
               <SettingsSectionIcon name="api" />
               API
             </a>
@@ -568,13 +531,6 @@ export function SettingsPage({
             </button>
           </div>
           <div id="settings-api-subs" className="settings-sidebar-subs" hidden={!apiExpanded}>
-              <a
-                href="#settings-api-overview"
-                className={`settings-sidebar-link settings-sidebar-link-sub ${isApiHealthOverviewActive ? 'active' : ''}`}
-              >
-                <SettingsSectionIcon name="heartbeat" />
-                API Overview
-              </a>
             <a
               href="#settings-api-docs"
               className={`settings-sidebar-link settings-sidebar-link-sub ${isApiDocsActive ? 'active' : ''}`}
@@ -781,14 +737,7 @@ export function SettingsPage({
   return (
     <SettingsShell sidebar={sidebarContent}>
       {isSystemSection ? (
-        isSystemCeleryActive ? (
-          <CeleryPage
-            status={status}
-            loadStatus={loadStatus}
-            embeddedInSettings
-            breadcrumbLabel="Celery"
-          />
-        ) : isSystemDaemonActive ? (
+        isSystemDaemonActive ? (
           <DaemonStatusPage
             status={status}
             loadStatus={loadStatus}
@@ -815,11 +764,12 @@ export function SettingsPage({
             showConsoleSection={true}
             showConsoleTabs={true}
             consoleCardTitle="Console"
-            celeryUiMode="relocated"
           />
         )
       ) : isDashboardSection ? (
         <DashboardPage status={status} loadStatus={loadStatus} embeddedInSettings />
+      ) : isServicesOverviewSection ? (
+        <ApiHealthOverviewPage embeddedInSettings />
       ) : isApiSection ? (
         isApiMassiveActive ? (
           <MassiveApiStatusPage embeddedInSettings />
@@ -828,7 +778,7 @@ export function SettingsPage({
         ) : isApiOpsActive ? (
           <OpsApiStatusPage embeddedInSettings />
         ) : (
-          <ApiHealthOverviewPage embeddedInSettings />
+          <DocsApiStatusPage embeddedInSettings />
         )
       ) : isCoverageSection ? (
         currentHash === 'coverage-stock' ? (

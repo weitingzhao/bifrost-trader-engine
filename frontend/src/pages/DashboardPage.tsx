@@ -8,7 +8,7 @@ import {
   clearCeleryLogs,
 } from '../api/monitor/logs'
 import { postStop } from '../api/monitor/control'
-import { postMonitorStop, postCeleryStop } from '../api/monitor/monitor'
+import { postMonitorStop } from '../api/monitor/monitor'
 import {
   fetchOpsWorkers,
   fetchOpsAudit,
@@ -33,6 +33,11 @@ import {
   type QueueSummaryRow,
 } from '../api/ops/ops'
 import { CeleryJobQueuesSection } from './celery/CeleryJobQueuesSection'
+import {
+  computeCeleryRuntimeLamp,
+  dedupedQueueSummaryTotals,
+  supportedQueueNamesFromSummary,
+} from '../utils/celeryRuntime'
 
 export interface DashboardPageProps {
   status?: StatusResponse | null
@@ -308,7 +313,7 @@ function LogConsole({ url, maxLines = 500 }: { url: string; maxLines?: number })
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-type ServiceId = 'daemon' | 'server' | 'celery'
+type ServiceId = 'daemon' | 'server'
 
 interface ServiceAction {
   id: ServiceId
@@ -317,7 +322,6 @@ interface ServiceAction {
 }
 
 const SERVICE_ACTIONS: ServiceAction[] = [
-  { id: 'celery', label: 'Celery', stopFn: postCeleryStop },
   { id: 'daemon', label: 'Daemon', stopFn: postStop },
   { id: 'server', label: 'Server', stopFn: postMonitorStop },
 ]
@@ -625,7 +629,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     setConfirmState({
       open: true,
       title: 'Shutdown entire system?',
-      message: 'Celery, then Daemon, then Server will be stopped in order. This cannot be undone.',
+      message: 'Daemon, then Server (management monitor) will be stopped in order. This cannot be undone.',
       confirming: false,
       action: async () => {
         setConfirmState(prev => ({ ...prev, confirming: true }))
@@ -765,13 +769,40 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     }
   }, [workers, consoleTarget])
 
+  useEffect(() => {
+    const scrollCelery = () => {
+      const h = window.location.hash.replace(/^#/, '')
+      if (h !== 'settings-dashboard-celery') return
+      requestAnimationFrame(() => {
+        document.getElementById('dashboard-celery')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+    scrollCelery()
+    window.addEventListener('hashchange', scrollCelery)
+    return () => window.removeEventListener('hashchange', scrollCelery)
+  }, [loading])
+
   const hb = status?.daemon_heartbeat
   const daemonLamp: LampColor = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
   const serverLamp: LampColor = status?.monitor_lamp ? (status.monitor_lamp as LampColor) : 'red'
-  const celeryStatusLamp: LampColor =
-    status?.celery_broker_connected && (status?.celery_workers?.length ?? 0) > 0 ? 'green' : 'red'
 
   const brokerLamp: LampColor = broker?.connected ? 'green' : 'red'
+  const supportedCeleryQueueNames = supportedQueueNamesFromSummary(queueSummary)
+  const runtimeCeleryLamp: LampColor = computeCeleryRuntimeLamp(
+    broker?.connected === true,
+    workers,
+    supportedCeleryQueueNames,
+  )
+  const queueSummaryDeduped =
+    queueSummary.length > 0 ? dedupedQueueSummaryTotals(queueSummary) : null
+  const runtimeCeleryStatusText =
+    runtimeCeleryLamp === 'green'
+      ? 'All supported queues covered'
+      : runtimeCeleryLamp === 'red'
+        ? 'Broker not connected'
+        : workers.length === 0
+          ? 'Broker only — no inspect workers'
+          : 'Workers do not cover every supported queue'
   const overallLamp: LampColor = (() => {
     if (!broker?.connected) return 'red'
     if (workers.length === 0) return 'red'
@@ -930,7 +961,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
             <div className="dashboard-section-header-row">
               <h3 id="dashboard-svc-head" className="page-title-with-tooltip">
                 Services
-                <InfoTooltip text="Unified view of all Bifrost services. Stop individual services or shut down the entire system in order (Celery → Daemon → Server)." />
+                <InfoTooltip text="Unified view of services. Stop Daemon or Server, or shut down both in order." />
               </h3>
               <div className="dashboard-svc-actions-row">
                 {svcMsg.text && (
@@ -941,7 +972,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                   className="btn-shutdown-all dashboard-btn dashboard-shutdown-all-btn"
                   onClick={onShutdownAllClick}
                   disabled={!!svcStopBusy}
-                  title="Shutdown entire system (Celery → Daemon → Server)"
+                  title="Shutdown Daemon then Server"
                 >
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
@@ -971,7 +1002,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                 <button
                   type="button"
                   className="dashboard-svc-stop-btn"
-                  onClick={() => onStopServiceClick(SERVICE_ACTIONS[1])}
+                  onClick={() => onStopServiceClick(SERVICE_ACTIONS[0])}
                   disabled={!!svcStopBusy}
                   title="Stop daemon process"
                 >
@@ -1001,7 +1032,7 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                 <button
                   type="button"
                   className="dashboard-svc-stop-btn"
-                  onClick={() => onStopServiceClick(SERVICE_ACTIONS[2])}
+                  onClick={() => onStopServiceClick(SERVICE_ACTIONS[1])}
                   disabled={!!svcStopBusy}
                   title="Stop server process"
                 >
@@ -1012,35 +1043,31 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               {/* Celery */}
               <div className="dashboard-svc-card">
                 <div className="dashboard-svc-card-header">
-                  <span className={`title-inline-lamp lamp-icon ${celeryStatusLamp}`} aria-hidden>
+                  <span className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`} aria-hidden>
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
                     </svg>
                   </span>
                   <strong>Celery</strong>
-                  <span className={`dashboard-svc-status dashboard-svc-status--${celeryStatusLamp}`}>
-                    {celeryStatusLamp === 'green' ? 'Running' : 'Down'}
+                  <span className={`dashboard-svc-status dashboard-svc-status--${runtimeCeleryLamp}`}>
+                    {runtimeCeleryLamp === 'green'
+                      ? 'Ready'
+                      : runtimeCeleryLamp === 'yellow'
+                        ? 'Incomplete'
+                        : 'Down'}
                   </span>
                 </div>
                 <div className="dashboard-svc-card-meta">
-                  <span>Broker: {status?.celery_broker_connected ? 'Connected' : 'Disconnected'}</span>
-                  <span>Workers: {status?.celery_workers?.length ?? 0}</span>
+                  <span>Broker: {broker?.connected ? 'Connected' : 'Disconnected'}</span>
+                  <span>Inspect workers: {workers.length}</span>
                 </div>
-                <button
-                  type="button"
-                  className="dashboard-svc-stop-btn"
-                  onClick={() => onStopServiceClick(SERVICE_ACTIONS[0])}
-                  disabled={!!svcStopBusy}
-                  title="Stop Celery worker"
-                >
-                  {svcStopBusy === 'celery' ? 'Stopping…' : 'Stop'}
-                </button>
               </div>
             </div>
           </section>
 
           {/* ── Celery (runtime, queues, instances, console, broker) ── */}
           <div
+            id="dashboard-celery"
             className="dashboard-celery-group"
             aria-labelledby="dashboard-celery-head"
           >
@@ -1093,6 +1120,14 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
               Runtime Snapshot
               <InfoTooltip text="Broker from Redis; workers from Celery inspect (who responds on the broker). Worker Instances below lists OS processes — not the same data source." />
             </h3>
+            <div className="dashboard-snapshot-celery-lamp-row" role="status">
+              <span className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`} aria-hidden>●</span>
+              <strong className="dashboard-snapshot-celery-lamp-title">Celery (aggregate)</strong>
+              <span className={`dashboard-snapshot-celery-lamp-status dashboard-svc-status--${runtimeCeleryLamp}`}>
+                {runtimeCeleryStatusText}
+              </span>
+              <InfoTooltip text="Red: broker unreachable. Yellow: broker OK but no workers, or workers’ queue list does not include every supported queue (bars, massive_high, massive). Green: at least one worker and their combined queues cover all supported queues." />
+            </div>
 
             {/* Broker */}
             <div
@@ -1272,6 +1307,18 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                         <td>{fmtQueueCell(row.failed_db)}</td>
                       </tr>
                     ))}
+                    {queueSummaryDeduped ? (
+                      <tr className="dashboard-queue-summary-totals-row">
+                        <td>
+                          <strong>Total</strong>
+                          <InfoTooltip text="Bars plus Massive once — massive_high shares the same DB totals as massive (see note above)." />
+                        </td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.pending_broker)}</td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.running_celery)}</td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.done_db)}</td>
+                        <td>{fmtQueueCell(queueSummaryDeduped.failed_db)}</td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

@@ -1387,7 +1387,7 @@ export function FeedMassiveOptionPage({
                 Active jobs: <strong>{pendingJobCount > 99 ? '99+' : pendingJobCount}</strong>
               </span>
             ) : null}
-            <a href="#feed-celery" className="feed-massive-queue-summary-link">Celery queue details</a>
+            <a href="#settings-dashboard-celery" className="feed-massive-queue-summary-link">Celery queue details</a>
             {!_status?.celery_workers?.length ? (
               <span className="feed-massive-queue-summary-warn">No workers — start with -Q massive</span>
             ) : null}

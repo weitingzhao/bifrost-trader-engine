@@ -19,8 +19,17 @@ export interface ApiHealthOverviewPageProps {
 
 type Lamp = 'green' | 'red' | 'none'
 
+/** Ports for trading/strategy/portfolio/market/research when probing host:port/health (split stack or single nginx host + sidecar ports). */
+interface MicroPorts {
+  tradingPort: number
+  strategyPort: number
+  portfolioPort: number
+  marketPort: number
+  researchPort: number
+}
+
 type ProbeKind =
-  | { kind: 'single'; origin: ApiOriginBase; researchPort?: number }
+  | { kind: 'single'; origin: ApiOriginBase; microPorts: MicroPorts }
   | {
       kind: 'split'
       scheme: string
@@ -29,6 +38,10 @@ type ProbeKind =
       massivePort: number
       docsPort: number
       opsPort: number
+      tradingPort: number
+      strategyPort: number
+      portfolioPort: number
+      marketPort: number
       researchPort: number
     }
 
@@ -48,17 +61,28 @@ interface ProbeResult {
   massive: ServiceProbe
   docs: ServiceProbe
   ops: ServiceProbe
+  trading: ServiceProbe
+  strategy: ServiceProbe
+  portfolio: ServiceProbe
+  market: ServiceProbe
   research: ServiceProbe
+}
+
+interface HealthProbeRow {
+  label: string
+  lamp: Lamp
+  detail: string
+}
+
+interface HealthGroupState {
+  title: string
+  rows: HealthProbeRow[]
 }
 
 interface ColumnState {
   title: string
   display: string | null
-  rows: Array<{
-    label: string
-    lamp: Lamp
-    detail: string
-  }>
+  groups: HealthGroupState[]
   hint?: string
 }
 
@@ -75,7 +99,41 @@ function formatServiceLabel(service: string): string {
   if (t === 'docs') return 'Docs'
   if (t === 'ops') return 'Ops'
   if (t === 'research') return 'Research'
+  if (t === 'server' || t === 'main' || t === 'api' || t === 'monitor') return 'Monitor'
+  if (t === 'trading') return 'Trading'
+  if (t === 'strategy') return 'Strategy'
+  if (t === 'portfolio') return 'Portfolio'
+  if (t === 'market') return 'Market'
+  if (t === 'ib') return 'IB'
   return service.charAt(0).toUpperCase() + service.slice(1)
+}
+
+const SERVICES_CONFIGURED_GROUP_ORDER = ['Architecture', 'Account', 'Research', 'Feed', 'Other'] as const
+
+function configuredServiceGroup(service: string): (typeof SERVICES_CONFIGURED_GROUP_ORDER)[number] {
+  const k = service.toLowerCase()
+  if (['server', 'main', 'api', 'monitor', 'ops', 'docs'].includes(k)) return 'Architecture'
+  if (['market', 'trading', 'portfolio'].includes(k)) return 'Account'
+  if (['research', 'strategy'].includes(k)) return 'Research'
+  if (['massive', 'ib'].includes(k)) return 'Feed'
+  return 'Other'
+}
+
+function groupUtilizedServicesForOverview(rows: UtilizedServiceRow[]): Array<{ title: string; rows: UtilizedServiceRow[] }> {
+  const buckets: Record<string, UtilizedServiceRow[]> = {
+    Architecture: [],
+    Account: [],
+    Research: [],
+    Feed: [],
+    Other: [],
+  }
+  for (const r of rows) {
+    buckets[configuredServiceGroup(r.service)].push(r)
+  }
+  return SERVICES_CONFIGURED_GROUP_ORDER.filter((t) => buckets[t].length > 0).map((t) => ({
+    title: t,
+    rows: buckets[t],
+  }))
 }
 
 function formatEnvLabel(env: string): string {
@@ -85,37 +143,75 @@ function formatEnvLabel(env: string): string {
   return env
 }
 
+/** Pill color variant for configured routes (aligns with Settings API sidebar: dev = sky, prod = green). */
+function envPillVariant(env: string): 'dev' | 'prod' | 'other' {
+  const t = env.toLowerCase().trim()
+  if (t === 'dev' || t === 'development') return 'dev'
+  if (t === 'prod' || t === 'production') return 'prod'
+  return 'other'
+}
+
+function formatEnvShortLabel(env: string): string {
+  const v = envPillVariant(env)
+  if (v === 'dev') return 'Dev'
+  if (v === 'prod') return 'Prod'
+  return env.trim() || '—'
+}
+
 function lampFor(ok: boolean | null): Lamp {
   if (ok === true) return 'green'
   if (ok === false) return 'red'
   return 'none'
 }
 
-function _researchProbeOrigin(kind: ProbeKind): string {
-  const rp =
-    kind.kind === 'split'
-      ? kind.researchPort
-      : (kind.researchPort ?? 8773)
+function defaultMicroPorts(): MicroPorts {
+  return {
+    tradingPort: 8769,
+    strategyPort: 8770,
+    portfolioPort: 8771,
+    marketPort: 8772,
+    researchPort: 8773,
+  }
+}
+
+function microPortsFromHealth(h: Record<string, unknown> | undefined | null): MicroPorts {
+  const n = (x: unknown, d: number) =>
+    typeof x === 'number' && Number.isFinite(x) ? x : d
+  return {
+    tradingPort: n(h?.trading_port, 8769),
+    strategyPort: n(h?.strategy_port, 8770),
+    portfolioPort: n(h?.portfolio_port, 8771),
+    marketPort: n(h?.market_port, 8772),
+    researchPort: n(h?.research_port, 8773),
+  }
+}
+
+function _microserviceHealthBase(kind: ProbeKind, port: number): string {
   if (kind.kind === 'split') {
-    return `${kind.scheme}://${kind.host}:${rp}`
+    return `${kind.scheme}://${kind.host}:${port}`
   }
   const o = kind.origin
+  const raw =
+    o && o.trim() !== ''
+      ? o.includes('://')
+        ? o
+        : `http://${o}`
+      : typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://127.0.0.1'
   try {
-    const raw =
-      o && o.trim() !== ''
-        ? o.includes('://')
-          ? o
-          : `http://${o}`
-        : typeof window !== 'undefined'
-          ? window.location.origin
-          : 'http://127.0.0.1'
     const u = new URL(raw)
     const scheme = (u.protocol || 'http:').replace(':', '') || 'http'
     const host = u.hostname || '127.0.0.1'
-    return `${scheme}://${host}:${rp}`
+    return `${scheme}://${host}:${port}`
   } catch {
-    return `http://127.0.0.1:${rp}`
+    return `http://127.0.0.1:${port}`
   }
+}
+
+function _researchProbeOrigin(kind: ProbeKind): string {
+  const rp = kind.kind === 'split' ? kind.researchPort : kind.microPorts.researchPort
+  return _microserviceHealthBase(kind, rp)
 }
 
 async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
@@ -124,11 +220,20 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
   if (kind.kind === 'single') {
     const o = kind.origin
     const baseLabel = o === '' ? '(same origin as this app)' : o
-    const [sr, mr, dr, or, rr] = await Promise.allSettled([
+    const mp = kind.microPorts
+    const oTr = _microserviceHealthBase(kind, mp.tradingPort)
+    const oSt = _microserviceHealthBase(kind, mp.strategyPort)
+    const oPf = _microserviceHealthBase(kind, mp.portfolioPort)
+    const oMk = _microserviceHealthBase(kind, mp.marketPort)
+    const [sr, mr, dr, or, tr, st, pf, mk, rr] = await Promise.allSettled([
       fetchHealthAtOrigin(o, tmo),
       fetchMassiveApiHealthAtOrigin(o, tmo),
       fetchDocsApiHealthAtOrigin(o, tmo),
       fetchOpsHealthAtOrigin(o, tmo),
+      fetchHealthAtOrigin(oTr, tmo),
+      fetchHealthAtOrigin(oSt, tmo),
+      fetchHealthAtOrigin(oPf, tmo),
+      fetchHealthAtOrigin(oMk, tmo),
       fetchResearchApiHealthAtOrigin(oRes, tmo),
     ])
     return {
@@ -152,6 +257,26 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
         ts: or.status === 'fulfilled' ? or.value.ts : undefined,
         base: baseLabel,
       },
+      trading: {
+        ok: tr.status === 'fulfilled',
+        ts: tr.status === 'fulfilled' ? tr.value.ts : undefined,
+        base: oTr,
+      },
+      strategy: {
+        ok: st.status === 'fulfilled',
+        ts: st.status === 'fulfilled' ? st.value.ts : undefined,
+        base: oSt,
+      },
+      portfolio: {
+        ok: pf.status === 'fulfilled',
+        ts: pf.status === 'fulfilled' ? pf.value.ts : undefined,
+        base: oPf,
+      },
+      market: {
+        ok: mk.status === 'fulfilled',
+        ts: mk.status === 'fulfilled' ? mk.value.ts : undefined,
+        base: oMk,
+      },
       research: {
         ok: rr.status === 'fulfilled',
         ts: rr.status === 'fulfilled' ? rr.value.ts : undefined,
@@ -159,17 +284,38 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
       },
     }
   }
-  const { scheme, host, serverPort, massivePort, docsPort, opsPort } = kind
+  const {
+    scheme,
+    host,
+    serverPort,
+    massivePort,
+    docsPort,
+    opsPort,
+    tradingPort,
+    strategyPort,
+    portfolioPort,
+    marketPort,
+    researchPort,
+  } = kind
   const oS = `${scheme}://${host}:${serverPort}`
   const oM = `${scheme}://${host}:${massivePort}`
   const oD = `${scheme}://${host}:${docsPort}`
   const oO = `${scheme}://${host}:${opsPort}`
-  const [sr, mr, dr, or, rr] = await Promise.allSettled([
+  const oTr = `${scheme}://${host}:${tradingPort}`
+  const oSt = `${scheme}://${host}:${strategyPort}`
+  const oPf = `${scheme}://${host}:${portfolioPort}`
+  const oMk = `${scheme}://${host}:${marketPort}`
+  const oR = `${scheme}://${host}:${researchPort}`
+  const [sr, mr, dr, or, tr, st, pf, mk, rr] = await Promise.allSettled([
     fetchHealthAtOrigin(oS, tmo),
     fetchMassiveApiHealthAtOrigin(oM, tmo),
     fetchDocsApiHealthAtOrigin(oD, tmo),
     fetchOpsHealthAtOrigin(oO, tmo),
-    fetchResearchApiHealthAtOrigin(oRes, tmo),
+    fetchHealthAtOrigin(oTr, tmo),
+    fetchHealthAtOrigin(oSt, tmo),
+    fetchHealthAtOrigin(oPf, tmo),
+    fetchHealthAtOrigin(oMk, tmo),
+    fetchResearchApiHealthAtOrigin(oR, tmo),
   ])
   return {
     server: {
@@ -192,10 +338,30 @@ async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
       ts: or.status === 'fulfilled' ? or.value.ts : undefined,
       base: oO,
     },
+    trading: {
+      ok: tr.status === 'fulfilled',
+      ts: tr.status === 'fulfilled' ? tr.value.ts : undefined,
+      base: oTr,
+    },
+    strategy: {
+      ok: st.status === 'fulfilled',
+      ts: st.status === 'fulfilled' ? st.value.ts : undefined,
+      base: oSt,
+    },
+    portfolio: {
+      ok: pf.status === 'fulfilled',
+      ts: pf.status === 'fulfilled' ? pf.value.ts : undefined,
+      base: oPf,
+    },
+    market: {
+      ok: mk.status === 'fulfilled',
+      ts: mk.status === 'fulfilled' ? mk.value.ts : undefined,
+      base: oMk,
+    },
     research: {
       ok: rr.status === 'fulfilled',
       ts: rr.status === 'fulfilled' ? rr.value.ts : undefined,
-      base: oRes,
+      base: oR,
     },
   }
 }
@@ -209,19 +375,17 @@ async function resolveColumnPlans(): Promise<{
   const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
   if (devEnv && prodEnv) {
     let utilizedServices: UtilizedServiceRow[] = []
-    let researchPort = 8773
+    let microPorts = defaultMicroPorts()
     try {
       const h = await fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
       utilizedServices = normalizeUtilizedServices(h?.utilized_services)
-      if (typeof h?.research_port === 'number' && Number.isFinite(h.research_port)) {
-        researchPort = h.research_port
-      }
+      microPorts = microPortsFromHealth(h as Record<string, unknown> | undefined)
     } catch {
       // same-origin /health may be unreachable; leave Services empty
     }
     return {
-      dev: { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort } },
-      prod: { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort } },
+      dev: { display: devEnv, probe: { kind: 'single', origin: devEnv, microPorts } },
+      prod: { display: prodEnv, probe: { kind: 'single', origin: prodEnv, microPorts } },
       utilizedServices,
     }
   }
@@ -236,10 +400,10 @@ async function resolveColumnPlans(): Promise<{
     const mh = mhr.status === 'fulfilled' ? mhr.value : undefined
 
     if (!h && !mh) {
-      const d = 8773
+      const microPorts = defaultMicroPorts()
       return {
-        dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort: d } } : null,
-        prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort: d } } : null,
+        dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, microPorts } } : null,
+        prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, microPorts } } : null,
         utilizedServices: [],
       }
     }
@@ -254,13 +418,12 @@ async function resolveColumnPlans(): Promise<{
     const mp = typeof h?.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
     const dp = typeof h?.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
     const op = typeof h?.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
-    const rp =
-      typeof h?.research_port === 'number' && Number.isFinite(h.research_port) ? h.research_port : 8773
+    const microPorts = microPortsFromHealth(h as Record<string, unknown> | undefined)
     const noYamlPaths = cfgDev == null && cfgProd == null
 
     let dev: ColumnPlan | null = null
     if (devEnv) {
-      dev = { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort: rp } }
+      dev = { display: devEnv, probe: { kind: 'single', origin: devEnv, microPorts } }
     } else if (cfgDev) {
       try {
         const raw = cfgDev.includes('://') ? cfgDev : `http://${cfgDev}`
@@ -278,39 +441,43 @@ async function resolveColumnPlans(): Promise<{
             massivePort: mp,
             docsPort: dp,
             opsPort: op,
-            researchPort: rp,
+            tradingPort: microPorts.tradingPort,
+            strategyPort: microPorts.strategyPort,
+            portfolioPort: microPorts.portfolioPort,
+            marketPort: microPorts.marketPort,
+            researchPort: microPorts.researchPort,
           },
         }
       } catch {
         const o = cfgDev.replace(/\/$/, '')
-        dev = { display: o, probe: { kind: 'single', origin: o, researchPort: rp } }
+        dev = { display: o, probe: { kind: 'single', origin: o, microPorts } }
       }
     } else if (noYamlPaths && prof === 'dev') {
       dev = {
         display: pub || 'Same as this app',
-        probe: { kind: 'single', origin: pub ?? '', researchPort: rp },
+        probe: { kind: 'single', origin: pub ?? '', microPorts },
       }
     }
 
     let prod: ColumnPlan | null = null
     if (prodEnv) {
-      prod = { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort: rp } }
+      prod = { display: prodEnv, probe: { kind: 'single', origin: prodEnv, microPorts } }
     } else if (cfgProd) {
       const o = cfgProd.replace(/\/$/, '')
-      prod = { display: o, probe: { kind: 'single', origin: o, researchPort: rp } }
+      prod = { display: o, probe: { kind: 'single', origin: o, microPorts } }
     } else if (noYamlPaths && prof === 'prod') {
       prod = {
         display: pub || 'Same as this app',
-        probe: { kind: 'single', origin: pub ?? '', researchPort: rp },
+        probe: { kind: 'single', origin: pub ?? '', microPorts },
       }
     }
 
     return { dev, prod, utilizedServices }
   } catch {
-    const d = 8773
+    const microPorts = defaultMicroPorts()
     return {
-      dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, researchPort: d } } : null,
-      prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, researchPort: d } } : null,
+      dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, microPorts } } : null,
+      prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, microPorts } } : null,
       utilizedServices: [],
     }
   }
@@ -321,7 +488,7 @@ function buildColumn(title: string, display: string | null, probe: ProbeResult |
     return {
       title,
       display: null,
-      rows: [],
+      groups: [],
       hint:
         title === 'Development'
           ? 'Set VITE_DEV_API_ORIGIN or open this UI against a dev server so the Development column can probe.'
@@ -329,26 +496,45 @@ function buildColumn(title: string, display: string | null, probe: ProbeResult |
     }
   }
   if (!probe) {
-    return { title, display, rows: [] }
+    return { title, display, groups: [] }
   }
-  const row = (label: string, p: ServiceProbe, failPath: string) => ({
+  const row = (label: string, p: ServiceProbe, failPath: string): HealthProbeRow => ({
     label,
     lamp: lampFor(p.ok),
     detail: p.ok
       ? `ts ${p.ts ?? '—'} · ${p.base}`
       : `${failPath} (unreachable or timed out) · ${p.base}`,
   })
-  return {
-    title,
-    display,
-    rows: [
-      row('Bifrost server', probe.server, 'GET /health failed'),
-      row('Massive API', probe.massive, 'GET /research/massive/health failed'),
-      row('Docs API', probe.docs, 'GET /research/docs/health failed'),
-      row('Ops API', probe.ops, 'GET /ops/health failed'),
-      row('Research API', probe.research, 'GET /health failed'),
-    ],
-  }
+  const groups: HealthGroupState[] = [
+    {
+      title: 'Architecture',
+      rows: [
+        row('Monitor', probe.server, 'GET /health failed'),
+        row('Ops API', probe.ops, 'GET /ops/health failed'),
+        row('Docs API', probe.docs, 'GET /research/docs/health failed'),
+      ],
+    },
+    {
+      title: 'Account',
+      rows: [
+        row('Market API', probe.market, 'GET /health failed'),
+        row('Trading API', probe.trading, 'GET /health failed'),
+        row('Portfolio API', probe.portfolio, 'GET /health failed'),
+      ],
+    },
+    {
+      title: 'Research',
+      rows: [
+        row('Research API', probe.research, 'GET /health failed'),
+        row('Strategy API', probe.strategy, 'GET /health failed'),
+      ],
+    },
+    {
+      title: 'Feed',
+      rows: [row('Massive API', probe.massive, 'GET /research/massive/health failed')],
+    },
+  ]
+  return { title, display, groups }
 }
 
 export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewPageProps) {
@@ -427,14 +613,14 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
   return (
     <div className={wrapClass}>
       <div className="server-groups settings-page-groups">
-        <section className="replay-section" aria-labelledby="api-overview-head">
+        <section className="replay-section" aria-labelledby="services-overview-head">
           <div className="system-tab-panel">
             <div className="daemon-header">
               <div className="daemon-header-main daemon-header-with-lamp">
                 <div>
-                  <h2 id="api-overview-head" className="daemon-card-title page-title-with-tooltip">
-                    API Overview
-                    <InfoTooltip text="Services: from YAML utilized.services (via GET /health). The rest of this app uses the same rules to call Massive/Docs APIs (prod vs dev) so a dead dev stack does not break the UI when everything is declared prod. Health: Development and Production columns probe FastAPI endpoints; each request times out so a dead service does not freeze the page. Override bases with VITE_DEV_API_ORIGIN and VITE_PROD_API_ORIGIN." />
+                  <h2 id="services-overview-head" className="daemon-card-title page-title-with-tooltip">
+                    Services Overview
+                    <InfoTooltip text="Configured routes from YAML utilized.services (GET /health), and live probes for Dev vs Prod. The app uses the same routing rules so a dead dev stack does not break the UI when services are declared prod. Requests time out per probe. Override bases with VITE_DEV_API_ORIGIN and VITE_PROD_API_ORIGIN." />
                   </h2>
                   <p className="massive-api-doc-hint">
                     Last refresh: {lastRefresh}
@@ -448,72 +634,99 @@ export function ApiHealthOverviewPage({ embeddedInSettings }: ApiHealthOverviewP
               <p className="api-health-overview-loading">Resolving…</p>
             ) : (
               <>
-                <div className="api-overview-services-section" aria-labelledby="api-overview-services-head">
-                  <h3 id="api-overview-services-head" className="api-overview-subsection-title">
-                    Services
-                    <InfoTooltip text="Declared in YAML as utilized.services (which sidecar stack each service uses). Values come from GET /health on the running bifrost-server (loaded at process start from your merged config — edit YAML alone does not apply until you restart that server). Not the same as the Health section column titles: those probe frontend.dev_path vs frontend.prod_path hosts." />
+                <div className="api-overview-api-scope" aria-labelledby="services-overview-api-head">
+                  <h3 id="services-overview-api-head" className="api-overview-scope-title">
+                    API
                   </h3>
-                  {resolved.utilizedServices.length === 0 ? (
-                    <p className="api-overview-services-empty massive-api-doc-hint">
-                      No utilized.services in config, or bifrost-server did not return them (unreachable / timed out).
-                    </p>
-                  ) : (
-                    <ul className="api-overview-services-list">
-                      {resolved.utilizedServices.map((row) => (
-                        <li key={`${row.service}-${row.env}`}>
-                          <span className="api-overview-services-name">{formatServiceLabel(row.service)}</span>
-                          <span className="api-overview-services-arrow" aria-hidden>
-                            {' '}
-                            →{' '}
-                          </span>
-                          <span className="api-overview-services-env">{formatEnvLabel(row.env)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
 
-                <div className="api-overview-health-section" aria-labelledby="api-overview-health-head">
-                  <h3 id="api-overview-health-head" className="api-overview-subsection-title">
-                    Health
-                  </h3>
-                  <div
-                    className="api-health-overview-grid"
-                    role="region"
-                    aria-label="FastAPI health by environment"
-                  >
-                {[displayDev, displayProd].map((col) =>
-                  col ? (
-                    <div key={col.title} className="api-health-overview-column">
-                      <div className="api-health-overview-column-head">
-                        <h4 className="api-health-overview-env-title">{col.title}</h4>
-                        <span className="api-health-overview-origin">{col.display ?? 'Not configured'}</span>
-                      </div>
-                      {col.hint ? (
-                        <p className="api-health-overview-hint">{col.hint}</p>
-                      ) : (
-                        <>
-                          <div className="api-health-diagram">
-                            {col.rows.map((row, i) => (
-                              <div key={row.label} className="api-health-diagram-step">
-                                {i > 0 ? <div className="api-health-diagram-line" /> : null}
-                                <div
-                                  className={`api-health-diagram-node api-health-diagram-node--${row.lamp}`}
-                                  title={row.detail}
-                                />
-                                <div className="api-health-diagram-label">{row.label}</div>
-                                <div className="api-health-diagram-detail">{row.detail}</div>
-                              </div>
-                            ))}
+                  <div className="api-overview-services-section" aria-labelledby="services-overview-configured-head">
+                    <h4 id="services-overview-configured-head" className="api-overview-subsection-title api-overview-subsection-title--nested">
+                      Configured routes
+                      <InfoTooltip text="From YAML utilized.services: map service keys (server/monitor, ops, docs, market, trading, portfolio, research, strategy, massive, ib, …) to dev or prod. Shown under Architecture, Account, Research, and Feed. Restart bifrost-server after YAML changes." />
+                    </h4>
+                    {resolved.utilizedServices.length === 0 ? (
+                      <p className="api-overview-services-empty massive-api-doc-hint">
+                        No utilized.services in config, or bifrost-server did not return them (unreachable / timed out).
+                      </p>
+                    ) : (
+                      <div className="api-overview-configured-strip" role="list">
+                        {groupUtilizedServicesForOverview(resolved.utilizedServices).map((g) => (
+                          <div key={g.title} className="api-overview-configured-category" role="listitem">
+                            <span className="api-overview-configured-cat-label">{g.title}</span>
+                            <div className="api-overview-configured-chips" role="group" aria-label={g.title}>
+                              {g.rows.map((row) => {
+                                const pill = envPillVariant(row.env)
+                                return (
+                                  <div
+                                    key={`${row.service}-${row.env}`}
+                                    className="api-overview-configured-chip"
+                                    title={`${formatServiceLabel(row.service)} → ${formatEnvLabel(row.env)}`}
+                                  >
+                                    <span className="api-overview-services-name">{formatServiceLabel(row.service)}</span>
+                                    <span
+                                      className={`api-overview-env-pill api-overview-env-pill--${pill}`}
+                                      aria-label={formatEnvLabel(row.env)}
+                                    >
+                                      <span className="api-overview-env-pill-dot" aria-hidden />
+                                      {formatEnvShortLabel(row.env)}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
                           </div>
-                          {col.rows.length === 0 ? (
-                            <p className="api-health-overview-loading">Checking…</p>
-                          ) : null}
-                        </>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="api-overview-health-section" aria-labelledby="services-overview-health-head">
+                    <h4 id="services-overview-health-head" className="api-overview-subsection-title api-overview-subsection-title--nested">
+                      Health
+                    </h4>
+                    <div
+                      className="api-health-overview-grid"
+                      role="region"
+                      aria-label="FastAPI health by environment"
+                    >
+                      {[displayDev, displayProd].map((col) =>
+                        col ? (
+                          <div key={col.title} className="api-health-overview-column">
+                            <div className="api-health-overview-column-head">
+                              <h4 className="api-health-overview-env-title">{col.title}</h4>
+                              <span className="api-health-overview-origin">{col.display ?? 'Not configured'}</span>
+                            </div>
+                            {col.hint ? (
+                              <p className="api-health-overview-hint">{col.hint}</p>
+                            ) : (
+                              <>
+                                {col.groups.map((g) => (
+                                  <div key={`${col.title}-${g.title}`} className="api-health-overview-group">
+                                    <h5 className="api-health-overview-group-title">{g.title}</h5>
+                                    <div className="api-health-diagram">
+                                      {g.rows.map((row, i) => (
+                                        <div key={row.label} className="api-health-diagram-step">
+                                          {i > 0 ? <div className="api-health-diagram-line" /> : null}
+                                          <div
+                                            className={`api-health-diagram-node api-health-diagram-node--${row.lamp}`}
+                                            title={row.detail}
+                                          />
+                                          <div className="api-health-diagram-label">{row.label}</div>
+                                          <div className="api-health-diagram-detail">{row.detail}</div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                                {col.groups.length === 0 ? (
+                                  <p className="api-health-overview-loading">Checking…</p>
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                        ) : null,
                       )}
                     </div>
-                  ) : null,
-                )}
                   </div>
                 </div>
               </>

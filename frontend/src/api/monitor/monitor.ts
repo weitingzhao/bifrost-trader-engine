@@ -29,12 +29,6 @@ export async function postMonitorReleaseIb(): Promise<ControlResponse> {
   return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
 }
 
-export async function postCeleryStop(): Promise<ControlResponse> {
-  const r = await fetch(`${apiBase()}/control/celery_stop`, { method: 'POST' })
-  const j = await r.json().catch(() => ({}))
-  return { ...j, ok: r.ok, error: j.error || (r.ok ? undefined : r.statusText) }
-}
-
 export async function postMonitorConnect(): Promise<
   ControlResponse & {
     account?: { requested?: boolean; success?: boolean; error?: string | null }

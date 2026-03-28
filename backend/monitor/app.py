@@ -29,13 +29,49 @@ from src.monitor.self_check import derive_daemon_self_check, derive_self_check
 logger = logging.getLogger(__name__)
 
 
+_UTILIZED_SERVICE_ORDER = (
+    "server",
+    "main",
+    "api",
+    "massive",
+    "docs",
+    "ops",
+    "trading",
+    "strategy",
+    "portfolio",
+    "market",
+    "research",
+)
+
+
+def _order_utilized_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    rank = {k: i for i, k in enumerate(_UTILIZED_SERVICE_ORDER)}
+
+    def sort_key(r: Dict[str, str]) -> Tuple[int, str]:
+        s = str(r.get("service") or "").lower()
+        return (rank.get(s, 1000), s)
+
+    return sorted(rows, key=sort_key)
+
+
 def _utilized_services_from_config(merged_config: Optional[dict]) -> List[Dict[str, str]]:
-    """Parse ``utilized.services`` from YAML into [{"service": "massive", "env": "dev"}, ...]."""
+    """Parse ``utilized.services`` from YAML into [{"service": "massive", "env": "dev"}, ...].
+
+    Accepts either a mapping (each key = service name, value = ``dev`` or ``prod``) or a legacy
+    list of ``{service: env}`` one-key dicts / ``name:env`` strings.
+    """
     out: List[Dict[str, str]] = []
     if not merged_config:
         return out
     raw = merged_config.get("utilized") or {}
     services = raw.get("services")
+    if isinstance(services, dict):
+        for k, v in services.items():
+            ks = str(k).strip()
+            vs = str(v).strip().strip("\"'")
+            if ks and vs:
+                out.append({"service": ks, "env": vs})
+        return _order_utilized_rows(out)
     if not isinstance(services, list):
         return out
     for x in services:
@@ -53,7 +89,7 @@ def _utilized_services_from_config(merged_config: Optional[dict]) -> List[Dict[s
                 env = right.strip().strip("\"'")
                 if name and env:
                     out.append({"service": name, "env": env})
-    return out
+    return _order_utilized_rows(out)
 
 
 def create_app(

@@ -12,8 +12,6 @@ export interface StatusCeleryPanelProps {
   celeryLastTs: number | null | undefined
   celeryWorkerIbConnected: boolean
   celeryWorkerIbClientId: number | null
-  onCeleryStop: () => void
-  celeryCtrlMsg: { text: string; isErr: boolean }
   className?: string
 }
 
@@ -25,8 +23,6 @@ export function StatusCeleryPanel({
   celeryLastTs,
   celeryWorkerIbConnected,
   celeryWorkerIbClientId,
-  onCeleryStop,
-  celeryCtrlMsg,
   className,
 }: StatusCeleryPanelProps) {
   const workersCount = j?.celery_workers?.length ?? 0
@@ -61,19 +57,6 @@ export function StatusCeleryPanel({
             </div>
           </div>
         </div>
-        <div className="monitor-header-actions">
-          <button
-            type="button"
-            className="section-header-icon-btn"
-            title="Stop Celery worker process (same as Monitor/Daemon Stop); restart with: python scripts/run_celery.py"
-            aria-label="Stop Celery"
-            onClick={onCeleryStop}
-          >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
       </div>
       <div className="daemon-groups">
         <div className="daemon-group">
@@ -106,7 +89,7 @@ export function StatusCeleryPanel({
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
             </span>
             <span className="daemon-group-title">Celery Workers</span>
-            <InfoTooltip text="Workers that responded to inspect ping. Worker connects to IB using Settings → Celery worker_market; connection is kept so backfill can use it. Use Stop above to terminate the worker." />
+            <InfoTooltip text="Workers that responded to inspect ping. Worker connects to IB using Settings → Celery worker_market; connection is kept so backfill can use it. Scale and consoles live under Settings → Dashboard → Celery." />
           </div>
           <div className="daemon-group-body">
             <p className="section-hint">
@@ -134,11 +117,6 @@ export function StatusCeleryPanel({
           </div>
         </div>
       </div>
-      {celeryCtrlMsg.text ? (
-        <div className={`msg ${celeryCtrlMsg.isErr ? 'err' : 'ok'}`} style={{ marginTop: '0.5rem' }}>
-          {celeryCtrlMsg.text}
-        </div>
-      ) : null}
     </div>
   )
 }

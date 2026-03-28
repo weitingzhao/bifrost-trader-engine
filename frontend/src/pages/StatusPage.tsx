@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
-import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postCeleryStop, postMonitorConnect, fetchHealth, postReleaseTickerSubscriptions, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
+import { postSuspend, postResume, postFlatten, postReleaseIb, postStop, postMonitorStop, postMonitorReleaseIb, postMonitorConnect, fetchHealth, postReleaseTickerSubscriptions, fetchDaemonLogs, subscribeDaemonLogs, clearDaemonLogs, fetchServerLogs, subscribeServerLogs, clearServerLogs } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import { useDeferredStart } from '../hooks/useDeferredStart'
@@ -18,7 +18,7 @@ import {
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
 import { useControlAction } from './status/useControlAction'
 import { StatusDaemonPanel, StatusMonitorPanel, StatusCeleryPanel, StatusStrategyPanel } from './status/panels'
-import { celeryMetricsFromStatus, useCeleryStopControl } from './status/celeryMetrics'
+import { celeryMetricsFromStatus } from './status/celeryMetrics'
 
 export type CeleryUiMode = 'full' | 'relocated'
 
@@ -128,8 +128,6 @@ export function StatusPage({
   const runMonitorAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, { onSuccess: loadStatus })
   /** Monitor Stop exits the server process shortly after 200; do not call loadStatus so the UI does not hang on a GET to a dead server. */
   const runMonitorStopAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, {})
-  const { celeryCtrlMsg, onCeleryStop } = useCeleryStopControl(loadStatus)
-
   const j = status
   const hb = j?.daemon_heartbeat
   const hbForCountdown = hb
@@ -361,15 +359,12 @@ export function StatusPage({
     return { label, value: out }
   })
 
-  /** Shut down entire system: Celery first, then Daemon, then Server last (so others still receive messages). */
+  /** Stop Daemon, then management Server (monitor). */
   const doShutdownAll = async () => {
     setShutdownConfirmOpen(false)
     setShutdownAllLoading(true)
     const errors: string[] = []
     try {
-      setShutdownAllMsg({ text: 'Stopping Celery…', isErr: false })
-      const r3 = await postCeleryStop()
-      if (!r3.ok) errors.push(`Celery: ${r3.error ?? r3.statusText ?? 'failed'}`)
       setShutdownAllMsg({ text: 'Stopping Daemon…', isErr: false })
       const r1 = await postStop()
       if (!r1.ok) errors.push(`Daemon: ${r1.error ?? r1.statusText ?? 'failed'}`)
@@ -404,7 +399,7 @@ export function StatusPage({
           <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
             <h3 id="shutdown-modal-title">Shutdown entire system?</h3>
             <p>
-              Celery, then Daemon, then Server will be stopped in order. This cannot be undone.
+              Daemon, then Server (management monitor) will be stopped in order. This cannot be undone.
             </p>
             <div className="data-reset-modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
@@ -438,7 +433,7 @@ export function StatusPage({
             <button
               type="button"
               className="section-header-icon-btn"
-              title="Stop Celery, then Daemon, then Server (in order)"
+              title="Stop Daemon, then Server (in order)"
               aria-label="Shutdown entire system"
               disabled={shutdownAllLoading}
               onClick={onShutdownAllClick}
@@ -569,8 +564,6 @@ export function StatusPage({
                   celeryLastTs={celeryLastTs}
                   celeryWorkerIbConnected={celeryWorkerIbConnected}
                   celeryWorkerIbClientId={celeryWorkerIbClientId}
-                  onCeleryStop={onCeleryStop}
-                  celeryCtrlMsg={celeryCtrlMsg}
                   className={showAllSystemSections ? 'system-stack-section' : undefined}
                 />
               </div>

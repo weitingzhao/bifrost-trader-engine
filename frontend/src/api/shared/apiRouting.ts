@@ -45,7 +45,7 @@ function envForService(
 }
 
 /**
- * Same rules as Settings → API Overview column resolution: one origin per env column,
+ * Same rules as Settings → Services Overview column resolution: one origin per env column,
  * with split host:port when frontend_dev_path is set and VITE_* overrides are unset.
  */
 function baseForEnvRole(

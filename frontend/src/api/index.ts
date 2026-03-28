@@ -246,7 +246,6 @@ export {
 export {
   postMonitorStop,
   postMonitorReleaseIb,
-  postCeleryStop,
   postMonitorConnect,
 } from './monitor/monitor'
 export { fetchRiskSummary, fetchPerformance, getTransactions, postTransactionsFetch } from './trading/performance'
