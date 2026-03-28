@@ -420,6 +420,16 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+/* Celery control: title block + Ops auth on one row; auth right-aligned */
+.settings-page-header--celery {
+  align-items: flex-start;
+}
+
+.settings-page-header--celery .settings-page-title-group {
+  flex: 1;
+  min-width: 0;
+}
+
 .settings-page-actions {
   display: flex;
   align-items: center;
@@ -1357,6 +1367,11 @@
   margin-top: var(--space-3);
 }
 
+/* Dashboard: API block sits in its own section; drop extra top margin */
+.api-overview-api-scope--dashboard {
+  margin-top: 0;
+}
+
 .api-overview-scope-title {
   margin: 0 0 var(--space-3);
   font-size: 1rem;
@@ -2014,6 +2029,17 @@
   flex: 1;
 }
 
+.dashboard-svc-card-detail-link {
+  color: var(--color-link);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.dashboard-svc-card-detail-link:hover {
+  color: var(--color-link-hover);
+  text-decoration: underline;
+}
+
 .dashboard-svc-stop-btn {
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--color-border);
@@ -2243,6 +2269,34 @@
   max-width: 52ch;
 }
 
+.dashboard-broker-ctrl--celery-column .dashboard-broker-ctrl-body {
+  gap: var(--space-2);
+}
+
+.dashboard-broker-ctrl-info--compact {
+  gap: var(--space-1) var(--space-2);
+  font-size: 0.75rem;
+}
+
+.dashboard-broker-ctrl-keys-line {
+  flex-basis: 100%;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+/* Worker Instances + Redis/Broker side by side on Celery page */
+.dashboard-celery-instances-broker-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.dashboard-celery-instances-broker-row > .dashboard-section {
+  min-width: 0;
+}
+
 /* ── Console ── */
 
 .dashboard-console-section {
@@ -2358,6 +2412,33 @@
   border-radius: 6px;
 }
 
+/* Celery page header: compact auth strip, right side (no extra margin below header) */
+.dashboard-auth-bar--celery-header {
+  flex: 0 1 auto;
+  align-self: flex-start;
+  margin-bottom: 0;
+  max-width: min(100%, 26rem);
+  justify-content: flex-end;
+}
+
+.dashboard-auth-bar--celery-header .dashboard-auth-info {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dashboard-auth-panel--celery-header {
+  flex-basis: 100%;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.dashboard-auth-panel--celery-header .dashboard-ctrl-input {
+  max-width: 200px;
+  flex: 1;
+  min-width: 120px;
+}
+
 .dashboard-auth-info {
   display: flex;
   align-items: center;
@@ -2442,5 +2523,26 @@
   }
   .dashboard-console-selector {
     flex-direction: column;
+  }
+  .dashboard-celery-instances-broker-row {
+    grid-template-columns: 1fr;
+  }
+  .settings-page-header--celery {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dashboard-auth-bar--celery-header {
+    max-width: none;
+    justify-content: flex-start;
+    align-self: stretch;
+  }
+  .dashboard-auth-bar--celery-header .dashboard-auth-info {
+    justify-content: flex-start;
+  }
+  .dashboard-auth-panel--celery-header {
+    justify-content: flex-start;
+  }
+  .dashboard-auth-panel--celery-header .dashboard-ctrl-input {
+    max-width: none;
   }
 }

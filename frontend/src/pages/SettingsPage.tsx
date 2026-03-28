@@ -60,6 +60,7 @@ import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { DocsApiStatusPage } from './DocsApiStatusPage'
 import { OpsApiStatusPage } from './OpsApiStatusPage'
 import { DashboardPage } from './DashboardPage'
+import { CeleryControlPage } from './CeleryControlPage'
 import { ApiHealthOverviewPage } from './ApiHealthOverviewPage'
 import { SettingsShell } from './settings/SettingsShell'
 import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
@@ -98,6 +99,8 @@ export interface SettingsPageProps {
   systemLamp?: 'green' | 'yellow' | 'red' | 'none'
   /** Open the global shutdown confirmation modal (lives in App.tsx). */
   onOpenShutdownConfirm?: () => void
+  /** Celery runtime lamp (same source as header / System aggregate). */
+  celeryLamp?: 'green' | 'yellow' | 'red' | 'none'
 }
 
 export function SettingsPage({
@@ -107,6 +110,7 @@ export function SettingsPage({
   onNavigateToStrategy,
   systemLamp = 'none',
   onOpenShutdownConfirm,
+  celeryLamp = 'none',
 }: SettingsPageProps) {
   const [msg, setMsg] = useState({ text: '', isErr: false })
   const [ibHost, setIbHost] = useState(DEFAULT_HOST)
@@ -227,10 +231,11 @@ export function SettingsPage({
     if (h && h.startsWith('coverage-')) return 'settings-coverage'
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
+    if (h === 'settings-celery' || h === 'settings-dashboard-celery') return 'settings-celery'
     if (h && h.startsWith('settings-dashboard')) return 'settings-dashboard'
     if (h === 'settings-services-overview') return 'settings-services'
     if (h && h.startsWith('settings-api')) return 'settings-api'
-    if (h === 'feed-celery' || h === 'settings-system-celery') return 'settings-dashboard'
+    if (h === 'feed-celery' || h === 'settings-system-celery') return 'settings-celery'
     if (h && isMassiveOptionFeedHash(`#${h}`)) return 'settings-feed'
     if (h && h.startsWith('feed-')) return 'settings-feed'
     return h || SETTINGS_SECTIONS[0].id
@@ -333,10 +338,10 @@ export function SettingsPage({
   useEffect(() => {
     const normalizeHash = (): string => {
       let h = window.location.hash
-      if (h === '#feed-celery' || h === '#settings-system-celery') {
-        const next = `${window.location.pathname}${window.location.search}#settings-dashboard-celery`
+      if (h === '#feed-celery' || h === '#settings-system-celery' || h === '#settings-dashboard-celery') {
+        const next = `${window.location.pathname}${window.location.search}#settings-celery`
         window.history.replaceState(null, '', next)
-        h = '#settings-dashboard-celery'
+        h = '#settings-celery'
       }
       return h
     }
@@ -429,6 +434,7 @@ export function SettingsPage({
 
   const isSystemSection = activeSectionId === 'settings-system'
   const isDashboardSection = activeSectionId === 'settings-dashboard'
+  const isCeleryControlSection = activeSectionId === 'settings-celery'
   const isServicesOverviewSection = activeSectionId === 'settings-services'
   const isCoverageSection = activeSectionId === 'settings-coverage'
   const isFeedSection = activeSectionId === 'settings-feed'
@@ -512,6 +518,19 @@ export function SettingsPage({
         >
           <SettingsSectionIcon name="heartbeat" />
           Services Overview
+        </a>
+        <a
+          href="#settings-celery"
+          className={`settings-sidebar-link ${isCeleryControlSection ? 'active' : ''}`}
+        >
+          <span
+            className={`title-inline-lamp lamp-icon ${celeryLamp === 'none' ? 'none' : celeryLamp}`}
+            title="Celery workers (broker + inspect)"
+            aria-hidden
+          >
+            <SettingsSidebarLampGlyph id="celery" />
+          </span>
+          Celery
         </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
@@ -768,6 +787,8 @@ export function SettingsPage({
         )
       ) : isDashboardSection ? (
         <DashboardPage status={status} loadStatus={loadStatus} embeddedInSettings />
+      ) : isCeleryControlSection ? (
+        <CeleryControlPage embeddedInSettings celeryLamp={celeryLamp} />
       ) : isServicesOverviewSection ? (
         <ApiHealthOverviewPage embeddedInSettings />
       ) : isApiSection ? (

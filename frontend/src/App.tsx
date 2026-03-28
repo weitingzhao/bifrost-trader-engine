@@ -229,6 +229,7 @@ export default function App() {
       h === FEED_MASSIVE_DAILY_DATA_ID ||
       h.startsWith('settings-system') ||
       h.startsWith('settings-dashboard') ||
+      h.startsWith('settings-celery') ||
       h.startsWith('feed-') ||
       h.startsWith('coverage-')
     ) {
@@ -783,7 +784,7 @@ export default function App() {
 
   const openDashboardCelerySection = () => {
     setActiveTab('settings')
-    window.location.hash = '#settings-dashboard-celery'
+    window.location.hash = '#settings-celery'
   }
 
   const doShutdownAll = async () => {
@@ -1461,6 +1462,7 @@ export default function App() {
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
           systemLamp={systemLamp}
           onOpenShutdownConfirm={() => setShutdownConfirmOpen(true)}
+          celeryLamp={celeryLamp}
         />
       )}
     </div>
