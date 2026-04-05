@@ -1,17 +1,24 @@
+# Example systemd unit — Massive Options WebSocket ingest (scripts/run_massive_ws.py).
+# Copy to /etc/systemd/system/, adjust User/Group/WorkingDirectory and Python venv path, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now bifrost-massive-ws.service
+#
+# Add the unit stem to ops.allowed_units in config (e.g. bifrost-massive-ws) for Ops API control.
+
 [Unit]
-Description=Bifrost Massive Options WebSocket ingest (run_massive_ws.py)
+Description=Bifrost Massive Options WebSocket ingest
 After=network-online.target redis.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=vision
-Group=vision
-WorkingDirectory=/home/vision/bifrost-trader-engine
-Environment=BIFROST_ENV=prod
-ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_massive_ws.py --config config/config.prod.yaml
+User=bifrost
+Group=bifrost
+WorkingDirectory=/opt/bifrost-trader-engine
+# Use your venv interpreter:
+ExecStart=/opt/bifrost-trader-engine/.venv/bin/python scripts/run_massive_ws.py --config config/config.prod.yaml
 Restart=on-failure
-RestartSec=15
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

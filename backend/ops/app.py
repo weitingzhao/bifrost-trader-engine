@@ -165,6 +165,7 @@ def create_ops_app(
         logger.info("Executor mode: local (systemd)")
 
     app.state.worker_state_service = worker_svc
+    app.state.bifrost_config = config
     app.state.executor = executor
     app.state.audit_log: list = []
     try:
@@ -210,8 +211,10 @@ def create_ops_app(
 
     from backend.ops.routers.workers import router as ops_router
     from backend.ops.routers.job_queues import router as job_queues_router
+    from backend.ops.routers.market_ingest import router as market_ingest_router
 
     app.include_router(job_queues_router)
+    app.include_router(market_ingest_router)
     app.include_router(ops_router)
 
     # ── Health ────────────────────────────────────────────────────────────────

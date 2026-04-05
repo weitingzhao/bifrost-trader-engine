@@ -33,7 +33,77 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))
 
+from backend.monitor.routers.deps import MASSIVE_WS_LOG_STREAM_KEY
+from src.core.logging_redis_stream import RedisStreamLogHandler
+
+_MASSIVE_WS_LOG_STREAM_MAXLEN = 2000
+
 logger = logging.getLogger("massive_ws")
+
+# Console log colors (aligned with scripts/run_server_massive.py, run_engine.py)
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_GRAY = "\033[90m"
+_CYAN = "\033[36m"
+_YELLOW = "\033[33m"
+_RED = "\033[31m"
+
+_LEVEL_COLORS = {
+    logging.DEBUG: _GRAY,
+    logging.INFO: _CYAN,
+    logging.WARNING: _YELLOW,
+    logging.ERROR: _RED + _BOLD,
+    logging.CRITICAL: _RED + _BOLD,
+}
+
+
+class ColoredFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        color = _LEVEL_COLORS.get(record.levelno, _RESET)
+        original_levelname = record.levelname
+        try:
+            record.levelname = f"{color}[{record.levelname}]{_RESET}"
+            return super().format(record)
+        finally:
+            record.levelname = original_levelname
+
+
+def _console_log_redis_url() -> str:
+    try:
+        from src.app.config import read_config
+        from src.core.redis_url import effective_redis_dict, format_redis_url
+
+        config, _ = read_config()
+    except (ImportError, OSError, ValueError, TypeError):
+        config = {}
+    return format_redis_url(effective_redis_dict(config, default_db=0))
+
+
+def _setup_logging(level: int) -> None:
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(
+        ColoredFormatter(
+            fmt="%(asctime)s %(name)s %(levelname)s  %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    redis_handler = RedisStreamLogHandler(
+        _console_log_redis_url(),
+        MASSIVE_WS_LOG_STREAM_KEY,
+        maxlen=_MASSIVE_WS_LOG_STREAM_MAXLEN,
+    )
+    redis_handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(console_handler)
+    root.addHandler(redis_handler)
+    root.setLevel(level)
+
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -477,10 +547,7 @@ def main() -> None:
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s %(name)s %(levelname)s  %(message)s",
-    )
+    _setup_logging(getattr(logging, args.log_level))
 
     cfg_path = args.config
     if not cfg_path:

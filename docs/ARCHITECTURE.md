@@ -181,21 +181,28 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **Starter**：仅开**延迟 quote/snapshot** 通道。
 - **Developer**：增开 **trades** 通道（与 REST 同 feature flag）。
 
-#### 2.10.3 UI 行为约定
+#### 2.10.3 Ingest 运维（监控 / 启停 / 日志）
+
+- **Redis meta（逻辑健康）**：`massive:meta:status` 字段含 `connected`、`last_msg_ts`、`reconnects`、`msg_count`、`updated_at`（由 `scripts/run_massive_ws.py` 写入）；`GET /status` 的 `massive` 摘要供 UI 展示。
+- **日志**：ingest 进程将控制台日志写入 Redis Stream `bifrost:massive_ws_console`；Monitor 提供 `GET /api/massive-ws/logs` 与 SSE `/api/massive-ws/logs/stream`。
+- **进程控制**：Ops `GET /ops/market-ingest/services`、`POST /ops/market-ingest/control`（需 admin）；`systemd` unit 须列入 `ops.allowed_units`。示例 unit：`deploy/systemd/bifrost-massive-ws.service`。注册表默认见 `ops.market_ingest_services`（示例见 `config/config.dev.yaml.example`）。
+- **跨机**：Ops 与 ingest 不同机时，使用 `executor_mode=agent`，在 ingest 机运行 Local Control Agent；新增 unit 时同步扩展 `backend/ops/agent/protocol.py` 中的 `ALLOWED_UNIT_PATTERNS`。
+
+#### 2.10.4 UI 行为约定
 
 - **Research → Option Discovery**：展示数据源 badge **Massive · 15 min delayed**；表格列：strike、bid/ask、last、IV、Greeks（来自落地快照）、OI（日终）。
 - **Trades Tab/列**：无 Developer tier 时**隐藏**「Tape/Trades」Tab 或列，或显示升级提示（英文文案 `Trades data requires Options Developer subscription`）。
 - **Settings / About**（可选）：展示当前 `tier` 与能力列表。
 - **所有 UI 文案使用英文**（遵守 workspace rule）。
 
-#### 2.10.4 Worker 行为约定
+#### 2.10.5 Worker 行为约定
 
 - **Celery queue**：`massive`（与 IB `bars` 分离）；`concurrency` 按 Massive 限流设 1–N。
 - **任务类型**：历史聚合回填、日 OI 拉取、快照批量、**Trades 回填**（仅 flag 开时入队与执行）；文件下载（若使用 Unlimited File Downloads）可作独立 task 解压/导入 staging 再 MERGE。
 - **重试与幂等**：429/5xx 指数退避；写入按供应商唯一 ID（`massive_trade_id`、bar 唯一键）UPSERT。
 - **启动**：`celery -A src.workers.celery_app worker -l info -Q massive --concurrency=N`（与 `bars` worker 可同机不同进程并行）。
 
-#### 2.10.5 Feature flag 约定
+#### 2.10.6 Feature flag 约定
 
 配置项 `massive.tier`（`starter` | `developer`）驱动 `massive.features.trades_enabled` 默认值；也可单独覆盖。
 
@@ -205,7 +212,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 升级后仅修改配置并重启相关进程（Server + Worker + 可选 WS Ingest），无需 schema 迁移。
 
-#### 2.10.6 详细说明与追踪
+#### 2.10.7 详细说明与追踪
 
 上述 §2.10 定义了 Massive 数据源的**架构约定**与**行为边界**。表结构、迁移与实现进度以 **[DATABASE.md](DATABASE.md)** 与 **[plans/CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)** 为准；历史分项实施计划文档已移除，不再单独维护。
 

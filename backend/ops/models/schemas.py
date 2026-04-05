@@ -70,6 +70,11 @@ class BrokerControlRequest(BaseModel):
     action: BrokerAction
 
 
+class MarketIngestControlRequest(BaseModel):
+    service_id: str = Field(..., min_length=1)
+    action: BrokerAction
+
+
 # ── Audit ─────────────────────────────────────────────────────────────────────
 
 

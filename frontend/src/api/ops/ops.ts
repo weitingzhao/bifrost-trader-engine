@@ -274,6 +274,43 @@ export async function controlBroker(action: BrokerAction): Promise<{
   return parseJsonResponse(r)
 }
 
+// ── Market ingest (long-running WS / future IB ingest) ───────────────────────
+
+export interface MarketIngestServiceRow {
+  id: string
+  label: string
+  systemd_unit: string
+  redis_meta_key: string
+  process_active: string
+}
+
+export async function fetchMarketIngestServices(): Promise<{
+  ok: boolean
+  services: MarketIngestServiceRow[]
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/market-ingest/services`, { headers: authHeaders() })
+  return parseJsonResponse(r)
+}
+
+export async function controlMarketIngest(
+  serviceId: string,
+  action: BrokerAction,
+): Promise<{
+  ok: boolean
+  service_id?: string
+  action?: string
+  result?: Record<string, unknown>
+  error?: string
+}> {
+  const r = await fetch(`${opsBase()}/ops/market-ingest/control`, {
+    method: 'POST',
+    headers: jsonAuthHeaders(),
+    body: JSON.stringify({ service_id: serviceId, action }),
+  })
+  return parseJsonResponse(r)
+}
+
 // ── Console SSE ──────────────────────────────────────────────────────────────
 
 function consoleStreamQuery(lines: number): URLSearchParams {
@@ -307,6 +344,8 @@ export async function fetchOpsHealth(): Promise<{
   config_profile?: string
   port?: number
   config_path?: string
+  executor_mode?: string
+  local_control?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/health`, { headers: authHeaders() })
   return parseJsonResponse(r)

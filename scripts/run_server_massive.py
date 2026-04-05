@@ -16,16 +16,12 @@ import subprocess
 import sys
 import time
 
-try:
-    import redis
-except ImportError:  # pragma: no cover
-    redis = None
-
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)
 
 from backend.monitor.routers.deps import MASSIVE_LOG_STREAM_KEY
+from src.core.logging_redis_stream import RedisStreamLogHandler
 
 _MASSIVE_LOG_STREAM_MAXLEN = 50
 
@@ -56,31 +52,6 @@ class ColoredFormatter(logging.Formatter):
             return super().format(record)
         finally:
             record.levelname = original_levelname
-
-
-class RedisStreamLogHandler(logging.Handler):
-    """Push Massive API log lines to Redis Stream for Settings → API → Massive console."""
-
-    def __init__(self, redis_url: str, stream_key: str, maxlen: int = 50) -> None:
-        super().__init__()
-        self._redis_url = redis_url
-        self._stream_key = stream_key
-        self._maxlen = maxlen
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if redis is None:
-            return
-        try:
-            line = self.format(record)
-            r = redis.from_url(self._redis_url)
-            r.xadd(
-                self._stream_key,
-                {"line": line},
-                maxlen=self._maxlen,
-                approximate=True,
-            )
-        except Exception:
-            pass
 
 
 def _console_log_redis_url() -> str:

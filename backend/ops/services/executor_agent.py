@@ -102,3 +102,13 @@ class AgentExecutor:
         if action not in _ALLOWED_ACTIONS:
             raise PermissionError(f"Action {action!r} not allowed for Redis")
         return await self._systemctl(action, "redis")
+
+    async def systemctl_is_active(self, unit: str) -> str:
+        self._validate("start", unit)
+        resp = await self._client.is_active(unit)
+        states = RestrictedExecutor._IS_ACTIVE_STATES  # noqa: SLF001
+        if resp.ok and resp.result:
+            out = (resp.result.get("stdout") or "").strip()
+            if out in states:
+                return out
+        return "unknown"

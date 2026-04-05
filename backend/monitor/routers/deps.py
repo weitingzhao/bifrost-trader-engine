@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 DAEMON_LOG_STREAM_KEY = "bifrost:daemon_console"
 SERVER_LOG_STREAM_KEY = "bifrost:server_console"
 MASSIVE_LOG_STREAM_KEY = "bifrost:massive_console"
+MASSIVE_WS_LOG_STREAM_KEY = "bifrost:massive_ws_console"
 DOCS_LOG_STREAM_KEY = "bifrost:docs_console"
 OPS_LOG_STREAM_KEY = "bifrost:ops_console"
 

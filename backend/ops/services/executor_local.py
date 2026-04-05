@@ -204,6 +204,30 @@ class RestrictedExecutor:
             raise PermissionError(f"Action {action!r} not allowed for Redis")
         return await self._systemctl(action, "redis")
 
+    _IS_ACTIVE_STATES = frozenset({
+        "active",
+        "inactive",
+        "activating",
+        "deactivating",
+        "failed",
+        "reloading",
+    })
+
+    async def systemctl_is_active(self, unit: str) -> str:
+        """Return systemd ``is-active`` stdout (active|inactive|…); ``unknown`` on error."""
+        self._validate("start", unit)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "is-active", unit,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        except Exception:
+            return "unknown"
+        state = (stdout or b"").decode().strip()
+        return state if state in self._IS_ACTIVE_STATES else "unknown"
+
 
 class SubprocessLocalExecutor:
     """Local executor without systemd: start/stop workers via ``scripts/run_celery.py``.
@@ -383,3 +407,50 @@ class SubprocessLocalExecutor:
 
     async def systemctl_redis(self, action: str) -> Dict[str, Any]:
         return await self._systemd.systemctl_redis(action)
+
+    async def systemctl_is_active(self, unit: str) -> str:
+        u = unit.strip()
+        if u in ("redis", "redis.service"):
+            return await self._systemd.systemctl_is_active(u)
+        try:
+            self._validate("start", u)
+        except PermissionError:
+            return "unknown"
+        if u.startswith(f"{_WORKER_UNIT_BASE}@"):
+            instances = await self.list_instances()
+            for row in instances:
+                if row.get("unit") == u:
+                    act = (row.get("active") or "").lower()
+                    return "active" if act == "active" else "inactive"
+            return "inactive"
+        stem = u.replace(".service", "")
+        if "massive-ws" in stem or stem == "bifrost-massive-ws":
+            proc = await asyncio.create_subprocess_exec(
+                "pgrep", "-f", r"run_massive_ws\.py",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            except Exception:
+                return "unknown"
+            if proc.returncode == 0 and (stdout or b"").strip():
+                return "active"
+            return "inactive"
+        if "ib-market-ingest" in stem or stem == "bifrost-ib-market-ingest":
+            proc = await asyncio.create_subprocess_exec(
+                "pgrep", "-f", r"run_ib_market_ingest\.py",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            except Exception:
+                return "unknown"
+            if proc.returncode == 0 and (stdout or b"").strip():
+                return "active"
+            return "inactive"
+        try:
+            return await self._systemd.systemctl_is_active(u)
+        except Exception:
+            return "unknown"

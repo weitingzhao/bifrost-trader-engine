@@ -133,6 +133,12 @@ def create_app(
     app.state._massive_log_thread: Optional[threading.Thread] = None
     app.state._massive_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # Massive WS ingest log stream (scripts/run_massive_ws.py → bifrost:massive_ws_console)
+    app.state.massive_ws_log_queues: list = []
+    app.state.massive_ws_log_lock = threading.Lock()
+    app.state._massive_ws_log_thread: Optional[threading.Thread] = None
+    app.state._massive_ws_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
     # Docs API console log stream (run_server_docs.py → bifrost:docs_console)
     app.state.docs_log_queues: list = []
     app.state.docs_log_lock = threading.Lock()

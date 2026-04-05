@@ -75,7 +75,13 @@ class AgentServer:
             return await self._list_units(req)
 
         if req.action == "is-active":
-            return await self._systemctl(req)
+            if not validate_unit(req.unit):
+                return AgentResponse(
+                    request_id=req.request_id,
+                    ok=False,
+                    error=f"Unit {req.unit!r} not in whitelist",
+                )
+            return await self._systemctl_is_active(req)
 
         if not validate_unit(req.unit):
             return AgentResponse(
@@ -101,6 +107,40 @@ class AgentServer:
             )
         async with lock:
             return await self._systemctl(req)
+
+    async def _systemctl_is_active(self, req: AgentRequest) -> AgentResponse:
+        """systemctl is-active may exit non-zero for inactive; still report stdout."""
+        cmd = ["sudo", "systemctl", "is-active", req.unit]
+        logger.info("Executing: %s", " ".join(cmd))
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=req.timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            return AgentResponse(
+                request_id=req.request_id,
+                ok=False,
+                error=f"Timed out after {req.timeout}s",
+            )
+        state = (stdout or b"").decode().strip()
+        return AgentResponse(
+            request_id=req.request_id,
+            ok=True,
+            result={
+                "method": "agent-systemd",
+                "action": "is-active",
+                "unit": req.unit,
+                "returncode": proc.returncode,
+                "stdout": state,
+                "stderr": (stderr or b"").decode().strip(),
+            },
+        )
 
     async def _systemctl(self, req: AgentRequest) -> AgentResponse:
         cmd = ["sudo", "systemctl", req.action, req.unit]

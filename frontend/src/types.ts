@@ -165,6 +165,16 @@ export interface StatusResponse {
   active_gate_safety_strategy_name?: string | null
   /** Name of active strategy allocation for display. */
   active_strategy_allocation_name?: string | null
+  /** Massive / Polygon summary from Redis + config (GET /status). */
+  massive?: {
+    configured?: boolean
+    tier?: string
+    pending_jobs?: number
+    ws_connected?: boolean
+    last_msg_age_s?: number | null
+    ws_reconnects?: number
+    last_snapshot_age_s?: number | null
+  } | null
 }
 
 /** R-A5: one row from daemon_open_orders (GET /status or GET /open-orders). */
