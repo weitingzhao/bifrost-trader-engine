@@ -25,9 +25,8 @@ export interface IbConnectionSectionProps {
   clientIdDaemon: number
   clientIdListener: number
   ib2ClientIdListener: number
-  clientIdAccount: number
+  clientIdOperator: number
   ib2ClientIdAccount: number
-  clientIdMarkets: number
   clientIdWorker: number
   defaultFlexRangeDays: number
   setDefaultFlexRangeDays: (v: number) => void
@@ -58,9 +57,8 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     clientIdDaemon,
     clientIdListener,
     ib2ClientIdListener,
-    clientIdAccount,
+    clientIdOperator,
     ib2ClientIdAccount,
-    clientIdMarkets,
     clientIdWorker,
     defaultFlexRangeDays,
     setDefaultFlexRangeDays,
@@ -220,18 +218,23 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   <td colSpan={3} className="client-ids-group-header">Monitor</td>
                 </tr>
                 <tr>
-                  <td className="flex-query-cell-type">Account</td>
+                  <td className="flex-query-cell-type">Operator (cmd RPC)</td>
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
-                      value={clientIdAccount}
+                      value={clientIdOperator}
                       readOnly
                       className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Account — Host (read-only, config.yaml)"
+                      aria-label="IB Operator (cmd RPC) client ID — Host (read-only, config.yaml)"
                       tabIndex={-1}
                     />
                   </td>
+                  <td className="flex-query-cell-input">—</td>
+                </tr>
+                <tr>
+                  <td className="flex-query-cell-type">Account (Secondary IB)</td>
+                  <td className="flex-query-cell-input">—</td>
                   <td className="flex-query-cell-input">
                     <input
                       type="number"
@@ -239,25 +242,10 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                       readOnly
                       className="flex-query-input settings-ib-readonly-field"
                       style={{ width: '4rem' }}
-                      aria-label="Account — Secondary (read-only, config.yaml)"
+                      aria-label="Account — Secondary TWS (read-only, config.yaml)"
                       tabIndex={-1}
                     />
                   </td>
-                </tr>
-                <tr>
-                  <td className="flex-query-cell-type">Market data</td>
-                  <td className="flex-query-cell-input">
-                    <input
-                      type="number"
-                      value={clientIdMarkets}
-                      readOnly
-                      className="flex-query-input settings-ib-readonly-field"
-                      style={{ width: '4rem' }}
-                      aria-label="Market data — Host (read-only, config.yaml)"
-                      tabIndex={-1}
-                    />
-                  </td>
-                  <td className="flex-query-cell-input">—</td>
                 </tr>
                 <tr className="client-ids-group-row">
                   <td colSpan={3} className="client-ids-group-header">Celery</td>

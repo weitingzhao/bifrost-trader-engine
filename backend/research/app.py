@@ -40,7 +40,7 @@ def create_research_app(
     app.state.control_via_db = control_via_db
     app.state.status_cfg_for_read = status_cfg_for_read
     app.state.monitor_enabled = True
-    app.state.ib_gateway_client = None
+    app.state.ib_operator_client = None
     app.state.bifrost_config_profile = (
         config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
     )
@@ -75,17 +75,17 @@ def create_research_app(
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        from src.ib_gateway.client import IbGatewayClient
+        from src.ib_operator.client import IbOperatorClient
 
         cfg = merged_config or reader._config
-        app.state.ib_gateway_client = IbGatewayClient.from_merged_config(cfg)
+        app.state.ib_operator_client = IbOperatorClient.from_merged_config(cfg)
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        gw = getattr(app.state, "ib_gateway_client", None)
-        if gw is not None:
+        op = getattr(app.state, "ib_operator_client", None)
+        if op is not None:
             try:
-                gw.close()
+                op.close()
             except Exception:
                 pass
 

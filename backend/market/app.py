@@ -53,7 +53,7 @@ def create_market_app(
     app.state.status_cfg_for_read = status_cfg_for_read
     app.state.monitor_enabled = True
     app.state.redis_quotes = redis_quotes
-    app.state.ib_gateway_client = None
+    app.state.ib_operator_client = None
 
     # SSE for live quotes
     app.state.sse_queues: list = []
@@ -94,10 +94,10 @@ def create_market_app(
     async def startup_event() -> None:
         app.state._sse_loop = asyncio.get_running_loop()
 
-        from src.ib_gateway.client import IbGatewayClient
+        from src.ib_operator.client import IbOperatorClient
 
         cfg = merged_config or reader._config
-        app.state.ib_gateway_client = IbGatewayClient.from_merged_config(cfg)
+        app.state.ib_operator_client = IbOperatorClient.from_merged_config(cfg)
 
         # Redis quotes subscriber
         rq = getattr(app.state, "redis_quotes", None)
@@ -131,10 +131,10 @@ def create_market_app(
         if getattr(app.state, "_redis_subscriber_thread", None) is not None:
             app.state._redis_subscriber_thread.join(timeout=2.0)
             app.state._redis_subscriber_thread = None
-        gw = getattr(app.state, "ib_gateway_client", None)
-        if gw is not None:
+        op = getattr(app.state, "ib_operator_client", None)
+        if op is not None:
             try:
-                gw.close()
+                op.close()
             except Exception:
                 pass
         rq = getattr(app.state, "redis_quotes", None)

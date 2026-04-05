@@ -368,7 +368,7 @@ async def post_bars_fetch(
         return {"ok": False, "error": "PostgreSQL is required to write bar tables.", "bars": [], "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
         return {"ok": False, "error": "Monitor stopped; cannot fetch bars.", "bars": [], "count": 0}
-    gw = getattr(app.state, "ib_gateway_client", None)
+    gw = getattr(app.state, "ib_operator_client", None)
     if gw is None:
         return {"ok": False, "error": "IB Gateway client is not configured.", "bars": [], "count": 0}
     per = (period or "1 D").strip()

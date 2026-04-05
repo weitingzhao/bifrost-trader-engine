@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.app.config import config_profile_from_resolved_path
 from src.connector.flex_client import fetch_cash_transactions, fetch_trades
-from src.ib_gateway.client import IbGatewayClient
+from src.ib_operator.client import IbOperatorClient
 from src.monitor.reader import StatusReader
 from src.connector.flex_client import parse_trades_xml
 from src.monitor.self_check import derive_daemon_self_check, derive_self_check
@@ -139,11 +139,11 @@ def create_app(
     app.state._massive_ws_log_thread: Optional[threading.Thread] = None
     app.state._massive_ws_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB Gateway log stream (scripts/run_ib_gateway.py → bifrost:ib_gateway_console)
-    app.state.ib_gateway_log_queues: list = []
-    app.state.ib_gateway_log_lock = threading.Lock()
-    app.state._ib_gateway_log_thread: Optional[threading.Thread] = None
-    app.state._ib_gateway_log_loop: Optional[asyncio.AbstractEventLoop] = None
+    # IB Operator log stream (scripts/run_ib_operator.py → bifrost:ib_operator_console)
+    app.state.ib_operator_log_queues: list = []
+    app.state.ib_operator_log_lock = threading.Lock()
+    app.state._ib_operator_log_thread: Optional[threading.Thread] = None
+    app.state._ib_operator_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # IB market ingest log stream (scripts/run_ib_market_ingest.py → bifrost:ib_market_console)
     app.state.ib_market_log_queues: list = []
@@ -163,9 +163,9 @@ def create_app(
     app.state._ops_log_thread: Optional[threading.Thread] = None
     app.state._ops_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB access via Redis IB Gateway only (no in-process TWS clients).
+    # IB access via Redis IB Operator only (no in-process TWS clients).
     app.state.monitor_enabled = True
-    app.state.ib_gateway_client = None
+    app.state.ib_operator_client = None
 
     # Shared deps for routers (reader, control_via_db, etc.)
     app.state.reader = reader
@@ -253,24 +253,24 @@ def create_app(
 
     @app.on_event("startup")
     async def startup_event() -> None:
-        """IB 经 Redis Gateway；本进程不连接 TWS。"""
+        """IB 经 Redis Operator；本进程不连接 TWS。"""
         cfg = merged_config or reader._config
-        app.state.ib_gateway_client = IbGatewayClient.from_merged_config(cfg)
-        if app.state.ib_gateway_client is not None:
-            logger.info("Monitor IB Gateway client enabled (Redis RPC)")
+        app.state.ib_operator_client = IbOperatorClient.from_merged_config(cfg)
+        if app.state.ib_operator_client is not None:
+            logger.info("Monitor IB Operator client enabled (Redis RPC)")
         elif (cfg.get("server") or {}).get("skip_monitor_ib", False):
-            logger.info("skip_monitor_ib=true: IB Gateway client not used (Management mode)")
+            logger.info("skip_monitor_ib=true: IB Operator client not used (Management mode)")
         else:
             logger.warning(
-                "IB Gateway client unavailable (enable Redis and ib_gateway.enabled, or set skip_monitor_ib)"
+                "IB Operator client unavailable (enable Redis and ib_operator.enabled, or set skip_monitor_ib)"
             )
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        gw = getattr(app.state, "ib_gateway_client", None)
-        if gw is not None:
+        op = getattr(app.state, "ib_operator_client", None)
+        if op is not None:
             try:
-                gw.close()
+                op.close()
             except Exception:
                 pass
 

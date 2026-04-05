@@ -12,10 +12,10 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
         "redis_meta_key": "massive:meta:status",
     },
     {
-        "id": "ib_gateway",
-        "label": "IB Gateway (Stream)",
-        "systemd_unit": "bifrost-ib-gateway.service",
-        "redis_meta_key": "bifrost:ib:gateway:health",
+        "id": "ib_operator",
+        "label": "IB Operator (cmd RPC)",
+        "systemd_unit": "bifrost-ib-operator.service",
+        "redis_meta_key": "bifrost:ib:operator:health",
     },
     {
         "id": "ib_market",

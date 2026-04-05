@@ -1,4 +1,4 @@
-"""Redis Stream helpers for IB Gateway (sync API)."""
+"""Redis Stream helpers for IB Operator (sync API)."""
 
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ def ack_message(r: Any, stream: str, group: str, stream_id: str) -> None:
         logger.warning("xack failed id=%s: %s", stream_id, e)
 
 
-class GatewayRedisRunner:
+class OperatorRedisRunner:
     """Blocking XREADGROUP loop with PEL reclaim for stale deadlines."""
 
     def __init__(

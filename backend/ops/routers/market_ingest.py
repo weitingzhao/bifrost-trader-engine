@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
-from backend.ops.ib_gateway_rpc import ib_gateway_disconnect_all_sync
+from backend.ops.ib_operator_rpc import ib_operator_disconnect_all_sync
 from backend.ops.market_ingest_config import market_ingest_service_by_id, market_ingest_services_from_config
 from backend.ops.models.schemas import MarketIngestAction, MarketIngestControlRequest
 from backend.ops.routers.workers import _audit, _require_role
@@ -84,9 +84,9 @@ async def market_ingest_control(
     try:
         if action == MarketIngestAction.RESET:
             extra: Dict[str, Any] = {}
-            if sid == "ib_gateway":
+            if sid == "ib_operator":
                 ok_rpc, rpc_err, rpc_data = await asyncio.to_thread(
-                    ib_gateway_disconnect_all_sync,
+                    ib_operator_disconnect_all_sync,
                     cfg,
                 )
                 extra["disconnect_all_rpc"] = {
@@ -96,10 +96,10 @@ async def market_ingest_control(
                 }
                 if not ok_rpc:
                     logger.warning(
-                        "ib_gateway reset: disconnect_all RPC failed (%s); continuing with restart",
+                        "ib_operator reset: disconnect_all RPC failed (%s); continuing with restart",
                         rpc_err,
                     )
-            # massive_ws / ib_market / ib_gateway: ordered release + restart via systemd.
+            # massive_ws / ib_market / ib_operator: ordered release + restart via systemd.
             result = await exc._systemctl("restart", unit)  # noqa: SLF001
             if extra:
                 result = {**result, **extra} if isinstance(result, dict) else {"result": result, **extra}

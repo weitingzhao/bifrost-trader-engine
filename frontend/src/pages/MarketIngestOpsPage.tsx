@@ -6,9 +6,9 @@ import {
   fetchMassiveWsLogs,
   subscribeMassiveWsLogs,
   clearMassiveWsLogs,
-  fetchIbGatewayLogs,
-  subscribeIbGatewayLogs,
-  clearIbGatewayLogs,
+  fetchIbOperatorLogs,
+  subscribeIbOperatorLogs,
+  clearIbOperatorLogs,
   fetchIbMarketLogs,
   subscribeIbMarketLogs,
   clearIbMarketLogs,
@@ -185,16 +185,16 @@ export function MarketIngestOpsPage({
     enabled: true,
   })
 
-  const fetchIbGwLogs = useCallback((tail?: number) => fetchIbGatewayLogs(tail ?? 80), [])
-  const subscribeIbGwLogs = useCallback(
-    (onLine: (line: string) => void, onError?: () => void) => subscribeIbGatewayLogs(onLine, onError),
+  const fetchIbOpLogs = useCallback((tail?: number) => fetchIbOperatorLogs(tail ?? 80), [])
+  const subscribeIbOpLogs = useCallback(
+    (onLine: (line: string) => void, onError?: () => void) => subscribeIbOperatorLogs(onLine, onError),
     [],
   )
-  const clearIbGwLogs = useCallback(() => clearIbGatewayLogs(), [])
-  const ibGatewayConsole = useLogConsole({
-    fetchLogs: fetchIbGwLogs,
-    subscribeLogs: subscribeIbGwLogs,
-    clearLogs: clearIbGwLogs,
+  const clearIbOpLogs = useCallback(() => clearIbOperatorLogs(), [])
+  const ibOperatorConsole = useLogConsole({
+    fetchLogs: fetchIbOpLogs,
+    subscribeLogs: subscribeIbOpLogs,
+    clearLogs: clearIbOpLogs,
     initialMaxLines: 500,
     enabled: true,
   })
@@ -240,7 +240,7 @@ export function MarketIngestOpsPage({
     for (const s of services) {
       if (s.id === 'massive_ws') {
         massiveServices.push(s)
-      } else if (s.id === 'ib_market' || s.id === 'ib_gateway') {
+      } else if (s.id === 'ib_market' || s.id === 'ib_operator') {
         ibServices.push(s)
       } else {
         otherServices.push(s)
@@ -261,8 +261,8 @@ export function MarketIngestOpsPage({
       const mc = ibMarket.msg_count != null ? String(ibMarket.msg_count) : '—'
       return `IB ${c}; last msg ${fmtAge(ibMarket.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
     }
-    if (svc.id === 'ib_gateway') {
-      return `Gateway health Redis key: ${svc.redis_meta_key}`
+    if (svc.id === 'ib_operator') {
+      return `Operator health Redis key: ${svc.redis_meta_key}`
     }
     if (svc.redis_meta_key) return `Meta: ${svc.redis_meta_key}`
     return '—'
@@ -304,7 +304,7 @@ export function MarketIngestOpsPage({
   }
 
   const openResetConfirm = (svc: MarketIngestServiceRow) => {
-    const isIb = svc.id === 'ib_gateway' || svc.id === 'ib_market'
+    const isIb = svc.id === 'ib_operator' || svc.id === 'ib_market'
     const message = isIb
       ? `Reset ${svc.label}? This will restart the service and disconnect IB clients (TWS).`
       : `Reset ${svc.label}? This restarts the ingest process (same end state as Restart).`
@@ -373,7 +373,7 @@ export function MarketIngestOpsPage({
       {localControl === 'subprocess' ? (
         <p className="massive-api-doc-hint" role="note">
           Ops <code>local_control=subprocess</code>: Celery workers use <code>run_celery.py</code>. Ingest services
-          (Massive WS, IB Gateway, IB market ingest) are started with <code>scripts/run_*.py</code> on this host when{' '}
+          (Massive WS, IB Operator, IB market ingest) are started with <code>scripts/run_*.py</code> on this host when{' '}
           <code>market_ingest_script_control</code> is true (see <code>GET /ops/health</code>). Production Linux still
           recommends <code>systemd</code> or <code>executor_mode=agent</code> on the ingest host.
         </p>
@@ -426,7 +426,7 @@ export function MarketIngestOpsPage({
           <InfoTooltip text="Interactive Brokers market data ingest (host TWS). Uses dedicated client_id; not Massive." />
         </h3>
         <p className="settings-page-subtitle" style={{ marginTop: 0, marginBottom: 'var(--space-3)' }}>
-          IB Gateway (stream RPC) and IB market ingest. Reset disconnects IB clients before restart where applicable.
+          IB Operator (cmd RPC) and IB market ingest. Reset disconnects IB clients before restart where applicable.
         </p>
         <h4 className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
           Services
@@ -434,7 +434,7 @@ export function MarketIngestOpsPage({
         {!opsErr ? (
           <ServicesTable
             rows={ibServices}
-            emptyHint="No IB service rows in Ops config (ib_gateway, ib_market)."
+            emptyHint="No IB service rows in Ops config (ib_operator, ib_market)."
             logicalSummary={logicalSummary}
             canAdmin={canAdmin}
             disableIngestActions={disableIngestActions}
@@ -447,15 +447,15 @@ export function MarketIngestOpsPage({
 
         <div style={{ marginTop: 'var(--space-5)' }}>
           <h4 className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
-            IB Gateway log
+            IB Operator log
           </h4>
           <LogConsolePanel
-            controller={ibGatewayConsole}
+            controller={ibOperatorConsole}
             loadingText="Connecting…"
             errorText="Unable to load (Redis may be down or Monitor not running)."
-            emptyText="No log lines yet. Start: python scripts/run_ib_gateway.py"
-            infoTooltipText="WS Connector — IB Gateway stream RPC only (bifrost:ib_gateway_console). Separate from IB market ingest."
-            resizeAriaLabel="Resize IB Gateway console height"
+            emptyText="No log lines yet. Start: python scripts/run_ib_operator.py"
+            infoTooltipText="WS Connector — IB Operator cmd RPC only (bifrost:ib_operator_console). Separate from IB market ingest."
+            resizeAriaLabel="Resize IB Operator console height"
             clearTitle="Clear displayed log and Redis stream"
           />
         </div>
@@ -469,7 +469,7 @@ export function MarketIngestOpsPage({
             loadingText="Connecting…"
             errorText="Unable to load (Redis may be down or Monitor not running)."
             emptyText="No log lines yet. Start: python scripts/run_ib_market_ingest.py"
-            infoTooltipText="WS Connector — IB market ingest only (bifrost:ib_market_console). Not IB Gateway."
+            infoTooltipText="WS Connector — IB market ingest only (bifrost:ib_market_console). Not IB Operator."
             resizeAriaLabel="Resize IB market ingest console height"
             clearTitle="Clear displayed log and Redis stream"
           />

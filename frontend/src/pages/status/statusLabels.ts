@@ -32,7 +32,7 @@ export const MONITOR_SELF_CHECK_LABELS: Record<string, string> = {
 
 export const MONITOR_REASON_LABELS: Record<string, string> = {
   monitor_stopped: 'Monitor service stopped',
-  monitor_ib_error: 'Monitor IB connection error (account or market)',
+  monitor_ib_error: 'Monitor IB connection error (operator or secondary account)',
 }
 
 export const DAEMON_STATE_LABELS: Record<string, string> = {

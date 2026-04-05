@@ -2,19 +2,17 @@
 export interface IbConfig {
   ib_host?: string
   ib_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
-  /** Resolved TCP port for account / primary ib.host.port_type */
+  /** Resolved TCP port for primary ib.host.port_type */
   ib_port?: number
-  /** Market data port (ingest + gateway Market client); from ib.host.port_type_market_data or same as ib_port */
+  /** Market data port (ingest); from ib.host.port_type_market_data or same as ib_port */
   ib_port_market_data?: number
   ib_port_type_market_data?: 'tws_live' | 'tws_paper' | 'gateway'
   /** Daemon: Trading (default 1) */
   ib_client_id_daemon?: number
   /** Daemon: Listener (default 2) */
   ib_client_id_listener?: number
-  /** Monitor: Account (default 4) */
-  ib_client_id_account?: number
-  /** Monitor: Market data (default 10); Host only */
-  ib_client_id_markets?: number
+  /** IB Operator cmd RPC (Host); single client_id for account + on-demand market ops */
+  ib_client_id_operator?: number
   /** Celery: Market Data / worker_market (default 500) */
   ib_client_id_worker_market?: number
   /** Standalone IB market ingest (scripts/run_ib_market_ingest.py); must not overlap other client IDs */
@@ -128,11 +126,10 @@ export interface StatusResponse {
   ib_config?: IbConfig | null
   /** Flex config: tokens in settings (ib_flex_host_token, ib_flex_secondary_token), rows in settings_ib_flex. Configure in Settings → IB Connection → Flex. */
   flex_config?: FlexConfig | null
-  /** 监控端 IB 状态：Account (Host), Account (Secondary), Market (Host) 连接情况与错误信息 */
+  /** 监控端 IB 状态：Operator (Host cmd RPC), Account (Secondary) 连接情况与错误信息 */
   monitor_ib_status?: {
-    account?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
+    operator?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
     account2?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
-    market?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
   } | null
   /** 监控端是否启用（停止监控后需重新启动监控服务进程） */
   monitor_enabled?: boolean

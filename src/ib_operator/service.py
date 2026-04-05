@@ -1,4 +1,4 @@
-"""IB Gateway main loop: Redis Stream consumer + IB executor."""
+"""IB Operator main loop: Redis Stream consumer + IB executor."""
 
 from __future__ import annotations
 
@@ -12,16 +12,16 @@ from typing import Any, Dict, Optional
 import redis
 
 from src.app.config import get_effective_ib_config
-from src.ib_gateway.config import effective_ib_gateway_settings
-from src.ib_gateway.executor import IbGatewayExecutor
-from src.ib_gateway.protocol import (
+from src.ib_operator.config import effective_ib_operator_settings
+from src.ib_operator.executor import IbOperatorExecutor
+from src.ib_operator.protocol import (
     CommandMessage,
     dumps_result,
     parse_stream_fields,
     result_key,
 )
-from src.ib_gateway.redis_io import (
-    GatewayRedisRunner,
+from src.ib_operator.redis_io import (
+    OperatorRedisRunner,
     ack_message,
     consumer_name,
     ensure_stream_and_group,
@@ -29,28 +29,20 @@ from src.ib_gateway.redis_io import (
     write_result,
     xreadgroup_recover_nogroup,
 )
-from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
+from src.monitor.integrations.ib_clients import AccountIbClient, OperatorIbClient
 
 logger = logging.getLogger(__name__)
 
 
-def _build_clients(config: Dict[str, Any]) -> IbGatewayExecutor:
+def _build_clients(config: Dict[str, Any]) -> IbOperatorExecutor:
     ib_cfg = get_effective_ib_config(config)
     host = ib_cfg["host"]
-    # Account / Redis Stream RPC: primary port (ib.host.port_type). Market: host IB market data port.
-    port_account = int(ib_cfg["port"])
-    port_market = int(ib_cfg.get("port_market_data", port_account))
-    account = AccountIbClient(
+    port = int(ib_cfg["port"])
+    primary = OperatorIbClient(
         host=host,
-        port=port_account,
-        client_id=ib_cfg["client_id_account"],
-        name="IbGatewayAccount",
-    )
-    market = MarketIbClient(
-        host=host,
-        port=port_market,
-        client_id=ib_cfg["client_id_markets"],
-        name="IbGatewayMarket",
+        port=port,
+        client_id=ib_cfg["client_id_operator"],
+        name="IbOperator",
     )
     ib2_host = ib_cfg.get("ib2_host") or ""
     acc2: Optional[AccountIbClient] = None
@@ -59,12 +51,12 @@ def _build_clients(config: Dict[str, Any]) -> IbGatewayExecutor:
             host=ib2_host,
             port=ib_cfg["ib2_port"],
             client_id=ib_cfg["ib2_client_id_account"],
-            name="IbGatewayAccount2",
+            name="IbOperatorAccount2",
         )
-    return IbGatewayExecutor(account=account, market=market, account_secondary=acc2)
+    return IbOperatorExecutor(primary=primary, account_secondary=acc2)
 
 
-def _write_health_sync(r: redis.Redis, executor: IbGatewayExecutor, key: str, ex_sec: int) -> None:
+def _write_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str, ex_sec: int) -> None:
     h = executor.health_dict()
     h["updated_at"] = time.time()
     try:
@@ -74,7 +66,7 @@ def _write_health_sync(r: redis.Redis, executor: IbGatewayExecutor, key: str, ex
 
 
 async def _handle_message(
-    executor: IbGatewayExecutor,
+    executor: IbOperatorExecutor,
     msg: CommandMessage,
 ) -> Dict[str, Any]:
     try:
@@ -91,20 +83,20 @@ async def _handle_message(
         return {"ok": False, "error": str(e)}
 
 
-def run_ib_gateway_loop(
+def run_ib_operator_loop(
     config: Dict[str, Any],
     *,
     stop_event: Optional[threading.Event] = None,
     redis_client: Optional[redis.Redis] = None,
 ) -> None:
     """Block until ``stop_event`` is set (if provided). Creates IB clients and consumes Redis."""
-    settings = effective_ib_gateway_settings(config)
+    settings = effective_ib_operator_settings(config)
     if not settings["enabled"]:
-        logger.error("IB Gateway disabled in config (ib_gateway.enabled=false or no Redis URL)")
+        logger.error("IB Operator disabled in config (ib_operator.enabled=false or no Redis URL)")
         return
     rurl = settings["redis_url"]
     if not rurl:
-        logger.error("IB Gateway requires Redis (redis.enabled or realtime)")
+        logger.error("IB Operator requires Redis (redis.enabled or realtime)")
         return
 
     stream = settings["stream"]
@@ -121,20 +113,19 @@ def run_ib_gateway_loop(
     r = redis_client or redis.from_url(rurl, decode_responses=True)
     ensure_stream_and_group(r, stream, group)
     executor = _build_clients(config)
-    runner = GatewayRedisRunner(r, stream, group, cons, block_ms)
+    runner = OperatorRedisRunner(r, stream, group, cons, block_ms)
 
     logger.info(
-        "IB Gateway started stream=%s group=%s consumer=%s",
+        "IB Operator started stream=%s group=%s consumer=%s",
         stream,
         group,
         cons,
     )
 
-    # Initial connect attempt (non-fatal)
     try:
         asyncio.run(executor.connect_all())
     except Exception as e:
-        logger.warning("IB Gateway initial connect failed (will retry on demand): %s", e)
+        logger.warning("IB Operator initial connect failed (will retry on demand): %s", e)
 
     _write_health_sync(r, executor, health_key, health_ex)
     last_health = time.time()
@@ -143,8 +134,6 @@ def run_ib_gateway_loop(
     def should_stop() -> bool:
         return stop.is_set()
 
-    # SIGTERM sets stop; the loop may block up to ``block_ms`` in XREADGROUP before observing it.
-    # systemd TimeoutStopSec should exceed that (see deploy/systemd/bifrost-ib-gateway.service).
     while not should_stop():
         now = time.time()
         if now - last_health >= health_refresh:
@@ -180,7 +169,7 @@ def run_ib_gateway_loop(
             rk = result_key(result_prefix, msg.req_id if msg else "invalid")
 
             if perr or msg is None:
-                logger.warning("Bad gateway message id=%s: %s", entry_id, perr)
+                logger.warning("Bad operator message id=%s: %s", entry_id, perr)
                 err_body, _ = dumps_result({"ok": False, "error": perr or "parse"}, max_bytes=max_bytes)
                 if msg and msg.req_id:
                     write_result(r, rk, err_body or "{}", ttl_sec=result_ttl)
@@ -210,10 +199,8 @@ def run_ib_gateway_loop(
             _write_health_sync(r, executor, health_key, health_ex)
             last_health = time.time()
 
-    logger.info("IB Gateway stopping: disconnecting IB clients")
+    logger.info("IB Operator stopping: disconnecting IB clients")
     try:
         asyncio.run(executor.disconnect_all())
     except Exception as e:
         logger.warning("disconnect on shutdown: %s", e)
-
-

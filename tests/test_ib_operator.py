@@ -1,4 +1,4 @@
-"""IB Gateway protocol, executor, and Redis client (mocked)."""
+"""IB Operator protocol, executor, and Redis client (mocked)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.ib_gateway.client import IbGatewayClient, build_monitor_ib_status
-from src.ib_gateway.executor import IbGatewayExecutor
-from src.ib_gateway.protocol import PROTOCOL_VERSION, parse_stream_fields
-from src.ib_gateway.redis_io import (
+from src.ib_operator.client import IbOperatorClient, build_monitor_ib_status
+from src.ib_operator.executor import IbOperatorExecutor
+from src.ib_operator.protocol import PROTOCOL_VERSION, parse_stream_fields
+from src.ib_operator.redis_io import (
     ensure_stream_and_group,
     is_nogroup_error,
     parse_xreadgroup_reply,
@@ -47,10 +47,9 @@ def test_parse_stream_fields_unknown_op() -> None:
 
 @pytest.mark.asyncio
 async def test_executor_ping() -> None:
-    acc = MagicMock()
-    acc.connected = False
-    mkt = MagicMock()
-    ex = IbGatewayExecutor(account=acc, market=mkt, account_secondary=None)
+    primary = MagicMock()
+    primary.connected = False
+    ex = IbOperatorExecutor(primary=primary, account_secondary=None)
     out = await ex.execute("ping", {})
     assert out["ok"] is True
     assert "data" in out
@@ -58,17 +57,16 @@ async def test_executor_ping() -> None:
 
 @pytest.mark.asyncio
 async def test_executor_fetch_bars_delegates() -> None:
-    acc = MagicMock()
-    mkt = MagicMock()
-    mkt.fetch_bars = AsyncMock(return_value=[{"open": 1.0}])
-    ex = IbGatewayExecutor(account=acc, market=mkt, account_secondary=None)
+    primary = MagicMock()
+    primary.fetch_bars = AsyncMock(return_value=[{"open": 1.0}])
+    ex = IbOperatorExecutor(primary=primary, account_secondary=None)
     out = await ex.execute(
         "fetch_bars",
         {"symbol": "AAPL", "period": "1 D", "duration": "5 D"},
     )
     assert out["ok"] is True
     assert len(out["data"]["bars"]) == 1
-    mkt.fetch_bars.assert_awaited_once()
+    primary.fetch_bars.assert_awaited_once()
 
 
 def test_build_monitor_ib_status_disabled_skip() -> None:
@@ -78,7 +76,7 @@ def test_build_monitor_ib_status_disabled_skip() -> None:
 
 def test_build_monitor_ib_status_no_redis() -> None:
     cfg = {"server": {}, "redis": {"enabled": False}}
-    assert build_monitor_ib_status(cfg, {"ib_client_id_account": 120}) is None
+    assert build_monitor_ib_status(cfg, {"ib_client_id_operator": 120}) is None
 
 
 def test_parse_xreadgroup_reply_empty() -> None:
@@ -86,7 +84,7 @@ def test_parse_xreadgroup_reply_empty() -> None:
     assert parse_xreadgroup_reply([]) == []
 
 
-def test_ib_gateway_client_request_polls_result() -> None:
+def test_ib_operator_client_request_polls_result() -> None:
     store: dict = {}
 
     class FakeRedis:
@@ -99,14 +97,14 @@ def test_ib_gateway_client_request_polls_result() -> None:
                 return json.dumps({"ok": True, "data": {"x": 1}})
             return None
 
-    with patch("src.ib_gateway.client.redis.from_url", return_value=FakeRedis()):
-        c = IbGatewayClient(
+    with patch("src.ib_operator.client.redis.from_url", return_value=FakeRedis()):
+        c = IbOperatorClient(
             redis_url="redis://localhost:6379/0",
             stream="s",
             result_prefix="p:",
             default_timeout_sec=1.0,
         )
-        with patch("src.ib_gateway.client.new_req_id", return_value="abc"):
+        with patch("src.ib_operator.client.new_req_id", return_value="abc"):
             out = c.request("ping", {}, caller="t")
     assert out == {"ok": True, "data": {"x": 1}}
 

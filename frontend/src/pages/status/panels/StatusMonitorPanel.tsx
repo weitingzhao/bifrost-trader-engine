@@ -18,9 +18,8 @@ export interface StatusMonitorPanelProps {
   apiHealthLamp: Lamp
   healthCountdownSec: number | null
   monitorIbGroupLamp: Lamp
-  monitorAccount: MonitorClient | undefined
+  monitorOperator: MonitorClient | undefined
   monitorAccount2: MonitorClient | undefined
-  monitorMarket: MonitorClient | undefined
   onMonitorStop: () => void
   onMonitorConnect: () => void
   onMonitorReleaseIb: () => void
@@ -37,9 +36,8 @@ export function StatusMonitorPanel({
   apiHealthLamp,
   healthCountdownSec,
   monitorIbGroupLamp,
-  monitorAccount,
+  monitorOperator,
   monitorAccount2,
-  monitorMarket,
   onMonitorStop,
   onMonitorConnect,
   onMonitorReleaseIb,
@@ -132,11 +130,11 @@ export function StatusMonitorPanel({
                 </span>
                 <span className="daemon-group-title">IB connection</span>
               </div>
-              {(monitorAccount?.connected || monitorAccount2?.connected || monitorMarket?.connected) ? (
+              {(monitorOperator?.connected || monitorAccount2?.connected) ? (
                 <button
                   type="button"
                   className="section-header-icon-btn"
-                  title="Release Monitor IB connections (Account + Account2 + Market). Monitor keeps running; use Connect to reconnect."
+                  title="Release Monitor IB connections (Operator + Secondary account if configured). Monitor keeps running; use Connect to reconnect."
                   aria-label="Release IB connections"
                   onClick={onMonitorReleaseIb}
                 >
@@ -151,7 +149,7 @@ export function StatusMonitorPanel({
                   type="button"
                   className="btn-resume"
                   disabled={!monitorEnabled}
-                  title={monitorEnabled ? 'Establish monitor IB connection (Account + Account2 + Market)' : 'Monitor stopped; cannot connect'}
+                  title={monitorEnabled ? 'Establish monitor IB connection (Operator + Secondary account if configured)' : 'Monitor stopped; cannot connect'}
                   onClick={onMonitorConnect}
                 >
                   Connect
@@ -163,7 +161,7 @@ export function StatusMonitorPanel({
                 <thead>
                   <tr>
                     <th scope="col" className="ib-connection-th-corner" />
-                    <th scope="col" className="ib-connection-th">Account</th>
+                    <th scope="col" className="ib-connection-th">IB client</th>
                     <th scope="col" className="ib-connection-th">Market</th>
                   </tr>
                 </thead>
@@ -171,19 +169,13 @@ export function StatusMonitorPanel({
                   <tr>
                     <th scope="row" className="ib-connection-row-label">Host</th>
                     <td className="ib-connection-cell">
-                      {monitorAccount?.connected ? (
-                        <span className="countdown-num">Connected @ {monitorAccount?.client_id ?? '—'}</span>
+                      {monitorOperator?.connected ? (
+                        <span className="countdown-num">Operator @ {monitorOperator?.client_id ?? '—'}</span>
                       ) : (
-                        `Not connected${monitorAccount?.last_error ? ` (${monitorAccount.last_error})` : ''}`
+                        `Not connected${monitorOperator?.last_error ? ` (${monitorOperator.last_error})` : ''}`
                       )}
                     </td>
-                    <td className="ib-connection-cell">
-                      {monitorMarket?.connected ? (
-                        <span className="countdown-num">Connected @ {monitorMarket?.client_id ?? '—'}</span>
-                      ) : (
-                        `Not connected${monitorMarket?.last_error ? ` (${monitorMarket.last_error})` : ''}`
-                      )}
-                    </td>
+                    <td className="ib-connection-cell">—</td>
                   </tr>
                   <tr>
                     <th scope="row" className="ib-connection-row-label" title="Secondary (Second User)">

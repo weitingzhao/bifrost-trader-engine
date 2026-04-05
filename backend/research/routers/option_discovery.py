@@ -119,7 +119,7 @@ def _ttl_sec_expiration_cache(config: dict) -> int:
 
 async def _option_expirations_ib(request: Request, symbol: str) -> Dict[str, Any]:
     """IB reqSecDefOptParams; same shape as legacy /research/option-expirations."""
-    gw = getattr(request.app.state, "ib_gateway_client", None)
+    gw = getattr(request.app.state, "ib_operator_client", None)
     if gw is None:
         return {
             "symbol": symbol,
@@ -805,7 +805,7 @@ async def post_option_snapshot(
             "error": "symbol and expiration are required",
         }
 
-    gw = getattr(request.app.state, "ib_gateway_client", None)
+    gw = getattr(request.app.state, "ib_operator_client", None)
     if gw is None:
         return {
             "symbol": symbol,

@@ -240,21 +240,21 @@ export function subscribeMassiveWsLogs(onLine: (line: string) => void, onError?:
   }
 }
 
-export async function fetchIbGatewayLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+export async function fetchIbOperatorLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${apiBase()}/api/ib-gateway/logs?${params}`)
+  const r = await fetch(`${apiBase()}/api/ib-operator/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
-export async function clearIbGatewayLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-gateway/logs`, { method: 'DELETE' })
+export async function clearIbOperatorLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-operator/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
-export async function trimIbGatewayLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/ib-gateway/logs/trim`, {
+export async function trimIbOperatorLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-operator/logs/trim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -263,8 +263,8 @@ export async function trimIbGatewayLogs(maxLines: number): Promise<{ ok: boolean
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
-export function subscribeIbGatewayLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${apiBase()}/api/ib-gateway/logs/stream`
+export function subscribeIbOperatorLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${apiBase()}/api/ib-operator/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {

@@ -173,8 +173,8 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
         "connect_timeout": ib.get("connect_timeout"),
         "client_id_daemon": int(hc.get("daemon") or 1),
         "client_id_listener": int(hc.get("listener") or 2),
-        "client_id_account": int(hc.get("account") or 100),
-        "client_id_markets": int(hc.get("markets") or 101),
+        # Host IB Operator (cmd RPC): YAML key `operator`; legacy `account` accepted for migration.
+        "client_id_operator": int(hc.get("operator") or hc.get("account") or 100),
         "client_id_worker_market": int(hc.get("worker_market") or 500),
         "client_id_ib_market_ingest": int(hc.get("ib_market_ingest") or 150),
         "ib2_client_id_listener": int(sc.get("listener") or 3),
@@ -192,7 +192,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
           host:
             ip: ...
             port_type: ...
-            client_id: { daemon, listener, account, markets, worker_market, ib_market_ingest }
+            client_id: { daemon, listener, operator, worker_market, ib_market_ingest }
           secondary:  # optional second TWS
             ip: ...
             port_type: ...
@@ -202,7 +202,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
 
     Returns a dict with normalised keys consumed by daemon, server, and celery:
       host, port_type, port, connect_timeout,
-      client_id_daemon, client_id_listener, client_id_account, client_id_markets, client_id_worker_market,
+      client_id_daemon, client_id_listener, client_id_operator, client_id_worker_market,
       client_id_ib_market_ingest,
       ib2_host, ib2_port_type, ib2_port, ib2_client_id_listener, ib2_client_id_account.
     Also includes the ``ib_*`` prefixed aliases expected by the API / frontend (``ib_client_id_daemon`` etc.).
@@ -228,8 +228,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
 
     cid_d = int(ib.get("client_id_daemon") or 1)
     cid_l = int(ib.get("client_id_listener") or 2)
-    cid_a = int(ib.get("client_id_account") or 100)
-    cid_m = int(ib.get("client_id_markets") or 101)
+    cid_op = int(ib.get("client_id_operator") or 100)
     cid_w = int(ib.get("client_id_worker_market") or 500)
     cid_mi = int(ib.get("client_id_ib_market_ingest") or 150)
 
@@ -242,8 +241,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         "connect_timeout": float(ib.get("connect_timeout") or 60.0),
         "client_id_daemon": cid_d,
         "client_id_listener": cid_l,
-        "client_id_account": cid_a,
-        "client_id_markets": cid_m,
+        "client_id_operator": cid_op,
         "client_id_worker_market": cid_w,
         "client_id_ib_market_ingest": cid_mi,
         # API / frontend aliases (ib_* prefix)
@@ -254,8 +252,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         "ib_port_market_data": port_market_data,
         "ib_client_id_daemon": cid_d,
         "ib_client_id_listener": cid_l,
-        "ib_client_id_account": cid_a,
-        "ib_client_id_markets": cid_m,
+        "ib_client_id_operator": cid_op,
         "ib_client_id_worker_market": cid_w,
         "ib_client_id_ib_market_ingest": cid_mi,
     }

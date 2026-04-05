@@ -17,7 +17,7 @@ ALLOWED_UNIT_PATTERNS = [
     re.compile(r"^bifrost-celery-beat\.service$"),
     re.compile(r"^redis(\.service)?$"),
     re.compile(r"^bifrost-massive-ws\.service$"),
-    re.compile(r"^bifrost-ib-gateway\.service$"),
+    re.compile(r"^bifrost-ib-operator\.service$"),
     re.compile(r"^bifrost-ib-market-ingest\.service$"),
 ]
 

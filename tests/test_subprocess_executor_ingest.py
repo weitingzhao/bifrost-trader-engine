@@ -13,7 +13,7 @@ from backend.ops.services.executor_local import SubprocessLocalExecutor, _ingest
 
 def test_ingest_script_log_for_unit() -> None:
     assert _ingest_script_log_for_unit("bifrost-massive-ws.service")[0] == "run_massive_ws.py"
-    assert _ingest_script_log_for_unit("bifrost-ib-gateway.service")[0] == "run_ib_gateway.py"
+    assert _ingest_script_log_for_unit("bifrost-ib-operator.service")[0] == "run_ib_operator.py"
     assert _ingest_script_log_for_unit("bifrost-ib-market-ingest.service")[0] == "run_ib_market_ingest.py"
     assert _ingest_script_log_for_unit("unknown.service") is None
 
@@ -54,10 +54,10 @@ async def test_start_ingest_massive_happy_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_ingest_gateway_positional_config(tmp_path: Path) -> None:
+async def test_start_ingest_operator_positional_config(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     (root / "scripts").mkdir(parents=True)
-    (root / "scripts" / "run_ib_gateway.py").write_text("#\n", encoding="utf-8")
+    (root / "scripts" / "run_ib_operator.py").write_text("#\n", encoding="utf-8")
     cfg = root / "config" / "c.yaml"
     cfg.parent.mkdir()
     cfg.write_text("redis:\n  enabled: false\n", encoding="utf-8")
@@ -76,10 +76,10 @@ async def test_start_ingest_gateway_positional_config(tmp_path: Path) -> None:
         mock_proc.wait = AsyncMock(side_effect=asyncio.TimeoutError())
 
         with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as cse:
-            await ex._systemctl("start", "bifrost-ib-gateway.service")
+            await ex._systemctl("start", "bifrost-ib-operator.service")
 
     cmd = cse.call_args[0]
-    assert "run_ib_gateway.py" in cmd[1]
+    assert "run_ib_operator.py" in cmd[1]
     assert "--config" not in cmd
     assert str(cfg.resolve()) == cmd[-1]
 

@@ -257,7 +257,7 @@ async def post_executions_fetch(
         return {"ok": False, "error": "PostgreSQL is required to write account_executions.", "count": 0}
     if not getattr(app.state, "monitor_enabled", True):
         return {"ok": False, "error": "Monitor stopped; cannot fetch executions.", "count": 0}
-    gw = getattr(app.state, "ib_gateway_client", None)
+    gw = getattr(app.state, "ib_operator_client", None)
     if gw is None:
         return {"ok": False, "error": "IB Gateway client is not configured.", "count": 0}
     env = await gw.request_async(

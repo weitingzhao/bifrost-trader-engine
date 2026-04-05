@@ -1,4 +1,4 @@
-"""Call IB Gateway from API processes via Redis (sync + async helper)."""
+"""Call IB Operator from API processes via Redis (sync + async helper)."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from typing import Any, Dict, Optional
 
 import redis
 
-from src.ib_gateway.config import effective_ib_gateway_settings
-from src.ib_gateway.protocol import PROTOCOL_VERSION, new_req_id, result_key
+from src.ib_operator.config import effective_ib_operator_settings
+from src.ib_operator.protocol import PROTOCOL_VERSION, new_req_id, result_key
 
 logger = logging.getLogger(__name__)
 
 
-class IbGatewayClient:
-    """Publish commands to the gateway stream and poll for result keys."""
+class IbOperatorClient:
+    """Publish commands to the operator stream and poll for result keys."""
 
     def __init__(
         self,
@@ -34,11 +34,11 @@ class IbGatewayClient:
         self._r: Optional[redis.Redis] = None
 
     @classmethod
-    def from_merged_config(cls, config: Dict[str, Any]) -> Optional["IbGatewayClient"]:
-        """Return client if gateway + Redis are enabled; else None."""
+    def from_merged_config(cls, config: Dict[str, Any]) -> Optional["IbOperatorClient"]:
+        """Return client if operator + Redis are enabled; else None."""
         if (config.get("server") or {}).get("skip_monitor_ib", False):
             return None
-        s = effective_ib_gateway_settings(config)
+        s = effective_ib_operator_settings(config)
         if not s["enabled"] or not s["redis_url"]:
             return None
         return cls(
@@ -69,7 +69,7 @@ class IbGatewayClient:
         timeout_sec: Optional[float] = None,
         caller: str = "fastapi",
     ) -> Dict[str, Any]:
-        """Blocking request. Returns gateway envelope ``{ok, error?, data?}``."""
+        """Blocking request. Returns envelope ``{ok, error?, data?}``."""
         payload = payload or {}
         timeout = float(timeout_sec if timeout_sec is not None else self._default_timeout_sec)
         if timeout <= 0:
@@ -89,7 +89,7 @@ class IbGatewayClient:
         try:
             r.xadd(self._stream, fields)
         except Exception as e:
-            logger.warning("ib_gateway xadd failed: %s", e)
+            logger.warning("ib_operator xadd failed: %s", e)
             return {"ok": False, "error": f"redis_xadd:{e}"}
 
         rk = result_key(self._result_prefix, req_id)
@@ -107,7 +107,7 @@ class IbGatewayClient:
                     return {"ok": False, "error": "invalid_result_json"}
             time.sleep(poll_interval)
 
-        return {"ok": False, "error": "timeout_waiting_for_gateway"}
+        return {"ok": False, "error": "timeout_waiting_for_operator"}
 
     async def request_async(
         self,
@@ -126,8 +126,8 @@ class IbGatewayClient:
         )
 
 
-def read_gateway_health(redis_url: str, health_key: str) -> Optional[Dict[str, Any]]:
-    """Best-effort read of gateway health JSON (sync)."""
+def read_operator_health(redis_url: str, health_key: str) -> Optional[Dict[str, Any]]:
+    """Best-effort read of operator health JSON (sync)."""
     try:
         r = redis.from_url(redis_url, decode_responses=True)
         try:
@@ -145,15 +145,15 @@ def build_monitor_ib_status(
     config: Dict[str, Any],
     ib_cfg: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """Build ``monitor_ib_status`` for GET /status when IB Gateway + Redis are enabled."""
+    """Build ``monitor_ib_status`` for GET /status when IB Operator + Redis are enabled."""
     if (config.get("server") or {}).get("skip_monitor_ib", False):
         return None
-    s = effective_ib_gateway_settings(config)
+    s = effective_ib_operator_settings(config)
     if not s["enabled"] or not s["redis_url"]:
         return None
     ib = ib_cfg or {}
-    health = read_gateway_health(s["redis_url"], s["health_key"])
-    unreachable = "IB gateway unreachable (is run_ib_gateway.py running?)"
+    health = read_operator_health(s["redis_url"], s["health_key"])
+    unreachable = "IB Operator unreachable (is run_ib_operator.py running?)"
 
     def _slot(
         key: str,
@@ -180,8 +180,7 @@ def build_monitor_ib_status(
         }
 
     out: Dict[str, Any] = {
-        "account": _slot("account", "ib_client_id_account", fallback_err=None),
-        "market": _slot("market", "ib_client_id_markets", fallback_err=None),
+        "operator": _slot("operator", "ib_client_id_operator", fallback_err=None),
     }
     ib2_host = ib.get("ib2_host") or ""
     ib2_host = ib2_host.strip() if isinstance(ib2_host, str) else ""

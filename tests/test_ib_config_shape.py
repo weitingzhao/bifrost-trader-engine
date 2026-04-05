@@ -15,8 +15,7 @@ def test_host_secondary_blocks():
                 "client_id": {
                     "daemon": 110,
                     "listener": 101,
-                    "account": 120,
-                    "markets": 130,
+                    "operator": 120,
                     "worker_market": 140,
                     "ib_market_ingest": 150,
                 },
@@ -36,8 +35,7 @@ def test_host_secondary_blocks():
     assert eff["port_type"] == "tws_live"
     assert eff["client_id_daemon"] == 110
     assert eff["client_id_listener"] == 101
-    assert eff["client_id_account"] == 120
-    assert eff["client_id_markets"] == 130
+    assert eff["client_id_operator"] == 120
     assert eff["client_id_worker_market"] == 140
     assert eff["client_id_ib_market_ingest"] == 150
     assert eff["ib_client_id_ib_market_ingest"] == 150
@@ -57,8 +55,7 @@ def test_omit_secondary():
                 "client_id": {
                     "daemon": 1,
                     "listener": 2,
-                    "account": 100,
-                    "markets": 101,
+                    "operator": 100,
                     "worker_market": 500,
                 },
             },

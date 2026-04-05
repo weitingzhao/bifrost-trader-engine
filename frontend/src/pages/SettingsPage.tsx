@@ -19,13 +19,12 @@ import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/shared/fetchTimeout'
 import { normalizeUtilizedServices, utilizedEnvFor, type UtilizedServiceRow } from '../utils/utilizedServices'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
-  DEFAULT_BARS_FETCH,
+  DEFAULT_IB_OPERATOR,
   DEFAULT_DAEMON,
   DEFAULT_HEARTBEAT_SEC,
   DEFAULT_HOST,
   DEFAULT_LISTENER,
   DEFAULT_PORT_TYPE,
-  DEFAULT_REFRESH_EXECUTIONS,
   DEFAULT_WORKER,
   FLEX_QUERY_TYPES,
   getDefaultFlexRows,
@@ -120,8 +119,7 @@ export function SettingsPage({
   const [ibPortType, setIbPortType] = useState<'tws_live' | 'tws_paper' | 'gateway'>(DEFAULT_PORT_TYPE)
   const [clientIdDaemon, setClientIdDaemon] = useState(DEFAULT_DAEMON)
   const [clientIdListener, setClientIdListener] = useState(DEFAULT_LISTENER)
-  const [clientIdAccount, setClientIdAccount] = useState(DEFAULT_REFRESH_EXECUTIONS)
-  const [clientIdMarkets, setClientIdMarkets] = useState(DEFAULT_BARS_FETCH)
+  const [clientIdOperator, setClientIdOperator] = useState(DEFAULT_IB_OPERATOR)
   const [clientIdWorker, setClientIdWorker] = useState(DEFAULT_WORKER)
   const [hostAccountId, setHostAccountId] = useState<string>('')
   const [streamHostAccountId, setStreamHostAccountId] = useState<string>('')
@@ -158,8 +156,7 @@ export function SettingsPage({
     if (c.ib_port_type != null) setIbPortType(c.ib_port_type)
     if (c.ib_client_id_daemon != null) setClientIdDaemon(c.ib_client_id_daemon)
     if (c.ib_client_id_listener != null) setClientIdListener(c.ib_client_id_listener)
-    if (c.ib_client_id_account != null) setClientIdAccount(c.ib_client_id_account)
-    if (c.ib_client_id_markets != null) setClientIdMarkets(c.ib_client_id_markets)
+    if (c.ib_client_id_operator != null) setClientIdOperator(c.ib_client_id_operator)
     if (c.ib_client_id_worker_market != null) setClientIdWorker(c.ib_client_id_worker_market)
     if (c.ib_host_account_id != null) setHostAccountId(String(c.ib_host_account_id))
     if (c.stream_host_account_id != null) setStreamHostAccountId(String(c.stream_host_account_id))
@@ -901,9 +898,8 @@ export function SettingsPage({
               clientIdDaemon={clientIdDaemon}
               clientIdListener={clientIdListener}
               ib2ClientIdListener={ib2ClientIdListener}
-              clientIdAccount={clientIdAccount}
+              clientIdOperator={clientIdOperator}
               ib2ClientIdAccount={ib2ClientIdAccount}
-              clientIdMarkets={clientIdMarkets}
               clientIdWorker={clientIdWorker}
               defaultFlexRangeDays={defaultFlexRangeDays}
               setDefaultFlexRangeDays={setDefaultFlexRangeDays}

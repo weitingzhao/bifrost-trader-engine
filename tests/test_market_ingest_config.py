@@ -12,9 +12,9 @@ def test_default_services():
     assert rows[0]["id"] == "massive_ws"
     assert rows[0]["systemd_unit"] == "bifrost-massive-ws.service"
     assert rows[0]["redis_meta_key"] == "massive:meta:status"
-    assert rows[1]["id"] == "ib_gateway"
-    assert rows[1]["systemd_unit"] == "bifrost-ib-gateway.service"
-    assert rows[1]["redis_meta_key"] == "bifrost:ib:gateway:health"
+    assert rows[1]["id"] == "ib_operator"
+    assert rows[1]["systemd_unit"] == "bifrost-ib-operator.service"
+    assert rows[1]["redis_meta_key"] == "bifrost:ib:operator:health"
     assert rows[2]["id"] == "ib_market"
 
 

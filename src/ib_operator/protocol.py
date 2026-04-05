@@ -1,4 +1,4 @@
-"""IB Gateway Redis protocol v1: ops, envelopes, parsing."""
+"""IB Operator Redis protocol v1: ops, envelopes, parsing."""
 
 from __future__ import annotations
 

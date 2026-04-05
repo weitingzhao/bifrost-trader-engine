@@ -1,34 +1,32 @@
-"""Dispatch gateway ops to AccountIbClient / MarketIbClient."""
+"""Dispatch IB Operator ops to OperatorIbClient / secondary AccountIbClient."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from src.monitor.integrations.ib_clients import AccountIbClient, MarketIbClient
+from src.monitor.integrations.ib_clients import AccountIbClient, OperatorIbClient
 
 logger = logging.getLogger(__name__)
 
 
-class IbGatewayExecutor:
+class IbOperatorExecutor:
     """Holds long-lived IB clients; async methods run on each client internal loop."""
 
     def __init__(
         self,
         *,
-        account: AccountIbClient,
-        market: MarketIbClient,
+        primary: OperatorIbClient,
         account_secondary: Optional[AccountIbClient],
     ) -> None:
-        self._account = account
-        self._market = market
+        self._primary = primary
         self._account_secondary = account_secondary
 
-    def _account_for_slot(self, payload: Dict[str, Any]) -> AccountIbClient:
+    def _account_for_slot(self, payload: Dict[str, Any]) -> AccountIbClient | OperatorIbClient:
         slot = (payload.get("account_slot") or "primary").strip().lower()
         if slot == "secondary" and self._account_secondary is not None:
             return self._account_secondary
-        return self._account
+        return self._primary
 
     async def execute(self, op: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         if op == "ping":
@@ -54,13 +52,13 @@ class IbGatewayExecutor:
             duration = str(payload.get("duration") or "1 D").strip()
             if not symbol:
                 return {"ok": False, "error": "missing_symbol"}
-            bars = await self._market.fetch_bars(symbol, period, duration)
+            bars = await self._primary.fetch_bars(symbol, period, duration)
             return {"ok": True, "data": {"bars": bars}}
         if op == "fetch_option_expirations":
             symbol = str(payload.get("symbol") or "").strip()
             if not symbol:
                 return {"ok": False, "error": "missing_symbol"}
-            out = await self._market.fetch_option_expirations(symbol)
+            out = await self._primary.fetch_option_expirations(symbol)
             return {"ok": True, "data": out}
         if op == "fetch_option_snapshot":
             symbol = str(payload.get("symbol") or "").strip()
@@ -78,7 +76,7 @@ class IbGatewayExecutor:
             pacing_sec = float(payload.get("pacing_sec") or 0.35)
             if not symbol or not expiration:
                 return {"ok": False, "error": "missing_symbol_or_expiration"}
-            rows, underlying_price = await self._market.fetch_option_snapshot(
+            rows, underlying_price = await self._primary.fetch_option_snapshot(
                 symbol,
                 expiration,
                 strikes_f,
@@ -100,9 +98,8 @@ class IbGatewayExecutor:
             }
 
         out: Dict[str, Any] = {
-            "account": _one(self._account),
-            "market": _one(self._market),
-            "gateway_alive": True,
+            "operator": _one(self._primary),
+            "operator_alive": True,
         }
         if self._account_secondary is not None:
             out["account2"] = _one(self._account_secondary)
@@ -111,20 +108,15 @@ class IbGatewayExecutor:
         return out
 
     async def connect_all(self) -> None:
-        await self._account.ensure_connected()
-        await self._market.ensure_connected()
+        await self._primary.ensure_connected()
         if self._account_secondary is not None:
             await self._account_secondary.ensure_connected()
 
     async def disconnect_all(self) -> None:
         try:
-            await self._account.disconnect()
+            await self._primary.disconnect()
         except Exception as e:
-            logger.debug("disconnect account: %s", e)
-        try:
-            await self._market.disconnect()
-        except Exception as e:
-            logger.debug("disconnect market: %s", e)
+            logger.debug("disconnect primary: %s", e)
         if self._account_secondary is not None:
             try:
                 await self._account_secondary.disconnect()

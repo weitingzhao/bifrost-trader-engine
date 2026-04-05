@@ -77,15 +77,14 @@ export function ServerStatusPage({
   const j = status
   const monitorEnabled = j?.monitor_enabled !== false
   const monitorStatus = (j?.monitor_ib_status as any) || {}
-  const monitorAccount = monitorStatus.account as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorOperator = monitorStatus.operator as { connected?: boolean; client_id?: number; last_error?: string } | undefined
   const monitorAccount2 = monitorStatus.account2 as { connected?: boolean; client_id?: number; last_error?: string } | undefined
-  const monitorMarket = monitorStatus.market as { connected?: boolean; client_id?: number; last_error?: string } | undefined
-  const monitorHasError = Boolean(monitorAccount?.last_error || monitorAccount2?.last_error || monitorMarket?.last_error)
+  const monitorHasError = Boolean(monitorOperator?.last_error || monitorAccount2?.last_error)
   const hasAccount2 = monitorAccount2 !== undefined
   const allMonitorClientsConnected = hasAccount2
-    ? Boolean(monitorAccount?.connected && monitorAccount2?.connected && monitorMarket?.connected)
-    : Boolean(monitorAccount?.connected && monitorMarket?.connected)
-  const anyMonitorClientConnected = Boolean(monitorAccount?.connected || monitorAccount2?.connected || monitorMarket?.connected)
+    ? Boolean(monitorOperator?.connected && monitorAccount2?.connected)
+    : Boolean(monitorOperator?.connected)
+  const anyMonitorClientConnected = Boolean(monitorOperator?.connected || monitorAccount2?.connected)
   const monitorLamp =
     !monitorEnabled
       ? 'red'
@@ -93,7 +92,7 @@ export function ServerStatusPage({
         ? 'yellow'
         : hasAccount2 && !allMonitorClientsConnected
           ? anyMonitorClientConnected ? 'yellow' : 'yellow'
-          : (monitorAccount?.connected || monitorMarket?.connected)
+          : monitorOperator?.connected && (!hasAccount2 || monitorAccount2?.connected)
             ? 'green'
             : 'yellow'
   const monitorSelfCheckText =
@@ -127,9 +126,8 @@ export function ServerStatusPage({
             apiHealthLamp={apiHealthLamp}
             healthCountdownSec={healthCountdownSec}
             monitorIbGroupLamp={monitorIbGroupLamp}
-            monitorAccount={monitorAccount}
+            monitorOperator={monitorOperator}
             monitorAccount2={monitorAccount2}
-            monitorMarket={monitorMarket}
             onMonitorStop={() => runMonitorStopAction(postMonitorStop, { loading: 'Stopping monitor service…', success: 'Monitor service stopped. Server has exited; refresh the page after restarting.' })}
             onMonitorConnect={() => runMonitorAction(postMonitorConnect, { loading: 'Establishing monitor IB connection…', success: 'Monitor IB connect requested; check status bar for result.' })}
             onMonitorReleaseIb={() => runMonitorAction(postMonitorReleaseIb, { loading: 'Releasing monitor IB connections…', success: 'Monitor IB connections released. Use Connect to reconnect.' })}

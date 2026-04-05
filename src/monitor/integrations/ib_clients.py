@@ -510,3 +510,88 @@ class MarketIbClient(BaseMonitorIbClient):
                 await asyncio.sleep(pacing_sec)
         return rows, underlying_price
 
+
+class OperatorIbClient(MarketIbClient):
+    """Single IB API client for IB Operator: account + market RPC on one client_id."""
+
+    async def fetch_executions(self, days: int) -> List[Dict[str, Any]]:
+        return await self._run_on_client_loop(self._fetch_executions_impl(days))
+
+    async def _fetch_executions_impl(self, days: int) -> List[Dict[str, Any]]:
+        await self._ensure_connected_impl()
+        assert self.connector is not None
+        try:
+            account_ids = self.connector.get_managed_accounts()
+            if not account_ids:
+                account_ids = [""]
+            all_execs: List[Dict[str, Any]] = []
+            for acc in account_ids:
+                exec_list = await self.connector.get_executions_async(
+                    account=acc or None,
+                    since_days=days,
+                )
+                if exec_list:
+                    all_execs.extend(exec_list)
+            logger.info(
+                "[monitor_ib] OperatorIbClient.fetch_executions: %s executions over %s days",
+                len(all_execs),
+                days,
+            )
+            self.last_error = None
+            return all_execs
+        except Exception as e:
+            self.last_error = str(e)
+            logger.warning(
+                "[monitor_ib] OperatorIbClient.fetch_executions failed: %s", e, exc_info=True
+            )
+            return []
+
+    async def fetch_accounts_snapshot(self) -> List[Dict[str, Any]]:
+        return await self._run_on_client_loop(self._fetch_accounts_snapshot_impl())
+
+    async def _fetch_accounts_snapshot_impl(self) -> List[Dict[str, Any]]:
+        await self._ensure_connected_impl()
+        assert self.connector is not None
+        try:
+            account_ids = self.connector.get_managed_accounts()
+            if not account_ids:
+                logger.warning(
+                    "[monitor_ib] OperatorIbClient.fetch_accounts_snapshot: get_managed_accounts returned 0"
+                )
+                return []
+            all_positions = await self.connector.get_positions(account=None)
+            accounts_list: List[Dict[str, Any]] = []
+            for account_id in account_ids:
+                values = await self.connector.get_account_summary(account=account_id)
+                summary: Dict[str, Any] = {}
+                for v in values:
+                    if getattr(v, "tag", None) and getattr(v, "value", None) is not None:
+                        summary[v.tag] = v.value
+                if account_id:
+                    summary["account"] = account_id
+                acct_positions = [
+                    p for p in all_positions if getattr(p, "account", None) == account_id
+                ]
+                pos_dicts = [
+                    self.connector.position_to_dict(p) for p in acct_positions
+                ]
+                accounts_list.append({
+                    "account_id": account_id,
+                    "summary": summary,
+                    "positions": pos_dicts,
+                })
+            self.last_error = None
+            logger.info(
+                "[monitor_ib] OperatorIbClient.fetch_accounts_snapshot: %s accounts",
+                len(accounts_list),
+            )
+            return accounts_list
+        except Exception as e:
+            self.last_error = str(e)
+            logger.warning(
+                "[monitor_ib] OperatorIbClient.fetch_accounts_snapshot failed: %s",
+                e,
+                exc_info=True,
+            )
+            return []
+

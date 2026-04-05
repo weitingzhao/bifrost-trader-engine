@@ -136,7 +136,7 @@ def get_status(request: Request) -> Dict[str, Any]:
         except Exception:
             payload["active_strategy_allocation_name"] = None
         try:
-            from src.ib_gateway.client import build_monitor_ib_status
+            from src.ib_operator.client import build_monitor_ib_status
 
             ib_cfg = payload.get("ib_config") or {}
             gw_status = build_monitor_ib_status(reader._config, ib_cfg if isinstance(ib_cfg, dict) else None)
@@ -306,8 +306,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "ib_port_type": "tws_paper",
                 "ib_client_id_daemon": 1,
                 "ib_client_id_listener": 2,
-                "ib_client_id_account": 100,
-                "ib_client_id_markets": 101,
+                "ib_client_id_operator": 100,
                 "ib_client_id_worker_market": 500,
                 "ib_client_id_ib_market_ingest": 150,
             },

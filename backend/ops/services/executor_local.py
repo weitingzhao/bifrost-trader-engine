@@ -29,8 +29,8 @@ def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
     stem = unit.replace(".service", "").strip()
     if "massive-ws" in stem or stem == "bifrost-massive-ws":
         return ("run_massive_ws.py", "massive-ws.log")
-    if "ib-gateway" in stem or stem == "bifrost-ib-gateway":
-        return ("run_ib_gateway.py", "ib-gateway.log")
+    if "ib-operator" in stem or stem == "bifrost-ib-operator":
+        return ("run_ib_operator.py", "ib-operator.log")
     if "ib-market-ingest" in stem or stem == "bifrost-ib-market-ingest":
         return ("run_ib_market_ingest.py", "ib-market-ingest.log")
     return None
@@ -253,7 +253,7 @@ class SubprocessLocalExecutor:
     Worker start spawns a detached child process; worker stop matches
     ``pgrep`` + ``SIGTERM`` (same idea as ``run_celery.py`` duplicate kill).
 
-    Market ingest units (``bifrost-massive-ws``, ``bifrost-ib-gateway``,
+    Market ingest units (``bifrost-massive-ws``, ``bifrost-ib-operator``,
     ``bifrost-ib-market-ingest``) start with ``scripts/run_*.py`` and the optional
     resolved YAML path (``--config`` or positional for gateway).
     """
@@ -383,7 +383,7 @@ class SubprocessLocalExecutor:
         if self._resolved_config_path is None:
             return
         cfg = str(self._resolved_config_path)
-        if script_name == "run_ib_gateway.py":
+        if script_name == "run_ib_operator.py":
             cmd.append(cfg)
         else:
             cmd.extend(["--config", cfg])
@@ -442,8 +442,8 @@ class SubprocessLocalExecutor:
         u = unit.replace(".service", "").strip()
         if "ib-market-ingest" in u:
             return "ib-market-ingest"
-        if "ib-gateway" in u:
-            return "ib-gateway"
+        if "ib-operator" in u:
+            return "ib-operator"
         if "massive-ws" in u:
             return "massive-ws"
         return None

@@ -7,21 +7,24 @@ postgres:
   user: "bifrost"
   password: "" # or PGPASSWORD env
 
+# IB Operator cmd RPC (scripts/run_ib_operator.py). Legacy key ib_gateway is still read with a deprecation warning.
+# ib_operator:
+#   enabled: true
+
 ib:
   connect_timeout: 60.0
   host:
     ip: "127.0.0.1"
-    # Account / ib_gateway Account client + primary API port (maps to 7496 live / 7497 paper / 4002 gateway).
+    # Primary API port (7496 live / 7497 paper / 4002 gateway). IB Operator uses this port + client_id.operator.
     port_type: "tws_live"
-    # Market data + ib_gateway Market client + run_ib_market_ingest (host IB only). Omit = same as port_type.
+    # IB market ingest (run_ib_market_ingest.py) may use a different port; omit = same as port_type.
     # port_type_market_data: "tws_paper"
     client_id:
       daemon: 110
       listener: 101
-      account: 120
-      markets: 130
+      operator: 120
       worker_market: 140
-      # Dedicated IB market ingest (scripts/run_ib_market_ingest.py); must not overlap gateway/daemon/Celery IDs.
+      # Dedicated IB market ingest (scripts/run_ib_market_ingest.py); must not overlap operator/daemon/Celery IDs.
       ib_market_ingest: 150
   secondary:
     ip: "127.0.0.1"
@@ -87,24 +90,24 @@ massive:
 # Ops control plane (run_server_ops.py): Celery systemd + optional market ingest services.
 # Whitelist stems for RestrictedExecutor (matches bifrost-celery-worker@*.service, redis, etc.).
 # On macOS, local_control: subprocess runs Celery via run_celery.py and WS Connector ingest via
-# scripts/run_massive_ws.py, run_ib_gateway.py, run_ib_market_ingest.py (GET /ops/health market_ingest_script_control).
+# scripts/run_massive_ws.py, run_ib_operator.py, run_ib_market_ingest.py (GET /ops/health market_ingest_script_control).
 # ops:
 #   local_control: subprocess
 #   allowed_units:
 #     - bifrost-celery-worker
 #     - bifrost-celery-beat
 #     - bifrost-massive-ws
-#     - bifrost-ib-gateway
+#     - bifrost-ib-operator
 #     - bifrost-ib-market-ingest
 #   market_ingest_services:
 #     - id: massive_ws
 #       label: "Massive Options WS ingest"
 #       systemd_unit: bifrost-massive-ws.service
 #       redis_meta_key: massive:meta:status
-#     - id: ib_gateway
-#       label: "IB Gateway (Stream)"
-#       systemd_unit: bifrost-ib-gateway.service
-#       redis_meta_key: bifrost:ib:gateway:health
+#     - id: ib_operator
+#       label: "IB Operator (cmd RPC)"
+#       systemd_unit: bifrost-ib-operator.service
+#       redis_meta_key: bifrost:ib:operator:health
 #     - id: ib_market
 #       label: "IB market ingest"
 #       systemd_unit: bifrost-ib-market-ingest.service

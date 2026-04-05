@@ -4,8 +4,7 @@ export const DEFAULT_HOST = '127.0.0.1'
 export const DEFAULT_PORT_TYPE = 'tws_paper'
 export const DEFAULT_DAEMON = 1
 export const DEFAULT_LISTENER = 2
-export const DEFAULT_REFRESH_EXECUTIONS = 100
-export const DEFAULT_BARS_FETCH = 101
+export const DEFAULT_IB_OPERATOR = 100
 export const DEFAULT_WORKER = 500
 export const DEFAULT_HEARTBEAT_SEC = 10
 

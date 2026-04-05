@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from backend.monitor.routers.deps import (
     DAEMON_LOG_STREAM_KEY,
     DOCS_LOG_STREAM_KEY,
-    IB_GATEWAY_LOG_STREAM_KEY,
+    IB_OPERATOR_LOG_STREAM_KEY,
     IB_MARKET_LOG_STREAM_KEY,
     MASSIVE_LOG_STREAM_KEY,
     MASSIVE_WS_LOG_STREAM_KEY,
@@ -144,33 +144,33 @@ def _massive_ws_log_reader_loop(app_ref) -> None:
         logger.warning("massive_ws_log_reader_loop exited: %s", e)
 
 
-def _ib_gateway_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:ib_gateway_console (run_ib_gateway.py)."""
+def _ib_operator_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD Redis stream bifrost:ib_operator_console (run_ib_operator.py)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
         last_id = "$"
         while True:
             try:
-                result = r.xread(block=5000, streams={IB_GATEWAY_LOG_STREAM_KEY: last_id}, count=100)
+                result = r.xread(block=5000, streams={IB_OPERATOR_LOG_STREAM_KEY: last_id}, count=100)
                 if not result:
                     continue
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
                         line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
-                        with app_ref.state.ib_gateway_log_lock:
-                            queues = list(app_ref.state.ib_gateway_log_queues)
-                        loop = getattr(app_ref.state, "_ib_gateway_log_loop", None)
+                        with app_ref.state.ib_operator_log_lock:
+                            queues = list(app_ref.state.ib_operator_log_queues)
+                        loop = getattr(app_ref.state, "_ib_operator_log_loop", None)
                         for q in queues:
                             if loop and not loop.is_closed():
                                 loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
             except redis.ConnectionError:
                 time.sleep(2)
             except Exception as e:
-                logger.debug("ib_gateway_log_reader_loop: %s", e)
+                logger.debug("ib_operator_log_reader_loop: %s", e)
     except Exception as e:
-        logger.warning("ib_gateway_log_reader_loop exited: %s", e)
+        logger.warning("ib_operator_log_reader_loop exited: %s", e)
 
 
 def _ib_market_log_reader_loop(app_ref) -> None:
@@ -680,43 +680,43 @@ async def get_massive_ws_logs_stream(request: Request):
     )
 
 
-# --- IB Gateway logs (scripts/run_ib_gateway.py → bifrost:ib_gateway_console) ---
+# --- IB Operator logs (scripts/run_ib_operator.py → bifrost:ib_operator_console) ---
 
 
-@router.get("/api/ib-gateway/logs")
-def get_ib_gateway_logs(
+@router.get("/api/ib-operator/logs")
+def get_ib_operator_logs(
     request: Request,
     tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
 ) -> Dict[str, Any]:
-    """Return last N lines from IB Gateway Redis stream."""
+    """Return last N lines from IB Operator Redis stream."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        raw = r.xrevrange(IB_GATEWAY_LOG_STREAM_KEY, count=tail)
+        raw = r.xrevrange(IB_OPERATOR_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
             line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
-        logger.warning("get_ib_gateway_logs failed: %s", e)
+        logger.warning("get_ib_operator_logs failed: %s", e)
         return {"lines": [], "error": str(e)}
 
 
-@router.delete("/api/ib-gateway/logs")
-def clear_ib_gateway_logs(request: Request) -> Dict[str, Any]:
+@router.delete("/api/ib-operator/logs")
+def clear_ib_operator_logs(request: Request) -> Dict[str, Any]:
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        r.delete(IB_GATEWAY_LOG_STREAM_KEY)
+        r.delete(IB_OPERATOR_LOG_STREAM_KEY)
         return {"ok": True}
     except Exception as e:
-        logger.warning("clear_ib_gateway_logs failed: %s", e)
+        logger.warning("clear_ib_operator_logs failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
-@router.post("/api/ib-gateway/logs/trim")
-def trim_ib_gateway_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+@router.post("/api/ib-operator/logs/trim")
+def trim_ib_operator_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
         max_lines = body.get("max_lines")
         if max_lines is None:
@@ -726,37 +726,37 @@ def trim_ib_gateway_logs(request: Request, body: Dict[str, Any] = Body(...)) -> 
             return {"ok": False, "error": "max_lines must be between 1 and 10000"}
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        r.xtrim(IB_GATEWAY_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        r.xtrim(IB_OPERATOR_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
         return {"ok": True}
     except Exception as e:
-        logger.warning("trim_ib_gateway_logs failed: %s", e)
+        logger.warning("trim_ib_operator_logs failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
-@router.get("/api/ib-gateway/logs/stream")
-async def get_ib_gateway_logs_stream(request: Request):
+@router.get("/api/ib-operator/logs/stream")
+async def get_ib_operator_logs_stream(request: Request):
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
         r.ping()
     except Exception as e:
-        logger.warning("ib_gateway_logs_stream check failed: %s", e)
+        logger.warning("ib_operator_logs_stream check failed: %s", e)
         return JSONResponse(status_code=503, content={"detail": str(e)})
 
     app = request.app
     queue: asyncio.Queue = asyncio.Queue(maxsize=512)
-    with app.state.ib_gateway_log_lock:
-        app.state.ib_gateway_log_queues.append(queue)
-        if app.state._ib_gateway_log_loop is None:
-            app.state._ib_gateway_log_loop = asyncio.get_running_loop()
-        if app.state._ib_gateway_log_thread is None or not app.state._ib_gateway_log_thread.is_alive():
-            app.state._ib_gateway_log_thread = threading.Thread(
-                target=_ib_gateway_log_reader_loop,
+    with app.state.ib_operator_log_lock:
+        app.state.ib_operator_log_queues.append(queue)
+        if app.state._ib_operator_log_loop is None:
+            app.state._ib_operator_log_loop = asyncio.get_running_loop()
+        if app.state._ib_operator_log_thread is None or not app.state._ib_operator_log_thread.is_alive():
+            app.state._ib_operator_log_thread = threading.Thread(
+                target=_ib_operator_log_reader_loop,
                 args=(app,),
-                name="ib-gateway-log-reader",
+                name="ib-operator-log-reader",
                 daemon=True,
             )
-            app.state._ib_gateway_log_thread.start()
+            app.state._ib_operator_log_thread.start()
 
     async def event_gen():
         try:
@@ -769,9 +769,9 @@ async def get_ib_gateway_logs_stream(request: Request):
         except asyncio.CancelledError:
             pass
         finally:
-            with app.state.ib_gateway_log_lock:
-                if queue in app.state.ib_gateway_log_queues:
-                    app.state.ib_gateway_log_queues.remove(queue)
+            with app.state.ib_operator_log_lock:
+                if queue in app.state.ib_operator_log_queues:
+                    app.state.ib_operator_log_queues.remove(queue)
 
     return StreamingResponse(
         event_gen(),
