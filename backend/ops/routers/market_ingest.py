@@ -1,15 +1,17 @@
-"""Market data ingest: systemd status + start/stop/restart (whitelisted units)."""
+"""Market data ingest: systemd status + start/stop/restart/reset (whitelisted units)."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
+from backend.ops.ib_gateway_rpc import ib_gateway_disconnect_all_sync
 from backend.ops.market_ingest_config import market_ingest_service_by_id, market_ingest_services_from_config
-from backend.ops.models.schemas import MarketIngestControlRequest
+from backend.ops.models.schemas import MarketIngestAction, MarketIngestControlRequest
 from backend.ops.routers.workers import _audit, _require_role
 
 logger = logging.getLogger(__name__)
@@ -76,8 +78,33 @@ async def market_ingest_control(
         )
     unit = svc["systemd_unit"]
     exc = _executor(request)
+    sid = svc["id"]
+    action = body.action
+
     try:
-        result = await exc._systemctl(body.action.value, unit)  # noqa: SLF001
+        if action == MarketIngestAction.RESET:
+            extra: Dict[str, Any] = {}
+            if sid == "ib_gateway":
+                ok_rpc, rpc_err, rpc_data = await asyncio.to_thread(
+                    ib_gateway_disconnect_all_sync,
+                    cfg,
+                )
+                extra["disconnect_all_rpc"] = {
+                    "ok": ok_rpc,
+                    "error": rpc_err,
+                    "result": rpc_data,
+                }
+                if not ok_rpc:
+                    logger.warning(
+                        "ib_gateway reset: disconnect_all RPC failed (%s); continuing with restart",
+                        rpc_err,
+                    )
+            # massive_ws / ib_market / ib_gateway: ordered release + restart via systemd.
+            result = await exc._systemctl("restart", unit)  # noqa: SLF001
+            if extra:
+                result = {**result, **extra} if isinstance(result, dict) else {"result": result, **extra}
+        else:
+            result = await exc._systemctl(action.value, unit)  # noqa: SLF001
     except Exception as e:
         _audit(
             request,

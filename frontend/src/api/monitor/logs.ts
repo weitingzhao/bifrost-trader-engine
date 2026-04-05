@@ -240,6 +240,92 @@ export function subscribeMassiveWsLogs(onLine: (line: string) => void, onError?:
   }
 }
 
+export async function fetchIbGatewayLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  const r = await fetch(`${apiBase()}/api/ib-gateway/logs?${params}`)
+  const j = await r.json().catch(() => ({ lines: [] }))
+  return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
+}
+
+export async function clearIbGatewayLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-gateway/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimIbGatewayLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-gateway/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export function subscribeIbGatewayLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${apiBase()}/api/ib-gateway/logs/stream`
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+export async function fetchIbMarketLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  const r = await fetch(`${apiBase()}/api/ib-market/logs?${params}`)
+  const j = await r.json().catch(() => ({ lines: [] }))
+  return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
+}
+
+export async function clearIbMarketLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-market/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimIbMarketLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-market/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export function subscribeIbMarketLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${apiBase()}/api/ib-market/logs/stream`
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
 export async function fetchDocsLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
   const r = await fetch(`${apiBase()}/api/docs/logs?${params}`)

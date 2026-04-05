@@ -159,12 +159,15 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
 
     host = str(h.get("ip") or "127.0.0.1").strip()
     ptp = str(h.get("port_type") or "tws_paper").strip().lower()
+    # Optional: market data / IB market ingest use this port (host IB only). Empty = same as port_type.
+    ptp_md = str(h.get("port_type_market_data") or "").strip().lower()
     ib2_h = str(s.get("ip") or "").strip()
     ib2_pt = str(s.get("port_type") or "tws_paper").strip().lower()
 
     return {
         "host": host,
         "port_type": ptp,
+        "port_type_market_data": ptp_md or None,
         "ib2_host": ib2_h or None,
         "ib2_port_type": ib2_pt,
         "connect_timeout": ib.get("connect_timeout"),
@@ -173,6 +176,7 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
         "client_id_account": int(hc.get("account") or 100),
         "client_id_markets": int(hc.get("markets") or 101),
         "client_id_worker_market": int(hc.get("worker_market") or 500),
+        "client_id_ib_market_ingest": int(hc.get("ib_market_ingest") or 150),
         "ib2_client_id_listener": int(sc.get("listener") or 3),
         "ib2_client_id_account": int(sc.get("account") or 102),
     }
@@ -188,7 +192,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
           host:
             ip: ...
             port_type: ...
-            client_id: { daemon, listener, account, markets, worker_market }
+            client_id: { daemon, listener, account, markets, worker_market, ib_market_ingest }
           secondary:  # optional second TWS
             ip: ...
             port_type: ...
@@ -199,6 +203,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
     Returns a dict with normalised keys consumed by daemon, server, and celery:
       host, port_type, port, connect_timeout,
       client_id_daemon, client_id_listener, client_id_account, client_id_markets, client_id_worker_market,
+      client_id_ib_market_ingest,
       ib2_host, ib2_port_type, ib2_port, ib2_client_id_listener, ib2_client_id_account.
     Also includes the ``ib_*`` prefixed aliases expected by the API / frontend (``ib_client_id_daemon`` etc.).
     """
@@ -212,30 +217,47 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         port_type = "tws_paper"
     port = IB_PORT_MAP[port_type]
 
+    ptm_raw = ib.get("port_type_market_data")
+    if ptm_raw:
+        ptm = str(ptm_raw).strip().lower()
+        if ptm not in IB_PORT_MAP:
+            ptm = port_type
+    else:
+        ptm = port_type
+    port_market_data = IB_PORT_MAP[ptm]
+
     cid_d = int(ib.get("client_id_daemon") or 1)
     cid_l = int(ib.get("client_id_listener") or 2)
     cid_a = int(ib.get("client_id_account") or 100)
     cid_m = int(ib.get("client_id_markets") or 101)
     cid_w = int(ib.get("client_id_worker_market") or 500)
+    cid_mi = int(ib.get("client_id_ib_market_ingest") or 150)
 
     out: Dict[str, Any] = {
         "host": host,
         "port_type": port_type,
         "port": port,
+        "port_type_market_data": ptm,
+        "port_market_data": port_market_data,
         "connect_timeout": float(ib.get("connect_timeout") or 60.0),
         "client_id_daemon": cid_d,
         "client_id_listener": cid_l,
         "client_id_account": cid_a,
         "client_id_markets": cid_m,
         "client_id_worker_market": cid_w,
+        "client_id_ib_market_ingest": cid_mi,
         # API / frontend aliases (ib_* prefix)
         "ib_host": host,
         "ib_port_type": port_type,
+        "ib_port": port,
+        "ib_port_type_market_data": ptm,
+        "ib_port_market_data": port_market_data,
         "ib_client_id_daemon": cid_d,
         "ib_client_id_listener": cid_l,
         "ib_client_id_account": cid_a,
         "ib_client_id_markets": cid_m,
         "ib_client_id_worker_market": cid_w,
+        "ib_client_id_ib_market_ingest": cid_mi,
     }
 
     # Second IB

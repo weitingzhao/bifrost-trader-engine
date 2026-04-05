@@ -14,7 +14,7 @@ import re
 import signal
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,18 @@ _SYSTEMD_TIMEOUT_SEC = 30
 _ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
 _WORKER_UNIT_BASE = "bifrost-celery-worker"
 _INSTANCE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
+    """Return (script_filename, log_filename) for market ingest units."""
+    stem = unit.replace(".service", "").strip()
+    if "massive-ws" in stem or stem == "bifrost-massive-ws":
+        return ("run_massive_ws.py", "massive-ws.log")
+    if "ib-gateway" in stem or stem == "bifrost-ib-gateway":
+        return ("run_ib_gateway.py", "ib-gateway.log")
+    if "ib-market-ingest" in stem or stem == "bifrost-ib-market-ingest":
+        return ("run_ib_market_ingest.py", "ib-market-ingest.log")
+    return None
 
 
 class RestrictedExecutor:
@@ -230,16 +242,20 @@ class RestrictedExecutor:
 
 
 class SubprocessLocalExecutor:
-    """Local executor without systemd: start/stop workers via ``scripts/run_celery.py``.
+    """Local executor without systemd: Celery via ``run_celery.py``; ingest via Massive/IB scripts.
 
     Use on macOS or any host where ``systemctl`` is unavailable. Same API as
-    :class:`RestrictedExecutor` for the Ops router (scale, list_instances).
+    :class:`RestrictedExecutor` for the Ops router (scale, list_instances, market ingest).
 
     Redis broker control still goes through :class:`RestrictedExecutor` (systemd),
     so ``systemctl_redis`` requires Linux + sudo like before.
 
     Worker start spawns a detached child process; worker stop matches
     ``pgrep`` + ``SIGTERM`` (same idea as ``run_celery.py`` duplicate kill).
+
+    Market ingest units (``bifrost-massive-ws``, ``bifrost-ib-gateway``,
+    ``bifrost-ib-market-ingest``) start with ``scripts/run_*.py`` and the optional
+    resolved YAML path (``--config`` or positional for gateway).
     """
 
     worker_to_unit = staticmethod(RestrictedExecutor.worker_to_unit)
@@ -252,9 +268,15 @@ class SubprocessLocalExecutor:
         use_redis_stop: bool,
         project_root: Path | str,
         python_executable: str | None = None,
+        resolved_config_path: str | Path | None = None,
     ) -> None:
         self._project_root = Path(project_root).resolve()
         self._python = python_executable or sys.executable
+        self._resolved_config_path: Optional[Path] = (
+            Path(resolved_config_path).resolve()
+            if resolved_config_path
+            else None
+        )
         self._systemd = RestrictedExecutor(
             allowed_units=allowed_units,
             broker_url=broker_url,
@@ -357,19 +379,311 @@ class SubprocessLocalExecutor:
             "message": f"SIGTERM sent to {killed}" if killed else "No PIDs killed",
         }
 
+    def _append_ingest_config_argv(self, cmd: List[str], script_name: str) -> None:
+        if self._resolved_config_path is None:
+            return
+        cfg = str(self._resolved_config_path)
+        if script_name == "run_ib_gateway.py":
+            cmd.append(cfg)
+        else:
+            cmd.extend(["--config", cfg])
+
+    def _cmd_looks_like_repo_ingest(self, cmd: str, script_name: str) -> bool:
+        """True if ``ps`` command line is this repo's ingest script (not other clones)."""
+        if script_name not in cmd:
+            return False
+        norm_cmd = cmd.replace("\\", "/")
+        norm_root = str(self._project_root.resolve()).replace("\\", "/")
+        if norm_root in norm_cmd:
+            return True
+        abs_script = str((self._project_root / "scripts" / script_name).resolve()).replace(
+            "\\", "/"
+        )
+        if abs_script in norm_cmd:
+            return True
+        if sys.platform == "darwin":
+            if norm_root.casefold() in norm_cmd.casefold():
+                return True
+            if abs_script.casefold() in norm_cmd.casefold():
+                return True
+        return False
+
+    async def _ingest_ps_command_lines(self) -> List[Tuple[str, str]]:
+        proc = await asyncio.create_subprocess_exec(
+            "ps", "axww", "-o", "pid=,command=",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=25)
+        rows: List[Tuple[str, str]] = []
+        for line in (stdout or b"").decode("utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) < 2 or not parts[0].isdigit():
+                continue
+            rows.append((parts[0], parts[1]))
+        return rows
+
+    async def _ps_command_for_pid(self, pid: int) -> Optional[str]:
+        proc = await asyncio.create_subprocess_exec(
+            "ps", "-p", str(pid), "-o", "command=",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        if proc.returncode != 0:
+            return None
+        t = (stdout or b"").decode("utf-8", errors="replace").strip()
+        return t or None
+
+    def _ingest_ops_pid_stem(self, unit: str) -> Optional[str]:
+        u = unit.replace(".service", "").strip()
+        if "ib-market-ingest" in u:
+            return "ib-market-ingest"
+        if "ib-gateway" in u:
+            return "ib-gateway"
+        if "massive-ws" in u:
+            return "massive-ws"
+        return None
+
+    def _ingest_ops_pid_path(self, unit: str) -> Optional[Path]:
+        stem = self._ingest_ops_pid_stem(unit)
+        if not stem:
+            return None
+        return self._project_root / "logs" / f".ops-ingest-{stem}.pid"
+
+    @staticmethod
+    def _pid_is_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    async def _ingest_subprocess_is_active(self, unit: str) -> str:
+        spec = _ingest_script_log_for_unit(unit)
+        if not spec:
+            return "unknown"
+        script_name, _ = spec
+        pp = self._ingest_ops_pid_path(unit)
+        if pp is not None and pp.is_file():
+            try:
+                raw = pp.read_text(encoding="utf-8").strip()
+                if raw.isdigit() and self._pid_is_alive(int(raw)):
+                    cmd_line = await self._ps_command_for_pid(int(raw))
+                    if cmd_line and self._cmd_looks_like_repo_ingest(cmd_line, script_name):
+                        return "active"
+                    pp.unlink(missing_ok=True)
+                else:
+                    pp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        matches = await self._ingest_matching_pids(script_name)
+        return "active" if matches else "inactive"
+
+    async def _ingest_matching_pids(self, script_name: str) -> List[str]:
+        rows = await self._ingest_ps_command_lines()
+        pids = [
+            pid
+            for pid, cmd in rows
+            if self._cmd_looks_like_repo_ingest(cmd, script_name)
+        ]
+        return pids
+
+    async def _start_ingest_unit(self, unit: str) -> Dict[str, Any]:
+        spec = _ingest_script_log_for_unit(unit)
+        if not spec:
+            raise ValueError(f"Not an ingest unit: {unit!r}")
+        script_name, log_name = spec
+        existing = await self._ingest_matching_pids(script_name)
+        if existing:
+            raise RuntimeError(
+                f"ingest_already_running: pids={existing} unit={unit!r} "
+                "(stop first or use restart)"
+            )
+        script = self._project_root / "scripts" / script_name
+        if not script.is_file():
+            raise RuntimeError(f"{script_name} not found at {script}")
+        cmd: List[str] = [self._python, str(script)]
+        self._append_ingest_config_argv(cmd, script_name)
+        log_dir = self._project_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / log_name
+        log_fp = open(log_file, "ab", buffering=0)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(self._project_root),
+                stdout=log_fp,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+                env=os.environ.copy(),
+            )
+        finally:
+            log_fp.close()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2.5)
+            tail = ""
+            if log_file.is_file():
+                try:
+                    with open(log_file, "rb") as lf:
+                        lf.seek(0, os.SEEK_END)
+                        sz = lf.tell()
+                        lf.seek(max(0, sz - 4000))
+                        tail = lf.read().decode("utf-8", errors="replace")
+                except OSError:
+                    tail = ""
+            raise RuntimeError(
+                f"Ingest exited immediately (rc={proc.returncode}). "
+                f"Log: {log_file}. Tail: {tail.strip() or '(empty)'}"
+            )
+        except asyncio.TimeoutError:
+            pass
+        pp = self._ingest_ops_pid_path(unit)
+        if pp is not None:
+            try:
+                pp.write_text(str(proc.pid), encoding="utf-8")
+            except OSError as e:
+                logger.warning("Could not write ops ingest pid file %s: %s", pp, e)
+        return {
+            "method": "subprocess",
+            "action": "start",
+            "unit": unit,
+            "pid": proc.pid,
+            "script": script_name,
+            "message": f"Ingest started in background ({script_name}).",
+        }
+
+    async def _stop_ingest_unit(self, unit: str) -> Dict[str, Any]:
+        spec = _ingest_script_log_for_unit(unit)
+        if not spec:
+            raise ValueError(f"Not an ingest unit: {unit!r}")
+        script_name, _ = spec
+        pp = self._ingest_ops_pid_path(unit)
+        from_file: List[str] = []
+        if pp is not None and pp.is_file():
+            try:
+                raw = pp.read_text(encoding="utf-8").strip()
+                if raw.isdigit() and self._pid_is_alive(int(raw)):
+                    cmd_line = await self._ps_command_for_pid(int(raw))
+                    if cmd_line and self._cmd_looks_like_repo_ingest(cmd_line, script_name):
+                        from_file.append(raw)
+            except OSError:
+                pass
+        from_ps = await self._ingest_matching_pids(script_name)
+        ordered: List[str] = []
+        seen: Set[str] = set()
+        for p in from_file + from_ps:
+            if p not in seen:
+                seen.add(p)
+                ordered.append(p)
+        if not ordered:
+            if pp is not None and pp.is_file():
+                try:
+                    pp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            return {
+                "method": "subprocess",
+                "action": "stop",
+                "unit": unit,
+                "message": "No matching ingest process (already stopped).",
+            }
+        killed: List[str] = []
+        for pid_str in ordered:
+            try:
+                pid = int(pid_str)
+            except ValueError:
+                continue
+            sent = False
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                sent = True
+            except OSError:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    sent = True
+                except (ProcessLookupError, PermissionError):
+                    pass
+            if sent:
+                killed.append(pid_str)
+        await asyncio.sleep(2.0)
+        lingering = await self._ingest_matching_pids(script_name)
+        sigkill_pids: List[str] = []
+        for pid_str in lingering:
+            try:
+                os.kill(int(pid_str), signal.SIGKILL)
+                sigkill_pids.append(pid_str)
+            except (ProcessLookupError, PermissionError, ValueError):
+                pass
+            except OSError:
+                pass
+        if pp is not None and pp.is_file():
+            try:
+                pp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        msg_parts = []
+        if killed:
+            msg_parts.append(f"SIGTERM {killed}")
+        if sigkill_pids:
+            msg_parts.append(f"SIGKILL {sigkill_pids}")
+        return {
+            "method": "subprocess",
+            "action": "stop",
+            "unit": unit,
+            "pids": killed,
+            "sigkill_pids": sigkill_pids,
+            "message": "; ".join(msg_parts) if msg_parts else "No PIDs killed",
+        }
+
+    async def _restart_ingest_unit(self, unit: str) -> Dict[str, Any]:
+        await self._stop_ingest_unit(unit)
+        await asyncio.sleep(1)
+        started = await self._start_ingest_unit(unit)
+        return {
+            "method": "subprocess",
+            "action": "restart",
+            "unit": unit,
+            "start": started,
+            "message": "Ingest stop + start completed.",
+        }
+
     async def _systemctl(
         self, action: str, unit: str, timeout: int = _SYSTEMD_TIMEOUT_SEC,
     ) -> Dict[str, Any]:
         if unit == "redis":
             return await self._systemd._systemctl(action, unit, timeout=timeout)  # noqa: SLF001
-        if action == "start":
-            return await self._start_worker_unit(unit)
-        if action == "stop":
-            return await self._stop_worker_unit(unit)
-        if action == "restart":
-            await self._stop_worker_unit(unit)
-            return await self._start_worker_unit(unit)
-        raise PermissionError(f"Action {action!r} not supported for subprocess worker control")
+        u = unit.strip()
+        if u.startswith(f"{_WORKER_UNIT_BASE}@") and u.endswith(".service"):
+            if action == "start":
+                return await self._start_worker_unit(u)
+            if action == "stop":
+                return await self._stop_worker_unit(u)
+            if action == "restart":
+                await self._stop_worker_unit(u)
+                return await self._start_worker_unit(u)
+            raise PermissionError(
+                f"Action {action!r} not supported for subprocess worker control"
+            )
+        if _ingest_script_log_for_unit(u) is not None:
+            if action == "start":
+                return await self._start_ingest_unit(u)
+            if action == "stop":
+                return await self._stop_ingest_unit(u)
+            if action == "restart":
+                return await self._restart_ingest_unit(u)
+            raise PermissionError(
+                f"Action {action!r} not supported for subprocess ingest control"
+            )
+        raise PermissionError(
+            f"Unit {unit!r} not supported in subprocess mode "
+            f"(use {_WORKER_UNIT_BASE}@… or ingest units)."
+        )
 
     async def list_instances(self) -> List[Dict[str, str]]:
         proc = await asyncio.create_subprocess_exec(
@@ -423,33 +737,8 @@ class SubprocessLocalExecutor:
                     act = (row.get("active") or "").lower()
                     return "active" if act == "active" else "inactive"
             return "inactive"
-        stem = u.replace(".service", "")
-        if "massive-ws" in stem or stem == "bifrost-massive-ws":
-            proc = await asyncio.create_subprocess_exec(
-                "pgrep", "-f", r"run_massive_ws\.py",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-            except Exception:
-                return "unknown"
-            if proc.returncode == 0 and (stdout or b"").strip():
-                return "active"
-            return "inactive"
-        if "ib-market-ingest" in stem or stem == "bifrost-ib-market-ingest":
-            proc = await asyncio.create_subprocess_exec(
-                "pgrep", "-f", r"run_ib_market_ingest\.py",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-            except Exception:
-                return "unknown"
-            if proc.returncode == 0 and (stdout or b"").strip():
-                return "active"
-            return "inactive"
+        if _ingest_script_log_for_unit(u) is not None:
+            return await self._ingest_subprocess_is_active(u)
         try:
             return await self._systemd.systemctl_is_active(u)
         except Exception:

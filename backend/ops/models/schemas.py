@@ -33,6 +33,14 @@ class BrokerAction(str, enum.Enum):
     RESTART = "restart"
 
 
+class MarketIngestAction(str, enum.Enum):
+    """Market ingest systemd control (includes ``reset`` — IB client release before restart)."""
+
+    START = "start"
+    STOP = "stop"
+    RESTART = "restart"
+    RESET = "reset"
+
 
 # ── Worker models ─────────────────────────────────────────────────────────────
 
@@ -72,7 +80,7 @@ class BrokerControlRequest(BaseModel):
 
 class MarketIngestControlRequest(BaseModel):
     service_id: str = Field(..., min_length=1)
-    action: BrokerAction
+    action: MarketIngestAction
 
 
 # ── Audit ─────────────────────────────────────────────────────────────────────

@@ -114,7 +114,7 @@ class BaseMonitorIbClient:
                 self.client_id,
             )
             self._connector = IBConnector(host=self.host, port=self.port, client_id=self.client_id)
-            ok = await self._connector.connect(max_attempts=10)
+            ok = await self._connector.connect(max_attempts=10, max_port_steps=5)
             if not ok:
                 self.last_error = "connect_failed"
                 self._connected_state = False

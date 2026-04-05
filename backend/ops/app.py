@@ -35,6 +35,10 @@ DEFAULT_OPS_PORT = 8768
 DEFAULT_ALLOWED_UNITS = [
     "bifrost-celery-worker",
     "bifrost-celery-beat",
+    # Market ingest (WS Connector); required for systemctl_is_active pgrep + whitelist on subprocess Mac.
+    "bifrost-massive-ws",
+    "bifrost-ib-gateway",
+    "bifrost-ib-market-ingest",
 ]
 
 
@@ -149,6 +153,7 @@ def create_ops_app(
             broker_url=broker_url,
             use_redis_stop=use_redis_stop,
             project_root=project_root,
+            resolved_config_path=resolved_config_path,
         )
         logger.info(
             "Executor mode: local subprocess (run_celery.py, project=%s)",
@@ -235,6 +240,9 @@ def create_ops_app(
         out["executor_mode"] = executor_mode
         if executor_mode == "local":
             out["local_control"] = local_control
+            out["market_ingest_script_control"] = local_control == "subprocess"
+        else:
+            out["market_ingest_script_control"] = False
         out["auth_required"] = app.state.ops_auth.has_tokens
         out["audit_mode"] = audit_store.stats().get("mode", "memory")
         return out

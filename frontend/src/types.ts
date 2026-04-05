@@ -2,6 +2,11 @@
 export interface IbConfig {
   ib_host?: string
   ib_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
+  /** Resolved TCP port for account / primary ib.host.port_type */
+  ib_port?: number
+  /** Market data port (ingest + gateway Market client); from ib.host.port_type_market_data or same as ib_port */
+  ib_port_market_data?: number
+  ib_port_type_market_data?: 'tws_live' | 'tws_paper' | 'gateway'
   /** Daemon: Trading (default 1) */
   ib_client_id_daemon?: number
   /** Daemon: Listener (default 2) */
@@ -12,6 +17,8 @@ export interface IbConfig {
   ib_client_id_markets?: number
   /** Celery: Market Data / worker_market (default 500) */
   ib_client_id_worker_market?: number
+  /** Standalone IB market ingest (scripts/run_ib_market_ingest.py); must not overlap other client IDs */
+  ib_client_id_ib_market_ingest?: number
   /** Host 账户 account_id（多账户时用于对冲与行情），R-A4 */
   ib_host_account_id?: string | null
   /** Live 页 Market Streams Host 账户 ID（Event Account），用于按账户分类/筛选 */
@@ -174,6 +181,13 @@ export interface StatusResponse {
     last_msg_age_s?: number | null
     ws_reconnects?: number
     last_snapshot_age_s?: number | null
+  } | null
+  /** IB market ingest from Redis ib:meta:status (GET /status). */
+  ib_market?: {
+    connected?: boolean
+    last_msg_age_s?: number | null
+    reconnects?: number | null
+    msg_count?: number | null
   } | null
 }
 

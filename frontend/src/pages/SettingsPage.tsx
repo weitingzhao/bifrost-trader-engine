@@ -235,7 +235,13 @@ export function SettingsPage({
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
     if (h && h.startsWith('settings-system')) return 'settings-system'
     if (h === 'settings-celery' || h === 'settings-dashboard-celery') return 'settings-celery'
-    if (h === 'settings-market-ingest') return 'settings-market-ingest'
+    if (
+      h === 'settings-market-ingest' ||
+      h === 'settings-ib-connector' ||
+      h === 'settings-ws-connector'
+    ) {
+      return 'settings-ws-connector'
+    }
     if (h && h.startsWith('settings-dashboard')) return 'settings-dashboard'
     if (h === 'settings-services-overview') return 'settings-api'
     if (h && h.startsWith('settings-api')) return 'settings-api'
@@ -451,7 +457,7 @@ export function SettingsPage({
   const isSystemSection = activeSectionId === 'settings-system'
   const isDashboardSection = activeSectionId === 'settings-dashboard'
   const isCeleryControlSection = activeSectionId === 'settings-celery'
-  const isMarketIngestSection = activeSectionId === 'settings-market-ingest'
+  const isWsConnectorSection = activeSectionId === 'settings-ws-connector'
   const isCoverageSection = activeSectionId === 'settings-coverage'
   const isFeedSection = activeSectionId === 'settings-feed'
 
@@ -542,13 +548,13 @@ export function SettingsPage({
           Celery
         </a>
         <a
-          href="#settings-market-ingest"
-          className={`settings-sidebar-link ${isMarketIngestSection ? 'active' : ''}`}
+          href="#settings-ws-connector"
+          className={`settings-sidebar-link ${isWsConnectorSection ? 'active' : ''}`}
         >
-          <span className="title-inline-lamp lamp-icon none" title="Market data ingest processes" aria-hidden>
+          <span className="title-inline-lamp lamp-icon none" title="Massive WebSocket and IB market data processes" aria-hidden>
             <SettingsSidebarLampGlyph id="websocket" />
           </span>
-          Market ingest
+          WS Connector
         </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
@@ -813,7 +819,7 @@ export function SettingsPage({
         <DashboardPage status={status} loadStatus={loadStatus} embeddedInSettings />
       ) : isCeleryControlSection ? (
         <CeleryControlPage embeddedInSettings celeryLamp={celeryLamp} />
-      ) : isMarketIngestSection ? (
+      ) : isWsConnectorSection ? (
         <MarketIngestOpsPage embeddedInSettings status={status} loadStatus={loadStatus} />
       ) : isApiSection ? (
         isApiOverviewMain ? (

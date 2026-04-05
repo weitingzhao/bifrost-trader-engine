@@ -274,7 +274,10 @@ export async function controlBroker(action: BrokerAction): Promise<{
   return parseJsonResponse(r)
 }
 
-// ── Market ingest (long-running WS / future IB ingest) ───────────────────────
+// ── WS Connector / market ingest services (Ops API; Settings → WS Connector) ─
+
+/** Market ingest only (includes ``reset`` for IB client release + restart). */
+export type MarketIngestAction = 'start' | 'stop' | 'restart' | 'reset'
 
 export interface MarketIngestServiceRow {
   id: string
@@ -295,7 +298,7 @@ export async function fetchMarketIngestServices(): Promise<{
 
 export async function controlMarketIngest(
   serviceId: string,
-  action: BrokerAction,
+  action: MarketIngestAction,
 ): Promise<{
   ok: boolean
   service_id?: string
@@ -346,6 +349,8 @@ export async function fetchOpsHealth(): Promise<{
   config_path?: string
   executor_mode?: string
   local_control?: string
+  /** True when local_control=subprocess and Ops can start/stop ingest via run_*.py (Mac dev). */
+  market_ingest_script_control?: boolean
 }> {
   const r = await fetch(`${opsBase()}/ops/health`, { headers: authHeaders() })
   return parseJsonResponse(r)

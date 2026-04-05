@@ -18,6 +18,7 @@ def test_host_secondary_blocks():
                     "account": 120,
                     "markets": 130,
                     "worker_market": 140,
+                    "ib_market_ingest": 150,
                 },
             },
             "secondary": {
@@ -38,6 +39,10 @@ def test_host_secondary_blocks():
     assert eff["client_id_account"] == 120
     assert eff["client_id_markets"] == 130
     assert eff["client_id_worker_market"] == 140
+    assert eff["client_id_ib_market_ingest"] == 150
+    assert eff["ib_client_id_ib_market_ingest"] == 150
+    assert eff["port_market_data"] == eff["port"]
+    assert eff["ib_port_market_data"] == eff["ib_port"]
     assert eff["ib2_host"] == "192.168.10.32"
     assert eff["ib2_client_id_listener"] == 11
     assert eff["ib2_client_id_account"] == 120
@@ -61,6 +66,7 @@ def test_omit_secondary():
     }
     eff = get_effective_ib_config(cfg)
     assert eff["ib2_host"] is None
+    assert eff["client_id_ib_market_ingest"] == 150
 
 
 def test_missing_ib_raises():

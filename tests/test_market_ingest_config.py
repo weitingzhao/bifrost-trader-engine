@@ -8,10 +8,14 @@ from backend.ops.market_ingest_config import (
 
 def test_default_services():
     rows = market_ingest_services_from_config({})
-    assert len(rows) >= 1
+    assert len(rows) == 3
     assert rows[0]["id"] == "massive_ws"
     assert rows[0]["systemd_unit"] == "bifrost-massive-ws.service"
     assert rows[0]["redis_meta_key"] == "massive:meta:status"
+    assert rows[1]["id"] == "ib_gateway"
+    assert rows[1]["systemd_unit"] == "bifrost-ib-gateway.service"
+    assert rows[1]["redis_meta_key"] == "bifrost:ib:gateway:health"
+    assert rows[2]["id"] == "ib_market"
 
 
 def test_custom_services_override():

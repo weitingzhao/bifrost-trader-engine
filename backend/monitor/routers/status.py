@@ -243,8 +243,37 @@ def get_status(request: Request) -> Dict[str, Any]:
                 massive_info["ws_connected"] = None
                 massive_info["last_msg_age_s"] = None
             payload["massive"] = massive_info
+
+            ib_market_info: Dict[str, Any] = {
+                "connected": False,
+                "last_msg_age_s": None,
+                "reconnects": None,
+                "msg_count": None,
+            }
+            if _rurl:
+                _ih = _r.hgetall("ib:meta:status")
+                if _ih:
+                    ib_market_info["connected"] = bool(_ih.get("connected") == "1")
+                    _lm = _ih.get("last_msg_ts")
+                    if _lm is not None:
+                        try:
+                            ib_market_info["last_msg_age_s"] = max(0.0, time.time() - float(_lm))
+                        except (TypeError, ValueError):
+                            ib_market_info["last_msg_age_s"] = None
+                    else:
+                        ib_market_info["last_msg_age_s"] = None
+                    try:
+                        ib_market_info["reconnects"] = int(_ih.get("reconnects") or 0)
+                    except (TypeError, ValueError):
+                        ib_market_info["reconnects"] = int(_ih.get("reconnects") or 0)
+                    try:
+                        ib_market_info["msg_count"] = int(_ih.get("msg_count") or 0)
+                    except (TypeError, ValueError):
+                        ib_market_info["msg_count"] = 0
+            payload["ib_market"] = ib_market_info
         except Exception:
             payload["massive"] = None
+            payload["ib_market"] = None
         dl = (payload.get("daemon_lamp") or "red").strip().lower()
         ml = (payload.get("monitor_lamp") or "red").strip().lower()
         sl = (payload.get("status_lamp") or "red").strip().lower()
@@ -280,6 +309,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "ib_client_id_account": 100,
                 "ib_client_id_markets": 101,
                 "ib_client_id_worker_market": 500,
+                "ib_client_id_ib_market_ingest": 150,
             },
             "flex_config": {"host_token": None, "secondary_token": None, "rows": []},
             "open_orders": [],
@@ -301,6 +331,8 @@ def get_status(request: Request) -> Dict[str, Any]:
             "celery_worker_ib_client_id": None,
             "celery_workers": [],
             "celery_worker_last_updated_ts": None,
+            "massive": None,
+            "ib_market": None,
             "system_lamp": "red",
         }
 

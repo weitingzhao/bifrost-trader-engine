@@ -37,16 +37,18 @@ logger = logging.getLogger(__name__)
 def _build_clients(config: Dict[str, Any]) -> IbGatewayExecutor:
     ib_cfg = get_effective_ib_config(config)
     host = ib_cfg["host"]
-    port = ib_cfg["port"]
+    # Account / Redis Stream RPC: primary port (ib.host.port_type). Market: host IB market data port.
+    port_account = int(ib_cfg["port"])
+    port_market = int(ib_cfg.get("port_market_data", port_account))
     account = AccountIbClient(
         host=host,
-        port=port,
+        port=port_account,
         client_id=ib_cfg["client_id_account"],
         name="IbGatewayAccount",
     )
     market = MarketIbClient(
         host=host,
-        port=port,
+        port=port_market,
         client_id=ib_cfg["client_id_markets"],
         name="IbGatewayMarket",
     )
@@ -141,6 +143,8 @@ def run_ib_gateway_loop(
     def should_stop() -> bool:
         return stop.is_set()
 
+    # SIGTERM sets stop; the loop may block up to ``block_ms`` in XREADGROUP before observing it.
+    # systemd TimeoutStopSec should exceed that (see deploy/systemd/bifrost-ib-gateway.service).
     while not should_stop():
         now = time.time()
         if now - last_health >= health_refresh:

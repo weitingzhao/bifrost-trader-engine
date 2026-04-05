@@ -94,7 +94,9 @@ class IBConnector:
 
     @staticmethod
     def _is_connection_refused(exc: Exception) -> bool:
-        if getattr(exc, "errno", None) == 111:
+        # Linux 111, macOS/BSD 61 = ECONNREFUSED; WinError 10061
+        en = getattr(exc, "errno", None)
+        if en in (111, 61, 10061):
             return True
         msg = (getattr(exc, "message", None) or str(exc)).lower()
         return "refus" in msg or "connection refused" in msg
@@ -125,140 +127,162 @@ class IBConnector:
             pass
         self._connected = False
 
-    async def connect(self, max_attempts: Optional[int] = None, bars_only: bool = False) -> bool:
+    async def connect(
+        self,
+        max_attempts: Optional[int] = None,
+        bars_only: bool = False,
+        max_port_steps: int = 1,
+    ) -> bool:
         """Connect to TWS/Gateway.
 
         When max_attempts is 1 (e.g. daemon heartbeat retry): try once with current client_id and return.
         When max_attempts is None or >1: try up to max_attempts (default 10) with client_id, client_id+1, ...
         so that "client_id in use" (326) can be worked around. No delay between attempts when >1.
+        When max_port_steps > 1: after connection refused (or unreachable) on a port, try self.port+1, ...
+        up to max_port_steps ports (e.g. TWS on 7497 vs 7496). Default 1 keeps prior behavior.
         When bars_only is True, do not register commissionReportEvent (used by bar fetch to avoid position/exec side effects).
         """
         if self.is_connected:
             return True
         base_id = self.client_id
+        base_port = int(self.port)
         limit = max_attempts if max_attempts is not None else 10
-        last_exc = None
+        last_exc: Optional[Exception] = None
         attempt_timeout = min(self.connect_timeout, self._CONNECT_ATTEMPT_TIMEOUT)
         wait_secs = int(attempt_timeout) + 5
-        for attempt in range(limit):
-            try_id = base_id + attempt
-            logger.info(
-                "IB connect attempt %s/%s (clientId=%s): may take up to %s–%ss%s",
-                attempt + 1,
-                limit,
-                try_id,
-                int(attempt_timeout),
-                wait_secs,
-                (
-                    " (single attempt per heartbeat)"
-                    if limit == 1
-                    else "; if client_id in use will retry with next ID"
-                ),
-            )
-            try:
-                logger.debug(
-                    "Connecting to IB %s:%s clientId=%s timeout=%.0fs",
-                    self.host,
-                    self.port,
+        steps = max(1, min(20, int(max_port_steps)))
+
+        for port_step in range(steps):
+            try_port = base_port + port_step
+            for attempt in range(limit):
+                try_id = base_id + attempt
+                logger.info(
+                    "IB connect port=%s (%s/%s) clientId=%s (%s/%s): up to %s–%ss%s",
+                    try_port,
+                    port_step + 1,
+                    steps,
                     try_id,
-                    attempt_timeout,
-                )
-                await asyncio.wait_for(
-                    self.ib.connectAsync(
-                        self.host,
-                        self.port,
-                        clientId=try_id,
-                        timeout=attempt_timeout,
+                    attempt + 1,
+                    limit,
+                    int(attempt_timeout),
+                    wait_secs,
+                    (
+                        " (single attempt per heartbeat)"
+                        if limit == 1
+                        else "; if client_id in use will retry with next ID"
                     ),
-                    timeout=attempt_timeout + 5.0,
                 )
-                self.client_id = try_id
-                self._connected = True
-                if try_id != base_id:
-                    logger.info(
-                        "Connected to IB %s:%s clientId=%s (base %s was in use)",
+                try:
+                    logger.debug(
+                        "Connecting to IB %s:%s clientId=%s timeout=%.0fs",
                         self.host,
-                        self.port,
+                        try_port,
                         try_id,
-                        base_id,
+                        attempt_timeout,
                     )
-                else:
-                    logger.info(
-                        "Connected to IB %s:%s clientId=%s",
-                        self.host,
-                        self.port,
-                        self.client_id,
+                    await asyncio.wait_for(
+                        self.ib.connectAsync(
+                            self.host,
+                            try_port,
+                            clientId=try_id,
+                            timeout=attempt_timeout,
+                        ),
+                        timeout=attempt_timeout + 5.0,
                     )
-                if not bars_only:
-                    self.ib.commissionReportEvent += self._on_commission_report
-                    self._commission_registered = True
-                return True
-            except Exception as e:
-                last_exc = e
-                if self.ib.isConnected():
-                    try:
-                        self.ib.disconnect()
-                    except Exception:
-                        pass
-                if attempt < limit - 1:
-                    logger.warning(
-                        "IB clientId=%s failed (%s), retrying with clientId=%s (next attempt may take up to %ss)",
-                        try_id,
-                        e,
-                        try_id + 1,
-                        wait_secs,
-                    )
-                else:
-                    if self._is_connection_refused(e) and try_id == base_id:
-                        try_id_retry = base_id + 1
-                        logger.warning(
-                            "IB connection refused (clientId=%s), retrying once with clientId=%s",
+                    self.port = try_port
+                    self.client_id = try_id
+                    self._connected = True
+                    if try_port != base_port:
+                        logger.info(
+                            "Connected to IB %s:%s clientId=%s (base port was %s)",
+                            self.host,
+                            try_port,
                             try_id,
-                            try_id_retry,
+                            base_port,
                         )
-                        try:
-                            await asyncio.wait_for(
-                                self.ib.connectAsync(
-                                    self.host,
-                                    self.port,
-                                    clientId=try_id_retry,
-                                    timeout=attempt_timeout,
-                                ),
-                                timeout=attempt_timeout + 5.0,
-                            )
-                            self.client_id = try_id_retry
-                            self._connected = True
-                            if not bars_only:
-                                self.ib.commissionReportEvent += self._on_commission_report
-                                self._commission_registered = True
-                            logger.info(
-                                "Connected to IB %s:%s clientId=%s (after refused retry)",
-                                self.host,
-                                self.port,
-                                self.client_id,
-                            )
-                            return True
-                        except Exception as retry_exc:
-                            last_exc = retry_exc
-                            logger.warning(
-                                "IB retry with clientId=%s failed: %s",
-                                try_id_retry,
-                                retry_exc,
-                            )
-                    if limit == 1:
-                        logger.debug(
-                            "IB connect attempt failed (will retry on next heartbeat): %s",
-                            last_exc,
+                    elif try_id != base_id:
+                        logger.info(
+                            "Connected to IB %s:%s clientId=%s (base %s was in use)",
+                            self.host,
+                            try_port,
+                            try_id,
+                            base_id,
                         )
                     else:
-                        logger.error(
-                            "IB connect failed after %s attempts: %s", limit, last_exc
+                        logger.info(
+                            "Connected to IB %s:%s clientId=%s",
+                            self.host,
+                            try_port,
+                            self.client_id,
                         )
-                    self._connected = False
-                    return False
+                    if not bars_only:
+                        self.ib.commissionReportEvent += self._on_commission_report
+                        self._commission_registered = True
+                    return True
+                except Exception as e:
+                    last_exc = e
+                    if self.ib.isConnected():
+                        try:
+                            self.ib.disconnect()
+                        except Exception:
+                            pass
+                    if self._is_connection_refused(e):
+                        if port_step < steps - 1:
+                            logger.warning(
+                                "IB connection refused on %s:%s (%s); trying port %s",
+                                self.host,
+                                try_port,
+                                e,
+                                try_port + 1,
+                            )
+                            break
+                        logger.error(
+                            "IB connection refused on %s:%s (%s)",
+                            self.host,
+                            try_port,
+                            e,
+                        )
+                        self._connected = False
+                        return False
+                    if attempt < limit - 1:
+                        logger.warning(
+                            "IB clientId=%s failed (%s), retrying with clientId=%s (next attempt may take up to %ss)",
+                            try_id,
+                            e,
+                            try_id + 1,
+                            wait_secs,
+                        )
+                    else:
+                        if (
+                            port_step < steps - 1
+                            and last_exc is not None
+                            and self._is_connection_refused(last_exc)
+                        ):
+                            logger.warning(
+                                "IB all client ids failed on %s:%s (%s); trying port %s",
+                                self.host,
+                                try_port,
+                                last_exc,
+                                try_port + 1,
+                            )
+                            break
+                        if limit == 1:
+                            logger.debug(
+                                "IB connect attempt failed (will retry on next heartbeat): %s",
+                                last_exc,
+                            )
+                        else:
+                            logger.error(
+                                "IB connect failed after %s port step(s) x %s client ids: %s",
+                                steps,
+                                limit,
+                                last_exc,
+                            )
+                        self._connected = False
+                        return False
         self._connected = False
         if last_exc:
-            logger.error("IB connect failed after %s attempts: %s", limit, last_exc)
+            logger.error("IB connect failed after %s port step(s): %s", steps, last_exc)
         return False
 
     async def disconnect(self) -> None:
