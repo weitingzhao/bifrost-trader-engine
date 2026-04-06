@@ -185,7 +185,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 #### 2.10.3 Ingest 运维（监控 / 启停 / 日志）
 
-- **Redis meta（逻辑健康）**：`massive:meta:status` 字段含 `connected`、`last_msg_ts`、`reconnects`、`msg_count`、`updated_at`（由 `scripts/run_massive_ws.py` 写入）；`GET /status` 的 `massive` 摘要供 UI 展示。
+- **Redis meta（逻辑健康）**：`bifrost:health:massive_ws`（原 `massive:meta:status`，Monitor 读时仍回退）字段含 `connected`、`last_msg_ts`、`reconnects`、`msg_count`、`updated_at`（由 `scripts/run_massive_ws.py` 写入）；IB ingestor / IB Operator 健康分别为 `bifrost:health:ib_ingestor`、`bifrost:health:ib_operator`；`GET /status` 的 `socket` 摘要供 UI 展示。
 - **日志**：ingest 进程将控制台日志写入 Redis Stream `bifrost:massive_ws_console`；Monitor 提供 `GET /api/massive-ws/logs` 与 SSE `/api/massive-ws/logs/stream`。
 - **进程控制**：Ops `GET /ops/market-ingest/services`、`POST /ops/market-ingest/control`（需 **operator**，与 `POST /ops/workers/scale` 同级；Redis broker 启停等仍为 admin）；`systemd` unit 须列入 `ops.allowed_units`。示例 unit：`deploy/systemd/bifrost-massive-ws.service`。注册表默认见 `ops.market_ingest_services`（示例见 `config/config.dev.yaml.example`）。
 - **跨机**：Ops 与 ingest 不同机时，使用 `executor_mode=agent`，在 ingest 机运行 Local Control Agent；新增 unit 时同步扩展 `backend/ops/agent/protocol.py` 中的 `ALLOWED_UNIT_PATTERNS`。

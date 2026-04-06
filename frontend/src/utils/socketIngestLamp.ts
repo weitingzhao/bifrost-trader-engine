@@ -85,7 +85,7 @@ export function ingestRedisHealthLamp(
     if (m.ws_connected === true) {
       return {
         lamp: 'green',
-        title: 'Massive WS ingest healthy (Redis massive:meta:status, connected).',
+        title: 'Massive WS ingest healthy (Redis bifrost:health:massive_ws, connected).',
       }
     }
     if (m.ws_connected === null || m.ws_connected === undefined) {
@@ -94,7 +94,7 @@ export function ingestRedisHealthLamp(
         title: 'Massive WS not reported (no Redis URL or empty meta in /status).',
       }
     }
-    return { lamp: 'red', title: 'Massive WS not connected (Redis massive:meta:status).' }
+    return { lamp: 'red', title: 'Massive WS not connected (Redis bifrost:health:massive_ws).' }
   }
   if (id === 'ib_ingestor') {
     const ib = status.socket?.ib_ingestor
@@ -104,10 +104,10 @@ export function ingestRedisHealthLamp(
     if (ib.connected === true) {
       return {
         lamp: 'green',
-        title: 'IB ingestor healthy (Redis ib:ingester:meta:health, connected).',
+        title: 'IB ingestor healthy (Redis bifrost:health:ib_ingestor, connected).',
       }
     }
-    return { lamp: 'red', title: 'IB ingestor not connected (Redis ib:ingester:meta:health).' }
+    return { lamp: 'red', title: 'IB ingestor not connected (Redis bifrost:health:ib_ingestor).' }
   }
   if (id === 'ib_operator') {
     const mon = status.socket?.ib_operator
@@ -121,10 +121,10 @@ export function ingestRedisHealthLamp(
     if (op?.connected === true) {
       return {
         lamp: 'green',
-        title: 'IB Operator healthy (Redis ib:operator:meta:health, host slot).',
+        title: 'IB Operator healthy (Redis bifrost:health:ib_operator, host slot).',
       }
     }
-    return { lamp: 'red', title: 'IB Operator not connected (Redis host slot).' }
+    return { lamp: 'red', title: 'IB Operator not connected (Redis bifrost:health:ib_operator, host slot).' }
   }
   return { lamp: 'gray', title: 'Unknown ingest service id for Redis health.' }
 }

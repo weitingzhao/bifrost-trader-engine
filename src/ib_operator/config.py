@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from src.bifrost.redis_health_keys import BIFROST_HEALTH_IB_OPERATOR
 from src.core.redis_url import format_redis_url, redis_url_from_config, effective_redis_dict
 
 logger = logging.getLogger(__name__)
@@ -42,8 +43,8 @@ def effective_ib_operator_settings(config: Dict[str, Any]) -> Dict[str, Any]:
         "consumer_group": (raw.get("consumer_group") or "ib-operator").strip() or "ib-operator",
         "result_prefix": (raw.get("result_prefix") or "ib:operator:result:").strip()
         or "ib:operator:result:",
-        "health_key": (raw.get("health_key") or "ib:operator:meta:health").strip()
-        or "ib:operator:meta:health",
+        "health_key": (raw.get("health_key") or BIFROST_HEALTH_IB_OPERATOR).strip()
+        or BIFROST_HEALTH_IB_OPERATOR,
         "result_ttl_sec": int(raw.get("result_ttl_sec") or 300),
         "request_timeout_sec": float(raw.get("request_timeout_sec") or 120),
         "health_refresh_sec": float(raw.get("health_refresh_sec") or 15),

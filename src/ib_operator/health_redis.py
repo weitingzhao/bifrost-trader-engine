@@ -1,4 +1,4 @@
-"""IB Operator health in Redis as a Hash (same style as ib:ingester:meta:health: string fields, HSET)."""
+"""IB Operator health in Redis as a Hash (same field style as bifrost:health:ib_ingestor: string fields, HSET)."""
 
 from __future__ import annotations
 

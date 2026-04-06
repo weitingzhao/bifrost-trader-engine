@@ -895,8 +895,10 @@ def get_massive_daily_checklist_data(
         if rurl:
             import redis
 
+            from src.bifrost.redis_health_keys import hgetall_massive_ws_status
+
             r = redis.from_url(rurl, decode_responses=True)
-            h = r.hgetall("massive:meta:status")
+            h = hgetall_massive_ws_status(r)
             if h:
                 connected = h.get("connected") == "1"
                 lm = h.get("last_msg_ts")

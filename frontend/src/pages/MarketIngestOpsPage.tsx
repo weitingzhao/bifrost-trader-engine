@@ -72,46 +72,95 @@ function categoryForServiceId(id: string): IngestCategory {
   return 'Other'
 }
 
+/** One IB Client ID line under Socket Services (ingest: single row; IB Operator: Host + optional Sec). */
+type IbClientIdSlot = { label?: string; id: number | null; title: string }
+
 /**
- * Client ID for IB ingest rows (only called when `ingestProcessRunningForIbClientId` is true).
- * ib_ingestor: live Monitor /status when present, else YAML; ib_operator: YAML.
+ * Client IDs for IB ingest rows (only called when `ibIngestClientIdShouldShow` is true).
+ * ib_ingestor: live Monitor /status when present, else YAML.
+ * ib_operator: Host + Secondary when configured or present in /status; prefer live socket.ib_operator.*.client_id.
  */
-function ibIngestClientIdDisplay(
+function ibIngestClientIdSlots(
   svcId: string,
   category: IngestCategory,
   status: StatusResponse | null,
-): { id: number; title: string } | null {
-  if (category !== 'IB') return null
+): IbClientIdSlot[] {
+  if (category !== 'IB') return []
   const cfg = status?.config?.ib_client
   if (svcId === 'ib_ingestor' || svcId === 'ib_market') {
     const run = status?.socket?.ib_ingestor?.client_id
     if (run != null && Number.isFinite(Number(run))) {
-      return {
-        id: Number(run),
-        title: 'Client ID used by the live IB ingestor connection (Monitor GET /status).',
-      }
+      return [
+        {
+          id: Number(run),
+          title: 'Client ID used by the live IB ingestor connection (Monitor GET /status).',
+        },
+      ]
     }
     const c = cfg?.port?.ingestor
     if (c != null && Number.isFinite(Number(c))) {
-      return {
-        id: Number(c),
-        title:
-          'Client ID from config (YAML ib.host.client_id.ingestor) for IB ingestor. Live connection not reporting an ID yet.',
-      }
+      return [
+        {
+          id: Number(c),
+          title:
+            'Client ID from config (YAML ib.host.client_id.ingestor) for IB ingestor. Live connection not reporting an ID yet.',
+        },
+      ]
     }
-    return null
+    return []
   }
   if (svcId === 'ib_operator') {
-    const c = cfg?.port?.operator_host
-    if (c != null && Number.isFinite(Number(c))) {
-      return {
-        id: Number(c),
-        title: 'Client ID from config (YAML ib.host.client_id.operator) for IB Operator cmd RPC.',
+    const op = status?.socket?.ib_operator
+    const slots: IbClientIdSlot[] = []
+    const hostRun = op?.host?.client_id
+    const hostCfg = cfg?.port?.operator_host
+    if (hostRun != null && Number.isFinite(Number(hostRun))) {
+      slots.push({
+        label: 'Host',
+        id: Number(hostRun),
+        title:
+          'Client ID used by the live IB Operator Host connection (Monitor GET /status socket.ib_operator.host).',
+      })
+    } else if (hostCfg != null && Number.isFinite(Number(hostCfg))) {
+      slots.push({
+        label: 'Host',
+        id: Number(hostCfg),
+        title:
+          'Client ID from config (YAML ib.host.client_id.operator) for IB Operator cmd RPC. Live Host slot not reporting an ID yet.',
+      })
+    }
+    const secConfigured =
+      cfg?.port?.operator_secondary != null && Number.isFinite(Number(cfg.port.operator_secondary))
+    const secSlotPresent = op?.secondary !== undefined
+    if (secConfigured || secSlotPresent) {
+      const secRun = op?.secondary?.client_id
+      const secCfg = cfg?.port?.operator_secondary
+      if (secRun != null && Number.isFinite(Number(secRun))) {
+        slots.push({
+          label: 'Sec',
+          id: Number(secRun),
+          title:
+            'Client ID used by the live IB Operator Secondary connection (Monitor GET /status socket.ib_operator.secondary).',
+        })
+      } else if (secCfg != null && Number.isFinite(Number(secCfg))) {
+        slots.push({
+          label: 'Sec',
+          id: Number(secCfg),
+          title:
+            'Client ID from config (merged YAML ib2_client_id_operator / operator_secondary) for IB Operator Secondary. Live Secondary slot not reporting an ID yet.',
+        })
+      } else {
+        slots.push({
+          label: 'Sec',
+          id: null,
+          title:
+            'Secondary IB Operator slot is present in Monitor /status or expected from config, but client_id is not available yet.',
+        })
       }
     }
-    return null
+    return slots
   }
-  return null
+  return []
 }
 
 /** Which primary control buttons to show for the reported systemd/Ops process state. */
@@ -153,7 +202,10 @@ function ibIngestClientIdShouldShow(
   if (ingestProcessRunningForIbClientId(processActive)) return true
   const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
   if (sid === 'ib_ingestor') return status?.socket?.ib_ingestor?.connected === true
-  if (sid === 'ib_operator') return status?.socket?.ib_operator?.host?.connected === true
+  if (sid === 'ib_operator') {
+    const ibOp = status?.socket?.ib_operator
+    return ibOp?.host?.connected === true || ibOp?.secondary?.connected === true
+  }
   return false
 }
 
@@ -289,7 +341,7 @@ function ServiceRow(props: {
   const statusTitle = redisHealth.title
   const { showStart, showStop } = ingestActionButtonsForProcessState(svc.process_active)
   const showIbClientId = ibIngestClientIdShouldShow(svc.id, category, svc.process_active, status)
-  const ibClient = showIbClientId ? ibIngestClientIdDisplay(svc.id, category, status) : null
+  const ibClientSlots = showIbClientId ? ibIngestClientIdSlots(svc.id, category, status) : []
   const actionsDisabled = actionBlock !== 'none'
   return (
     <tr>
@@ -310,14 +362,33 @@ function ServiceRow(props: {
         {showIbClientId ? (
           <div className="socket-ib-client-id-wrap">
             <span className="massive-api-doc-hint">IB Client ID</span>
-            {ibClient ? (
-              <span className="socket-ib-client-id-badge" title={ibClient.title} aria-label={ibClient.title}>
-                {ibClient.id}
-              </span>
-            ) : (
+            {ibClientSlots.length === 0 ? (
               <span className="massive-api-doc-hint" title="Not available from Monitor /status or ib_client.">
                 —
               </span>
+            ) : (
+              ibClientSlots.map((slot, i) => (
+                <span
+                  key={`${slot.label ?? 'ingest'}-${i}`}
+                  className="socket-ib-client-id-slot"
+                  style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}
+                >
+                  {slot.label ? (
+                    <span className="massive-api-doc-hint" style={{ margin: 0 }}>
+                      {slot.label}
+                    </span>
+                  ) : null}
+                  {slot.id != null ? (
+                    <span className="socket-ib-client-id-badge" title={slot.title} aria-label={slot.title}>
+                      {slot.id}
+                    </span>
+                  ) : (
+                    <span className="massive-api-doc-hint" title={slot.title} aria-label={slot.title}>
+                      —
+                    </span>
+                  )}
+                </span>
+              ))
             )}
           </div>
         ) : null}
@@ -758,7 +829,7 @@ export function MarketIngestOpsPage({
                 <SettingsSidebarLampGlyph id="websocket" />
               </span>
               <span>Socket Services</span>
-              <InfoTooltip text="Roll-up of ingest units from Monitor GET /status `socket` Redis health (Massive meta, IB ingestor hash, IB Operator in socket.ib_operator.host): green when that service reports connected in Redis, red when not, gray when unknown. Same data whether ingest runs on this host or only on another stack. Local systemd state is for Start/Stop only. Not Local Control Agent health." />
+              <InfoTooltip text="Roll-up of ingest units from Monitor GET /status `socket` Redis health (Massive meta, IB ingestor hash, IB Operator in socket.ib_operator host and optional secondary): green when that service reports connected in Redis, red when not, gray when unknown. Same data whether ingest runs on this host or only on another stack. Local systemd state is for Start/Stop only. Not Local Control Agent health." />
             </span>
           </h2>
           <p className="settings-page-subtitle">

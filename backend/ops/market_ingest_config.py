@@ -9,19 +9,19 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
         "id": "massive_ws",
         "label": "Massive Options WS ingest",
         "systemd_unit": "bifrost-massive-ws.service",
-        "redis_meta_key": "massive:meta:status",
+        "redis_meta_key": "bifrost:health:massive_ws",
     },
     {
         "id": "ib_operator",
         "label": "IB Operator (cmd RPC)",
         "systemd_unit": "bifrost-ib-operator.service",
-        "redis_meta_key": "ib:operator:meta:health",
+        "redis_meta_key": "bifrost:health:ib_operator",
     },
     {
         "id": "ib_ingestor",
         "label": "IB ingestor",
         "systemd_unit": "bifrost-ib-ingestor.service",
-        "redis_meta_key": "ib:ingester:meta:health",
+        "redis_meta_key": "bifrost:health:ib_ingestor",
     },
 ]
 

@@ -15,8 +15,8 @@ from src.monitor.reader.ib_config_public import (
     ib_flex_for_status_api,
     ib_flex_public_defaults,
 )
-from src.monitor.self_check import derive_daemon_self_check, derive_self_check
-from src.vendor.ib_ingestor.redis_keys import IB_INGESTER_META_HEALTH
+from src.monitor.self_check import derive_daemon_self_check, derive_health_roll_up
+from src.bifrost.redis_health_keys import hgetall_ib_ingestor_health, hgetall_massive_ws_status
 
 logger = logging.getLogger(__name__)
 
@@ -146,12 +146,10 @@ def _assemble_status_v3(
     massive: Any,
     ib_ingestor: Any,
 ) -> Dict[str, Any]:
-    dl = (daemon_lamp or "red").strip().lower()
-    ml = (monitor_lamp or "red").strip().lower()
     sl = (health_status_lamp or "red").strip().lower()
-    if dl == "red" or ml == "red" or sl == "red":
+    if sl == "red":
         system_lamp = "red"
-    elif dl == "yellow" or ml == "yellow" or sl == "yellow":
+    elif sl == "yellow":
         system_lamp = "yellow"
     else:
         system_lamp = "green"
@@ -232,9 +230,7 @@ def get_status(request: Request) -> Dict[str, Any]:
     try:
         status_current_row = reader.get_status_current()
         run_suspended = reader.get_run_status()
-        sc = derive_self_check(
-            status_current_row, data_lag_threshold_ms, trading_suspended=run_suspended
-        )
+        ts_flag = run_suspended if run_suspended is not None else False
         hb = reader.get_daemon_heartbeat()
         daemon_heartbeat: Optional[Dict[str, Any]] = None
         if hb is not None:
@@ -264,7 +260,12 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "event_subscribe_commission_ib2": hb.get("event_subscribe_commission_ib2", False),
                 "last_control_message": hb.get("last_control_message"),
             }
-            dsc = derive_daemon_self_check(daemon_heartbeat)
+            dsc = derive_daemon_self_check(
+                daemon_heartbeat,
+                auto_status_row=status_current_row,
+                data_lag_threshold_ms=data_lag_threshold_ms,
+                trading_suspended=ts_flag,
+            )
         else:
             dsc = derive_daemon_self_check(None)
         daemon_self_check = dsc["daemon_self_check"]
@@ -421,7 +422,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                 import redis as redis_mod
 
                 _r = redis_mod.from_url(_rurl, decode_responses=True)
-                _mh = _r.hgetall("massive:meta:status")
+                _mh = hgetall_massive_ws_status(_r)
                 if _mh:
                     massive_info["ws_connected"] = bool(_mh.get("connected") == "1")
                     _lm = _mh.get("last_msg_ts")
@@ -454,7 +455,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "client_id": None,
             }
             if _rurl:
-                _ih = _r.hgetall(IB_INGESTER_META_HEALTH)
+                _ih = hgetall_ib_ingestor_health(_r)
                 if _ih:
                     ib_ingestor_info["connected"] = bool(_ih.get("connected") == "1")
                     _lm = _ih.get("last_msg_ts")
@@ -486,11 +487,23 @@ def get_status(request: Request) -> Dict[str, Any]:
             massive = None
             ib_ingestor = None
 
+        hc = derive_health_roll_up(
+            daemon_lamp=daemon_lamp,
+            daemon_block_reasons=daemon_block_reasons,
+            monitor_lamp=monitor_lamp,
+            monitor_block_reasons=monitor_block_reasons,
+            massive=massive,
+            ib_ingestor=ib_ingestor,
+            quotes_redis_reader_ok=quotes_redis_reader_ok,
+            celery_broker_connected=celery_broker_connected,
+            celery_workers=celery_workers,
+        )
+
         payload = _assemble_status_v3(
-            health_self_check=sc["self_check"],
-            health_block_reasons=sc["block_reasons"],
-            health_status_lamp=sc["status_lamp"],
-            trading_suspended=run_suspended if run_suspended is not None else False,
+            health_self_check=hc["self_check"],
+            health_block_reasons=hc["block_reasons"],
+            health_status_lamp=hc["status_lamp"],
+            trading_suspended=ts_flag,
             daemon_heartbeat=daemon_heartbeat,
             daemon_self_check=daemon_self_check,
             daemon_lamp=daemon_lamp,

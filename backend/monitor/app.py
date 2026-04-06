@@ -24,7 +24,7 @@ from src.connector.flex_client import fetch_cash_transactions, fetch_trades
 from src.ib_operator.client import IbOperatorClient
 from src.monitor.reader import StatusReader
 from src.connector.flex_client import parse_trades_xml
-from src.monitor.self_check import derive_daemon_self_check, derive_self_check
+from src.monitor.self_check import derive_daemon_self_check
 
 logger = logging.getLogger(__name__)
 

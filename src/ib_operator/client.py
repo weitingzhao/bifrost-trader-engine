@@ -129,22 +129,33 @@ class IbOperatorClient:
 
 def read_operator_health(redis_url: str, health_key: str) -> Optional[Dict[str, Any]]:
     """Read operator health: Redis Hash (ingest-style string fields) or legacy JSON string value."""
+    from src.bifrost.redis_health_keys import (
+        BIFROST_HEALTH_IB_OPERATOR,
+        LEGACY_IB_OPERATOR_META_HEALTH,
+    )
+
+    def _read_at_key(r: Any, key: str) -> Optional[Dict[str, Any]]:
+        kt = r.type(key)
+        if kt == "none":
+            return None
+        if kt == "hash":
+            raw_map = r.hgetall(key)
+            return operator_health_dict_from_redis_hash(raw_map or {})
+        if kt == "string":
+            raw = r.get(key)
+            if not raw:
+                return None
+            loaded = json.loads(raw)
+            return loaded if isinstance(loaded, dict) else None
+        return None
+
     try:
         r = redis.from_url(redis_url, decode_responses=True)
         try:
-            kt = r.type(health_key)
-            if kt == "none":
-                return None
-            if kt == "hash":
-                raw_map = r.hgetall(health_key)
-                return operator_health_dict_from_redis_hash(raw_map or {})
-            if kt == "string":
-                raw = r.get(health_key)
-                if not raw:
-                    return None
-                loaded = json.loads(raw)
-                return loaded if isinstance(loaded, dict) else None
-            return None
+            out = _read_at_key(r, health_key)
+            if out is None and health_key == BIFROST_HEALTH_IB_OPERATOR:
+                out = _read_at_key(r, LEGACY_IB_OPERATOR_META_HEALTH)
+            return out
         finally:
             r.close()
     except Exception:

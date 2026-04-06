@@ -528,7 +528,7 @@ export default function App() {
   }, [loadStatus])
 
   const j = status
-  // System status lamp: green only when daemon/monitor/status all green; otherwise worst of the three
+  // System lamp: GET /status lamps.system_lamp (server health roll-up); fallback to daemon/monitor/celery
   const dl = (j?.daemon?.lamp as 'green' | 'yellow' | 'red') || 'red'
   const ml = (j?.monitor?.lamp as 'green' | 'yellow' | 'red') || 'red'
   // Strategy tab lamp = Trading Strategy status (same as System → Daemon Event → Trading Strategy)
@@ -539,6 +539,8 @@ export default function App() {
     celeryRuntimeLampOverride ?? celeryMetricsFromStatus(status).celeryLamp
   const cl = celeryLamp as 'green' | 'yellow' | 'red'
   const systemLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
+    const api = j?.lamps?.system_lamp
+    if (api === 'green' || api === 'yellow' || api === 'red') return api
     if (dl === 'red' || ml === 'red' || cl === 'red') return 'red'
     if (dl === 'yellow' || ml === 'yellow' || cl === 'yellow') return 'yellow'
     return dl === 'green' && ml === 'green' && cl === 'green' ? 'green' : 'none'

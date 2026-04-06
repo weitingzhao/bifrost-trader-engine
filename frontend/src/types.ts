@@ -115,7 +115,7 @@ export interface IbAccountSnapshot {
 
 export type StatusLamp = 'green' | 'yellow' | 'red'
 
-/** GET /status: derive_self_check roll-up (trading row + data lag); not daemon-specific. */
+/** GET /status health: server roll-up (daemon + socket/quotes + Celery + monitor lamps). */
 export interface StatusHealth {
   self_check?: string
   block_reasons?: string[]
@@ -123,7 +123,7 @@ export interface StatusHealth {
 }
 
 export interface StatusLamps {
-  /** Roll-up: worst of daemon / monitor / health.status_lamp */
+  /** Mirrors health.status_lamp — system roll-up computed on Monitor. */
   system_lamp?: StatusLamp
 }
 

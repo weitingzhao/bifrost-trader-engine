@@ -5,7 +5,7 @@ Connects to the Massive Options WS, dynamically subscribes to channels for
 Watchlist symbols, writes latest quotes to Redis, samples 1-minute bars to
 PostgreSQL (option_snapshots), and publishes update notifications.
 
-Architecture reference: docs/ARCHITECTURE.md §2.10.2 (WebSocket ingest behavior)
+Architecture reference: docs/ARCHITECTURE.md (WebSocket ingest); health hash ``bifrost:health:massive_ws``.
 
 Usage
 ─────
@@ -32,6 +32,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))
+
+from src.bifrost.redis_health_keys import BIFROST_HEALTH_MASSIVE_WS
 
 from backend.monitor.routers.deps import MASSIVE_WS_LOG_STREAM_KEY
 from src.core.logging_redis_stream import RedisStreamLogHandler
@@ -113,7 +115,7 @@ def _setup_logging(level: int, config_path: str | None) -> None:
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 REDIS_KEY_PREFIX = "massive:"
-REDIS_META_STATUS = "massive:meta:status"
+REDIS_META_STATUS = BIFROST_HEALTH_MASSIVE_WS
 REDIS_META_SUBS = "massive:meta:subscriptions"
 REDIS_PUB_CHANNEL = "massive:channel"
 REDIS_KEY_TTL = 300

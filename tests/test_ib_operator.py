@@ -79,7 +79,7 @@ def test_effective_ib_operator_settings_redis_key_defaults() -> None:
     s = effective_ib_operator_settings(cfg)
     assert s["stream"] == "ib:operator:cmd"
     assert s["result_prefix"] == "ib:operator:result:"
-    assert s["health_key"] == "ib:operator:meta:health"
+    assert s["health_key"] == "bifrost:health:ib_operator"
 
 
 def test_operator_health_hash_roundtrip_no_secondary() -> None:
@@ -222,7 +222,7 @@ def test_ensure_stream_and_group_busygroup_ignored() -> None:
 
 
 def test_write_health_sync_does_not_delete_hash() -> None:
-    """Ops stores bifrost_ops_control_env on ib:operator:meta:health; health refresh must merge."""
+    """Ops stores bifrost_ops_control_env on the operator health hash; health refresh must merge (no DELETE)."""
     from src.ib_operator.service import _write_health_sync
 
     primary = MagicMock()
@@ -231,7 +231,7 @@ def test_write_health_sync_does_not_delete_hash() -> None:
     pipe = MagicMock()
     r = MagicMock()
     r.pipeline.return_value = pipe
-    _write_health_sync(r, ex, "ib:operator:meta:health", 60)
+    _write_health_sync(r, ex, "bifrost:health:ib_operator", 60)
     pipe.delete.assert_not_called()
     pipe.hset.assert_called_once()
     pipe.expire.assert_called_once()

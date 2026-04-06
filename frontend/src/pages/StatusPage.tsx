@@ -10,7 +10,6 @@ import {
   DAEMON_REASON_LABELS,
   DAEMON_SELF_CHECK_LABELS,
   DAEMON_STATE_LABELS,
-  HEDGE_REASON_LABELS,
   MONITOR_REASON_LABELS,
   MONITOR_SELF_CHECK_LABELS,
   STATUS_FIELDS,
@@ -243,16 +242,16 @@ export function StatusPage({
           : monitorOperator?.connected && (!hasAccount2 || monitorAccount2?.connected)
             ? 'green'
             : 'yellow'
-  const suspendedInReasons = j?.health?.block_reasons?.includes('trading_suspended') ?? false
+  const suspendedInReasons = j?.daemon?.block_reasons?.includes('trading_suspended') ?? false
   const daemonSelfCheckText =
     DAEMON_SELF_CHECK_LABELS[j?.daemon?.self_check ?? ''] ?? j?.daemon?.self_check ?? '--'
   const hedgeSelfCheckText =
-    (j?.health?.self_check ?? '--') + (suspendedInReasons ? ' (hedge suspended)' : '')
+    daemonSelfCheckText + (suspendedInReasons ? ' (hedge suspended)' : '')
   const daemonBlockReasons = (j?.daemon?.block_reasons ?? [])
     .map((r) => DAEMON_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
-  const hedgeBlockReasons = (j?.health?.block_reasons ?? [])
-    .map((r) => HEDGE_REASON_LABELS[r] ?? r)
+  const hedgeBlockReasons = (j?.daemon?.block_reasons ?? [])
+    .map((r) => DAEMON_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
 
   const monitorSelfCheckText =
@@ -331,8 +330,10 @@ export function StatusPage({
     return 'red'
   })()
 
-  /** System status (for "System Status" heading): same logic as header — red if any red; yellow if any yellow; green only when all green. */
+  /** System status: prefer Monitor GET /status lamps.system_lamp (health roll-up on server). */
   const systemLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
+    const api = j?.lamps?.system_lamp
+    if (api === 'green' || api === 'yellow' || api === 'red') return api
     const asRyg = (v: string): 'green' | 'yellow' | 'red' => (v === 'none' ? 'red' : v as 'green' | 'yellow' | 'red')
     const d = asRyg(daemonLamp)
     const m = asRyg(monitorLamp)

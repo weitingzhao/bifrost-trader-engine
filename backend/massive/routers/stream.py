@@ -67,15 +67,17 @@ async def get_massive_option_stream(request: Request):
 
 @router.get("/research/massive/ws-status")
 def get_massive_ws_status(request: Request) -> Dict[str, Any]:
-    """Redis ``massive:meta:status`` from Massive WS ingest (scripts/run_massive_ws.py)."""
+    """Redis ingest health for Massive WS (``bifrost:health:massive_ws``, legacy ``massive:meta:status``)."""
     redis_url = redis_url_from_config(getattr(request.app.state.reader, "_config", {}) or {})
     if not redis_url:
         return {"ok": False, "error": "Redis not configured", "connected": None}
     try:
         import redis
 
+        from src.bifrost.redis_health_keys import hgetall_massive_ws_status
+
         r = redis.from_url(redis_url, decode_responses=True)
-        raw = r.hgetall("massive:meta:status")
+        raw = hgetall_massive_ws_status(r)
         subs = r.smembers("massive:meta:subscriptions")
         return {
             "ok": True,

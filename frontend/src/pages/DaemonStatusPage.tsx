@@ -19,7 +19,6 @@ import {
   DAEMON_REASON_LABELS,
   DAEMON_SELF_CHECK_LABELS,
   DAEMON_STATE_LABELS,
-  HEDGE_REASON_LABELS,
   STATUS_FIELDS,
 } from './status/statusLabels'
 import { scheduleMsgClear, setMsg } from './status/messageUtils'
@@ -130,16 +129,16 @@ export function DaemonStatusPage({
     hedgeHint = 'In dual-process mode, hedge does not run when daemon is down'
   }
 
-  const suspendedInReasons = j?.health?.block_reasons?.includes('trading_suspended') ?? false
+  const suspendedInReasons = j?.daemon?.block_reasons?.includes('trading_suspended') ?? false
   const daemonSelfCheckText =
     DAEMON_SELF_CHECK_LABELS[j?.daemon?.self_check ?? ''] ?? j?.daemon?.self_check ?? '--'
   const hedgeSelfCheckText =
-    (j?.health?.self_check ?? '--') + (suspendedInReasons ? ' (hedge suspended)' : '')
+    daemonSelfCheckText + (suspendedInReasons ? ' (hedge suspended)' : '')
   const daemonBlockReasons = (j?.daemon?.block_reasons ?? [])
     .map(r => DAEMON_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
-  const hedgeBlockReasons = (j?.health?.block_reasons ?? [])
-    .map(r => HEDGE_REASON_LABELS[r] ?? r)
+  const hedgeBlockReasons = (j?.daemon?.block_reasons ?? [])
+    .map(r => DAEMON_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
 
   const runStatusLabel = suspended ? 'Suspended (no new hedges)' : 'Running'
