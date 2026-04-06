@@ -16357,6 +16357,13 @@ th:has(> .coverage-pool-th-held-amt) {
   width: 1%;
 }
 
+/* Narrower padding than default .table-operations cells so Actions stays minimal vs streaming columns */
+.table-operations thead th.replay-opt-actions-cell,
+.table-operations tbody td.replay-opt-actions-cell {
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+}
+
 /* Stg/Ins cell styling in Trade History Details tables */
 .replay-stg-ins {
   display: inline-flex;

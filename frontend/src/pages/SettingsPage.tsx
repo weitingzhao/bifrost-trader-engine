@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Operation, StatusResponse } from '../types'
 import type { FlexAccountItem } from '../types'
 import {
@@ -69,8 +69,8 @@ import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
-import { fetchMarketIngestServices, fetchOpsHealth } from '../api/ops/ops'
-import { aggregateIngestServicesLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
+import { fetchMarketIngestServices, fetchOpsHealth, type MarketIngestServiceRow } from '../api/ops/ops'
+import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
 
 const API_SETTINGS_DETAIL_HASHES = [
   'settings-api-monitor',
@@ -284,8 +284,10 @@ export function SettingsPage({
   const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
   const [socketIngestLamp, setSocketIngestLamp] = useState<AggregateIngestLamp>('none')
   const [socketIngestTitle, setSocketIngestTitle] = useState(
-    'Ingest processes only: Massive WebSocket and IB ingest (loading status…)',
+    'Socket ingest Redis health from Monitor /status (loading…)',
   )
+  const [ingestServicesCache, setIngestServicesCache] = useState<MarketIngestServiceRow[]>([])
+  const [ingestServicesFetchError, setIngestServicesFetchError] = useState<string | null>(null)
   const deferredStart = useDeferredStart(280)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
@@ -355,12 +357,11 @@ export function SettingsPage({
         .then(res => {
           if (cancelled) return
           if (res.ok && Array.isArray(res.services)) {
-            const agg = aggregateIngestServicesLamp(res.services.map(svc => ({ svc })))
-            setSocketIngestLamp(agg.lamp)
-            setSocketIngestTitle(agg.title)
+            setIngestServicesCache(res.services)
+            setIngestServicesFetchError(null)
           } else {
-            setSocketIngestLamp('none')
-            setSocketIngestTitle(
+            setIngestServicesCache([])
+            setIngestServicesFetchError(
               res.error
                 ? `Could not load ingest services: ${res.error}`
                 : 'Could not load ingest services from Ops.',
@@ -369,8 +370,8 @@ export function SettingsPage({
         })
         .catch(() => {
           if (!cancelled) {
-            setSocketIngestLamp('none')
-            setSocketIngestTitle('Could not load ingest services from Ops.')
+            setIngestServicesCache([])
+            setIngestServicesFetchError('Could not load ingest services from Ops.')
           }
         })
     }
@@ -381,6 +382,18 @@ export function SettingsPage({
       window.clearInterval(t)
     }
   }, [deferredStart])
+
+  const socketIngestAggregate = useMemo(() => {
+    if (ingestServicesFetchError) {
+      return { lamp: 'none' as AggregateIngestLamp, title: ingestServicesFetchError }
+    }
+    return aggregateIngestRedisHealthLamp(ingestServicesCache.map(svc => ({ svc })), status)
+  }, [ingestServicesCache, ingestServicesFetchError, status])
+
+  useEffect(() => {
+    setSocketIngestLamp(socketIngestAggregate.lamp)
+    setSocketIngestTitle(socketIngestAggregate.title)
+  }, [socketIngestAggregate])
 
   useEffect(() => {
     const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)

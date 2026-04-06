@@ -27,8 +27,8 @@ import {
 import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
 import { opsHostEnvFromConfigProfile, type OpsHostEnvPill } from '../utils/opsHostEnvPill'
 import {
-  aggregateIngestServicesLamp,
-  ingestProcessLamp,
+  aggregateIngestRedisHealthLamp,
+  ingestRedisHealthLamp,
   localControlAgentLamp,
 } from '../utils/socketIngestLamp'
 
@@ -114,38 +114,6 @@ function ibIngestClientIdDisplay(
   return null
 }
 
-/** English explanation for hover (raw status from Ops included where helpful). */
-function ingestProcessStatusExplanation(active: string): string {
-  const a = (active || '').toLowerCase().trim()
-  const raw = (active || '').trim()
-  switch (a) {
-    case 'active':
-      return 'Active — the ingest service process is running.'
-    case 'inactive':
-      return 'Inactive — the ingest service process is not running.'
-    case 'failed':
-      return 'Failed — the systemd unit has failed.'
-    case 'dead':
-      return 'Dead — the systemd unit is dead.'
-    case 'activating':
-      return 'Activating — the service is starting.'
-    case 'deactivating':
-      return 'Deactivating — the service is stopping.'
-    case 'reloading':
-      return 'Reloading — the service is reloading its configuration.'
-    case 'maintenance':
-      return 'Maintenance — unit is inactive while a maintenance operation is in progress.'
-    case 'refreshing':
-      return 'Refreshing — unit is active; namespace refresh in progress.'
-    case 'unknown':
-      return 'Unknown — Ops could not determine process state (check executor / systemctl).'
-    case '':
-      return 'Unknown — no status has been reported yet.'
-    default:
-      return raw ? `Other — reported state: ${raw}.` : 'Other — non-standard or unrecognized state.'
-  }
-}
-
 /** Which primary control buttons to show for the reported systemd/Ops process state. */
 function ingestActionButtonsForProcessState(processActive: string): { showStart: boolean; showStop: boolean } {
   const a = (processActive || '').toLowerCase().trim()
@@ -172,6 +140,21 @@ function ingestActionButtonsForProcessState(processActive: string): { showStart:
 function ingestProcessRunningForIbClientId(processActive: string): boolean {
   const a = (processActive || '').toLowerCase().trim()
   return a === 'active' || a === 'activating' || a === 'reloading'
+}
+
+/** Show IB Client ID when local process is up or Redis health says connected (Dev UI vs remote ingest). */
+function ibIngestClientIdShouldShow(
+  svcId: string,
+  category: IngestCategory,
+  processActive: string,
+  status: StatusResponse | null,
+): boolean {
+  if (category !== 'IB') return false
+  if (ingestProcessRunningForIbClientId(processActive)) return true
+  const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
+  if (sid === 'ib_ingestor') return status?.ib_ingestor?.connected === true
+  if (sid === 'ib_operator') return status?.monitor_ib_status?.operator?.connected === true
+  return false
 }
 
 /** Ops /health config_profile → dev|prod for cross-stack action gating (matches opsHostEnvFromConfigProfile). */
@@ -301,11 +284,11 @@ function ServiceRow(props: {
     onRestart,
     onReset,
   } = props
-  const lamp = ingestProcessLamp(svc.process_active)
-  const statusTitle = ingestProcessStatusExplanation(svc.process_active)
+  const redisHealth = ingestRedisHealthLamp(svc.id, status)
+  const lamp = redisHealth.lamp
+  const statusTitle = redisHealth.title
   const { showStart, showStop } = ingestActionButtonsForProcessState(svc.process_active)
-  const showIbClientId =
-    category === 'IB' && ingestProcessRunningForIbClientId(svc.process_active)
+  const showIbClientId = ibIngestClientIdShouldShow(svc.id, category, svc.process_active, status)
   const ibClient = showIbClientId ? ibIngestClientIdDisplay(svc.id, category, status) : null
   const actionsDisabled = actionBlock !== 'none'
   return (
@@ -624,8 +607,8 @@ export function MarketIngestOpsPage({
   }, [services])
 
   const socketPageAggregate = useMemo(
-    () => aggregateIngestServicesLamp(unifiedServiceRows),
-    [unifiedServiceRows],
+    () => aggregateIngestRedisHealthLamp(unifiedServiceRows, status),
+    [unifiedServiceRows, status],
   )
 
   const localAgentPanel = useMemo(() => {
@@ -775,11 +758,11 @@ export function MarketIngestOpsPage({
                 <SettingsSidebarLampGlyph id="websocket" />
               </span>
               <span>Socket Services</span>
-              <InfoTooltip text="This lamp is only the roll-up of ingest units (Massive WS, IB ingestor, IB operator): green / red / yellow from each unit’s process state reported by Ops — same rule as dev. It does not use Local Control Agent health." />
+              <InfoTooltip text="Roll-up of ingest units from Monitor GET /status Redis health (Massive meta, IB ingestor hash, IB Operator slot): green when that feed reports connected in Redis, red when not, gray when unknown. Same data whether ingest runs on this host or only on another stack. Local systemd state is for Start/Stop only. Not Local Control Agent health." />
             </span>
           </h2>
           <p className="settings-page-subtitle">
-            Monitor /status shows feed logic; Ops shows each ingest process state. Title lamp = ingest units only (same as dev). When this Ops uses executor_mode=agent, Local Control Agent status is in the section below.
+            Row lamps use Redis-backed health from Monitor /status (not local Ops systemd). Ops Start/Stop still targets processes on this Ops host. When executor_mode=agent, Local Control Agent is below.
           </p>
         </div>
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
@@ -879,7 +862,7 @@ export function MarketIngestOpsPage({
       <section className="replay-section" aria-labelledby="socket-services-heading">
         <h3 id="socket-services-heading" className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
           Ingest services
-          <InfoTooltip text="Each row lamp is only that unit’s process state from Ops (active / inactive / …), identical to dev — not agent reachability." />
+            <InfoTooltip text="Each row lamp reflects Redis health from Monitor GET /status for that feed. Ops process column is for control only." />
         </h3>
         <>
           <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>

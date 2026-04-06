@@ -1,4 +1,5 @@
 import type { MarketIngestServiceRow } from '../api/ops/ops'
+import type { StatusResponse } from '../types'
 
 export type IngestLamp = 'green' | 'yellow' | 'red' | 'gray'
 
@@ -61,5 +62,109 @@ export function aggregateIngestServicesLamp(
     lamp: 'yellow',
     title:
       'Mixed or partial state: some services active, inactive, unknown, or transitional. See each row.',
+  }
+}
+
+/**
+ * Lamp from Redis-backed health in Monitor GET /status (same view for Dev and Prod stacks).
+ * Green when the ingest writer reports healthy in Redis; red when explicitly unhealthy; gray when unknown.
+ */
+export function ingestRedisHealthLamp(
+  serviceId: string,
+  status: StatusResponse | null,
+): { lamp: IngestLamp; title: string } {
+  const id = serviceId === 'ib_market' ? 'ib_ingestor' : serviceId
+  if (!status) {
+    return { lamp: 'gray', title: 'Monitor GET /status not loaded yet.' }
+  }
+  if (id === 'massive_ws') {
+    const m = status.massive
+    if (m == null) {
+      return { lamp: 'gray', title: 'Massive block missing from /status (Redis meta unavailable).' }
+    }
+    if (m.ws_connected === true) {
+      return {
+        lamp: 'green',
+        title: 'Massive WS ingest healthy (Redis massive:meta:status, connected).',
+      }
+    }
+    if (m.ws_connected === null || m.ws_connected === undefined) {
+      return {
+        lamp: 'gray',
+        title: 'Massive WS not reported (no Redis URL or empty meta in /status).',
+      }
+    }
+    return { lamp: 'red', title: 'Massive WS not connected (Redis massive:meta:status).' }
+  }
+  if (id === 'ib_ingestor') {
+    const ib = status.ib_ingestor
+    if (ib == null) {
+      return { lamp: 'gray', title: 'IB ingestor block missing from /status (Redis health unavailable).' }
+    }
+    if (ib.connected === true) {
+      return {
+        lamp: 'green',
+        title: 'IB ingestor healthy (Redis ib:ingester:meta:health, connected).',
+      }
+    }
+    return { lamp: 'red', title: 'IB ingestor not connected (Redis ib:ingester:meta:health).' }
+  }
+  if (id === 'ib_operator') {
+    const mon = status.monitor_ib_status
+    if (mon == null) {
+      return {
+        lamp: 'gray',
+        title: 'IB Operator health not in /status (Monitor IB disabled, skip_monitor_ib, or no Redis).',
+      }
+    }
+    const op = mon.operator
+    if (op?.connected === true) {
+      return {
+        lamp: 'green',
+        title: 'IB Operator healthy (Redis ib:operator:meta:health, operator slot).',
+      }
+    }
+    return { lamp: 'red', title: 'IB Operator not connected (Redis operator health).' }
+  }
+  return { lamp: 'gray', title: 'Unknown ingest service id for Redis health.' }
+}
+
+/** Roll-up of ingest rows using Redis health from Monitor /status (not local Ops systemd). */
+export function aggregateIngestRedisHealthLamp(
+  rows: { svc: MarketIngestServiceRow }[],
+  status: StatusResponse | null,
+): { lamp: AggregateIngestLamp; title: string } {
+  if (rows.length === 0) {
+    return { lamp: 'none', title: 'No ingest services in Ops configuration.' }
+  }
+  const tiers = rows.map(r => ingestRedisHealthLamp(r.svc.id, status).lamp)
+  if (tiers.every(t => t === 'green')) {
+    return {
+      lamp: 'green',
+      title: 'All ingest services report healthy Redis state (Monitor GET /status).',
+    }
+  }
+  if (tiers.every(t => t === 'red')) {
+    return {
+      lamp: 'red',
+      title: 'All ingest services report disconnected or unhealthy Redis state.',
+    }
+  }
+  if (tiers.every(t => t === 'gray')) {
+    return {
+      lamp: 'gray',
+      title: 'Redis health unknown for all ingest rows (/status missing or health not exposed).',
+    }
+  }
+  if (tiers.every(t => t === 'yellow')) {
+    return {
+      lamp: 'yellow',
+      title: 'All ingest services transitional (unexpected for Redis health mode).',
+    }
+  }
+  return {
+    lamp: 'yellow',
+    title:
+      'Mixed Redis health: some services healthy, disconnected, or unknown. See each row tooltip.',
   }
 }

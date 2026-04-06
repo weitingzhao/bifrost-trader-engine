@@ -741,7 +741,7 @@ export function PositionsPage({
           {includeAttrColumn ? <td className="replay-muted" /> : null}
           <td className="replay-muted">{ex.account_id ?? '—'}</td>
           <StrategyAttributionCells ex={ex} />
-          <td>
+          <td className="replay-opt-actions-cell">
             <span className="replay-exec-row-actions">
               <button
                 type="button"
@@ -2609,7 +2609,7 @@ export function PositionsPage({
                                                 <th>Attr</th>
                                                 <th>Account</th>
                                                 <th>Opportunity</th>
-                                                <th>Actions</th>
+                                                <th className="replay-opt-actions-cell">Actions</th>
                                               </tr>
                                             </thead>
                                             <tbody>
@@ -2720,7 +2720,7 @@ export function PositionsPage({
                                                         </span>
                                                       )}
                                                     </td>
-                                                    <td>—</td>
+                                                    <td className="replay-opt-actions-cell">—</td>
                                                   </tr>,
                                                   ...(isPosExpanded ? [
                                                     ...scopedFinalExecs.map((ex, ei) =>
@@ -3146,7 +3146,7 @@ export function PositionsPage({
                         <th>Pool</th>
                         <th>Account</th>
                         <th>Opportunity</th>
-                        <th>Actions</th>
+                        <th className="replay-opt-actions-cell">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3279,7 +3279,7 @@ export function PositionsPage({
                                     <span className="replay-muted">{execCount} execution{execCount > 1 ? 's' : ''} ↓</span>
                                   )}
                                 </td>
-                                <td>—</td>
+                                <td className="replay-opt-actions-cell">—</td>
                               </tr>
                             )
                             const execRows = isPosExpanded

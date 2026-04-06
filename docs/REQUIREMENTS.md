@@ -1,6 +1,6 @@
 # 产品需求
 
-本文档是 **Bifrost Trader Engine** 的**产品需求**唯一定义。**功能需求**（R-M*/R-C*/R-H*/R-B*/R-A* 等）不随运行环境变化；**环境与部署约束**（R-DV*）定义 Dev/Prod 隔离与共享 TWS 纪律，详见本文档 §7 及 [ARCHITECTURE.md](ARCHITECTURE.md) §2。
+本文档是 **Bifrost Trader Engine** 的**产品需求**唯一定义。**功能需求**（R-M*/R-C*/R-H*/R-B*/R-A* 等）不随运行环境变化；**环境与部署约束**（R-DV*）定义 Dev/Prod 隔离、共享 TWS 纪律及**可选调试拓扑**（R-DV4：多 UI 只读同一 Redis 行情），详见本文档 §7 及 [ARCHITECTURE.md](ARCHITECTURE.md) §2。
 
 能力进度与差距评估见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
@@ -41,6 +41,7 @@
 | **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离：独立 database，各进程仅连本环境库，settings 与业务数据不跨环境混用。 | §7 |
 | | **R-DV2** | 生产在 Linux 服务器部署完整运行栈（Engine、Server、Redis、Celery）；开发在本机连 Dev 库。 | §7 |
 | | **R-DV3** | IB/TWS 为共享基础设施（两台 Mac Mini）；Dev/Prod 通过不同 client_id 或 TWS 端口区分；同一 IB 账户同一时刻仅一个 Engine 下单。 | §7 |
+| | **R-DV4** | 调试拓扑下允许多套 Monitor/Market 只读同一 Redis 实时行情（单点 Engine 写入）；PG 仍隔离（R-DV1），Engine 互斥不变（R-DV3）。 | §7 |
 
 **说明**：「说明章节」列指向本文档中该需求的细节描述位置。能力进度见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
@@ -284,6 +285,12 @@
 - **区分**：Dev 与 Prod 通过 **不同 `client_id` 与/或不同 TWS/Gateway 监听端口** 区分连接。
 - **互斥**：**同一 IB 账户同一时刻仅允许一个自动交易 Engine** 对该账户下单，避免双环境双 Engine 实盘冲突。与现有单进程约束（RE-6）及控制语义一致。
 
+### 7.4 共享 Redis 实时行情（调试拓扑，R-DV4）
+
+- **目标**：在**调试或并行验收**时，允许 **Dev UI 与 Prod UI 同时看到同一条 IB 实时行情推流**（R-RM2/R-RM3 的只读侧）：**单处**运行连接 TWS 的 Engine（唯一行情写入方），向 **唯一** Redis 写报价并发布 Pub/Sub；各环境的 **Market API**（可位于不同主机、不同端口）配置**相同**的 `redis.host` / `redis.port` / `redis.db`（及与 Engine 一致的 `channel`），使前端 SSE 订阅同一数据源。
+- **不替代**：**R-DV1** 仍成立——各环境 **PostgreSQL** 独立 database，`GET /status`、控制面、业务数据仍按环境分离。**R-DV3** 仍成立——共享 Redis **不**表示允许多个 Engine 对同一账户同时自动下单；调试时通常只保留**一个** Engine 进程写 Redis。
+- **运维注意**：Celery broker/result 与实时行情若共用 Redis **进程**，须用 **不同 `db` 索引** 区分（与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§2.8 一致），避免队列与行情键混用。
+
 ---
 
 ## 8. 小结表（便于快速查阅）
@@ -317,9 +324,10 @@
 | **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离 |
 | | **R-DV2** | Prod Linux 完整运行栈；Dev 本机 |
 | | **R-DV3** | TWS 共享 + Engine 互斥 |
+| | **R-DV4** | 调试拓扑：多 UI 共享只读同一 Redis 行情；PG 与 Engine 纪律不变 |
 
 **运行环境与约束**（IB/账户、Dev/Prod 隔离、部署拓扑、监控与交易分离、单进程、守护程序与 IB 连接等）见 [ARCHITECTURE.md](ARCHITECTURE.md)「运行环境与部署约束」（§2）。
 
 ---
 
-*最后更新：2026-03-21，新增 R-A6 Massive 期权研究数据（§3.5）、R-OD1 扩展为 Massive 主力源（§2.7）、R-A3 数据源分层（§3.4）。*
+*最后更新：2026-04-06，新增 R-DV4 共享 Redis 实时行情调试拓扑（§7.4），与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.8 对齐。*
