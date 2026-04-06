@@ -65,7 +65,10 @@ function categoryForServiceId(id: string): IngestCategory {
   return 'Other'
 }
 
-/** Client ID for IB ingest rows: live connection for ib_ingestor when present, else YAML; ib_operator from YAML. */
+/**
+ * Client ID for IB ingest rows (only called when `ingestProcessRunningForIbClientId` is true).
+ * ib_ingestor: live Monitor /status when present, else YAML; ib_operator: YAML.
+ */
 function ibIngestClientIdDisplay(
   svcId: string,
   category: IngestCategory,
@@ -144,7 +147,75 @@ function ingestActionButtonsForProcessState(processActive: string): { showStart:
   return { showStart: true, showStop: true }
 }
 
-/** Ops /health: config profile + executor — same Host cell for every service (this Ops instance). */
+/** IB Client ID is only meaningful while the service process is up (or starting); hide the block otherwise. */
+function ingestProcessRunningForIbClientId(processActive: string): boolean {
+  const a = (processActive || '').toLowerCase().trim()
+  return a === 'active' || a === 'activating' || a === 'reloading'
+}
+
+/** Ops /health config_profile → dev|prod for cross-stack action gating (matches opsHostEnvFromConfigProfile). */
+function normalizedPageDevProd(configProfile: string | null): 'dev' | 'prod' | null {
+  const p = (configProfile ?? '').toLowerCase().trim()
+  if (p === 'dev' || p === 'development') return 'dev'
+  if (p === 'prod' || p === 'production') return 'prod'
+  return null
+}
+
+/** Per-row Host: Redis lease (which stack started the service via Ops), not the browser's Ops routing. */
+function runtimeControlHostDisplay(
+  redisControlEnv: string | null | undefined,
+  redisMetaKey: string,
+): { title: string; pill: OpsHostEnvPill } {
+  const r = (redisControlEnv ?? '').toLowerCase().trim()
+  if (r === 'dev' || r === 'prod') {
+    const pill = opsHostEnvFromConfigProfile(r)
+    const keyHint = redisMetaKey ? `${redisMetaKey}` : 'ingest meta hash'
+    return {
+      pill,
+      title: `Ops control lease in Redis (${keyHint}): last start from ${pill.ariaLabel}. Field bifrost_ops_control_env.`,
+    }
+  }
+  return {
+    pill: { shortLabel: '—', pillVariant: 'other', ariaLabel: 'Unclaimed' },
+    title: redisMetaKey.trim()
+      ? `No Ops control lease in Redis yet (${redisMetaKey}). Starting from Ops (Dev or Prod) writes bifrost_ops_control_env.`
+      : 'No redis_meta_key for this row; cross-stack lease is not tracked.',
+  }
+}
+
+type IngestActionBlock = 'none' | 'admin' | 'script' | 'remote_env'
+
+function ingestActionBlock(
+  canAdmin: boolean,
+  disableIngestScript: boolean,
+  pageEnv: 'dev' | 'prod' | null,
+  redisControlEnv: string | null | undefined,
+): IngestActionBlock {
+  if (!canAdmin) return 'admin'
+  if (disableIngestScript) return 'script'
+  if (pageEnv) {
+    const lease = (redisControlEnv ?? '').toLowerCase().trim()
+    if (lease === 'dev' || lease === 'prod') {
+      if (lease !== pageEnv) return 'remote_env'
+    }
+  }
+  return 'none'
+}
+
+function ingestActionBlockMessage(block: IngestActionBlock): string {
+  switch (block) {
+    case 'admin':
+      return 'Admin role required (Ops token).'
+    case 'script':
+      return 'Control disabled: subprocess Ops without ingest script support (upgrade Ops or use Linux systemd).'
+    case 'remote_env':
+      return 'Control is held by the other stack (Redis). Stop the service from that Ops host first.'
+    default:
+      return ''
+  }
+}
+
+/** Ops /health: config profile + executor — summary for this Ops instance (sidebar / page context). */
 function socketServicesHostColumnDisplay(opts: {
   configProfile: string | null
   localControl: string | null
@@ -187,11 +258,10 @@ function ServiceRow(props: {
   svc: MarketIngestServiceRow
   category: IngestCategory
   status: StatusResponse | null
-  hostTitle: string
-  hostPill: OpsHostEnvPill
+  runtimeHostTitle: string
+  runtimeHostPill: OpsHostEnvPill
   logicalText: string
-  canAdmin: boolean
-  disableIngestActions: boolean
+  actionBlock: IngestActionBlock
   onStart: () => void
   onStop: () => void
   onRestart: () => void
@@ -201,11 +271,10 @@ function ServiceRow(props: {
     svc,
     category,
     status,
-    hostTitle,
-    hostPill,
+    runtimeHostTitle,
+    runtimeHostPill,
     logicalText,
-    canAdmin,
-    disableIngestActions,
+    actionBlock,
     onStart,
     onStop,
     onRestart,
@@ -214,7 +283,10 @@ function ServiceRow(props: {
   const lamp = ingestProcessLamp(svc.process_active)
   const statusTitle = ingestProcessStatusExplanation(svc.process_active)
   const { showStart, showStop } = ingestActionButtonsForProcessState(svc.process_active)
-  const ibClient = ibIngestClientIdDisplay(svc.id, category, status)
+  const showIbClientId =
+    category === 'IB' && ingestProcessRunningForIbClientId(svc.process_active)
+  const ibClient = showIbClientId ? ibIngestClientIdDisplay(svc.id, category, status) : null
+  const actionsDisabled = actionBlock !== 'none'
   return (
     <tr>
       <td>
@@ -222,8 +294,8 @@ function ServiceRow(props: {
           <span aria-hidden>●</span>
         </span>
       </td>
-      <td title={hostTitle}>
-        <OpsHostEnvPillBadge pill={hostPill} />
+      <td title={runtimeHostTitle}>
+        <OpsHostEnvPillBadge pill={runtimeHostPill} />
       </td>
       <td>{category}</td>
       <td className="massive-api-kv-label">
@@ -231,7 +303,7 @@ function ServiceRow(props: {
         <div className="massive-api-doc-hint" style={{ marginTop: 4 }}>
           <code>{svc.systemd_unit}</code>
         </div>
-        {category === 'IB' ? (
+        {showIbClientId ? (
           <div className="socket-ib-client-id-wrap">
             <span className="massive-api-doc-hint">IB Client ID</span>
             {ibClient ? (
@@ -248,7 +320,7 @@ function ServiceRow(props: {
       </td>
       <td>{logicalText}</td>
       <td>
-        {canAdmin && !disableIngestActions ? (
+        {!actionsDisabled ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
             {showStart ? (
               <button
@@ -304,11 +376,7 @@ function ServiceRow(props: {
             </button>
           </div>
         ) : (
-          <span className="massive-api-doc-hint">
-            {disableIngestActions
-              ? 'Control disabled: subprocess Ops without ingest script support (upgrade Ops or use Linux systemd).'
-              : 'Admin role required (Ops token).'}
-          </span>
+          <span className="massive-api-doc-hint">{ingestActionBlockMessage(actionBlock)}</span>
         )}
       </td>
     </tr>
@@ -318,12 +386,11 @@ function ServiceRow(props: {
 function IngestServicesTable(props: {
   rows: { svc: MarketIngestServiceRow; category: IngestCategory }[]
   status: StatusResponse | null
-  hostTitle: string
-  hostPill: OpsHostEnvPill
+  pageEnv: 'dev' | 'prod' | null
+  disableIngestScript: boolean
+  canAdmin: boolean
   emptyHint: string
   logicalSummary: (svc: MarketIngestServiceRow) => string
-  canAdmin: boolean
-  disableIngestActions: boolean
   onStart: (svc: MarketIngestServiceRow) => void
   onStop: (svc: MarketIngestServiceRow) => void
   onRestart: (svc: MarketIngestServiceRow) => void
@@ -332,12 +399,11 @@ function IngestServicesTable(props: {
   const {
     rows,
     status,
-    hostTitle,
-    hostPill,
+    pageEnv,
+    disableIngestScript,
+    canAdmin,
     emptyHint,
     logicalSummary,
-    canAdmin,
-    disableIngestActions,
     onStart,
     onStop,
     onRestart,
@@ -353,7 +419,7 @@ function IngestServicesTable(props: {
           <th>Status</th>
           <th>
             Host
-            <InfoTooltip text="Environment for this Ops instance (config profile from Ops /health). Same for all rows; switch Ops routing in app settings to target another host." />
+            <InfoTooltip text="Runtime stack from Redis field bifrost_ops_control_env on the ingest meta hash (set when you start a service from Ops). Shows Dev or Prod for the stack that owns control. If it differs from this page's Ops config profile, Actions are disabled until that stack stops the service." />
           </th>
           <th>Category</th>
           <th className="massive-api-kv-label">Service</th>
@@ -362,23 +428,29 @@ function IngestServicesTable(props: {
         </tr>
       </thead>
       <tbody>
-        {rows.map(({ svc, category }) => (
-          <ServiceRow
-            key={svc.id}
-            svc={svc}
-            category={category}
-            status={status}
-            hostTitle={hostTitle}
-            hostPill={hostPill}
-            logicalText={logicalSummary(svc)}
-            canAdmin={canAdmin}
-            disableIngestActions={disableIngestActions}
-            onStart={() => onStart(svc)}
-            onStop={() => onStop(svc)}
-            onRestart={() => onRestart(svc)}
-            onReset={() => onReset(svc)}
-          />
-        ))}
+        {rows.map(({ svc, category }) => {
+          const { title: rtTitle, pill: rtPill } = runtimeControlHostDisplay(
+            svc.redis_control_env,
+            svc.redis_meta_key,
+          )
+          const block = ingestActionBlock(canAdmin, disableIngestScript, pageEnv, svc.redis_control_env)
+          return (
+            <ServiceRow
+              key={svc.id}
+              svc={svc}
+              category={category}
+              status={status}
+              runtimeHostTitle={rtTitle}
+              runtimeHostPill={rtPill}
+              logicalText={logicalSummary(svc)}
+              actionBlock={block}
+              onStart={() => onStart(svc)}
+              onStop={() => onStop(svc)}
+              onRestart={() => onRestart(svc)}
+              onReset={() => onReset(svc)}
+            />
+          )
+        })}
       </tbody>
     </table>
   )
@@ -714,20 +786,29 @@ export function MarketIngestOpsPage({
           Services
         </h3>
         {!opsErr ? (
-          <IngestServicesTable
-            rows={unifiedServiceRows}
-            status={status}
-            hostTitle={hostColumn.title}
-            hostPill={hostColumn.pill}
-            emptyHint="No market ingest services in Ops config."
-            logicalSummary={logicalSummary}
-            canAdmin={canAdmin}
-            disableIngestActions={disableIngestActions}
-            onStart={svc => openServiceConfirm(svc, 'start', 'Start')}
-            onStop={svc => openServiceConfirm(svc, 'stop', 'Stop')}
-            onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
-            onReset={openResetConfirm}
-          />
+          <>
+            <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              <span title={hostColumn.title}>
+                This Ops instance (config / executor)
+                <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
+                  <OpsHostEnvPillBadge pill={hostColumn.pill} />
+                </span>
+              </span>
+            </p>
+            <IngestServicesTable
+              rows={unifiedServiceRows}
+              status={status}
+              pageEnv={normalizedPageDevProd(configProfile)}
+              disableIngestScript={disableIngestActions}
+              emptyHint="No market ingest services in Ops config."
+              logicalSummary={logicalSummary}
+              canAdmin={canAdmin}
+              onStart={svc => openServiceConfirm(svc, 'start', 'Start')}
+              onStop={svc => openServiceConfirm(svc, 'stop', 'Stop')}
+              onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
+              onReset={openResetConfirm}
+            />
+          </>
         ) : null}
       </section>
 

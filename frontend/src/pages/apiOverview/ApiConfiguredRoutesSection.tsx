@@ -27,8 +27,8 @@ const SERVICES_CONFIGURED_GROUP_ORDER = ['Architecture', 'Account', 'Research', 
 function configuredServiceGroup(service: string): (typeof SERVICES_CONFIGURED_GROUP_ORDER)[number] {
   const k = service.toLowerCase()
   if (['server', 'main', 'api', 'monitor', 'ops', 'docs'].includes(k)) return 'Architecture'
-  if (['market', 'trading', 'portfolio'].includes(k)) return 'Account'
-  if (['research', 'strategy'].includes(k)) return 'Research'
+  if (['trading', 'portfolio'].includes(k)) return 'Account'
+  if (['research', 'strategy', 'market'].includes(k)) return 'Research'
   if (['massive', 'ib'].includes(k)) return 'Feed'
   return 'Other'
 }

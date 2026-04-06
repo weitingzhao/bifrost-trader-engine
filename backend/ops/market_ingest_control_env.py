@@ -1,0 +1,86 @@
+"""Redis field on ingest meta hashes: which Ops stack (dev|prod) owns control.
+
+Written after successful Ops start; cleared after successful Ops stop. Uses Redis DB 0
+(same as ``scripts/run_massive_ws.py`` meta keys), not the Celery broker DB.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+BIFROST_OPS_CONTROL_ENV_FIELD = "bifrost_ops_control_env"
+
+_REDIS_SOCKET_SEC = 3.0
+
+
+def normalize_control_profile(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    if s in ("dev", "prod"):
+        return s
+    return None
+
+
+def meta_redis_url_from_ops_config(config: dict) -> Optional[str]:
+    from src.core.redis_url import redis_url_from_config
+
+    return redis_url_from_config(config or {})
+
+
+def read_control_env(redis_url: str, meta_key: str) -> Optional[str]:
+    """Return ``dev``/``prod`` from hash field, or ``None`` if missing/unreadable."""
+    if not meta_key.strip():
+        return None
+    try:
+        import redis
+
+        r = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=_REDIS_SOCKET_SEC,
+            socket_timeout=_REDIS_SOCKET_SEC,
+        )
+        raw = r.hget(meta_key.strip(), BIFROST_OPS_CONTROL_ENV_FIELD)
+        return normalize_control_profile(raw)
+    except Exception as e:
+        logger.debug("read_control_env %s: %s", meta_key, e)
+        return None
+
+
+def write_control_env(redis_url: str, meta_key: str, profile: str) -> None:
+    norm = normalize_control_profile(profile)
+    if not norm:
+        raise ValueError(f"invalid control profile: {profile!r}")
+    if not meta_key.strip():
+        raise ValueError("empty redis_meta_key")
+    import redis
+
+    r = redis.from_url(
+        redis_url,
+        decode_responses=True,
+        socket_connect_timeout=_REDIS_SOCKET_SEC,
+        socket_timeout=_REDIS_SOCKET_SEC,
+    )
+    r.hset(meta_key.strip(), BIFROST_OPS_CONTROL_ENV_FIELD, norm)
+
+
+def clear_control_env(redis_url: str, meta_key: str) -> None:
+    if not meta_key.strip():
+        return
+    try:
+        import redis
+
+        r = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=_REDIS_SOCKET_SEC,
+            socket_timeout=_REDIS_SOCKET_SEC,
+        )
+        r.hdel(meta_key.strip(), BIFROST_OPS_CONTROL_ENV_FIELD)
+    except Exception as e:
+        logger.warning("clear_control_env %s: %s", meta_key, e)
+        raise

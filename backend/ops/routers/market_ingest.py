@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 
 from backend.ops.ib_operator_rpc import ib_operator_disconnect_all_sync
 from backend.ops.market_ingest_config import market_ingest_service_by_id, market_ingest_services_from_config
+from backend.ops.market_ingest_control_env import (
+    clear_control_env,
+    meta_redis_url_from_ops_config,
+    normalize_control_profile,
+    read_control_env,
+    write_control_env,
+)
 from backend.ops.models.schemas import MarketIngestAction, MarketIngestControlRequest
 from backend.ops.routers.workers import _audit, _require_role
 
@@ -27,12 +34,18 @@ def _config(request: Request) -> dict:
     return getattr(request.app.state, "bifrost_config", {}) or {}
 
 
+def _ops_control_profile(request: Request) -> Optional[str]:
+    raw = getattr(request.app.state, "bifrost_config_profile", None)
+    return normalize_control_profile(raw if isinstance(raw, str) else None)
+
+
 @router.get("/ops/market-ingest/services")
 async def market_ingest_services(request: Request) -> Dict[str, Any]:
     """List configured ingest services with current systemd ``is-active`` state."""
     cfg = _config(request)
     rows = market_ingest_services_from_config(cfg)
     exc = _executor(request)
+    rurl = meta_redis_url_from_ops_config(cfg)
     out: List[Dict[str, Any]] = []
     for row in rows:
         unit = row["systemd_unit"]
@@ -41,7 +54,11 @@ async def market_ingest_services(request: Request) -> Dict[str, Any]:
         except Exception as e:
             active = "unknown"
             logger.debug("systemctl_is_active %s: %s", unit, e)
-        out.append({**row, "process_active": active})
+        meta_key = (row.get("redis_meta_key") or "").strip()
+        redis_control_env: Optional[str] = None
+        if rurl and meta_key:
+            redis_control_env = await asyncio.to_thread(read_control_env, rurl, meta_key)
+        out.append({**row, "process_active": active, "redis_control_env": redis_control_env})
     return {"ok": True, "services": out}
 
 
@@ -80,6 +97,27 @@ async def market_ingest_control(
     exc = _executor(request)
     sid = svc["id"]
     action = body.action
+    meta_key = (svc.get("redis_meta_key") or "").strip()
+    rurl = meta_redis_url_from_ops_config(cfg)
+    ops_profile = _ops_control_profile(request)
+    if rurl and meta_key and ops_profile:
+        claimed = await asyncio.to_thread(read_control_env, rurl, meta_key)
+        if claimed and claimed != ops_profile:
+            msg = (
+                f"Ingest control is held by the {claimed.upper()} stack (Redis). "
+                "Stop the service from that Ops host first."
+            )
+            _audit(
+                request,
+                f"market_ingest_{body.action.value}",
+                f"{body.service_id}:{unit}",
+                "rejected",
+                detail=f"redis_control_env={claimed} ops_profile={ops_profile}",
+            )
+            return JSONResponse(
+                status_code=409,
+                content={"ok": False, "error": msg},
+            )
 
     try:
         if action == MarketIngestAction.RESET:
@@ -117,6 +155,42 @@ async def market_ingest_control(
             status_code=500,
             content={"ok": False, "error": str(e)},
         )
+
+    if rurl and meta_key and ops_profile:
+        try:
+            if action == MarketIngestAction.STOP:
+                await asyncio.to_thread(clear_control_env, rurl, meta_key)
+            elif action in (
+                MarketIngestAction.START,
+                MarketIngestAction.RESTART,
+                MarketIngestAction.RESET,
+            ):
+                await asyncio.to_thread(write_control_env, rurl, meta_key, ops_profile)
+        except Exception as e:
+            logger.warning(
+                "market_ingest redis_control_env post-action failed: %s %s %s",
+                body.service_id,
+                action.value,
+                e,
+            )
+            _audit(
+                request,
+                f"market_ingest_{body.action.value}",
+                f"{body.service_id}:{unit}",
+                "failed",
+                detail=f"redis_control_env: {e}",
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "ok": False,
+                    "error": (
+                        "systemd action succeeded but updating Redis control lease failed: "
+                        f"{e}"
+                    ),
+                },
+            )
+
     _audit(
         request,
         f"market_ingest_{body.action.value}",

@@ -13,6 +13,6 @@ interface ImportMetaEnv {
   readonly VITE_RESEARCH_API_ORIGIN?: string
   /** Optional bifrost-server origin for API Health overview (Development column). When unset, same-origin is used only if the loaded YAML profile is dev. */
   readonly VITE_DEV_API_ORIGIN?: string
-  /** Optional bifrost-server origin for API Health overview (Production column). When unset, same-origin is used only if the loaded YAML profile is prod. */
+  /** Optional bifrost-server origin for API Health overview (Production column). When unset, same-origin is used when config_profile is prod or utilized.services are all prod (config.yaml-only deploy). */
   readonly VITE_PROD_API_ORIGIN?: string
 }

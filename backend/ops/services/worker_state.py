@@ -205,6 +205,12 @@ class WorkerStateService:
                         if isinstance(queues_raw, list)
                         else []
                     )
+                    cp = data.get("config_profile")
+                    wcp = (
+                        str(cp).lower().strip()
+                        if isinstance(cp, str) and str(cp).lower().strip() in ("dev", "prod")
+                        else None
+                    )
                     results.append(
                         WorkerSummary(
                             worker_id=wid,
@@ -214,6 +220,7 @@ class WorkerStateService:
                             active_tasks=0,
                             reserved_tasks=0,
                             last_heartbeat=time.time(),
+                            worker_config_profile=wcp,
                         )
                     )
                 if cur == 0:
@@ -222,6 +229,27 @@ class WorkerStateService:
         except Exception as e:
             logger.warning("list_workers_from_redis_presence failed: %s", e)
             return []
+
+    @staticmethod
+    def _merge_worker_profiles_from_presence(
+        workers: List[WorkerSummary], presence: List[WorkerSummary],
+    ) -> List[WorkerSummary]:
+        """Attach ``worker_config_profile`` from Redis presence onto inspect-only rows."""
+        pmap = {
+            p.worker_id: p.worker_config_profile
+            for p in presence
+            if p.worker_config_profile
+        }
+        if not pmap:
+            return workers
+        out: List[WorkerSummary] = []
+        for w in workers:
+            prof = pmap.get(w.worker_id)
+            if prof and not w.worker_config_profile:
+                out.append(w.model_copy(update={"worker_config_profile": prof}))
+            else:
+                out.append(w)
+        return out
 
     def _list_workers_inspect_bounded(self) -> List[WorkerSummary]:
         """Celery control.inspect — bounded wall time."""
@@ -310,7 +338,9 @@ class WorkerStateService:
             return self._list_workers_from_redis_presence()
         mode = self._worker_list_mode or "redis_presence"
         if mode == "inspect":
-            return self._list_workers_inspect_bounded()
+            inspected = self._list_workers_inspect_bounded()
+            presence = self._list_workers_from_redis_presence()
+            return self._merge_worker_profiles_from_presence(inspected, presence)
         if mode == "redis_only":
             return self._list_workers_from_redis_presence()
         # redis_presence (default): SCAN presence keys (fast) + merge with Celery inspect.
@@ -327,7 +357,8 @@ class WorkerStateService:
         for p in presence:
             if p.worker_id not in by_id:
                 by_id[p.worker_id] = p
-        return sorted(by_id.values(), key=lambda x: x.worker_id)
+        merged = sorted(by_id.values(), key=lambda x: x.worker_id)
+        return self._merge_worker_profiles_from_presence(merged, presence)
 
     def get_worker(self, worker_id: str) -> Optional[WorkerDetail]:
         ping, stats, active, reserved, active_queues = self._inspect()

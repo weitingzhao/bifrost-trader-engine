@@ -192,7 +192,7 @@ def create_app(
 
     _scfg = (merged_config or {}).get("server") or {}
     try:
-        app.state.bifrost_server_listen_port = int(_scfg.get("port") or 8765)
+        app.state.bifrost_server_listen_port = int(_scfg.get("monitor_port") or 8765)
     except (TypeError, ValueError):
         app.state.bifrost_server_listen_port = 8765
     try:
@@ -244,7 +244,8 @@ def create_app(
     app.include_router(daemon_router)
     app.include_router(config_router)
 
-    _root = Path(__file__).resolve().parent.parent
+    # backend/monitor/app.py -> repo root (not backend/)
+    _root = Path(__file__).resolve().parent.parent.parent
     _dist_assets = _root / "frontend" / "dist" / "assets"
     if _dist_assets.is_dir():
         app.mount(
@@ -286,7 +287,7 @@ def run_server(config: dict, resolved_config_path: Optional[str] = None) -> None
     use_db_control = has_postgres
     status_cfg_for_read = config if has_postgres else None
 
-    port = config.get("server", {}).get("port") or 8765
+    port = config.get("server", {}).get("monitor_port") or 8765
     data_lag_ms = None
     gates = config.get("gates") or {}
     state_cfg = gates.get("state") or {}

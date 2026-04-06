@@ -48,6 +48,22 @@ def _ops_auth(request: Request):
     return getattr(request.app.state, "ops_auth", OpsAuth.__new__(OpsAuth))
 
 
+async def _wait_worker_unit_quiet(exc: Any, unit: str) -> str:
+    """Poll ``systemctl_is_active`` / subprocess view until unit is no longer busy shutting down."""
+    if not hasattr(exc, "systemctl_is_active"):
+        return "unknown"
+    last = "unknown"
+    busy = frozenset({"active", "activating", "deactivating", "reloading"})
+    for _ in range(24):
+        last = await exc.systemctl_is_active(unit)
+        if last == "unknown":
+            return last
+        if last not in busy:
+            return last
+        await asyncio.sleep(0.35)
+    return last
+
+
 def _identity(request: Request):
     return _ops_auth(request).resolve(request)
 
@@ -233,9 +249,35 @@ async def scale_worker(
         _audit(request, "scale_remove", unit, "failed", detail=str(e))
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
-    _audit(request, "scale_remove", unit, "success")
-    return {"ok": True, "action": "remove", "unit": unit, "instance_id": body.instance_id,
-            "result": result}
+    after_state = await _wait_worker_unit_quiet(exc, unit)
+    if after_state == "active":
+        detail = (
+            "Unit still reports active after stop. Another machine may be running a worker with the "
+            "same instance id on this Redis broker, or the process was not started by this unit."
+        )
+        _audit(request, "scale_remove", unit, "failed", detail=f"after_state={after_state}")
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error": detail,
+                "action": "remove",
+                "unit": unit,
+                "instance_id": body.instance_id,
+                "after_state": after_state,
+                "result": result,
+            },
+        )
+
+    _audit(request, "scale_remove", unit, "success", detail=f"after_state={after_state}")
+    return {
+        "ok": True,
+        "action": "remove",
+        "unit": unit,
+        "instance_id": body.instance_id,
+        "after_state": after_state,
+        "result": result,
+    }
 
 
 @router.get("/ops/workers/instances")

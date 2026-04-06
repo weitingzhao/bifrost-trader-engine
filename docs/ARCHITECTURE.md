@@ -259,7 +259,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | 域（逻辑） | Python 包 | 启动脚本 | 配置端口键（示例默认） |
 |------------|-----------|----------|-------------------------|
 | Monitor（状态、控制、日志等） | `backend.monitor` | `scripts/run_server.py` | `server.port`（未配置时 **`run_server.py` 默认 8765**；可在 YAML `server.port` 覆盖） |
-| Research（含 Massive 研究路由等；脚本名沿用 massive） | `backend.research` | `scripts/run_server_massive.py` | `server.massive_port`（8766） |
+| Massive / Feed（`/research/massive/*`、SSE 等） | `backend.massive` | `scripts/run_server_massive.py` | `server.massive_port`（8766） |
+| Research（期权发现、max pain 等独立 API） | `backend.research` | `scripts/run_server_research.py` | `server.research_port`（8773） |
 | Docs（合并 OpenAPI 等） | `backend.docs` | `scripts/run_server_docs.py` | `server.docs_port`（8767） |
 | Ops（队列、Worker、Bars 任务等） | `backend.ops` | `scripts/run_server_ops.py` | `server.ops_port`（8768） |
 | Trading（成交、绩效等） | `backend.trading` | `scripts/run_server_trading.py` | `server.trading_port`（8769） |
@@ -267,7 +268,9 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | Portfolio | `backend.portfolio` | `scripts/run_server_portfolio.py` | `server.portfolio_port`（8771） |
 | Market（行情、Watchlist 等） | `backend.market` | `scripts/run_server_market.py` | `server.market_port`（8772） |
 
-**Celery**：任务应用模块为 **`src.workers.celery_app`**（与 `scripts/run_celery.py` 一致）。Massive/Polygon 等队列任务在 **`src.massive.tasks`**；**`backend.massive`** 为对应 HTTP（含 WebSocket/SSE）服务。
+**Celery**：任务应用模块为 **`src.workers.celery_app`**（与 `scripts/run_celery.py` 一致）。Massive/Polygon 等队列任务在 **`src.massive.tasks`**；**`backend.massive`** 为 Massive/Feed 对应 HTTP（含 WebSocket/SSE）。
+
+**运维分组（Prod systemd / `scripts/bifrost_ssh.sh`）**：HTTP 进程按四类聚合以便 deploy 后重启、systemctl 与状态扫描 — **architecture** = Monitor + Ops + Docs；**account** = Trading + Portfolio；**research** = Market + Research（`run_server_research`）+ Strategy；**feed** = Massive（`run_server_massive`）。Engine、Agent、Celery、ingest 单元不在此四类内，脚本中仍用「core / full stack」等组合。
 
 **前端**：开发环境下对各 API 基址的配置需与上述多进程一致；详见 **[docs/index.md](index.md)**「项目组成与启动」。
 

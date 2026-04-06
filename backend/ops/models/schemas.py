@@ -53,6 +53,10 @@ class WorkerSummary(BaseModel):
     active_tasks: int = 0
     reserved_tasks: int = 0
     last_heartbeat: Optional[float] = None
+    worker_config_profile: Optional[str] = Field(
+        None,
+        description="dev|prod from worker BIFROST_CONFIG (Redis presence); not the Ops API host profile.",
+    )
 
 
 class WorkerDetail(WorkerSummary):

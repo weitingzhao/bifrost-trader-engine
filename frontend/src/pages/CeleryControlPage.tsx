@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
@@ -88,6 +89,13 @@ function formatQueueLabel(name: string): string {
   return name
 }
 
+/** Celery nodename is ``worker{id}@{hostname}`` — return host part for cross-machine hints. */
+function workerHostFromWorkerId(workerId: string): string | null {
+  const i = workerId.indexOf('@')
+  if (i < 0 || i >= workerId.length - 1) return null
+  return workerId.slice(i + 1).trim() || null
+}
+
 /** Worker console: per-worker Redis stream via Ops `/ops/console/worker/{nodename}` (SSE). */
 function DashboardWorkerRedisConsole({ workerId }: { workerId: string }) {
   const fetchLogs = useCallback(
@@ -121,11 +129,17 @@ function DashboardWorkerRedisConsole({ workerId }: { workerId: string }) {
 }
 
 function workerIdToInstanceId(workerId: string): string | null {
-  const [node] = workerId.split('@', 1)
-  if (node && node.startsWith('worker') && node.length > 'worker'.length) {
+  const node = workerId.split('@')[0]?.trim() ?? ''
+  if (node.startsWith('worker') && node.length > 'worker'.length) {
     return node.slice('worker'.length)
   }
   return null
+}
+
+/** Instance id from `bifrost-celery-worker@ID.service` (systemd may escape chars in ID). */
+function instanceIdFromWorkerUnit(unit: string): string | null {
+  const m = unit.trim().match(/^bifrost-celery-worker@(.+)\.service$/i)
+  return m ? m[1] : null
 }
 
 type ConfirmDialogState = {
@@ -133,6 +147,8 @@ type ConfirmDialogState = {
   title: string
   message: string
   confirming: boolean
+  /** Primary action label (destructive remove uses Confirm delete). */
+  confirmLabel?: string
   action: (() => Promise<void>) | null
 }
 
@@ -141,6 +157,7 @@ const INITIAL_CONFIRM: ConfirmDialogState = {
   title: '',
   message: '',
   confirming: false,
+  confirmLabel: undefined,
   action: null,
 }
 
@@ -490,18 +507,24 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   void tick
 
   // ── Scaling handlers ──────────────────────────────────────────────────
-  const onScaleRemove = async (instanceId: string) => {
+  const onScaleRemove = (instanceId: string) => {
     setConfirmState({
       open: true,
       title: `Remove worker instance ${instanceId}?`,
       message: `This will stop bifrost-celery-worker@${instanceId}.service via systemd.`,
       confirming: false,
+      confirmLabel: 'Confirm delete',
       action: async () => {
         setConfirmState(prev => ({ ...prev, confirming: true }))
         setScaleBusy(true)
         try {
           const res = await scaleWorker({ action: 'remove', instance_id: instanceId })
-          setScaleMsg({ text: res.ok ? `Instance ${instanceId} removed` : (res.error ?? 'Failed'), isErr: !res.ok })
+          setScaleMsg({
+            text: res.ok
+              ? `Instance ${instanceId} stopped (unit ${res.after_state ?? 'inactive'}).`
+              : (res.error ?? 'Failed'),
+            isErr: !res.ok,
+          })
           await loadAll()
           if (res.ok) await refreshOpsWorkersSnapshot({ forceRefresh: true })
         } catch (e) {
@@ -544,6 +567,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
         title: 'Stop Redis broker?',
         message: 'Stopping the broker will disconnect all workers and halt task processing.',
         confirming: false,
+        confirmLabel: undefined,
         action: async () => {
           setConfirmState(prev => ({ ...prev, confirming: true }))
           setBrokerBusy(true)
@@ -656,44 +680,48 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           : 'Workers do not cover every supported queue'
   const showInitialSkeleton = loading && workers.length === 0
 
+  const confirmDialog =
+    confirmState.open &&
+    createPortal(
+      <div
+        className="data-reset-modal-overlay celery-control-confirm-overlay"
+        onClick={() => !confirmState.confirming && setConfirmState(INITIAL_CONFIRM)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="celery-control-confirm-title"
+      >
+        <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
+          <h3 id="celery-control-confirm-title">{confirmState.title}</h3>
+          <p>{confirmState.message}</p>
+          <div className="data-reset-modal-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setConfirmState(INITIAL_CONFIRM)}
+              disabled={confirmState.confirming}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-shutdown-all"
+              onClick={() => void confirmState.action?.()}
+              disabled={confirmState.confirming}
+            >
+              {confirmState.confirming ? 'Executing…' : (confirmState.confirmLabel ?? 'Confirm')}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    )
+
   return (
     <div
       id="settings-celery-control"
       className={`settings-page-card ${embeddedInSettings ? 'dashboard-page dashboard-page--embedded' : 'dashboard-page'}`}
     >
-      {/* Confirm dialog */}
-      {confirmState.open && (
-        <div
-          className="data-reset-modal-overlay"
-          onClick={() => !confirmState.confirming && setConfirmState(INITIAL_CONFIRM)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="celery-control-confirm-title"
-        >
-          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="celery-control-confirm-title">{confirmState.title}</h3>
-            <p>{confirmState.message}</p>
-            <div className="data-reset-modal-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setConfirmState(INITIAL_CONFIRM)}
-                disabled={confirmState.confirming}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn-shutdown-all"
-                onClick={() => confirmState.action?.()}
-                disabled={confirmState.confirming}
-              >
-                {confirmState.confirming ? 'Executing…' : 'Confirm'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {confirmDialog}
 
       <div className="settings-page-header settings-page-header--celery">
         <div className="settings-page-title-group">
@@ -816,7 +844,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
             <h3 id="dashboard-snapshot-head" className="page-title-with-tooltip">
               Runtime Snapshot
-              <InfoTooltip text="Broker from Redis; workers from Celery inspect (who responds on the broker). Worker Instances below lists OS processes — not the same data source. Dev/Prod chip on each worker card is Ops config_profile (GET /ops/health) for this control plane." />
+              <InfoTooltip text="Broker from Redis; workers from Redis presence + Celery inspect. Worker Dev/Prod badge = that process BIFROST_CONFIG (config.dev.yaml vs config.prod.yaml) from the worker Redis heartbeat. Ops role in the header = this Ops API host only. Text after @ in the worker id is the machine hostname. Remove stops the unit on the Ops control host; another machine using the same broker can still show a worker with the same instance id until stopped there." />
             </h3>
             <div className="dashboard-snapshot-celery-lamp-row" role="status">
               <span className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`} aria-hidden>●</span>
@@ -899,6 +927,8 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
               <div className="dashboard-workers-grid">
                 {workers.map(w => {
                   const lamp = workerLamp(w.status)
+                  const workerStackPill = opsHostEnvFromConfigProfile(w.worker_config_profile ?? null)
+                  const wh = workerHostFromWorkerId(w.worker_id)
                   return (
                     <div
                       key={w.worker_id}
@@ -910,37 +940,60 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                       }}
                     >
                       <div className="dashboard-worker-header">
-                        <span className={`title-inline-lamp lamp-icon ${lamp}`} aria-hidden>●</span>
-                        <OpsHostEnvPillBadge
-                          pill={opsHostEnvPill}
-                          className="dashboard-celery-env-pill"
-                          title={opsHostEnvPillTitle}
-                        />
-                        <span className="dashboard-worker-id" title={w.worker_id}>{w.worker_id}</span>
-                        <span className={`dashboard-worker-status dashboard-worker-status--${lamp}`}>
-                          {workerStatusLabel(w.status)}
-                        </span>
-                        <button
-                          type="button"
-                          className="dashboard-worker-remove-btn"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            const instanceId = workerIdToInstanceId(w.worker_id)
-                            if (!instanceId) {
-                              setScaleMsg({ text: `Cannot infer instance ID from ${w.worker_id}`, isErr: true })
-                              return
-                            }
-                            onScaleRemove(instanceId)
-                          }}
-                          disabled={scaleBusy || !canOperate}
-                          title={canOperate ? 'Remove this worker instance' : 'Requires operator role'}
-                          aria-label={`Remove ${w.worker_id}`}
-                        >
-                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
-                          </svg>
-                        </button>
+                        <div className="dashboard-worker-header-row1">
+                          <div className="dashboard-worker-header-leading">
+                            <span className={`title-inline-lamp lamp-icon ${lamp}`} aria-hidden>●</span>
+                            <OpsHostEnvPillBadge
+                              pill={workerStackPill}
+                              className="dashboard-celery-env-pill"
+                              title={
+                                w.worker_config_profile
+                                  ? `Worker stack: ${w.worker_config_profile} (from BIFROST_CONFIG on that process)`
+                                  : 'Worker stack unknown — restart worker after upgrade to publish dev/prod via Redis heartbeat'
+                              }
+                            />
+                          </div>
+                          <div className="dashboard-worker-header-trailing">
+                            <span className={`dashboard-worker-status dashboard-worker-status--${lamp}`}>
+                              {workerStatusLabel(w.status)}
+                            </span>
+                            <button
+                              type="button"
+                              className="dashboard-worker-remove-btn"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const instanceId = workerIdToInstanceId(w.worker_id)
+                                if (!instanceId) {
+                                  setScaleMsg({ text: `Cannot infer instance ID from ${w.worker_id}`, isErr: true })
+                                  return
+                                }
+                                onScaleRemove(instanceId)
+                              }}
+                              disabled={scaleBusy || !canOperate}
+                              title={
+                                canOperate
+                                  ? 'Remove: stops the systemd/subprocess unit on the Ops control host for this instance id. Another host on the same broker may keep a worker visible until stopped there.'
+                                  : 'Requires operator role'
+                              }
+                              aria-label={`Remove ${w.worker_id}`}
+                            >
+                              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="dashboard-worker-identity">
+                          <div className="dashboard-worker-id-full" title={w.worker_id}>
+                            {w.worker_id}
+                          </div>
+                          {wh ? (
+                            <div className="dashboard-worker-host-line" title="Machine hostname from Celery nodename">
+                              @{wh}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                       <div className="dashboard-worker-meta">
                         <span>Queues: {w.queues.length > 0 ? w.queues.join(', ') : '—'}</span>
@@ -1033,7 +1086,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
               <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
                 Worker Instances
-                <InfoTooltip text="Select a worker type and click Add — the system assigns a unique instance ID automatically. Dev/Prod chip on each row reflects Ops config_profile (GET /ops/health) for this host." />
+                <InfoTooltip text="Select a worker type and click Add — the system assigns a unique instance ID. Row chip = Ops host profile (GET /ops/health). Remove stops the unit on this control host; if Runtime Snapshot still shows a worker with the same id, check hostname on the worker card — it may be another machine on the same Redis broker." />
               </h3>
               {scaleMsg.text && (
                 <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
@@ -1054,8 +1107,15 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                         type="button"
                         className="dashboard-svc-stop-btn"
                         onClick={() => {
-                          const match = inst.unit.match(/@([^.]+)\.service/)
-                          if (match) onScaleRemove(match[1])
+                          const iid = instanceIdFromWorkerUnit(inst.unit)
+                          if (iid) {
+                            onScaleRemove(iid)
+                          } else {
+                            setScaleMsg({
+                              text: `Cannot parse instance id from unit name: ${inst.unit}`,
+                              isErr: true,
+                            })
+                          }
                         }}
                         disabled={scaleBusy || !canOperate}
                         title={canOperate ? `Stop and remove ${inst.unit}` : 'Requires operator role'}

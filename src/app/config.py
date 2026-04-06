@@ -4,6 +4,7 @@ from src.config.yaml_config import (
     IB_PORT_MAP,
     config_profile_from_resolved_path,
     get_effective_ib_config,
+    normalize_server_config,
     read_config,
     resolve_startup_config_path,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "IB_PORT_MAP",
     "config_profile_from_resolved_path",
     "get_effective_ib_config",
+    "normalize_server_config",
     "read_config",
     "resolve_startup_config_path",
 ]

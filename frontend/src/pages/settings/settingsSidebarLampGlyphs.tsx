@@ -23,6 +23,7 @@ export type SettingsSidebarLampGlyphId =
   | 'celery'
   | 'api'
   | 'api-massive'
+  | 'api-monitor'
   | 'api-docs'
   | 'api-ops'
   | 'massive-option'
@@ -104,6 +105,14 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
       return (
         <svg {...SVG_COMMON}>
           <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      )
+    /** API Monitor: status / control plane (display) */
+    case 'api-monitor':
+      return (
+        <svg {...SVG_COMMON}>
+          <rect x="2" y="4" width="20" height="13" rx="2" />
+          <path d="M8 21h8" />
         </svg>
       )
     /** API Docs: merged OpenAPI documentation */

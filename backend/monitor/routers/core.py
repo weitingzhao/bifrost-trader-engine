@@ -11,7 +11,8 @@ router = APIRouter(tags=["core"])
 
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent
+    # backend/monitor/routers/core.py -> repo root (not backend/)
+    return Path(__file__).resolve().parent.parent.parent.parent
 
 
 def _frontend_dist() -> Path:
@@ -73,7 +74,7 @@ def get_health(request: Request) -> Dict[str, Any]:
     fe_prod = getattr(request.app.state, "bifrost_frontend_prod_path", None)
     if fe_prod:
         out["frontend_prod_path"] = fe_prod
-    out["server_port"] = int(getattr(request.app.state, "bifrost_server_listen_port", 8765))
+    out["monitor_port"] = int(getattr(request.app.state, "bifrost_server_listen_port", 8765))
     out["massive_port"] = int(getattr(request.app.state, "bifrost_massive_port", 8766))
     out["docs_port"] = int(getattr(request.app.state, "bifrost_docs_port", 8767))
     out["ops_port"] = int(getattr(request.app.state, "bifrost_ops_port", 8768))

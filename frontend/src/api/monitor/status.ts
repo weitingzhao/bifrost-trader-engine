@@ -28,14 +28,16 @@ export async function fetchHealth(options?: { timeoutMs?: number }): Promise<{
   frontend_dev_path?: string
   /** From YAML frontend.prod_path — base URL for API Health Production column. */
   frontend_prod_path?: string
-  /** From YAML server.port — main bifrost FastAPI listen port (API Health Development split probes). */
-  server_port?: number
+  /** From YAML server.architecture.monitor_port (flattened as server.monitor_port) — Monitor API listen port. */
+  monitor_port?: number
   /** From YAML server.massive_port — Massive FastAPI port. */
   massive_port?: number
-  /** From YAML server.docs_port — merged Docs FastAPI port. */
-  /** From YAML server.ops_port — Ops FastAPI port. */
-  ops_port?: number
   docs_port?: number
+  ops_port?: number
+  trading_port?: number
+  strategy_port?: number
+  portfolio_port?: number
+  market_port?: number
   /** From YAML server.research_port — Research API (option discovery, max pain). */
   research_port?: number
   /** From YAML utilized.services — which sidecar stack each service uses (e.g. dev vs prod). */

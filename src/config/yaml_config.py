@@ -18,6 +18,83 @@ _IB_YAML_EXAMPLE_HINT = (
 _VALID_ENV_NAMES = frozenset(("dev", "prod"))
 
 
+def _server_int_opt(d: dict, key: str) -> Optional[int]:
+    v = d.get(key)
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _server_int_with_defaults(
+    nested: dict,
+    flat: dict,
+    key: str,
+    legacy_flat_key: Optional[str],
+    default: int,
+) -> int:
+    v = _server_int_opt(nested, key)
+    if v is not None:
+        return v
+    v = _server_int_opt(flat, key)
+    if v is not None:
+        return v
+    if legacy_flat_key:
+        v = _server_int_opt(flat, legacy_flat_key)
+        if v is not None:
+            return v
+    return default
+
+
+def normalize_server_config(server: Optional[dict]) -> dict:
+    """Flatten ``server.{architecture,account,research,feed}`` into canonical port keys.
+
+    Categories align with API Health / Services Overview: Architecture, Account, Research, Feed.
+
+    - ``architecture``: ``monitor_port`` (legacy top-level ``port`` also accepted), ``docs_port``, ``ops_port``
+    - ``account``: ``trading_port``, ``portfolio_port``
+    - ``research``: ``research_port``, ``market_port``, ``strategy_port``
+    - ``feed``: ``massive_port``
+
+    Nested values win over legacy flat keys. Category keys and legacy ``port`` are removed from the result.
+    """
+    if not server or not isinstance(server, dict):
+        return {}
+    srv = dict(server)
+    arch = srv.get("architecture") if isinstance(srv.get("architecture"), dict) else {}
+    acc = srv.get("account") if isinstance(srv.get("account"), dict) else {}
+    res = srv.get("research") if isinstance(srv.get("research"), dict) else {}
+    feed = srv.get("feed") if isinstance(srv.get("feed"), dict) else {}
+
+    monitor_port = _server_int_with_defaults(arch, srv, "monitor_port", "port", 8765)
+    docs_port = _server_int_with_defaults(arch, srv, "docs_port", None, 8767)
+    ops_port = _server_int_with_defaults(arch, srv, "ops_port", None, 8768)
+    trading_port = _server_int_with_defaults(acc, srv, "trading_port", None, 8769)
+    portfolio_port = _server_int_with_defaults(acc, srv, "portfolio_port", None, 8771)
+    research_port = _server_int_with_defaults(res, srv, "research_port", None, 8773)
+    market_port = _server_int_with_defaults(res, srv, "market_port", None, 8772)
+    strategy_port = _server_int_with_defaults(res, srv, "strategy_port", None, 8770)
+    massive_port = _server_int_with_defaults(feed, srv, "massive_port", None, 8766)
+
+    out = {
+        k: v
+        for k, v in srv.items()
+        if k not in ("architecture", "account", "research", "feed", "port")
+    }
+    out["monitor_port"] = monitor_port
+    out["docs_port"] = docs_port
+    out["ops_port"] = ops_port
+    out["trading_port"] = trading_port
+    out["portfolio_port"] = portfolio_port
+    out["research_port"] = research_port
+    out["market_port"] = market_port
+    out["strategy_port"] = strategy_port
+    out["massive_port"] = massive_port
+    return out
+
+
 def resolve_startup_config_path(project_root: str, argv: List[str]) -> Tuple[str, List[str]]:
     """Resolve config file for ``run_engine`` / ``run_server`` / ``run_celery``.
 
@@ -120,6 +197,9 @@ def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
     ``config/config.yaml`` exists in the same directory, load ``config.yaml`` first and **deep-merge**
     the env-specific file on top (overlay wins). This matches a split where shared keys live in
     ``config.yaml`` and env overrides live in ``config.dev.yaml`` / ``config.prod.yaml``.
+
+    After merge, ``server`` is passed through :func:`normalize_server_config` so categorized YAML
+    (``architecture`` / ``account`` / ``research`` / ``feed``) becomes flat keys (``monitor_port``, …).
     """
     config_path = config_path or os.environ.get("BIFROST_CONFIG", "config/config.yaml")
     if not Path(config_path).exists():
@@ -136,9 +216,15 @@ def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
         if base_path.is_file():
             with open(base_path, "r", encoding="utf-8") as f:
                 base: Dict[str, Any] = yaml.safe_load(f) or {}
-            return deep_merge(base, overlay), config_path
+            merged = deep_merge(base, overlay)
+        else:
+            merged = overlay
+    else:
+        merged = overlay
 
-    return overlay, config_path
+    if isinstance(merged.get("server"), dict):
+        merged["server"] = normalize_server_config(merged["server"])
+    return merged, config_path
 
 
 def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:

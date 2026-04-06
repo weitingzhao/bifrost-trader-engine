@@ -1,26 +1,39 @@
-# HTTPS server block — render from template, then copy AFTER Let's Encrypt (or other) certs exist.
+# Reverse proxy for Bifrost APIs. Ports are filled from merged YAML (do not edit by hand); regenerate with:
+#   python scripts/render_nginx_status_conf.py
+# Uses merged YAML (config.yaml + config.prod.yaml when BIFROST_CONFIG points at prod), same as uvicorn.
 #
-#   python scripts/render_nginx_status_conf.py --ssl-output deploy/nginx/bifrost-status-ssl.conf.example
-#   sudo cp deploy/nginx/bifrost-status-ssl.conf.example /etc/nginx/sites-available/bifrost-status-ssl
-#   # Edit ssl_certificate paths if your domain is not ai.trader
-#   sudo ln -sf /etc/nginx/sites-available/bifrost-status-ssl /etc/nginx/sites-enabled/
+# Path → backend (single origin :80; matches FastAPI route prefixes in backend/*/routers):
+#   /research/massive → Massive | /research/docs, /bifrost-api-docs/ → Docs | /ops → Ops
+#   /strategies/ → Strategy | /portfolio/, /position-categories → Portfolio
+#   /trading/, /executions, /performance, /transactions → Trading
+#   /bars, /watchlist, /quotes, /market/, /indices/ → Market
+#   /research/ (rest) → Research API (option discovery, max pain) — longer /research/massive|docs win first
+#   / → Monitor (SPA, /status, /health, …). GET /health is only the Monitor process on this host.
+#
+# Install (Debian/Ubuntu) — HTTP only; nginx -t passes without TLS files:
+#   python scripts/render_nginx_status_conf.py
+#   sudo cp deploy/nginx/bifrost-status.conf /etc/nginx/sites-available/bifrost-status
+#   sudo ln -sf /etc/nginx/sites-available/bifrost-status /etc/nginx/sites-enabled/bifrost-status
 #   sudo nginx -t && sudo systemctl reload nginx
 #
-# If nginx -t fails with "cannot load certificate", either fix PEM paths or remove this site from sites-enabled.
+# HTTPS (optional): render ssl template then copy (see bifrost-status-ssl.conf.template).
+#
+# Hostname: add your DNS (e.g. ai.trader) to server_name; if https://... 404s, check nginx -T | grep server_name
+#
+# Uvicorn backends speak HTTP only. Do NOT use https://host:<port> in proxy_pass — terminate TLS in nginx.
 
-# --- HTTPS (same routes as bifrost-status.conf HTTP block) ---
+# --- HTTP only (no ssl_certificate — nginx -t works on fresh hosts) ---
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 80;
+    listen [::]:80;
     server_name ai.trader 192.168.10.70 127.0.0.1 localhost;
 
-    ssl_certificate     /etc/letsencrypt/live/ai.trader/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/ai.trader/privkey.pem;
-    # include /etc/letsencrypt/options-ssl-nginx.conf;
-    # ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    # Optional: redirect all HTTP to HTTPS (uncomment after :443 works)
+    # return 301 https://$host$request_uri;
 
+    # Massive API. Prefix without trailing slash so /research/massive matches.
     location ^~ /research/massive {
-        proxy_pass http://127.0.0.1:8741;
+        proxy_pass http://127.0.0.1:@@BIFROST_MASSIVE_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -32,8 +45,9 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    # Docs API. Same proxy pattern as Massive — full path forwarded.
     location ^~ /research/docs {
-        proxy_pass http://127.0.0.1:8719;
+        proxy_pass http://127.0.0.1:@@BIFROST_DOCS_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -46,7 +60,7 @@ server {
     }
 
     location ^~ /bifrost-api-docs/ {
-        proxy_pass http://127.0.0.1:8719/;
+        proxy_pass http://127.0.0.1:@@BIFROST_DOCS_PORT@@/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -54,11 +68,13 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Ops API — control plane. LAN-only access.
     location ^~ /ops {
+        # Restrict to LAN subnets (uncomment and adjust for production)
         # allow 192.168.10.0/24;
         # deny all;
 
-        proxy_pass http://127.0.0.1:8713;
+        proxy_pass http://127.0.0.1:@@BIFROST_OPS_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -70,8 +86,9 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    # Strategy API (routers use prefix /strategies)
     location ^~ /strategies/ {
-        proxy_pass http://127.0.0.1:8735;
+        proxy_pass http://127.0.0.1:@@BIFROST_STRATEGY_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -83,8 +100,9 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    # Portfolio API
     location ^~ /portfolio/ {
-        proxy_pass http://127.0.0.1:8723;
+        proxy_pass http://127.0.0.1:@@BIFROST_PORTFOLIO_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -97,7 +115,7 @@ server {
     }
 
     location ^~ /position-categories {
-        proxy_pass http://127.0.0.1:8723;
+        proxy_pass http://127.0.0.1:@@BIFROST_PORTFOLIO_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -109,8 +127,9 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    # Trading API (docs/openapi under /trading/*; REST at /executions, /performance, /transactions)
     location ^~ /trading/ {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -123,7 +142,7 @@ server {
     }
 
     location ^~ /executions {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -136,7 +155,7 @@ server {
     }
 
     location ^~ /performance {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -149,7 +168,7 @@ server {
     }
 
     location ^~ /transactions {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -161,8 +180,9 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    # Market API
     location ^~ /bars {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -175,7 +195,7 @@ server {
     }
 
     location ^~ /watchlist {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -188,7 +208,7 @@ server {
     }
 
     location ^~ /quotes {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -201,7 +221,7 @@ server {
     }
 
     location ^~ /market/ {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -214,7 +234,7 @@ server {
     }
 
     location ^~ /indices/ {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -226,8 +246,9 @@ server {
         proxy_read_timeout 86400s;
     }
 
+    # Research API (option discovery, max pain, …) — must follow /research/massive and /research/docs above
     location ^~ /research/ {
-        proxy_pass http://127.0.0.1:8731;
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -240,7 +261,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:8711;
+        proxy_pass http://127.0.0.1:@@BIFROST_MONITOR_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

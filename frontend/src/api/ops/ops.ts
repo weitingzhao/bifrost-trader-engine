@@ -90,6 +90,8 @@ export interface WorkerSummary {
   active_tasks: number
   reserved_tasks: number
   last_heartbeat: number | null
+  /** dev|prod from worker BIFROST_CONFIG (Redis presence); not the Ops API host. */
+  worker_config_profile?: string | null
 }
 
 export interface WorkerDetail extends WorkerSummary {
@@ -207,6 +209,8 @@ export interface ScaleResult {
   worker_type?: string
   result?: Record<string, unknown>
   error?: string
+  /** systemd / subprocess view after remove (e.g. inactive). */
+  after_state?: string
 }
 
 export async function scaleWorker(params: {
@@ -285,6 +289,8 @@ export interface MarketIngestServiceRow {
   systemd_unit: string
   redis_meta_key: string
   process_active: string
+  /** dev|prod from Redis hash field bifrost_ops_control_env (Ops start/stop); null if unclaimed. */
+  redis_control_env?: string | null
 }
 
 export async function fetchMarketIngestServices(): Promise<{

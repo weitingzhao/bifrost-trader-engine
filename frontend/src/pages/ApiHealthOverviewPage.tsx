@@ -92,6 +92,12 @@ function trimEnv(s: string | undefined): string | undefined {
   return t ? t.replace(/\/$/, '') : undefined
 }
 
+/** True when every utilized row is prod (GET /health may omit config_profile if only config.yaml is loaded). */
+function utilizedAllEnv(rows: UtilizedServiceRow[], env: 'prod' | 'dev'): boolean {
+  if (rows.length === 0) return false
+  return rows.every((r) => r.env.toLowerCase() === env)
+}
+
 export type { UtilizedServiceRow }
 
 function lampFor(ok: boolean | null): Lamp {
@@ -347,10 +353,14 @@ async function resolveColumnPlans(): Promise<{
     const utilizedServices = normalizeUtilizedServices(h?.utilized_services)
 
     const prof = mh?.config_profile ?? h?.config_profile
+    /** Production column: same-origin fallback when prod_path unset but this is clearly a prod stack. */
+    const effectiveProdStack =
+      prof === 'prod' ||
+      (prof == null && utilizedAllEnv(utilizedServices, 'prod'))
     const pub = trimEnv(h?.frontend_public_origin)
     const cfgDev = trimEnv(h?.frontend_dev_path)
     const cfgProd = trimEnv(h?.frontend_prod_path)
-    const sp = typeof h?.server_port === 'number' && Number.isFinite(h.server_port) ? h.server_port : 8765
+    const sp = typeof h?.monitor_port === 'number' && Number.isFinite(h.monitor_port) ? h.monitor_port : 8765
     const mp = typeof h?.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
     const dp = typeof h?.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
     const op = typeof h?.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
@@ -401,7 +411,7 @@ async function resolveColumnPlans(): Promise<{
     } else if (cfgProd) {
       const o = cfgProd.replace(/\/$/, '')
       prod = { display: o, probe: { kind: 'single', origin: o, microPorts } }
-    } else if (noYamlPaths && prof === 'prod') {
+    } else if (effectiveProdStack && !prodEnv && !cfgProd) {
       prod = {
         display: pub || 'Same as this app',
         probe: { kind: 'single', origin: pub ?? '', microPorts },
@@ -453,7 +463,6 @@ function buildColumn(title: string, display: string | null, probe: ProbeResult |
     {
       title: 'Account',
       rows: [
-        row('Market API', probe.market, 'GET /health failed'),
         row('Trading API', probe.trading, 'GET /health failed'),
         row('Portfolio API', probe.portfolio, 'GET /health failed'),
       ],
@@ -462,6 +471,7 @@ function buildColumn(title: string, display: string | null, probe: ProbeResult |
       title: 'Research',
       rows: [
         row('Research API', probe.research, 'GET /health failed'),
+        row('Market API', probe.market, 'GET /health failed'),
         row('Strategy API', probe.strategy, 'GET /health failed'),
       ],
     },

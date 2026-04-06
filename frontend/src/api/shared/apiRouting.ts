@@ -10,7 +10,7 @@ export interface HealthRoutingFields {
   frontend_public_origin?: string
   frontend_dev_path?: string
   frontend_prod_path?: string
-  server_port?: number
+  monitor_port?: number
   massive_port?: number
   docs_port?: number
   ops_port?: number
@@ -44,6 +44,14 @@ function envForService(
   return null
 }
 
+function utilizedRowsAllEnv(
+  rows: Array<{ service: string; env: string }>,
+  env: 'prod' | 'dev',
+): boolean {
+  if (rows.length === 0) return false
+  return rows.every((r) => String(r.env).toLowerCase().trim() === env)
+}
+
 /**
  * Same rules as Settings → Services Overview column resolution: one origin per env column,
  * with split host:port when frontend_dev_path is set and VITE_* overrides are unset.
@@ -64,7 +72,7 @@ function baseForEnvRole(
 ): string {
   const devEnv = trimEnv(import.meta.env.VITE_DEV_API_ORIGIN)
   const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
-  const sp = typeof h.server_port === 'number' && Number.isFinite(h.server_port) ? h.server_port : 8765
+  const sp = typeof h.monitor_port === 'number' && Number.isFinite(h.monitor_port) ? h.monitor_port : 8765
   const mp = typeof h.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
   const dp = typeof h.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
   const op = typeof h.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
@@ -111,7 +119,11 @@ function baseForEnvRole(
 
   if (prodEnv) return prodEnv
   if (cfgProd) return cfgProd.replace(/\/$/, '')
-  if (noYamlPaths && h.config_profile === 'prod') {
+  const rows = Array.isArray(h.utilized_services) ? h.utilized_services : []
+  const inferredProdStack =
+    h.config_profile === 'prod' ||
+    (h.config_profile == null && utilizedRowsAllEnv(rows, 'prod'))
+  if (!cfgProd && inferredProdStack) {
     return pub ?? ''
   }
   return ''

@@ -20,7 +20,7 @@ server {
     # ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     location ^~ /research/massive {
-        proxy_pass http://127.0.0.1:8741;
+        proxy_pass http://127.0.0.1:@@BIFROST_MASSIVE_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -33,7 +33,7 @@ server {
     }
 
     location ^~ /research/docs {
-        proxy_pass http://127.0.0.1:8719;
+        proxy_pass http://127.0.0.1:@@BIFROST_DOCS_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -46,7 +46,7 @@ server {
     }
 
     location ^~ /bifrost-api-docs/ {
-        proxy_pass http://127.0.0.1:8719/;
+        proxy_pass http://127.0.0.1:@@BIFROST_DOCS_PORT@@/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -58,7 +58,7 @@ server {
         # allow 192.168.10.0/24;
         # deny all;
 
-        proxy_pass http://127.0.0.1:8713;
+        proxy_pass http://127.0.0.1:@@BIFROST_OPS_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -71,7 +71,7 @@ server {
     }
 
     location ^~ /strategies/ {
-        proxy_pass http://127.0.0.1:8735;
+        proxy_pass http://127.0.0.1:@@BIFROST_STRATEGY_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -84,7 +84,7 @@ server {
     }
 
     location ^~ /portfolio/ {
-        proxy_pass http://127.0.0.1:8723;
+        proxy_pass http://127.0.0.1:@@BIFROST_PORTFOLIO_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -97,7 +97,7 @@ server {
     }
 
     location ^~ /position-categories {
-        proxy_pass http://127.0.0.1:8723;
+        proxy_pass http://127.0.0.1:@@BIFROST_PORTFOLIO_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -110,7 +110,7 @@ server {
     }
 
     location ^~ /trading/ {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -123,7 +123,7 @@ server {
     }
 
     location ^~ /executions {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -136,7 +136,7 @@ server {
     }
 
     location ^~ /performance {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -149,7 +149,7 @@ server {
     }
 
     location ^~ /transactions {
-        proxy_pass http://127.0.0.1:8721;
+        proxy_pass http://127.0.0.1:@@BIFROST_TRADING_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -162,7 +162,7 @@ server {
     }
 
     location ^~ /bars {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -175,7 +175,7 @@ server {
     }
 
     location ^~ /watchlist {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -188,7 +188,7 @@ server {
     }
 
     location ^~ /quotes {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -201,7 +201,7 @@ server {
     }
 
     location ^~ /market/ {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -214,7 +214,7 @@ server {
     }
 
     location ^~ /indices/ {
-        proxy_pass http://127.0.0.1:8733;
+        proxy_pass http://127.0.0.1:@@BIFROST_MARKET_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -227,7 +227,7 @@ server {
     }
 
     location ^~ /research/ {
-        proxy_pass http://127.0.0.1:8731;
+        proxy_pass http://127.0.0.1:@@BIFROST_RESEARCH_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -240,7 +240,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:8711;
+        proxy_pass http://127.0.0.1:@@BIFROST_MONITOR_PORT@@;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

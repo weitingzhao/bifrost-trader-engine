@@ -19,6 +19,8 @@
      1. Root node MUST have min-width:0 + max-width:100% (set via .settings-main > selector).
      2. All flex/grid children inside MUST set min-width:0 to prevent content blow-out.
      3. Console / log containers use box-sizing:border-box to respect parent bounds.
+   4. Modals that use position:fixed must be portaled to document.body — .settings-main has
+      overflow-x:hidden and will clip descendants otherwise (Celery remove-instance confirm).
 
    Breakpoint: --settings-embedded-bp (960px) for Celery 2-column grid.
    @media cannot use var(); keep the literal in sync with the :root token.
@@ -354,6 +356,11 @@
   padding-left: var(--settings-main-padding-x);
   /* Avoid a second horizontal scrollbar: wide tables/logs scroll inside their own wrappers */
   overflow-x: hidden;
+}
+
+/* Portaled from CeleryControlPage — above .celery-queue-confirm-overlay (4000) and app header */
+.celery-control-confirm-overlay.data-reset-modal-overlay {
+  z-index: 6000;
 }
 
 /* Embedded Daemon/Celery under Settings: don't let grid/flex min-content widen the whole page */
@@ -1758,9 +1765,25 @@
 
 .dashboard-worker-header {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+
+.dashboard-worker-header-row1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.dashboard-worker-header-leading,
+.dashboard-worker-header-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 /* Dev/Prod — same capsule as Services Overview (api-overview-env-pill) */
@@ -1768,14 +1791,26 @@
   flex-shrink: 0;
 }
 
-.dashboard-worker-id {
+.dashboard-worker-identity {
+  min-width: 0;
+}
+
+.dashboard-worker-id-full {
   font-weight: 600;
   font-size: 0.8125rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  color: var(--color-text-main);
+}
+
+.dashboard-worker-host-line {
+  margin-top: 0.15rem;
+  font-size: 0.6875rem;
+  color: var(--color-text-dim);
+  line-height: 1.3;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .dashboard-worker-status {
@@ -1794,7 +1829,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-left: auto;
+  flex-shrink: 0;
   width: 1.4rem;
   height: 1.4rem;
   padding: 0;

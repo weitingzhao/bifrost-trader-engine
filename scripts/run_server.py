@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 2: Standalone status/control server. Reads PostgreSQL; GET /status, GET /operations, POST /control/stop.
 
-On startup, reads server.port from config and frees the port if already in use (kills existing process), then starts the Monitor FastAPI app (``backend.monitor.app``).
+On startup, reads server.architecture.monitor_port (normalized to ``server.monitor_port``) from config and frees the port if already in use (kills existing process), then starts the Monitor FastAPI app (``backend.monitor.app``).
 
 Default config: ``config/config.dev.yaml``. Use ``--prod`` or ``BIFROST_ENV=prod`` for ``config/config.prod.yaml``, or ``BIFROST_CONFIG`` / first positional path."""
 
@@ -134,7 +134,7 @@ def setup_logging() -> None:
 
 def _port_from_config(config: dict) -> int:
     """Port from config (same as servers.app.run_server)."""
-    port = config.get("server", {}).get("port") or 8765
+    port = config.get("server", {}).get("monitor_port") or 8765
     return int(port)
 
 

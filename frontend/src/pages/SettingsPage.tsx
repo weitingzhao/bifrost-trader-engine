@@ -57,6 +57,7 @@ import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { DocsApiStatusPage } from './DocsApiStatusPage'
+import { MonitorApiStatusPage } from './MonitorApiStatusPage'
 import { OpsApiStatusPage } from './OpsApiStatusPage'
 import { DashboardPage } from './DashboardPage'
 import { CeleryControlPage } from './CeleryControlPage'
@@ -70,7 +71,12 @@ import { useDeferredStart } from '../hooks/useDeferredStart'
 import { fetchMarketIngestServices, fetchOpsHealth } from '../api/ops/ops'
 import { aggregateIngestServicesLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
 
-const API_SETTINGS_DETAIL_HASHES = ['settings-api-docs', 'settings-api-massive', 'settings-api-ops'] as const
+const API_SETTINGS_DETAIL_HASHES = [
+  'settings-api-monitor',
+  'settings-api-docs',
+  'settings-api-massive',
+  'settings-api-ops',
+] as const
 
 /** Stack indicator from GET /health utilized_services (YAML). */
 function SettingsSidebarServiceEnvBadge({ stack }: { stack: 'prod' | 'dev' | null }) {
@@ -267,6 +273,7 @@ export function SettingsPage({
   const [apiExpanded, setApiExpanded] = useState(true)
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
   const [massiveApiHealthOk, setMassiveApiHealthOk] = useState<boolean | null>(null)
+  const [monitorApiHealthOk, setMonitorApiHealthOk] = useState<boolean | null>(null)
   const [docsApiHealthOk, setDocsApiHealthOk] = useState<boolean | null>(null)
   const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
   const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
@@ -288,12 +295,18 @@ export function SettingsPage({
   const isApiDetailSubPage =
     isApiSection && API_SETTINGS_DETAIL_HASHES.includes(currentHash as (typeof API_SETTINGS_DETAIL_HASHES)[number])
   const isApiOverviewMain = isApiSection && !isApiDetailSubPage
+  const isApiMonitorActive = isApiSection && currentHash === 'settings-api-monitor'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
   const isApiDocsActive = isApiSection && currentHash === 'settings-api-docs'
   const isApiOpsActive = isApiSection && currentHash === 'settings-api-ops'
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
+  const monitorApiLamp: 'green' | 'red' | 'none' = monitorApiHealthOk === true ? 'green' : monitorApiHealthOk === false ? 'red' : 'none'
   const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
   const opsApiLamp: 'green' | 'red' | 'none' = opsApiHealthOk === true ? 'green' : opsApiHealthOk === false ? 'red' : 'none'
+  const monitorStackEnv =
+    utilizedEnvFor(utilizedServices, 'server')
+    ?? utilizedEnvFor(utilizedServices, 'main')
+    ?? utilizedEnvFor(utilizedServices, 'api')
   const docsStackEnv = utilizedEnvFor(utilizedServices, 'docs')
   const massiveStackEnv = utilizedEnvFor(utilizedServices, 'massive')
   const opsStackEnv = utilizedEnvFor(utilizedServices, 'ops')
@@ -316,10 +329,16 @@ export function SettingsPage({
         .catch(() => { if (!cancelled) setOpsApiHealthOk(false) })
       fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
         .then(h => {
-          if (!cancelled) setUtilizedServices(normalizeUtilizedServices(h.utilized_services))
+          if (!cancelled) {
+            setUtilizedServices(normalizeUtilizedServices(h.utilized_services))
+            setMonitorApiHealthOk(true)
+          }
         })
         .catch(() => {
-          if (!cancelled) setUtilizedServices([])
+          if (!cancelled) {
+            setUtilizedServices([])
+            setMonitorApiHealthOk(false)
+          }
         })
       computeApiHealthAggregateLamp()
         .then((l) => {
@@ -609,6 +628,16 @@ export function SettingsPage({
           </div>
           <div id="settings-api-subs" className="settings-sidebar-subs" hidden={!apiExpanded}>
             <a
+              href="#settings-api-monitor"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiMonitorActive ? 'active' : ''}`}
+            >
+              <span className={`title-inline-lamp lamp-icon ${monitorApiLamp}`} title="Monitor API health" aria-hidden>
+                <SettingsSidebarLampGlyph id="api-monitor" />
+              </span>
+              Monitor
+              <SettingsSidebarServiceEnvBadge stack={monitorStackEnv} />
+            </a>
+            <a
               href="#settings-api-docs"
               className={`settings-sidebar-link settings-sidebar-link-sub ${isApiDocsActive ? 'active' : ''}`}
             >
@@ -852,6 +881,8 @@ export function SettingsPage({
       ) : isApiSection ? (
         isApiOverviewMain ? (
           <ApiHealthOverviewPage embeddedInSettings />
+        ) : isApiMonitorActive ? (
+          <MonitorApiStatusPage embeddedInSettings />
         ) : isApiMassiveActive ? (
           <MassiveApiStatusPage embeddedInSettings />
         ) : isApiDocsActive ? (

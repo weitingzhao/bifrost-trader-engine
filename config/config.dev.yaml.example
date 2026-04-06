@@ -38,23 +38,29 @@ redis:
   host: "127.0.0.1"
   port: 6379
 
+# Categories: Architecture, Account, Research, Feed (same as Settings → Services Overview).
 server:
-  port: 8765 # Monitor API (run_server.py); omit only if you rely on script default
-  massive_port: 8766
-  docs_port: 8767
-  ops_port: 8768
-  trading_port: 8769   # trading API server
-  strategy_port: 8770  # strategy API server
-  portfolio_port: 8771 # portfolio API server
-  market_port: 8772    # market API server
+  architecture:
+    monitor_port: 8765 # Monitor API (run_server.py)
+    docs_port: 8767
+    ops_port: 8768
+  account:
+    trading_port: 8769
+    portfolio_port: 8771
+  research:
+    research_port: 8773
+    market_port: 8772
+    strategy_port: 8770
+  feed:
+    massive_port: 8766
 
 frontend:
   port: 5173
   # Optional: Settings → API Health + browser API routing (GET /health).
   # When config_profile is dev and dev_path is set, the UI builds trading/strategy/portfolio/market
-  # origins as this host + server.trading_port / strategy_port / portfolio_port / market_port from YAML
+  # origins as this host + flattened server.*_port from YAML (after read_config normalization)
   # even if utilized.services omits those rows. Massive/Docs still follow utilized.services.
-  # dev_path: "http://192.168.x.x"     # host — ports come from server.*_port in this file
+  # dev_path: "http://192.168.x.x"     # host — ports come from server.account/research/feed/architecture in this file
   # prod_path: "https://your-prod-host"
 
 # Optional: per FastAPI microservice — dev or prod for browser API routing (GET /health utilized_services).

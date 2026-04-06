@@ -162,6 +162,19 @@ def _presence_queue_names_for_worker(worker: object) -> List[str]:
     return sorted(set(out))
 
 
+def _bifrost_config_profile_label() -> Optional[str]:
+    """Map ``BIFROST_CONFIG`` path to ``dev`` / ``prod`` for Ops UI (Redis presence)."""
+    raw = (os.environ.get("BIFROST_CONFIG") or "").strip()
+    if not raw:
+        return None
+    name = Path(raw).name.lower()
+    if name == "config.prod.yaml":
+        return "prod"
+    if name == "config.dev.yaml":
+        return "dev"
+    return None
+
+
 def _start_ops_worker_presence_heartbeat(worker: object) -> None:
     """Background SETEX so Ops can list workers via SCAN without control.inspect."""
     try:
@@ -187,6 +200,7 @@ def _start_ops_worker_presence_heartbeat(worker: object) -> None:
                     "worker_id": wid,
                     "queues": _presence_queue_names_for_worker(worker),
                     "ts": time.time(),
+                    "config_profile": _bifrost_config_profile_label(),
                 }
                 r.setex(key, OPS_WORKER_PRESENCE_TTL_SEC, json.dumps(payload))
             except Exception as e:

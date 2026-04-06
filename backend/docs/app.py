@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.docs.merge_openapi import fetch_openapi, merge_openapi_specs
-from src.app.config import config_profile_from_resolved_path
+from src.app.config import config_profile_from_resolved_path, normalize_server_config
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,9 @@ def create_docs_app(
         /research/docs/redoc
         /research/docs/health
 
+    ``config`` may use categorized ``server.{architecture,account,research,feed}`` YAML; it is normalized
+    the same way as ``read_config()``.
+
     Root ``/openapi.json``, ``/docs``, ``/redoc`` remain for nginx
     ``/bifrost-api-docs/`` → ``127.0.0.1:8767/`` (stripped prefix). Set
     ``BIFROST_DOCS_ROOT_PATH=/bifrost-api-docs`` so Swagger loads the correct
@@ -63,6 +66,10 @@ def create_docs_app(
         allow_headers=["*"],
     )
 
+    _cfg: Dict[str, Any] = dict(config) if config else {}
+    if isinstance(_cfg.get("server"), dict):
+        _cfg["server"] = normalize_server_config(_cfg["server"])
+
     _state: Dict[str, Any] = {
         "main_url": main_openapi_url,
         "massive_url": massive_openapi_url,
@@ -80,7 +87,7 @@ def create_docs_app(
             "massive_url": _state["massive_url"],
             "research_url": _state["research_url"],
         }
-        srv = (config or {}).get("server") or {}
+        srv = _cfg.get("server") or {}
         out["port"] = int(srv.get("docs_port") or 8767)
         profile = config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
         if profile is not None:
@@ -195,7 +202,9 @@ def run_docs_server(
     import uvicorn
 
     server_cfg = config.get("server") or {}
-    main_port = int(server_cfg.get("port") or 8765)
+    if isinstance(server_cfg, dict):
+        server_cfg = normalize_server_config(server_cfg)
+    main_port = int(server_cfg.get("monitor_port") or 8765)
     massive_port = int(server_cfg.get("massive_port") or 8766)
     research_port = int(server_cfg.get("research_port") or 8773)
     docs_port = int(server_cfg.get("docs_port") or 8767)
