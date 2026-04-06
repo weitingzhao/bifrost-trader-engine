@@ -24,14 +24,14 @@ ib:
       listener: 101
       operator: 120
       worker_market: 140
-      # Dedicated IB market ingest (scripts/run_ib_market_ingest.py); must not overlap operator/daemon/Celery IDs.
-      ib_market_ingest: 150
+      # IB Market Ingest (scripts/run_ib_market_ingest.py); must not overlap operator/daemon/Celery IDs.
+      ingestor: 150
   secondary:
     ip: "127.0.0.1"
     port_type: "tws_live"
     client_id:
       listener: 11
-      account: 120
+      operator: 120
 
 redis:
   enabled: true
@@ -107,11 +107,11 @@ massive:
 #     - id: ib_operator
 #       label: "IB Operator (cmd RPC)"
 #       systemd_unit: bifrost-ib-operator.service
-#       redis_meta_key: bifrost:ib:operator:health
+#       redis_meta_key: ib:operator:meta:health
 #     - id: ib_market
 #       label: "IB market ingest"
 #       systemd_unit: bifrost-ib-market-ingest.service
-#       redis_meta_key: ib:meta:status
+#       redis_meta_key: ib:ingester:meta:health
 
 # IB market ingest (scripts/run_ib_market_ingest.py): Watchlist-driven; caps subscription count.
 # ib_market_ingest:

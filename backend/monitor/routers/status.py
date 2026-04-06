@@ -10,6 +10,7 @@ from fastapi import APIRouter, Query, Request
 
 from src.monitor.reader import get_job_bars_backfill_last_updated
 from src.monitor.self_check import derive_daemon_self_check, derive_self_check
+from src.vendor.ib_market_ingest.redis_keys import IB_INGESTER_META_HEALTH
 
 logger = logging.getLogger(__name__)
 
@@ -249,9 +250,10 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "last_msg_age_s": None,
                 "reconnects": None,
                 "msg_count": None,
+                "client_id": None,
             }
             if _rurl:
-                _ih = _r.hgetall("ib:meta:status")
+                _ih = _r.hgetall(IB_INGESTER_META_HEALTH)
                 if _ih:
                     ib_market_info["connected"] = bool(_ih.get("connected") == "1")
                     _lm = _ih.get("last_msg_ts")
@@ -270,6 +272,12 @@ def get_status(request: Request) -> Dict[str, Any]:
                         ib_market_info["msg_count"] = int(_ih.get("msg_count") or 0)
                     except (TypeError, ValueError):
                         ib_market_info["msg_count"] = 0
+                    _cid = _ih.get("client_id")
+                    if _cid is not None and str(_cid).strip() != "":
+                        try:
+                            ib_market_info["client_id"] = int(_cid)
+                        except (TypeError, ValueError):
+                            ib_market_info["client_id"] = None
             payload["ib_market"] = ib_market_info
         except Exception:
             payload["massive"] = None

@@ -26,7 +26,7 @@ export interface IbConnectionSectionProps {
   clientIdListener: number
   ib2ClientIdListener: number
   clientIdOperator: number
-  ib2ClientIdAccount: number
+  ib2ClientIdOperator: number
   clientIdWorker: number
   defaultFlexRangeDays: number
   setDefaultFlexRangeDays: (v: number) => void
@@ -58,7 +58,7 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     clientIdListener,
     ib2ClientIdListener,
     clientIdOperator,
-    ib2ClientIdAccount,
+    ib2ClientIdOperator,
     clientIdWorker,
     defaultFlexRangeDays,
     setDefaultFlexRangeDays,
@@ -230,21 +230,20 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                       tabIndex={-1}
                     />
                   </td>
-                  <td className="flex-query-cell-input">—</td>
-                </tr>
-                <tr>
-                  <td className="flex-query-cell-type">Account (Secondary IB)</td>
-                  <td className="flex-query-cell-input">—</td>
                   <td className="flex-query-cell-input">
-                    <input
-                      type="number"
-                      value={ib2ClientIdAccount}
-                      readOnly
-                      className="flex-query-input settings-ib-readonly-field"
-                      style={{ width: '4rem' }}
-                      aria-label="Account — Secondary TWS (read-only, config.yaml)"
-                      tabIndex={-1}
-                    />
+                    {ib2Host.trim() ? (
+                      <input
+                        type="number"
+                        value={ib2ClientIdOperator}
+                        readOnly
+                        className="flex-query-input settings-ib-readonly-field"
+                        style={{ width: '4rem' }}
+                        aria-label="IB Operator (cmd RPC) client ID — Secondary (read-only, config.yaml)"
+                        tabIndex={-1}
+                      />
+                    ) : (
+                      '—'
+                    )}
                   </td>
                 </tr>
                 <tr className="client-ids-group-row">

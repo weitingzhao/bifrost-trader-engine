@@ -16,7 +16,7 @@ Troubleshooting:
   ``port+1…`` on connection refused (``max_port_steps=5``).
 - Redis ``NOGROUP``: stream or consumer group was missing. The operator recreates the group on NOGROUP;
   ensure FastAPI and Operator use the same ``redis`` URL and DB index.
-- **Dashboard log**: Redis stream ``bifrost:ib_operator_console`` (WS Connector IB Operator log panel).
+- **Dashboard log**: Redis stream ``ib:operator:console`` (WS Connector IB Operator log panel).
 """
 
 from __future__ import annotations

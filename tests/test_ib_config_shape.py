@@ -17,7 +17,7 @@ def test_host_secondary_blocks():
                     "listener": 101,
                     "operator": 120,
                     "worker_market": 140,
-                    "ib_market_ingest": 150,
+                    "ingestor": 150,
                 },
             },
             "secondary": {
@@ -25,7 +25,7 @@ def test_host_secondary_blocks():
                 "port_type": "tws_live",
                 "client_id": {
                     "listener": 11,
-                    "account": 120,
+                    "operator": 120,
                 },
             },
         }
@@ -43,7 +43,49 @@ def test_host_secondary_blocks():
     assert eff["ib_port_market_data"] == eff["ib_port"]
     assert eff["ib2_host"] == "192.168.10.32"
     assert eff["ib2_client_id_listener"] == 11
-    assert eff["ib2_client_id_account"] == 120
+    assert eff["ib2_client_id_operator"] == 120
+
+
+def test_host_legacy_ib_market_ingest_yaml_key():
+    """YAML key `ib_market_ingest` under ib.host.client_id still maps to client_id_ib_market_ingest."""
+    cfg = {
+        "ib": {
+            "host": {
+                "ip": "10.0.0.1",
+                "port_type": "tws_paper",
+                "client_id": {
+                    "daemon": 1,
+                    "listener": 2,
+                    "operator": 100,
+                    "worker_market": 500,
+                    "ib_market_ingest": 155,
+                },
+            },
+        }
+    }
+    eff = get_effective_ib_config(cfg)
+    assert eff["client_id_ib_market_ingest"] == 155
+    assert eff["ib_client_id_ib_market_ingest"] == 155
+
+
+def test_secondary_legacy_account_yaml_key():
+    """YAML key `account` under ib.secondary.client_id still maps to ib2_client_id_operator."""
+    cfg = {
+        "ib": {
+            "host": {
+                "ip": "10.0.0.1",
+                "port_type": "tws_paper",
+                "client_id": {"daemon": 1, "listener": 2, "operator": 100, "worker_market": 500},
+            },
+            "secondary": {
+                "ip": "10.0.0.2",
+                "port_type": "tws_paper",
+                "client_id": {"listener": 3, "account": 88},
+            },
+        }
+    }
+    eff = get_effective_ib_config(cfg)
+    assert eff["ib2_client_id_operator"] == 88
 
 
 def test_omit_secondary():

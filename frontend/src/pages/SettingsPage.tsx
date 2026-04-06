@@ -127,7 +127,7 @@ export function SettingsPage({
   const [ib2Host, setIb2Host] = useState<string>('')
   const [ib2PortType, setIb2PortType] = useState<'tws_live' | 'tws_paper' | 'gateway'>(DEFAULT_PORT_TYPE)
   const [ib2ClientIdListener, setIb2ClientIdListener] = useState(3)
-  const [ib2ClientIdAccount, setIb2ClientIdAccount] = useState(102)
+  const [ib2ClientIdOperator, setIb2ClientIdOperator] = useState(102)
   const [heartbeatIntervalSec, setHeartbeatIntervalSec] = useState(DEFAULT_HEARTBEAT_SEC)
   const [ibConfigInitialized, setIbConfigInitialized] = useState(false)
   const [heartbeatInitialized, setHeartbeatInitialized] = useState(false)
@@ -164,7 +164,7 @@ export function SettingsPage({
     if (c.ib2_host != null) setIb2Host(String(c.ib2_host))
     if (c.ib2_port_type != null) setIb2PortType(c.ib2_port_type as 'tws_live' | 'tws_paper' | 'gateway')
     if (c.ib2_client_id_listener != null) setIb2ClientIdListener(c.ib2_client_id_listener)
-    if (c.ib2_client_id_account != null) setIb2ClientIdAccount(c.ib2_client_id_account)
+    if (c.ib2_client_id_operator != null) setIb2ClientIdOperator(c.ib2_client_id_operator)
     const days = (c as { flex_default_range_days?: number }).flex_default_range_days
     if (typeof days === 'number' && Number.isFinite(days) && days >= 1) setDefaultFlexRangeDays(Math.round(days))
     const initDays = (c as { flex_init_range_days?: number }).flex_init_range_days
@@ -899,7 +899,7 @@ export function SettingsPage({
               clientIdListener={clientIdListener}
               ib2ClientIdListener={ib2ClientIdListener}
               clientIdOperator={clientIdOperator}
-              ib2ClientIdAccount={ib2ClientIdAccount}
+              ib2ClientIdOperator={ib2ClientIdOperator}
               clientIdWorker={clientIdWorker}
               defaultFlexRangeDays={defaultFlexRangeDays}
               setDefaultFlexRangeDays={setDefaultFlexRangeDays}

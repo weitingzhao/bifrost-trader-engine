@@ -38,12 +38,12 @@ def effective_ib_operator_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "enabled": bool(enabled),
         "redis_url": rurl,
-        "stream": (raw.get("stream") or "bifrost:ib_operator:cmd").strip() or "bifrost:ib_operator:cmd",
+        "stream": (raw.get("stream") or "ib:operator:cmd").strip() or "ib:operator:cmd",
         "consumer_group": (raw.get("consumer_group") or "ib-operator").strip() or "ib-operator",
-        "result_prefix": (raw.get("result_prefix") or "bifrost:ib_operator:result:").strip()
-        or "bifrost:ib_operator:result:",
-        "health_key": (raw.get("health_key") or "bifrost:ib:operator:health").strip()
-        or "bifrost:ib:operator:health",
+        "result_prefix": (raw.get("result_prefix") or "ib:operator:result:").strip()
+        or "ib:operator:result:",
+        "health_key": (raw.get("health_key") or "ib:operator:meta:health").strip()
+        or "ib:operator:meta:health",
         "result_ttl_sec": int(raw.get("result_ttl_sec") or 300),
         "request_timeout_sec": float(raw.get("request_timeout_sec") or 120),
         "health_refresh_sec": float(raw.get("health_refresh_sec") or 15),

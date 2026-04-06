@@ -259,7 +259,11 @@ export function MarketIngestOpsPage({
       const c = ibMarket.connected ? 'connected' : 'disconnected'
       const rc = ibMarket.reconnects != null ? String(ibMarket.reconnects) : '—'
       const mc = ibMarket.msg_count != null ? String(ibMarket.msg_count) : '—'
-      return `IB ${c}; last msg ${fmtAge(ibMarket.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
+      const cl =
+        ibMarket.client_id != null && Number.isFinite(ibMarket.client_id)
+          ? String(ibMarket.client_id)
+          : '—'
+      return `IB ${c}; client ${cl}; last msg ${fmtAge(ibMarket.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
     }
     if (svc.id === 'ib_operator') {
       return `Operator health Redis key: ${svc.redis_meta_key}`
@@ -454,7 +458,7 @@ export function MarketIngestOpsPage({
             loadingText="Connecting…"
             errorText="Unable to load (Redis may be down or Monitor not running)."
             emptyText="No log lines yet. Start: python scripts/run_ib_operator.py"
-            infoTooltipText="WS Connector — IB Operator cmd RPC only (bifrost:ib_operator_console). Separate from IB market ingest."
+            infoTooltipText="WS Connector — IB Operator cmd RPC only (ib:operator:console). Separate from IB market ingest."
             resizeAriaLabel="Resize IB Operator console height"
             clearTitle="Clear displayed log and Redis stream"
           />

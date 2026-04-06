@@ -14,8 +14,9 @@ def test_default_services():
     assert rows[0]["redis_meta_key"] == "massive:meta:status"
     assert rows[1]["id"] == "ib_operator"
     assert rows[1]["systemd_unit"] == "bifrost-ib-operator.service"
-    assert rows[1]["redis_meta_key"] == "bifrost:ib:operator:health"
+    assert rows[1]["redis_meta_key"] == "ib:operator:meta:health"
     assert rows[2]["id"] == "ib_market"
+    assert rows[2]["redis_meta_key"] == "ib:ingester:meta:health"
 
 
 def test_custom_services_override():

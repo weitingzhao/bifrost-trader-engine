@@ -7,8 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.ib_operator.client import IbOperatorClient, build_monitor_ib_status
+from src.ib_operator.client import IbOperatorClient, build_monitor_ib_status, read_operator_health
+from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.executor import IbOperatorExecutor
+from src.ib_operator.health_redis import (
+    operator_health_dict_from_redis_hash,
+    operator_health_dict_to_redis_hash,
+)
 from src.ib_operator.protocol import PROTOCOL_VERSION, parse_stream_fields
 from src.ib_operator.redis_io import (
     ensure_stream_and_group,
@@ -67,6 +72,100 @@ async def test_executor_fetch_bars_delegates() -> None:
     assert out["ok"] is True
     assert len(out["data"]["bars"]) == 1
     primary.fetch_bars.assert_awaited_once()
+
+
+def test_effective_ib_operator_settings_redis_key_defaults() -> None:
+    cfg = {"redis": {"enabled": True}}
+    s = effective_ib_operator_settings(cfg)
+    assert s["stream"] == "ib:operator:cmd"
+    assert s["result_prefix"] == "ib:operator:result:"
+    assert s["health_key"] == "ib:operator:meta:health"
+
+
+def test_operator_health_hash_roundtrip_no_secondary() -> None:
+    h = {
+        "operator": {"connected": True, "client_id": 120, "last_error": None},
+        "operator_alive": True,
+        "account2": None,
+        "updated_at": 1_700_000_000.0,
+    }
+    m = operator_health_dict_to_redis_hash(h)
+    assert m["operator_connected"] == "1"
+    assert m["operator_client_id"] == "120"
+    assert m["account2_present"] == "0"
+    h2 = operator_health_dict_from_redis_hash(m)
+    assert h2 is not None
+    assert h2["operator"]["connected"] is True
+    assert h2["operator"]["client_id"] == 120
+    assert h2["operator"]["last_error"] is None
+    assert h2["account2"] is None
+
+
+def test_operator_health_hash_roundtrip_with_account2() -> None:
+    h = {
+        "operator": {"connected": True, "client_id": 120, "last_error": "primary_err"},
+        "operator_alive": True,
+        "account2": {"connected": False, "client_id": 11, "last_error": None},
+        "updated_at": 1.0,
+    }
+    m = operator_health_dict_to_redis_hash(h)
+    h2 = operator_health_dict_from_redis_hash(m)
+    assert h2 is not None
+    assert h2["account2"] is not None
+    assert h2["account2"]["connected"] is False
+    assert h2["account2"]["client_id"] == 11
+    assert h2["account2"]["last_error"] is None
+    assert h2["operator"]["last_error"] == "primary_err"
+
+
+def test_operator_health_from_redis_hash_empty() -> None:
+    assert operator_health_dict_from_redis_hash({}) is None
+
+
+def test_read_operator_health_hash_and_legacy_string() -> None:
+    class FakeRedisHash:
+        def type(self, _key: str) -> str:
+            return "hash"
+
+        def hgetall(self, _key: str) -> dict:
+            return operator_health_dict_to_redis_hash(
+                {
+                    "operator": {"connected": True, "client_id": 5, "last_error": None},
+                    "operator_alive": True,
+                    "account2": None,
+                    "updated_at": 0.0,
+                }
+            )
+
+        def get(self, _key: str) -> None:
+            raise AssertionError("should not GET hash key")
+
+        def close(self) -> None:
+            pass
+
+    class FakeRedisString:
+        def type(self, _key: str) -> str:
+            return "string"
+
+        def hgetall(self, _key: str) -> dict:
+            return {}
+
+        def get(self, _key: str) -> str:
+            return '{"operator":{"connected":false,"client_id":9,"last_error":null},"operator_alive":true,"account2":null}'
+
+        def close(self) -> None:
+            pass
+
+    with patch("src.ib_operator.client.redis.from_url", return_value=FakeRedisHash()):
+        h = read_operator_health("redis://x", "k")
+    assert h is not None
+    assert h["operator"]["client_id"] == 5
+
+    with patch("src.ib_operator.client.redis.from_url", return_value=FakeRedisString()):
+        h2 = read_operator_health("redis://x", "k")
+    assert h2 is not None
+    assert h2["operator"]["client_id"] == 9
+    assert h2["operator"]["connected"] is False
 
 
 def test_build_monitor_ib_status_disabled_skip() -> None:

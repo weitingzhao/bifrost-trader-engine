@@ -15,7 +15,7 @@ export interface IbConfig {
   ib_client_id_operator?: number
   /** Celery: Market Data / worker_market (default 500) */
   ib_client_id_worker_market?: number
-  /** Standalone IB market ingest (scripts/run_ib_market_ingest.py); must not overlap other client IDs */
+  /** IB Market Ingest client ID from YAML ib.host.client_id.ingestor (API key unchanged; legacy YAML ib_market_ingest). */
   ib_client_id_ib_market_ingest?: number
   /** Host 账户 account_id（多账户时用于对冲与行情），R-A4 */
   ib_host_account_id?: string | null
@@ -32,8 +32,8 @@ export interface IbConfig {
   ib2_port_type?: string | null
   /** Second IB: Listener (default 3) */
   ib2_client_id_listener?: number
-  /** Second IB: Account (default 102); no market data column */
-  ib2_client_id_account?: number
+  /** Second IB: Operator client ID (YAML ib.secondary.client_id.operator; legacy key `account`). */
+  ib2_client_id_operator?: number
 }
 
 /** One Flex row: same label/purpose for both; query_host_id (Host IB), query_secondary_id (Second IB, optional). Tokens in settings. */
@@ -179,12 +179,13 @@ export interface StatusResponse {
     ws_reconnects?: number
     last_snapshot_age_s?: number | null
   } | null
-  /** IB market ingest from Redis ib:meta:status (GET /status). */
+  /** IB market ingest from Redis ib:ingester:meta:health (GET /status). */
   ib_market?: {
     connected?: boolean
     last_msg_age_s?: number | null
     reconnects?: number | null
     msg_count?: number | null
+    client_id?: number | null
   } | null
 }
 

@@ -44,12 +44,13 @@ ib:
       listener: 101
       operator: 120
       worker_market: 140
+      ingestor: 150
   secondary:
     ip: "127.0.0.1"
     port_type: "tws_live"
     client_id:
       listener: 11
-      account: 120
+      operator: 120
 
 redis:
   enabled: true

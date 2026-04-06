@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import redis
 
 from src.ib_operator.config import effective_ib_operator_settings
+from src.ib_operator.health_redis import operator_health_dict_from_redis_hash
 from src.ib_operator.protocol import PROTOCOL_VERSION, new_req_id, result_key
 
 logger = logging.getLogger(__name__)
@@ -127,16 +128,25 @@ class IbOperatorClient:
 
 
 def read_operator_health(redis_url: str, health_key: str) -> Optional[Dict[str, Any]]:
-    """Best-effort read of operator health JSON (sync)."""
+    """Read operator health: Redis Hash (ingest-style string fields) or legacy JSON string value."""
     try:
         r = redis.from_url(redis_url, decode_responses=True)
         try:
-            raw = r.get(health_key)
+            kt = r.type(health_key)
+            if kt == "none":
+                return None
+            if kt == "hash":
+                raw_map = r.hgetall(health_key)
+                return operator_health_dict_from_redis_hash(raw_map or {})
+            if kt == "string":
+                raw = r.get(health_key)
+                if not raw:
+                    return None
+                loaded = json.loads(raw)
+                return loaded if isinstance(loaded, dict) else None
+            return None
         finally:
             r.close()
-        if not raw:
-            return None
-        return json.loads(raw)
     except Exception:
         return None
 
@@ -185,7 +195,7 @@ def build_monitor_ib_status(
     ib2_host = ib.get("ib2_host") or ""
     ib2_host = ib2_host.strip() if isinstance(ib2_host, str) else ""
     try:
-        cid2 = int(ib.get("ib2_client_id_account") or 102)
+        cid2 = int(ib.get("ib2_client_id_operator") or 102)
     except (TypeError, ValueError):
         cid2 = 102
     if ib2_host or cid2 != 102:

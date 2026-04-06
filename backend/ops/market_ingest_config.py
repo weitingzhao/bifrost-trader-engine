@@ -15,13 +15,13 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
         "id": "ib_operator",
         "label": "IB Operator (cmd RPC)",
         "systemd_unit": "bifrost-ib-operator.service",
-        "redis_meta_key": "bifrost:ib:operator:health",
+        "redis_meta_key": "ib:operator:meta:health",
     },
     {
         "id": "ib_market",
         "label": "IB market ingest",
         "systemd_unit": "bifrost-ib-market-ingest.service",
-        "redis_meta_key": "ib:meta:status",
+        "redis_meta_key": "ib:ingester:meta:health",
     },
 ]
 

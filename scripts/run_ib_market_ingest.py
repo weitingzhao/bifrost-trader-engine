@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """IB market data ingest — standalone process (separate client_id from gateway/daemon).
 
-Subscribes to Watchlist STK/OPT contracts via ib_insync, writes latest quotes to Redis ``ib_md:*``
-and meta hash ``ib:meta:status``. Does not write ``quote:{symbol}`` (daemon-owned).
+Uses ``get_effective_ib_config`` → ``client_id_ib_market_ingest`` from YAML ``ib.host.client_id.ingestor``
+(legacy key ``ib_market_ingest`` still accepted). Default 150 if omitted.
+
+Subscribes to Watchlist STK/OPT contracts via ib_insync, writes latest quotes to Redis ``ib:ingester:tick:*``,
+health hash ``ib:ingester:meta:health`` (incl. client_id), subscriptions set, and pub channel ``ib:ingester:channel``.
+Does not write ``quote:{symbol}`` (daemon-owned).
 
 Usage
 -----
@@ -23,7 +27,7 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -249,6 +253,7 @@ class IbMarketIngestApp:
         self._reconnects = 0
         self._msg_count = 0
         self._last_msg_ts = 0.0
+        self._client_id = 0
 
     def _max_subscriptions(self) -> int:
         try:
@@ -274,9 +279,10 @@ class IbMarketIngestApp:
         from src.monitor.integrations.ib_clients import MarketIbClient
 
         ib_eff = get_effective_ib_config(self._cfg)
+        self._client_id = int(ib_eff["client_id_ib_market_ingest"])
         host = str(ib_eff["host"])
         port = int(ib_eff.get("port_market_data", ib_eff["port"]))
-        cid = int(ib_eff["client_id_ib_market_ingest"])
+        cid = self._client_id
 
         logger.info(
             "IB market ingest starting host=%s port=%s (market data) client_id=%s max_subs=%s",
@@ -303,7 +309,8 @@ class IbMarketIngestApp:
                 RECONNECT_BASE * (2 ** min(self._reconnects - 1, 6)),
                 RECONNECT_MAX,
             )
-            self._writer.update_status(
+            self._writer.update_health(
+                self._client_id,
                 False,
                 time.time(),
                 self._reconnects,
@@ -315,7 +322,8 @@ class IbMarketIngestApp:
             except asyncio.TimeoutError:
                 pass
 
-        self._writer.update_status(
+        self._writer.update_health(
+            self._client_id,
             False,
             time.time(),
             self._reconnects,
@@ -344,7 +352,8 @@ class IbMarketIngestApp:
                         "No STK/OPT rows in watchlist; retry in %ds",
                         WATCHLIST_POLL_SEC,
                     )
-                    self._writer.update_status(
+                    self._writer.update_health(
+                        self._client_id,
                         True,
                         time.time(),
                         self._reconnects,
@@ -386,7 +395,8 @@ class IbMarketIngestApp:
 
                 await client._run_on_client_loop(_apply())
                 self._writer.set_subscriptions(keys)
-                self._writer.update_status(
+                self._writer.update_health(
+                    self._client_id,
                     True,
                     time.time(),
                     self._reconnects,
@@ -425,7 +435,8 @@ class IbMarketIngestApp:
         while not self._stop.is_set():
             ts = self._last_msg_ts or time.time()
             try:
-                self._writer.update_status(
+                self._writer.update_health(
+                    self._client_id,
                     True,
                     ts,
                     self._reconnects,
@@ -440,7 +451,9 @@ class IbMarketIngestApp:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="IB market data ingest (Redis ib_md:*)")
+    parser = argparse.ArgumentParser(
+        description="IB market data ingest (Redis ib:ingester:tick:*, ib:ingester:meta:health, …)",
+    )
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config")
     parser.add_argument(
         "--log-level",

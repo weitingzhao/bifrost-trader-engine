@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import threading
 import time
@@ -14,6 +13,7 @@ import redis
 from src.app.config import get_effective_ib_config
 from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.executor import IbOperatorExecutor
+from src.ib_operator.health_redis import operator_health_dict_to_redis_hash
 from src.ib_operator.protocol import (
     CommandMessage,
     dumps_result,
@@ -50,7 +50,7 @@ def _build_clients(config: Dict[str, Any]) -> IbOperatorExecutor:
         acc2 = AccountIbClient(
             host=ib2_host,
             port=ib_cfg["ib2_port"],
-            client_id=ib_cfg["ib2_client_id_account"],
+            client_id=ib_cfg["ib2_client_id_operator"],
             name="IbOperatorAccount2",
         )
     return IbOperatorExecutor(primary=primary, account_secondary=acc2)
@@ -59,8 +59,14 @@ def _build_clients(config: Dict[str, Any]) -> IbOperatorExecutor:
 def _write_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str, ex_sec: int) -> None:
     h = executor.health_dict()
     h["updated_at"] = time.time()
+    mapping = operator_health_dict_to_redis_hash(h)
     try:
-        r.set(key, json.dumps(h, default=str), ex=ex_sec)
+        pipe = r.pipeline()
+        pipe.delete(key)
+        pipe.hset(key, mapping=mapping)
+        if ex_sec > 0:
+            pipe.expire(key, ex_sec)
+        pipe.execute()
     except Exception as e:
         logger.warning("write health key failed: %s", e)
 

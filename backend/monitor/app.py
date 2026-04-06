@@ -139,7 +139,7 @@ def create_app(
     app.state._massive_ws_log_thread: Optional[threading.Thread] = None
     app.state._massive_ws_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB Operator log stream (scripts/run_ib_operator.py → bifrost:ib_operator_console)
+    # IB Operator log stream (scripts/run_ib_operator.py → ib:operator:console)
     app.state.ib_operator_log_queues: list = []
     app.state.ib_operator_log_lock = threading.Lock()
     app.state._ib_operator_log_thread: Optional[threading.Thread] = None

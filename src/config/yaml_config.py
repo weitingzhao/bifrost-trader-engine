@@ -145,7 +145,7 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
     """Map ``ib.host`` / ``ib.secondary`` to internal flat keys for port resolution and connectors.
 
     Primary TWS: ``ib.host.ip``, ``ib.host.port_type``, ``ib.host.client_id.*``
-    Optional second TWS: ``ib.secondary`` (ip, port_type, client_id.listener/account).
+    Optional second TWS: ``ib.secondary`` (ip, port_type, client_id.listener/operator).
     """
     h = ib.get("host")
     if not isinstance(h, dict):
@@ -176,9 +176,11 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
         # Host IB Operator (cmd RPC): YAML key `operator`; legacy `account` accepted for migration.
         "client_id_operator": int(hc.get("operator") or hc.get("account") or 100),
         "client_id_worker_market": int(hc.get("worker_market") or 500),
-        "client_id_ib_market_ingest": int(hc.get("ib_market_ingest") or 150),
+        # IB Market Ingest (run_ib_market_ingest.py): YAML `ingestor`; legacy `ib_market_ingest` accepted.
+        "client_id_ib_market_ingest": int(hc.get("ingestor") or hc.get("ib_market_ingest") or 150),
         "ib2_client_id_listener": int(sc.get("listener") or 3),
-        "ib2_client_id_account": int(sc.get("account") or 102),
+        # Secondary IB Operator (same role as host operator); legacy YAML key `account` accepted.
+        "ib2_client_id_operator": int(sc.get("operator") or sc.get("account") or 102),
     }
 
 
@@ -192,11 +194,11 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
           host:
             ip: ...
             port_type: ...
-            client_id: { daemon, listener, operator, worker_market, ib_market_ingest }
+            client_id: { daemon, listener, operator, worker_market, ingestor }
           secondary:  # optional second TWS
             ip: ...
             port_type: ...
-            client_id: { listener, account }
+            client_id: { listener, operator }
 
     See ``config/config.dev.yaml.example`` or ``config/config.prod.yaml.example`` (same ``ib`` shape).
 
@@ -204,7 +206,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
       host, port_type, port, connect_timeout,
       client_id_daemon, client_id_listener, client_id_operator, client_id_worker_market,
       client_id_ib_market_ingest,
-      ib2_host, ib2_port_type, ib2_port, ib2_client_id_listener, ib2_client_id_account.
+      ib2_host, ib2_port_type, ib2_port, ib2_client_id_listener, ib2_client_id_operator.
     Also includes the ``ib_*`` prefixed aliases expected by the API / frontend (``ib_client_id_daemon`` etc.).
     """
     ib_raw = config.get("ib")
@@ -264,13 +266,13 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         if ib2_pt not in IB_PORT_MAP:
             ib2_pt = "tws_paper"
         ib2_cid_l = int(ib.get("ib2_client_id_listener") or 3)
-        ib2_cid_a = int(ib.get("ib2_client_id_account") or 102)
+        ib2_cid_op = int(ib.get("ib2_client_id_operator") or 102)
         out.update({
             "ib2_host": ib2_host,
             "ib2_port_type": ib2_pt,
             "ib2_port": IB_PORT_MAP[ib2_pt],
             "ib2_client_id_listener": ib2_cid_l,
-            "ib2_client_id_account": ib2_cid_a,
+            "ib2_client_id_operator": ib2_cid_op,
         })
     else:
         out.update({
@@ -278,7 +280,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
             "ib2_port_type": None,
             "ib2_port": None,
             "ib2_client_id_listener": 3,
-            "ib2_client_id_account": 102,
+            "ib2_client_id_operator": 102,
         })
 
     return out

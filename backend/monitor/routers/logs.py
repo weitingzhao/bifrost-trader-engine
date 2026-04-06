@@ -145,7 +145,7 @@ def _massive_ws_log_reader_loop(app_ref) -> None:
 
 
 def _ib_operator_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:ib_operator_console (run_ib_operator.py)."""
+    """Background thread: XREAD Redis stream ib:operator:console (run_ib_operator.py)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
@@ -680,7 +680,7 @@ async def get_massive_ws_logs_stream(request: Request):
     )
 
 
-# --- IB Operator logs (scripts/run_ib_operator.py → bifrost:ib_operator_console) ---
+# --- IB Operator logs (scripts/run_ib_operator.py → ib:operator:console) ---
 
 
 @router.get("/api/ib-operator/logs")
