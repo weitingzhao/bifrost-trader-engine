@@ -214,13 +214,17 @@ export function StrategyInstanceDetailPage({
       if (positions.length === 0) continue
       let covShares = 0
       let covAvgCost: number | null = null
-      if (hasUnderlying && status?.accounts) {
+      const portfolioAccounts = status?.portfolio?.accounts
+      if (hasUnderlying && portfolioAccounts) {
         const sym = (exs[0]?.symbol ?? '').toUpperCase()
         const acct = (exs[0]?.account_id ?? '').trim()
         if (sym && acct) {
-          const accRow = status.accounts.find(a => (a.account_id ?? '').trim() === acct)
+          const accRow = portfolioAccounts.find(
+            (a: { account_id?: string | null }) => (a.account_id ?? '').trim() === acct,
+          )
           const stk = accRow?.positions?.find(
-            p => (p.secType ?? '').toUpperCase() !== 'OPT' && (p.symbol ?? '').toUpperCase() === sym,
+            (p: { secType?: string | null; symbol?: string | null; position?: number | null; avgCost?: number | null }) =>
+              (p.secType ?? '').toUpperCase() !== 'OPT' && (p.symbol ?? '').toUpperCase() === sym,
           )
           if (stk) {
             covShares = Math.abs(Number(stk.position) || 0)
@@ -232,7 +236,7 @@ export function StrategyInstanceDetailPage({
       merged = merged == null ? rp : pickWorse(merged, rp)
     }
     return merged
-  }, [executionsFinal, structure, status?.accounts])
+  }, [executionsFinal, structure, status?.portfolio?.accounts])
 
   const formatExecutionStrike = (strike: number | undefined | null): string => {
     if (strike == null || !Number.isFinite(Number(strike))) return '—'

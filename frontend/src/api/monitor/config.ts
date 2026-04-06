@@ -1,4 +1,4 @@
-import type { ControlResponse, IbConfig, FlexAccountItem } from '../../types'
+import type { ControlResponse, IbClient, FlexAccountItem } from '../../types'
 import { apiBase } from '../shared/constants'
 
 export async function postSetHeartbeatInterval(heartbeat_interval_sec: number): Promise<ControlResponse & { heartbeat_interval_sec?: number }> {
@@ -16,7 +16,7 @@ export async function postIbConfig(accounts: {
   ib_host_account_id?: string | null
   stream_host_account_id?: string | null
   stream_secondary_account_id?: string | null
-}): Promise<ControlResponse & Partial<IbConfig>> {
+}): Promise<ControlResponse & Partial<IbClient>> {
   const r = await fetch(`${apiBase()}/config/ib`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

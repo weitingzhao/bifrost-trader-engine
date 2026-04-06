@@ -392,10 +392,6 @@ async def heartbeat(app: Any) -> None:
                         payload = app._quote_payload()
                         if payload:
                             app._redis_quotes.set_quote(app.symbol, payload)
-                            app._redis_quotes.publish_update(
-                                app.symbol,
-                                {"symbol": app.symbol, "ts": payload.get("ts")},
-                            )
                     except Exception as e:
                         logger.warning("Redis quote write in heartbeat: %s", e)
             else:
@@ -409,10 +405,6 @@ async def heartbeat(app: Any) -> None:
                         payload = app._quote_payload()
                         if payload:
                             app._redis_quotes.set_quote(app.symbol, payload)
-                            app._redis_quotes.publish_update(
-                                app.symbol,
-                                {"symbol": app.symbol, "ts": payload.get("ts")},
-                            )
                     except Exception as e:
                         logger.warning(
                             "Redis quote write in heartbeat (minimal): %s", e

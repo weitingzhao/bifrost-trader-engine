@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Query, Request
@@ -14,12 +15,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["quotes"])
 
 
+def _sanitize_for_sse_json(obj: Any) -> Any:
+    """Replace NaN/Inf so ``json.dumps`` emits RFC-compliant JSON (``JSON.parse`` in browsers rejects NaN)."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_sse_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_sse_json(x) for x in obj]
+    return obj
+
+
 @router.get("/quotes")
 def get_quotes(
     request: Request,
     symbols: Optional[str] = Query(None, description="Comma-separated symbols; if omitted, use focus list (positions + watchlist)"),
 ) -> Dict[str, Any]:
-    """R-RM*: Read current quotes from Redis (STK, daemon writes) and contract_quote_live (OPT). Returns combined list; OPT items include contract_key."""
+    """R-RM*: STK from Redis ``quote:{symbol}`` (daemon) with fallback ``ib:ingester:tick:{SYM|STK|||}`` (ingestor); OPT from contract_quote_live. Combined list; OPT items include contract_key."""
     app = request.app
     reader = app.state.reader
     rq = getattr(app.state, "redis_quotes", None)
@@ -47,7 +59,15 @@ def get_quotes(
     quotes: list = []
     if symbol_list and rq and getattr(rq, "available", False):
         try:
-            quotes = list(rq.get_quotes(symbol_list) or [])
+            for sym in symbol_list:
+                s = (sym or "").strip()
+                if not s:
+                    continue
+                q = rq.get_quote(s)
+                if q is None:
+                    q = rq.get_ingester_tick(f"{s}|STK|||")
+                if q is not None:
+                    quotes.append(q)
         except Exception as e:
             logger.warning("GET /quotes Redis failed: %s", e)
     if contract_keys_opt:
@@ -68,7 +88,7 @@ def get_quotes(
 
 @router.get("/quotes/stream")
 async def get_quotes_stream(request: Request):
-    """R-RM* SSE: Subscribe to Redis daemon:quotes; daemon pushes a data event on each quote update. Returns 503 when Redis unavailable."""
+    """R-RM* SSE: Subscribe to Redis ``ib:ingester:channel`` (config ``redis.subscribe_channel``); load full tick from ``ib:ingester:tick:*``. Returns 503 when Redis unavailable."""
     app = request.app
     rq = getattr(app.state, "redis_quotes", None)
     if rq is None or not getattr(rq, "available", False):
@@ -86,7 +106,13 @@ async def get_quotes_stream(request: Request):
             while True:
                 try:
                     data = await asyncio.wait_for(queue.get(), timeout=25.0)
-                    yield f"data: {json.dumps(data)}\n\n"
+                    safe = _sanitize_for_sse_json(data)
+                    try:
+                        line = json.dumps(safe, default=str, allow_nan=False)
+                    except (ValueError, TypeError) as ex:
+                        logger.warning("SSE quote JSON skip (non-encodable): %s", ex)
+                        continue
+                    yield f"data: {line}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         except asyncio.CancelledError:

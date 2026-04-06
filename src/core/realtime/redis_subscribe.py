@@ -1,4 +1,4 @@
-"""Redis SUBSCRIBE loop for quote pub/sub (monitor SSE). Uses a separate connection from the reader GET client."""
+"""Redis SUBSCRIBE loop for quote pub/sub (Market SSE). Uses a separate connection from the reader GET client."""
 
 from __future__ import annotations
 
@@ -18,9 +18,10 @@ def run_subscribe_loop(
     stop_event: threading.Event,
     poll_timeout: float = 0.5,
 ) -> None:
-    """Run Redis SUBSCRIBE in a thread; on each channel message, load quote via reader and call on_quote.
+    """Run Redis SUBSCRIBE in a thread; on each message load full quote and call on_quote.
 
-    Uses reader.realtime_params for host/port/db/channel so the reader's primary connection can keep doing GET.
+    Subscribes to ``subscribe_channel`` (default ``ib:ingester:channel``). Expects IB ingestor
+    publish payload ``{contract_key, ts}`` and loads ``ib:ingester:tick:{contract_key}``.
     """
     try:
         import redis
@@ -40,8 +41,11 @@ def run_subscribe_loop(
     pubsub = None
     try:
         pubsub = sub_client.pubsub()
-        pubsub.subscribe(p.channel)
-        logger.info("Redis quotes subscribe loop started on channel=%s", p.channel)
+        pubsub.subscribe(p.subscribe_channel)
+        logger.info(
+            "Redis quotes subscribe loop started on channel=%s",
+            p.subscribe_channel,
+        )
         while not stop_event.is_set():
             msg = pubsub.get_message(timeout=poll_timeout)
             if msg is None:
@@ -50,6 +54,12 @@ def run_subscribe_loop(
                 continue
             try:
                 data = json.loads(msg["data"])
+                contract_key = (data.get("contract_key") or "").strip()
+                if contract_key:
+                    quote = reader.get_ingester_tick(contract_key)
+                    if quote:
+                        on_quote(quote)
+                    continue
                 symbol = (data.get("symbol") or "").strip()
                 if not symbol:
                     continue

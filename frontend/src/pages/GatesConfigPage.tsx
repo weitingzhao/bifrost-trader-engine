@@ -142,7 +142,11 @@ export function GatesConfigPage({
   }, [])
 
   const handleSetActive = async (gateSafetyId: number) => {
-    const res = await postActiveStrategy(status?.active_strategy_structure_id ?? null, gateSafetyId, status?.active_strategy_allocation_id ?? null)
+    const res = await postActiveStrategy(
+      status?.strategy?.active?.structure?.id ?? null,
+      gateSafetyId,
+      status?.strategy?.active?.allocation?.id ?? null,
+    )
     if (res.ok) {
       setSetActiveMsg({ text: 'Active gate safety updated. Daemon uses it on next start.', isErr: false })
       loadStatus()
@@ -312,12 +316,12 @@ export function GatesConfigPage({
         <h3 className="section-subtitle">Current active</h3>
         <div className="statusSummary">
           <div>
-            <strong>Gate safety:</strong> {status?.active_gate_safety_strategy_name ?? '—'}
-            {status?.active_gate_safety_strategy_id != null && ` (${status.active_gate_safety_strategy_id})`}
+            <strong>Gate safety:</strong> {status?.strategy?.active?.gate_safety?.name ?? '—'}
+            {status?.strategy?.active?.gate_safety?.id != null && ` (${status?.strategy?.active?.gate_safety?.id})`}
           </div>
           <div>
-            <strong>Allocation:</strong> {status?.active_strategy_allocation_name ?? '—'}
-            {status?.active_strategy_allocation_id != null && ` (${status.active_strategy_allocation_id})`}
+            <strong>Allocation:</strong> {status?.strategy?.active?.allocation?.name ?? '—'}
+            {status?.strategy?.active?.allocation?.id != null && ` (${status?.strategy?.active?.allocation?.id})`}
           </div>
         </div>
         <p className="section-hint">Daemon uses this on next start.</p>

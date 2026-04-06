@@ -1,4 +1,4 @@
-import type { DaemonHeartbeat, IbConfig, StatusResponse } from '../../../types'
+import type { DaemonHeartbeat, IbClient, StatusResponse } from '../../../types'
 import { fmtTs } from '../../../utils/format'
 
 type Lamp = 'green' | 'yellow' | 'red' | 'none'
@@ -19,7 +19,7 @@ export interface StatusDaemonPanelProps {
   suspended: boolean
   ibConnected: boolean
   daemonIbLine: string
-  ibConfig: IbConfig | null | undefined
+  ibConfig: IbClient | null | undefined
   onStop: () => void
   onReleaseIb: () => void
   ctrlMsg: { text: string; isErr: boolean }
@@ -168,10 +168,10 @@ export function StatusDaemonPanel({
                   <td className="ib-connection-cell">
                     {!hb?.daemon_alive ? (
                       '—'
-                    ) : ibConfig?.ib_client_id_listener == null ? (
+                    ) : ibConfig?.port?.listener_host == null ? (
                       '—'
                     ) : hb?.listener_connected ? (
-                      <span className="countdown-num">Connected @ {hb?.listener_client_id ?? ibConfig.ib_client_id_listener}</span>
+                      <span className="countdown-num">Connected @ {hb?.listener_client_id ?? ibConfig.port.listener_host}</span>
                     ) : (
                       'Not connected'
                     )}
@@ -179,9 +179,9 @@ export function StatusDaemonPanel({
                   <td className="ib-connection-cell">
                     {!hb?.daemon_alive ? (
                       '—'
-                    ) : (ibConfig?.ib2_host ?? ibConfig?.ib2_client_id_listener != null) ? (
+                    ) : (ibConfig?.client?.secondary_host_ip ?? ibConfig?.port?.listener_secondary != null) ? (
                       hb?.listener_2_connected ? (
-                        <span className="countdown-num">Connected @ {hb?.listener_2_client_id ?? ibConfig?.ib2_client_id_listener ?? '?'}</span>
+                        <span className="countdown-num">Connected @ {hb?.listener_2_client_id ?? ibConfig?.port?.listener_secondary ?? '?'}</span>
                       ) : (
                         'Not connected'
                       )

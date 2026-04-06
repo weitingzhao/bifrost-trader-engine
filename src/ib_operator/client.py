@@ -155,7 +155,7 @@ def build_monitor_ib_status(
     config: Dict[str, Any],
     ib_cfg: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """Build ``monitor_ib_status`` for GET /status when IB Operator + Redis are enabled."""
+    """Build IB Operator Redis health dict for GET /status ``socket.ib_operator`` (host + optional secondary)."""
     if (config.get("server") or {}).get("skip_monitor_ib", False):
         return None
     s = effective_ib_operator_settings(config)
@@ -190,7 +190,7 @@ def build_monitor_ib_status(
         }
 
     out: Dict[str, Any] = {
-        "operator": _slot("operator", "ib_client_id_operator", fallback_err=None),
+        "host": _slot("operator", "ib_client_id_operator", fallback_err=None),
     }
     ib2_host = ib.get("ib2_host") or ""
     ib2_host = ib2_host.strip() if isinstance(ib2_host, str) else ""
@@ -201,13 +201,13 @@ def build_monitor_ib_status(
     if ib2_host or cid2 != 102:
         if health and health.get("account2") is not None and isinstance(health.get("account2"), dict):
             a2 = health["account2"]
-            out["account2"] = {
+            out["secondary"] = {
                 "connected": bool(a2.get("connected")),
                 "client_id": int(a2.get("client_id") or cid2),
                 "last_error": a2.get("last_error"),
             }
         else:
-            out["account2"] = {
+            out["secondary"] = {
                 "connected": False,
                 "client_id": cid2,
                 "last_error": unreachable

@@ -8,10 +8,13 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from src.vendor.ib_ingestor.redis_keys import IB_INGESTER_TICK_PREFIX
+
 from .redis_keys import (
     PUB_CHANNEL,
     QUOTE_KEY_PREFIX,
     QUOTE_TTL_SEC,
+    SUBSCRIBE_CHANNEL_DEFAULT,
     TICKER_SUBSCRIBED_KEY,
 )
 
@@ -29,6 +32,7 @@ class RedisRealtimeParams:
     socket_connect_timeout: float
     quote_ttl_sec: int
     channel: str
+    subscribe_channel: str
 
 
 def get_quote_key(symbol: str) -> str:
@@ -52,6 +56,7 @@ def parse_redis_realtime_params(config: Dict[str, Any]) -> Optional[RedisRealtim
     timeout = float(redis_cfg.get("socket_connect_timeout", 5.0))
     ttl = int(redis_cfg.get("quote_ttl_sec", QUOTE_TTL_SEC))
     channel = redis_cfg.get("channel", PUB_CHANNEL)
+    subscribe_channel = redis_cfg.get("subscribe_channel", SUBSCRIBE_CHANNEL_DEFAULT)
     return RedisRealtimeParams(
         host=host,
         port=port,
@@ -60,6 +65,7 @@ def parse_redis_realtime_params(config: Dict[str, Any]) -> Optional[RedisRealtim
         socket_connect_timeout=timeout,
         quote_ttl_sec=ttl,
         channel=channel,
+        subscribe_channel=subscribe_channel,
     )
 
 
@@ -238,10 +244,11 @@ class RedisQuotesReader:
             self._client.ping()
             self._available = True
             logger.info(
-                "Redis quotes reader connected: host=%s port=%s db=%s",
+                "Redis quotes reader connected: host=%s port=%s db=%s subscribe_channel=%s",
                 self._params.host,
                 self._params.port,
                 self._params.db,
+                self._params.subscribe_channel,
             )
             return True
         except ImportError:
@@ -280,6 +287,23 @@ class RedisQuotesReader:
             if q is not None:
                 out.append(q)
         return out
+
+    def get_ingester_tick(self, contract_key: str) -> Optional[Dict[str, Any]]:
+        """Latest quote JSON from IB ingestor (``ib:ingester:tick:{contract_key}``)."""
+        if not self._client:
+            return None
+        ck = (contract_key or "").strip()
+        if not ck:
+            return None
+        key = IB_INGESTER_TICK_PREFIX + ck
+        try:
+            val = self._client.get(key)
+            if val is None:
+                return None
+            return json.loads(val)
+        except Exception as e:
+            logger.debug("Redis get_ingester_tick failed contract_key=%s: %s", ck, e)
+            return None
 
     def get_subscribed_symbols(self) -> Set[str]:
         if not self._client:

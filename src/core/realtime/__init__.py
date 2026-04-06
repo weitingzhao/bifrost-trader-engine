@@ -1,6 +1,12 @@
 """Redis-backed real-time quotes: not FastAPI; daemon writes, monitor reads and subscribes."""
 
-from .redis_keys import PUB_CHANNEL, QUOTE_KEY_PREFIX, QUOTE_TTL_SEC, TICKER_SUBSCRIBED_KEY
+from .redis_keys import (
+    PUB_CHANNEL,
+    QUOTE_KEY_PREFIX,
+    QUOTE_TTL_SEC,
+    SUBSCRIBE_CHANNEL_DEFAULT,
+    TICKER_SUBSCRIBED_KEY,
+)
 from .redis_quotes import (
     RedisQuotesReader,
     RedisQuotesWriter,
@@ -14,6 +20,7 @@ from .redis_subscribe import run_subscribe_loop
 
 __all__ = [
     "PUB_CHANNEL",
+    "SUBSCRIBE_CHANNEL_DEFAULT",
     "QUOTE_KEY_PREFIX",
     "QUOTE_TTL_SEC",
     "TICKER_SUBSCRIBED_KEY",

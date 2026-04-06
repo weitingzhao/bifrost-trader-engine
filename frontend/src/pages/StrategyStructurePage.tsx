@@ -282,7 +282,11 @@ export function StrategyStructurePage({
   const handleSetActiveStructure = async (structureId: number) => {
     setSetActiveInProgress(true)
     try {
-      const res = await postActiveStrategy(structureId, status?.active_gate_safety_strategy_id ?? null, status?.active_strategy_allocation_id ?? null)
+      const res = await postActiveStrategy(
+        structureId,
+        status?.strategy?.active?.gate_safety?.id ?? null,
+        status?.strategy?.active?.allocation?.id ?? null,
+      )
       if (res.ok) {
         setSetActiveMsg({ text: 'Active structure updated. Daemon uses it on next start.', isErr: false })
         loadStatus()
@@ -298,7 +302,11 @@ export function StrategyStructurePage({
   const handleClearActiveStructure = async () => {
     setSetActiveInProgress(true)
     try {
-      const res = await postActiveStrategy(null, status?.active_gate_safety_strategy_id ?? null, status?.active_strategy_allocation_id ?? null)
+      const res = await postActiveStrategy(
+        null,
+        status?.strategy?.active?.gate_safety?.id ?? null,
+        status?.strategy?.active?.allocation?.id ?? null,
+      )
       if (res.ok) {
         setSetActiveMsg({ text: 'Active structure cleared.', isErr: false })
         loadStatus()
@@ -876,16 +884,16 @@ export function StrategyStructurePage({
         <h3 className="section-subtitle">Current active</h3>
         <div className="statusSummary">
           <div>
-            <strong>Structure:</strong> {status?.active_strategy_structure_name ?? '—'}
-            {status?.active_strategy_structure_id != null && ` (${status.active_strategy_structure_id})`}
+            <strong>Structure:</strong> {status?.strategy?.active?.structure?.name ?? '—'}
+            {status?.strategy?.active?.structure?.id != null && ` (${status?.strategy?.active?.structure?.id})`}
           </div>
           <div>
-            <strong>Gate safety:</strong> {status?.active_gate_safety_strategy_name ?? '—'}
-            {status?.active_gate_safety_strategy_id != null && ` (${status.active_gate_safety_strategy_id})`}
+            <strong>Gate safety:</strong> {status?.strategy?.active?.gate_safety?.name ?? '—'}
+            {status?.strategy?.active?.gate_safety?.id != null && ` (${status?.strategy?.active?.gate_safety?.id})`}
           </div>
           <div>
-            <strong>Allocation:</strong> {status?.active_strategy_allocation_name ?? '—'}
-            {status?.active_strategy_allocation_id != null && ` (${status.active_strategy_allocation_id})`}
+            <strong>Allocation:</strong> {status?.strategy?.active?.allocation?.name ?? '—'}
+            {status?.strategy?.active?.allocation?.id != null && ` (${status?.strategy?.active?.allocation?.id})`}
           </div>
         </div>
         <p className="section-hint">Daemon uses these on next start.</p>
@@ -971,7 +979,7 @@ export function StrategyStructurePage({
               </thead>
               <tbody>
                 {structuresForTypeTab.map((row) => {
-                  const isCurrentActive = status?.active_strategy_structure_id === row.strategy_structure_id
+                  const isCurrentActive = status?.strategy?.active?.structure?.id === row.strategy_structure_id
                   const availabilityUpdating = availabilityInProgress === row.strategy_structure_id
                   return (
                     <tr key={row.strategy_structure_id}>

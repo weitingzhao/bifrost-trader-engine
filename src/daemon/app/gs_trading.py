@@ -204,7 +204,7 @@ class GsTrading:
             )
         if getattr(self, "_redis_quotes", None) and self._redis_quotes.available:
             logger.info(
-                "Redis quotes: connected (Event ticker → quote:{symbol}, channel daemon:quotes)"
+                "Redis quotes: connected (Event ticker → quote:{symbol}; SSE uses IB ingestor ib:ingester:channel)"
             )
         else:
             logger.info(

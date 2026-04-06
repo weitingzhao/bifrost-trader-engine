@@ -129,7 +129,7 @@ export function StatusPage({
   /** Monitor Stop exits the server process shortly after 200; do not call loadStatus so the UI does not hang on a GET to a dead server. */
   const runMonitorStopAction = useControlAction(setMonitorCtrlMsg, monitorCtrlMsgClearRef, {})
   const j = status
-  const hb = j?.daemon_heartbeat
+  const hb = j?.daemon?.heartbeat
   const hbForCountdown = hb
   const intervalSec = hbForCountdown?.heartbeat_interval_sec ?? 10
   const nowSec = Date.now() / 1000
@@ -139,11 +139,11 @@ export function StatusPage({
     hbForCountdown?.daemon_alive && hbForCountdown?.last_ts != null
       ? Math.max(0, Math.ceil(hbForCountdown.last_ts + intervalSec - nowSec))
       : null
-  const suspended = j?.trading_suspended === true
+  const suspended = j?.daemon?.trading?.trading_suspended === true
   const ibConnected = hb?.ib_connected === true
-  const streamHostAccountId = (j?.ib_config?.stream_host_account_id ?? '').toString().trim()
-  const streamSecondaryAccountId = (j?.ib_config?.stream_secondary_account_id ?? '').toString().trim()
-  const openOrdersList = j?.open_orders ?? []
+  const streamHostAccountId = (j?.config?.ib_client?.account?.event_host ?? '').toString().trim()
+  const streamSecondaryAccountId = (j?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
+  const openOrdersList = j?.portfolio?.open_orders ?? []
   const hostOpenOrderCount = streamHostAccountId
     ? openOrdersList.filter((o) => (o.account_id ?? '').toString().trim() === streamHostAccountId).length
     : openOrdersList.length
@@ -194,8 +194,9 @@ export function StatusPage({
 
   let daemonLabel = 'Not running (or single-process mode)'
   let daemonHint = 'Run run_engine.py on the trading machine to see "Running" here'
-  let hedgeLabel = (j?.status?.ts != null && nowSec - (j.status.ts as number) < 90) ? 'Running (single-process)' : 'Not running'
-  let hedgeHint = (j?.status?.ts != null && nowSec - (j.status.ts as number) < 90)
+  const autoSt = j?.daemon?.trading?.auto_status
+  let hedgeLabel = (autoSt?.ts != null && nowSec - (autoSt.ts as number) < 90) ? 'Running (single-process)' : 'Not running'
+  let hedgeHint = (autoSt?.ts != null && nowSec - (autoSt.ts as number) < 90)
     ? 'Single-process mode (run_engine.py); status written by hedge logic'
     : ''
   let daemonIbLine = ''
@@ -222,10 +223,10 @@ export function StatusPage({
     hedgeHint = 'In dual-process mode, hedge does not run when daemon is down'
   }
 
-  const monitorEnabled = j?.monitor_enabled !== false
-  const monitorStatus = (j?.monitor_ib_status as any) || {}
-  const monitorOperator = monitorStatus.operator as { connected?: boolean; client_id?: number; last_error?: string } | undefined
-  const monitorAccount2 = monitorStatus.account2 as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorEnabled = j?.monitor?.enabled !== false
+  const monitorStatus = (j?.socket?.ib_operator as any) || {}
+  const monitorOperator = monitorStatus.host as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorAccount2 = monitorStatus.secondary as { connected?: boolean; client_id?: number; last_error?: string } | undefined
   const monitorHasError = Boolean(monitorOperator?.last_error || monitorAccount2?.last_error)
   const hasAccount2 = monitorAccount2 !== undefined
   const allMonitorClientsConnected = hasAccount2
@@ -242,21 +243,21 @@ export function StatusPage({
           : monitorOperator?.connected && (!hasAccount2 || monitorAccount2?.connected)
             ? 'green'
             : 'yellow'
-  const suspendedInReasons = j?.block_reasons?.includes('trading_suspended') ?? false
+  const suspendedInReasons = j?.health?.block_reasons?.includes('trading_suspended') ?? false
   const daemonSelfCheckText =
-    DAEMON_SELF_CHECK_LABELS[j?.daemon_self_check ?? ''] ?? j?.daemon_self_check ?? '--'
+    DAEMON_SELF_CHECK_LABELS[j?.daemon?.self_check ?? ''] ?? j?.daemon?.self_check ?? '--'
   const hedgeSelfCheckText =
-    (j?.self_check ?? '--') + (suspendedInReasons ? ' (hedge suspended)' : '')
-  const daemonBlockReasons = (j?.daemon_block_reasons ?? [])
+    (j?.health?.self_check ?? '--') + (suspendedInReasons ? ' (hedge suspended)' : '')
+  const daemonBlockReasons = (j?.daemon?.block_reasons ?? [])
     .map((r) => DAEMON_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
-  const hedgeBlockReasons = (j?.block_reasons ?? [])
+  const hedgeBlockReasons = (j?.health?.block_reasons ?? [])
     .map((r) => HEDGE_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
 
   const monitorSelfCheckText =
-    MONITOR_SELF_CHECK_LABELS[j?.monitor_self_check ?? ''] ?? j?.monitor_self_check ?? '--'
-  const monitorBlockReasons = (j?.monitor_block_reasons ?? [])
+    MONITOR_SELF_CHECK_LABELS[j?.monitor?.self_check ?? ''] ?? j?.monitor?.self_check ?? '--'
+  const monitorBlockReasons = (j?.monitor?.block_reasons ?? [])
     .map((r) => MONITOR_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
 
@@ -341,7 +342,7 @@ export function StatusPage({
     return d === 'green' && m === 'green' && c === 'green' ? 'green' : 'red'
   })()
 
-  const s = j?.status ?? {}
+  const s = j?.daemon?.trading?.auto_status ?? {}
   const statusSummaryItems = STATUS_FIELDS.map(([k, label]) => {
     let v: string | number | undefined = (s as Record<string, unknown>)[k] as string | number | undefined
     let out: string | number
@@ -511,7 +512,7 @@ export function StatusPage({
               suspended={suspended}
               ibConnected={ibConnected}
               daemonIbLine={daemonIbLine}
-              ibConfig={j?.ib_config}
+              ibConfig={j?.config?.ib_client}
               onStop={() => runCtrlAction(postStop, { loading: 'Requesting daemon stop…', success: 'Stop sent; daemon will exit and clear ib_client_id; next start uses client_id=1.' })}
               onReleaseIb={() => runCtrlAction(postReleaseIb, { loading: 'Requesting release IB…', success: 'Reset sent. Daemon will release both Trading and Listener IB connections on its next heartbeat, then enter WAITING_IB (daemon keeps running). Use «Retry IB connection» below to reconnect when ready.' })}
               ctrlMsg={ctrlMsg}
@@ -594,8 +595,8 @@ export function StatusPage({
               suspended={suspended}
               onSuspend={() => runCtrlAction(postSuspend, { loading: 'Setting suspend…', success: 'Suspend set; daemon will pause new hedges on next heartbeat.' })}
               onResume={() => runCtrlAction(postResume, { loading: 'Setting resume…', success: 'Resume set; daemon will resume hedging on next heartbeat.' })}
-              activeStructureName={status?.active_strategy_structure_name}
-              activeGateSafetyName={status?.active_gate_safety_strategy_name}
+              activeStructureName={status?.strategy?.active?.structure?.name}
+              activeGateSafetyName={status?.strategy?.active?.gate_safety?.name}
               onManage={onNavigateToStrategy}
             />
           </div>
@@ -640,7 +641,9 @@ export function StatusPage({
             </div>
             <div className="event-subscribe-body">
             {(() => {
-              const hasSecondary = !!(j?.ib_config?.ib2_host ?? j?.ib_config?.ib2_client_id_listener != null)
+              const hasSecondary = !!(
+                j?.config?.ib_client?.client?.secondary_host_ip ?? j?.config?.ib_client?.port?.listener_secondary != null
+              )
               return (
             <table className="table-operations table-event-subscribe table-event-subscribe-horizontal">
               <thead>
@@ -660,15 +663,15 @@ export function StatusPage({
                       </span>
                       <span
                         className="event-subscribe-status-text"
-                        title={hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.subscribed_tickers?.length ?? 0) > 0
-                          ? `Subscribed symbols: ${(j?.subscribed_tickers ?? []).join(', ')}`
+                        title={hb?.daemon_alive && hb?.event_subscribe_ticker && (j?.live_ui?.subscribed_tickers?.length ?? 0) > 0
+                          ? `Subscribed symbols: ${(j?.live_ui?.subscribed_tickers ?? []).join(', ')}`
                           : undefined}
                       >
                         {hb?.daemon_alive && hb?.event_subscribe_ticker
                           ? (
                               <>
-                                <span className="countdown-num">{j?.subscribed_tickers?.length ?? 0}</span>
-                                {' ticker'}{(j?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'}
+                                <span className="countdown-num">{j?.live_ui?.subscribed_tickers?.length ?? 0}</span>
+                                {' ticker'}{(j?.live_ui?.subscribed_tickers?.length ?? 0) === 1 ? '' : 's'}
                               </>
                             )
                           : hb?.daemon_alive

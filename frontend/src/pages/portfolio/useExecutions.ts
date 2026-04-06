@@ -117,7 +117,7 @@ export function useExecutions(
   }, [filters?.strategy_opportunity_id, filters?.strategy_instance_id, loadBookForLedger, positionsSplitFeeds])
 
   const executionAccountOptions = useMemo(() => {
-    const fromStatus = ((status?.accounts as { account_id?: string }[] | undefined) ?? [])
+    const fromStatus = ((status?.portfolio?.accounts as { account_id?: string }[] | undefined) ?? [])
       .map(a => (a.account_id ?? '').trim())
       .filter(Boolean)
     const fromExec = (executions || [])
@@ -132,7 +132,7 @@ export function useExecutions(
       merged.push(OFF_TRACK_ACCOUNT_ID)
     }
     return merged
-  }, [status?.accounts, executions, executionsBook])
+  }, [status?.portfolio?.accounts, executions, executionsBook])
 
   return {
     executions,

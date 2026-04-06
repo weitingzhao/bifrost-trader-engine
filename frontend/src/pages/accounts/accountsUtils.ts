@@ -8,6 +8,52 @@ export type DailyBenchmark = {
   is_stale?: boolean
 }
 
+/** Normalize benchmark map keys to uppercase so UI rows match stock_day / ingestor symbol casing. */
+export function normalizeBenchmarkMap(
+  raw: Record<string, DailyBenchmark> | undefined | null,
+): Record<string, DailyBenchmark> {
+  const out: Record<string, DailyBenchmark> = {}
+  if (!raw) return out
+  for (const [k, v] of Object.entries(raw)) {
+    const key = k.trim().toUpperCase()
+    if (key && v && typeof v === 'object') out[key] = v as DailyBenchmark
+  }
+  return out
+}
+
+/** Display price for streams: last trade if present, else mid (ingestor often has bid/ask only). */
+export function quoteDisplayLast(q: { last?: number | null; mid?: number | null } | undefined | null): number | null {
+  if (!q) return null
+  if (q.last != null && Number.isFinite(q.last)) return q.last
+  if (q.mid != null && Number.isFinite(q.mid)) return q.mid
+  return null
+}
+
+/** True when quote is equity stream for quotesMap merge (OPT rows must not overwrite underlying symbol). */
+export function isStkStreamQuote(q: RealtimeQuote): boolean {
+  const st = (q.sec_type ?? '').toString().toUpperCase()
+  if (st === 'STK') return true
+  const ck = (q.contract_key ?? '').trim()
+  return ck.includes('|STK|')
+}
+
+/** Merge GET /quotes or SSE items into a symbol-keyed map (uppercase STK keys). */
+export function mergeQuotesIntoSymbolMap(
+  prev: Record<string, RealtimeQuote>,
+  quotes: RealtimeQuote[],
+): Record<string, RealtimeQuote> {
+  const next = { ...prev }
+  for (const q of quotes) {
+    const sym = (q.symbol ?? '').trim()
+    if (!sym) continue
+    const mapKey = sym.toUpperCase()
+    if (isStkStreamQuote(q) || !q.contract_key) {
+      next[mapKey] = q
+    }
+  }
+  return next
+}
+
 export type PriceSource = 'live' | 'db' | 'daemon' | null
 
 export function getNetLiq(a: IbAccountSnapshot): number {

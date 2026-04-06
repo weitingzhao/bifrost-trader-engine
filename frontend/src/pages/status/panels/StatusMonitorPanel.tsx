@@ -110,7 +110,7 @@ export function StatusMonitorPanel({
               {/* Database/Redis status under API service */}
               {!monitorEnabled ? (
                 <p className="section-hint" style={{ marginTop: 'var(--space-2)' }}>Redis: —</p>
-              ) : j?.redis_quotes_connected ? (
+              ) : j?.market_data?.quotes_redis_reader_ok ? (
                 <p className="section-hint countdown-line" style={{ marginTop: 'var(--space-2)' }}>
                   Redis: <span className="countdown-num">Connected</span>{' '}
                   <InfoTooltip text="GET /quotes available" />

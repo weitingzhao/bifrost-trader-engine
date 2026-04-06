@@ -159,32 +159,35 @@ export function SettingsPage({
   const [initFlexRangeDays, setInitFlexRangeDays] = useState<number>(360)
 
   useEffect(() => {
-    const c = status?.ib_config
+    const c = status?.config?.ib_client
     if (!c || ibConfigInitialized) return
-    if (c.ib_host != null) setIbHost(c.ib_host)
-    if (c.ib_port_type != null) setIbPortType(c.ib_port_type)
-    if (c.ib_client_id_daemon != null) setClientIdDaemon(c.ib_client_id_daemon)
-    if (c.ib_client_id_listener != null) setClientIdListener(c.ib_client_id_listener)
-    if (c.ib_client_id_operator != null) setClientIdOperator(c.ib_client_id_operator)
-    if (c.ib_client_id_worker_market != null) setClientIdWorker(c.ib_client_id_worker_market)
-    if (c.ib_client_id_ib_ingestor != null) setClientIdIbIngestor(c.ib_client_id_ib_ingestor)
-    if (c.ib_host_account_id != null) setHostAccountId(String(c.ib_host_account_id))
-    if (c.stream_host_account_id != null) setStreamHostAccountId(String(c.stream_host_account_id))
-    if ((c as { stream_secondary_account_id?: string }).stream_secondary_account_id != null) setStreamSecondaryAccountId(String((c as { stream_secondary_account_id?: string }).stream_secondary_account_id))
-    if (c.ib2_host != null) setIb2Host(String(c.ib2_host))
-    if (c.ib2_port_type != null) setIb2PortType(c.ib2_port_type as 'tws_live' | 'tws_paper' | 'gateway')
-    if (c.ib2_client_id_listener != null) setIb2ClientIdListener(c.ib2_client_id_listener)
-    if (c.ib2_client_id_operator != null) setIb2ClientIdOperator(c.ib2_client_id_operator)
-    const days = (c as { flex_default_range_days?: number }).flex_default_range_days
-    if (typeof days === 'number' && Number.isFinite(days) && days >= 1) setDefaultFlexRangeDays(Math.round(days))
-    const initDays = (c as { flex_init_range_days?: number }).flex_init_range_days
-    if (typeof initDays === 'number' && Number.isFinite(initDays) && initDays >= 1) setInitFlexRangeDays(Math.round(initDays))
+    const cl = c.client
+    if (cl?.host_ip != null) setIbHost(cl.host_ip)
+    if (cl?.host_port_type != null) setIbPortType(cl.host_port_type)
+    const pid = c.port
+    const acc = c.account
+    if (pid?.trading != null) setClientIdDaemon(pid.trading)
+    if (pid?.listener_host != null) setClientIdListener(pid.listener_host)
+    if (pid?.operator_host != null) setClientIdOperator(pid.operator_host)
+    if (pid?.market_data_worker != null) setClientIdWorker(pid.market_data_worker)
+    if (pid?.ingestor != null) setClientIdIbIngestor(pid.ingestor)
+    if (acc?.trading != null) setHostAccountId(String(acc.trading))
+    if (acc?.event_host != null) setStreamHostAccountId(String(acc.event_host))
+    if (acc?.event_secondary != null) setStreamSecondaryAccountId(String(acc.event_secondary))
+    if (cl?.secondary_host_ip != null) setIb2Host(String(cl.secondary_host_ip))
+    if (cl?.secondary_port_type != null) setIb2PortType(cl.secondary_port_type as 'tws_live' | 'tws_paper' | 'gateway')
+    if (pid?.listener_secondary != null) setIb2ClientIdListener(pid.listener_secondary)
+    if (pid?.operator_secondary != null) setIb2ClientIdOperator(pid.operator_secondary)
     setIbConfigInitialized(true)
-  }, [status?.ib_config, ibConfigInitialized])
+  }, [status?.config?.ib_client, ibConfigInitialized])
 
   useEffect(() => {
     if (!status || flexInitialized) return
-    const fc = status.flex_config
+    const fc = status.config?.ib_flex
+    const days = fc?.default_range_days
+    if (typeof days === 'number' && Number.isFinite(days) && days >= 1) setDefaultFlexRangeDays(Math.round(days))
+    const initDays = fc?.init_range_days
+    if (typeof initDays === 'number' && Number.isFinite(initDays) && initDays >= 1) setInitFlexRangeDays(Math.round(initDays))
     if (fc && typeof fc === 'object' && 'rows' in fc && Array.isArray(fc.rows)) {
       setFlexHostToken((fc.host_token ?? '') || '')
       setFlexSecondaryToken((fc.secondary_token ?? '') || '')
@@ -205,16 +208,16 @@ export function SettingsPage({
       setFlexAccounts(getDefaultFlexRows())
     }
     setFlexInitialized(true)
-  }, [status, status?.flex_config, flexInitialized])
+  }, [status, status?.config?.ib_flex, flexInitialized])
 
   useEffect(() => {
-    const sec = status?.daemon_heartbeat?.heartbeat_interval_sec
+    const sec = status?.daemon?.heartbeat?.heartbeat_interval_sec
     if (heartbeatInitialized) return
     if (sec != null && Number.isFinite(sec)) {
       setHeartbeatIntervalSec(sec)
       setHeartbeatInitialized(true)
     }
-  }, [status?.daemon_heartbeat?.heartbeat_interval_sec, heartbeatInitialized])
+  }, [status?.daemon?.heartbeat?.heartbeat_interval_sec, heartbeatInitialized])
 
   const loadHolidays = async () => {
     setHolidaysLoading(true)
@@ -284,7 +287,7 @@ export function SettingsPage({
   const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
   const [socketIngestLamp, setSocketIngestLamp] = useState<AggregateIngestLamp>('none')
   const [socketIngestTitle, setSocketIngestTitle] = useState(
-    'Socket ingest Redis health from Monitor /status (loading…)',
+    'Socket ingest Redis health from Monitor GET /status `socket` (loading…)',
   )
   const [ingestServicesCache, setIngestServicesCache] = useState<MarketIngestServiceRow[]>([])
   const [ingestServicesFetchError, setIngestServicesFetchError] = useState<string | null>(null)
@@ -293,8 +296,8 @@ export function SettingsPage({
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
-  const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
-  const monitorLamp: 'green' | 'yellow' | 'red' = ((status?.monitor_lamp as string) || 'red') as 'green' | 'yellow' | 'red'
+  const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon?.lamp as string) || 'red') as 'green' | 'yellow' | 'red'
+  const monitorLamp: 'green' | 'yellow' | 'red' = ((status?.monitor?.lamp as string) || 'red') as 'green' | 'yellow' | 'red'
   const isSystemServerActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-server'
   const isSystemDaemonActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-daemon'
   const isApiSection = activeSectionId === 'settings-api'

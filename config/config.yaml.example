@@ -56,6 +56,10 @@ redis:
   enabled: true
   host: "127.0.0.1"
   port: 6379
+  # Optional: daemon publish channel (legacy; SSE uses subscribe_channel below).
+  # channel: daemon:quotes
+  # SSE GET /quotes/stream subscribes here (default ib:ingester:channel).
+  # subscribe_channel: ib:ingester:channel
 
 # Categories align with Settings → Services Overview / API Health (Architecture, Account, Research, Feed).
 server:

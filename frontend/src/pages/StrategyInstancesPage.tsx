@@ -57,16 +57,16 @@ export function StrategyInstancesPage({
   /** Detail view is shown when URL has an instance id or user picked one in-page (e.g. after create). */
   const effectiveDetailId = urlStrategyInstanceId ?? selectedInstanceId
 
-  const accounts = status?.accounts ?? []
+  const accounts = status?.portfolio?.accounts ?? []
 
   /** Event Account options for Create instance: Host and Secondary from Settings → IB Connection. */
   const eventAccounts = (() => {
-    const cfg = status?.ib_config
+    const cfg = status?.config?.ib_client
     if (!cfg) return []
     const list: { account_id: string; label: string }[] = []
-    const host = (cfg.stream_host_account_id ?? '').toString().trim()
+    const host = (cfg.account?.event_host ?? '').toString().trim()
     if (host) list.push({ account_id: host, label: 'Host' })
-    const secondary = (cfg.stream_secondary_account_id ?? '').toString().trim()
+    const secondary = (cfg.account?.event_secondary ?? '').toString().trim()
     if (secondary) list.push({ account_id: secondary, label: 'Secondary' })
     return list
   })()
@@ -133,7 +133,7 @@ export function StrategyInstancesPage({
     const map = new Map<number, RiskProfile>()
     type OptRow = IbPositionRow & { account_id: string }
     const allPositions: OptRow[] = []
-    for (const acc of status?.accounts ?? []) {
+    for (const acc of status?.portfolio?.accounts ?? []) {
       const aid = (acc.account_id ?? '').trim()
       for (const p of acc.positions ?? []) {
         if ((p.secType ?? '').toUpperCase() !== 'OPT' || !(p.strategy_links ?? []).length) continue
@@ -193,7 +193,7 @@ export function StrategyInstancesPage({
         if (hasUnderlying) {
           const sym = (optsA[0]?.symbol ?? '').toUpperCase()
           if (sym) {
-            const accRow = (status?.accounts ?? []).find(a => (a.account_id ?? '').trim() === acct)
+            const accRow = (status?.portfolio?.accounts ?? []).find(a => (a.account_id ?? '').trim() === acct)
             const held = accRow?.positions?.find(
               s => (s.secType ?? '').toUpperCase() !== 'OPT' && (s.symbol ?? '').toUpperCase() === sym,
             )
@@ -209,7 +209,7 @@ export function StrategyInstancesPage({
       if (merged != null) map.set(instId, merged)
     }
     return map
-  }, [status?.accounts, items, opportunitiesById, structuresById])
+  }, [status?.portfolio?.accounts, items, opportunitiesById, structuresById])
 
   const groupedItems = useMemo(() => {
     const groups: Array<{ key: string; label: string; rows: StrategyInstance[] }> = []
@@ -419,7 +419,7 @@ export function StrategyInstancesPage({
     const pad = (n: number) => String(n).padStart(2, '0')
     setCreateOpenedAt(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`)
     setCreateOpportunityId('')
-    const hostId = (status?.ib_config?.stream_host_account_id ?? '').toString().trim()
+    const hostId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
     setCreateAccountId(hostId)
     setCreateLabel('')
     setCreateNotes('')

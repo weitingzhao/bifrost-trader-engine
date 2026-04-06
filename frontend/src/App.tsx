@@ -43,6 +43,13 @@ import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/mas
 import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
+import {
+  computeDailyChange,
+  mergeQuotesIntoSymbolMap,
+  normalizeBenchmarkMap,
+  quoteDisplayLast,
+  type DailyBenchmark,
+} from './pages/accounts/accountsUtils'
 import './App.css'
 import './styles/settings-celery.css'
 
@@ -206,9 +213,7 @@ export default function App() {
   /** Short feedback after account refresh (success/fail/timeout); auto-cleared after a few seconds */
   const [accountsRefreshFeedback, setAccountsRefreshFeedback] = useState<string | null>(null)
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
-  const [benchmarks, setBenchmarks] = useState<
-    Record<string, { bar_time: number; close: number; prev_close?: number | null; is_today?: boolean; is_stale?: boolean }>
-  >({})
+  const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   /** Celery: Ops /ops/workers + /ops/queues/summary (header lamp + badge; falls back to /status if Ops fails). */
   const [celeryRuntimeLampOverride, setCeleryRuntimeLampOverride] = useState<LampId | null>(null)
   const [celeryQueuePendingTotal, setCeleryQueuePendingTotal] = useState<number | null>(null)
@@ -440,12 +445,12 @@ export default function App() {
     fetchQuotes()
       .then((res) => {
         if (!cancelled && res.quotes?.length) {
-          setQuotesMap(() => Object.fromEntries(res.quotes!.map((q) => [q.symbol, q])))
+          setQuotesMap((prev) => mergeQuotesIntoSymbolMap(prev, res.quotes!))
         }
       })
       .catch(() => {})
     const unsub = subscribeQuotes((q) => {
-      setQuotesMap((prev) => ({ ...prev, [q.symbol]: q }))
+      setQuotesMap((prev) => mergeQuotesIntoSymbolMap(prev, [q]))
     })
     return () => {
       cancelled = true
@@ -454,26 +459,30 @@ export default function App() {
   }, [isDetailMode])
 
   useEffect(() => {
-    if (status?.accounts != null && accountsDisplay === null)
-      setAccountsDisplay(status.accounts ? [...status.accounts] : [])
-  }, [status?.accounts, accountsDisplay])
+    const acc = status?.portfolio?.accounts
+    if (acc != null && accountsDisplay === null) setAccountsDisplay(acc ? [...acc] : [])
+  }, [status?.portfolio?.accounts, accountsDisplay])
 
   // Sync accounts when backend reports new data (e.g. after fallback prices applied) so Market/Daily %/Daily $ update
   const lastAccountsFetchedAtRef = useRef<number | null>(null)
   useEffect(() => {
-    if (status?.accounts == null || status?.accounts_fetched_at == null) return
-    const fetchedAt = status.accounts_fetched_at
+    const acc = status?.portfolio?.accounts
+    const fetchedAt = status?.portfolio?.accounts_fetched_at
+    if (acc == null || fetchedAt == null) return
     if (accountsDisplay !== null && fetchedAt !== lastAccountsFetchedAtRef.current) {
       lastAccountsFetchedAtRef.current = fetchedAt
-      setAccountsDisplay([...status.accounts])
+      setAccountsDisplay([...acc])
     } else if (accountsDisplay === null) {
       lastAccountsFetchedAtRef.current = fetchedAt
     }
-  }, [status?.accounts, status?.accounts_fetched_at, accountsDisplay])
+  }, [status?.portfolio?.accounts, status?.portfolio?.accounts_fetched_at, accountsDisplay])
 
   useEffect(() => {
     const t = setInterval(() => {
-      loadStatus().then((j) => setAccountsDisplay(j?.accounts ? [...j.accounts] : []))
+      loadStatus().then((j) => {
+        const a = j?.portfolio?.accounts
+        setAccountsDisplay(a ? [...a] : [])
+      })
     }, 60 * 60 * 1000)
     return () => clearInterval(t)
   }, [loadStatus])
@@ -498,8 +507,10 @@ export default function App() {
       const deadline = Date.now() + 30000
       while (Date.now() < deadline) {
         const j = await loadStatus()
-        if (j?.accounts != null) setAccountsDisplay(j.accounts ? [...j.accounts] : [])
-        if (j?.accounts_fetched_at != null && j.accounts_fetched_at > requestedAt) {
+        const ja = j?.portfolio?.accounts
+        if (ja != null) setAccountsDisplay(ja ? [...ja] : [])
+        const jf = j?.portfolio?.accounts_fetched_at
+        if (jf != null && jf > requestedAt) {
           setAccountsRefreshFeedback('Refreshed')
           refreshed = true
           break
@@ -518,12 +529,12 @@ export default function App() {
 
   const j = status
   // System status lamp: green only when daemon/monitor/status all green; otherwise worst of the three
-  const dl = (j?.daemon_lamp as 'green' | 'yellow' | 'red') || 'red'
-  const ml = (j?.monitor_lamp as 'green' | 'yellow' | 'red') || 'red'
+  const dl = (j?.daemon?.lamp as 'green' | 'yellow' | 'red') || 'red'
+  const ml = (j?.monitor?.lamp as 'green' | 'yellow' | 'red') || 'red'
   // Strategy tab lamp = Trading Strategy status (same as System → Daemon Event → Trading Strategy)
-  const hb = j?.daemon_heartbeat
+  const hb = j?.daemon?.heartbeat
   const strategyLamp: LampId =
-    !hb || !hb.daemon_alive ? 'red' : j?.trading_suspended === true ? 'yellow' : 'green'
+    !hb || !hb.daemon_alive ? 'red' : j?.daemon?.trading?.trading_suspended === true ? 'yellow' : 'green'
   const celeryLamp: LampId =
     celeryRuntimeLampOverride ?? celeryMetricsFromStatus(status).celeryLamp
   const cl = celeryLamp as 'green' | 'yellow' | 'red'
@@ -532,31 +543,29 @@ export default function App() {
     if (dl === 'yellow' || ml === 'yellow' || cl === 'yellow') return 'yellow'
     return dl === 'green' && ml === 'green' && cl === 'green' ? 'green' : 'none'
   })()
-  const daemonHeartbeat = status?.daemon_heartbeat
-  // Market Streams: green only when daemon is alive, subscribed to ticker, and monitor can read Redis quotes
+  // Market Streams (header): green when quotes Redis OK and IB ingestor socket connected
   const liveLamp: LampId =
-    status?.redis_quotes_connected === true &&
-    daemonHeartbeat?.daemon_alive === true &&
-    daemonHeartbeat?.event_subscribe_ticker === true
+    status?.market_data?.quotes_redis_reader_ok === true &&
+    status?.socket?.ib_ingestor?.connected === true
       ? 'green'
       : 'red'
 
   const watchlistSymbols = useMemo(
-    () => [...new Set([...(status?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
-    [status?.subscribed_tickers, quotesMap],
+    () => [...new Set([...(status?.live_ui?.subscribed_tickers ?? []), ...Object.keys(quotesMap)])].sort(),
+    [status?.live_ui?.subscribed_tickers, quotesMap],
   )
   const benchmarkSymbols = useMemo(
     () =>
       [
         ...new Set([
           ...watchlistSymbols,
-          ...(status?.reference_indices?.map((r) => r.symbol) ?? []),
+          ...(status?.live_ui?.reference_indices?.map((r) => r.symbol) ?? []),
         ]),
       ].sort(),
-    [watchlistSymbols, status?.reference_indices],
+    [watchlistSymbols, status?.live_ui?.reference_indices],
   )
   const streamSummaryItems = useMemo<StreamSummaryItem[]>(() => {
-    const accountsList = status?.accounts ?? []
+    const accountsList = status?.portfolio?.accounts ?? []
     const rows = watchlistSymbols.map((symbol) => {
       let qty = 0
       let totalCost = 0
@@ -575,25 +584,14 @@ export default function App() {
         }
       }
       const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
-      const quote = quotesMap[symbol]
-      const bench = benchmarks[symbol]
-      let changePct: number | null = null
-      let pnlVsBench: number | null = null
-      const qLast = quote?.last
-      if (
-        bench &&
-        quote &&
-        qLast != null &&
-        Number.isFinite(qLast) &&
-        Number.isFinite(bench.close) &&
-        bench.close > 0
-      ) {
-        changePct = ((qLast - bench.close) / bench.close) * 100
-        pnlVsBench = Number.isFinite(qty) ? (qLast - bench.close) * qty : null
-      }
+      const symKey = (symbol || '').trim().toUpperCase()
+      const quote = quotesMap[symKey] ?? quotesMap[symbol]
+      const bench = benchmarks[symKey]
+      const curr = quoteDisplayLast(quote)
+      const { changePct, pnlVsBench } = computeDailyChange(bench, curr, qty ?? 0)
       const pnlCost =
-        quote && avgCost != null && qLast != null && Number.isFinite(qLast) && Number.isFinite(qty) && qty !== 0
-          ? (qLast - avgCost) * qty
+        curr != null && avgCost != null && Number.isFinite(qty) && qty !== 0
+          ? (curr - avgCost) * qty
           : null
       return { qty, avgCost, pnlCost, pnlVsBench, changePct }
     })
@@ -604,10 +602,8 @@ export default function App() {
     )
     const sumLastQty = watchlistSymbols.reduce((acc, symbol, index) => {
       const qty = Number.isFinite(rows[index]?.qty) ? rows[index]!.qty : 0
-      const last =
-        quotesMap[symbol]?.last != null && Number.isFinite(quotesMap[symbol].last)
-          ? quotesMap[symbol].last
-          : 0
+      const sk = (symbol || '').trim().toUpperCase()
+      const last = quoteDisplayLast(quotesMap[sk] ?? quotesMap[symbol]) ?? 0
       return acc + last * qty
     }, 0)
     const totalDailyDenom = sumLastQty - totalDailyDollar
@@ -659,7 +655,7 @@ export default function App() {
       },
     ]
     return items
-  }, [status?.accounts, status?.reference_indices, watchlistSymbols, quotesMap, benchmarks, liveLamp])
+  }, [status?.portfolio?.accounts, status?.live_ui?.reference_indices, watchlistSymbols, quotesMap, benchmarks, liveLamp])
 
   useEffect(() => {
     if (benchmarkSymbols.length === 0) {
@@ -669,7 +665,7 @@ export default function App() {
     let cancelled = false
     fetchBarsBenchmark(benchmarkSymbols)
       .then((res) => {
-        if (!cancelled) setBenchmarks(res.benchmarks ?? {})
+        if (!cancelled) setBenchmarks(normalizeBenchmarkMap(res.benchmarks))
       })
       .catch(() => {
         if (!cancelled) setBenchmarks({})
@@ -1058,7 +1054,7 @@ export default function App() {
                 onMouseLeave={closeLampPopover}
               >
                 <span
-                  className={`lamp-icon ${(status?.monitor_lamp as LampId) ?? 'red'}`}
+                  className={`lamp-icon ${(status?.monitor?.lamp as LampId) ?? 'red'}`}
                   aria-hidden
                   title="Server"
                 >
@@ -1101,7 +1097,7 @@ export default function App() {
                 onMouseLeave={closeLampPopover}
               >
                 <span
-                  className={`lamp-icon ${(status?.daemon_lamp as LampId) ?? 'red'}`}
+                  className={`lamp-icon ${(status?.daemon?.lamp as LampId) ?? 'red'}`}
                   aria-hidden
                   title="Daemon status"
                 >
@@ -1317,9 +1313,9 @@ export default function App() {
           streamLamp={liveLamp}
           streamItems={streamSummaryItems}
           onStreamClick={() => setActiveTab('live')}
-          openOrderCount={(status?.open_orders ?? []).length}
+          openOrderCount={(status?.portfolio?.open_orders ?? []).length}
           onOpenOrdersClick={() => setActiveTab('live')}
-          openOrdersLamp={status?.daemon_heartbeat?.daemon_alive === true ? 'green' : 'red'}
+          openOrdersLamp={status?.daemon?.heartbeat?.daemon_alive === true ? 'green' : 'red'}
         />
       )}
 

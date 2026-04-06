@@ -120,7 +120,7 @@ def post_celery_stop() -> JSONResponse:
 
 @router.post("/control/monitor_connect")
 async def post_monitor_connect(request: Request) -> JSONResponse:
-    """Reconnect IB Operator (host operator + secondary account if configured). On success, /status monitor_ib_status reflects health."""
+    """Reconnect IB Operator (host operator + secondary account if configured). On success, /status socket.ib_operator reflects health."""
     app = request.app
     if not getattr(app.state, "monitor_enabled", True):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Monitor stopped; cannot connect IB."})

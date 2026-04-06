@@ -1380,7 +1380,7 @@ export function FeedMassiveOptionPage({
           <div className="feed-massive-queue-summary">
             <span className="feed-massive-queue-summary-label">Queue</span>
             <span className="feed-massive-queue-summary-stat">
-              Workers: <strong>{_status?.celery_workers?.length ?? 0}</strong>
+              Workers: <strong>{_status?.celery?.workers?.length ?? 0}</strong>
             </span>
             {pendingJobCount > 0 ? (
               <span className="feed-massive-queue-summary-stat">
@@ -1388,7 +1388,7 @@ export function FeedMassiveOptionPage({
               </span>
             ) : null}
             <a href="#settings-celery" className="feed-massive-queue-summary-link">Celery queue details</a>
-            {!_status?.celery_workers?.length ? (
+            {!_status?.celery?.workers?.length ? (
               <span className="feed-massive-queue-summary-warn">No workers — start with -Q massive</span>
             ) : null}
           </div>

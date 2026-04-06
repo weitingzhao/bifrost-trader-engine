@@ -11,6 +11,7 @@ from src.monitor.reader import (
     write_flex_config,
     write_ib_config,
 )
+from src.monitor.reader.ib_config_public import ib_client_for_api
 from src.monitor.reader.settings import write_active_strategy_and_gates
 
 logger = logging.getLogger(__name__)
@@ -96,8 +97,7 @@ def post_config_ib(request: Request, body: IbConfigBody = Body(...)) -> JSONResp
     logger.info("[config/ib] writing settings: host_account_id=%r stream_host=%r stream_secondary=%r", host_id, stream_host_id, stream_secondary_id)
     if write_ib_config(control_via_db, host_id, stream_host_id, stream_secondary_id):
         merged = reader.get_ib_config() or {}
-        out: Dict[str, Any] = {"ok": True}
-        out.update(merged)
+        out: Dict[str, Any] = {"ok": True, **ib_client_for_api(merged)}
         return JSONResponse(status_code=200, content=out)
     return JSONResponse(status_code=500, content={"error": "failed to write settings"})
 

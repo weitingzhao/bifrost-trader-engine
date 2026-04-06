@@ -76,17 +76,12 @@ export function AccountsPage({
   onViewChange,
 }: AccountsPageProps) {
   const j = status
-  const rawAccounts = (accountsDisplay ?? j?.accounts) as IbAccountSnapshot[] | undefined
+  const rawAccounts = (accountsDisplay ?? j?.portfolio?.accounts) as IbAccountSnapshot[] | undefined
   const hasAccounts = Array.isArray(rawAccounts) && rawAccounts.length > 0
-  const fetchedAt = j?.accounts_fetched_at
+  const fetchedAt = j?.portfolio?.accounts_fetched_at
   const accounts = hasAccounts ? [...rawAccounts!].sort((a, b) => getNetLiq(b) - getNetLiq(a)) : []
-  /** Only show accounts with Net Liquidation ≥ $10. */
-  const accountsVisible = useMemo(
-    () => accounts.filter((a) => getNetLiq(a) >= 10),
-    [accounts],
-  )
-  const selectedIndex = accountsVisible.length > 0 ? Math.min(ibAccountIndex, accountsVisible.length - 1) : 0
-  const acc = accountsVisible[selectedIndex] ?? null
+  const selectedIndex = accounts.length > 0 ? Math.min(ibAccountIndex, accounts.length - 1) : 0
+  const acc = accounts[selectedIndex] ?? null
   const [quotesMap, setQuotesMap] = useState<Record<string, RealtimeQuote>>({})
   const [replayFetchDays, setReplayFetchDays] = useState<1 | 3 | 7>(1)
   const [replaySyncing, setReplaySyncing] = useState(false)
@@ -138,12 +133,12 @@ export function AccountsPage({
     return { optionContracts: optKeys.size, stockLines, unrealizedPnl }
   }, [rawAccounts])
 
-  /** Aggregated totals across visible accounts (Net Liq ≥ $10). */
+  /** Aggregated totals across accounts from status (all rows returned by API). */
   const aggregatedTotals = useMemo(() => {
     let totalNetLiq = 0
     let totalCash = 0
     let totalBuyingPower = 0
-    for (const a of accountsVisible) {
+    for (const a of accounts) {
       totalNetLiq += getNetLiq(a)
       const cash = a.summary?.TotalCashValue
       if (cash != null) {
@@ -157,7 +152,7 @@ export function AccountsPage({
       }
     }
     return { totalNetLiq, totalCash, totalBuyingPower }
-  }, [accountsVisible])
+  }, [accounts])
 
   /** Pie chart: composition by Cash + stock categories + Options (market value). */
   const portfolioPieData = useMemo(() => {
@@ -167,7 +162,7 @@ export function AccountsPage({
 
     const categoryValue: Record<string, number> = {}
     let optionsValue = 0
-    for (const account of accountsVisible) {
+    for (const account of accounts) {
       for (const pos of account.positions ?? []) {
         const qty = Number(pos.position)
         if (!Number.isFinite(qty) || qty === 0) continue
@@ -186,7 +181,7 @@ export function AccountsPage({
     })
     if (optionsValue > 0) slices.push({ name: 'Options', value: optionsValue })
     return slices
-  }, [accountsVisible, aggregatedTotals.totalCash])
+  }, [accounts, aggregatedTotals.totalCash])
 
   const [benchmarks, setBenchmarks] = useState<Record<string, DailyBenchmark>>({})
   const stockSymbols = useMemo(() => {
@@ -202,8 +197,8 @@ export function AccountsPage({
   }, [acc])
   const benchmarkSymbols = useMemo(
     () =>
-      [...new Set([...stockSymbols, ...(status?.reference_indices?.map((r) => r.symbol) ?? [])])].sort(),
-    [stockSymbols, status?.reference_indices],
+      [...new Set([...stockSymbols, ...(status?.live_ui?.reference_indices?.map((r) => r.symbol) ?? [])])].sort(),
+    [stockSymbols, status?.live_ui?.reference_indices],
   )
   useEffect(() => {
     if (benchmarkSymbols.length === 0) {
@@ -352,7 +347,7 @@ export function AccountsPage({
         )}
 
         <div className="ib-portfolio-overview-compact" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
-          <span><span className="ib-portfolio-overview-label">Accounts</span> {status?.accounts?.length ?? 0}</span>
+          <span><span className="ib-portfolio-overview-label">Accounts</span> {status?.portfolio?.accounts?.length ?? 0}</span>
           <span className="ib-portfolio-overview-sep">·</span>
           <span><span className="ib-portfolio-overview-label">Options</span> {overviewTotals.optionContracts}</span>
           <span className="ib-portfolio-overview-sep">·</span>
@@ -548,14 +543,11 @@ export function AccountsPage({
     return `${Math.round(days)} days ago`
   }
 
+  const autoStRow = status?.daemon?.trading?.auto_status
   const spot =
-    status?.status?.spot != null && Number.isFinite(Number(status.status.spot))
-      ? Number(status.status.spot)
-      : null
+    autoStRow?.spot != null && Number.isFinite(Number(autoStRow.spot)) ? Number(autoStRow.spot) : null
   const statusTs =
-    status?.status?.ts != null && Number.isFinite(Number(status.status.ts))
-      ? Number(status.status.ts)
-      : null
+    autoStRow?.ts != null && Number.isFinite(Number(autoStRow.ts)) ? Number(autoStRow.ts) : null
 
   return (
     <div className="card process-section">
@@ -938,11 +930,11 @@ export function AccountsPage({
         <div className="ib-portfolio-netliq-chart-wrap">
         <span className="ib-portfolio-pie-title">Net Liquidation over time</span>
         {(() => {
-          const series = accountsVisible.map((a) => ({
+          const series = accounts.map((a) => ({
             accountId: a.account_id ?? '',
             label: a.account_id ?? '—',
             points: [{ t: Date.now() / 1000, y: getNetLiq(a) }],
-          })).filter((s) => s.points[0].y > 0)
+          })).filter((s) => Number.isFinite(s.points[0].y))
           const allTs = series.flatMap((s) => s.points.map((p) => p.t))
           const minT = allTs.length ? Math.min(...allTs) : 0
           const maxT = allTs.length ? Math.max(...allTs) : 1
@@ -958,7 +950,7 @@ export function AccountsPage({
           return (
             <div className="ib-portfolio-netliq-chart">
               {series.length === 0 ? (
-                <p className="ib-portfolio-chart-empty">No account data (Net Liquidation ≥ $10).</p>
+                <p className="ib-portfolio-chart-empty">No account data.</p>
               ) : (
                 <svg className="ib-portfolio-line-svg" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet">
                   <defs>
@@ -1003,9 +995,9 @@ export function AccountsPage({
       </div>
 
       <div className="ib-accounts-wrap">
-        {accountsVisible.length > 1 && (
+        {accounts.length > 1 && (
           <div className="system-tabs ib-accounts-tab-row" role="tablist" aria-label="Account">
-            {accountsVisible.map((a, idx) => (
+            {accounts.map((a, idx) => (
               <button
                 key={a.account_id ?? idx}
                 type="button"
@@ -1024,7 +1016,7 @@ export function AccountsPage({
         )}
         <div className="ib-accounts-content system-tab-panel">
           {!acc ? (
-            <p className="section-hint" style={{ marginTop: '0.5rem' }}>No accounts with Net Liquidation ≥ $10</p>
+            <p className="section-hint" style={{ marginTop: '0.5rem' }}>No accounts</p>
           ) : (
           <>
           <div className="ib-summary-card">
@@ -1033,7 +1025,7 @@ export function AccountsPage({
               <span className="label">Account</span>
               <span className="value">{aid}</span>
             </div>
-            {netLiq != null && Number.isFinite(netLiq) && netLiq >= 10 && (
+            {netLiq != null && Number.isFinite(netLiq) && (
               <div className="ib-summary-item">
                 <span className="label">Net liquidation</span>
                 <span className="value">{fmtUsd(netLiq)}</span>
@@ -1115,7 +1107,7 @@ export function AccountsPage({
                     const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
                     const totalCost = Number.isFinite(qty) && Number.isFinite(cost) ? qty * cost : null
                     const sym = (pos.symbol ?? '').toString().toUpperCase()
-                    const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                    const mainSym = (status?.daemon?.trading?.auto_status?.symbol ?? '').toString().toUpperCase()
                     const perPrice =
                       pos.price != null && Number.isFinite(Number(pos.price))
                         ? Number(pos.price)
@@ -1229,7 +1221,7 @@ export function AccountsPage({
                       const qty = pos.position != null ? Number(pos.position) : NaN
                       const cost = pos.avgCost != null ? Number(pos.avgCost) : NaN
                       const sym = (pos.symbol ?? '').toString().toUpperCase()
-                      const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                      const mainSym = (status?.daemon?.trading?.auto_status?.symbol ?? '').toString().toUpperCase()
                       const perPrice = pos.price != null && Number.isFinite(Number(pos.price)) ? Number(pos.price) : null
                       const showSpot = spot != null && Number.isFinite(spot) && sym !== '' && mainSym !== '' && sym === mainSym
                       const priceInfo = resolvePreferredPrice({
@@ -1308,7 +1300,7 @@ export function AccountsPage({
                 const sumTotalMarket = stockPositions.reduce((acc, pos) => {
                   const qty = pos.position != null ? Number(pos.position) : NaN
                   const sym = (pos.symbol ?? '').toString().toUpperCase()
-                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                  const mainSym = (status?.daemon?.trading?.auto_status?.symbol ?? '').toString().toUpperCase()
                   const priceInfo = resolvePreferredPrice({
                     liveQuote: quotesMap[sym],
                     dbPrice:
@@ -1334,7 +1326,7 @@ export function AccountsPage({
                 }, 0)
                 const sumPnl = stockPositions.reduce((acc, pos) => {
                   const sym = (pos.symbol ?? '').toString().toUpperCase()
-                  const mainSym = (status?.status?.symbol ?? '').toString().toUpperCase()
+                  const mainSym = (status?.daemon?.trading?.auto_status?.symbol ?? '').toString().toUpperCase()
                   const priceInfo = resolvePreferredPrice({
                     liveQuote: quotesMap[sym],
                     dbPrice:

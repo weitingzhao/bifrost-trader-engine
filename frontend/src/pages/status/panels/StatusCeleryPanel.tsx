@@ -25,7 +25,7 @@ export function StatusCeleryPanel({
   celeryWorkerIbClientId,
   className,
 }: StatusCeleryPanelProps) {
-  const workersCount = j?.celery_workers?.length ?? 0
+  const workersCount = j?.celery?.workers?.length ?? 0
   /** Redis up but no Celery process: yellow (infra OK, service down). Both down: red. */
   const brokerLamp: Lamp =
     !celeryBrokerConnected ? 'red' : workersCount > 0 ? 'green' : 'yellow'
@@ -93,8 +93,8 @@ export function StatusCeleryPanel({
           </div>
           <div className="daemon-group-body">
             <p className="section-hint">
-              {(j?.celery_workers?.length ?? 0) > 0
-                ? (j?.celery_workers ?? []).join(', ')
+              {(j?.celery?.workers?.length ?? 0) > 0
+                ? (j?.celery?.workers ?? []).join(', ')
                 : 'None (start worker: python scripts/run_celery.py)'}
             </p>
             <p className="section-hint countdown-line">

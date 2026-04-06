@@ -82,16 +82,16 @@ function ibIngestClientIdDisplay(
   status: StatusResponse | null,
 ): { id: number; title: string } | null {
   if (category !== 'IB') return null
-  const cfg = status?.ib_config
+  const cfg = status?.config?.ib_client
   if (svcId === 'ib_ingestor' || svcId === 'ib_market') {
-    const run = status?.ib_ingestor?.client_id
+    const run = status?.socket?.ib_ingestor?.client_id
     if (run != null && Number.isFinite(Number(run))) {
       return {
         id: Number(run),
         title: 'Client ID used by the live IB ingestor connection (Monitor GET /status).',
       }
     }
-    const c = cfg?.ib_client_id_ib_ingestor
+    const c = cfg?.port?.ingestor
     if (c != null && Number.isFinite(Number(c))) {
       return {
         id: Number(c),
@@ -102,7 +102,7 @@ function ibIngestClientIdDisplay(
     return null
   }
   if (svcId === 'ib_operator') {
-    const c = cfg?.ib_client_id_operator
+    const c = cfg?.port?.operator_host
     if (c != null && Number.isFinite(Number(c))) {
       return {
         id: Number(c),
@@ -152,8 +152,8 @@ function ibIngestClientIdShouldShow(
   if (category !== 'IB') return false
   if (ingestProcessRunningForIbClientId(processActive)) return true
   const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
-  if (sid === 'ib_ingestor') return status?.ib_ingestor?.connected === true
-  if (sid === 'ib_operator') return status?.monitor_ib_status?.operator?.connected === true
+  if (sid === 'ib_ingestor') return status?.socket?.ib_ingestor?.connected === true
+  if (sid === 'ib_operator') return status?.socket?.ib_operator?.host?.connected === true
   return false
 }
 
@@ -315,7 +315,7 @@ function ServiceRow(props: {
                 {ibClient.id}
               </span>
             ) : (
-              <span className="massive-api-doc-hint" title="Not available from Monitor /status or ib_config.">
+              <span className="massive-api-doc-hint" title="Not available from Monitor /status or ib_client.">
                 —
               </span>
             )}
@@ -571,8 +571,8 @@ export function MarketIngestOpsPage({
     return () => window.clearInterval(t)
   }, [refresh])
 
-  const massive = status?.massive
-  const ibIngestor = status?.ib_ingestor
+  const massive = status?.socket?.massive
+  const ibIngestor = status?.socket?.ib_ingestor
   const disableIngestActions = localControl === 'subprocess' && marketIngestScriptControl !== true
 
   const isAuthenticated = caps?.identity.authenticated ?? false
@@ -758,7 +758,7 @@ export function MarketIngestOpsPage({
                 <SettingsSidebarLampGlyph id="websocket" />
               </span>
               <span>Socket Services</span>
-              <InfoTooltip text="Roll-up of ingest units from Monitor GET /status Redis health (Massive meta, IB ingestor hash, IB Operator slot): green when that feed reports connected in Redis, red when not, gray when unknown. Same data whether ingest runs on this host or only on another stack. Local systemd state is for Start/Stop only. Not Local Control Agent health." />
+              <InfoTooltip text="Roll-up of ingest units from Monitor GET /status `socket` Redis health (Massive meta, IB ingestor hash, IB Operator in socket.ib_operator.host): green when that service reports connected in Redis, red when not, gray when unknown. Same data whether ingest runs on this host or only on another stack. Local systemd state is for Start/Stop only. Not Local Control Agent health." />
             </span>
           </h2>
           <p className="settings-page-subtitle">
@@ -862,7 +862,7 @@ export function MarketIngestOpsPage({
       <section className="replay-section" aria-labelledby="socket-services-heading">
         <h3 id="socket-services-heading" className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
           Ingest services
-            <InfoTooltip text="Each row lamp reflects Redis health from Monitor GET /status for that feed. Ops process column is for control only." />
+            <InfoTooltip text="Each row lamp reflects Redis health from Monitor GET /status `socket` for that service. Ops process column is for control only." />
         </h3>
         <>
           <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>

@@ -3,9 +3,9 @@
 All producers that push into these queues must use ``put_nowait_drop_oldest`` so a
 slow consumer cannot cause ``QueueFull`` in the event-loop callback.
 
-Call sites (Status service):
-- Monitor FastAPI app (``backend/monitor``): Redis quote broadcast → ``app.state.sse_queues`` (GET /quotes/stream)
-- ``servers/routers/logs.py``: daemon / server / Celery log reader threads → respective ``*_log_queues``
+Call sites:
+- Market FastAPI app (``backend/market``): Redis quote broadcast → ``app.state.sse_queues`` (GET /quotes/stream)
+- Monitor log SSE and similar: respective ``*_log_queues`` in ``backend/monitor``
 """
 
 import asyncio

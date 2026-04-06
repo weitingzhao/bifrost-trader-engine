@@ -20,11 +20,11 @@ interface MarketDataPageProps {
 /** 从持仓汇总可拉取 K 线的标的候选（后续可合并 Watchlist） */
 function useBarCandidateSymbols(status: StatusResponse | null): string[] {
   return useMemo(() => {
-    const fromAccounts = (status?.accounts || []).flatMap((acc: IbAccountSnapshot) =>
+    const fromAccounts = (status?.portfolio?.accounts || []).flatMap((acc: IbAccountSnapshot) =>
       (acc.positions || []).map(p => p.symbol).filter((s): s is string => Boolean(s?.trim())),
     )
     return [...new Set(fromAccounts)].sort()
-  }, [status?.accounts])
+  }, [status?.portfolio?.accounts])
 }
 
 export function MarketDataPage({ status, onGoToScreener, breadcrumbLabel = 'Screener' }: MarketDataPageProps) {

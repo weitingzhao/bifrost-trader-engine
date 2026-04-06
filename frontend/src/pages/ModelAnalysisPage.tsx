@@ -122,12 +122,13 @@ function riskBadge(t: string): string {
 }
 
 export function ModelAnalysisPage({ status }: Props) {
-  const accounts: IbAccountSnapshot[] = useMemo(() => status?.accounts ?? [], [status])
+  const accounts: IbAccountSnapshot[] = useMemo(() => status?.portfolio?.accounts ?? [], [status])
 
   const { hostId, secondaryId, hostSelectable, secondarySelectable } = useMemo(() => {
-    const ib = status?.ib_config
-    const host = (ib?.stream_host_account_id ?? ib?.ib_host_account_id ?? '').trim()
-    const sec = (ib?.stream_secondary_account_id ?? '').trim()
+    const ib = status?.config?.ib_client
+    const acct = ib?.account
+    const host = (acct?.event_host ?? acct?.trading ?? '').trim()
+    const sec = (acct?.event_secondary ?? '').trim()
     const ids = new Set(accounts.map((a) => (a.account_id ?? '').trim()).filter(Boolean))
     return {
       hostId: host,
@@ -135,7 +136,7 @@ export function ModelAnalysisPage({ status }: Props) {
       hostSelectable: Boolean(host && ids.has(host)),
       secondarySelectable: Boolean(sec && ids.has(sec)),
     }
-  }, [status?.ib_config, accounts])
+  }, [status?.config?.ib_client, accounts])
 
   const [selectedAccount, setSelectedAccount] = useState<string>('')
   const [data, setData] = useState<ModelAnalysisResponse | null>(null)
@@ -232,8 +233,8 @@ export function ModelAnalysisPage({ status }: Props) {
       {!hostSelectable && !secondarySelectable && accounts.length > 0 && (
         <div className="model-analysis-config-hint">
           Host / Secondary account IDs from settings do not match any account in the current snapshot. Check{' '}
-          <strong>stream_host_account_id</strong>, <strong>ib_host_account_id</strong>, or{' '}
-          <strong>stream_secondary_account_id</strong> in Settings (IB / Event account).
+          <strong>event_host</strong>, <strong>trading</strong>, or <strong>event_secondary</strong> in{' '}
+          GET /status <code>config.ib_client.account</code> (Settings IB / Event account).
         </div>
       )}
 

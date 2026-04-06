@@ -159,7 +159,7 @@ export function DataCoveragePanel({
         <button
           type="button"
           className="btn btn-secondary btn-sm"
-          disabled={indicesRefreshLoading || (status?.reference_indices?.length ?? 0) === 0}
+          disabled={indicesRefreshLoading || (status?.live_ui?.reference_indices?.length ?? 0) === 0}
           onClick={() => {
             void onRefreshIndices()
           }}
@@ -230,7 +230,7 @@ export function DataCoveragePanel({
                       </tr>
                     ) : null}
                     {group.rows.map((row) => {
-                      const isIndex = status?.reference_indices?.some((r) => r.symbol === row.symbol)
+                      const isIndex = status?.live_ui?.reference_indices?.some((r) => r.symbol === row.symbol)
                       const dayStatus = coverageStatusDisplay(row.stock_day.status)
                       const min1Status = coverageStatusDisplay(row.stock_min['1 min']?.status)
                       const min5Status = coverageStatusDisplay(row.stock_min['5 mins']?.status)
@@ -264,7 +264,7 @@ export function DataCoveragePanel({
                         <tr key={row.symbol}>
                           <td>
                             {isIndex ? (() => {
-                              const ref = status?.reference_indices?.find((r) => r.symbol === row.symbol)
+                              const ref = status?.live_ui?.reference_indices?.find((r) => r.symbol === row.symbol)
                               const label = ref?.label || row.symbol
                               return (
                                 <>

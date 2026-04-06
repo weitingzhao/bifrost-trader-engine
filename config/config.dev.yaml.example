@@ -37,6 +37,8 @@ redis:
   enabled: true
   host: "127.0.0.1"
   port: 6379
+  # Optional: SSE subscribes to redis.subscribe_channel (default ib:ingester:channel).
+  # subscribe_channel: ib:ingester:channel
 
 # Categories: Architecture, Account, Research, Feed (same as Settings → Services Overview).
 server:

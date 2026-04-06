@@ -31,7 +31,7 @@ export function subscribeQuotes(onQuote: (q: RealtimeQuote) => void): () => void
     }
   }
   es.onerror = () => {
-    es.close()
+    // Do not es.close() here — native EventSource reconnects after transient errors; close() was killing the stream permanently.
   }
   return () => {
     es.close()

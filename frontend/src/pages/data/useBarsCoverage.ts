@@ -52,14 +52,14 @@ export function useBarsCoverage(status: StatusResponse | null) {
 
   const coverageGroups = useMemo((): { label: string; rows: BarCoverageItem[] }[] => {
     if (!coverage || coverage.length === 0) return []
-    const refSymbols = new Set((status?.reference_indices ?? []).map((r) => r.symbol))
+    const refSymbols = new Set((status?.live_ui?.reference_indices ?? []).map((r) => r.symbol))
     const indices = coverage.filter((r) => refSymbols.has(r.symbol))
     const watchlist = coverage.filter((r) => !refSymbols.has(r.symbol))
     const out: { label: string; rows: BarCoverageItem[] }[] = []
     if (indices.length > 0) out.push({ label: 'Indices', rows: indices })
     if (watchlist.length > 0) out.push({ label: 'Watchlist', rows: watchlist })
     return out.length > 0 ? out : [{ label: '', rows: coverage }]
-  }, [coverage, status?.reference_indices])
+  }, [coverage, status?.live_ui?.reference_indices])
 
   const loadCoverage = useCallback(async () => {
     setCoverageLoading(true)

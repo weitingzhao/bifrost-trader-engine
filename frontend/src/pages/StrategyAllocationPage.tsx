@@ -92,8 +92,8 @@ export function StrategyAllocationPage({
 
   const handleSetActiveAllocation = async (allocationId: number) => {
     const res = await postActiveStrategy(
-      status?.active_strategy_structure_id ?? null,
-      status?.active_gate_safety_strategy_id ?? null,
+      status?.strategy?.active?.structure?.id ?? null,
+      status?.strategy?.active?.gate_safety?.id ?? null,
       allocationId
     )
     if (res.ok) {
@@ -202,8 +202,8 @@ export function StrategyAllocationPage({
         <h3 className="section-subtitle">Current active</h3>
         <div className="statusSummary">
           <div>
-            <strong>Allocation:</strong> {status?.active_strategy_allocation_name ?? '—'}
-            {status?.active_strategy_allocation_id != null && ` (${status.active_strategy_allocation_id})`}
+            <strong>Allocation:</strong> {status?.strategy?.active?.allocation?.name ?? '—'}
+            {status?.strategy?.active?.allocation?.id != null && ` (${status?.strategy?.active?.allocation?.id})`}
           </div>
         </div>
         <p className="section-hint">Daemon uses this on next start.</p>

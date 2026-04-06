@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
-import type { Execution, IbConfig, OptExecutionGroup, StatusResponse } from '../../types'
+import type { Execution, IbClient, OptExecutionGroup, StatusResponse } from '../../types'
 import type { StrategyOpportunity } from '../../api'
 import type { StrategyInstance } from '../../types'
 import { deleteExecution, fetchOpportunities, fetchStrategyInstances, updateExecution } from '../../api'
@@ -86,9 +86,9 @@ export function LedgerView({
 
   /** Trade ledger account tabs: All + Host/Secondary from Settings (Event Account), not every account in data. */
   const ledgerTradeAccountTabs = useMemo(() => {
-    const ib = status?.ib_config as IbConfig | undefined
-    const host = (ib?.stream_host_account_id ?? '').trim()
-    const secondary = (ib?.stream_secondary_account_id ?? '').trim()
+    const ib = status?.config?.ib_client as IbClient | undefined
+    const host = (ib?.account?.event_host ?? '').trim()
+    const secondary = (ib?.account?.event_secondary ?? '').trim()
     const tabs: { id: string; label: string }[] = []
     const seen = new Set<string>()
     if (host && !seen.has(host)) {
@@ -100,7 +100,7 @@ export function LedgerView({
       tabs.push({ id: secondary, label: 'Secondary' })
     }
     return tabs
-  }, [status?.ib_config])
+  }, [status?.config?.ib_client])
 
   const ledgerMonthKeyOptions = useMemo(() => {
     const merged = [...(executions ?? []), ...(executionsBook ?? [])]
@@ -256,7 +256,7 @@ export function LedgerView({
   /** (account_id, contract_key) -> category name for STK positions */
   const positionCategoryByAccountContract = useMemo(() => {
     const map = new Map<string, string>()
-    const accounts = status?.accounts ?? []
+    const accounts = status?.portfolio?.accounts ?? []
     for (const acc of accounts) {
       const accountId = (acc.account_id ?? '').trim()
       const positions =
@@ -272,7 +272,7 @@ export function LedgerView({
       }
     }
     return map
-  }, [status?.accounts])
+  }, [status?.portfolio?.accounts])
 
   /** STK contract_key for lookup: symbol|STK||| */
   const stkContractKey = useCallback(

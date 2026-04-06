@@ -3,13 +3,13 @@ import type { StatusResponse } from '../types'
 import { fetchCeleryLogs, subscribeCeleryLogs, clearCeleryLogs } from '../api'
 
 /**
- * Binds Celery console API to `/status` `celery_workers` list: one Redis stream per worker nodename.
+ * Binds Celery console API to `/status` `celery.workers` list: one Redis stream per worker nodename.
  */
 export function useCeleryWorkerConsoleBindings(
   status: StatusResponse | null | undefined,
   baseEnabled: boolean,
 ) {
-  const workers = status?.celery_workers ?? []
+  const workers = status?.celery?.workers ?? []
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null)
 
   useEffect(() => {

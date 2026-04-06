@@ -348,9 +348,9 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
     })
   }
 
-  const hb = status?.daemon_heartbeat
+  const hb = status?.daemon?.heartbeat
   const daemonLamp: LampColor = hb ? (hb.daemon_alive ? 'green' : 'red') : 'none'
-  const serverLamp: LampColor = status?.monitor_lamp ? (status.monitor_lamp as LampColor) : 'red'
+  const serverLamp: LampColor = status?.monitor?.lamp ? (status.monitor.lamp as LampColor) : 'red'
 
   const supportedCeleryQueueNames = supportedQueueNamesFromSummary(queueSummary)
   const runtimeCeleryLamp: LampColor = computeCeleryRuntimeLamp(
@@ -550,7 +550,9 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                 <div className="dashboard-svc-card-meta">
                   {hb?.daemon_alive && hb?.last_ts != null && <span>Heartbeat: {fmtRelative(hb.last_ts)}</span>}
                   {hb?.ib_connected != null && <span>IB: {hb.ib_connected ? 'Connected' : 'Disconnected'}</span>}
-                  {status?.trading_suspended != null && <span>Trading: {status.trading_suspended ? 'Suspended' : 'Active'}</span>}
+                  {status?.daemon?.trading?.trading_suspended != null && (
+                    <span>Trading: {status.daemon.trading.trading_suspended ? 'Suspended' : 'Active'}</span>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -580,7 +582,9 @@ export function DashboardPage({ status, loadStatus, embeddedInSettings }: Dashbo
                   </span>
                 </div>
                 <div className="dashboard-svc-card-meta">
-                  {status?.monitor_enabled != null && <span>Monitor: {status.monitor_enabled ? 'Enabled' : 'Disabled'}</span>}
+                  {status?.monitor?.enabled != null && (
+                    <span>Monitor: {status.monitor.enabled ? 'Enabled' : 'Disabled'}</span>
+                  )}
                 </div>
                 <button
                   type="button"

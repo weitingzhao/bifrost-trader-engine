@@ -1,10 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { OpenOrder, PositionCategory, RealtimeQuote, StatusResponse, WatchlistItem } from '../types'
-import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, postReleaseTickerSubscriptions, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
+import { fetchBarsBenchmark, fetchMarketStreamsSymbolOrder, fetchOpenOrders, fetchPositionCategories, fetchQuotes, fetchWatchlist, patchPositionCategory, putMarketStreamsSymbolOrder, subscribeQuotes } from '../api'
 import { InfoTooltip } from '../components/InfoTooltip'
 import { fmtSince, fmtTs, fmtUsd, fmtUsdRound0, parseOptionContractKey } from '../utils/format'
-import { computeDailyChange, type DailyBenchmark } from './accounts/accountsUtils'
+import {
+  computeDailyChange,
+  mergeQuotesIntoSymbolMap,
+  normalizeBenchmarkMap,
+  quoteDisplayLast,
+  type DailyBenchmark,
+} from './accounts/accountsUtils'
 
 const SYMBOL_ORDER_STORAGE_KEY = 'market_streams_symbol_order'
 
@@ -81,14 +87,14 @@ function formatStrike(strike: number | null | undefined): string {
 /** Watchlist Options: Last + Bid/Ask spread vs Last (same as Watchlist page). */
 function renderLastBidAskOption(q: RealtimeQuote | undefined): ReactNode {
   if (!q) return '—'
-  const last = q.last != null && Number.isFinite(q.last) ? q.last : null
+  const ref = quoteDisplayLast(q)
   const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
   const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
-  const bidDiff = last != null && bid != null ? bid - last : null
-  const askDiff = last != null && ask != null ? ask - last : null
+  const bidDiff = ref != null && bid != null ? bid - ref : null
+  const askDiff = ref != null && ask != null ? ask - ref : null
   return (
     <>
-      {last != null ? fmtUsd(last) : '—'}
+      {ref != null ? fmtUsd(ref) : '—'}
       {bidDiff != null && (
         <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
       )}
@@ -202,9 +208,9 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
 
   // Open orders: sync from status (parent poll) and dedicated poll from DB
   useEffect(() => {
-    const list = j?.open_orders ?? []
+    const list = j?.portfolio?.open_orders ?? []
     setOpenOrders(list)
-  }, [j?.open_orders])
+  }, [j?.portfolio?.open_orders])
   useEffect(() => {
     const poll = () => {
       fetchOpenOrders()
@@ -219,12 +225,12 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
     return () => clearInterval(id)
   }, [])
 
-  const accountsList = j?.accounts ?? []
-  // Host/Secondary account IDs from Settings → Account → Event Account (stream_host_account_id, stream_secondary_account_id).
-  // No hardcoded account IDs: read from status.ib_config (backend reads from DB settings), then match against accountsList[].account_id.
-  const ibConfig = j?.ib_config as { stream_host_account_id?: string; stream_secondary_account_id?: string } | undefined
-  const streamHostId = (ibConfig?.stream_host_account_id ?? '').trim() || null
-  const streamSecondaryId = (ibConfig?.stream_secondary_account_id ?? '').trim() || null
+  const accountsList = j?.portfolio?.accounts ?? []
+  // Host/Secondary account IDs from Settings → IB Connection → Event Account (config.ib_client.account.*).
+  // No hardcoded account IDs: read from status (backend reads from DB settings), then match against accountsList[].account_id.
+  const ibAcct = j?.config?.ib_client?.account
+  const streamHostId = (ibAcct?.event_host ?? '').trim() || null
+  const streamSecondaryId = (ibAcct?.event_secondary ?? '').trim() || null
   const hasStreamAccounts = streamHostId != null || streamSecondaryId != null
 
   const streamPositionSymbols = useMemo(() => {
@@ -254,18 +260,23 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
     () =>
       [
         ...new Set([
-          ...(j?.subscribed_tickers ?? []),
+          ...(j?.live_ui?.subscribed_tickers ?? []),
           ...streamPositionSymbols.host,
           ...streamPositionSymbols.secondary,
           ...Object.keys(quotesMap),
         ]),
       ].sort(),
-    [j?.subscribed_tickers, streamPositionSymbols.host, streamPositionSymbols.secondary, quotesMap],
+    [j?.live_ui?.subscribed_tickers, streamPositionSymbols.host, streamPositionSymbols.secondary, quotesMap],
   )
   const benchmarkSymbols = useMemo(
     () =>
-      [...new Set([...watchlistSymbols, ...(j?.reference_indices?.map((r: { symbol: string }) => r.symbol) ?? [])])].sort(),
-    [watchlistSymbols, j?.reference_indices],
+      [
+        ...new Set([
+          ...watchlistSymbols,
+          ...(j?.live_ui?.reference_indices?.map((r: { symbol: string }) => r.symbol) ?? []),
+        ]),
+      ].sort(),
+    [watchlistSymbols, j?.live_ui?.reference_indices],
   )
 
   useEffect(() => {
@@ -276,7 +287,7 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
     let cancelled = false
     fetchBarsBenchmark(benchmarkSymbols)
       .then((r) => {
-        if (!cancelled) setBenchmarks(r.benchmarks ?? {})
+        if (!cancelled) setBenchmarks(normalizeBenchmarkMap(r.benchmarks))
       })
       .catch(() => {
         if (!cancelled) setBenchmarks({})
@@ -287,16 +298,13 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
   }, [benchmarkSymbols.join(',')])
 
   const mergeQuotes = useCallback((quotes: RealtimeQuote[]) => {
-    const nextMap: Record<string, RealtimeQuote> = {}
     const nextByCk: Record<string, RealtimeQuote> = {}
     for (const q of quotes) {
       if (q.contract_key) {
         nextByCk[q.contract_key] = q
-      } else if (q.symbol) {
-        nextMap[q.symbol] = q
       }
     }
-    setQuotesMap((prev) => ({ ...prev, ...nextMap }))
+    setQuotesMap((prev) => mergeQuotesIntoSymbolMap(prev, quotes))
     setQuotesByContractKey((prev) => ({ ...prev, ...nextByCk }))
   }, [])
 
@@ -308,7 +316,7 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
       })
       .catch(() => {})
     const unsub = subscribeQuotes((q) => {
-      setQuotesMap((prev) => ({ ...prev, [q.symbol]: q }))
+      mergeQuotes([q])
     })
     const pollId = setInterval(() => {
       fetchQuotes()
@@ -324,18 +332,18 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
     }
   }, [mergeQuotes])
 
-  const hb = j?.daemon_heartbeat
+  /** Market Streams lamp: Redis quotes API + IB ingestor socket (not daemon ticker). */
   const marketStreamsOk =
-    j?.redis_quotes_connected === true && hb?.daemon_alive === true && hb?.event_subscribe_ticker === true
+    j?.market_data?.quotes_redis_reader_ok === true && j?.socket?.ib_ingestor?.connected === true
 
   const subscribedSet = useMemo(
     () =>
       new Set(
-        (j?.subscribed_tickers ?? [])
+        (j?.live_ui?.subscribed_tickers ?? [])
           .map((s: string) => (s && typeof s === 'string' ? s.trim().toUpperCase() : ''))
           .filter(Boolean)
       ),
-    [j?.subscribed_tickers]
+    [j?.live_ui?.subscribed_tickers]
   )
   const norm = (id: string | null) => (id ?? '').trim().toLowerCase() || ''
   const wantHost = norm(streamHostId)
@@ -401,14 +409,15 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
     const avgCost = hasCost && qty !== 0 ? totalCost / qty : null
     const hostAvgCost = hostHasCost && hostQty !== 0 ? hostTotalCost / hostQty : null
     const secondaryAvgCost = secondaryHasCost && secondaryQty !== 0 ? secondaryTotalCost / secondaryQty : null
-    const quote = quotesMap[symbol]
-    const bench = benchmarks[symbol]
+    const symKey = (symbol || '').trim().toUpperCase()
+    const quote = quotesMap[symKey] ?? quotesMap[symbol]
+    const bench = benchmarks[symKey]
     const { changePct, pnlVsBench } = computeDailyChange(
       bench,
-      quote?.last ?? null,
+      quoteDisplayLast(quote),
       qty ?? 0,
     )
-    const lastVal = quote?.last != null && Number.isFinite(quote.last) ? quote.last : null
+    const lastVal = quoteDisplayLast(quote)
     const pnlCost =
       lastVal != null && avgCost != null && qty != null && Number.isFinite(qty) && qty !== 0
         ? (lastVal - avgCost) * qty
@@ -632,16 +641,16 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
         </div>
         <div className="statusSummary">
           <div>
-            <strong>Structure:</strong> {j?.active_strategy_structure_name ?? '—'}
-            {j?.active_strategy_structure_id != null && ` (${j.active_strategy_structure_id})`}
+            <strong>Structure:</strong> {j?.strategy?.active?.structure?.name ?? '—'}
+            {j?.strategy?.active?.structure?.id != null && ` (${j?.strategy?.active?.structure?.id})`}
           </div>
           <div>
-            <strong>Gate safety:</strong> {j?.active_gate_safety_strategy_name ?? '—'}
-            {j?.active_gate_safety_strategy_id != null && ` (${j.active_gate_safety_strategy_id})`}
+            <strong>Gate safety:</strong> {j?.strategy?.active?.gate_safety?.name ?? '—'}
+            {j?.strategy?.active?.gate_safety?.id != null && ` (${j?.strategy?.active?.gate_safety?.id})`}
           </div>
           <div>
-            <strong>Allocation:</strong> {j?.active_strategy_allocation_name ?? '—'}
-            {j?.active_strategy_allocation_id != null && ` (${j.active_strategy_allocation_id})`}
+            <strong>Allocation:</strong> {j?.strategy?.active?.allocation?.name ?? '—'}
+            {j?.strategy?.active?.allocation?.id != null && ` (${j?.strategy?.active?.allocation?.id})`}
           </div>
         </div>
         <p className="section-hint">Daemon uses these on next start.</p>
@@ -652,7 +661,7 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
           <h2 className="daemon-card-title page-title-with-tooltip">
             <span
               className={`title-inline-lamp lamp-icon ${marketStreamsOk ? 'green' : 'red'}`}
-              title="Market streams: green when daemon alive, subscribed to ticker, and monitor reads Redis"
+              title="Market streams: green when Market API can read Redis quotes and IB ingestor is connected (socket)"
               aria-hidden
             >
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -663,8 +672,8 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
             <InfoTooltip
               text={
                 marketStreamsOk
-                  ? `Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions (Settings → Account). Daemon alive, Event subscription active. ${watchlistSymbols.length} symbol(s); prices & PnL update when stream arrives.`
-                  : 'Ticker data from daemon subscription, pushed via Redis. Symbols: Watchlist ∪ Host & Secondary account positions. Requires daemon running (green), Redis, and daemon Event subscription. If daemon is red, streams are offline.'
+                  ? `Live quotes: IB ingestor writes Redis (ib:ingester:tick:*); Market API SSE + polling. Symbols: Watchlist ∪ Host & Secondary STK positions. ${watchlistSymbols.length} symbol(s). Refresh reloads quotes and daily benchmarks from the API.`
+                  : 'Requires Market API Redis (quotes) and IB ingestor connected (see System status). Symbols: Watchlist ∪ Host & Secondary positions.'
               }
             />
           </h2>
@@ -673,17 +682,22 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
               type="button"
               className="section-header-icon-btn"
               onClick={async () => {
-                setStreamSyncFeedback('Releasing…')
+                setStreamSyncFeedback('Refreshing…')
                 try {
-                  const res = await postReleaseTickerSubscriptions()
-                  setStreamSyncFeedback(res.ok ? 'Released; daemon will restore on next heartbeat' : res.error || 'Failed')
+                  const [qRes, bRes] = await Promise.all([
+                    fetchQuotes(),
+                    fetchBarsBenchmark(benchmarkSymbols),
+                  ])
+                  if (qRes.quotes?.length) mergeQuotes(qRes.quotes)
+                  setBenchmarks(normalizeBenchmarkMap(bRes.benchmarks))
+                  setStreamSyncFeedback('Updated')
                 } catch {
                   setStreamSyncFeedback('Failed')
                 }
                 setTimeout(() => setStreamSyncFeedback(null), 4000)
               }}
-              title="Release all Real-time ticker subscriptions (same as Status → Event Subscribe → Release). Daemon will restore subscriptions on next heartbeat."
-              aria-label="Refresh / Release ticker subscriptions"
+              title="Reload quotes (GET /quotes) and daily benchmarks (GET /bars/benchmark) from the Market API. Does not change daemon or ingestor processes."
+              aria-label="Refresh quotes and daily benchmarks"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
@@ -852,7 +866,7 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
                         className={symbolFreshness ? `realtime-quote-symbol realtime-quote-symbol-${symbolFreshness}` : 'realtime-quote-symbol'}
                         title={[
                           q?.ts != null ? `Last update ${symbolFreshness === 'fresh' ? '<3s ago' : symbolFreshness === 'stale' ? '3–10s ago' : '>10s ago'}` : null,
-                          getDailyRefTooltip(benchmarks[symbol], q?.last),
+                          getDailyRefTooltip(benchmarks[(symbol || '').trim().toUpperCase()], quoteDisplayLast(q)),
                         ]
                           .filter(Boolean)
                           .join('\n') || undefined}
@@ -901,22 +915,22 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
                       <td className="realtime-quote-num">{avgCost != null && Number.isFinite(avgCost) ? fmtUsd(avgCost) : '—'}</td>
                       <td className="realtime-quote-num realtime-quote-last-bid-ask">
                         {q ? (() => {
-                          const last = q.last != null && Number.isFinite(q.last) ? q.last : null
+                          const displayLast = quoteDisplayLast(q)
                           const bid = q.bid != null && Number.isFinite(q.bid) ? q.bid : null
                           const ask = q.ask != null && Number.isFinite(q.ask) ? q.ask : null
-                          const bidDiff = last != null && bid != null ? bid - last : null
-                          const askDiff = last != null && ask != null ? ask - last : null
-                          const bench = benchmarks[symbol]
+                          const bidDiff = displayLast != null && bid != null ? bid - displayLast : null
+                          const askDiff = displayLast != null && ask != null ? ask - displayLast : null
+                          const bench = benchmarks[(symbol || '').trim().toUpperCase()]
                           const prevClose = bench && (bench.prev_close != null && Number.isFinite(bench.prev_close))
                             ? bench.prev_close
                             : (bench && Number.isFinite(bench.close) ? bench.close : null)
-                          const lastVsPrev = last != null && prevClose != null && prevClose > 0
-                            ? (last > prevClose ? 'pnl-positive' : last < prevClose ? 'pnl-negative' : '')
+                          const lastVsPrev = displayLast != null && prevClose != null && prevClose > 0
+                            ? (displayLast > prevClose ? 'pnl-positive' : displayLast < prevClose ? 'pnl-negative' : '')
                             : ''
                           return (
                             <>
-                              {last != null ? (
-                                <span className={lastVsPrev}>{fmtUsd(last)}</span>
+                              {displayLast != null ? (
+                                <span className={lastVsPrev}>{fmtUsd(displayLast)}</span>
                               ) : '—'}
                               {bidDiff != null && (
                                 <span className={`realtime-quote-spread ${bidDiff > 0 ? 'pnl-positive' : bidDiff < 0 ? 'pnl-negative' : ''}`} title="Bid vs Last"> {Math.abs(bidDiff).toFixed(2)}</span>
@@ -948,8 +962,9 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
                       </td>
                       <td className="realtime-quote-num">
                         {(() => {
-                          if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || !q?.last || !Number.isFinite(q.last)) return '—'
-                          const sincePct = ((q.last - avgCost) / avgCost) * 100
+                          const dl = quoteDisplayLast(q)
+                          if (avgCost == null || !Number.isFinite(avgCost) || avgCost <= 0 || dl == null) return '—'
+                          const sincePct = ((dl - avgCost) / avgCost) * 100
                           return (
                             <span className={sincePct > 0 ? 'pnl-positive' : sincePct < 0 ? 'pnl-negative' : ''}>
                               {Math.abs(sincePct).toFixed(2)}%
@@ -994,7 +1009,7 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
                 const totalDailyDollar = filteredRows.reduce((a, r) => a + (r.pnlVsBench != null && Number.isFinite(r.pnlVsBench) ? r.pnlVsBench : 0), 0)
                 const sumLastQty = filteredRows.reduce((a, r) => {
                   const q = r.qty != null && Number.isFinite(r.qty) ? r.qty : 0
-                  const last = r.quote?.last != null && Number.isFinite(r.quote.last) ? r.quote.last : 0
+                  const last = quoteDisplayLast(r.quote) ?? 0
                   return a + last * q
                 }, 0)
                 const totalDailyDenom = sumLastQty - totalDailyDollar
@@ -1072,7 +1087,7 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
             }, 0)
             const sumLastQty = filteredRows.reduce((acc, row) => {
               const qty = row.qty != null && Number.isFinite(row.qty) ? row.qty : 0
-              const last = row.quote?.last != null && Number.isFinite(row.quote.last) ? row.quote.last : 0
+              const last = quoteDisplayLast(row.quote) ?? 0
               return acc + last * qty
             }, 0)
             const totalDailyDenom = sumLastQty - totalDailyDollar
@@ -1162,7 +1177,7 @@ export function LivePage({ status, onNavigateToStrategy }: LivePageProps) {
         <div className="daemon-header-with-lamp" style={{ marginBottom: '0.5rem' }}>
           <h2 className="daemon-card-title page-title-with-tooltip">
             <span
-              className={`title-inline-lamp lamp-icon ${(j?.daemon_heartbeat?.daemon_alive && j?.daemon_heartbeat?.ib_connected) ? 'green' : 'red'}`}
+              className={`title-inline-lamp lamp-icon ${(j?.daemon?.heartbeat?.daemon_alive && j?.daemon?.heartbeat?.ib_connected) ? 'green' : 'red'}`}
               title="Open orders: green when daemon is connected to IB (event-driven write to DB); data polled from DB."
               aria-hidden
             >

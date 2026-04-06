@@ -9,6 +9,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request
 
 from src.monitor.reader import get_job_bars_backfill_last_updated
+from src.monitor.reader.ib_config_public import (
+    ib_client_for_api,
+    ib_client_public_defaults,
+    ib_flex_for_status_api,
+    ib_flex_public_defaults,
+)
 from src.monitor.self_check import derive_daemon_self_check, derive_self_check
 from src.vendor.ib_ingestor.redis_keys import IB_INGESTER_META_HEALTH
 
@@ -27,37 +33,217 @@ _STATUS_CELERY_INSPECT_TIMEOUT_SEC = float(
     os.environ.get("BIFROST_STATUS_CELERY_INSPECT_TIMEOUT_SEC", "2.0")
 )
 
+STATUS_SCHEMA_VERSION = 8
+
+
+def _strategy_status_block(
+    *,
+    active_structure_id: Any,
+    active_structure_name: Any,
+    active_gate_id: Any,
+    active_gate_name: Any,
+    active_alloc_id: Any,
+    active_alloc_name: Any,
+) -> Dict[str, Any]:
+    return {
+        "active": {
+            "structure": {"id": active_structure_id, "name": active_structure_name},
+            "gate_safety": {"id": active_gate_id, "name": active_gate_name},
+            "allocation": {"id": active_alloc_id, "name": active_alloc_name},
+        }
+    }
+
+
+def _status_error_payload() -> Dict[str, Any]:
+    """Minimal schema v8 body when status read fails (200 + blocked)."""
+    ib_c = ib_client_public_defaults()
+    flex_b = ib_flex_public_defaults()
+    return {
+        "status_schema_version": STATUS_SCHEMA_VERSION,
+        "health": {
+            "self_check": "blocked",
+            "block_reasons": ["status_read_error"],
+            "status_lamp": "red",
+        },
+        "lamps": {"system_lamp": "red"},
+        "daemon": {
+            "heartbeat": None,
+            "self_check": "blocked",
+            "lamp": "red",
+            "block_reasons": ["status_read_error"],
+            "trading": {"auto_status": None, "trading_suspended": False},
+        },
+        "monitor": {
+            "enabled": False,
+            "health": "ok",
+            "self_check": "blocked",
+            "lamp": "red",
+            "block_reasons": ["status_read_error"],
+        },
+        "portfolio": {
+            "accounts": None,
+            "accounts_fetched_at": None,
+            "open_orders": [],
+        },
+        "config": {"ib_client": ib_c, "ib_flex": flex_b},
+        "strategy": _strategy_status_block(
+            active_structure_id=None,
+            active_structure_name=None,
+            active_gate_id=None,
+            active_gate_name=None,
+            active_alloc_id=None,
+            active_alloc_name=None,
+        ),
+        "market_data": {"quotes_redis_reader_ok": False},
+        "socket": {"massive": None, "ib_ingestor": None, "ib_operator": None},
+        "celery": {
+            "broker_connected": False,
+            "workers": [],
+            "worker_ib_connected": False,
+            "worker_ib_client_id": None,
+            "worker_last_updated_ts": None,
+        },
+        "live_ui": {"subscribed_tickers": [], "reference_indices": []},
+    }
+
+
+def _assemble_status_v3(
+    *,
+    health_self_check: str,
+    health_block_reasons: List[str],
+    health_status_lamp: str,
+    trading_suspended: bool,
+    daemon_heartbeat: Optional[Dict[str, Any]],
+    daemon_self_check: str,
+    daemon_lamp: str,
+    daemon_block_reasons: List[str],
+    auto_status: Any,
+    subscribed_tickers: List[str],
+    reference_indices: Any,
+    accounts: Any,
+    accounts_fetched_at: Any,
+    ib_config: Dict[str, Any],
+    flex_config: Any,
+    open_orders: Any,
+    active_structure_id: Any,
+    active_structure_name: Any,
+    active_gate_id: Any,
+    active_gate_name: Any,
+    active_alloc_id: Any,
+    active_alloc_name: Any,
+    monitor_ib_status: Any,
+    monitor_enabled: bool,
+    monitor_health: str,
+    monitor_self_check: str,
+    monitor_lamp: str,
+    monitor_block_reasons: List[str],
+    quotes_redis_reader_ok: bool,
+    celery_broker_connected: bool,
+    celery_workers: List[str],
+    celery_worker_ib_connected: bool,
+    celery_worker_ib_client_id: Any,
+    celery_worker_last_updated_ts: Any,
+    massive: Any,
+    ib_ingestor: Any,
+) -> Dict[str, Any]:
+    dl = (daemon_lamp or "red").strip().lower()
+    ml = (monitor_lamp or "red").strip().lower()
+    sl = (health_status_lamp or "red").strip().lower()
+    if dl == "red" or ml == "red" or sl == "red":
+        system_lamp = "red"
+    elif dl == "yellow" or ml == "yellow" or sl == "yellow":
+        system_lamp = "yellow"
+    else:
+        system_lamp = "green"
+    return {
+        "status_schema_version": STATUS_SCHEMA_VERSION,
+        "health": {
+            "self_check": health_self_check,
+            "block_reasons": health_block_reasons,
+            "status_lamp": health_status_lamp,
+        },
+        "lamps": {"system_lamp": system_lamp},
+        "daemon": {
+            "heartbeat": daemon_heartbeat,
+            "self_check": daemon_self_check,
+            "lamp": daemon_lamp,
+            "block_reasons": daemon_block_reasons,
+            "trading": {
+                "auto_status": auto_status,
+                "trading_suspended": trading_suspended,
+            },
+        },
+        "monitor": {
+            "enabled": monitor_enabled,
+            "health": monitor_health,
+            "self_check": monitor_self_check,
+            "lamp": monitor_lamp,
+            "block_reasons": monitor_block_reasons,
+        },
+        "portfolio": {
+            "accounts": accounts,
+            "accounts_fetched_at": accounts_fetched_at,
+            "open_orders": open_orders,
+        },
+        "config": {
+            "ib_client": ib_client_for_api(ib_config),
+            "ib_flex": ib_flex_for_status_api(ib_config, flex_config),
+        },
+        "strategy": _strategy_status_block(
+            active_structure_id=active_structure_id,
+            active_structure_name=active_structure_name,
+            active_gate_id=active_gate_id,
+            active_gate_name=active_gate_name,
+            active_alloc_id=active_alloc_id,
+            active_alloc_name=active_alloc_name,
+        ),
+        "market_data": {"quotes_redis_reader_ok": quotes_redis_reader_ok},
+        "socket": {
+            "massive": massive,
+            "ib_ingestor": ib_ingestor,
+            "ib_operator": monitor_ib_status,
+        },
+        "celery": {
+            "broker_connected": celery_broker_connected,
+            "workers": celery_workers,
+            "worker_ib_connected": celery_worker_ib_connected,
+            "worker_ib_client_id": celery_worker_ib_client_id,
+            "worker_last_updated_ts": celery_worker_last_updated_ts,
+        },
+        "live_ui": {
+            "subscribed_tickers": subscribed_tickers,
+            "reference_indices": reference_indices,
+        },
+    }
+
 
 @router.get("/status")
 def get_status(request: Request) -> Dict[str, Any]:
-    """Return current run status plus self_check, status_lamp, trading_suspended (R-M1b, R-M2, R-M3). Never returns 5xx: on read error returns 200 with blocked/red."""
+    """Return current run status (schema v8 nested JSON). R-M1b, R-M2, R-M3. Never returns 5xx."""
     global _status_cache, _status_cache_ts
-    now = time.monotonic()
+    now_mono = time.monotonic()
     with _status_cache_lock:
-        if _status_cache and (now - _status_cache_ts) < _STATUS_CACHE_TTL:
+        if _status_cache and (now_mono - _status_cache_ts) < _STATUS_CACHE_TTL:
             return _status_cache
     app = request.app
     reader = app.state.reader
     control_via_db = app.state.control_via_db
     data_lag_threshold_ms = app.state.data_lag_threshold_ms
     try:
-        row = reader.get_status_current()
+        status_current_row = reader.get_status_current()
         run_suspended = reader.get_run_status()
-        sc = derive_self_check(row, data_lag_threshold_ms, trading_suspended=run_suspended)
-        payload: Dict[str, Any] = {
-            "self_check": sc["self_check"],
-            "block_reasons": sc["block_reasons"],
-            "status_lamp": sc["status_lamp"],
-            "trading_suspended": run_suspended if run_suspended is not None else False,
-        }
+        sc = derive_self_check(
+            status_current_row, data_lag_threshold_ms, trading_suspended=run_suspended
+        )
         hb = reader.get_daemon_heartbeat()
+        daemon_heartbeat: Optional[Dict[str, Any]] = None
         if hb is not None:
-            now = time.time()
+            now_ts = time.time()
             last_ts = hb.get("last_ts")
-            payload["daemon_heartbeat"] = {
+            daemon_heartbeat = {
                 "last_ts": last_ts,
                 "hedge_running": hb.get("hedge_running", False),
-                "daemon_alive": (last_ts is not None and (now - last_ts) < 35),
+                "daemon_alive": (last_ts is not None and (now_ts - last_ts) < 35),
                 "ib_connected": hb.get("ib_connected", False),
                 "ib_client_id": hb.get("ib_client_id"),
                 "listener_connected": hb.get("listener_connected", False),
@@ -78,86 +264,93 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "event_subscribe_commission_ib2": hb.get("event_subscribe_commission_ib2", False),
                 "last_control_message": hb.get("last_control_message"),
             }
-            dsc = derive_daemon_self_check(payload["daemon_heartbeat"])
-            payload["daemon_self_check"] = dsc["daemon_self_check"]
-            payload["daemon_lamp"] = dsc["daemon_lamp"]
-            payload["daemon_block_reasons"] = dsc["daemon_block_reasons"]
+            dsc = derive_daemon_self_check(daemon_heartbeat)
         else:
-            payload["daemon_heartbeat"] = None
             dsc = derive_daemon_self_check(None)
-            payload["daemon_self_check"] = dsc["daemon_self_check"]
-            payload["daemon_lamp"] = dsc["daemon_lamp"]
-            payload["daemon_block_reasons"] = dsc["daemon_block_reasons"]
-        if row is not None:
-            payload["status"] = row
-        else:
-            payload["status"] = None
+        daemon_self_check = dsc["daemon_self_check"]
+        daemon_lamp = dsc["daemon_lamp"]
+        daemon_block_reasons = dsc["daemon_block_reasons"]
+
         symbols_set: set = set()
-        if row and row.get("symbol"):
-            symbols_set.add(str(row.get("symbol", "") or "").strip())
+        if status_current_row and status_current_row.get("symbol"):
+            symbols_set.add(str(status_current_row.get("symbol", "") or "").strip())
         for w in reader.get_watchlist():
             st = (w.get("sec_type") or "").strip().upper()
             sym = (w.get("symbol") or "").strip()
             if sym and (st == "STK" or not st):
                 symbols_set.add(sym)
-        # Prefer actual daemon subscription list (written each heartbeat) so UI reflects Release / restore in time
-        if hb is not None and hb.get("subscribed_tickers") is not None and isinstance(hb["subscribed_tickers"], list):
-            payload["subscribed_tickers"] = sorted(s for s in hb["subscribed_tickers"] if s and str(s).strip())
+        if hb is not None and hb.get("subscribed_tickers") is not None and isinstance(
+            hb["subscribed_tickers"], list
+        ):
+            subscribed_tickers = sorted(
+                s for s in hb["subscribed_tickers"] if s and str(s).strip()
+            )
         else:
-            payload["subscribed_tickers"] = sorted(s for s in symbols_set if s)
-        payload["reference_indices"] = (control_via_db or {}).get("reference_indices") or []
-        payload["accounts"] = reader.get_accounts_from_tables()
-        if payload["accounts"] is None:
-            payload["accounts"] = []
-        payload["accounts_fetched_at"] = reader.get_accounts_fetched_at()
-        payload["ib_config"] = reader.get_ib_config() or {}
-        payload["flex_config"] = reader.get_flex_config()
-        payload["open_orders"] = reader.get_open_orders()
-        # Phase A: active strategy structure and gate safety set (management & monitoring)
-        payload["active_strategy_structure_id"] = reader.get_active_strategy_structure_id()
-        payload["active_gate_safety_strategy_id"] = reader.get_active_gate_safety_strategy_id()
-        payload["active_strategy_allocation_id"] = reader.get_active_strategy_allocation_id()
+            subscribed_tickers = sorted(s for s in symbols_set if s)
+
+        reference_indices = (control_via_db or {}).get("reference_indices") or []
+        accounts = reader.get_accounts_from_tables()
+        if accounts is None:
+            accounts = []
+        accounts_fetched_at = reader.get_accounts_fetched_at()
+        ib_config = reader.get_ib_config() or {}
+        flex_config = reader.get_flex_config()
+        open_orders = reader.get_open_orders()
+
+        active_strategy_structure_id = reader.get_active_strategy_structure_id()
+        active_gate_safety_strategy_id = reader.get_active_gate_safety_strategy_id()
+        active_strategy_allocation_id = reader.get_active_strategy_allocation_id()
+        active_strategy_structure_name = None
         try:
-            sid = payload.get("active_strategy_structure_id")
-            row = reader.get_structure_by_id(sid) if sid is not None else None
-            payload["active_strategy_structure_name"] = row.get("name") if row else None
+            sid = active_strategy_structure_id
+            srow = reader.get_structure_by_id(sid) if sid is not None else None
+            active_strategy_structure_name = srow.get("name") if srow else None
         except Exception:
-            payload["active_strategy_structure_name"] = None
+            pass
+        active_gate_safety_strategy_name = None
         try:
-            gid = payload.get("active_gate_safety_strategy_id")
-            payload["active_gate_safety_strategy_name"] = (
+            gid = active_gate_safety_strategy_id
+            active_gate_safety_strategy_name = (
                 reader.get_gate_safety_name(gid) if gid is not None else None
             )
         except Exception:
-            payload["active_gate_safety_strategy_name"] = None
+            pass
+        active_strategy_allocation_name = None
         try:
-            aid = payload.get("active_strategy_allocation_id")
-            row = reader.get_allocation_by_id(aid) if aid is not None else None
-            payload["active_strategy_allocation_name"] = row.get("name") if row else None
+            aid = active_strategy_allocation_id
+            arow = reader.get_allocation_by_id(aid) if aid is not None else None
+            active_strategy_allocation_name = arow.get("name") if arow else None
         except Exception:
-            payload["active_strategy_allocation_name"] = None
+            pass
+
+        monitor_ib_status = None
         try:
             from src.ib_operator.client import build_monitor_ib_status
 
-            ib_cfg = payload.get("ib_config") or {}
-            gw_status = build_monitor_ib_status(reader._config, ib_cfg if isinstance(ib_cfg, dict) else None)
+            gw_status = build_monitor_ib_status(
+                reader._config, ib_config if isinstance(ib_config, dict) else None
+            )
             if gw_status is not None:
-                payload["monitor_ib_status"] = gw_status
-            else:
-                payload["monitor_ib_status"] = None
+                monitor_ib_status = gw_status
         except Exception:
-            payload["monitor_ib_status"] = None
+            pass
+
         monitor_enabled = bool(getattr(app.state, "monitor_enabled", True))
-        payload["monitor_enabled"] = monitor_enabled
-        payload["monitor_health"] = "ok"
+        monitor_health = "ok"
         monitor_block_reasons: list = []
-        monitor_status_obj = payload.get("monitor_ib_status") or {}
+        monitor_status_obj = monitor_ib_status or {}
         acc_status = monitor_status_obj.get("account") or {}
-        acc2_status = monitor_status_obj.get("account2") or {}
+        host_status = monitor_status_obj.get("host") or {}
+        sec_status = monitor_status_obj.get("secondary") or {}
         mkt_status = monitor_status_obj.get("market") or {}
         if not monitor_enabled:
             monitor_block_reasons.append("monitor_stopped")
-        if acc_status.get("last_error") or acc2_status.get("last_error") or mkt_status.get("last_error"):
+        if (
+            acc_status.get("last_error")
+            or host_status.get("last_error")
+            or sec_status.get("last_error")
+            or mkt_status.get("last_error")
+        ):
             monitor_block_reasons.append("monitor_ib_error")
         if not monitor_enabled:
             monitor_self_check = "blocked"
@@ -167,22 +360,24 @@ def get_status(request: Request) -> Dict[str, Any]:
             monitor_lamp = "yellow"
         else:
             monitor_self_check = "ok"
-            acc_conn = bool(acc_status.get("connected"))
-            acc2_conn = bool(acc2_status.get("connected"))
+            pri_conn = bool(acc_status.get("connected")) or bool(host_status.get("connected"))
+            sec_conn = bool(sec_status.get("connected"))
             mkt_conn = bool(mkt_status.get("connected"))
-            # Green when all configured clients are connected (account2 only exists when second IB is configured)
-            need_acc2 = "account2" in monitor_status_obj
-            if need_acc2 and not (acc_conn and acc2_conn and mkt_conn):
-                monitor_lamp = "yellow" if (acc_conn or acc2_conn or mkt_conn) else "red"
-            elif not acc_conn and not mkt_conn:
+            need_secondary = "secondary" in monitor_status_obj
+            if need_secondary and not (pri_conn and sec_conn and mkt_conn):
+                monitor_lamp = "yellow" if (pri_conn or sec_conn or mkt_conn) else "red"
+            elif not pri_conn and not mkt_conn:
                 monitor_lamp = "yellow"
             else:
                 monitor_lamp = "green"
-        payload["monitor_self_check"] = monitor_self_check
-        payload["monitor_lamp"] = monitor_lamp
-        payload["monitor_block_reasons"] = monitor_block_reasons
+
         rq = getattr(app.state, "redis_quotes", None)
-        payload["redis_quotes_connected"] = bool(rq and getattr(rq, "available", False))
+        quotes_redis_reader_ok = bool(rq and getattr(rq, "available", False))
+
+        celery_broker_connected = False
+        celery_workers: List[str] = []
+        celery_worker_ib_connected = False
+        celery_worker_ib_client_id = None
         try:
             from src.workers.celery_app import (
                 get_celery_broker_connected,
@@ -190,20 +385,24 @@ def get_status(request: Request) -> Dict[str, Any]:
                 get_celery_workers_ping,
             )
 
-            payload["celery_broker_connected"] = get_celery_broker_connected()
-            workers_ping = get_celery_workers_ping(timeout=_STATUS_CELERY_INSPECT_TIMEOUT_SEC)
-            payload["celery_workers"] = workers_ping
-            worker_ib = get_worker_ib_status()
-            payload["celery_worker_ib_connected"] = bool(
-                worker_ib and worker_ib.get("connected") and len(workers_ping) > 0
+            celery_broker_connected = get_celery_broker_connected()
+            celery_workers = get_celery_workers_ping(
+                timeout=_STATUS_CELERY_INSPECT_TIMEOUT_SEC
             )
-            payload["celery_worker_ib_client_id"] = worker_ib.get("client_id") if worker_ib else None
+            worker_ib = get_worker_ib_status()
+            celery_worker_ib_connected = bool(
+                worker_ib and worker_ib.get("connected") and len(celery_workers) > 0
+            )
+            celery_worker_ib_client_id = worker_ib.get("client_id") if worker_ib else None
         except Exception:
-            payload["celery_broker_connected"] = False
-            payload["celery_worker_ib_connected"] = False
-            payload["celery_worker_ib_client_id"] = None
-            payload["celery_workers"] = []
-        payload["celery_worker_last_updated_ts"] = get_job_bars_backfill_last_updated(control_via_db) if control_via_db else None
+            pass
+
+        celery_worker_last_updated_ts = (
+            get_job_bars_backfill_last_updated(control_via_db) if control_via_db else None
+        )
+
+        massive = None
+        ib_ingestor = None
         try:
             from src.vendor.massive.config import get_massive_settings
             from src.vendor.massive.reader import count_pending_massive_jobs
@@ -219,16 +418,18 @@ def get_status(request: Request) -> Dict[str, Any]:
             }
             _rurl = redis_url_from_config(reader._config)
             if _rurl:
-                import redis
+                import redis as redis_mod
 
-                _r = redis.from_url(_rurl, decode_responses=True)
+                _r = redis_mod.from_url(_rurl, decode_responses=True)
                 _mh = _r.hgetall("massive:meta:status")
                 if _mh:
                     massive_info["ws_connected"] = bool(_mh.get("connected") == "1")
                     _lm = _mh.get("last_msg_ts")
                     if _lm is not None:
                         try:
-                            massive_info["last_msg_age_s"] = max(0.0, time.time() - float(_lm))
+                            massive_info["last_msg_age_s"] = max(
+                                0.0, time.time() - float(_lm)
+                            )
                         except (TypeError, ValueError):
                             massive_info["last_msg_age_s"] = None
                     else:
@@ -243,7 +444,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             else:
                 massive_info["ws_connected"] = None
                 massive_info["last_msg_age_s"] = None
-            payload["massive"] = massive_info
+            massive = massive_info
 
             ib_ingestor_info: Dict[str, Any] = {
                 "connected": False,
@@ -259,7 +460,9 @@ def get_status(request: Request) -> Dict[str, Any]:
                     _lm = _ih.get("last_msg_ts")
                     if _lm is not None:
                         try:
-                            ib_ingestor_info["last_msg_age_s"] = max(0.0, time.time() - float(_lm))
+                            ib_ingestor_info["last_msg_age_s"] = max(
+                                0.0, time.time() - float(_lm)
+                            )
                         except (TypeError, ValueError):
                             ib_ingestor_info["last_msg_age_s"] = None
                     else:
@@ -278,70 +481,56 @@ def get_status(request: Request) -> Dict[str, Any]:
                             ib_ingestor_info["client_id"] = int(_cid)
                         except (TypeError, ValueError):
                             ib_ingestor_info["client_id"] = None
-            payload["ib_ingestor"] = ib_ingestor_info
+            ib_ingestor = ib_ingestor_info
         except Exception:
-            payload["massive"] = None
-            payload["ib_ingestor"] = None
-        dl = (payload.get("daemon_lamp") or "red").strip().lower()
-        ml = (payload.get("monitor_lamp") or "red").strip().lower()
-        sl = (payload.get("status_lamp") or "red").strip().lower()
-        if dl == "red" or ml == "red" or sl == "red":
-            payload["system_lamp"] = "red"
-        elif dl == "yellow" or ml == "yellow" or sl == "yellow":
-            payload["system_lamp"] = "yellow"
-        else:
-            payload["system_lamp"] = "green"
+            massive = None
+            ib_ingestor = None
+
+        payload = _assemble_status_v3(
+            health_self_check=sc["self_check"],
+            health_block_reasons=sc["block_reasons"],
+            health_status_lamp=sc["status_lamp"],
+            trading_suspended=run_suspended if run_suspended is not None else False,
+            daemon_heartbeat=daemon_heartbeat,
+            daemon_self_check=daemon_self_check,
+            daemon_lamp=daemon_lamp,
+            daemon_block_reasons=daemon_block_reasons,
+            auto_status=status_current_row,
+            subscribed_tickers=subscribed_tickers,
+            reference_indices=reference_indices,
+            accounts=accounts,
+            accounts_fetched_at=accounts_fetched_at,
+            ib_config=ib_config,
+            flex_config=flex_config,
+            open_orders=open_orders,
+            active_structure_id=active_strategy_structure_id,
+            active_structure_name=active_strategy_structure_name,
+            active_gate_id=active_gate_safety_strategy_id,
+            active_gate_name=active_gate_safety_strategy_name,
+            active_alloc_id=active_strategy_allocation_id,
+            active_alloc_name=active_strategy_allocation_name,
+            monitor_ib_status=monitor_ib_status,
+            monitor_enabled=monitor_enabled,
+            monitor_health=monitor_health,
+            monitor_self_check=monitor_self_check,
+            monitor_lamp=monitor_lamp,
+            monitor_block_reasons=monitor_block_reasons,
+            quotes_redis_reader_ok=quotes_redis_reader_ok,
+            celery_broker_connected=celery_broker_connected,
+            celery_workers=celery_workers,
+            celery_worker_ib_connected=celery_worker_ib_connected,
+            celery_worker_ib_client_id=celery_worker_ib_client_id,
+            celery_worker_last_updated_ts=celery_worker_last_updated_ts,
+            massive=massive,
+            ib_ingestor=ib_ingestor,
+        )
         with _status_cache_lock:
             _status_cache = payload
             _status_cache_ts = time.monotonic()
         return payload
     except Exception as e:
         logger.warning("get_status failed: %s", e)
-        return {
-            "self_check": "blocked",
-            "block_reasons": ["status_read_error"],
-            "status_lamp": "red",
-            "trading_suspended": False,
-            "daemon_heartbeat": None,
-            "daemon_self_check": "blocked",
-            "daemon_lamp": "red",
-            "daemon_block_reasons": ["status_read_error"],
-            "status": None,
-            "accounts": None,
-            "accounts_fetched_at": None,
-            "ib_config": {
-                "ib_host": "127.0.0.1",
-                "ib_port_type": "tws_paper",
-                "ib_client_id_daemon": 1,
-                "ib_client_id_listener": 2,
-                "ib_client_id_operator": 100,
-                "ib_client_id_worker_market": 500,
-                "ib_client_id_ib_ingestor": 150,
-            },
-            "flex_config": {"host_token": None, "secondary_token": None, "rows": []},
-            "open_orders": [],
-            "active_strategy_structure_id": None,
-            "active_gate_safety_strategy_id": None,
-            "active_strategy_allocation_id": None,
-            "active_strategy_structure_name": None,
-            "active_gate_safety_strategy_name": None,
-            "active_strategy_allocation_name": None,
-            "monitor_ib_status": None,
-            "monitor_enabled": False,
-            "monitor_health": "ok",
-            "monitor_self_check": "blocked",
-            "monitor_lamp": "red",
-            "monitor_block_reasons": ["status_read_error"],
-            "redis_quotes_connected": False,
-            "celery_broker_connected": False,
-            "celery_worker_ib_connected": False,
-            "celery_worker_ib_client_id": None,
-            "celery_workers": [],
-            "celery_worker_last_updated_ts": None,
-            "massive": None,
-            "ib_ingestor": None,
-            "system_lamp": "red",
-        }
+        return _status_error_payload()
 
 
 @router.get("/open-orders")
@@ -357,17 +546,21 @@ def get_operations(
     request: Request,
     since_ts: Optional[float] = Query(None, description="Filter operations with ts >= this"),
     until_ts: Optional[float] = Query(None, description="Filter operations with ts <= this"),
-    operation_type: Optional[str] = Query(None, alias="type", description="Filter by type (hedge_intent, order_sent, fill, reject, cancel)"),
+    operation_type: Optional[str] = Query(
+        None, alias="type", description="Filter by type (hedge_intent, order_sent, fill, reject, cancel)"
+    ),
     limit: int = Query(100, ge=1, le=1000),
 ) -> Dict[str, Any]:
     """Return operations list with optional filters (R-M4b)."""
     reader = request.app.state.reader
-    items = reader.get_operations(since_ts=since_ts, until_ts=until_ts, type_filter=operation_type, limit=limit)
+    items = reader.get_operations(
+        since_ts=since_ts, until_ts=until_ts, type_filter=operation_type, limit=limit
+    )
     return {"operations": items}
 
 
 @router.get("/risk_summary")
 def get_risk_summary(request: Request) -> Dict[str, Any]:
-    """Return risk/post-mortem summary for replay & risk page (R-M7): daily_hedge_count, daily_pnl, operations_count_24h, etc."""
+    """Return risk/post-mortem summary for replay & risk page (R-M7)."""
     reader = request.app.state.reader
     return reader.get_risk_summary()

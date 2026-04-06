@@ -78,9 +78,9 @@ export function ingestRedisHealthLamp(
     return { lamp: 'gray', title: 'Monitor GET /status not loaded yet.' }
   }
   if (id === 'massive_ws') {
-    const m = status.massive
+    const m = status.socket?.massive
     if (m == null) {
-      return { lamp: 'gray', title: 'Massive block missing from /status (Redis meta unavailable).' }
+      return { lamp: 'gray', title: 'Massive block missing from /status socket (Redis meta unavailable).' }
     }
     if (m.ws_connected === true) {
       return {
@@ -97,9 +97,9 @@ export function ingestRedisHealthLamp(
     return { lamp: 'red', title: 'Massive WS not connected (Redis massive:meta:status).' }
   }
   if (id === 'ib_ingestor') {
-    const ib = status.ib_ingestor
+    const ib = status.socket?.ib_ingestor
     if (ib == null) {
-      return { lamp: 'gray', title: 'IB ingestor block missing from /status (Redis health unavailable).' }
+      return { lamp: 'gray', title: 'IB ingestor block missing from /status socket (Redis health unavailable).' }
     }
     if (ib.connected === true) {
       return {
@@ -110,21 +110,21 @@ export function ingestRedisHealthLamp(
     return { lamp: 'red', title: 'IB ingestor not connected (Redis ib:ingester:meta:health).' }
   }
   if (id === 'ib_operator') {
-    const mon = status.monitor_ib_status
+    const mon = status.socket?.ib_operator
     if (mon == null) {
       return {
         lamp: 'gray',
-        title: 'IB Operator health not in /status (Monitor IB disabled, skip_monitor_ib, or no Redis).',
+        title: 'IB Operator health not in /status (socket.ib_operator missing; skip_monitor_ib or no Redis).',
       }
     }
-    const op = mon.operator
+    const op = mon.host
     if (op?.connected === true) {
       return {
         lamp: 'green',
-        title: 'IB Operator healthy (Redis ib:operator:meta:health, operator slot).',
+        title: 'IB Operator healthy (Redis ib:operator:meta:health, host slot).',
       }
     }
-    return { lamp: 'red', title: 'IB Operator not connected (Redis operator health).' }
+    return { lamp: 'red', title: 'IB Operator not connected (Redis host slot).' }
   }
   return { lamp: 'gray', title: 'Unknown ingest service id for Redis health.' }
 }

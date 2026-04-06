@@ -97,7 +97,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | **Prod** | **Linux 服务器（192.168.10.70）**：Engine + Server + Redis + Celery | **Prod DB**（192.168.10.80 上独立 database） | 经 IB API 连接两台 Mac Mini 上的 TWS（Prod client_id） |
 | **Dev** | **开发机（Mac）**：Engine（可选）、Server、Redis、Celery | **Dev DB**（192.168.10.80 上独立 database） | 经 IB API 连接同一两台 Mac Mini（Dev client_id，与 Prod 互斥） |
 
-**调试 / 开发推荐拓扑（单 TWS 套接字、唯一 Redis 行情）**：当前局域网调试常采用 **一处运行持有 IB API（TCP）连接的 Engine**（单进程 `run_engine.py`），向 **唯一** Redis 写入实时行情键与 Pub/Sub 通知；**Dev 与 Prod 两套 UI**（不同前端入口、不同 `config_profile`）各自后端的 **Market API** 将 `redis.host` / `redis.port` / `redis.db`（及与 Engine 一致的 `redis.channel`，默认 `daemon:quotes`）指向**同一** Redis。这样两端 SSE（`GET …/quotes/stream`）订阅的是**同一**发布流，便于对照调试。**不改变**以下纪律：**PostgreSQL** 仍按上表各连各库（R-DV1）；**同一 IB 账户仅一处 Engine 自动下单**（R-DV3）。若 Celery broker 与实时行情共用 Redis 实例，须用 **不同 `redis.db` 索引** 区分 broker/result 与行情缓存，避免与 §2.7「队列与行情可选共用实例、不同 db」冲突。
+**调试 / 开发推荐拓扑（单 TWS 套接字、唯一 Redis 行情）**：当前局域网调试常采用 **一处运行持有 IB API（TCP）连接的 Engine**（单进程 `run_engine.py`），向 **唯一** Redis 写入实时行情键；**独立 IB ingestor**（`run_ib_ingestor.py`）在同一 Redis 上写入 `ib:ingester:tick:*` 并在 **`ib:ingester:channel`** 上 `PUBLISH`。**Dev 与 Prod 两套 UI** 各自后端的 **Market API** 将 `redis.host` / `redis.port` / `redis.db`（及可选 `redis.subscribe_channel`，默认 `ib:ingester:channel`）指向**同一** Redis，使两端 SSE（`GET …/quotes/stream`）订阅**同一** ingestor 发布流。守护进程仍可向 `quote:{symbol}` 写入（供轮询等路径）；**不再**使用 `daemon:quotes` 频道推送。**不改变**以下纪律：**PostgreSQL** 仍按上表各连各库（R-DV1）；**同一 IB 账户仅一处 Engine 自动下单**（R-DV3）。若 Celery broker 与实时行情共用 Redis 实例，须用 **不同 `redis.db` 索引** 区分 broker/result 与行情缓存，避免与 §2.7「队列与行情可选共用实例、不同 db」冲突。
 
 **约束**：
 - 数据库**迁移（schema migration）、种子数据、备份**按环境独立执行；**禁止**将 Dev 的破坏性操作（清表、重建等）默认指向 Prod。
@@ -220,7 +220,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 #### 2.10.8 IB ingestor 与 Redis Pub/Sub（调试）
 
-独立进程 `scripts/run_ib_ingestor.py` 将最新报价写入字符串键 `ib:ingester:tick:*`，并在**固定频道** **`ib:ingester:channel`** 上 `PUBLISH` 轻量通知（JSON 含 `contract_key`、`ts`）。与守护进程行情 **`daemon:quotes`** / `quote:*` 为两套命名空间。
+独立进程 `scripts/run_ib_ingestor.py` 将最新报价写入字符串键 `ib:ingester:tick:*`，并在**固定频道** **`ib:ingester:channel`** 上 `PUBLISH` 轻量通知（JSON 含 `contract_key`、`ts`）。**Market SSE**（`GET …/quotes/stream`）订阅该频道并 `GET` 对应 tick 键。守护进程写入的 **`quote:*`** 为另一套键空间（无 Pub/Sub；可选供 `GET /quotes` 等轮询路径）。
 
 **为何在 Redis Insight / `PUBSUB CHANNELS *` 里「看不到」该频道**：Pub/Sub 频道**不是**字符串键，**不会**出现在 Browser 的 key 列表中；`EXISTS ib:ingester:channel` 对键空间恒为假。命令 **`PUBSUB CHANNELS`** 只列出**当前至少有一个客户端正在 `SUBSCRIBE` 的频道**——若尚无任何订阅者，列表为空属正常，**不代表** ingestor 未发布。
 

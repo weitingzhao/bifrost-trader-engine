@@ -114,8 +114,8 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
   const [positionCategories, setPositionCategories] = useState<PositionCategory[]>([])
 
   const positions = useMemo(() => {
-    return (status?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
-  }, [status?.accounts])
+    return (status?.portfolio?.accounts || []).flatMap((acc: IbAccountSnapshot) => (acc.positions || []))
+  }, [status?.portfolio?.accounts])
 
   /** Contract keys that have a position in any account (for Holding column). */
   const contractKeysWithPosition = useMemo(

@@ -328,7 +328,8 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
       client_id_daemon, client_id_listener, client_id_operator, client_id_worker_market,
       client_id_ib_ingestor,
       ib2_host, ib2_port_type, ib2_port, ib2_client_id_listener, ib2_client_id_operator.
-    Also includes the ``ib_*`` prefixed aliases expected by the API / frontend (``ib_client_id_daemon`` etc.).
+    Also includes ``ib_*`` prefixed duplicates (``ib_host``, ``ib_client_id_daemon``, …) for internal callers.
+    Monitor HTTP responses use ``src.monitor.reader.ib_config_public.ib_client_for_api`` (Settings-aligned names).
     """
     ib_raw = config.get("ib")
     if not ib_raw or not isinstance(ib_raw, dict):

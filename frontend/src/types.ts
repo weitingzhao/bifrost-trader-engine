@@ -1,39 +1,40 @@
-/** IB connection config. Client IDs come from server config.yaml (read-only in UI). Non-ID fields (host, account IDs, flex) from DB. See ARCHITECTURE.md §2.1. */
-export interface IbConfig {
-  ib_host?: string
-  ib_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
-  /** Resolved TCP port for primary ib.host.port_type */
-  ib_port?: number
-  /** Market data port (ingest); from ib.host.port_type_market_data or same as ib_port */
-  ib_port_market_data?: number
-  ib_port_type_market_data?: 'tws_live' | 'tws_paper' | 'gateway'
-  /** Daemon: Trading (default 1) */
-  ib_client_id_daemon?: number
-  /** Daemon: Listener (default 2) */
-  ib_client_id_listener?: number
-  /** IB Operator cmd RPC (Host); single client_id for account + on-demand market ops */
-  ib_client_id_operator?: number
-  /** Celery: Market Data / worker_market (default 500) */
-  ib_client_id_worker_market?: number
-  /** IB ingestor client ID from YAML ib.host.client_id.ingestor (legacy YAML key ib_market_ingest still read server-side). */
-  ib_client_id_ib_ingestor?: number
-  /** Host 账户 account_id（多账户时用于对冲与行情），R-A4 */
-  ib_host_account_id?: string | null
-  /** Live 页 Market Streams Host 账户 ID（Event Account），用于按账户分类/筛选 */
-  stream_host_account_id?: string | null
-  /** Live 页 Market Streams Secondary 账户 ID */
-  stream_secondary_account_id?: string | null
-  /** 第二 IB 主机（不同 TWS 机器，手动交易账户），空则未配置 */
-  ib2_host?: string | null
-  /** Default Flex Query range in days (e.g. 30). Stored in settings.flex_default_range_days. */
-  flex_default_range_days?: number | null
-  /** Init Flex Query range in days (e.g. 360) for initial/full pull. Stored in settings.flex_init_range_days. */
-  flex_init_range_days?: number | null
-  ib2_port_type?: string | null
-  /** Second IB: Listener (default 3) */
-  ib2_client_id_listener?: number
-  /** Second IB: Operator client ID (YAML ib.secondary.client_id.operator; legacy key `account`). */
-  ib2_client_id_operator?: number
+/** Host / Secondary IP and TCP ports (Settings → IB Connection, read-only from YAML). */
+export interface IbClientNetwork {
+  host_ip?: string
+  host_port_type?: 'tws_live' | 'tws_paper' | 'gateway'
+  host_port?: number | null
+  secondary_host_ip?: string | null
+  secondary_port_type?: 'tws_live' | 'tws_paper' | 'gateway' | string | null
+  secondary_port?: number | null
+}
+
+/** IB API client_id slots from YAML (Settings → IB Connection, read-only). JSON key `port`. */
+export interface IbClientPort {
+  trading?: number
+  listener_host?: number
+  listener_secondary?: number
+  operator_host?: number
+  operator_secondary?: number
+  ingestor?: number
+  market_data_worker?: number
+}
+
+/** Trading / event stream account IDs from DB settings (editable on Settings page). */
+export interface IbClientAccount {
+  trading?: string | null
+  event_host?: string | null
+  event_secondary?: string | null
+}
+
+/**
+ * GET /status `config.ib_client` and POST /config/ib response body (minus `ok`).
+ * YAML + DB merge is built server-side; network fields read-only from YAML.
+ */
+export interface IbClient {
+  client?: IbClientNetwork
+  port?: IbClientPort
+  account?: IbClientAccount
+  timeout_sec?: number
 }
 
 /** One Flex row: same label/purpose for both; query_host_id (Host IB), query_secondary_id (Second IB, optional). Tokens in settings. */
@@ -44,11 +45,17 @@ export interface FlexAccountItem {
   purpose?: string | null
 }
 
-/** GET /status flex_config: tokens in settings, rows from settings_ib_flex. */
+/** Flex tokens and query rows (e.g. POST /config/flex response shape). */
 export interface FlexConfig {
   host_token?: string | null
   secondary_token?: string | null
   rows?: FlexAccountItem[]
+}
+
+/** GET /status `config.ib_flex`: default/init range days + same token/rows as FlexConfig. */
+export interface StatusIbFlex extends FlexConfig {
+  default_range_days?: number | null
+  init_range_days?: number | null
 }
 
 /** Strategy link derived from account_executions (one position may belong to multiple strategies). */
@@ -106,87 +113,146 @@ export interface IbAccountSnapshot {
   positions?: IbPositionRow[]
 }
 
-/** Response from GET /status */
-export interface StatusResponse {
+export type StatusLamp = 'green' | 'yellow' | 'red'
+
+/** GET /status: derive_self_check roll-up (trading row + data lag); not daemon-specific. */
+export interface StatusHealth {
   self_check?: string
   block_reasons?: string[]
-  status_lamp?: 'green' | 'yellow' | 'red'
+  status_lamp?: StatusLamp
+}
+
+export interface StatusLamps {
+  /** Roll-up: worst of daemon / monitor / health.status_lamp */
+  system_lamp?: StatusLamp
+}
+
+/** Auto-trading row + suspend flag (former `engine` + `health.trading_suspended`). */
+export interface StatusDaemonTrading {
+  auto_status?: StatusRow | null
   trading_suspended?: boolean
-  daemon_heartbeat?: DaemonHeartbeat | null
-  daemon_self_check?: string
-  daemon_lamp?: 'green' | 'yellow' | 'red'
-  /** 系统状态 Tab 用：daemon / monitor / status 三者都绿才绿，否则取最差 */
-  system_lamp?: 'green' | 'yellow' | 'red'
-  daemon_block_reasons?: string[]
-  status?: StatusRow | null
-  /** R-A1 multi-account: 与守护/对冲同级，交易账户与持仓基础数据 */
+}
+
+export interface StatusDaemon {
+  heartbeat?: DaemonHeartbeat | null
+  self_check?: string
+  lamp?: StatusLamp
+  block_reasons?: string[]
+  trading?: StatusDaemonTrading
+}
+
+/** One IB Operator TWS slot in Redis health (`GET /status` `socket.ib_operator`). */
+export interface SocketIbOperatorSlot {
+  connected?: boolean
+  client_id?: number | null
+  last_error?: string | null
+}
+
+/** GET /status `socket.ib_operator` — Host + optional Secondary operator RPC connections. */
+export interface SocketIbOperator {
+  host?: SocketIbOperatorSlot
+  secondary?: SocketIbOperatorSlot
+  account?: SocketIbOperatorSlot
+  market?: SocketIbOperatorSlot
+}
+
+export interface StatusMonitor {
+  enabled?: boolean
+  health?: string
+  self_check?: string
+  lamp?: StatusLamp
+  block_reasons?: string[]
+}
+
+export interface StatusPortfolio {
   accounts?: IbAccountSnapshot[] | null
-  /** 账户/持仓数据最后从 IB 拉取并写入 DB 的时间（Unix 秒），供监控页显示数据新鲜度 */
   accounts_fetched_at?: number | null
-  ib_config?: IbConfig | null
-  /** Flex config: tokens in settings (ib_flex_host_token, ib_flex_secondary_token), rows in settings_ib_flex. Configure in Settings → IB Connection → Flex. */
-  flex_config?: FlexConfig | null
-  /** 监控端 IB 状态：Operator (Host cmd RPC), Account (Secondary) 连接情况与错误信息 */
-  monitor_ib_status?: {
-    operator?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
-    account2?: { connected?: boolean; client_id?: number | null; last_error?: string | null }
-  } | null
-  /** 监控端是否启用（停止监控后需重新启动监控服务进程） */
-  monitor_enabled?: boolean
-  /** 监控服务健康：能拿到 /status 或 GET /health 200 即表示进程存活 */
-  monitor_health?: string
-  /** 监控服务自检结果与原因（与守护类似的红绿灯语义） */
-  monitor_self_check?: string
-  monitor_lamp?: 'green' | 'yellow' | 'red'
-  monitor_block_reasons?: string[]
-  /** 监控端是否能连接 Redis 并读取行情（R-RM*） */
-  redis_quotes_connected?: boolean
-  /** Celery broker (Redis) 是否可达，用于 System → Celery 状态 */
-  celery_broker_connected?: boolean
-  /** Worker 是否已连接 IB（与 Monitor/Daemon 同级，由 Worker 写入 Redis） */
-  celery_worker_ib_connected?: boolean
-  /** Worker 连接 IB 使用的 client_id（与 celery_worker_ib_connected 配套） */
-  celery_worker_ib_client_id?: number | null
-  /** job_bars_backfill 最近一次 updated_at（Unix 秒），用于判断 Worker 是否有近期活动 */
-  celery_worker_last_updated_ts?: number | null
-  /** 当前响应的 Celery Worker 名称列表（inspect ping），用于 Celery 下列出已运行 Worker */
-  celery_workers?: string[]
-  /** 当前守护进程订阅的 Real-time ticker 标的（Watchlist STK + strategy symbol），与 Event Subscribe 一致 */
-  subscribed_tickers?: string[]
-  /** US market indices for watchlist comparison (e.g. S&P 500, Dow, Nasdaq). Used for benchmark row and /bars/benchmark. */
-  reference_indices?: { symbol: string; label?: string }[]
-  /** R-A5: current open/unfilled orders from daemon (symbol, action, status, filled, remaining, limit_price). */
   open_orders?: OpenOrder[]
-  /** Phase A: current active strategy structure id (settings); daemon uses on next start. */
-  active_strategy_structure_id?: number | null
-  /** Phase A: current active gate safety set id (settings); daemon uses on next start. */
-  active_gate_safety_strategy_id?: number | null
-  /** Current active strategy allocation id (settings); for monitoring/execution scope. */
-  active_strategy_allocation_id?: number | null
-  /** Phase A: name of active structure for display. */
-  active_strategy_structure_name?: string | null
-  /** Phase A: name of active gate safety set for display. */
-  active_gate_safety_strategy_name?: string | null
-  /** Name of active strategy allocation for display. */
-  active_strategy_allocation_name?: string | null
-  /** Massive / Polygon summary from Redis + config (GET /status). */
-  massive?: {
-    configured?: boolean
-    tier?: string
-    pending_jobs?: number
-    ws_connected?: boolean
-    last_msg_age_s?: number | null
-    ws_reconnects?: number
-    last_snapshot_age_s?: number | null
-  } | null
-  /** IB ingestor from Redis ib:ingester:meta:health (GET /status). */
-  ib_ingestor?: {
-    connected?: boolean
-    last_msg_age_s?: number | null
-    reconnects?: number | null
-    msg_count?: number | null
-    client_id?: number | null
-  } | null
+}
+
+export interface StatusConfig {
+  ib_client?: IbClient | null
+  ib_flex?: StatusIbFlex | null
+}
+
+export interface StrategyActiveRef {
+  id?: number | null
+  name?: string | null
+}
+
+export interface StatusStrategyActive {
+  structure?: StrategyActiveRef
+  gate_safety?: StrategyActiveRef
+  allocation?: StrategyActiveRef
+}
+
+/** GET /status `strategy`: extend with more keys later; active = current daemon selection. */
+export interface StatusStrategy {
+  active?: StatusStrategyActive
+}
+
+/** Monitor Redis reader for quotes API / SSE (not daemon heartbeat redis_quotes_connected). */
+export interface StatusMarketData {
+  quotes_redis_reader_ok?: boolean
+}
+
+/** GET /status `socket.massive` — Massive WS ingest Redis meta + config hints. */
+export interface StatusSocketMassive {
+  configured?: boolean
+  tier?: string
+  pending_jobs?: number
+  ws_connected?: boolean
+  last_msg_age_s?: number | null
+  ws_reconnects?: number
+  last_snapshot_age_s?: number | null
+}
+
+/** GET /status `socket.ib_ingestor` — IB market ingest Redis health. */
+export interface StatusSocketIbIngestor {
+  connected?: boolean
+  last_msg_age_s?: number | null
+  reconnects?: number | null
+  msg_count?: number | null
+  client_id?: number | null
+}
+
+/**
+ * GET /status `socket` — aligns with Settings sidebar "Socket" (ingest + IB Operator Redis health).
+ * Formerly `feeds`; IB Operator health is `ib_operator` (moved from `monitor.ib_status`).
+ */
+export interface StatusSocket {
+  massive?: StatusSocketMassive | null
+  ib_ingestor?: StatusSocketIbIngestor | null
+  ib_operator?: SocketIbOperator | null
+}
+
+export interface StatusCelery {
+  broker_connected?: boolean
+  workers?: string[]
+  worker_ib_connected?: boolean
+  worker_ib_client_id?: number | null
+  worker_last_updated_ts?: number | null
+}
+
+export interface StatusLiveUi {
+  subscribed_tickers?: string[]
+  reference_indices?: { symbol: string; label?: string }[]
+}
+
+/** GET /status nested JSON (status_schema_version 8). */
+export interface StatusResponse {
+  status_schema_version?: 8
+  health?: StatusHealth
+  lamps?: StatusLamps
+  daemon?: StatusDaemon
+  monitor?: StatusMonitor
+  portfolio?: StatusPortfolio
+  config?: StatusConfig
+  strategy?: StatusStrategy
+  market_data?: StatusMarketData
+  socket?: StatusSocket
+  celery?: StatusCelery
+  live_ui?: StatusLiveUi
 }
 
 /** R-A5: one row from daemon_open_orders (GET /status or GET /open-orders). */
@@ -227,7 +293,7 @@ export interface DaemonHeartbeat {
   /** Daemon second IB connection (YAML client_id.listener); shown as this Client ID in TWS */
   listener_connected?: boolean
   listener_client_id?: number | null
-  /** Listener on Secondary TWS (YAML ib.secondary → ib2_host / ib2_client_id_listener) */
+  /** Listener on Secondary TWS (YAML ib.secondary; status ib_client.client / port.listener_secondary) */
   listener_2_connected?: boolean
   listener_2_client_id?: number | null
   /** Secondary IB event subscribe: positions, fills, commission (no ticker). */
@@ -240,7 +306,7 @@ export interface DaemonHeartbeat {
   last_control_message?: string | null
 }
 
-/** Current status row from daemon_auto_status_current (GET /status). PK: daemon_auto_status_current_id. */
+/** Current status row from daemon_auto_status_current (GET /status `daemon.trading.auto_status`). PK: daemon_auto_status_current_id. */
 export interface StatusRow {
   daemon_auto_status_current_id?: number
   daemon_state?: string

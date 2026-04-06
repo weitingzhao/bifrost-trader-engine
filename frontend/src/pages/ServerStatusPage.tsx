@@ -75,10 +75,10 @@ export function ServerStatusPage({
   void healthTick
 
   const j = status
-  const monitorEnabled = j?.monitor_enabled !== false
-  const monitorStatus = (j?.monitor_ib_status as any) || {}
-  const monitorOperator = monitorStatus.operator as { connected?: boolean; client_id?: number; last_error?: string } | undefined
-  const monitorAccount2 = monitorStatus.account2 as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorEnabled = j?.monitor?.enabled !== false
+  const monitorStatus = (j?.socket?.ib_operator as any) || {}
+  const monitorOperator = monitorStatus.host as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorAccount2 = monitorStatus.secondary as { connected?: boolean; client_id?: number; last_error?: string } | undefined
   const monitorHasError = Boolean(monitorOperator?.last_error || monitorAccount2?.last_error)
   const hasAccount2 = monitorAccount2 !== undefined
   const allMonitorClientsConnected = hasAccount2
@@ -96,8 +96,8 @@ export function ServerStatusPage({
             ? 'green'
             : 'yellow'
   const monitorSelfCheckText =
-    MONITOR_SELF_CHECK_LABELS[j?.monitor_self_check ?? ''] ?? j?.monitor_self_check ?? '--'
-  const monitorBlockReasons = (j?.monitor_block_reasons ?? [])
+    MONITOR_SELF_CHECK_LABELS[j?.monitor?.self_check ?? ''] ?? j?.monitor?.self_check ?? '--'
+  const monitorBlockReasons = (j?.monitor?.block_reasons ?? [])
     .map(r => MONITOR_REASON_LABELS[r] ?? r)
     .join('; ') || 'None'
   const monitorIbGroupLamp =

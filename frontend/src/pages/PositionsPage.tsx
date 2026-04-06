@@ -833,7 +833,7 @@ export function PositionsPage({
   }, [executionsFinal, executionsTws, openFilterSymbol, openFilterExpiryStart])
 
   const livePositions = useMemo((): LivePositionRow[] => {
-    const accounts = status?.accounts ?? []
+    const accounts = status?.portfolio?.accounts ?? []
     let rows = accounts.flatMap(account => {
       const accId = (account.account_id ?? '').trim()
       if (openFilterAccountId !== 'all' && accId !== openFilterAccountId) return []
@@ -871,7 +871,7 @@ export function PositionsPage({
       return (a.account_id ?? '').localeCompare(b.account_id ?? '')
     })
     return rows
-  }, [openFilterAccountId, openFilterExpiryStart, openFilterSymbol, status?.accounts])
+  }, [openFilterAccountId, openFilterExpiryStart, openFilterSymbol, status?.portfolio?.accounts])
 
   const liveOptionPositions = useMemo(
     () => livePositions.filter(position => (position.secType ?? '').toUpperCase() === 'OPT'),
@@ -1699,8 +1699,8 @@ export function PositionsPage({
     [optionUnderlyingPoolItems],
   )
 
-  const streamHostAccountId = (status?.ib_config?.stream_host_account_id ?? '').toString().trim()
-  const streamSecondaryAccountId = (status?.ib_config?.stream_secondary_account_id ?? '').toString().trim()
+  const streamHostAccountId = (status?.config?.ib_client?.account?.event_host ?? '').toString().trim()
+  const streamSecondaryAccountId = (status?.config?.ib_client?.account?.event_secondary ?? '').toString().trim()
 
   /** Open Positions account filter: All vs IB Host / Secondary only (Settings → IB Connection). */
   const openFilterAccountTabs = useMemo(() => {
@@ -1726,14 +1726,14 @@ export function PositionsPage({
   }, [openFilterAccountId, streamHostAccountId, streamSecondaryAccountId])
 
   const hostSecondaryAccountCashBp = useMemo(() => {
-    const list = status?.accounts ?? []
+    const list = status?.portfolio?.accounts ?? []
     const snap = (id: string) =>
       id ? list.find(a => (a.account_id ?? '').trim() === id) : undefined
     return {
       host: accountTotalCashBuyingPower(snap(streamHostAccountId)),
       secondary: accountTotalCashBuyingPower(snap(streamSecondaryAccountId)),
     }
-  }, [status?.accounts, streamHostAccountId, streamSecondaryAccountId])
+  }, [status?.portfolio?.accounts, streamHostAccountId, streamSecondaryAccountId])
 
   const [underlyingPoolSort, setUnderlyingPoolSort] = useState<{
     col: CoveragePoolSortCol

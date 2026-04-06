@@ -49,9 +49,7 @@ def on_ticker_for_symbol(app: Any, symbol: str, ticker: Any) -> None:
                 )
                 if payload:
                     app._redis_quotes.set_quote(symbol, payload)
-                    app._redis_quotes.publish_update(
-                        symbol, {"symbol": symbol, "ts": payload.get("ts")}
-                    )
+                    # SSE uses IB ingestor pub/sub (ib:ingester:channel); daemon does not PUBLISH.
             except Exception as e:
                 logger.warning(
                     "Redis quote write/publish in _on_ticker_for_symbol: %s", e
