@@ -6,7 +6,7 @@ from typing import Any, Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.app.config import config_profile_from_resolved_path
+from src.app.config import config_profile_from_resolved_path, normalize_server_config
 from src.monitor.reader import StatusReader
 
 logger = logging.getLogger(__name__)
@@ -42,11 +42,13 @@ def create_strategy_app(
         config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
     )
 
-    _scfg = (merged_config or {}).get("server") or {}
-    try:
-        app.state.bifrost_strategy_port = int(_scfg.get("strategy_port") or 8770)
-    except (TypeError, ValueError):
-        app.state.bifrost_strategy_port = 8770
+    _cfg_holder = merged_config or reader._config
+    _raw_server = _cfg_holder.get("server")
+    if not isinstance(_raw_server, dict):
+        raise ValueError("create_strategy_app requires config['server'] from read_config() merged YAML.")
+    _cfg_holder["server"] = normalize_server_config(dict(_raw_server))
+    reader._config["server"] = _cfg_holder["server"]
+    app.state.bifrost_strategy_port = int(_cfg_holder["server"]["strategy_port"])
 
     from backend.strategy.routers import strategies_router
     app.include_router(strategies_router)
@@ -73,7 +75,7 @@ def run_strategy_server(config: dict, resolved_config_path: Optional[str] = None
     status_cfg_for_read = config if has_postgres else None
     control_via_db = config if has_postgres else None
 
-    port = config.get("server", {}).get("strategy_port") or 8770
+    port = int(config["server"]["strategy_port"])
 
     reader = StatusReader(config)
     app = create_strategy_app(

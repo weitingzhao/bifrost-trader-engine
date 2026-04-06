@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.app.config import config_profile_from_resolved_path
+from src.app.config import config_profile_from_resolved_path, normalize_server_config
 from src.monitor.reader import StatusReader
 from src.monitor.redis_url import redis_url_from_config
 from src.core.sse.queue_utils import put_nowait_drop_oldest
@@ -61,6 +61,11 @@ def create_massive_app(
     app.state._massive_sse_subscriber_thread: Optional[threading.Thread] = None
     app.state._sse_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    _raw_server = reader._config.get("server")
+    if not isinstance(_raw_server, dict):
+        raise ValueError("create_massive_app requires reader._config['server'] from read_config() merged YAML.")
+    reader._config["server"] = normalize_server_config(dict(_raw_server))
+
     # Routers
     from backend.massive.routers.stream import router as massive_stream_router
     from backend.massive.routers.routes import router as massive_routes_router
@@ -74,8 +79,8 @@ def create_massive_app(
         profile = getattr(app.state, "bifrost_config_profile", None)
         if profile is not None:
             out["config_profile"] = profile
-        _srv = reader._config.get("server") or {}
-        out["port"] = int(_srv.get("massive_port") or 8766)
+        _srv = reader._config["server"]
+        out["port"] = int(_srv["massive_port"])
         if resolved_config_path:
             out["config_path"] = str(Path(resolved_config_path).resolve())
         return out
@@ -140,7 +145,7 @@ def run_massive_server(config: dict, resolved_config_path: Optional[str] = None)
     status_cfg_for_read = config if has_postgres else None
     control_via_db = config if has_postgres else None
 
-    port = config.get("server", {}).get("massive_port") or 8766
+    port = int(config["server"]["massive_port"])
 
     reader = StatusReader(config)
     app = create_massive_app(

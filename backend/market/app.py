@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.app.config import config_profile_from_resolved_path
+from src.app.config import config_profile_from_resolved_path, normalize_server_config
 from src.monitor.reader import StatusReader
 from src.core.sse.queue_utils import put_nowait_drop_oldest
 
@@ -66,11 +66,13 @@ def create_market_app(
         config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
     )
 
-    _scfg = (merged_config or {}).get("server") or {}
-    try:
-        app.state.bifrost_market_port = int(_scfg.get("market_port") or 8772)
-    except (TypeError, ValueError):
-        app.state.bifrost_market_port = 8772
+    _cfg_holder = merged_config or reader._config
+    _raw_server = _cfg_holder.get("server")
+    if not isinstance(_raw_server, dict):
+        raise ValueError("create_market_app requires config['server'] from read_config() merged YAML.")
+    _cfg_holder["server"] = normalize_server_config(dict(_raw_server))
+    reader._config["server"] = _cfg_holder["server"]
+    app.state.bifrost_market_port = int(_cfg_holder["server"]["market_port"])
 
     from backend.market.routers.market_data import router as market_data_router
     from backend.market.routers.quotes import router as quotes_router
@@ -156,7 +158,7 @@ def run_market_server(config: dict, resolved_config_path: Optional[str] = None) 
     status_cfg_for_read = config if has_postgres else None
     control_via_db = config if has_postgres else None
 
-    port = config.get("server", {}).get("market_port") or 8772
+    port = int(config["server"]["market_port"])
 
     reader = StatusReader(config)
     redis_quotes = None

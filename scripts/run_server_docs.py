@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Standalone Docs API server — merged OpenAPI (same URL layout as Massive API).
 
-On startup, reads server.docs_port from config (default 8767) and frees the
+On startup, reads ``server.docs_port`` from merged YAML (``read_config``) and frees the
 port if already in use, then starts the Docs FastAPI via backend.docs.app.
 
 Default config: ``config/config.dev.yaml``. Use ``--prod`` or
@@ -126,7 +126,7 @@ def setup_logging() -> None:
 
 
 def _docs_port_from_config(config: dict) -> int:
-    return int(config.get("server", {}).get("docs_port") or 8767)
+    return int(config["server"]["docs_port"])
 
 
 def _pids_on_port(port: int) -> list[int]:

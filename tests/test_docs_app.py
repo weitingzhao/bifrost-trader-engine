@@ -8,6 +8,18 @@ from starlette.testclient import TestClient
 
 from backend.docs.app import DOCS_PATH_PREFIX, create_docs_app
 
+_FULL_SERVER = {
+    "monitor_port": 8765,
+    "massive_port": 8766,
+    "docs_port": 8767,
+    "ops_port": 8768,
+    "trading_port": 8769,
+    "strategy_port": 8770,
+    "portfolio_port": 8771,
+    "market_port": 8772,
+    "research_port": 8773,
+}
+
 
 def _minimal_openapi(title: str = "Test") -> dict:
     return {
@@ -22,11 +34,18 @@ def _make_client(
     config: dict | None = None,
     resolved_config_path: str | None = None,
 ) -> TestClient:
+    base = {"server": dict(_FULL_SERVER)}
+    if config:
+        cfg = {**base, **config}
+        if "server" in config:
+            cfg["server"] = {**_FULL_SERVER, **config["server"]}
+    else:
+        cfg = base
     app = create_docs_app(
         "http://127.0.0.1:1/openapi.json",
         "http://127.0.0.1:2/research/massive/openapi.json",
         "http://127.0.0.1:3/openapi.json",
-        config=config or {},
+        config=cfg,
         resolved_config_path=resolved_config_path,
     )
     return TestClient(app, raise_server_exceptions=False)

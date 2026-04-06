@@ -128,14 +128,36 @@ def main_cli() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Merge two OpenAPI specs")
-    parser.add_argument("--main-url", default="http://127.0.0.1:8765/openapi.json")
-    parser.add_argument("--secondary-url", default="http://127.0.0.1:8766/research/massive/openapi.json")
+    parser.add_argument(
+        "--main-url",
+        default=None,
+        help="Main Monitor OpenAPI URL (default: from read_config server.monitor_port on 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--secondary-url",
+        default=None,
+        help="Massive OpenAPI URL (default: from read_config server.massive_port on 127.0.0.1).",
+    )
     parser.add_argument("--prefix", default="Massive")
     parser.add_argument("-o", "--output", help="Write to file instead of stdout")
     args = parser.parse_args()
 
-    main_spec = fetch_openapi(args.main_url)
-    sec_spec = fetch_openapi(args.secondary_url)
+    main_url = args.main_url
+    secondary_url = args.secondary_url
+    if main_url is None or secondary_url is None:
+        from src.app.config import read_config
+
+        cfg, _ = read_config()
+        srv = cfg["server"]
+        mp = int(srv["monitor_port"])
+        massive_p = int(srv["massive_port"])
+        if main_url is None:
+            main_url = f"http://127.0.0.1:{mp}/openapi.json"
+        if secondary_url is None:
+            secondary_url = f"http://127.0.0.1:{massive_p}/research/massive/openapi.json"
+
+    main_spec = fetch_openapi(main_url)
+    sec_spec = fetch_openapi(secondary_url)
     merged = merge_openapi_specs(main_spec, sec_spec, secondary_prefix=args.prefix)
 
     text = json.dumps(merged, indent=2, ensure_ascii=False)

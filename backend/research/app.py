@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.app.config import config_profile_from_resolved_path
+from src.app.config import config_profile_from_resolved_path, normalize_server_config
 from src.monitor.reader import StatusReader
 
 logger = logging.getLogger(__name__)
@@ -45,11 +45,14 @@ def create_research_app(
         config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
     )
 
-    _scfg = (merged_config or {}).get("server") or {}
-    try:
-        app.state.bifrost_research_port = int(_scfg.get("research_port") or 8773)
-    except (TypeError, ValueError):
-        app.state.bifrost_research_port = 8773
+    _cfg_holder = merged_config or reader._config
+    _raw_server = _cfg_holder.get("server")
+    if not isinstance(_raw_server, dict):
+        raise ValueError("create_research_app requires config['server'] from read_config() merged YAML.")
+    _cfg_holder["server"] = normalize_server_config(dict(_raw_server))
+    reader._config["server"] = _cfg_holder["server"]
+    _scfg = _cfg_holder["server"]
+    app.state.bifrost_research_port = int(_scfg["research_port"])
 
     from backend.research.routers.option_discovery import router as option_discovery_router
     from backend.research.routers.max_pain import router as max_pain_router
@@ -63,8 +66,7 @@ def create_research_app(
         profile = getattr(app.state, "bifrost_config_profile", None)
         if profile is not None:
             out["config_profile"] = profile
-        _srv = reader._config.get("server") or {}
-        out["port"] = int(_srv.get("research_port") or 8773)
+        out["port"] = int(app.state.bifrost_research_port)
         if resolved_config_path:
             out["config_path"] = str(Path(resolved_config_path).resolve())
         return out
@@ -101,7 +103,7 @@ def run_research_server(config: dict, resolved_config_path: Optional[str] = None
     status_cfg_for_read = config if has_postgres else None
     control_via_db = config if has_postgres else None
 
-    port = config.get("server", {}).get("research_port") or 8773
+    port = int(config["server"]["research_port"])
 
     reader = StatusReader(config)
     app = create_research_app(

@@ -30,9 +30,11 @@ function docsApiDocsBase(health: DocsApiHealthResponse | null): string {
   if (explicit) return explicit.replace(/\/$/, '')
   const routed = getDocsApiBase().replace(/\/$/, '')
   if (routed) return routed
-  const port = health?.port ?? 8767
-  if (typeof window === 'undefined') return ''
-  return `${window.location.protocol}//${window.location.hostname}:${port}`
+  const port = health?.port
+  if (typeof port === 'number' && Number.isFinite(port) && typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${port}`
+  }
+  return ''
 }
 
 export function DocsApiStatusPage({ embeddedInSettings }: DocsApiStatusPageProps) {

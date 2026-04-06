@@ -28,9 +28,11 @@ function monitorApiDocsBase(health: MonitorHealth | null): string {
   if (explicit) return explicit.replace(/\/$/, '')
   const routed = getServerApiBase().replace(/\/$/, '')
   if (routed) return routed
-  const port = health?.monitor_port ?? 8765
-  if (typeof window === 'undefined') return ''
-  return `${window.location.protocol}//${window.location.hostname}:${port}`
+  const mp = health?.monitor_port
+  if (typeof mp === 'number' && Number.isFinite(mp) && typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${mp}`
+  }
+  return ''
 }
 
 export function MonitorApiStatusPage({ embeddedInSettings }: MonitorApiStatusPageProps) {

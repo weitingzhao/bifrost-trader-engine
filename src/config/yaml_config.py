@@ -28,24 +28,53 @@ def _server_int_opt(d: dict, key: str) -> Optional[int]:
         return None
 
 
-def _server_int_with_defaults(
+def _validate_listen_port(name: str, value: int) -> None:
+    if value < 1 or value > 65535:
+        raise ValueError(f"server listen port {name} must be in 1..65535, got {value}")
+
+
+def _required_listen_port(
     nested: dict,
     flat: dict,
     key: str,
     legacy_flat_key: Optional[str],
-    default: int,
+    yaml_hint: str,
 ) -> int:
+    """Resolve one listen port from categorized nested dict and/or flat ``server`` keys (no defaults)."""
     v = _server_int_opt(nested, key)
     if v is not None:
+        _validate_listen_port(yaml_hint, v)
         return v
     v = _server_int_opt(flat, key)
     if v is not None:
+        _validate_listen_port(yaml_hint, v)
         return v
     if legacy_flat_key:
         v = _server_int_opt(flat, legacy_flat_key)
         if v is not None:
+            _validate_listen_port(yaml_hint, v)
             return v
-    return default
+    if key in nested and nested[key] is not None:
+        raise ValueError(
+            f"{yaml_hint} must be an integer, got {nested[key]!r} "
+            "(set a numeric port in YAML; see config/config.yaml.example)."
+        )
+    if key in flat and flat[key] is not None:
+        raise ValueError(
+            f"{yaml_hint} must be an integer, got {flat[key]!r} "
+            "(set a numeric port in YAML; see config/config.yaml.example)."
+        )
+    if legacy_flat_key and legacy_flat_key in flat and flat[legacy_flat_key] is not None:
+        raise ValueError(
+            f"{yaml_hint} (legacy server.{legacy_flat_key}) must be an integer, "
+            f"got {flat[legacy_flat_key]!r}"
+        )
+    raise ValueError(
+        f"Missing required {yaml_hint} in config YAML. "
+        "Define all sidecar listen ports under server.architecture, server.account, "
+        "server.research, and server.feed (or equivalent flat keys). "
+        "See config/config.yaml.example."
+    )
 
 
 def normalize_server_config(server: Optional[dict]) -> dict:
@@ -59,24 +88,30 @@ def normalize_server_config(server: Optional[dict]) -> dict:
     - ``feed``: ``massive_port``
 
     Nested values win over legacy flat keys. Category keys and legacy ``port`` are removed from the result.
+
+    **All listen ports are required** — there are no code defaults; omitting a port raises ``ValueError``.
     """
     if not server or not isinstance(server, dict):
-        return {}
+        raise ValueError(
+            "config['server'] must be a YAML object with all listen ports. "
+            "See config/config.yaml.example (server.architecture, server.account, "
+            "server.research, server.feed)."
+        )
     srv = dict(server)
     arch = srv.get("architecture") if isinstance(srv.get("architecture"), dict) else {}
     acc = srv.get("account") if isinstance(srv.get("account"), dict) else {}
     res = srv.get("research") if isinstance(srv.get("research"), dict) else {}
     feed = srv.get("feed") if isinstance(srv.get("feed"), dict) else {}
 
-    monitor_port = _server_int_with_defaults(arch, srv, "monitor_port", "port", 8765)
-    docs_port = _server_int_with_defaults(arch, srv, "docs_port", None, 8767)
-    ops_port = _server_int_with_defaults(arch, srv, "ops_port", None, 8768)
-    trading_port = _server_int_with_defaults(acc, srv, "trading_port", None, 8769)
-    portfolio_port = _server_int_with_defaults(acc, srv, "portfolio_port", None, 8771)
-    research_port = _server_int_with_defaults(res, srv, "research_port", None, 8773)
-    market_port = _server_int_with_defaults(res, srv, "market_port", None, 8772)
-    strategy_port = _server_int_with_defaults(res, srv, "strategy_port", None, 8770)
-    massive_port = _server_int_with_defaults(feed, srv, "massive_port", None, 8766)
+    monitor_port = _required_listen_port(arch, srv, "monitor_port", "port", "server.architecture.monitor_port")
+    docs_port = _required_listen_port(arch, srv, "docs_port", None, "server.architecture.docs_port")
+    ops_port = _required_listen_port(arch, srv, "ops_port", None, "server.architecture.ops_port")
+    trading_port = _required_listen_port(acc, srv, "trading_port", None, "server.account.trading_port")
+    portfolio_port = _required_listen_port(acc, srv, "portfolio_port", None, "server.account.portfolio_port")
+    research_port = _required_listen_port(res, srv, "research_port", None, "server.research.research_port")
+    market_port = _required_listen_port(res, srv, "market_port", None, "server.research.market_port")
+    strategy_port = _required_listen_port(res, srv, "strategy_port", None, "server.research.strategy_port")
+    massive_port = _required_listen_port(feed, srv, "massive_port", None, "server.feed.massive_port")
 
     out = {
         k: v

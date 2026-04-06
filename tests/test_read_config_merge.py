@@ -1,8 +1,25 @@
 """read_config deep-merge of config.yaml with config.dev.yaml / config.prod.yaml."""
 
+import pytest
 from pathlib import Path
 
 from src.app.config import normalize_server_config, read_config
+
+_FULL_SERVER_YAML = """
+  architecture:
+    monitor_port: 8000
+    docs_port: 8767
+    ops_port: 8768
+  account:
+    trading_port: 8769
+    portfolio_port: 8771
+  research:
+    research_port: 8773
+    market_port: 8772
+    strategy_port: 8770
+  feed:
+    massive_port: 8766
+"""
 
 
 def test_merge_prod_overlay_wins_scalar(tmp_path: Path) -> None:
@@ -26,7 +43,7 @@ def test_merge_nested_dict(tmp_path: Path) -> None:
     cfg = tmp_path / "config"
     cfg.mkdir()
     (cfg / "config.yaml").write_text(
-        "server:\n  port: 8765\n  extra: x\n",
+        "server:\n" + _FULL_SERVER_YAML + "  extra: x\n",
         encoding="utf-8",
     )
     (cfg / "config.dev.yaml").write_text(
@@ -70,6 +87,25 @@ def test_normalize_server_categorized_yaml() -> None:
 
 
 def test_normalize_server_legacy_port_key() -> None:
-    flat = normalize_server_config({"port": 9999})
+    flat = normalize_server_config(
+        {
+            "port": 9999,
+            "docs_port": 8767,
+            "ops_port": 8768,
+            "trading_port": 8769,
+            "portfolio_port": 8771,
+            "research_port": 8773,
+            "market_port": 8772,
+            "strategy_port": 8770,
+            "massive_port": 8766,
+        }
+    )
     assert flat["monitor_port"] == 9999
     assert "port" not in flat
+
+
+def test_normalize_server_empty_raises() -> None:
+    with pytest.raises(ValueError, match="config\\['server'\\]"):
+        normalize_server_config({})
+    with pytest.raises(ValueError, match="Missing required"):
+        normalize_server_config({"architecture": {}})

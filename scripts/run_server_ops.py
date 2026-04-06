@@ -123,7 +123,7 @@ def setup_logging() -> None:
 
 
 def _ops_port_from_config(config: dict) -> int:
-    return int(config.get("server", {}).get("ops_port") or 8768)
+    return int(config["server"]["ops_port"])
 
 
 def _pids_on_port(port: int) -> list[int]:

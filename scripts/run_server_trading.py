@@ -110,7 +110,7 @@ def main() -> None:
     setup_logging()
     config, resolved_config_path = read_config(config_path)
     print(f"bifrost trading server: YAML loaded: {resolved_config_path}", file=sys.stderr)
-    port = int(config.get("server", {}).get("trading_port") or 8769)
+    port = int(config["server"]["trading_port"])
     if not _free_port(port):
         print(f"Could not free port {port}.", file=sys.stderr)
         sys.exit(1)

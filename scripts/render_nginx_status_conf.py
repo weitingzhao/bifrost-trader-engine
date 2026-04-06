@@ -28,34 +28,40 @@ os.chdir(_PROJECT_ROOT)
 
 from src.app.config import read_config  # noqa: E402
 
-_PLACEHOLDER_MAP = (
-    ("@@BIFROST_MONITOR_PORT@@", "monitor_port", 8765),
-    ("@@BIFROST_MASSIVE_PORT@@", "massive_port", 8766),
-    ("@@BIFROST_DOCS_PORT@@", "docs_port", 8767),
-    ("@@BIFROST_OPS_PORT@@", "ops_port", 8768),
-    ("@@BIFROST_TRADING_PORT@@", "trading_port", 8769),
-    ("@@BIFROST_STRATEGY_PORT@@", "strategy_port", 8770),
-    ("@@BIFROST_PORTFOLIO_PORT@@", "portfolio_port", 8771),
-    ("@@BIFROST_MARKET_PORT@@", "market_port", 8772),
-    ("@@BIFROST_RESEARCH_PORT@@", "research_port", 8773),
+_PLACEHOLDER_KEYS = (
+    ("@@BIFROST_MONITOR_PORT@@", "monitor_port"),
+    ("@@BIFROST_MASSIVE_PORT@@", "massive_port"),
+    ("@@BIFROST_DOCS_PORT@@", "docs_port"),
+    ("@@BIFROST_OPS_PORT@@", "ops_port"),
+    ("@@BIFROST_TRADING_PORT@@", "trading_port"),
+    ("@@BIFROST_STRATEGY_PORT@@", "strategy_port"),
+    ("@@BIFROST_PORTFOLIO_PORT@@", "portfolio_port"),
+    ("@@BIFROST_MARKET_PORT@@", "market_port"),
+    ("@@BIFROST_RESEARCH_PORT@@", "research_port"),
 )
 
 
 def _ports_from_config(config: dict) -> dict[str, int]:
     srv = config.get("server") if isinstance(config.get("server"), dict) else {}
     out: dict[str, int] = {}
-    for _ph, key, default in _PLACEHOLDER_MAP:
+    missing = [k for _, k in _PLACEHOLDER_KEYS if k not in srv or srv[k] is None]
+    if missing:
+        raise ValueError(
+            "Merged config server block is missing required listen ports: "
+            + ", ".join(missing)
+            + ". Fix YAML and re-run (see config/config.yaml.example)."
+        )
+    for _ph, key in _PLACEHOLDER_KEYS:
         try:
-            v = int(srv.get(key) or default)
-        except (TypeError, ValueError):
-            v = default
-        out[key] = v
+            out[key] = int(srv[key])
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"server.{key} must be an integer, got {srv[key]!r}") from e
     return out
 
 
 def render_template(text: str, ports: dict[str, int]) -> str:
     out = text
-    for ph, key, _default in _PLACEHOLDER_MAP:
+    for ph, key in _PLACEHOLDER_KEYS:
         out = out.replace(ph, str(ports[key]))
     return out
 

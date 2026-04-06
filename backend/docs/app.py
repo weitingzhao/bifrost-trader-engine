@@ -46,7 +46,7 @@ def create_docs_app(
     the same way as ``read_config()``.
 
     Root ``/openapi.json``, ``/docs``, ``/redoc`` remain for nginx
-    ``/bifrost-api-docs/`` → ``127.0.0.1:8767/`` (stripped prefix). Set
+    ``/bifrost-api-docs/`` → docs listen port on 127.0.0.1 (stripped prefix). Set
     ``BIFROST_DOCS_ROOT_PATH=/bifrost-api-docs`` so Swagger loads the correct
     ``openapi.json`` URL in the browser.
     """
@@ -67,8 +67,9 @@ def create_docs_app(
     )
 
     _cfg: Dict[str, Any] = dict(config) if config else {}
-    if isinstance(_cfg.get("server"), dict):
-        _cfg["server"] = normalize_server_config(_cfg["server"])
+    if not isinstance(_cfg.get("server"), dict):
+        raise ValueError("create_docs_app requires config['server'] from merged YAML (read_config).")
+    _cfg["server"] = normalize_server_config(_cfg["server"])
 
     _state: Dict[str, Any] = {
         "main_url": main_openapi_url,
@@ -87,8 +88,8 @@ def create_docs_app(
             "massive_url": _state["massive_url"],
             "research_url": _state["research_url"],
         }
-        srv = _cfg.get("server") or {}
-        out["port"] = int(srv.get("docs_port") or 8767)
+        srv = _cfg["server"]
+        out["port"] = int(srv["docs_port"])
         profile = config_profile_from_resolved_path(resolved_config_path) if resolved_config_path else None
         if profile is not None:
             out["config_profile"] = profile
@@ -201,13 +202,14 @@ def run_docs_server(
     """Start the Docs API server (merged OpenAPI)."""
     import uvicorn
 
-    server_cfg = config.get("server") or {}
-    if isinstance(server_cfg, dict):
-        server_cfg = normalize_server_config(server_cfg)
-    main_port = int(server_cfg.get("monitor_port") or 8765)
-    massive_port = int(server_cfg.get("massive_port") or 8766)
-    research_port = int(server_cfg.get("research_port") or 8773)
-    docs_port = int(server_cfg.get("docs_port") or 8767)
+    server_raw = config.get("server")
+    if not isinstance(server_raw, dict):
+        raise ValueError("run_docs_server requires config['server'] from merged YAML (read_config).")
+    server_cfg = normalize_server_config(server_raw)
+    main_port = int(server_cfg["monitor_port"])
+    massive_port = int(server_cfg["massive_port"])
+    research_port = int(server_cfg["research_port"])
+    docs_port = int(server_cfg["docs_port"])
 
     if main_openapi_url is None:
         main_openapi_url = os.environ.get(

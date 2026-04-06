@@ -74,14 +74,14 @@ def get_health(request: Request) -> Dict[str, Any]:
     fe_prod = getattr(request.app.state, "bifrost_frontend_prod_path", None)
     if fe_prod:
         out["frontend_prod_path"] = fe_prod
-    out["monitor_port"] = int(getattr(request.app.state, "bifrost_server_listen_port", 8765))
-    out["massive_port"] = int(getattr(request.app.state, "bifrost_massive_port", 8766))
-    out["docs_port"] = int(getattr(request.app.state, "bifrost_docs_port", 8767))
-    out["ops_port"] = int(getattr(request.app.state, "bifrost_ops_port", 8768))
-    out["trading_port"] = int(getattr(request.app.state, "bifrost_trading_port", 8769))
-    out["strategy_port"] = int(getattr(request.app.state, "bifrost_strategy_port", 8770))
-    out["portfolio_port"] = int(getattr(request.app.state, "bifrost_portfolio_port", 8771))
-    out["market_port"] = int(getattr(request.app.state, "bifrost_market_port", 8772))
-    out["research_port"] = int(getattr(request.app.state, "bifrost_research_port", 8773))
+    out["monitor_port"] = int(request.app.state.bifrost_server_listen_port)
+    out["massive_port"] = int(request.app.state.bifrost_massive_port)
+    out["docs_port"] = int(request.app.state.bifrost_docs_port)
+    out["ops_port"] = int(request.app.state.bifrost_ops_port)
+    out["trading_port"] = int(request.app.state.bifrost_trading_port)
+    out["strategy_port"] = int(request.app.state.bifrost_strategy_port)
+    out["portfolio_port"] = int(request.app.state.bifrost_portfolio_port)
+    out["market_port"] = int(request.app.state.bifrost_market_port)
+    out["research_port"] = int(request.app.state.bifrost_research_port)
     out["utilized_services"] = list(getattr(request.app.state, "bifrost_utilized_services", []) or [])
     return out

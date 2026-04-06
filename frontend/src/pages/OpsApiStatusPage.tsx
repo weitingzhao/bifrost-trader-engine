@@ -24,9 +24,11 @@ function opsApiDocsBase(health: Awaited<ReturnType<typeof fetchOpsHealth>> | nul
   if (explicit) return explicit.replace(/\/$/, '')
   const routed = getOpsApiBase().replace(/\/$/, '')
   if (routed) return routed
-  const port = health?.port ?? 8768
-  if (typeof window === 'undefined') return ''
-  return `${window.location.protocol}//${window.location.hostname}:${port}`
+  const port = health?.port
+  if (typeof port === 'number' && Number.isFinite(port) && typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:${port}`
+  }
+  return ''
 }
 
 export function OpsApiStatusPage({ embeddedInSettings }: OpsApiStatusPageProps) {

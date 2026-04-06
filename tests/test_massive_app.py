@@ -8,10 +8,29 @@ from starlette.testclient import TestClient
 
 from backend.massive.app import create_massive_app
 
+_FULL_SERVER = {
+    "monitor_port": 8765,
+    "massive_port": 8766,
+    "docs_port": 8767,
+    "ops_port": 8768,
+    "trading_port": 8769,
+    "strategy_port": 8770,
+    "portfolio_port": 8771,
+    "market_port": 8772,
+    "research_port": 8773,
+}
+
 
 def _make_client(resolved_config_path: str | None = None, reader_config: dict | None = None) -> TestClient:
     reader = MagicMock()
-    reader._config = reader_config if reader_config is not None else {}
+    base = {"server": dict(_FULL_SERVER)}
+    if reader_config is not None:
+        rc = {**base, **reader_config}
+        if "server" in reader_config:
+            rc["server"] = {**_FULL_SERVER, **reader_config["server"]}
+        reader._config = rc
+    else:
+        reader._config = base
     app = create_massive_app(
         reader=reader,
         control_via_db=None,

@@ -134,8 +134,7 @@ def setup_logging() -> None:
 
 def _port_from_config(config: dict) -> int:
     """Port from config (same as servers.app.run_server)."""
-    port = config.get("server", {}).get("monitor_port") or 8765
-    return int(port)
+    return int(config["server"]["monitor_port"])
 
 
 def _pids_on_port(port: int) -> list[int]:

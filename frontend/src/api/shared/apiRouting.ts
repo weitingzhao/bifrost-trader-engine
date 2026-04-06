@@ -27,6 +27,29 @@ function trimEnv(s: string | undefined): string | undefined {
   return t ? t.replace(/\/$/, '') : undefined
 }
 
+type ListenPortKey =
+  | 'monitor_port'
+  | 'massive_port'
+  | 'docs_port'
+  | 'ops_port'
+  | 'trading_port'
+  | 'strategy_port'
+  | 'portfolio_port'
+  | 'market_port'
+  | 'research_port'
+
+/** No numeric fallbacks: routing must match merged YAML exposed on GET /health. */
+function listenPortFromHealth(h: HealthRoutingFields, key: ListenPortKey, label: string): number {
+  const v = h[key]
+  if (typeof v !== 'number' || !Number.isFinite(v)) {
+    throw new Error(
+      `GET /health must include numeric ${label} (from merged server.* YAML). ` +
+        `Redeploy Monitor or fix config; do not rely on client-side port guesses.`,
+    )
+  }
+  return v
+}
+
 export function joinServiceBase(base: string, path: string): string {
   const p = path.startsWith('/') ? path : `/${path}`
   const b = base.replace(/\/$/, '')
@@ -72,16 +95,15 @@ function baseForEnvRole(
 ): string {
   const devEnv = trimEnv(import.meta.env.VITE_DEV_API_ORIGIN)
   const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
-  const sp = typeof h.monitor_port === 'number' && Number.isFinite(h.monitor_port) ? h.monitor_port : 8765
-  const mp = typeof h.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
-  const dp = typeof h.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
-  const op = typeof h.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
-  const tp = typeof h.trading_port === 'number' && Number.isFinite(h.trading_port) ? h.trading_port : 8769
-  const stp = typeof h.strategy_port === 'number' && Number.isFinite(h.strategy_port) ? h.strategy_port : 8770
-  const pfp = typeof h.portfolio_port === 'number' && Number.isFinite(h.portfolio_port) ? h.portfolio_port : 8771
-  const mkp = typeof h.market_port === 'number' && Number.isFinite(h.market_port) ? h.market_port : 8772
-  const rp =
-    typeof h.research_port === 'number' && Number.isFinite(h.research_port) ? h.research_port : 8773
+  const sp = listenPortFromHealth(h, 'monitor_port', 'monitor_port')
+  const mp = listenPortFromHealth(h, 'massive_port', 'massive_port')
+  const dp = listenPortFromHealth(h, 'docs_port', 'docs_port')
+  const op = listenPortFromHealth(h, 'ops_port', 'ops_port')
+  const tp = listenPortFromHealth(h, 'trading_port', 'trading_port')
+  const stp = listenPortFromHealth(h, 'strategy_port', 'strategy_port')
+  const pfp = listenPortFromHealth(h, 'portfolio_port', 'portfolio_port')
+  const mkp = listenPortFromHealth(h, 'market_port', 'market_port')
+  const rp = listenPortFromHealth(h, 'research_port', 'research_port')
   const cfgDev = trimEnv(h.frontend_dev_path)
   const cfgProd = trimEnv(h.frontend_prod_path)
   const pub = trimEnv(h.frontend_public_origin)

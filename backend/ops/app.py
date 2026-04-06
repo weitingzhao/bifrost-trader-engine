@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.app.config import config_profile_from_resolved_path
+from src.app.config import config_profile_from_resolved_path, normalize_server_config
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,6 @@ class AccessControlAllowPrivateNetworkMiddleware(BaseHTTPMiddleware):
         return response
 
 
-DEFAULT_OPS_PORT = 8768
 DEFAULT_ALLOWED_UNITS = [
     "bifrost-celery-worker",
     "bifrost-celery-beat",
@@ -77,6 +76,11 @@ def create_ops_app(
     from src.core.redis_url import effective_redis_dict, format_redis_url
 
     broker_url = format_redis_url(effective_redis_dict(config, default_db=1))
+
+    _raw_srv = config.get("server")
+    if not isinstance(_raw_srv, dict):
+        raise ValueError("create_ops_app requires config['server'] from read_config() merged YAML.")
+    config["server"] = normalize_server_config(dict(_raw_srv))
 
     app = FastAPI(
         title="Bifrost Ops API",
@@ -233,8 +237,7 @@ def create_ops_app(
         profile = getattr(app.state, "bifrost_config_profile", None)
         if profile is not None:
             out["config_profile"] = profile
-        srv = config.get("server") or {}
-        out["port"] = int(srv.get("ops_port") or DEFAULT_OPS_PORT)
+        out["port"] = int(config["server"]["ops_port"])
         if resolved_config_path:
             out["config_path"] = str(Path(resolved_config_path).resolve())
         out["executor_mode"] = executor_mode
@@ -276,7 +279,7 @@ def run_ops_server(config: dict, resolved_config_path: Optional[str] = None) -> 
     """Start the Ops API server."""
     import uvicorn
 
-    port = int((config.get("server") or {}).get("ops_port") or DEFAULT_OPS_PORT)
+    port = int(config["server"]["ops_port"])
     app = create_ops_app(config, resolved_config_path=resolved_config_path)
     host = "0.0.0.0"
     logger.info("Ops API server on %s:%s", host, port)

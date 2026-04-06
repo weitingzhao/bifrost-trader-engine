@@ -30,7 +30,7 @@ interface MicroPorts {
 }
 
 type ProbeKind =
-  | { kind: 'single'; origin: ApiOriginBase; microPorts: MicroPorts }
+  | { kind: 'single'; origin: ApiOriginBase; microPorts: MicroPorts | null }
   | {
       kind: 'split'
       scheme: string
@@ -106,26 +106,43 @@ function lampFor(ok: boolean | null): Lamp {
   return 'none'
 }
 
-function defaultMicroPorts(): MicroPorts {
-  return {
-    tradingPort: 8769,
-    strategyPort: 8770,
-    portfolioPort: 8771,
-    marketPort: 8772,
-    researchPort: 8773,
+function microPortsFromHealth(h: Record<string, unknown> | undefined | null): MicroPorts | null {
+  const n = (x: unknown): number | null =>
+    typeof x === 'number' && Number.isFinite(x) ? x : null
+  const tradingPort = n(h?.trading_port)
+  const strategyPort = n(h?.strategy_port)
+  const portfolioPort = n(h?.portfolio_port)
+  const marketPort = n(h?.market_port)
+  const researchPort = n(h?.research_port)
+  if (
+    tradingPort === null ||
+    strategyPort === null ||
+    portfolioPort === null ||
+    marketPort === null ||
+    researchPort === null
+  ) {
+    return null
   }
+  return { tradingPort, strategyPort, portfolioPort, marketPort, researchPort }
 }
 
-function microPortsFromHealth(h: Record<string, unknown> | undefined | null): MicroPorts {
-  const n = (x: unknown, d: number) =>
-    typeof x === 'number' && Number.isFinite(x) ? x : d
-  return {
-    tradingPort: n(h?.trading_port, 8769),
-    strategyPort: n(h?.strategy_port, 8770),
-    portfolioPort: n(h?.portfolio_port, 8771),
-    marketPort: n(h?.market_port, 8772),
-    researchPort: n(h?.research_port, 8773),
+/** Split-column architecture ports from GET /health; null if any required field is missing. */
+function splitCorePortsFromHealth(h: Record<string, unknown> | undefined | null): {
+  serverPort: number
+  massivePort: number
+  docsPort: number
+  opsPort: number
+} | null {
+  const n = (x: unknown): number | null =>
+    typeof x === 'number' && Number.isFinite(x) ? x : null
+  const serverPort = n(h?.monitor_port)
+  const massivePort = n(h?.massive_port)
+  const docsPort = n(h?.docs_port)
+  const opsPort = n(h?.ops_port)
+  if (serverPort === null || massivePort === null || docsPort === null || opsPort === null) {
+    return null
   }
+  return { serverPort, massivePort, docsPort, opsPort }
 }
 
 function _microserviceHealthBase(kind: ProbeKind, port: number): string {
@@ -152,17 +169,62 @@ function _microserviceHealthBase(kind: ProbeKind, port: number): string {
 }
 
 function _researchProbeOrigin(kind: ProbeKind): string {
-  const rp = kind.kind === 'split' ? kind.researchPort : kind.microPorts.researchPort
+  const rp =
+    kind.kind === 'split'
+      ? kind.researchPort
+      : kind.microPorts !== null
+        ? kind.microPorts.researchPort
+        : 0
   return _microserviceHealthBase(kind, rp)
 }
 
 async function probeServices(kind: ProbeKind): Promise<ProbeResult> {
   const tmo = { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS }
-  const oRes = _researchProbeOrigin(kind)
   if (kind.kind === 'single') {
     const o = kind.origin
     const baseLabel = o === '' ? '(same origin as this app)' : o
     const mp = kind.microPorts
+    if (mp === null) {
+      const [sr, mr, dr, or_] = await Promise.allSettled([
+        fetchHealthAtOrigin(o, tmo),
+        fetchMassiveApiHealthAtOrigin(o, tmo),
+        fetchDocsApiHealthAtOrigin(o, tmo),
+        fetchOpsHealthAtOrigin(o, tmo),
+      ])
+      const dead = (base: string) => ({
+        ok: false as boolean,
+        ts: undefined as number | undefined,
+        base,
+      })
+      return {
+        server: {
+          ok: sr.status === 'fulfilled',
+          ts: sr.status === 'fulfilled' ? sr.value.ts : undefined,
+          base: baseLabel,
+        },
+        massive: {
+          ok: mr.status === 'fulfilled',
+          ts: mr.status === 'fulfilled' ? mr.value.ts : undefined,
+          base: baseLabel,
+        },
+        docs: {
+          ok: dr.status === 'fulfilled',
+          ts: dr.status === 'fulfilled' ? dr.value.ts : undefined,
+          base: baseLabel,
+        },
+        ops: {
+          ok: or_.status === 'fulfilled',
+          ts: or_.status === 'fulfilled' ? or_.value.ts : undefined,
+          base: baseLabel,
+        },
+        trading: dead('(need trading_port etc. on GET /health)'),
+        strategy: dead('(need trading_port etc. on GET /health)'),
+        portfolio: dead('(need trading_port etc. on GET /health)'),
+        market: dead('(need trading_port etc. on GET /health)'),
+        research: dead('(need trading_port etc. on GET /health)'),
+      }
+    }
+    const oRes = _researchProbeOrigin(kind)
     const oTr = _microserviceHealthBase(kind, mp.tradingPort)
     const oSt = _microserviceHealthBase(kind, mp.strategyPort)
     const oPf = _microserviceHealthBase(kind, mp.portfolioPort)
@@ -317,7 +379,7 @@ async function resolveColumnPlans(): Promise<{
   const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
   if (devEnv && prodEnv) {
     let utilizedServices: UtilizedServiceRow[] = []
-    let microPorts = defaultMicroPorts()
+    let microPorts: MicroPorts | null = null
     try {
       const h = await fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
       utilizedServices = normalizeUtilizedServices(h?.utilized_services)
@@ -342,7 +404,7 @@ async function resolveColumnPlans(): Promise<{
     const mh = mhr.status === 'fulfilled' ? mhr.value : undefined
 
     if (!h && !mh) {
-      const microPorts = defaultMicroPorts()
+      const microPorts: MicroPorts | null = null
       return {
         dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, microPorts } } : null,
         prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, microPorts } } : null,
@@ -360,41 +422,43 @@ async function resolveColumnPlans(): Promise<{
     const pub = trimEnv(h?.frontend_public_origin)
     const cfgDev = trimEnv(h?.frontend_dev_path)
     const cfgProd = trimEnv(h?.frontend_prod_path)
-    const sp = typeof h?.monitor_port === 'number' && Number.isFinite(h.monitor_port) ? h.monitor_port : 8765
-    const mp = typeof h?.massive_port === 'number' && Number.isFinite(h.massive_port) ? h.massive_port : 8766
-    const dp = typeof h?.docs_port === 'number' && Number.isFinite(h.docs_port) ? h.docs_port : 8767
-    const op = typeof h?.ops_port === 'number' && Number.isFinite(h.ops_port) ? h.ops_port : 8768
     const microPorts = microPortsFromHealth(h as Record<string, unknown> | undefined)
+    const splitCore = splitCorePortsFromHealth(h as Record<string, unknown> | undefined)
     const noYamlPaths = cfgDev == null && cfgProd == null
 
     let dev: ColumnPlan | null = null
     if (devEnv) {
       dev = { display: devEnv, probe: { kind: 'single', origin: devEnv, microPorts } }
     } else if (cfgDev) {
-      try {
-        const raw = cfgDev.includes('://') ? cfgDev : `http://${cfgDev}`
-        const u = new URL(raw)
-        const scheme = (u.protocol || 'http:').replace(':', '') || 'http'
-        const host = u.hostname
-        if (!host) throw new Error('no host')
-        dev = {
-          display: cfgDev.replace(/\/$/, ''),
-          probe: {
-            kind: 'split',
-            scheme,
-            host,
-            serverPort: sp,
-            massivePort: mp,
-            docsPort: dp,
-            opsPort: op,
-            tradingPort: microPorts.tradingPort,
-            strategyPort: microPorts.strategyPort,
-            portfolioPort: microPorts.portfolioPort,
-            marketPort: microPorts.marketPort,
-            researchPort: microPorts.researchPort,
-          },
+      if (splitCore && microPorts) {
+        try {
+          const raw = cfgDev.includes('://') ? cfgDev : `http://${cfgDev}`
+          const u = new URL(raw)
+          const scheme = (u.protocol || 'http:').replace(':', '') || 'http'
+          const host = u.hostname
+          if (!host) throw new Error('no host')
+          dev = {
+            display: cfgDev.replace(/\/$/, ''),
+            probe: {
+              kind: 'split',
+              scheme,
+              host,
+              serverPort: splitCore.serverPort,
+              massivePort: splitCore.massivePort,
+              docsPort: splitCore.docsPort,
+              opsPort: splitCore.opsPort,
+              tradingPort: microPorts.tradingPort,
+              strategyPort: microPorts.strategyPort,
+              portfolioPort: microPorts.portfolioPort,
+              marketPort: microPorts.marketPort,
+              researchPort: microPorts.researchPort,
+            },
+          }
+        } catch {
+          const o = cfgDev.replace(/\/$/, '')
+          dev = { display: o, probe: { kind: 'single', origin: o, microPorts } }
         }
-      } catch {
+      } else {
         const o = cfgDev.replace(/\/$/, '')
         dev = { display: o, probe: { kind: 'single', origin: o, microPorts } }
       }
@@ -420,7 +484,7 @@ async function resolveColumnPlans(): Promise<{
 
     return { dev, prod, utilizedServices }
   } catch {
-    const microPorts = defaultMicroPorts()
+    const microPorts: MicroPorts | null = null
     return {
       dev: devEnv ? { display: devEnv, probe: { kind: 'single', origin: devEnv, microPorts } } : null,
       prod: prodEnv ? { display: prodEnv, probe: { kind: 'single', origin: prodEnv, microPorts } } : null,

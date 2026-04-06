@@ -191,42 +191,17 @@ def create_app(
     app.state.bifrost_frontend_prod_path = _fe_str("prod_path")
 
     _scfg = (merged_config or {}).get("server") or {}
-    try:
-        app.state.bifrost_server_listen_port = int(_scfg.get("monitor_port") or 8765)
-    except (TypeError, ValueError):
-        app.state.bifrost_server_listen_port = 8765
-    try:
-        app.state.bifrost_massive_port = int(_scfg.get("massive_port") or 8766)
-    except (TypeError, ValueError):
-        app.state.bifrost_massive_port = 8766
-    try:
-        app.state.bifrost_docs_port = int(_scfg.get("docs_port") or 8767)
-    except (TypeError, ValueError):
-        app.state.bifrost_docs_port = 8767
-    try:
-        app.state.bifrost_ops_port = int(_scfg.get("ops_port") or 8768)
-    except (TypeError, ValueError):
-        app.state.bifrost_ops_port = 8768
-    try:
-        app.state.bifrost_trading_port = int(_scfg.get("trading_port") or 8769)
-    except (TypeError, ValueError):
-        app.state.bifrost_trading_port = 8769
-    try:
-        app.state.bifrost_strategy_port = int(_scfg.get("strategy_port") or 8770)
-    except (TypeError, ValueError):
-        app.state.bifrost_strategy_port = 8770
-    try:
-        app.state.bifrost_portfolio_port = int(_scfg.get("portfolio_port") or 8771)
-    except (TypeError, ValueError):
-        app.state.bifrost_portfolio_port = 8771
-    try:
-        app.state.bifrost_market_port = int(_scfg.get("market_port") or 8772)
-    except (TypeError, ValueError):
-        app.state.bifrost_market_port = 8772
-    try:
-        app.state.bifrost_research_port = int(_scfg.get("research_port") or 8773)
-    except (TypeError, ValueError):
-        app.state.bifrost_research_port = 8773
+    if not isinstance(_scfg, dict):
+        raise ValueError("create_app (monitor) requires merged_config['server'] from read_config().")
+    app.state.bifrost_server_listen_port = int(_scfg["monitor_port"])
+    app.state.bifrost_massive_port = int(_scfg["massive_port"])
+    app.state.bifrost_docs_port = int(_scfg["docs_port"])
+    app.state.bifrost_ops_port = int(_scfg["ops_port"])
+    app.state.bifrost_trading_port = int(_scfg["trading_port"])
+    app.state.bifrost_strategy_port = int(_scfg["strategy_port"])
+    app.state.bifrost_portfolio_port = int(_scfg["portfolio_port"])
+    app.state.bifrost_market_port = int(_scfg["market_port"])
+    app.state.bifrost_research_port = int(_scfg["research_port"])
 
     app.state.bifrost_utilized_services = _utilized_services_from_config(merged_config)
 
@@ -287,7 +262,7 @@ def run_server(config: dict, resolved_config_path: Optional[str] = None) -> None
     use_db_control = has_postgres
     status_cfg_for_read = config if has_postgres else None
 
-    port = config.get("server", {}).get("monitor_port") or 8765
+    port = int(config["server"]["monitor_port"])
     data_lag_ms = None
     gates = config.get("gates") or {}
     state_cfg = gates.get("state") or {}

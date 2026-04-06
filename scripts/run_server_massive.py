@@ -97,7 +97,7 @@ def setup_logging() -> None:
 
 
 def _massive_port_from_config(config: dict) -> int:
-    return int(config.get("server", {}).get("massive_port") or 8766)
+    return int(config["server"]["massive_port"])
 
 
 def _pids_on_port(port: int) -> list[int]:
