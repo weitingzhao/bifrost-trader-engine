@@ -765,7 +765,7 @@
 | Daemon | Trading | `client_id_daemon` / — | 主连接下单、持仓、行情 |
 | Daemon | Listener | `client_id_listener` / `ib2_client_id_listener` | 事件、订阅；Secondary 无行情订阅 |
 | Monitor | Operator (cmd RPC) | `client_id.operator` / `secondary.client_id.operator`（旧键 `account` 仍可读） | IB Operator / Secondary 账户侧连接；账户摘要、执行记录等 |
-| Standalone | IB Market Ingest | `ib.host.client_id.ingestor`（旧键 `ib_market_ingest` 仍可读） / — | `run_ib_market_ingest.py`、Redis `ib:ingester:*` |
+| Standalone | IB ingestor | `ib.host.client_id.ingestor`（旧键 `ib_market_ingest` 仍可读） / — | `run_ib_ingestor.py`、Redis `ib:ingester:*` |
 | Celery | Market Data | `client_id.worker_market` / — | Bars 补全等 worker |
 
 - **语义**：**第二 IB**（`ib.secondary`，扁平键为 `ib2_*`）用于统一 Portfolio 与 listener_connector_2；行情仍由 Host 承担。**Flex**：token 与 Query 行由 Settings 或 POST /config/flex 写入。修改 **YAML 中的 client_id 或 host** 后需**重启**相关进程。

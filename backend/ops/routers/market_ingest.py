@@ -99,7 +99,7 @@ async def market_ingest_control(
                         "ib_operator reset: disconnect_all RPC failed (%s); continuing with restart",
                         rpc_err,
                     )
-            # massive_ws / ib_market / ib_operator: ordered release + restart via systemd.
+            # massive_ws / ib_ingestor / ib_operator: ordered release + restart via systemd.
             result = await exc._systemctl("restart", unit)  # noqa: SLF001
             if extra:
                 result = {**result, **extra} if isinstance(result, dict) else {"result": result, **extra}

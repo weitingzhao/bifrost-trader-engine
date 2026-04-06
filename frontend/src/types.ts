@@ -15,8 +15,8 @@ export interface IbConfig {
   ib_client_id_operator?: number
   /** Celery: Market Data / worker_market (default 500) */
   ib_client_id_worker_market?: number
-  /** IB Market Ingest client ID from YAML ib.host.client_id.ingestor (API key unchanged; legacy YAML ib_market_ingest). */
-  ib_client_id_ib_market_ingest?: number
+  /** IB ingestor client ID from YAML ib.host.client_id.ingestor (legacy YAML key ib_market_ingest still read server-side). */
+  ib_client_id_ib_ingestor?: number
   /** Host 账户 account_id（多账户时用于对冲与行情），R-A4 */
   ib_host_account_id?: string | null
   /** Live 页 Market Streams Host 账户 ID（Event Account），用于按账户分类/筛选 */
@@ -179,8 +179,8 @@ export interface StatusResponse {
     ws_reconnects?: number
     last_snapshot_age_s?: number | null
   } | null
-  /** IB market ingest from Redis ib:ingester:meta:health (GET /status). */
-  ib_market?: {
+  /** IB ingestor from Redis ib:ingester:meta:health (GET /status). */
+  ib_ingestor?: {
     connected?: boolean
     last_msg_age_s?: number | null
     reconnects?: number | null

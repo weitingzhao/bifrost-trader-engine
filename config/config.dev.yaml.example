@@ -17,14 +17,14 @@ ib:
     ip: "127.0.0.1"
     # Primary API port (7496 live / 7497 paper / 4002 gateway). IB Operator uses this port + client_id.operator.
     port_type: "tws_live"
-    # IB market ingest (run_ib_market_ingest.py) may use a different port; omit = same as port_type.
+    # IB ingestor (run_ib_ingestor.py) may use a different port; omit = same as port_type.
     # port_type_market_data: "tws_paper"
     client_id:
       daemon: 110
       listener: 101
       operator: 120
       worker_market: 140
-      # IB Market Ingest (scripts/run_ib_market_ingest.py); must not overlap operator/daemon/Celery IDs.
+      # IB ingestor (scripts/run_ib_ingestor.py); must not overlap operator/daemon/Celery IDs.
       ingestor: 150
   secondary:
     ip: "127.0.0.1"
@@ -90,7 +90,7 @@ massive:
 # Ops control plane (run_server_ops.py): Celery systemd + optional market ingest services.
 # Whitelist stems for RestrictedExecutor (matches bifrost-celery-worker@*.service, redis, etc.).
 # On macOS, local_control: subprocess runs Celery via run_celery.py and WS Connector ingest via
-# scripts/run_massive_ws.py, run_ib_operator.py, run_ib_market_ingest.py (GET /ops/health market_ingest_script_control).
+# scripts/run_massive_ws.py, run_ib_operator.py, run_ib_ingestor.py (GET /ops/health market_ingest_script_control).
 # ops:
 #   local_control: subprocess
 #   allowed_units:
@@ -98,7 +98,7 @@ massive:
 #     - bifrost-celery-beat
 #     - bifrost-massive-ws
 #     - bifrost-ib-operator
-#     - bifrost-ib-market-ingest
+#     - bifrost-ib-ingestor
 #   market_ingest_services:
 #     - id: massive_ws
 #       label: "Massive Options WS ingest"
@@ -108,13 +108,13 @@ massive:
 #       label: "IB Operator (cmd RPC)"
 #       systemd_unit: bifrost-ib-operator.service
 #       redis_meta_key: ib:operator:meta:health
-#     - id: ib_market
-#       label: "IB market ingest"
-#       systemd_unit: bifrost-ib-market-ingest.service
+#     - id: ib_ingestor
+#       label: "IB ingestor"
+#       systemd_unit: bifrost-ib-ingestor.service
 #       redis_meta_key: ib:ingester:meta:health
 
-# IB market ingest (scripts/run_ib_market_ingest.py): Watchlist-driven; caps subscription count.
-# ib_market_ingest:
+# IB ingestor (scripts/run_ib_ingestor.py): Watchlist-driven; caps subscription count. Legacy top-level key ib_market_ingest still read.
+# ib_ingestor:
 #   max_subscriptions: 200
 #   include_stk: true
 #   include_opt: true

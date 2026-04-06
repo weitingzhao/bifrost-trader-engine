@@ -1,4 +1,4 @@
-"""Redis key names for IB market ingest (isolated from quote: / massive:)."""
+"""Redis key names for IB ingestor (isolated from quote: / massive:)."""
 
 IB_INGESTER_PREFIX = "ib:ingester"
 IB_INGESTER_META_HEALTH = "ib:ingester:meta:health"

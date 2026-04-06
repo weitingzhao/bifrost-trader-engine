@@ -1198,6 +1198,33 @@
   word-break: break-word;
 }
 
+/* Socket Services table: IB Client ID under service label */
+.socket-ib-client-id-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.socket-ib-client-id-wrap .massive-api-doc-hint {
+  margin: 0;
+}
+
+.socket-ib-client-id-badge {
+  display: inline-block;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  line-height: 1.25;
+  font-size: var(--text-body);
+  cursor: default;
+}
+
 .massive-api-doc-links {
   display: flex;
   gap: var(--space-3);
@@ -1734,6 +1761,11 @@
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
+}
+
+/* Dev/Prod — same capsule as Services Overview (api-overview-env-pill) */
+.dashboard-celery-env-pill {
+  flex-shrink: 0;
 }
 
 .dashboard-worker-id {

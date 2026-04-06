@@ -9,7 +9,7 @@ SERVER_LOG_STREAM_KEY = "bifrost:server_console"
 MASSIVE_LOG_STREAM_KEY = "bifrost:massive_console"
 MASSIVE_WS_LOG_STREAM_KEY = "bifrost:massive_ws_console"
 IB_OPERATOR_LOG_STREAM_KEY = "ib:operator:console"
-IB_MARKET_LOG_STREAM_KEY = "bifrost:ib_market_console"
+IB_INGESTOR_LOG_STREAM_KEY = "bifrost:ib_ingestor_console"
 DOCS_LOG_STREAM_KEY = "bifrost:docs_console"
 OPS_LOG_STREAM_KEY = "bifrost:ops_console"
 

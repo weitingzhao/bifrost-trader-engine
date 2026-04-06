@@ -145,11 +145,11 @@ def create_app(
     app.state._ib_operator_log_thread: Optional[threading.Thread] = None
     app.state._ib_operator_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB market ingest log stream (scripts/run_ib_market_ingest.py → bifrost:ib_market_console)
-    app.state.ib_market_log_queues: list = []
-    app.state.ib_market_log_lock = threading.Lock()
-    app.state._ib_market_log_thread: Optional[threading.Thread] = None
-    app.state._ib_market_log_loop: Optional[asyncio.AbstractEventLoop] = None
+    # IB ingestor log stream (scripts/run_ib_ingestor.py → bifrost:ib_ingestor_console)
+    app.state.ib_ingestor_log_queues: list = []
+    app.state.ib_ingestor_log_lock = threading.Lock()
+    app.state._ib_ingestor_log_thread: Optional[threading.Thread] = None
+    app.state._ib_ingestor_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # Docs API console log stream (run_server_docs.py → bifrost:docs_console)
     app.state.docs_log_queues: list = []

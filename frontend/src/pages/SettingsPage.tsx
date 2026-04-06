@@ -67,7 +67,8 @@ import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
-import { fetchOpsHealth } from '../api/ops/ops'
+import { fetchMarketIngestServices, fetchOpsHealth } from '../api/ops/ops'
+import { aggregateIngestServicesLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
 
 const API_SETTINGS_DETAIL_HASHES = ['settings-api-docs', 'settings-api-massive', 'settings-api-ops'] as const
 
@@ -270,6 +271,10 @@ export function SettingsPage({
   const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
   const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
   const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
+  const [socketIngestLamp, setSocketIngestLamp] = useState<AggregateIngestLamp>('none')
+  const [socketIngestTitle, setSocketIngestTitle] = useState(
+    'Socket services: Massive WebSocket and IB ingest (loading status…)',
+  )
   const deferredStart = useDeferredStart(280)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
@@ -322,6 +327,28 @@ export function SettingsPage({
         })
         .catch(() => {
           if (!cancelled) setApiAggregateLamp('none')
+        })
+      fetchMarketIngestServices()
+        .then(res => {
+          if (cancelled) return
+          if (res.ok && Array.isArray(res.services)) {
+            const agg = aggregateIngestServicesLamp(res.services.map(svc => ({ svc })))
+            setSocketIngestLamp(agg.lamp)
+            setSocketIngestTitle(agg.title)
+          } else {
+            setSocketIngestLamp('none')
+            setSocketIngestTitle(
+              res.error
+                ? `Could not load ingest services: ${res.error}`
+                : 'Could not load ingest services from Ops.',
+            )
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSocketIngestLamp('none')
+            setSocketIngestTitle('Could not load ingest services from Ops.')
+          }
         })
     }
     load()
@@ -548,10 +575,14 @@ export function SettingsPage({
           href="#settings-ws-connector"
           className={`settings-sidebar-link ${isWsConnectorSection ? 'active' : ''}`}
         >
-          <span className="title-inline-lamp lamp-icon none" title="Massive WebSocket and IB market data processes" aria-hidden>
+          <span
+            className={`title-inline-lamp lamp-icon ${socketIngestLamp === 'none' ? 'none' : socketIngestLamp}`}
+            title={socketIngestTitle}
+            aria-hidden
+          >
             <SettingsSidebarLampGlyph id="websocket" />
           </span>
-          WS Connector
+          Socket
         </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>

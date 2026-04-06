@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { InfoTooltip } from '../components/InfoTooltip'
+import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
 import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
 import {
   fetchCeleryLogs,
@@ -14,6 +15,7 @@ import {
   fetchWorkerInstances,
   fetchWorkerProfiles,
   fetchBrokerStatusExtended,
+  fetchOpsHealth,
   controlBroker,
   brokerConsoleUrl,
   getOpsToken,
@@ -34,6 +36,7 @@ import {
   dedupedQueueSummaryTotals,
   supportedQueueNamesFromSummary,
 } from '../utils/celeryRuntime'
+import { opsHostEnvFromConfigProfile } from '../utils/opsHostEnvPill'
 
 export interface CeleryControlPageProps {
   embeddedInSettings?: boolean
@@ -297,6 +300,8 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   const [scaleBusy, setScaleBusy] = useState(false)
   const [scaleMsg, setScaleMsg] = useState<{ text: string; isErr: boolean }>({ text: '', isErr: false })
   const [snapshotRefreshBusy, setSnapshotRefreshBusy] = useState(false)
+  /** Ops GET /health — Dev/Prod label for workers and systemd instances on this Ops host. */
+  const [opsConfigProfile, setOpsConfigProfile] = useState<string | null>(null)
 
   // Broker control
   const [extBroker, setExtBroker] = useState<ExtendedBrokerStatus | null>(null)
@@ -382,6 +387,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             fetchWorkerInstances().catch(() => ({ ok: false, instances: [] as SystemdInstance[], count: 0 })),
             fetchBrokerStatusExtended().catch(() => null),
             fetchWorkerProfiles().catch(() => ({ ok: false, profiles: [] as WorkerProfileInfo[], count: 0 })),
+            fetchOpsHealth().catch(() => null),
           ])
           const qRes =
             settled[0].status === 'fulfilled'
@@ -396,6 +402,12 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             settled[3].status === 'fulfilled'
               ? settled[3].value
               : { ok: false, profiles: [] as WorkerProfileInfo[], count: 0 }
+          const healthRes = settled[4].status === 'fulfilled' ? settled[4].value : null
+          if (healthRes && typeof healthRes.config_profile === 'string' && healthRes.config_profile.trim()) {
+            setOpsConfigProfile(healthRes.config_profile.trim())
+          } else if (healthRes) {
+            setOpsConfigProfile(null)
+          }
 
           if (qRes.ok) {
             setQueueSummary(qRes.queues)
@@ -629,6 +641,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
   )
   const queueSummaryDeduped =
     queueSummary.length > 0 ? dedupedQueueSummaryTotals(queueSummary) : null
+  const opsHostEnvPill = useMemo(() => opsHostEnvFromConfigProfile(opsConfigProfile), [opsConfigProfile])
+  const opsHostEnvPillTitle = useMemo(() => {
+    const raw = opsConfigProfile?.trim() || 'unknown'
+    return `Stack for this Ops host (${raw} from GET /ops/health config_profile). Same label on every row: workers and units are managed by this Ops instance.`
+  }, [opsConfigProfile])
   const runtimeCeleryStatusText =
     runtimeCeleryLamp === 'green'
       ? 'All supported queues covered'
@@ -799,7 +816,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
           <section className="replay-section dashboard-section dashboard-snapshot" aria-labelledby="dashboard-snapshot-head">
             <h3 id="dashboard-snapshot-head" className="page-title-with-tooltip">
               Runtime Snapshot
-              <InfoTooltip text="Broker from Redis; workers from Celery inspect (who responds on the broker). Worker Instances below lists OS processes — not the same data source." />
+              <InfoTooltip text="Broker from Redis; workers from Celery inspect (who responds on the broker). Worker Instances below lists OS processes — not the same data source. Dev/Prod chip on each worker card is Ops config_profile (GET /ops/health) for this control plane." />
             </h3>
             <div className="dashboard-snapshot-celery-lamp-row" role="status">
               <span className={`title-inline-lamp lamp-icon ${runtimeCeleryLamp}`} aria-hidden>●</span>
@@ -894,6 +911,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                     >
                       <div className="dashboard-worker-header">
                         <span className={`title-inline-lamp lamp-icon ${lamp}`} aria-hidden>●</span>
+                        <OpsHostEnvPillBadge
+                          pill={opsHostEnvPill}
+                          className="dashboard-celery-env-pill"
+                          title={opsHostEnvPillTitle}
+                        />
                         <span className="dashboard-worker-id" title={w.worker_id}>{w.worker_id}</span>
                         <span className={`dashboard-worker-status dashboard-worker-status--${lamp}`}>
                           {workerStatusLabel(w.status)}
@@ -1011,7 +1033,7 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
             <section className="replay-section dashboard-section dashboard-scaling" aria-labelledby="dashboard-scale-head">
               <h3 id="dashboard-scale-head" className="page-title-with-tooltip">
                 Worker Instances
-                <InfoTooltip text="Select a worker type and click Add — the system assigns a unique instance ID automatically." />
+                <InfoTooltip text="Select a worker type and click Add — the system assigns a unique instance ID automatically. Dev/Prod chip on each row reflects Ops config_profile (GET /ops/health) for this host." />
               </h3>
               {scaleMsg.text && (
                 <span className={`settings-page-msg ${scaleMsg.isErr ? 'msg-error' : 'msg-ok'}`}>{scaleMsg.text}</span>
@@ -1021,6 +1043,11 @@ export function CeleryControlPage({ embeddedInSettings, celeryLamp = 'none' }: C
                   {instances.map(inst => (
                     <div key={inst.unit} className="dashboard-instance-row">
                       <span className={`dashboard-instance-lamp ${inst.active === 'active' ? 'green' : 'red'}`}>●</span>
+                      <OpsHostEnvPillBadge
+                        pill={opsHostEnvPill}
+                        className="dashboard-celery-env-pill"
+                        title={opsHostEnvPillTitle}
+                      />
                       <span className="dashboard-instance-unit">{inst.unit}</span>
                       <span className="dashboard-instance-sub">{inst.sub}</span>
                       <button

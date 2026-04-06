@@ -31,8 +31,10 @@ def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
         return ("run_massive_ws.py", "massive-ws.log")
     if "ib-operator" in stem or stem == "bifrost-ib-operator":
         return ("run_ib_operator.py", "ib-operator.log")
+    if "ib-ingestor" in stem or stem == "bifrost-ib-ingestor":
+        return ("run_ib_ingestor.py", "ib-ingestor.log")
     if "ib-market-ingest" in stem or stem == "bifrost-ib-market-ingest":
-        return ("run_ib_market_ingest.py", "ib-market-ingest.log")
+        return ("run_ib_ingestor.py", "ib-ingestor.log")
     return None
 
 
@@ -254,7 +256,7 @@ class SubprocessLocalExecutor:
     ``pgrep`` + ``SIGTERM`` (same idea as ``run_celery.py`` duplicate kill).
 
     Market ingest units (``bifrost-massive-ws``, ``bifrost-ib-operator``,
-    ``bifrost-ib-market-ingest``) start with ``scripts/run_*.py`` and the optional
+    ``bifrost-ib-ingestor``) start with ``scripts/run_*.py`` and the optional
     resolved YAML path (``--config`` or positional for gateway).
     """
 
@@ -440,6 +442,8 @@ class SubprocessLocalExecutor:
 
     def _ingest_ops_pid_stem(self, unit: str) -> Optional[str]:
         u = unit.replace(".service", "").strip()
+        if "ib-ingestor" in u:
+            return "ib-ingestor"
         if "ib-market-ingest" in u:
             return "ib-market-ingest"
         if "ib-operator" in u:

@@ -37,8 +37,8 @@ def test_host_secondary_blocks():
     assert eff["client_id_listener"] == 101
     assert eff["client_id_operator"] == 120
     assert eff["client_id_worker_market"] == 140
-    assert eff["client_id_ib_market_ingest"] == 150
-    assert eff["ib_client_id_ib_market_ingest"] == 150
+    assert eff["client_id_ib_ingestor"] == 150
+    assert eff["ib_client_id_ib_ingestor"] == 150
     assert eff["port_market_data"] == eff["port"]
     assert eff["ib_port_market_data"] == eff["ib_port"]
     assert eff["ib2_host"] == "192.168.10.32"
@@ -47,7 +47,7 @@ def test_host_secondary_blocks():
 
 
 def test_host_legacy_ib_market_ingest_yaml_key():
-    """YAML key `ib_market_ingest` under ib.host.client_id still maps to client_id_ib_market_ingest."""
+    """YAML key `ib_market_ingest` under ib.host.client_id still maps to client_id_ib_ingestor."""
     cfg = {
         "ib": {
             "host": {
@@ -64,8 +64,8 @@ def test_host_legacy_ib_market_ingest_yaml_key():
         }
     }
     eff = get_effective_ib_config(cfg)
-    assert eff["client_id_ib_market_ingest"] == 155
-    assert eff["ib_client_id_ib_market_ingest"] == 155
+    assert eff["client_id_ib_ingestor"] == 155
+    assert eff["ib_client_id_ib_ingestor"] == 155
 
 
 def test_secondary_legacy_account_yaml_key():
@@ -105,7 +105,7 @@ def test_omit_secondary():
     }
     eff = get_effective_ib_config(cfg)
     assert eff["ib2_host"] is None
-    assert eff["client_id_ib_market_ingest"] == 150
+    assert eff["client_id_ib_ingestor"] == 150
 
 
 def test_missing_ib_raises():

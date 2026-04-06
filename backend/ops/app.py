@@ -38,7 +38,7 @@ DEFAULT_ALLOWED_UNITS = [
     # Market ingest (WS Connector); required for systemctl_is_active pgrep + whitelist on subprocess Mac.
     "bifrost-massive-ws",
     "bifrost-ib-operator",
-    "bifrost-ib-market-ingest",
+    "bifrost-ib-ingestor",
 ]
 
 

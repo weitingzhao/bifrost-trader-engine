@@ -274,7 +274,7 @@ export async function controlBroker(action: BrokerAction): Promise<{
   return parseJsonResponse(r)
 }
 
-// ── WS Connector / market ingest services (Ops API; Settings → WS Connector) ─
+// ── Socket / market ingest services (Ops API; Settings → Socket) ─
 
 /** Market ingest only (includes ``reset`` for IB client release + restart). */
 export type MarketIngestAction = 'start' | 'stop' | 'restart' | 'reset'

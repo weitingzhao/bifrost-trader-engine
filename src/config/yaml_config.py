@@ -159,7 +159,7 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
 
     host = str(h.get("ip") or "127.0.0.1").strip()
     ptp = str(h.get("port_type") or "tws_paper").strip().lower()
-    # Optional: market data / IB market ingest use this port (host IB only). Empty = same as port_type.
+    # Optional: market data / IB ingestor use this port (host IB only). Empty = same as port_type.
     ptp_md = str(h.get("port_type_market_data") or "").strip().lower()
     ib2_h = str(s.get("ip") or "").strip()
     ib2_pt = str(s.get("port_type") or "tws_paper").strip().lower()
@@ -176,8 +176,8 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
         # Host IB Operator (cmd RPC): YAML key `operator`; legacy `account` accepted for migration.
         "client_id_operator": int(hc.get("operator") or hc.get("account") or 100),
         "client_id_worker_market": int(hc.get("worker_market") or 500),
-        # IB Market Ingest (run_ib_market_ingest.py): YAML `ingestor`; legacy `ib_market_ingest` accepted.
-        "client_id_ib_market_ingest": int(hc.get("ingestor") or hc.get("ib_market_ingest") or 150),
+        # IB ingestor (run_ib_ingestor.py): YAML `ingestor`; legacy `ib_market_ingest` accepted.
+        "client_id_ib_ingestor": int(hc.get("ingestor") or hc.get("ib_market_ingest") or 150),
         "ib2_client_id_listener": int(sc.get("listener") or 3),
         # Secondary IB Operator (same role as host operator); legacy YAML key `account` accepted.
         "ib2_client_id_operator": int(sc.get("operator") or sc.get("account") or 102),
@@ -205,7 +205,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
     Returns a dict with normalised keys consumed by daemon, server, and celery:
       host, port_type, port, connect_timeout,
       client_id_daemon, client_id_listener, client_id_operator, client_id_worker_market,
-      client_id_ib_market_ingest,
+      client_id_ib_ingestor,
       ib2_host, ib2_port_type, ib2_port, ib2_client_id_listener, ib2_client_id_operator.
     Also includes the ``ib_*`` prefixed aliases expected by the API / frontend (``ib_client_id_daemon`` etc.).
     """
@@ -232,7 +232,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
     cid_l = int(ib.get("client_id_listener") or 2)
     cid_op = int(ib.get("client_id_operator") or 100)
     cid_w = int(ib.get("client_id_worker_market") or 500)
-    cid_mi = int(ib.get("client_id_ib_market_ingest") or 150)
+    cid_mi = int(ib.get("client_id_ib_ingestor") or 150)
 
     out: Dict[str, Any] = {
         "host": host,
@@ -245,7 +245,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         "client_id_listener": cid_l,
         "client_id_operator": cid_op,
         "client_id_worker_market": cid_w,
-        "client_id_ib_market_ingest": cid_mi,
+        "client_id_ib_ingestor": cid_mi,
         # API / frontend aliases (ib_* prefix)
         "ib_host": host,
         "ib_port_type": port_type,
@@ -256,7 +256,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         "ib_client_id_listener": cid_l,
         "ib_client_id_operator": cid_op,
         "ib_client_id_worker_market": cid_w,
-        "ib_client_id_ib_market_ingest": cid_mi,
+        "ib_client_id_ib_ingestor": cid_mi,
     }
 
     # Second IB

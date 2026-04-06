@@ -18,9 +18,9 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
         "redis_meta_key": "ib:operator:meta:health",
     },
     {
-        "id": "ib_market",
-        "label": "IB market ingest",
-        "systemd_unit": "bifrost-ib-market-ingest.service",
+        "id": "ib_ingestor",
+        "label": "IB ingestor",
+        "systemd_unit": "bifrost-ib-ingestor.service",
         "redis_meta_key": "ib:ingester:meta:health",
     },
 ]
@@ -42,10 +42,15 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
         meta = str(row.get("redis_meta_key") or "").strip()
         if not sid or not unit:
             continue
+        if sid == "ib_market":
+            sid = "ib_ingestor"
+        norm_unit = unit if unit.endswith(".service") else f"{unit}.service"
+        if norm_unit == "bifrost-ib-market-ingest.service":
+            norm_unit = "bifrost-ib-ingestor.service"
         out.append({
             "id": sid,
             "label": label or sid,
-            "systemd_unit": unit if unit.endswith(".service") else f"{unit}.service",
+            "systemd_unit": norm_unit,
             "redis_meta_key": meta,
         })
     return out if out else list(DEFAULT_MARKET_INGEST_SERVICES)
@@ -53,6 +58,8 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
 
 def market_ingest_service_by_id(config: dict, service_id: str) -> Dict[str, str] | None:
     sid = (service_id or "").strip()
+    if sid == "ib_market":
+        sid = "ib_ingestor"
     for row in market_ingest_services_from_config(config):
         if row["id"] == sid:
             return row

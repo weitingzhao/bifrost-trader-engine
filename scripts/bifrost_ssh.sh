@@ -33,16 +33,23 @@ SYNC_PROD_CONFIG="${DEPLOY_SYNC_PROD_CONFIG:-0}"
 RESTART_ALL=0
 ACTION=""
 DO_STATUS=0
-# When 1, systemctl targets full stack: all HTTP APIs + celery + engine + bifrost-agent.
+# When 1, systemctl targets full stack: all HTTP APIs + engine + bifrost-agent (Celery: use Dashboard / Ops UI).
 RESTART_ALL_STACK=0
 # When 1, systemctl targets all FastAPI units only (Monitor + domain APIs).
 RESTART_ALL_APIS=0
 # Ordered: Monitor + domain backends (see ARCHITECTURE §4.0).
 BIFROST_HTTP_UNITS=(bifrost-server bifrost-massive bifrost-docs bifrost-ops bifrost-trading bifrost-strategy bifrost-portfolio bifrost-market)
-# Full prod stack (same order as historical restarts, plus new API units before agent).
-BIFROST_FULL_STACK_UNITS=(bifrost-server bifrost-celery bifrost-engine bifrost-massive bifrost-docs bifrost-ops bifrost-trading bifrost-strategy bifrost-portfolio bifrost-market bifrost-agent)
-# TUI status banner row order (pseudo-unit flower last).
-BIFROST_STATUS_ROWS=(bifrost-server bifrost-engine bifrost-celery bifrost-massive bifrost-docs bifrost-ops bifrost-trading bifrost-strategy bifrost-portfolio bifrost-market bifrost-agent flower)
+# Full prod stack (Celery worker units omitted — control via Ops / Dashboard).
+BIFROST_FULL_STACK_UNITS=(bifrost-server bifrost-engine bifrost-massive bifrost-docs bifrost-ops bifrost-trading bifrost-strategy bifrost-portfolio bifrost-market bifrost-agent)
+# TUI status banner row order (no bifrost-celery — use Ops UI).
+BIFROST_STATUS_ROWS=(bifrost-server bifrost-engine bifrost-massive bifrost-docs bifrost-ops bifrost-trading bifrost-strategy bifrost-portfolio bifrost-market bifrost-agent)
+# Remote --remote-services-status / menu (p): read-only scan (includes bifrost-celery for troubleshooting; not restarted by this script).
+BIFROST_REMOTE_SCAN_UNITS=(
+  bifrost-server bifrost-engine bifrost-celery
+  bifrost-massive bifrost-docs bifrost-ops bifrost-trading bifrost-strategy bifrost-portfolio bifrost-market
+  bifrost-agent
+  bifrost-massive-ws bifrost-ib-ingestor bifrost-ib-operator
+)
 declare -a RESTART_UNITS=()
 
 # Interactive full-screen TUI: menu on top, last N lines of command output below.
@@ -86,7 +93,6 @@ _bifrost_unit_display_label() {
   case "$1" in
     bifrost-server) printf '%s' 'Server' ;;
     bifrost-engine) printf '%s' 'Engine' ;;
-    bifrost-celery) printf '%s' 'Celery' ;;
     bifrost-massive) printf '%s' 'Research' ;;
     bifrost-docs) printf '%s' 'Docs' ;;
     bifrost-ops) printf '%s' 'Ops' ;;
@@ -95,19 +101,13 @@ _bifrost_unit_display_label() {
     bifrost-portfolio) printf '%s' 'Portfolio' ;;
     bifrost-market) printf '%s' 'Market' ;;
     bifrost-agent) printf '%s' 'Agent' ;;
-    flower) printf '%s' 'Flower' ;;
     *) printf '%s' "$1" ;;
   esac
 }
 
-# Space-separated bifrost-*.service names for status refresh (banner order; no flower).
+# Space-separated bifrost-*.service names for status refresh (banner order).
 _bifrost_status_systemd_units_space() {
-  local u out=""
-  for u in "${BIFROST_STATUS_ROWS[@]}"; do
-    [[ "${u}" == flower ]] && continue
-    out="${out}${out:+ }${u}"
-  done
-  printf '%s' "$out"
+  printf '%s' "${BIFROST_STATUS_ROWS[*]}"
 }
 
 # Color one log line (remote command output) by keyword heuristics.
@@ -175,34 +175,16 @@ EOF
   fi
 }
 
-# One line for interactive banner: flower: RUNNING … | flower: NOT RUNNING (no sudo; pgrep on remote).
-_bifrost_remote_print_flower_status() {
-  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
-  local _port="${FLOWER_PORT:-5555}"
-  ssh_remote "${REMOTE}" \
-    FLOWER_PORT="${_port}" \
-    DEPLOY_HOST="${DEPLOY_HOST}" \
-    bash -s <<'REMOTE_FLOWER_LINE_EOF'
-set -euo pipefail
-if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
-  pid=$(pgrep -f 'scripts/run_flower\\.py' | head -n 1)
-  echo "flower: RUNNING (PID=${pid} · http://${DEPLOY_HOST}:${FLOWER_PORT}/)"
-else
-  echo "flower: NOT RUNNING"
-fi
-REMOTE_FLOWER_LINE_EOF
-}
-
-# Paint Server / Engine / Celery / Flower rows under the banner (fixed order). Uses BIFROST_INTERACTIVE_STATUS_*.
+# Paint Server / Engine / … rows under the banner (fixed order). Uses BIFROST_INTERACTIVE_STATUS_*.
 _interactive_paint_remote_status_block() {
   local u label line rest
   if [[ -z "${BIFROST_INTERACTIVE_STATUS_RAW:-}" ]]; then
-    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads systemd units + Flower from ${DEPLOY_HOST}; see Quick ${C_BOLD}a${C_DIM} = restart all HTTP APIs.)${C_RESET}"
+    echo "${C_DIM}  (Menu ${C_GREEN}3${C_DIM} loads systemd units from ${DEPLOY_HOST}; see Quick ${C_BOLD}a${C_DIM} = restart all HTTP APIs.)${C_RESET}"
     return 0
   fi
   echo "${C_BLUE}${C_BOLD}  Units on ${DEPLOY_HOST}${C_RESET} ${C_DIM}· refreshed ${BIFROST_INTERACTIVE_STATUS_AT:-?}${C_RESET}"
   # sudo may prefix stderr merged into capture (2>&1); lines may look like "[sudo] … bifrost-server: RUNNING …"
-  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|celery|massive|docs|ops|trading|strategy|portfolio|market|agent):|flower:'; then
+  if ! echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | grep -qE 'bifrost-(server|engine|massive|docs|ops|trading|strategy|portfolio|market|agent):'; then
     echo "${C_YELLOW}  $(echo "${BIFROST_INTERACTIVE_STATUS_RAW}" | head -n 1)${C_RESET}"
   fi
   for u in "${BIFROST_STATUS_ROWS[@]}"; do
@@ -228,15 +210,16 @@ _interactive_paint_remote_status_block() {
 
 _interactive_paint_main_menu() {
   echo "${C_BLUE}${C_BOLD}--- Main menu ---${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} one unit or groups ${C_DIM}(1–3 core, 4=all three, 5 Research, 6 Docs, 7 Ops, 8=full stack 11u+Agent, 9=Agent; ${C_BOLD}apis restart${C_DIM} / ${C_BOLD}h3${C_DIM} = all HTTP APIs; ${C_BOLD}83${C_DIM} = full stack+restart)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(1–9 as before; ${C_BOLD}a${C_DIM} = deploy + restart ${C_BOLD}all HTTP APIs${C_RESET}${C_DIM} 8 units; ${C_BOLD}R${C_DIM} on digits = restart after deploy)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}(all bifrost units + Flower, summary above)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}1)${C_RESET} ${C_BOLD}systemctl:${C_RESET} one unit or groups ${C_DIM}(1–2 Server/Engine, 3=both, 4 Research … 7=full stack 10u+Agent, 8=Agent; ${C_BOLD}apis / h3${C_DIM} = all HTTP APIs; ${C_BOLD}73${C_DIM} = full stack+restart)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}2)${C_RESET} ${C_BOLD}Quick:${C_RESET} Deploy ${C_DIM}(1–8; ${C_BOLD}a${C_DIM} = deploy + restart ${C_BOLD}all HTTP APIs${C_RESET}${C_DIM} 8 units; ${C_BOLD}R${C_DIM} on digits = restart after deploy)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}3)${C_RESET} ${C_BOLD}Status:${C_RESET} refresh ${C_DIM}(all bifrost units, summary above)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}4)${C_RESET} Reconnect SSH master ${C_DIM}(password again)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}5)${C_RESET} Clear stored sudo password"
   echo "  ${C_GREEN}${C_BOLD}6)${C_RESET} ${C_BOLD}DB: Refresh schema${C_RESET} ${C_DIM}(choose Dev=local --dev or Prod=remote --prod; pg_ddl / script changes — stays in this menu)${C_RESET}"
   echo "  ${C_GREEN}${C_BOLD}7)${C_RESET} ${C_BOLD}DB: Release locks${C_RESET} ${C_DIM}(choose Dev=local or Prod=remote; dry-run then optional terminate)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}8)${C_RESET} ${C_BOLD}Flower:${C_RESET} Celery UI on ${DEPLOY_HOST} ${C_DIM}(start / stop / restart / status)${C_RESET}"
-  echo "  ${C_GREEN}${C_BOLD}9)${C_RESET} ${C_BOLD}systemd install:${C_RESET} copy ${C_DIM}deploy/systemd/*.service + *.target → /etc/systemd/system + daemon-reload${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}8)${C_RESET} ${C_BOLD}systemd install:${C_RESET} copy ${C_DIM}deploy/systemd/*.service + *.target → /etc/systemd/system + daemon-reload${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}l)${C_RESET} ${C_BOLD}Local Mac:${C_RESET} Socket ingest + Celery ${C_DIM}(pgrep + logs/.ops-ingest-*.pid on this repo)${C_RESET}"
+  echo "  ${C_GREEN}${C_BOLD}p)${C_RESET} ${C_BOLD}Remote Prod:${C_RESET} systemd scan on ${DEPLOY_HOST} ${C_DIM}(same units as deploy + worker@*)${C_RESET}"
   echo "  ${C_YELLOW}${C_BOLD}q)${C_RESET} Quit"
 }
 
@@ -286,9 +269,11 @@ Usage (from repo root):
       Interactive menu: open one SSH master (login once; kept until you quit), then run operations in a loop;
       sudo password you enter (or -p) is kept in memory for every menu action until quit or menu (5) Clear.
       Main menu stays on top; last command output is shown in the bottom 20 lines. Same flags as below.
-      Menu (3) Status refreshes all bifrost systemd units + Flower. Quick deploy: a = deploy + restart all HTTP APIs (8 units).
-      Menu (8) Flower: start, stop, restart, or status on the host (non-systemd background process).
-      Menu (9) Install systemd: register deploy/systemd/*.service and *.target (including bifrost-apis.target) via systemctl enable or cp + daemon-reload (sudo).
+      Menu (3) Status refreshes banner units (no bifrost-celery; use Ops UI). Quick deploy: a = deploy + restart all HTTP APIs (8 units).
+      Menu (8) Install systemd: register deploy/systemd/*.service and *.target (including bifrost-apis.target) via systemctl enable or cp + daemon-reload (sudo).
+      Menu (l) Local Mac: pgrep run_massive_ws / IB ingest / IB operator / run_celery + check logs/.ops-ingest-*.pid (this machine; not SSH).
+      Menu (p) Remote Prod: systemctl scan on DEPLOY_HOST (bifrost-* units + socket ingest + bifrost-celery-worker@*); use --password if systemctl needs sudo.
+      CLI: --local-mac-services | --remote-services-status
       With --password / -p (or env DEPLOY_SUDO_PASSWORD), skip the sudo password prompt; value is
       kept in memory only for this process. Warning: --password may be visible in process listings.
 
@@ -299,7 +284,6 @@ Usage (from repo root):
 
     --server | -server          systemd unit bifrost-server
     --engine | -engine          systemd unit bifrost-engine
-    --celery | -celery          systemd unit bifrost-celery
     --massive | -massive        systemd unit bifrost-massive (Research API, run_server_massive.py)
     --docs | -docs              systemd unit bifrost-docs (merged OpenAPI docs, run_server_docs.py)
     --ops | -ops                systemd unit bifrost-ops (Ops API, run_server_ops.py)
@@ -308,9 +292,9 @@ Usage (from repo root):
     --portfolio | -portfolio    systemd unit bifrost-portfolio (run_server_portfolio.py)
     --market | -market          systemd unit bifrost-market (run_server_market.py)
     --agent | -agent            systemd unit bifrost-agent (Local Control Agent for Ops executor_mode=agent)
-    --all | -all                all three core units (server, celery, engine)
+    --all | -all                core pair: bifrost-server + bifrost-engine (Celery: Dashboard / Ops UI)
     --apis | -apis              all eight HTTP API units (server, massive, docs, ops, trading, strategy, portfolio, market)
-    --all-stack | -all-stack    full stack: above eight APIs + celery + engine + bifrost-agent (11 units)
+    --all-stack | -all-stack    full stack: eight APIs + engine + bifrost-agent (10 units; no Celery unit)
 
     --stop | -stop              sudo systemctl stop …
     --start | -start            sudo systemctl start …
@@ -334,11 +318,12 @@ Usage (from repo root):
     --db-release-locks-terminate  Remote: db_release_dblock.py --prod --yes.
     --db-release-locks-terminate-dev  Local: db_release_dblock.py --dev --yes.
 
-    --flower-start                remote: start Celery Flower (run_flower.py --prod, nohup, prod config).
-                                  Binds FLOWER_ADDRESS (default 0.0.0.0) and FLOWER_PORT (default 5555).
-    --flower-stop                 remote: stop background Flower (pkill run_flower.py).
-    --flower-restart              remote: stop then start Flower (same env as --flower-start).
-    --flower-status               remote: print whether Flower is running + hint URL.
+    --local-mac-services          this machine only: pgrep + pidfiles for run_massive_ws / run_ib_ingestor /
+                                  run_ib_operator / run_celery (see Examples).
+
+    --remote-services-status      SSH to DEPLOY_HOST: systemctl is-active for bifrost HTTP stack + engine + celery + agent +
+                                  socket ingest units (massive-ws, ib-ingestor, ib-operator); list bifrost-celery-worker@*.
+                                  Optional --password if remote systemctl requires sudo.
 
     --install-systemd-units       remote: sudo cp deploy/systemd/*.service and *.target (under DEPLOY_PATH on host), including
                                   bifrost-agent.service and bifrost-apis.target, to /etc/systemd/system/ and systemctl daemon-reload. One-shot; no other flags.
@@ -356,14 +341,12 @@ Usage (from repo root):
     DEPLOY_USER   (default vision)
     DEPLOY_PATH   (default /home/vision/bifrost-trader-engine)
     DEPLOY_SUDO_PASSWORD  optional; same effect as --password (skips interactive sudo prompt)
-    FLOWER_PORT   optional; passed to remote run_flower.py (default 5555)
-    FLOWER_ADDRESS  optional; passed to remote run_flower.py (default 0.0.0.0 for --flower-start)
 
 Examples:
 
   ./scripts/bifrost_ssh.sh --deploy-only
   ./scripts/bifrost_ssh.sh -engine -restart -deploy
-  ./scripts/bifrost_ssh.sh -server -celery --stop
+  ./scripts/bifrost_ssh.sh -server --stop
   ./scripts/bifrost_ssh.sh --all --restart -deploy
   ./scripts/bifrost_ssh.sh --all-stack --restart -deploy
   ./scripts/bifrost_ssh.sh --apis --restart -deploy
@@ -380,11 +363,14 @@ Examples:
   ./scripts/bifrost_ssh.sh --db-release-locks-terminate
   ./scripts/bifrost_ssh.sh --db-release-locks-terminate-dev
 
-  ./scripts/bifrost_ssh.sh --flower-start
-  FLOWER_PORT=5556 ./scripts/bifrost_ssh.sh --flower-start
-  ./scripts/bifrost_ssh.sh --flower-status
-  ./scripts/bifrost_ssh.sh --flower-restart
-  ./scripts/bifrost_ssh.sh --flower-stop
+  ./scripts/bifrost_ssh.sh --local-mac-services
+      On this Mac only: from repo root, pgrep Socket ingest + Celery (same scripts as
+      Ops SubprocessLocalExecutor on macOS). Prints PID, command line, repo-path match, and
+      logs/.ops-ingest-*.pid staleness — useful when processes run but Settings UI looks empty.
+
+  ./scripts/bifrost_ssh.sh --remote-services-status
+  ./scripts/bifrost_ssh.sh -p 'SUDO' --remote-services-status
+      On DEPLOY_HOST (Linux): systemctl for full bifrost unit set + socket ingest + Celery worker instances.
 
   ./scripts/bifrost_ssh.sh --install-systemd-units
   ./scripts/bifrost_ssh.sh -p 'SUDO' --install-systemd-units
@@ -629,7 +615,7 @@ _run_pipeline() {
   elif [[ "${RESTART_ALL_STACK}" == "1" ]]; then
     RESTART_UNITS=("${BIFROST_FULL_STACK_UNITS[@]}")
   elif [[ "${RESTART_ALL}" == "1" ]]; then
-    RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine)
+    RESTART_UNITS=(bifrost-server bifrost-engine)
   fi
 
   if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
@@ -783,19 +769,19 @@ REMOTE_EOF
   return "${_ec}"
 }
 
-# Interactive: rsync + remote build; optional systemctl restart for selected unit(s). Input: 1–4, optional trailing R.
+# Interactive: rsync + remote build; optional systemctl restart for selected unit(s). Input: 1–8 or a, optional trailing R.
 _interactive_quick_deploy() {
   local _raw _norm _digit _want_r
   echo ""
   echo "${C_BLUE}${C_BOLD}--- Quick: Deploy ---${C_RESET}"
   _msg_info "Remote: rsync + venv pip + npm build (includes React SPA / Dashboard). Append R to restart systemd units after deploy."
-  echo "  ${C_GREEN}1${C_RESET} server  ${C_GREEN}2${C_RESET} engine  ${C_GREEN}3${C_RESET} celery  ${C_GREEN}4${C_RESET} all three  ${C_GREEN}5${C_RESET} research  ${C_GREEN}6${C_RESET} docs  ${C_GREEN}7${C_RESET} ops  ${C_GREEN}8${C_RESET} full stack ${C_DIM}(11 units + agent)${C_RESET}  ${C_GREEN}9${C_RESET} agent"
+  echo "  ${C_GREEN}1${C_RESET} server  ${C_GREEN}2${C_RESET} engine  ${C_GREEN}3${C_RESET} both ${C_DIM}(server+engine)${C_RESET}  ${C_GREEN}4${C_RESET} research  ${C_GREEN}5${C_RESET} docs  ${C_GREEN}6${C_RESET} ops  ${C_GREEN}7${C_RESET} full stack ${C_DIM}(10 units + agent, no Celery)${C_RESET}  ${C_GREEN}8${C_RESET} agent"
   echo "  ${C_GREEN}a${C_RESET} = deploy + restart all HTTP APIs ${C_DIM}(Monitor + 7 domain backends, 8 units)${C_RESET}"
-  echo "  Examples: ${C_DIM}4${C_RESET} = sync+build only · ${C_DIM}4R${C_RESET} = +restart server+celery+engine · ${C_DIM}a${C_RESET} = +restart 8 HTTP APIs · ${C_DIM}8R${C_RESET} = +restart full stack"
-  echo "  ${C_DIM}Tip: Dashboard SPA is in frontend/dist; bifrost-server mounts /assets at process start — use 1R or 4R after UI changes if you did not append R.${C_RESET}"
+  echo "  Examples: ${C_DIM}3${C_RESET} = sync+build only · ${C_DIM}3R${C_RESET} = +restart server+engine · ${C_DIM}a${C_RESET} = +restart 8 HTTP APIs · ${C_DIM}7R${C_RESET} = +restart full stack"
+  echo "  ${C_DIM}Tip: Dashboard SPA is in frontend/dist; bifrost-server mounts /assets at process start — use 1R or 3R after UI changes if you did not append R. Celery: use Dashboard.${C_RESET}"
   echo "  ${C_DIM}0 = cancel${C_RESET}"
   while true; do
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-9, a, optional R on digits]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-8, a, optional R on digits]${C_RESET} "
     read -r _raw
     _raw=$(echo "${_raw}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [[ -z "${_raw}" || "${_raw}" == "0" ]]; then
@@ -812,8 +798,8 @@ _interactive_quick_deploy() {
       _run_pipeline || true
       break
     fi
-    if [[ ! "${_norm}" =~ ^([1-9])(r)?$ ]]; then
-      _msg_warn "Invalid — enter 1–9 or a, optionally R after a digit (e.g. 2R, 8R). Or 0 to cancel."
+    if [[ ! "${_norm}" =~ ^([1-8])(r)?$ ]]; then
+      _msg_warn "Invalid — enter 1–8 or a, optionally R after a digit (e.g. 2R, 7R). Or 0 to cancel."
       continue
     fi
     _digit="${BASH_REMATCH[1]}"
@@ -824,13 +810,12 @@ _interactive_quick_deploy() {
       case "${_digit}" in
         1) _restart_add_unit bifrost-server ;;
         2) _restart_add_unit bifrost-engine ;;
-        3) _restart_add_unit bifrost-celery ;;
-        4) RESTART_ALL=1 ;;
-        5) _restart_add_unit bifrost-massive ;;
-        6) _restart_add_unit bifrost-docs ;;
-        7) _restart_add_unit bifrost-ops ;;
-        8) RESTART_ALL_STACK=1 ;;
-        9) _restart_add_unit bifrost-agent ;;
+        3) RESTART_ALL=1 ;;
+        4) _restart_add_unit bifrost-massive ;;
+        5) _restart_add_unit bifrost-docs ;;
+        6) _restart_add_unit bifrost-ops ;;
+        7) RESTART_ALL_STACK=1 ;;
+        8) _restart_add_unit bifrost-agent ;;
       esac
       echo "${C_CYAN}→ deploy + sudo systemctl restart …${C_RESET}"
     else
@@ -858,6 +843,161 @@ _local_run_python_script() {
   python "scripts/${_script}" "$@"
 }
 
+# Local (this Mac): pgrep Socket ingest + Celery — same scripts as SubprocessLocalExecutor
+# (backend/ops/services/executor_local.py). Helps debug “process running but Settings Socket/Celery empty”.
+_cli_local_mac_subprocess_check() {
+  cd "${PROJECT_ROOT}" || return 1
+  local root_lc
+  root_lc=$(echo "${PROJECT_ROOT}" | tr '[:upper:]' '[:lower:]')
+
+  echo ""
+  echo "${C_BLUE}${C_BOLD}=== Local Mac — Bifrost subprocess scan ===${C_RESET}"
+  echo "${C_DIM}Repo:${C_RESET} ${PROJECT_ROOT}"
+  echo "${C_DIM}Time:${C_RESET} $(date '+%Y-%m-%d %H:%M:%S %z')"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "${C_DIM}Host:${C_RESET} Darwin (typical: Ops ops.local_control=subprocess)"
+  else
+    echo "${C_YELLOW}Note:${C_RESET} Not macOS — prod Linux uses systemd on ${DEPLOY_HOST}; this scan is still local pgrep only."
+  fi
+  echo ""
+  echo "${C_BOLD}UI hint:${C_RESET} App Settings → Ops / Socket / Celery must target the Ops instance on ${C_DIM}this${C_RESET} machine if you expect these PIDs."
+  echo "${C_BOLD}Pidfiles:${C_RESET} ${C_DIM}logs/.ops-ingest-*.pid${C_RESET} are written when Ops starts ingest via subprocess; stale files mean UI/Ops state can disagree with pgrep."
+  echo ""
+
+  _bifrost_local_scan_script() {
+    local pattern="$1"
+    local title="$2"
+    echo "${C_CYAN}${title}${C_RESET}"
+    local pids
+    pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+    if [[ -z "${pids}" ]]; then
+      echo "  ${C_DIM}NOT RUNNING (no pgrep match for this pattern)${C_RESET}"
+      echo ""
+      return 0
+    fi
+    local pid cmd match
+    for pid in ${pids}; do
+      cmd=$(ps -p "$pid" -o command= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)
+      if [[ -z "${cmd}" ]]; then
+        echo "  PID ${pid}: ${C_YELLOW}(process ended — pgrep race)${C_RESET}"
+        continue
+      fi
+      match="other"
+      if [[ "${cmd}" == *"${PROJECT_ROOT}"* ]]; then
+        match="this_repo"
+      elif echo "${cmd}" | grep -Fqi "${root_lc}"; then
+        match="casefold"
+      fi
+      case "${match}" in
+        this_repo)
+          echo "  ${C_GREEN}RUNNING${C_RESET} PID=${pid} ${C_DIM}(command line contains this repo path)${C_RESET}"
+          ;;
+        casefold)
+          echo "  ${C_YELLOW}RUNNING${C_RESET} PID=${pid} ${C_DIM}(case-insensitive path match — confirm it is this clone)${C_RESET}"
+          ;;
+        *)
+          echo "  ${C_YELLOW}RUNNING${C_RESET} PID=${pid} ${C_DIM}(path does not match this repo — other clone or wrapper?)${C_RESET}"
+          ;;
+      esac
+      echo "    ${C_DIM}${cmd}${C_RESET}"
+    done
+    echo ""
+  }
+
+  _bifrost_local_pidfile() {
+    local rel="$1"
+    local title="$2"
+    local path="${PROJECT_ROOT}/${rel}"
+    echo "${C_CYAN}${title} ${C_DIM}(${rel})${C_RESET}"
+    if [[ ! -f "${path}" ]]; then
+      echo "  ${C_DIM}(no pidfile)${C_RESET}"
+      echo ""
+      return 0
+    fi
+    local pid
+    pid=$(tr -d ' \t\n\r' < "${path}" | head -c 32)
+    if ! [[ "${pid}" =~ ^[0-9]+$ ]]; then
+      echo "  ${C_RED}invalid pidfile${C_RESET}: ${pid:-empty}"
+      echo ""
+      return 0
+    fi
+    if kill -0 "${pid}" 2>/dev/null; then
+      local c
+      c=$(ps -p "${pid}" -o command= 2>/dev/null | sed 's/^[[:space:]]*//' || true)
+      echo "  ${C_GREEN}PID ${pid} alive${C_RESET}"
+      [[ -n "${c}" ]] && echo "    ${C_DIM}${c}${C_RESET}"
+    else
+      echo "  ${C_RED}STALE${C_RESET}: pidfile points to ${pid} (not running)"
+    fi
+    echo ""
+  }
+
+  _bifrost_local_scan_script 'scripts/run_massive_ws\.py' 'Massive WebSocket ingest (run_massive_ws.py)'
+  _bifrost_local_scan_script 'scripts/run_ib_ingestor\.py' 'IB ingestor (run_ib_ingestor.py)'
+  _bifrost_local_scan_script 'scripts/run_ib_operator\.py' 'IB operator RPC (run_ib_operator.py)'
+  _bifrost_local_scan_script 'scripts/run_celery\.py' 'Celery worker (run_celery.py)'
+
+  echo "${C_BOLD}Ops ingest pidfiles${C_RESET} ${C_DIM}(SubprocessLocalExecutor)${C_RESET}"
+  _bifrost_local_pidfile 'logs/.ops-ingest-massive-ws.pid' 'massive-ws'
+  _bifrost_local_pidfile 'logs/.ops-ingest-ib-operator.pid' 'ib-operator'
+  _bifrost_local_pidfile 'logs/.ops-ingest-ib-ingestor.pid' 'ib-ingestor'
+
+  echo "${C_DIM}--- end ---${C_RESET}"
+}
+
+# SSH to DEPLOY_HOST: systemctl scan for prod Linux (bifrost units + socket ingest + worker@*).
+_cli_remote_services_systemd_scan() {
+  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+  _bifrost_restore_session_sudo
+  local _us
+  _us=$(printf '%s ' "${BIFROST_REMOTE_SCAN_UNITS[@]}")
+  _emit_remote_scan_body() {
+    cat <<EOF
+set -euo pipefail
+export SYSTEMD_PAGER=cat
+echo "=== Bifrost systemd scan (${DEPLOY_USER}@${DEPLOY_HOST}) ==="
+echo "Repo on server (expected): ${DEPLOY_PATH}"
+echo "Time: \$(date '+%Y-%m-%d %H:%M:%S %z')"
+echo ""
+echo "--- Units (systemctl is-active; use -p/--password if you see 'not found' without sudo) ---"
+for u in ${_us}; do
+  printf '%s: ' "\$u"
+  act=\$(systemctl is-active "\$u" 2>/dev/null || true)
+  sub=\$(systemctl show "\$u" -p SubState --value 2>/dev/null || true)
+  mp=\$(systemctl show "\$u" -p MainPID --value 2>/dev/null || true)
+  if [[ "\$act" == "active" ]]; then
+    echo "RUNNING (SubState=\${sub:-?}, MainPID=\${mp:-0})"
+  elif [[ -n "\$act" ]]; then
+    echo "NOT RUNNING (ActiveState=\$act\${sub:+, SubState=\$sub})"
+  else
+    echo "NOT RUNNING (unit not found or not readable — retry with sudo, e.g. -p PASSWORD)"
+  fi
+done
+echo ""
+echo "--- bifrost-celery-worker@*.service (template instances) ---"
+if out=\$(systemctl list-units 'bifrost-celery-worker@*.service' --all --no-legend --no-pager 2>/dev/null); then
+  if [[ -z "\$(echo "\$out" | tr -d '[:space:]')" ]]; then
+    echo "  (none loaded)"
+  else
+    echo "\$out"
+  fi
+else
+  echo "  (list-units failed — check systemd version / permissions)"
+fi
+echo ""
+echo "--- end ---"
+EOF
+  }
+  if [[ -n "${SUDO_PASSWORD}" ]]; then
+    {
+      printf '%s\n' "${SUDO_PASSWORD}"
+      _emit_remote_scan_body
+    } | ssh_remote_stdin_pipe "${REMOTE}" "sudo -S -p '' bash -s"
+  else
+    _emit_remote_scan_body | ssh_remote_stdin_pipe "${REMOTE}" bash -s
+  fi
+}
+
 # Interactive: 1=Dev (local --dev) 2=Prod (remote --prod). Prints dev|prod to stdout.
 # Must print prompts to stderr: callers use _env="$(...)" and stdout is captured — only the
 # final dev|prod must go to stdout, or the user sees nothing and read blocks on a hidden prompt.
@@ -879,28 +1019,23 @@ _interactive_pick_db_env() {
   esac
 }
 
-# Interactive menu 3: systemd units + Flower (pgrep) on DEPLOY_HOST; store colored summary for banner (no sub-prompt).
+# Interactive menu 3: systemd units on DEPLOY_HOST; store summary for banner (no sub-prompt).
 _interactive_show_status() {
-  local _raw _flower _ec_sys _fec _ec
+  local _raw _ec_sys _ec
   _bifrost_restore_session_sudo
-  _msg_info "Fetching status (all bifrost units + Flower) on ${DEPLOY_HOST} …"
+  _msg_info "Fetching status (all bifrost units) on ${DEPLOY_HOST} …"
   echo ""
   set +e
   _raw="$(_bifrost_remote_print_unit_status "$(_bifrost_status_systemd_units_space)" 2>&1)"
   _ec_sys=$?
-  _flower="$(_bifrost_remote_print_flower_status 2>&1)"
-  _fec=$?
   set -e
-  _ec=0
-  [[ ${_ec_sys} -ne 0 ]] && _ec=${_ec_sys}
-  [[ ${_fec} -ne 0 ]] && _ec=${_fec}
-  BIFROST_INTERACTIVE_STATUS_RAW="${_raw}"$'\n'"${_flower}"
+  _ec=${_ec_sys}
+  BIFROST_INTERACTIVE_STATUS_RAW="${_raw}"
   BIFROST_INTERACTIVE_STATUS_AT="$(date '+%Y-%m-%d %H:%M:%S')"
   if [[ -n "${BIFROST_SSH_LAST_LOG:-}" ]]; then
     {
-      echo "--- Status refresh (${BIFROST_INTERACTIVE_STATUS_AT}) exit ${_ec} (systemd=${_ec_sys}, flower=${_fec}) ---"
+      echo "--- Status refresh (${BIFROST_INTERACTIVE_STATUS_AT}) exit ${_ec} ---"
       echo "${_raw}"
-      echo "${_flower}"
     } >"${BIFROST_SSH_LAST_LOG}"
   fi
   _msg_info "Status refresh finished (exit ${_ec}). Redrawing menu…"
@@ -1085,96 +1220,6 @@ _cli_local_db_release_locks() {
   _local_run_python_script db_release_dblock.py --dev ${extra}
 }
 
-# Remote: Celery Flower (scripts/run_flower.py --prod). Does not require sudo.
-# Use ssh_remote_stdin_pipe (-T), not ssh_remote_tty (-tt): heredoc-fed bash -s must not get a PTY
-# or the remote can drop into an interactive shell and hang when stdout is piped to tee (interactive menu).
-_cli_remote_flower_start() {
-  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
-  local _port="${FLOWER_PORT:-5555}"
-  local _addr="${FLOWER_ADDRESS:-0.0.0.0}"
-  _bifrost_restore_session_sudo
-  ssh_remote_stdin_pipe "${REMOTE}" \
-    DEPLOY_PATH="${DEPLOY_PATH}" \
-    FLOWER_PORT="${_port}" \
-    FLOWER_ADDRESS="${_addr}" \
-    bash -s <<'REMOTE_FLOWER_START_EOF'
-set -euo pipefail
-cd "$DEPLOY_PATH"
-if [[ ! -f .venv/bin/activate ]]; then
-  echo "ERROR: .venv missing on remote. Deploy first: ./scripts/bifrost_ssh.sh --deploy-only" >&2
-  exit 1
-fi
-# shellcheck source=/dev/null
-source .venv/bin/activate
-if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
-  echo "Flower already running (scripts/run_flower.py). Stop with: ./scripts/bifrost_ssh.sh --flower-stop"
-  exit 0
-fi
-export FLOWER_PORT="${FLOWER_PORT}"
-export FLOWER_ADDRESS="${FLOWER_ADDRESS}"
-export BIFROST_CONFIG=config/config.prod.yaml
-nohup python scripts/run_flower.py --prod >>/tmp/bifrost-flower.log 2>&1 &
-echo $! >/tmp/bifrost-flower.pid
-sleep 1
-if ps -p "$(cat /tmp/bifrost-flower.pid)" >/dev/null 2>&1; then
-  echo "Flower started PID $(cat /tmp/bifrost-flower.pid); log: /tmp/bifrost-flower.log"
-else
-  echo "WARN: process exited; check /tmp/bifrost-flower.log" >&2
-  tail -n 20 /tmp/bifrost-flower.log 2>/dev/null || true
-  exit 1
-fi
-REMOTE_FLOWER_START_EOF
-  local _ec=$?
-  echo ""
-  _msg_info "Open in browser: ${C_BOLD}http://${DEPLOY_HOST}:${_port}/${C_RESET}"
-  return "${_ec}"
-}
-
-_cli_remote_flower_stop() {
-  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
-  _bifrost_restore_session_sudo
-  ssh_remote_stdin_pipe "${REMOTE}" bash -s <<'REMOTE_FLOWER_STOP_EOF'
-set -euo pipefail
-if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
-  pkill -f "scripts/run_flower\\.py" || true
-  echo "Stopped Flower (scripts/run_flower.py)."
-else
-  echo "Flower not running."
-fi
-rm -f /tmp/bifrost-flower.pid
-REMOTE_FLOWER_STOP_EOF
-}
-
-# Remote: stop then start Flower (same FLOWER_PORT / FLOWER_ADDRESS as --flower-start).
-_cli_remote_flower_restart() {
-  local _es _ec
-  _cli_remote_flower_stop
-  _es=$?
-  sleep 1
-  _cli_remote_flower_start
-  _ec=$?
-  if [[ ${_es} -ne 0 ]] || [[ ${_ec} -ne 0 ]]; then
-    return 1
-  fi
-  return 0
-}
-
-_cli_remote_flower_status() {
-  local REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
-  local _port="${FLOWER_PORT:-5555}"
-  _bifrost_restore_session_sudo
-  ssh_remote_stdin_pipe "${REMOTE}" FLOWER_PORT="${_port}" DEPLOY_HOST="${DEPLOY_HOST}" bash -s <<'REMOTE_FLOWER_STATUS_EOF'
-set -euo pipefail
-if pgrep -f "scripts/run_flower\\.py" >/dev/null 2>&1; then
-  echo "Flower: RUNNING (PID $(pgrep -f 'scripts/run_flower\\.py' | head -n 1))"
-  echo "Log: /tmp/bifrost-flower.log"
-  echo "URL (LAN): http://${DEPLOY_HOST}:${FLOWER_PORT}/"
-else
-  echo "Flower: NOT RUNNING"
-fi
-REMOTE_FLOWER_STATUS_EOF
-}
-
 # Remote: register deploy/systemd/*.service and *.target with systemd and daemon-reload (requires sudo).
 # - Prefer: systemctl enable /absolute/path/foo.service (symlink under /etc/systemd/system; works if repo path is stable).
 # - Fallback: cp to /etc/systemd/system/.
@@ -1277,7 +1322,7 @@ REMOTE_INSTALL_BODY
   return "${_ec}"
 }
 
-# Interactive menu 9: install systemd unit files from synced repo.
+# Interactive menu 8: install systemd unit files from synced repo.
 _interactive_install_systemd_units() {
   local _ec
   _bifrost_restore_session_sudo
@@ -1295,84 +1340,17 @@ _interactive_install_systemd_units() {
   return 0
 }
 
-# Interactive menu 8: Flower start / stop / restart / status on DEPLOY_HOST.
-_interactive_flower_menu() {
-  local _pick _ec
-  echo ""
-  echo "${C_BLUE}${C_BOLD}--- Flower (Celery monitoring UI) ---${C_RESET}"
-  echo "  ${C_DIM}1)${C_RESET} Start ${C_DIM}(nohup, prod config)${C_RESET}"
-  echo "  ${C_DIM}2)${C_RESET} Stop"
-  echo "  ${C_DIM}3)${C_RESET} Restart ${C_DIM}(stop, wait, start)${C_RESET}"
-  echo "  ${C_DIM}4)${C_RESET} Status"
-  echo "  ${C_DIM}0 = cancel${C_RESET}"
-  while true; do
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[0-4]${C_RESET} "
-    read -r _pick
-    _pick=$(echo "${_pick}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    case "${_pick}" in
-      0|'')
-        _msg_info "Cancelled."
-        return 0
-        ;;
-      1)
-        _bifrost_restore_session_sudo
-        _msg_info "Remote: start Flower …"
-        echo ""
-        set +e
-        _cli_remote_flower_start 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
-        _ec=${PIPESTATUS[0]}
-        set -e
-        ;;
-      2)
-        _bifrost_restore_session_sudo
-        _msg_info "Remote: stop Flower …"
-        echo ""
-        set +e
-        _cli_remote_flower_stop 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
-        _ec=${PIPESTATUS[0]}
-        set -e
-        ;;
-      3)
-        _bifrost_restore_session_sudo
-        _msg_info "Remote: restart Flower …"
-        echo ""
-        set +e
-        _cli_remote_flower_restart 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
-        _ec=${PIPESTATUS[0]}
-        set -e
-        ;;
-      4)
-        _bifrost_restore_session_sudo
-        _msg_info "Remote: Flower status …"
-        echo ""
-        set +e
-        _cli_remote_flower_status 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
-        _ec=${PIPESTATUS[0]}
-        set -e
-        ;;
-      *) _msg_warn "Invalid — enter 0–4."; continue ;;
-    esac
-    {
-      echo ""
-      echo "--- exit code: ${_ec} ---"
-    } >>"${BIFROST_SSH_LAST_LOG}"
-    # Next iteration of interactive_mode runs _interactive_paint_full → main menu.
-    return 0
-  done
-}
-
-# Map token -> bifrost unit name, or ALL for all three units (empty if unknown).
+# Map token -> bifrost unit name, or ALL for server+engine (empty if unknown). Celery: Dashboard only.
 _interactive_map_unit_token() {
   case "$1" in
     1|server|bifrost-server) echo bifrost-server ;;
     2|engine|e|bifrost-engine) echo bifrost-engine ;;
-    3|celery|c|bifrost-celery) echo bifrost-celery ;;
-    4|all|all-three|all3|core) echo ALL ;;
-    5|massive|m|research|bifrost-massive) echo bifrost-massive ;;
-    6|docs|doc|bifrost-docs) echo bifrost-docs ;;
-    7|ops|o|bifrost-ops) echo bifrost-ops ;;
-    8|all-stack|full|everything|all6|all7) echo ALL_STACK ;;
-    9|agent|bifrost-agent) echo bifrost-agent ;;
+    3|both|all|all-three|all3|core|pair) echo ALL ;;
+    4|massive|m|research|bifrost-massive) echo bifrost-massive ;;
+    5|docs|doc|bifrost-docs) echo bifrost-docs ;;
+    6|ops|o|bifrost-ops) echo bifrost-ops ;;
+    7|all-stack|full|everything) echo ALL_STACK ;;
+    8|agent|bifrost-agent) echo bifrost-agent ;;
     trading|t|bifrost-trading) echo bifrost-trading ;;
     strategy|bifrost-strategy) echo bifrost-strategy ;;
     portfolio|bifrost-portfolio) echo bifrost-portfolio ;;
@@ -1398,10 +1376,10 @@ _interactive_systemctl_one_service() {
   echo ""
   echo "${C_BLUE}${C_BOLD}--- systemctl (one unit or all) ---${C_RESET}"
   _msg_info "Enter unit + action on one line (examples below)."
-  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1${C_RESET} server  ${C_DIM}2${C_RESET} engine  ${C_DIM}3${C_RESET} celery  ${C_DIM}4${C_RESET} all three  ${C_DIM}5${C_RESET} research  ${C_DIM}6${C_RESET} docs  ${C_DIM}7${C_RESET} ops  ${C_DIM}8${C_RESET} full stack ${C_DIM}(11u)${C_RESET}  ${C_DIM}9${C_RESET} agent"
+  echo "  ${C_GREEN}Units:${C_RESET}  ${C_DIM}1${C_RESET} server  ${C_DIM}2${C_RESET} engine  ${C_DIM}3${C_RESET} both ${C_DIM}(server+engine)${C_RESET}  ${C_DIM}4${C_RESET} research  ${C_DIM}5${C_RESET} docs  ${C_DIM}6${C_RESET} ops  ${C_DIM}7${C_RESET} full stack ${C_DIM}(10u)${C_RESET}  ${C_DIM}8${C_RESET} agent"
   echo "  ${C_GREEN}Words:${C_RESET} ${C_DIM}apis${C_RESET} = all 8 HTTP APIs · ${C_DIM}trading / strategy / portfolio / market${C_RESET} = single domain unit"
   echo "  ${C_GREEN}Action:${C_RESET} ${C_DIM}1${C_RESET}=start ${C_DIM}2${C_RESET}=stop ${C_DIM}3${C_RESET}=restart"
-  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_DIM}unit ${C_BOLD}1–9${C_DIM} + action ${C_BOLD}1–3${C_RESET} · ${C_BOLD}h1${C_DIM}-${C_BOLD}h3${C_RESET} = HTTP APIs + start/stop/restart (e.g. ${C_BOLD}h3${C_RESET} = restart all HTTP)"
+  echo "  ${C_CYAN}Shorthand:${C_RESET} ${C_DIM}unit ${C_BOLD}1–8${C_DIM} + action ${C_BOLD}1–3${C_RESET} · ${C_BOLD}h1${C_DIM}-${C_BOLD}h3${C_RESET} = HTTP APIs + start/stop/restart (e.g. ${C_BOLD}h3${C_RESET} = restart all HTTP)"
   echo "  ${C_DIM}0 or empty = cancel${C_RESET}"
   while true; do
     echo -n "${C_GREEN}${C_BOLD}>${C_RESET} "
@@ -1428,20 +1406,20 @@ _interactive_systemctl_one_service() {
       break
     fi
 
-    # Shorthand: first digit = unit 1–9 (4=three, 8=all-stack, 9=agent), second = action 1–3
+    # Shorthand: first digit = unit 1–8 (3=server+engine, 7=all-stack, 8=agent), second = action 1–3
     _digits=$(echo "${_line}" | tr -cd '0-9')
     if [[ ${#_digits} -ge 2 ]]; then
       _d1="${_digits:0:1}"
       _d2="${_digits:1:1}"
-      if [[ "${_d1}" == [123456789] && "${_d2}" == [123] ]]; then
+      if [[ "${_d1}" == [12345678] && "${_d2}" == [123] ]]; then
         _u="$(_interactive_map_unit_token "${_d1}")"
         _a="$(_interactive_map_action_token "${_d2}")"
         if [[ -z "${_u}" || -z "${_a}" ]]; then
-          _msg_warn "Invalid shorthand — use unit 1–9 and action 1–3 (e.g. 43, 83, 93). Or 0 to cancel."
+          _msg_warn "Invalid shorthand — use unit 1–8 and action 1–3 (e.g. 33, 73, 83). Or 0 to cancel."
           continue
         fi
         if [[ "${_u}" == "ALL" ]]; then
-          echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server bifrost-celery bifrost-engine${C_RESET}"
+          echo "${C_CYAN}→ sudo systemctl ${_a} bifrost-server bifrost-engine${C_RESET}"
         elif [[ "${_u}" == "ALL_STACK" ]]; then
           echo "${C_CYAN}→ sudo systemctl ${_a} ${BIFROST_FULL_STACK_UNITS[*]}${C_RESET}"
         elif [[ "${_u}" == "ALL_HTTP" ]]; then
@@ -1467,7 +1445,7 @@ _interactive_systemctl_one_service() {
 
     set -- ${_line}
     if [[ $# -lt 2 ]]; then
-      _msg_warn "Invalid input — use two words (engine restart, all-stack restart) or digit shorthand (23, 83). Try again, or 0 to cancel."
+      _msg_warn "Invalid input — use two words (engine restart, all-stack restart) or digit shorthand (23, 73). Try again, or 0 to cancel."
       continue
     fi
     _t1="$1"
@@ -1484,12 +1462,12 @@ _interactive_systemctl_one_service() {
         _unit="${_u}"
         _act="${_a}"
       else
-        _msg_warn "Could not parse. Try engine restart, all-stack restart, 2 3, or 83. Or 0 to cancel."
+        _msg_warn "Could not parse. Try engine restart, all-stack restart, 2 3, or 73. Or 0 to cancel."
         continue
       fi
     fi
     if [[ "${_unit}" == "ALL" ]]; then
-      echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server bifrost-celery bifrost-engine${C_RESET}"
+      echo "${C_CYAN}→ sudo systemctl ${_act} bifrost-server bifrost-engine${C_RESET}"
     elif [[ "${_unit}" == "ALL_STACK" ]]; then
       echo "${C_CYAN}→ sudo systemctl ${_act} ${BIFROST_FULL_STACK_UNITS[*]}${C_RESET}"
     elif [[ "${_unit}" == "ALL_HTTP" ]]; then
@@ -1554,7 +1532,7 @@ interactive_mode() {
 
   while true; do
     _interactive_paint_full
-    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-9|q]${C_RESET} "
+    echo -n "${C_GREEN}${C_BOLD}[?]${C_RESET} Choice ${C_DIM}[1-8|l|p|q]${C_RESET} "
     read -r _ch
     case "${_ch}" in
       1) _interactive_systemctl_one_service ;;
@@ -1581,14 +1559,34 @@ interactive_mode() {
         ;;
       6) _interactive_db_refresh_schema ;;
       7) _interactive_db_release_locks ;;
-      8) _interactive_flower_menu ;;
-      9) _interactive_install_systemd_units ;;
+      8) _interactive_install_systemd_units ;;
+      l|L)
+        set +e
+        _cli_local_mac_subprocess_check 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+        _ec_l=${PIPESTATUS[0]}
+        set -e
+        {
+          echo ""
+          echo "--- exit code: ${_ec_l} ---"
+        } >>"${BIFROST_SSH_LAST_LOG}"
+        ;;
+      p|P)
+        _bifrost_restore_session_sudo
+        set +e
+        _cli_remote_services_systemd_scan 2>&1 | tee "${BIFROST_SSH_LAST_LOG}"
+        _ec_p=${PIPESTATUS[0]}
+        set -e
+        {
+          echo ""
+          echo "--- exit code: ${_ec_p} ---"
+        } >>"${BIFROST_SSH_LAST_LOG}"
+        ;;
       q|Q)
         echo "[INFO] Bye." >"${BIFROST_SSH_LAST_LOG}"
         _interactive_paint_full
         break
         ;;
-      *) echo "[WARN] Unknown choice — try 1–9 or q." >"${BIFROST_SSH_LAST_LOG}" ;;
+      *) echo "[WARN] Unknown choice — try 1–8, l, p, or q." >"${BIFROST_SSH_LAST_LOG}" ;;
     esac
   done
   _ssh_control_cleanup
@@ -1654,10 +1652,8 @@ CLI_DB_REL_DRY=0
 CLI_DB_REL_DRY_DEV=0
 CLI_DB_REL_YES=0
 CLI_DB_REL_YES_DEV=0
-CLI_FLOWER_START=0
-CLI_FLOWER_STOP=0
-CLI_FLOWER_RESTART=0
-CLI_FLOWER_STATUS=0
+CLI_LOCAL_MAC_SERVICES=0
+CLI_REMOTE_SERVICES_STATUS=0
 CLI_INSTALL_SYSTEMD=0
 
 while [[ $# -gt 0 ]]; do
@@ -1670,14 +1666,11 @@ while [[ $# -gt 0 ]]; do
     --db-release-locks-dev) CLI_DB_REL_DRY_DEV=1 ;;
     --db-release-locks-terminate) CLI_DB_REL_YES=1 ;;
     --db-release-locks-terminate-dev) CLI_DB_REL_YES_DEV=1 ;;
-    --flower-start) CLI_FLOWER_START=1 ;;
-    --flower-stop) CLI_FLOWER_STOP=1 ;;
-    --flower-restart) CLI_FLOWER_RESTART=1 ;;
-    --flower-status) CLI_FLOWER_STATUS=1 ;;
+    --local-mac-services) CLI_LOCAL_MAC_SERVICES=1 ;;
+    --remote-services-status) CLI_REMOTE_SERVICES_STATUS=1 ;;
     --install-systemd-units) CLI_INSTALL_SYSTEMD=1 ;;
     --server|-server) _restart_add_unit bifrost-server ;;
     --engine|-engine) _restart_add_unit bifrost-engine ;;
-    --celery|-celery) _restart_add_unit bifrost-celery ;;
     --massive|-massive) _restart_add_unit bifrost-massive ;;
     --docs|-docs) _restart_add_unit bifrost-docs ;;
     --ops|-ops) _restart_add_unit bifrost-ops ;;
@@ -1720,10 +1713,12 @@ done
 
 # DB-only: schema refresh or lock release (local or remote; no rsync / systemctl).
 _db_cli_count=$((CLI_DB_REFRESH + CLI_DB_REFRESH_DEV + CLI_DB_REL_DRY + CLI_DB_REL_DRY_DEV + CLI_DB_REL_YES + CLI_DB_REL_YES_DEV))
-_flower_cli_count=$((CLI_FLOWER_START + CLI_FLOWER_STOP + CLI_FLOWER_RESTART + CLI_FLOWER_STATUS))
+if [[ "${CLI_LOCAL_MAC_SERVICES}" == "1" ]] && [[ "${CLI_REMOTE_SERVICES_STATUS}" == "1" ]]; then
+  usage_error "use only one of --local-mac-services or --remote-services-status."
+fi
 if [[ "${_db_cli_count}" -gt 0 ]]; then
-  if [[ "${_flower_cli_count}" -gt 0 ]]; then
-    usage_error "cannot combine --db-* with --flower-*."
+  if [[ "${CLI_LOCAL_MAC_SERVICES}" == "1" ]] || [[ "${CLI_REMOTE_SERVICES_STATUS}" == "1" ]]; then
+    usage_error "cannot combine --db-* with --local-mac-services or --remote-services-status."
   fi
   if [[ "${_db_cli_count}" -gt 1 ]]; then
     usage_error "use only one of --db-refresh / --db-refresh-dev / --db-release-locks / --db-release-locks-dev / --db-release-locks-terminate / --db-release-locks-terminate-dev."
@@ -1760,8 +1755,8 @@ fi
 
 # Install systemd units only (remote sudo cp + daemon-reload).
 if [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]]; then
-  if [[ "${_db_cli_count}" -gt 0 ]] || [[ "${_flower_cli_count}" -gt 0 ]]; then
-    usage_error "--install-systemd-units cannot be combined with --db-* or --flower-*."
+  if [[ "${_db_cli_count}" -gt 0 ]] || [[ "${CLI_LOCAL_MAC_SERVICES}" == "1" ]] || [[ "${CLI_REMOTE_SERVICES_STATUS}" == "1" ]]; then
+    usage_error "--install-systemd-units cannot be combined with --db-*, --local-mac-services, or --remote-services-status."
   fi
   if [[ "${DO_DEPLOY}" == "1" ]] || [[ "${DO_DEPLOY_ONLY}" == "1" ]] || [[ -n "${ACTION:-}" ]] || [[ "${DO_STATUS}" == "1" ]] \
     || [[ "${RESTART_ALL}" == "1" ]] || [[ "${RESTART_ALL_STACK}" == "1" ]] || [[ "${RESTART_ALL_APIS}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]] || [[ "${DO_MIGRATE}" == "1" ]] || [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
@@ -1771,31 +1766,30 @@ if [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]]; then
   exit $?
 fi
 
-# Flower-only: remote Celery Flower (no rsync / systemctl / sudo).
-if [[ "${_flower_cli_count}" -gt 0 ]]; then
-  if [[ "${_flower_cli_count}" -gt 1 ]]; then
-    usage_error "use only one of --flower-start / --flower-stop / --flower-restart / --flower-status."
+# Local Mac only: pgrep ingest + celery (no SSH; same scripts as SubprocessLocalExecutor).
+if [[ "${CLI_LOCAL_MAC_SERVICES}" == "1" ]]; then
+  if [[ "${_db_cli_count}" -gt 0 ]] || [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]]; then
+    usage_error "--local-mac-services cannot be combined with --db-* or --install-systemd-units."
   fi
   if [[ "${DO_DEPLOY}" == "1" ]] || [[ "${DO_DEPLOY_ONLY}" == "1" ]] || [[ -n "${ACTION:-}" ]] || [[ "${DO_STATUS}" == "1" ]] \
     || [[ "${RESTART_ALL}" == "1" ]] || [[ "${RESTART_ALL_STACK}" == "1" ]] || [[ "${RESTART_ALL_APIS}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]] || [[ "${DO_MIGRATE}" == "1" ]] || [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
-    usage_error "Flower flags cannot be combined with deploy, systemctl, --migrate, or --sync-prod-config."
+    usage_error "--local-mac-services cannot be combined with deploy, systemctl, --migrate, or --sync-prod-config."
   fi
-  if [[ "${CLI_FLOWER_START}" == "1" ]]; then
-    _cli_remote_flower_start
-    exit $?
+  _cli_local_mac_subprocess_check
+  exit 0
+fi
+
+# Remote Linux: systemd + worker@* on DEPLOY_HOST.
+if [[ "${CLI_REMOTE_SERVICES_STATUS}" == "1" ]]; then
+  if [[ "${_db_cli_count}" -gt 0 ]] || [[ "${CLI_INSTALL_SYSTEMD}" == "1" ]]; then
+    usage_error "--remote-services-status cannot be combined with --db-* or --install-systemd-units."
   fi
-  if [[ "${CLI_FLOWER_STOP}" == "1" ]]; then
-    _cli_remote_flower_stop
-    exit $?
+  if [[ "${DO_DEPLOY}" == "1" ]] || [[ "${DO_DEPLOY_ONLY}" == "1" ]] || [[ -n "${ACTION:-}" ]] || [[ "${DO_STATUS}" == "1" ]] \
+    || [[ "${RESTART_ALL}" == "1" ]] || [[ "${RESTART_ALL_STACK}" == "1" ]] || [[ "${RESTART_ALL_APIS}" == "1" ]] || [[ ${#RESTART_UNITS[@]} -gt 0 ]] || [[ "${DO_MIGRATE}" == "1" ]] || [[ "${SYNC_PROD_CONFIG}" == "1" ]]; then
+    usage_error "--remote-services-status cannot be combined with deploy, systemctl, --migrate, or --sync-prod-config."
   fi
-  if [[ "${CLI_FLOWER_RESTART}" == "1" ]]; then
-    _cli_remote_flower_restart
-    exit $?
-  fi
-  if [[ "${CLI_FLOWER_STATUS}" == "1" ]]; then
-    _cli_remote_flower_status
-    exit $?
-  fi
+  _cli_remote_services_systemd_scan
+  exit 0
 fi
 
 if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
@@ -1818,13 +1812,13 @@ if [[ "${DO_DEPLOY_ONLY}" == "1" ]]; then
 fi
 
 if [[ "${RESTART_ALL}" == "1" ]] && [[ "${RESTART_ALL_STACK}" == "1" ]]; then
-  usage_error "use either --all (three core units) or --all-stack (full 11-unit stack), not both."
+  usage_error "use either --all (server+engine) or --all-stack (full 10-unit stack), not both."
 fi
 if [[ "${RESTART_ALL_APIS}" == "1" ]] && [[ "${RESTART_ALL_STACK}" == "1" ]]; then
   usage_error "use either --apis (HTTP APIs only) or --all-stack (full stack), not both."
 fi
 if [[ "${RESTART_ALL_APIS}" == "1" ]] && [[ "${RESTART_ALL}" == "1" ]]; then
-  usage_error "use either --apis or --all (three core), not both."
+  usage_error "use either --apis or --all (server+engine), not both."
 fi
 
 if [[ "${RESTART_ALL_STACK}" == "1" ]]; then
@@ -1832,7 +1826,7 @@ if [[ "${RESTART_ALL_STACK}" == "1" ]]; then
 elif [[ "${RESTART_ALL_APIS}" == "1" ]]; then
   RESTART_UNITS=("${BIFROST_HTTP_UNITS[@]}")
 elif [[ "${RESTART_ALL}" == "1" ]]; then
-  RESTART_UNITS=(bifrost-server bifrost-celery bifrost-engine)
+  RESTART_UNITS=(bifrost-server bifrost-engine)
 fi
 
 if [[ "${DO_DEPLOY_ONLY}" != "1" ]]; then
@@ -1844,7 +1838,7 @@ if [[ "${DO_DEPLOY_ONLY}" != "1" ]]; then
   fi
   if [[ -n "${ACTION}" || "${DO_STATUS}" == "1" ]]; then
     if [[ "${RESTART_ALL}" != "1" ]] && [[ "${RESTART_ALL_STACK}" != "1" ]] && [[ "${RESTART_ALL_APIS}" != "1" ]] && [[ ${#RESTART_UNITS[@]} -eq 0 ]]; then
-      usage_error "missing service: specify at least one of --server, --engine, --celery, --massive, --docs, --ops, --trading, --strategy, --portfolio, --market, --agent, --all, --apis, or --all-stack."
+      usage_error "missing service: specify at least one of --server, --engine, --massive, --docs, --ops, --trading, --strategy, --portfolio, --market, --agent, --all, --apis, or --all-stack."
     fi
   fi
 fi

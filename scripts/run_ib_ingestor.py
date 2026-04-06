@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""IB market data ingest — standalone process (separate client_id from gateway/daemon).
+"""IB market data ingestor — standalone process (separate client_id from gateway/daemon).
 
-Uses ``get_effective_ib_config`` → ``client_id_ib_market_ingest`` from YAML ``ib.host.client_id.ingestor``
-(legacy key ``ib_market_ingest`` still accepted). Default 150 if omitted.
+Uses ``get_effective_ib_config`` → ``client_id_ib_ingestor`` from YAML ``ib.host.client_id.ingestor``
+(legacy YAML key ``ib_market_ingest`` under ``client_id`` still accepted). Default 150 if omitted.
 
 Subscribes to Watchlist STK/OPT contracts via ib_insync, writes latest quotes to Redis ``ib:ingester:tick:*``,
 health hash ``ib:ingester:meta:health`` (incl. client_id), subscriptions set, and pub channel ``ib:ingester:channel``.
@@ -10,8 +10,8 @@ Does not write ``quote:{symbol}`` (daemon-owned).
 
 Usage
 -----
-  python scripts/run_ib_market_ingest.py
-  python scripts/run_ib_market_ingest.py --config config/config.prod.yaml --log-level DEBUG
+  python scripts/run_ib_ingestor.py
+  python scripts/run_ib_ingestor.py --config config/config.prod.yaml --log-level DEBUG
 
 Phase 2 optional PostgreSQL sampling is not implemented; see plan (DATABASE.md review).
 """
@@ -34,12 +34,12 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 os.chdir(str(_PROJECT_ROOT))
 
-from backend.monitor.routers.deps import IB_MARKET_LOG_STREAM_KEY
+from backend.monitor.routers.deps import IB_INGESTOR_LOG_STREAM_KEY
 from src.core.logging_redis_stream import RedisStreamLogHandler
 
-_IB_MARKET_LOG_STREAM_MAXLEN = 2000
+_IB_INGESTOR_LOG_STREAM_MAXLEN = 2000
 
-logger = logging.getLogger("ib_market_ingest")
+logger = logging.getLogger("ib_ingestor")
 
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
@@ -89,8 +89,8 @@ def _setup_logging(level: int) -> None:
     )
     redis_handler = RedisStreamLogHandler(
         _console_log_redis_url(),
-        IB_MARKET_LOG_STREAM_KEY,
-        maxlen=_IB_MARKET_LOG_STREAM_MAXLEN,
+        IB_INGESTOR_LOG_STREAM_KEY,
+        maxlen=_IB_INGESTOR_LOG_STREAM_MAXLEN,
     )
     redis_handler.setFormatter(
         logging.Formatter(
@@ -127,10 +127,13 @@ def _redis_client(cfg: dict):
 
 
 def _ingest_settings(cfg: dict) -> Dict[str, Any]:
+    raw = cfg.get("ib_ingestor")
+    if isinstance(raw, dict):
+        return raw
     raw = cfg.get("ib_market_ingest")
-    if not isinstance(raw, dict):
-        return {}
-    return raw
+    if isinstance(raw, dict):
+        return raw
+    return {}
 
 
 def _watchlist_targets(
@@ -241,14 +244,14 @@ RECONNECT_BASE = 2.0
 RECONNECT_MAX = 60.0
 
 
-class IbMarketIngestApp:
+class IbIngestorApp:
     def __init__(self, cfg: dict) -> None:
         self._cfg = cfg
         self._st = _ingest_settings(cfg)
         self._rds = _redis_client(cfg)
-        from src.vendor.ib_market_ingest.writer import IbMarketRedisWriter
+        from src.vendor.ib_ingestor.writer import IbIngestorRedisWriter
 
-        self._writer = IbMarketRedisWriter(self._rds)
+        self._writer = IbIngestorRedisWriter(self._rds)
         self._stop = asyncio.Event()
         self._reconnects = 0
         self._msg_count = 0
@@ -279,13 +282,13 @@ class IbMarketIngestApp:
         from src.monitor.integrations.ib_clients import MarketIbClient
 
         ib_eff = get_effective_ib_config(self._cfg)
-        self._client_id = int(ib_eff["client_id_ib_market_ingest"])
+        self._client_id = int(ib_eff["client_id_ib_ingestor"])
         host = str(ib_eff["host"])
         port = int(ib_eff.get("port_market_data", ib_eff["port"]))
         cid = self._client_id
 
         logger.info(
-            "IB market ingest starting host=%s port=%s (market data) client_id=%s max_subs=%s",
+            "IB ingestor starting host=%s port=%s (market data) client_id=%s max_subs=%s",
             host,
             port,
             cid,
@@ -293,7 +296,7 @@ class IbMarketIngestApp:
         )
 
         while not self._stop.is_set():
-            client = MarketIbClient(host, port, cid, name="IbMarketIngest")
+            client = MarketIbClient(host, port, cid, name="IbIngestor")
             try:
                 await self._run_connected_session(client)
             except asyncio.CancelledError:
@@ -330,7 +333,7 @@ class IbMarketIngestApp:
             self._msg_count,
         )
         logger.info(
-            "IB market ingest stopped (messages=%d reconnects=%d)",
+            "IB ingestor stopped (messages=%d reconnects=%d)",
             self._msg_count,
             self._reconnects,
         )
@@ -452,7 +455,7 @@ class IbMarketIngestApp:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="IB market data ingest (Redis ib:ingester:tick:*, ib:ingester:meta:health, …)",
+        description="IB ingestor (Redis ib:ingester:tick:*, ib:ingester:meta:health, …)",
     )
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config")
     parser.add_argument(
@@ -473,7 +476,7 @@ def main() -> None:
                 break
 
     cfg = _load_config(cfg_path)
-    app = IbMarketIngestApp(cfg)
+    app = IbIngestorApp(cfg)
     asyncio.run(app.run())
 
 

@@ -14,7 +14,8 @@ from backend.ops.services.executor_local import SubprocessLocalExecutor, _ingest
 def test_ingest_script_log_for_unit() -> None:
     assert _ingest_script_log_for_unit("bifrost-massive-ws.service")[0] == "run_massive_ws.py"
     assert _ingest_script_log_for_unit("bifrost-ib-operator.service")[0] == "run_ib_operator.py"
-    assert _ingest_script_log_for_unit("bifrost-ib-market-ingest.service")[0] == "run_ib_market_ingest.py"
+    assert _ingest_script_log_for_unit("bifrost-ib-ingestor.service")[0] == "run_ib_ingestor.py"
+    assert _ingest_script_log_for_unit("bifrost-ib-market-ingest.service")[0] == "run_ib_ingestor.py"
     assert _ingest_script_log_for_unit("unknown.service") is None
 
 

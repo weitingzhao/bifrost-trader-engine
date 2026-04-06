@@ -1,4 +1,4 @@
-"""Redis writer for IB market ingest meta, quotes, and pub/sub notifications."""
+"""Redis writer for IB ingestor meta, quotes, and pub/sub notifications."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import time
 from typing import Any, Dict, Set
 
-from src.vendor.ib_market_ingest.redis_keys import (
+from src.vendor.ib_ingestor.redis_keys import (
     IB_INGESTER_CHANNEL,
     IB_INGESTER_META_HEALTH,
     IB_INGESTER_META_SUBSCRIPTIONS,
@@ -15,7 +15,7 @@ from src.vendor.ib_market_ingest.redis_keys import (
 )
 
 
-class IbMarketRedisWriter:
+class IbIngestorRedisWriter:
     def __init__(self, rds: Any) -> None:
         self._rds = rds
 
