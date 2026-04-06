@@ -26,7 +26,11 @@ import {
 } from '../api/ops/ops'
 import { OpsHostEnvPillBadge } from '../components/OpsHostEnvPillBadge'
 import { opsHostEnvFromConfigProfile, type OpsHostEnvPill } from '../utils/opsHostEnvPill'
-import { aggregateIngestServicesLamp, ingestProcessLamp } from '../utils/socketIngestLamp'
+import {
+  aggregateIngestServicesLamp,
+  ingestProcessLamp,
+  localControlAgentLamp,
+} from '../utils/socketIngestLamp'
 
 export interface MarketIngestOpsPageProps {
   embeddedInSettings?: boolean
@@ -39,6 +43,8 @@ type ConfirmState = {
   title: string
   message: string
   confirming: boolean
+  /** Shown when start/stop/restart/reset fails (API/network); modal stays open until dismissed or retried. */
+  error: string | null
   action: (() => Promise<void>) | null
 }
 
@@ -47,6 +53,7 @@ const INITIAL_CONFIRM: ConfirmState = {
   title: '',
   message: '',
   confirming: false,
+  error: null,
   action: null,
 }
 
@@ -126,6 +133,10 @@ function ingestProcessStatusExplanation(active: string): string {
       return 'Deactivating — the service is stopping.'
     case 'reloading':
       return 'Reloading — the service is reloading its configuration.'
+    case 'maintenance':
+      return 'Maintenance — unit is inactive while a maintenance operation is in progress.'
+    case 'refreshing':
+      return 'Refreshing — unit is active; namespace refresh in progress.'
     case 'unknown':
       return 'Unknown — Ops could not determine process state (check executor / systemctl).'
     case '':
@@ -138,13 +149,23 @@ function ingestProcessStatusExplanation(active: string): string {
 /** Which primary control buttons to show for the reported systemd/Ops process state. */
 function ingestActionButtonsForProcessState(processActive: string): { showStart: boolean; showStop: boolean } {
   const a = (processActive || '').toLowerCase().trim()
-  if (a === 'inactive' || a === 'dead' || a === 'deactivating') {
+  // Stopped, failed, or not in a running sub-state — Start only (matches backend is-active vocabulary).
+  if (
+    a === 'inactive'
+    || a === 'dead'
+    || a === 'deactivating'
+    || a === 'failed'
+    || a === 'maintenance'
+  ) {
     return { showStart: true, showStop: false }
   }
-  if (a === 'active' || a === 'activating' || a === 'reloading') {
+  // Running or on the way up — Stop only.
+  if (a === 'active' || a === 'activating' || a === 'reloading' || a === 'refreshing') {
     return { showStart: false, showStop: true }
   }
-  return { showStart: true, showStop: true }
+  // Unknown / empty / future systemd strings: Start only — never show both with Stop.
+  // `systemctl start` on an already-active unit is a no-op, so this stays safe when probe fails (e.g. Prod agent).
+  return { showStart: true, showStop: false }
 }
 
 /** IB Client ID is only meaningful while the service process is up (or starting); hide the block otherwise. */
@@ -186,12 +207,12 @@ function runtimeControlHostDisplay(
 type IngestActionBlock = 'none' | 'admin' | 'script' | 'remote_env'
 
 function ingestActionBlock(
-  canAdmin: boolean,
+  canOperate: boolean,
   disableIngestScript: boolean,
   pageEnv: 'dev' | 'prod' | null,
   redisControlEnv: string | null | undefined,
 ): IngestActionBlock {
-  if (!canAdmin) return 'admin'
+  if (!canOperate) return 'admin'
   if (disableIngestScript) return 'script'
   if (pageEnv) {
     const lease = (redisControlEnv ?? '').toLowerCase().trim()
@@ -205,7 +226,7 @@ function ingestActionBlock(
 function ingestActionBlockMessage(block: IngestActionBlock): string {
   switch (block) {
     case 'admin':
-      return 'Admin role required (Ops token).'
+      return 'Operator role required (Ops token).'
     case 'script':
       return 'Control disabled: subprocess Ops without ingest script support (upgrade Ops or use Linux systemd).'
     case 'remote_env':
@@ -388,7 +409,7 @@ function IngestServicesTable(props: {
   status: StatusResponse | null
   pageEnv: 'dev' | 'prod' | null
   disableIngestScript: boolean
-  canAdmin: boolean
+  canOperate: boolean
   emptyHint: string
   logicalSummary: (svc: MarketIngestServiceRow) => string
   onStart: (svc: MarketIngestServiceRow) => void
@@ -401,7 +422,7 @@ function IngestServicesTable(props: {
     status,
     pageEnv,
     disableIngestScript,
-    canAdmin,
+    canOperate,
     emptyHint,
     logicalSummary,
     onStart,
@@ -433,7 +454,7 @@ function IngestServicesTable(props: {
             svc.redis_control_env,
             svc.redis_meta_key,
           )
-          const block = ingestActionBlock(canAdmin, disableIngestScript, pageEnv, svc.redis_control_env)
+          const block = ingestActionBlock(canOperate, disableIngestScript, pageEnv, svc.redis_control_env)
           return (
             <ServiceRow
               key={svc.id}
@@ -463,7 +484,6 @@ export function MarketIngestOpsPage({
 }: MarketIngestOpsPageProps) {
   const [services, setServices] = useState<MarketIngestServiceRow[]>([])
   const [opsErr, setOpsErr] = useState<string | null>(null)
-  const [canAdmin, setCanAdmin] = useState(false)
   const [caps, setCaps] = useState<OpsCapabilities | null>(null)
   const [configProfile, setConfigProfile] = useState<string | null>(null)
   const [localControl, setLocalControl] = useState<string | null>(null)
@@ -472,6 +492,7 @@ export function MarketIngestOpsPage({
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmState>(INITIAL_CONFIRM)
   const [logTab, setLogTab] = useState<SocketLogTab>('massive')
+  const [opsHealth, setOpsHealth] = useState<Awaited<ReturnType<typeof fetchOpsHealth>> | null>(null)
 
   const fetchLogs = useCallback((tail?: number) => fetchMassiveWsLogs(tail ?? 80), [])
   const subscribeLogs = useCallback(
@@ -517,10 +538,9 @@ export function MarketIngestOpsPage({
 
   const refresh = useCallback(async () => {
     try {
-      const [svcRes, capRes, healthRes] = await Promise.all([
+      const [svcRes, capRes] = await Promise.all([
         fetchMarketIngestServices(),
         fetchOpsCapabilities(),
-        fetchOpsHealth(),
       ])
       if (svcRes.ok && Array.isArray(svcRes.services)) {
         setServices(svcRes.services)
@@ -530,15 +550,22 @@ export function MarketIngestOpsPage({
         setOpsErr(svcRes.error ?? 'Failed to load services')
       }
       if (capRes.ok) setCaps(capRes)
-      setCanAdmin(capRes.capabilities?.can_admin === true)
-      setConfigProfile(healthRes.config_profile ?? null)
-      setLocalControl(healthRes.local_control ?? null)
-      setMarketIngestScriptControl(healthRes.market_ingest_script_control === true)
     } catch (e) {
       setOpsErr((e as Error).message)
       setServices([])
-      setMarketIngestScriptControl(false)
+      setCaps(null)
+    }
+    try {
+      const healthRes = await fetchOpsHealth()
+      setOpsHealth(healthRes)
+      setConfigProfile(healthRes.config_profile ?? null)
+      setLocalControl(healthRes.local_control ?? null)
+      setMarketIngestScriptControl(healthRes.market_ingest_script_control === true)
+    } catch {
+      setOpsHealth(null)
       setConfigProfile(null)
+      setLocalControl(null)
+      setMarketIngestScriptControl(false)
     }
   }, [])
 
@@ -568,6 +595,7 @@ export function MarketIngestOpsPage({
   const isAuthenticated = caps?.identity.authenticated ?? false
   const authRequired = caps?.auth_required ?? false
   const currentRole = caps?.identity.role ?? 'viewer'
+  const canOperate = caps?.capabilities?.can_operate === true
 
   const hostColumn = useMemo(
     () =>
@@ -600,6 +628,28 @@ export function MarketIngestOpsPage({
     [unifiedServiceRows],
   )
 
+  const localAgentPanel = useMemo(() => {
+    if ((opsHealth?.executor_mode ?? '').toLowerCase() !== 'agent') {
+      return null
+    }
+    const r = opsHealth?.agent_reachable
+    const lamp = localControlAgentLamp(r)
+    const socketPath = (opsHealth?.agent_socket ?? '').trim()
+    let detail: string
+    if (r === true) {
+      detail =
+        'Reachable. Ingest start/stop below is delegated through this socket (systemd on the host).'
+    } else if (r === false) {
+      detail = opsHealth?.agent_error?.trim()
+        ? opsHealth.agent_error
+        : 'Unreachable — check bifrost-agent.service, socket permissions, and sudoers.'
+    } else {
+      detail =
+        'Reachability not reported (upgrade Ops or inspect GET /ops/health). Ingest rows may show unknown until the agent answers.'
+    }
+    return { lamp, detail, socketPath }
+  }, [opsHealth])
+
   const logicalSummary = (svc: MarketIngestServiceRow): string => {
     if (svc.id === 'massive_ws' && massive) {
       const ws = massive.ws_connected ? 'connected' : 'disconnected'
@@ -625,24 +675,24 @@ export function MarketIngestOpsPage({
       title,
       message,
       confirming: false,
+      error: null,
       action: async () => {
-        setConfirmState(prev => ({ ...prev, confirming: true }))
+        setConfirmState(prev => ({ ...prev, confirming: true, error: null }))
         try {
           await fn()
           await refresh()
           await loadStatus()
-        } finally {
           setConfirmState(INITIAL_CONFIRM)
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          setConfirmState(prev => ({ ...prev, confirming: false, error: msg }))
         }
       },
     })
   }
 
   const runControl = async (serviceId: string, action: MarketIngestAction) => {
-    const r = await controlMarketIngest(serviceId, action)
-    if (!r.ok) {
-      throw new Error(r.error ?? 'Control request failed')
-    }
+    await controlMarketIngest(serviceId, action)
   }
 
   const openServiceConfirm = (svc: MarketIngestServiceRow, action: Exclude<MarketIngestAction, 'reset'>, verb: string) => {
@@ -681,6 +731,15 @@ export function MarketIngestOpsPage({
           <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
             <h3 id="ws-connector-confirm-title">{confirmState.title}</h3>
             <p>{confirmState.message}</p>
+            {confirmState.error ? (
+              <p
+                className="settings-page-msg settings-page-msg--error"
+                style={{ marginTop: 'var(--space-2)' }}
+                role="alert"
+              >
+                {confirmState.error}
+              </p>
+            ) : null}
             <div className="data-reset-modal-actions">
               <button
                 type="button"
@@ -705,20 +764,22 @@ export function MarketIngestOpsPage({
 
       <div className="settings-page-header settings-page-header--celery">
         <div className="settings-page-title-group">
-          <h2 className="settings-page-title page-title-with-tooltip">
-            <span
-              className={`title-inline-lamp lamp-icon ${socketPageAggregate.lamp}`}
-              title={socketPageAggregate.title}
-              role="img"
-              aria-label={socketPageAggregate.title}
-            >
-              <SettingsSidebarLampGlyph id="websocket" />
+          <h2 className="settings-page-title page-title-with-tooltip" style={{ flexWrap: 'wrap', rowGap: 'var(--space-2)' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+              <span
+                className={`title-inline-lamp lamp-icon ${socketPageAggregate.lamp}`}
+                title={socketPageAggregate.title}
+                role="img"
+                aria-label={socketPageAggregate.title}
+              >
+                <SettingsSidebarLampGlyph id="websocket" />
+              </span>
+              <span>Socket Services</span>
+              <InfoTooltip text="This lamp is only the roll-up of ingest units (Massive WS, IB ingestor, IB operator): green / red / yellow from each unit’s process state reported by Ops — same rule as dev. It does not use Local Control Agent health." />
             </span>
-            Socket Services
-            <InfoTooltip text="Massive (Polygon) WebSocket ingest and IB ingestor. Status from Monitor /status and Redis; control via Ops API (admin)." />
           </h2>
           <p className="settings-page-subtitle">
-            Logical health from Monitor /status; process state from Ops. Feeds write to Redis.
+            Monitor /status shows feed logic; Ops shows each ingest process state. Title lamp = ingest units only (same as dev). When this Ops uses executor_mode=agent, Local Control Agent status is in the section below.
           </p>
         </div>
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">
@@ -781,35 +842,68 @@ export function MarketIngestOpsPage({
         </p>
       ) : null}
 
+      {localAgentPanel ? (
+        <section
+          className="replay-section"
+          id="settings-ws-agent"
+          aria-labelledby="local-control-agent-heading"
+        >
+          <h3
+            id="local-control-agent-heading"
+            className="daemon-group-title"
+            style={{ marginBottom: 'var(--space-2)' }}
+          >
+            <span
+              className={`title-inline-lamp lamp-icon ${localAgentPanel.lamp}`}
+              title={localAgentPanel.detail}
+              role="img"
+              aria-label={localAgentPanel.detail}
+            >
+              <SettingsSidebarLampGlyph id="api-ops" />
+            </span>
+            Local Control Agent
+            <InfoTooltip text="Separate systemd proxy (bifrost-agent) over a Unix socket. If red, ingest control via Ops will fail even when units exist. Does not replace ingest process status in the table below." />
+          </h3>
+          <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-2)' }}>
+            {localAgentPanel.detail}
+          </p>
+          {localAgentPanel.socketPath ? (
+            <p className="massive-api-doc-hint" style={{ marginBottom: 0 }}>
+              Socket:{' '}
+              <code style={{ fontSize: '0.9em' }}>{localAgentPanel.socketPath}</code>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="replay-section" aria-labelledby="socket-services-heading">
         <h3 id="socket-services-heading" className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
-          Services
+          Ingest services
+          <InfoTooltip text="Each row lamp is only that unit’s process state from Ops (active / inactive / …), identical to dev — not agent reachability." />
         </h3>
-        {!opsErr ? (
-          <>
-            <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-              <span title={hostColumn.title}>
-                This Ops instance (config / executor)
-                <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
-                  <OpsHostEnvPillBadge pill={hostColumn.pill} />
-                </span>
+        <>
+          <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            <span title={hostColumn.title}>
+              This Ops instance (config / executor)
+              <span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
+                <OpsHostEnvPillBadge pill={hostColumn.pill} />
               </span>
-            </p>
-            <IngestServicesTable
-              rows={unifiedServiceRows}
-              status={status}
-              pageEnv={normalizedPageDevProd(configProfile)}
-              disableIngestScript={disableIngestActions}
-              emptyHint="No market ingest services in Ops config."
-              logicalSummary={logicalSummary}
-              canAdmin={canAdmin}
-              onStart={svc => openServiceConfirm(svc, 'start', 'Start')}
-              onStop={svc => openServiceConfirm(svc, 'stop', 'Stop')}
-              onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
-              onReset={openResetConfirm}
-            />
-          </>
-        ) : null}
+            </span>
+          </p>
+          <IngestServicesTable
+            rows={unifiedServiceRows}
+            status={status}
+            pageEnv={normalizedPageDevProd(configProfile)}
+            disableIngestScript={disableIngestActions}
+            emptyHint="No market ingest services in Ops config."
+            logicalSummary={logicalSummary}
+            canOperate={canOperate}
+            onStart={svc => openServiceConfirm(svc, 'start', 'Start')}
+            onStop={svc => openServiceConfirm(svc, 'stop', 'Stop')}
+            onRestart={svc => openServiceConfirm(svc, 'restart', 'Restart')}
+            onReset={openResetConfirm}
+          />
+        </>
       </section>
 
       <section className="replay-section" aria-labelledby="socket-logs-heading">

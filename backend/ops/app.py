@@ -176,6 +176,16 @@ def create_ops_app(
     app.state.worker_state_service = worker_svc
     app.state.bifrost_config = config
     app.state.executor = executor
+    app.state.agent_socket_path = (
+        str(
+            ops_cfg.get(
+                "agent_socket",
+                "/run/bifrost-agent/bifrost-agent.sock",
+            ),
+        ).strip()
+        if executor_mode == "agent"
+        else None
+    )
     app.state.audit_log: list = []
     try:
         app.state.ops_project_root = _project_root_for_subprocess_executor(
@@ -228,7 +238,7 @@ def create_ops_app(
 
     # ── Health ────────────────────────────────────────────────────────────────
 
-    def _health_payload() -> Dict[str, Any]:
+    def _health_payload_sync() -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "status": "ok",
             "service": "bifrost-ops",
@@ -245,18 +255,34 @@ def create_ops_app(
             out["local_control"] = local_control
             out["market_ingest_script_control"] = local_control == "subprocess"
         else:
+            # Agent mode: same effective plane as systemd; omitting local_control confused clients
+            # that gate ingest on subprocess vs systemd.
+            out["local_control"] = "systemd"
             out["market_ingest_script_control"] = False
         out["auth_required"] = app.state.ops_auth.has_tokens
         out["audit_mode"] = audit_store.stats().get("mode", "memory")
         return out
 
+    async def _health_payload_async() -> Dict[str, Any]:
+        out = _health_payload_sync()
+        sock = getattr(app.state, "agent_socket_path", None)
+        if sock:
+            from backend.ops.agent.health_probe import probe_agent_reachability
+
+            out["agent_socket"] = sock
+            ok, err = await probe_agent_reachability(sock)
+            out["agent_reachable"] = ok
+            if err:
+                out["agent_error"] = err
+        return out
+
     @app.get("/health")
-    def ops_health_root() -> Dict[str, Any]:
-        return _health_payload()
+    async def ops_health_root() -> Dict[str, Any]:
+        return await _health_payload_async()
 
     @app.get("/ops/health")
-    def ops_health_prefixed() -> Dict[str, Any]:
-        return _health_payload()
+    async def ops_health_prefixed() -> Dict[str, Any]:
+        return await _health_payload_async()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 

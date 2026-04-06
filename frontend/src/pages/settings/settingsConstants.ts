@@ -6,6 +6,8 @@ export const DEFAULT_DAEMON = 1
 export const DEFAULT_LISTENER = 2
 export const DEFAULT_IB_OPERATOR = 100
 export const DEFAULT_WORKER = 500
+/** IB ingestor client ID default (YAML ib.host.client_id.ingestor). */
+export const DEFAULT_IB_INGESTOR = 150
 export const DEFAULT_HEARTBEAT_SEC = 10
 
 /** Status / read-only view (sidebar group: Status). */

@@ -219,3 +219,20 @@ def test_ensure_stream_and_group_busygroup_ignored() -> None:
     r = MagicMock()
     r.xgroup_create.side_effect = Exception("BUSYGROUP Consumer Group name already exists")
     ensure_stream_and_group(r, "stream", "grp")  # no raise
+
+
+def test_write_health_sync_does_not_delete_hash() -> None:
+    """Ops stores bifrost_ops_control_env on ib:operator:meta:health; health refresh must merge."""
+    from src.ib_operator.service import _write_health_sync
+
+    primary = MagicMock()
+    primary.connected = False
+    ex = IbOperatorExecutor(primary=primary, account_secondary=None)
+    pipe = MagicMock()
+    r = MagicMock()
+    r.pipeline.return_value = pipe
+    _write_health_sync(r, ex, "ib:operator:meta:health", 60)
+    pipe.delete.assert_not_called()
+    pipe.hset.assert_called_once()
+    pipe.expire.assert_called_once()
+    pipe.execute.assert_called_once()

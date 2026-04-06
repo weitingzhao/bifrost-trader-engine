@@ -1,9 +1,4 @@
-# Example systemd unit — IB ingestor (scripts/run_ib_ingestor.py).
-# Copy to /etc/systemd/system/, adjust User/Group/WorkingDirectory and Python venv path, then:
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now bifrost-ib-ingestor.service
-#
-# Add the unit stem to ops.allowed_units in config (e.g. bifrost-ib-ingestor) for Ops API control.
+# IB ingestor — same deploy layout as bifrost-massive-ws.service (see that file for rsync/config notes).
 
 [Unit]
 Description=Bifrost IB market data ingestor
@@ -12,10 +7,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=bifrost
-Group=bifrost
-WorkingDirectory=/opt/bifrost-trader-engine
-ExecStart=/opt/bifrost-trader-engine/.venv/bin/python scripts/run_ib_ingestor.py --config config/config.prod.yaml
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_CONFIG=/home/vision/bifrost-trader-engine/config/config.prod.yaml
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_ib_ingestor.py --config config/config.prod.yaml
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

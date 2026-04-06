@@ -27,6 +27,8 @@ export interface IbConnectionSectionProps {
   ib2ClientIdListener: number
   clientIdOperator: number
   ib2ClientIdOperator: number
+  /** IB ingestor client ID (Host only; YAML ib.host.client_id.ingestor). */
+  clientIdIbIngestor: number
   clientIdWorker: number
   defaultFlexRangeDays: number
   setDefaultFlexRangeDays: (v: number) => void
@@ -59,6 +61,7 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     ib2ClientIdListener,
     clientIdOperator,
     ib2ClientIdOperator,
+    clientIdIbIngestor,
     clientIdWorker,
     defaultFlexRangeDays,
     setDefaultFlexRangeDays,
@@ -215,7 +218,7 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                   </td>
                 </tr>
                 <tr className="client-ids-group-row">
-                  <td colSpan={3} className="client-ids-group-header">Monitor</td>
+                  <td colSpan={3} className="client-ids-group-header">Socket Services</td>
                 </tr>
                 <tr>
                   <td className="flex-query-cell-type">Operator (cmd RPC)</td>
@@ -245,6 +248,24 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                       '—'
                     )}
                   </td>
+                </tr>
+                <tr>
+                  <td className="flex-query-cell-type">
+                    Ingestor
+                    <InfoTooltip text="Client ID for scripts/run_ib_ingestor.py (YAML ib.host.client_id.ingestor; legacy key ib_market_ingest still read server-side). Host only — Secondary has no ingestor client." />
+                  </td>
+                  <td className="flex-query-cell-input">
+                    <input
+                      type="number"
+                      value={clientIdIbIngestor}
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
+                      style={{ width: '4rem' }}
+                      aria-label="IB ingestor client ID — Host (read-only, config.yaml ib.host.client_id.ingestor)"
+                      tabIndex={-1}
+                    />
+                  </td>
+                  <td className="flex-query-cell-input">—</td>
                 </tr>
                 <tr className="client-ids-group-row">
                   <td colSpan={3} className="client-ids-group-header">Celery</td>

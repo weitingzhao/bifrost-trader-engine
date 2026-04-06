@@ -1,9 +1,9 @@
-# Example systemd unit — Massive Options WebSocket ingest (scripts/run_massive_ws.py).
-# Copy to /etc/systemd/system/, adjust User/Group/WorkingDirectory and Python venv path, then:
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now bifrost-massive-ws.service
+# Massive Options WebSocket ingest (scripts/run_massive_ws.py).
+# Default paths match scripts/bifrost_ssh.sh (DEPLOY_PATH) and bifrost-server.service.
+# rsync excludes config/config.prod.yaml unless you pass --sync-prod-config — without it, --config may 404 on the server.
 #
-# Add the unit stem to ops.allowed_units in config (e.g. bifrost-massive-ws) for Ops API control.
+#   sudo cp deploy/systemd/bifrost-massive-ws.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bifrost-massive-ws.service
 
 [Unit]
 Description=Bifrost Massive Options WebSocket ingest
@@ -12,11 +12,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=bifrost
-Group=bifrost
-WorkingDirectory=/opt/bifrost-trader-engine
-# Use your venv interpreter:
-ExecStart=/opt/bifrost-trader-engine/.venv/bin/python scripts/run_massive_ws.py --config config/config.prod.yaml
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_CONFIG=/home/vision/bifrost-trader-engine/config/config.prod.yaml
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_massive_ws.py --config config/config.prod.yaml
 Restart=on-failure
 RestartSec=5
 

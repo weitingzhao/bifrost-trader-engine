@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from src.app.config import config_profile_from_resolved_path, resolve_startup_config_path
+from src.app.config import (
+    config_profile_from_resolved_path,
+    read_config,
+    resolve_startup_config_path,
+)
 
 
 @pytest.fixture
@@ -50,3 +54,14 @@ def test_bifrost_config_env_wins(project_root: Path, monkeypatch: pytest.MonkeyP
     p, rest = resolve_startup_config_path(str(project_root), ["--prod", "ignored"])
     assert p == str(Path(target).resolve())
     assert rest == ["--prod", "ignored"]
+
+
+def test_read_config_dev_includes_ops_worker_profiles_from_config_yaml(project_root: Path) -> None:
+    """run_celery --instance massive-N must see profiles merged from base config.yaml (not only dev overlay)."""
+    dev = str(project_root / "config" / "config.dev.yaml")
+    if not Path(dev).is_file():
+        pytest.skip("config.dev.yaml not present")
+    cfg, _ = read_config(dev)
+    profiles = (cfg.get("ops") or {}).get("worker_profiles") or {}
+    assert "massive" in profiles
+    assert profiles["massive"].get("queues") == ["massive"]

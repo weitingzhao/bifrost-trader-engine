@@ -68,18 +68,23 @@ class ColoredFormatter(logging.Formatter):
             record.levelname = original_levelname
 
 
-def _console_log_redis_url() -> str:
+def _console_log_redis_url(config_path: str | None) -> str:
+    """Must use the same merged YAML as the ingest (e.g. ``--config config/config.prod.yaml``).
+
+    Calling ``read_config()`` with no path uses ``config/config.yaml`` only, so Redis for the
+    dashboard stream can differ from ``_load_config`` → empty Socket Services logs on Prod Linux.
+    """
     try:
         from src.app.config import read_config
         from src.core.redis_url import effective_redis_dict, format_redis_url
 
-        config, _ = read_config()
+        config, _ = read_config(config_path)
     except (ImportError, OSError, ValueError, TypeError):
         config = {}
     return format_redis_url(effective_redis_dict(config, default_db=0))
 
 
-def _setup_logging(level: int) -> None:
+def _setup_logging(level: int, config_path: str | None) -> None:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
         ColoredFormatter(
@@ -88,7 +93,7 @@ def _setup_logging(level: int) -> None:
         )
     )
     redis_handler = RedisStreamLogHandler(
-        _console_log_redis_url(),
+        _console_log_redis_url(config_path),
         MASSIVE_WS_LOG_STREAM_KEY,
         maxlen=_MASSIVE_WS_LOG_STREAM_MAXLEN,
     )
@@ -540,6 +545,23 @@ class MassiveWsIngest:
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
+def _redis_ping_or_exit(cfg: dict) -> None:
+    """Fail fast when Redis is unreachable (otherwise quotes/meta silently never persist)."""
+    try:
+        _redis_client(cfg).ping()
+    except Exception as e:
+        logger.error(
+            "Redis ping failed — cannot write quotes or console stream: %s",
+            e,
+        )
+        print(
+            "Hint: On Prod, use merged config/config.prod.yaml (see BIFROST_CONFIG / --config). "
+            "If you rsync without --sync-prod-config, the server may lack config.prod.yaml.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Massive Options WebSocket ingest service")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config")
@@ -547,16 +569,32 @@ def main() -> None:
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
-    _setup_logging(getattr(logging, args.log_level))
-
-    cfg_path = args.config
-    if not cfg_path:
+    cfg_path: str | None = args.config
+    if cfg_path:
+        p = Path(cfg_path)
+        if not p.is_absolute():
+            p = _PROJECT_ROOT / p
+        if not p.is_file():
+            print(
+                f"ERROR: --config file not found: {args.config}\n"
+                "  rsync deploy excludes config/config.prod.yaml unless you use:\n"
+                "    ./scripts/bifrost_ssh.sh --deploy --sync-prod-config\n"
+                "  Or copy config/config.prod.yaml to the server (same tree as config/config.yaml).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        cfg_path = str(p.resolve())
+    else:
         for candidate in ("config/config.dev.yaml", "config/config.prod.yaml"):
-            if (_PROJECT_ROOT / candidate).exists():
-                cfg_path = str(_PROJECT_ROOT / candidate)
+            cp = _PROJECT_ROOT / candidate
+            if cp.is_file():
+                cfg_path = str(cp.resolve())
                 break
 
+    _setup_logging(getattr(logging, args.log_level), cfg_path)
+
     cfg = _load_config(cfg_path)
+    _redis_ping_or_exit(cfg)
     ms = _get_massive(cfg)
 
     if not ms["api_key"]:

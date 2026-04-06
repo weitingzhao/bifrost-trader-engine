@@ -110,7 +110,8 @@ class AgentServer:
 
     async def _systemctl_is_active(self, req: AgentRequest) -> AgentResponse:
         """systemctl is-active may exit non-zero for inactive; still report stdout."""
-        cmd = ["sudo", "systemctl", "is-active", req.unit]
+        # -n: non-interactive; requires NOPASSWD in /etc/sudoers.d/ (see deploy/sudoers/bifrost-agent).
+        cmd = ["sudo", "-n", "/usr/bin/systemctl", "is-active", req.unit]
         logger.info("Executing: %s", " ".join(cmd))
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -143,7 +144,7 @@ class AgentServer:
         )
 
     async def _systemctl(self, req: AgentRequest) -> AgentResponse:
-        cmd = ["sudo", "systemctl", req.action, req.unit]
+        cmd = ["sudo", "-n", "/usr/bin/systemctl", req.action, req.unit]
         logger.info("Executing: %s", " ".join(cmd))
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -178,7 +179,7 @@ class AgentServer:
 
     async def _list_units(self, req: AgentRequest) -> AgentResponse:
         pattern = req.unit or "bifrost-celery-worker@*"
-        cmd = ["systemctl", "list-units", pattern, "--no-legend", "--no-pager", "--plain"]
+        cmd = ["/usr/bin/systemctl", "list-units", pattern, "--no-legend", "--no-pager", "--plain"]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,

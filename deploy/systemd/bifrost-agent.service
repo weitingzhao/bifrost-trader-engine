@@ -19,7 +19,8 @@ RestartSec=5
 NoNewPrivileges=false
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=/home/vision/bifrost-trader-engine
+# Project tree + sudo timestamp dir (some hosts error on /run/sudo/ts/* if /run/sudo is not writable in the unit).
+ReadWritePaths=/home/vision/bifrost-trader-engine /run/sudo
 PrivateTmp=true
 
 # Socket mode 0660 is set in backend.ops.agent.server after bind (no ExecStartPost: it races

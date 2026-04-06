@@ -8,6 +8,8 @@
 #   sudo cp deploy/sudoers/bifrost-agent /etc/sudoers.d/bifrost-agent
 #   sudo chmod 0440 /etc/sudoers.d/bifrost-agent
 #   sudo visudo -c   # validate syntax
+# Verify (as bifrost-agent, must succeed without a password prompt):
+#   sudo -u bifrost-agent sudo -n /usr/bin/systemctl is-active bifrost-massive-ws.service
 #
 # IMPORTANT: Do NOT add broader wildcards or NOPASSWD: ALL.
 
@@ -15,11 +17,13 @@
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-celery-worker@*.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-celery-worker@*.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-celery-worker@*.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-celery-worker@*.service
 
 # Celery beat
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-celery-beat.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-celery-beat.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-celery-beat.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-celery-beat.service
 
 # Redis (local broker) — only enable if Redis is locally managed
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start redis
@@ -28,3 +32,26 @@ bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart redis
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start redis.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop redis.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart redis.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active redis
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active redis.service
+
+# Socket Services ingest (Ops Dashboard → market-ingest; same units as backend.ops.agent.protocol)
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-massive-ws.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-massive-ws.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-massive-ws.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-massive-ws.service
+
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-ib-operator.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-ib-operator.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-ib-operator.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-ib-operator.service
+
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-ib-ingestor.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-ib-ingestor.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-ib-ingestor.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-ib-ingestor.service
+
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-ib-market-ingest.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-ib-market-ingest.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-ib-market-ingest.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-ib-market-ingest.service

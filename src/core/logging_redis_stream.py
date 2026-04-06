@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,8 +11,10 @@ if TYPE_CHECKING:
 
 try:
     import redis
+    from redis.exceptions import RedisError
 except ImportError:  # pragma: no cover
     redis = None  # type: ignore[misc, assignment]
+    RedisError = Exception  # type: ignore[misc, assignment]
 
 
 class RedisStreamLogHandler(logging.Handler):
@@ -22,6 +25,7 @@ class RedisStreamLogHandler(logging.Handler):
         self._redis_url = redis_url
         self._stream_key = stream_key
         self._maxlen = maxlen
+        self._logged_emit_error = False
 
     def emit(self, record: logging.LogRecord) -> None:
         if redis is None:
@@ -35,5 +39,11 @@ class RedisStreamLogHandler(logging.Handler):
                 maxlen=self._maxlen,
                 approximate=True,
             )
-        except Exception:
-            pass
+        except RedisError as e:
+            if not self._logged_emit_error:
+                self._logged_emit_error = True
+                print(
+                    f"RedisStreamLogHandler: first xadd failed for {self._stream_key!r} ({e!r}); "
+                    "check redis host/port/password vs merged YAML, and that Monitor uses the same Redis.",
+                    file=sys.stderr,
+                )

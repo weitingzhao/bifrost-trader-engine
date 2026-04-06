@@ -129,11 +129,12 @@ def _resolve_queues_for_instance(
         )
         return _DEFAULT_QUEUES
 
-    import yaml
+    from src.app.config import read_config
 
     try:
-        with open(config_path, "r") as fh:
-            cfg = yaml.safe_load(fh) or {}
+        # Same merge as daemon/server: config.dev.yaml / config.prod.yaml overlay on config.yaml
+        # so ops.worker_profiles from the base file are visible when only env file defines ops.* overrides.
+        cfg, _ = read_config(config_path)
     except Exception as exc:
         sys.stderr.write(
             f"[run_celery] WARNING: cannot read {config_path}: {exc}; "

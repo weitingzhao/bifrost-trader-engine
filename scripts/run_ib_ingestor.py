@@ -68,18 +68,19 @@ class ColoredFormatter(logging.Formatter):
             record.levelname = original_levelname
 
 
-def _console_log_redis_url() -> str:
+def _console_log_redis_url(config_path: str | None) -> str:
+    """Use the same merged YAML as ``_load_config`` so Redis console stream matches Monitor (Prod systemd)."""
     try:
         from src.app.config import read_config
         from src.core.redis_url import effective_redis_dict, format_redis_url
 
-        config, _ = read_config()
+        config, _ = read_config(config_path)
     except (ImportError, OSError, ValueError, TypeError):
         config = {}
     return format_redis_url(effective_redis_dict(config, default_db=0))
 
 
-def _setup_logging(level: int) -> None:
+def _setup_logging(level: int, config_path: str | None) -> None:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
         ColoredFormatter(
@@ -88,7 +89,7 @@ def _setup_logging(level: int) -> None:
         )
     )
     redis_handler = RedisStreamLogHandler(
-        _console_log_redis_url(),
+        _console_log_redis_url(config_path),
         IB_INGESTOR_LOG_STREAM_KEY,
         maxlen=_IB_INGESTOR_LOG_STREAM_MAXLEN,
     )
@@ -453,6 +454,18 @@ class IbIngestorApp:
                 pass
 
 
+def _redis_ping_or_exit(cfg: dict) -> None:
+    try:
+        _redis_client(cfg).ping()
+    except Exception as e:
+        logger.error("Redis ping failed — IB ingestor cannot write ticks/meta: %s", e)
+        print(
+            "Hint: Use merged config/config.prod.yaml on the server; deploy with --sync-prod-config if needed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="IB ingestor (Redis ib:ingester:tick:*, ib:ingester:meta:health, …)",
@@ -466,16 +479,31 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    _setup_logging(getattr(logging, args.log_level))
-
-    cfg_path = args.config
-    if not cfg_path:
+    cfg_path: str | None = args.config
+    if cfg_path:
+        p = Path(cfg_path)
+        if not p.is_absolute():
+            p = _PROJECT_ROOT / p
+        if not p.is_file():
+            print(
+                f"ERROR: --config file not found: {args.config}\n"
+                "  Deploy with: ./scripts/bifrost_ssh.sh --deploy --sync-prod-config\n"
+                "  Or copy config/config.prod.yaml to the server.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        cfg_path = str(p.resolve())
+    else:
         for candidate in ("config/config.dev.yaml", "config/config.prod.yaml"):
-            if (_PROJECT_ROOT / candidate).exists():
-                cfg_path = str(_PROJECT_ROOT / candidate)
+            cp = _PROJECT_ROOT / candidate
+            if cp.is_file():
+                cfg_path = str(cp.resolve())
                 break
 
+    _setup_logging(getattr(logging, args.log_level), cfg_path)
+
     cfg = _load_config(cfg_path)
+    _redis_ping_or_exit(cfg)
     app = IbIngestorApp(cfg)
     asyncio.run(app.run())
 

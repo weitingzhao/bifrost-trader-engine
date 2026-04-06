@@ -26,6 +26,7 @@ import {
   DEFAULT_LISTENER,
   DEFAULT_PORT_TYPE,
   DEFAULT_WORKER,
+  DEFAULT_IB_INGESTOR,
   FLEX_QUERY_TYPES,
   getDefaultFlexRows,
   IB_CONNECTION_SUBSECTIONS,
@@ -128,6 +129,7 @@ export function SettingsPage({
   const [clientIdListener, setClientIdListener] = useState(DEFAULT_LISTENER)
   const [clientIdOperator, setClientIdOperator] = useState(DEFAULT_IB_OPERATOR)
   const [clientIdWorker, setClientIdWorker] = useState(DEFAULT_WORKER)
+  const [clientIdIbIngestor, setClientIdIbIngestor] = useState(DEFAULT_IB_INGESTOR)
   const [hostAccountId, setHostAccountId] = useState<string>('')
   const [streamHostAccountId, setStreamHostAccountId] = useState<string>('')
   const [streamSecondaryAccountId, setStreamSecondaryAccountId] = useState<string>('')
@@ -165,6 +167,7 @@ export function SettingsPage({
     if (c.ib_client_id_listener != null) setClientIdListener(c.ib_client_id_listener)
     if (c.ib_client_id_operator != null) setClientIdOperator(c.ib_client_id_operator)
     if (c.ib_client_id_worker_market != null) setClientIdWorker(c.ib_client_id_worker_market)
+    if (c.ib_client_id_ib_ingestor != null) setClientIdIbIngestor(c.ib_client_id_ib_ingestor)
     if (c.ib_host_account_id != null) setHostAccountId(String(c.ib_host_account_id))
     if (c.stream_host_account_id != null) setStreamHostAccountId(String(c.stream_host_account_id))
     if ((c as { stream_secondary_account_id?: string }).stream_secondary_account_id != null) setStreamSecondaryAccountId(String((c as { stream_secondary_account_id?: string }).stream_secondary_account_id))
@@ -242,7 +245,8 @@ export function SettingsPage({
     if (
       h === 'settings-market-ingest' ||
       h === 'settings-ib-connector' ||
-      h === 'settings-ws-connector'
+      h === 'settings-ws-connector' ||
+      h === 'settings-ws-agent'
     ) {
       return 'settings-ws-connector'
     }
@@ -280,7 +284,7 @@ export function SettingsPage({
   const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
   const [socketIngestLamp, setSocketIngestLamp] = useState<AggregateIngestLamp>('none')
   const [socketIngestTitle, setSocketIngestTitle] = useState(
-    'Socket services: Massive WebSocket and IB ingest (loading status…)',
+    'Ingest processes only: Massive WebSocket and IB ingest (loading status…)',
   )
   const deferredStart = useDeferredStart(280)
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
@@ -962,6 +966,7 @@ export function SettingsPage({
               ib2ClientIdListener={ib2ClientIdListener}
               clientIdOperator={clientIdOperator}
               ib2ClientIdOperator={ib2ClientIdOperator}
+              clientIdIbIngestor={clientIdIbIngestor}
               clientIdWorker={clientIdWorker}
               defaultFlexRangeDays={defaultFlexRangeDays}
               setDefaultFlexRangeDays={setDefaultFlexRangeDays}

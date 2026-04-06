@@ -36,6 +36,7 @@
   --color-lamp-green: #4ade80;
   --color-lamp-yellow: #facc15;
   --color-lamp-red: #f87171;
+  --color-lamp-gray: #94a3b8;
   --color-lamp-none: var(--color-text-dim);
 
   /* 强调色：关键指标与正向操作（青柠） */
@@ -116,6 +117,7 @@
   --color-lamp-green: #16a34a;
   --color-lamp-yellow: #ca8a04;
   --color-lamp-red: #dc2626;
+  --color-lamp-gray: #64748b;
   --color-lamp-none: var(--color-text-dim);
 
   --color-accent: #0ea5e9;
@@ -5163,6 +5165,12 @@ button:disabled {
   color: var(--color-lamp-red);
   filter: drop-shadow(0 0 5px var(--color-lamp-red)) drop-shadow(0 0 10px rgba(248, 113, 113, 0.3));
   animation: lamp-pulse-red 1.5s ease-in-out infinite;
+}
+
+.title-inline-lamp.gray {
+  color: var(--color-lamp-gray);
+  filter: none;
+  animation: none;
 }
 
 /* Massive Option sidebar: tier / plan limit (same semantic as feed-massive-tab-dot--tier) */

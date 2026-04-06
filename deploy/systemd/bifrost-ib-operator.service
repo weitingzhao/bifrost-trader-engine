@@ -1,9 +1,4 @@
-# Example systemd unit — IB Operator (scripts/run_ib_operator.py): Redis cmd RPC + one TWS client_id.
-# Copy to /etc/systemd/system/, adjust User/Group/WorkingDirectory and Python venv path, then:
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now bifrost-ib-operator.service
-#
-# Add the unit stem to ops.allowed_units (e.g. bifrost-ib-operator) for Ops API control.
+# IB Operator — same deploy layout as bifrost-massive-ws.service.
 
 [Unit]
 Description=Bifrost IB Operator (Redis cmd RPC)
@@ -12,13 +7,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=bifrost
-Group=bifrost
-WorkingDirectory=/opt/bifrost-trader-engine
-ExecStart=/opt/bifrost-trader-engine/.venv/bin/python scripts/run_ib_operator.py --config config/config.prod.yaml
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_CONFIG=/home/vision/bifrost-trader-engine/config/config.prod.yaml
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_ib_operator.py --config config/config.prod.yaml
 Restart=on-failure
 RestartSec=5
-# Allow time for the main loop to exit the blocking XREADGROUP (see ib_operator block_ms) and run disconnect_all().
 TimeoutStopSec=60
 
 [Install]

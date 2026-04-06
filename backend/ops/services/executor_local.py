@@ -218,6 +218,7 @@ class RestrictedExecutor:
             raise PermissionError(f"Action {action!r} not allowed for Redis")
         return await self._systemctl(action, "redis")
 
+    # Match ``systemctl is-active`` / ``systemctl --state=help`` active-ish names; avoid false ``unknown`` → UI yellow.
     _IS_ACTIVE_STATES = frozenset({
         "active",
         "inactive",
@@ -225,7 +226,17 @@ class RestrictedExecutor:
         "deactivating",
         "failed",
         "reloading",
+        "dead",
+        "maintenance",
+        "refreshing",
     })
+
+    @classmethod
+    def _normalize_is_active_stdout(cls, raw: str) -> str:
+        t = (raw or "").strip()
+        if not t:
+            return ""
+        return t.splitlines()[0].strip()
 
     async def systemctl_is_active(self, unit: str) -> str:
         """Return systemd ``is-active`` stdout (active|inactive|…); ``unknown`` on error."""
@@ -239,7 +250,7 @@ class RestrictedExecutor:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         except Exception:
             return "unknown"
-        state = (stdout or b"").decode().strip()
+        state = self._normalize_is_active_stdout((stdout or b"").decode())
         return state if state in self._IS_ACTIVE_STATES else "unknown"
 
 

@@ -108,7 +108,9 @@ class AgentExecutor:
         resp = await self._client.is_active(unit)
         states = RestrictedExecutor._IS_ACTIVE_STATES  # noqa: SLF001
         if resp.ok and resp.result:
-            out = (resp.result.get("stdout") or "").strip()
+            out = RestrictedExecutor._normalize_is_active_stdout(  # noqa: SLF001
+                str(resp.result.get("stdout") or ""),
+            )
             if out in states:
                 return out
         return "unknown"

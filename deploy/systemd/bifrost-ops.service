@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 User=vision
 Group=vision
+# Connect to bifrost-agent UDS (mode 0660, group bifrost-agent) when ops.executor_mode=agent
+SupplementaryGroups=bifrost-agent
 WorkingDirectory=/home/vision/bifrost-trader-engine
 Environment=BIFROST_ENV=prod
 # Ops Console SSE runs journalctl as User=vision; sudo is required unless vision is in group systemd-journal.

@@ -69,7 +69,7 @@ async def market_ingest_control(
 ) -> Any:
     from backend.ops.routers.workers import _role
 
-    denied = _require_role(request, "admin")
+    denied = _require_role(request, "operator")
     if denied:
         _audit(
             request,

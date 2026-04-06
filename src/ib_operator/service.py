@@ -61,8 +61,10 @@ def _write_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str, e
     h["updated_at"] = time.time()
     mapping = operator_health_dict_to_redis_hash(h)
     try:
+        # Do not DELETE the hash: Ops stores bifrost_ops_control_env on the same key
+        # (Socket Services Host column). Replacing the key would drop the lease after
+        # the first health refresh.
         pipe = r.pipeline()
-        pipe.delete(key)
         pipe.hset(key, mapping=mapping)
         if ex_sec > 0:
             pipe.expire(key, ex_sec)

@@ -39,7 +39,9 @@ Config: `config.dev.yaml` ships with `executor_mode: local` and `default_role: a
    sudo useradd -r -s /usr/sbin/nologin bifrost-agent
    ```
 
-3. Install sudoers (CRITICAL: validate first):
+3. Install sudoers (CRITICAL: validate first). The file must include **Socket Services** units
+   (`bifrost-massive-ws`, `bifrost-ib-operator`, `bifrost-ib-ingestor`, …) in addition to Celery/Redis;
+   otherwise Dashboard start/stop will fail with `sudo` denial while Mac dev (`local_control: subprocess`) still works.
    ```bash
    sudo cp deploy/sudoers/bifrost-agent /etc/sudoers.d/bifrost-agent
    sudo chmod 0440 /etc/sudoers.d/bifrost-agent
@@ -124,6 +126,9 @@ Check socket permissions:
 ls -la /run/bifrost-agent/bifrost-agent.sock
 # Expected: srw-rw---- bifrost-agent bifrost-agent
 ```
+
+Ops API (`bifrost-ops.service`) must run with supplementary group `bifrost-agent` so user `vision` can open that socket.
+Shipped unit file uses `SupplementaryGroups=bifrost-agent`. After editing the unit: `sudo systemctl daemon-reload && sudo systemctl restart bifrost-ops`.
 
 ### Auth Issues
 

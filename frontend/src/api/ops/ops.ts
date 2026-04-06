@@ -55,6 +55,30 @@ async function parseJsonResponse<T>(r: Response): Promise<T> {
   }
 }
 
+/** FastAPI may use `detail` (string or validation array); our routers use `error`. */
+function opsControlFailureMessage(data: unknown, r: Response): string {
+  if (data && typeof data === 'object') {
+    const o = data as Record<string, unknown>
+    if (typeof o.error === 'string' && o.error.trim()) return o.error.trim()
+    if (typeof o.detail === 'string' && o.detail.trim()) return o.detail.trim()
+    if (Array.isArray(o.detail)) {
+      const parts = o.detail
+        .map(item => {
+          if (item && typeof item === 'object' && 'msg' in item) {
+            return String((item as { msg?: string }).msg ?? '').trim()
+          }
+          return ''
+        })
+        .filter(Boolean)
+      if (parts.length) return parts.join('; ')
+    }
+  }
+  if (!r.ok) {
+    return `Request failed (HTTP ${r.status}${r.statusText ? ` ${r.statusText}` : ''})`
+  }
+  return 'Control request failed'
+}
+
 // ── Auth / capabilities ──────────────────────────────────────────────────────
 
 export interface OpsCapabilities {
@@ -317,7 +341,24 @@ export async function controlMarketIngest(
     headers: jsonAuthHeaders(),
     body: JSON.stringify({ service_id: serviceId, action }),
   })
-  return parseJsonResponse(r)
+  const data = await parseJsonResponse<{
+    ok?: boolean
+    error?: string
+    detail?: unknown
+    service_id?: string
+    action?: string
+    result?: Record<string, unknown>
+  }>(r)
+  if (data.ok === true) {
+    return data as {
+      ok: boolean
+      service_id?: string
+      action?: string
+      result?: Record<string, unknown>
+      error?: string
+    }
+  }
+  throw new Error(opsControlFailureMessage(data, r))
 }
 
 // ── Console SSE ──────────────────────────────────────────────────────────────
@@ -357,6 +398,11 @@ export async function fetchOpsHealth(): Promise<{
   local_control?: string
   /** True when local_control=subprocess and Ops can start/stop ingest via run_*.py (Mac dev). */
   market_ingest_script_control?: boolean
+  /** Present when executor_mode is agent: UDS path. */
+  agent_socket?: string
+  /** Present when executor_mode is agent: whether the Local Control Agent answered a probe. */
+  agent_reachable?: boolean
+  agent_error?: string
 }> {
   const r = await fetch(`${opsBase()}/ops/health`, { headers: authHeaders() })
   return parseJsonResponse(r)
