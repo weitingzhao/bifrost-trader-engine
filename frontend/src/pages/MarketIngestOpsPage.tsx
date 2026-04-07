@@ -29,6 +29,7 @@ import { opsHostEnvFromConfigProfile, type OpsHostEnvPill } from '../utils/opsHo
 import {
   aggregateIngestRedisHealthLamp,
   ingestRedisHealthLamp,
+  ingestRedisTruthyConnected,
   localControlAgentLamp,
 } from '../utils/socketIngestLamp'
 
@@ -114,12 +115,15 @@ function ibIngestClientIdSlots(
     const slots: IbClientIdSlot[] = []
     const hostRun = op?.host?.client_id
     const hostCfg = cfg?.port?.operator_host
+    const hostApiLive =
+      ingestRedisTruthyConnected(op?.connected) || ingestRedisTruthyConnected(op?.host?.connected)
     if (hostRun != null && Number.isFinite(Number(hostRun))) {
       slots.push({
         label: 'Host',
         id: Number(hostRun),
-        title:
-          'Client ID used by the live IB Operator Host connection (Monitor GET /status socket.ib_operator.host).',
+        title: hostApiLive
+          ? 'Client ID used by the live IB Operator Host IB API connection (Monitor GET /status socket.ib_operator.host; host_connected).'
+          : 'Redis host_client_id in Monitor /status (same value as config before API login). host_client_id is always present in the health hash; green lamp requires host_connected=true (IB API), not this number alone.',
       })
     } else if (hostCfg != null && Number.isFinite(Number(hostCfg))) {
       slots.push({
@@ -135,12 +139,14 @@ function ibIngestClientIdSlots(
     if (secConfigured || secSlotPresent) {
       const secRun = op?.secondary?.client_id
       const secCfg = cfg?.port?.operator_secondary
+      const secApiLive = ingestRedisTruthyConnected(op?.secondary?.connected)
       if (secRun != null && Number.isFinite(Number(secRun))) {
         slots.push({
           label: 'Sec',
           id: Number(secRun),
-          title:
-            'Client ID used by the live IB Operator Secondary connection (Monitor GET /status socket.ib_operator.secondary).',
+          title: secApiLive
+            ? 'Client ID used by the live IB Operator Secondary IB API connection (Monitor socket.ib_operator.secondary; secondary_connected).'
+            : 'Redis secondary_client_id in Monitor /status while secondary_connected is false. Same as Host: client_id in the hash does not prove IB API login; lamp uses secondary_connected.',
         })
       } else if (secCfg != null && Number.isFinite(Number(secCfg))) {
         slots.push({
@@ -346,6 +352,11 @@ function ServiceRow(props: {
   const { showStart, showStop } = ingestActionButtonsForProcessState(svc.process_active)
   const showIbClientId = ibIngestClientIdShouldShow(svc.id, category, svc.process_active, status)
   const ibClientSlots = showIbClientId ? ibIngestClientIdSlots(svc.id, category, status) : []
+  const ibOpForRow = svc.id === 'ib_operator' ? status?.socket?.ib_operator : undefined
+  const liveHostApiConnected =
+    svc.id !== 'ib_operator'
+    || ingestRedisTruthyConnected(ibOpForRow?.connected)
+    || ingestRedisTruthyConnected(ibOpForRow?.host?.connected)
   const actionsDisabled = actionBlock !== 'none'
   return (
     <tr>
@@ -394,6 +405,12 @@ function ServiceRow(props: {
                 </span>
               ))
             )}
+            {svc.id === 'ib_operator' && ibOpForRow && !liveHostApiConnected && showIbClientId ? (
+              <div className="massive-api-doc-hint" style={{ marginTop: 6, maxWidth: 480 }}>
+                Yellow lamp: Redis <code>host_connected</code> is false. <code>host_client_id</code> is
+                unrelated (always filled from config). Hover Host / Sec badges for details.
+              </div>
+            ) : null}
           </div>
         ) : null}
       </td>
@@ -722,9 +739,13 @@ export function MarketIngestOpsPage({
     }
     if (svc.id === 'ib_operator' && status?.socket?.ib_operator) {
       const op = status.socket.ib_operator
-      const hostUp = op.connected === true || op.host?.connected === true
+      const hostUp =
+        ingestRedisTruthyConnected(op.connected)
+        || ingestRedisTruthyConnected(op.host?.connected)
       const c = hostUp ? 'connected' : 'disconnected'
-      return `IB Operator ${c} (Redis ${svc.redis_meta_key})`
+      const rc = op.reconnects != null ? String(op.reconnects) : '—'
+      const mc = op.msg_count != null ? String(op.msg_count) : '—'
+      return `IB Operator ${c}; last activity ${fmtAge(op.last_msg_age_s ?? null)}; reconnects ${rc}; cmds ${mc}`
     }
     if (svc.redis_meta_key) return `Meta: ${svc.redis_meta_key}`
     return '—'
@@ -836,11 +857,11 @@ export function MarketIngestOpsPage({
                 <SettingsSidebarLampGlyph id="websocket" />
               </span>
               <span>Socket Services</span>
-              <InfoTooltip text="Roll-up from Monitor GET /status `socket`: Massive meta; IB ingestor uses `ib_ingestor.connected`; IB Operator uses `ib_operator.connected` (Host), same green/red rule. Gray when unknown. Local systemd is Start/Stop only; not Local Control Agent health." />
+              <InfoTooltip text="Roll-up from Monitor GET /status `socket`: Massive meta; IB ingestor uses `ib_ingestor.connected`. IB Operator: green only when Redis `host_connected` — the Operator process (`run_ib_operator.py`) has an IB API socket to TWS/Gateway (API port + client_id from YAML). TWS showing a logged-in session is not the same as that API connection; enable API in TWS and fix host/port/client_id if the lamp stays yellow. `host_client_id` in Redis is always filled and does not imply API. Yellow when host not connected but health is fresh; red when stale/stopped. Gray when unknown. Local systemd is Start/Stop only; not Local Control Agent health." />
             </span>
           </h2>
           <p className="settings-page-subtitle">
-            Row lamps use Redis-backed health from Monitor /status (not local Ops systemd). Ops Start/Stop still targets processes on this Ops host. When executor_mode=agent, Local Control Agent is below.
+            Row lamps use Redis-backed health from Monitor /status (not local Ops systemd). IB Operator: TWS UI login ≠ IB API `host_connected` — the lamp reflects whether `run_ib_operator.py` has connected to the API port. Ops Start/Stop still targets processes on this Ops host. When executor_mode=agent, Local Control Agent is below.
           </p>
         </div>
         <div className="dashboard-auth-bar dashboard-auth-bar--celery-header">

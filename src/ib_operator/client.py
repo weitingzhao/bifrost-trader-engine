@@ -11,7 +11,11 @@ from typing import Any, Dict, Optional
 import redis
 
 from src.ib_operator.config import effective_ib_operator_settings
-from src.ib_operator.health_redis import operator_health_dict_from_redis_hash
+from src.ib_operator.health_redis import (
+    jsonish_connected,
+    normalize_operator_health_payload,
+    operator_health_dict_from_redis_hash,
+)
 from src.ib_operator.protocol import PROTOCOL_VERSION, new_req_id, result_key
 
 logger = logging.getLogger(__name__)
@@ -142,7 +146,9 @@ def read_operator_health(redis_url: str, health_key: str) -> Optional[Dict[str, 
             if not raw:
                 return None
             loaded = json.loads(raw)
-            return loaded if isinstance(loaded, dict) else None
+            if isinstance(loaded, dict):
+                return normalize_operator_health_payload(loaded)
+            return None
         return None
 
     try:
@@ -167,6 +173,8 @@ def build_monitor_ib_status(
         return None
     ib = ib_cfg or {}
     health = read_operator_health(s["redis_url"], s["health_key"])
+    if health:
+        health = normalize_operator_health_payload(health)
     unreachable = "IB Operator unreachable (is run_ib_operator.py running?)"
 
     def _slot(
@@ -180,21 +188,29 @@ def build_monitor_ib_status(
             cid_i = int(cid) if cid is not None else 0
         except (TypeError, ValueError):
             cid_i = 0
-        if health and isinstance(health.get(key), dict):
-            h = health[key]
-            return {
-                "connected": bool(h.get("connected")),
-                "client_id": int(h.get("client_id") or cid_i),
-                "last_error": h.get("last_error"),
-            }
+        if health:
+            h = health.get(key)
+            if not isinstance(h, dict):
+                if key == "host" and isinstance(health.get("operator"), dict):
+                    h = health["operator"]
+                elif key == "secondary" and isinstance(health.get("account2"), dict):
+                    h = health["account2"]
+            if isinstance(h, dict):
+                return {
+                    "connected": jsonish_connected(h.get("connected")),
+                    "client_id": int(h.get("client_id") or cid_i),
+                    "last_error": h.get("last_error"),
+                    "reconnects": int(h.get("reconnects") or 0),
+                }
         return {
             "connected": False,
             "client_id": cid_i,
             "last_error": unreachable if not health else fallback_err,
+            "reconnects": 0,
         }
 
     out: Dict[str, Any] = {
-        "host": _slot("operator", "ib_client_id_operator", fallback_err=None),
+        "host": _slot("host", "ib_client_id_operator", fallback_err=None),
     }
     ib2_host = ib.get("ib2_host") or ""
     ib2_host = ib2_host.strip() if isinstance(ib2_host, str) else ""
@@ -203,12 +219,16 @@ def build_monitor_ib_status(
     except (TypeError, ValueError):
         cid2 = 102
     if ib2_host or cid2 != 102:
-        if health and health.get("account2") is not None and isinstance(health.get("account2"), dict):
-            a2 = health["account2"]
+        sec = health.get("secondary") if health else None
+        if sec is None and health and isinstance(health.get("account2"), dict):
+            sec = health["account2"]
+        if health and sec is not None and isinstance(sec, dict):
+            a2 = sec
             out["secondary"] = {
-                "connected": bool(a2.get("connected")),
+                "connected": jsonish_connected(a2.get("connected")),
                 "client_id": int(a2.get("client_id") or cid2),
                 "last_error": a2.get("last_error"),
+                "reconnects": int(a2.get("reconnects") or 0),
             }
         else:
             out["secondary"] = {
@@ -217,7 +237,27 @@ def build_monitor_ib_status(
                 "last_error": unreachable
                 if not health
                 else ("Set Second IB host in Settings to enable" if not ib2_host else None),
+                "reconnects": 0,
             }
     # Mirror ib_ingestor: top-level `connected` = Host slot (primary cmd RPC).
-    out["connected"] = bool(out["host"]["connected"])
+    out["connected"] = jsonish_connected(out["host"]["connected"])
+    if health:
+        out["service_alive"] = jsonish_connected(health.get("service_alive", True))
+        out["operator_alive"] = out["service_alive"]
+        try:
+            out["msg_count"] = int(health.get("msg_count") or 0)
+        except (TypeError, ValueError):
+            out["msg_count"] = 0
+        try:
+            lm = float(health.get("last_msg_ts") or 0)
+            out["last_msg_age_s"] = max(0.0, time.time() - lm) if lm > 0 else None
+        except (TypeError, ValueError):
+            out["last_msg_age_s"] = None
+        out["reconnects"] = int(out["host"].get("reconnects") or 0)
+    else:
+        out["service_alive"] = False
+        out["operator_alive"] = False
+        out["msg_count"] = 0
+        out["last_msg_age_s"] = None
+        out["reconnects"] = 0
     return out

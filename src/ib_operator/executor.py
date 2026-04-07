@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
+from src.ib_operator.health_redis import jsonish_connected
 from src.monitor.integrations.ib_clients import AccountIbClient, OperatorIbClient
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,13 @@ class IbOperatorExecutor:
     ) -> None:
         self._primary = primary
         self._account_secondary = account_secondary
+        self._cmd_count = 0
+        self._last_cmd_ts = 0.0
+
+    def note_cmd_processed(self) -> None:
+        """Increment after each handled operator stream message (Redis cmd RPC)."""
+        self._cmd_count += 1
+        self._last_cmd_ts = time.time()
 
     def _account_for_slot(self, payload: Dict[str, Any]) -> AccountIbClient | OperatorIbClient:
         slot = (payload.get("account_slot") or "primary").strip().lower()
@@ -92,19 +101,22 @@ class IbOperatorExecutor:
     def health_dict(self) -> Dict[str, Any]:
         def _one(c: Any) -> Dict[str, Any]:
             return {
-                "connected": bool(getattr(c, "connected", False)),
+                "connected": jsonish_connected(getattr(c, "connected", False)),
                 "client_id": int(getattr(c, "client_id", 0)),
                 "last_error": getattr(c, "last_error", None),
+                "reconnects": int(getattr(c, "reconnects", 0)),
             }
 
         out: Dict[str, Any] = {
-            "operator": _one(self._primary),
-            "operator_alive": True,
+            "host": _one(self._primary),
+            "service_alive": True,
+            "cmd_count": self._cmd_count,
+            "last_cmd_ts": self._last_cmd_ts,
         }
         if self._account_secondary is not None:
-            out["account2"] = _one(self._account_secondary)
+            out["secondary"] = _one(self._account_secondary)
         else:
-            out["account2"] = None
+            out["secondary"] = None
         return out
 
     async def connect_all(self) -> None:
@@ -121,4 +133,4 @@ class IbOperatorExecutor:
             try:
                 await self._account_secondary.disconnect()
             except Exception as e:
-                logger.debug("disconnect account2: %s", e)
+                logger.debug("disconnect secondary: %s", e)

@@ -11,8 +11,10 @@ from src.ib_operator.client import IbOperatorClient, build_monitor_ib_status, re
 from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.executor import IbOperatorExecutor
 from src.ib_operator.health_redis import (
+    LEGACY_OPERATOR_HEALTH_HASH_FIELDS,
     operator_health_dict_from_redis_hash,
     operator_health_dict_to_redis_hash,
+    prune_legacy_operator_health_hash_fields,
 )
 from src.ib_operator.protocol import PROTOCOL_VERSION, parse_stream_fields
 from src.ib_operator.redis_io import (
@@ -111,38 +113,63 @@ def test_effective_ib_operator_ignores_custom_health_key() -> None:
 
 def test_operator_health_hash_roundtrip_no_secondary() -> None:
     h = {
-        "operator": {"connected": True, "client_id": 120, "last_error": None},
-        "operator_alive": True,
-        "account2": None,
+        "host": {"connected": True, "client_id": 120, "last_error": None},
+        "service_alive": True,
+        "secondary": None,
         "updated_at": 1_700_000_000.0,
     }
     m = operator_health_dict_to_redis_hash(h)
-    assert m["operator_connected"] == "1"
-    assert m["operator_client_id"] == "120"
-    assert m["account2_present"] == "0"
+    assert m["host_connected"] == "1"
+    assert m["host_client_id"] == "120"
+    assert m["secondary_present"] == "0"
+    assert m["msg_count"] == "0"
+    assert m["host_reconnects"] == "0"
+    assert "last_msg_ts" in m
+    assert m["secondary_reconnects"] == "0"
     h2 = operator_health_dict_from_redis_hash(m)
     assert h2 is not None
-    assert h2["operator"]["connected"] is True
-    assert h2["operator"]["client_id"] == 120
-    assert h2["operator"]["last_error"] is None
+    assert h2["host"]["connected"] is True
+    assert h2["host"]["client_id"] == 120
+    assert h2["host"]["last_error"] is None
+    assert h2["secondary"] is None
+    assert h2["operator"] is h2["host"]
     assert h2["account2"] is None
 
 
-def test_operator_health_hash_roundtrip_with_account2() -> None:
+def test_operator_health_hash_roundtrip_with_secondary() -> None:
     h = {
-        "operator": {"connected": True, "client_id": 120, "last_error": "primary_err"},
-        "operator_alive": True,
-        "account2": {"connected": False, "client_id": 11, "last_error": None},
+        "host": {"connected": True, "client_id": 120, "last_error": "primary_err"},
+        "service_alive": True,
+        "secondary": {"connected": False, "client_id": 11, "last_error": None},
         "updated_at": 1.0,
     }
     m = operator_health_dict_to_redis_hash(h)
     h2 = operator_health_dict_from_redis_hash(m)
     assert h2 is not None
-    assert h2["account2"] is not None
-    assert h2["account2"]["connected"] is False
-    assert h2["account2"]["client_id"] == 11
-    assert h2["account2"]["last_error"] is None
-    assert h2["operator"]["last_error"] == "primary_err"
+    assert h2["secondary"] is not None
+    assert h2["secondary"]["connected"] is False
+    assert h2["secondary"]["client_id"] == 11
+    assert h2["secondary"]["last_error"] is None
+    assert h2["host"]["last_error"] == "primary_err"
+
+
+def test_operator_health_legacy_operator_account2_keys_still_encode() -> None:
+    """Executor-shaped dicts before host/secondary rename still flatten correctly."""
+    h = {
+        "operator": {"connected": True, "client_id": 1, "last_error": None},
+        "operator_alive": True,
+        "account2": None,
+        "updated_at": 0.0,
+    }
+    m = operator_health_dict_to_redis_hash(h)
+    assert m["host_client_id"] == "1"
+    assert m["secondary_present"] == "0"
+
+
+def test_prune_legacy_operator_health_hash_fields() -> None:
+    r = MagicMock()
+    prune_legacy_operator_health_hash_fields(r, "k")
+    r.hdel.assert_called_once_with("k", *LEGACY_OPERATOR_HEALTH_HASH_FIELDS)
 
 
 def test_operator_health_from_redis_hash_empty() -> None:
@@ -157,9 +184,9 @@ def test_read_operator_health_hash_and_legacy_string() -> None:
         def hgetall(self, _key: str) -> dict:
             return operator_health_dict_to_redis_hash(
                 {
-                    "operator": {"connected": True, "client_id": 5, "last_error": None},
-                    "operator_alive": True,
-                    "account2": None,
+                    "host": {"connected": True, "client_id": 5, "last_error": None},
+                    "service_alive": True,
+                    "secondary": None,
                     "updated_at": 0.0,
                 }
             )
@@ -186,13 +213,15 @@ def test_read_operator_health_hash_and_legacy_string() -> None:
     with patch("src.ib_operator.client.redis.from_url", return_value=FakeRedisHash()):
         h = read_operator_health("redis://x", "k")
     assert h is not None
+    assert h["host"]["client_id"] == 5
     assert h["operator"]["client_id"] == 5
 
     with patch("src.ib_operator.client.redis.from_url", return_value=FakeRedisString()):
         h2 = read_operator_health("redis://x", "k")
     assert h2 is not None
+    assert h2["host"]["client_id"] == 9
+    assert h2["host"]["connected"] is False
     assert h2["operator"]["client_id"] == 9
-    assert h2["operator"]["connected"] is False
 
 
 def test_build_monitor_ib_status_disabled_skip() -> None:
@@ -209,16 +238,46 @@ def test_build_monitor_ib_status_top_level_connected_matches_host() -> None:
     cfg = {"server": {}, "redis": {"enabled": True}}
     ib = {"ib_client_id_operator": 101}
     fake_health = {
-        "operator": {"connected": True, "client_id": 101, "last_error": None},
-        "operator_alive": True,
-        "account2": None,
+        "host": {"connected": True, "client_id": 101, "last_error": None, "reconnects": 2},
+        "service_alive": True,
+        "secondary": None,
+        "msg_count": 40,
+        "last_msg_ts": 1_700_000_100.0,
     }
-    with patch("src.ib_operator.client.read_operator_health", return_value=fake_health):
+    with patch("src.ib_operator.client.read_operator_health", return_value=fake_health), patch(
+        "src.ib_operator.client.time.time", return_value=1_700_000_200.0
+    ):
         out = build_monitor_ib_status(cfg, ib)
     assert out is not None
     assert out["connected"] is True
     assert out["host"]["connected"] is True
     assert out["host"]["client_id"] == 101
+    assert out["host"]["reconnects"] == 2
+    assert out["msg_count"] == 40
+    assert out["reconnects"] == 2
+    assert out["last_msg_age_s"] == 100.0
+    assert out["service_alive"] is True
+    assert out["operator_alive"] is True
+
+
+def test_build_monitor_ib_status_service_alive_from_health() -> None:
+    cfg = {"server": {}, "redis": {"enabled": True}}
+    ib = {"ib_client_id_operator": 101}
+    fake_health = {
+        "host": {"connected": True, "client_id": 101, "last_error": None, "reconnects": 0},
+        "service_alive": False,
+        "secondary": None,
+        "msg_count": 1,
+        "last_msg_ts": 1.0,
+    }
+    with patch("src.ib_operator.client.read_operator_health", return_value=fake_health), patch(
+        "src.ib_operator.client.time.time", return_value=2.0
+    ):
+        out = build_monitor_ib_status(cfg, ib)
+    assert out is not None
+    assert out["connected"] is True
+    assert out["service_alive"] is False
+    assert out["operator_alive"] is False
 
 
 def test_parse_xreadgroup_reply_empty() -> None:
@@ -271,11 +330,47 @@ def test_write_health_sync_does_not_delete_hash() -> None:
     primary = MagicMock()
     primary.connected = False
     ex = IbOperatorExecutor(primary=primary, account_secondary=None)
-    pipe = MagicMock()
     r = MagicMock()
-    r.pipeline.return_value = pipe
-    _write_health_sync(r, ex, "bifrost:health:ws_ib_operator", 60)
-    pipe.delete.assert_not_called()
-    pipe.hset.assert_called_once()
-    pipe.expire.assert_called_once()
-    pipe.execute.assert_called_once()
+    _write_health_sync(r, ex, "bifrost:health:ws_ib_operator")
+    r.delete.assert_not_called()
+    r.hset.assert_called_once()
+    r.hdel.assert_called_once()
+    r.pipeline.assert_not_called()
+
+
+def test_write_shutdown_health_sync_forces_disconnected_and_not_alive() -> None:
+    """Graceful stop should push host_connected=0 and host_alive=0 before exit (Socket Services /status)."""
+    from src.ib_operator.service import _write_shutdown_health_sync
+
+    primary = MagicMock()
+    primary.connected = True
+    primary.client_id = 120
+    primary.last_error = None
+    primary.reconnects = 0
+    ex = IbOperatorExecutor(primary=primary, account_secondary=None)
+    r = MagicMock()
+    _write_shutdown_health_sync(r, ex, "bifrost:health:ws_ib_operator")
+    r.delete.assert_not_called()
+    r.hset.assert_called_once()
+    mapping = r.hset.call_args.kwargs["mapping"]
+    assert mapping["host_connected"] == "0"
+    assert mapping["host_alive"] == "0"
+    assert mapping["host_client_id"] == "120"
+    r.hdel.assert_called_once()
+
+
+def test_operator_health_hash_writes_secondary_zeros_when_no_secondary() -> None:
+    """HSET merges fields; without secondary, still write secondary_* so Redis has no stale 1s."""
+    from src.ib_operator.health_redis import operator_health_dict_to_redis_hash
+
+    m = operator_health_dict_to_redis_hash(
+        {
+            "host": {"connected": False, "client_id": 120, "last_error": None, "reconnects": 0},
+            "service_alive": True,
+            "secondary": None,
+        }
+    )
+    assert m["secondary_present"] == "0"
+    assert m["secondary_connected"] == "0"
+    assert m["secondary_client_id"] == "0"
+    assert m["secondary_reconnects"] == "0"

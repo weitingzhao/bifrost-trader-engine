@@ -7,6 +7,33 @@ export type AggregateIngestLamp = IngestLamp | 'none'
 
 export type LocalControlAgentLamp = 'green' | 'yellow' | 'red'
 
+/**
+ * JSON `connected` from Monitor may be boolean; some paths historically used 1/0 or strings.
+ * Strict `=== true` misses numeric truthy and breaks Socket Services lamps.
+ */
+export function ingestRedisTruthyConnected(v: unknown): boolean {
+  if (v === true) return true
+  if (v === false || v === null || v === undefined) return false
+  if (typeof v === 'number' && Number.isFinite(v)) return v !== 0
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase()
+    return s === '1' || s === 'true' || s === 'yes'
+  }
+  return false
+}
+
+/** Yellow "waiting for IB" only when Redis health is actively updating (avoids stale service_alive default). */
+const IB_OPERATOR_HEALTH_FRESH_MAX_S = 180
+
+function ingestRedisExplicitlyOff(v: unknown): boolean {
+  if (v === false || v === 0) return true
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase()
+    return s === '0' || s === 'false' || s === 'no'
+  }
+  return false
+}
+
 /** Green = UDS responds; red = unreachable; yellow = probe pending / legacy health without agent_reachable. */
 export function localControlAgentLamp(reachable: boolean | null | undefined): LocalControlAgentLamp {
   if (reachable === true) return 'green'
@@ -82,7 +109,7 @@ export function ingestRedisHealthLamp(
     if (m == null) {
       return { lamp: 'gray', title: 'Massive block missing from /status socket (Redis meta unavailable).' }
     }
-    if (m.ws_connected === true) {
+    if (ingestRedisTruthyConnected(m.ws_connected)) {
       return {
         lamp: 'green',
         title: 'Massive WS ingest healthy (Redis bifrost:health:ws_massive_option, connected).',
@@ -101,7 +128,7 @@ export function ingestRedisHealthLamp(
     if (ib == null) {
       return { lamp: 'gray', title: 'IB ingestor block missing from /status socket (Redis health unavailable).' }
     }
-    if (ib.connected === true) {
+    if (ingestRedisTruthyConnected(ib.connected)) {
       return {
         lamp: 'green',
         title: 'IB ingestor healthy (Redis bifrost:health:ws_ib_ingestor, connected).',
@@ -117,12 +144,45 @@ export function ingestRedisHealthLamp(
         title: 'IB Operator health not in /status (socket.ib_operator missing; skip_monitor_ib or no Redis).',
       }
     }
-    // Align with ib_ingestor: prefer top-level `connected`, fall back to host slot (older Monitor).
-    const hostUp = mon.connected === true || mon.host?.connected === true
+    // Prefer top-level `connected`, fall back to `host.connected` (same roll-up as IB ingestor).
+    const hostSlotUp =
+      ingestRedisTruthyConnected(mon.connected) || ingestRedisTruthyConnected(mon.host?.connected)
+    const procDead =
+      ingestRedisExplicitlyOff(mon.service_alive) || ingestRedisExplicitlyOff(mon.operator_alive)
+    const serviceAlive =
+      ingestRedisTruthyConnected(mon.service_alive) || ingestRedisTruthyConnected(mon.operator_alive)
+    const lastAge = mon.last_msg_age_s
+    const healthFresh =
+      lastAge != null
+      && typeof lastAge === 'number'
+      && Number.isFinite(lastAge)
+      && lastAge <= IB_OPERATOR_HEALTH_FRESH_MAX_S
+    const hostUp = hostSlotUp && !procDead
     if (hostUp) {
       return {
         lamp: 'green',
         title: 'IB Operator healthy (Redis bifrost:health:ws_ib_operator, same roll-up as IB ingestor).',
+      }
+    }
+    if (procDead) {
+      return {
+        lamp: 'red',
+        title:
+          'IB Operator process reports stopped (Redis host_alive / service_alive); Host slot not in service.',
+      }
+    }
+    if (serviceAlive && !hostSlotUp && healthFresh) {
+      return {
+        lamp: 'yellow',
+        title:
+          'IB Operator process is running; IB Host not connected yet (Redis bifrost:health:ws_ib_operator). Green when Host connects.',
+      }
+    }
+    if (serviceAlive && !hostSlotUp && !healthFresh) {
+      return {
+        lamp: 'red',
+        title:
+          'IB Operator Host not connected; Redis health is stale or missing timestamp (process may be stopped without shutdown, or not updating).',
       }
     }
     return {

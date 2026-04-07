@@ -146,12 +146,22 @@ export interface SocketIbOperatorSlot {
   connected?: boolean
   client_id?: number | null
   last_error?: string | null
+  reconnects?: number
 }
 
 /** GET /status `socket.ib_operator` — Host + optional Secondary operator RPC connections. */
 export interface SocketIbOperator {
+  /** From Redis `host_alive` / health `service_alive`: false after graceful operator shutdown. */
+  service_alive?: boolean
+  /** Legacy alias for `service_alive` (same Redis field family). */
+  operator_alive?: boolean
   /** Same meaning as `socket.ib_ingestor.connected`: Host (primary) cmd RPC slot. */
   connected?: boolean
+  /** Cmd RPC messages processed (like `ib_ingestor.msg_count`). */
+  msg_count?: number | null
+  last_msg_age_s?: number | null
+  /** Host slot IB reconnect counter (like `ib_ingestor.reconnects`). */
+  reconnects?: number | null
   host?: SocketIbOperatorSlot
   secondary?: SocketIbOperatorSlot
   account?: SocketIbOperatorSlot

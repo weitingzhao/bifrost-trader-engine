@@ -31,8 +31,8 @@ export async function postMonitorReleaseIb(): Promise<ControlResponse> {
 
 export async function postMonitorConnect(): Promise<
   ControlResponse & {
-    account?: { requested?: boolean; success?: boolean; error?: string | null }
-    market?: { requested?: boolean; success?: boolean; error?: string | null }
+    host?: { requested?: boolean; success?: boolean; error?: string | null }
+    secondary?: { requested?: boolean; success?: boolean; error?: string | null }
   }
 > {
   const r = await fetch(`${apiBase()}/control/monitor_connect`, { method: 'POST' })
@@ -41,7 +41,7 @@ export async function postMonitorConnect(): Promise<
     ...j,
     ok: r.ok && (j.ok !== false),
     error: j.error || (r.ok ? undefined : r.statusText),
-    account: j.account,
-    market: j.market,
+    host: j.host,
+    secondary: j.secondary,
   }
 }

@@ -13,7 +13,10 @@ import redis
 from src.app.config import get_effective_ib_config
 from src.ib_operator.config import effective_ib_operator_settings
 from src.ib_operator.executor import IbOperatorExecutor
-from src.ib_operator.health_redis import operator_health_dict_to_redis_hash
+from src.ib_operator.health_redis import (
+    operator_health_dict_to_redis_hash,
+    prune_legacy_operator_health_hash_fields,
+)
 from src.ib_operator.protocol import (
     CommandMessage,
     dumps_result,
@@ -56,7 +59,7 @@ def _build_clients(config: Dict[str, Any]) -> IbOperatorExecutor:
     return IbOperatorExecutor(primary=primary, account_secondary=acc2)
 
 
-def _write_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str, ex_sec: int) -> None:
+def _write_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str) -> None:
     h = executor.health_dict()
     h["updated_at"] = time.time()
     mapping = operator_health_dict_to_redis_hash(h)
@@ -64,13 +67,31 @@ def _write_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str, e
         # Do not DELETE the hash: Ops stores bifrost_ops_control_env on bifrost:health:ws_ib_operator (same key)
         # (Socket Services Host column). Replacing the key would drop the lease after
         # the first health refresh.
-        pipe = r.pipeline()
-        pipe.hset(key, mapping=mapping)
-        if ex_sec > 0:
-            pipe.expire(key, ex_sec)
-        pipe.execute()
+        #
+        # Do not EXPIRE this key: IB ingestor / Massive WS health hashes have no TTL. A short TTL here
+        # caused the whole key to vanish when writes paused; Ops then recreated a hash with only
+        # bifrost_ops_control_env, wiping host_connected and all other fields until restart.
+        r.hset(key, mapping=mapping)
+        prune_legacy_operator_health_hash_fields(r, key)
     except Exception as e:
         logger.warning("write health key failed: %s", e)
+
+
+def _write_shutdown_health_sync(r: redis.Redis, executor: IbOperatorExecutor, key: str) -> None:
+    """Publish final Redis health before process exit so /status and Socket Services update immediately."""
+    h = executor.health_dict()
+    for slot in ("host", "secondary"):
+        sub = h.get(slot)
+        if isinstance(sub, dict):
+            h[slot] = {**sub, "connected": False}
+    h["service_alive"] = False
+    h["updated_at"] = time.time()
+    mapping = operator_health_dict_to_redis_hash(h)
+    try:
+        r.hset(key, mapping=mapping)
+        prune_legacy_operator_health_hash_fields(r, key)
+    except Exception as e:
+        logger.warning("write shutdown health failed: %s", e)
 
 
 async def _handle_message(
@@ -116,7 +137,6 @@ def run_ib_operator_loop(
     max_bytes = settings["max_result_bytes"]
     health_key = settings["health_key"]
     health_refresh = settings["health_refresh_sec"]
-    health_ex = max(int(health_refresh * 4), 60)
 
     r = redis_client or redis.from_url(rurl, decode_responses=True)
     ensure_stream_and_group(r, stream, group)
@@ -130,12 +150,18 @@ def run_ib_operator_loop(
         cons,
     )
 
+    # Publish Redis health before blocking on IB connect. Otherwise Ops may HSET only
+    # bifrost_ops_control_env on this key after systemd start while connect_all() retries
+    # TWS for a long time — leaving a hash with no host_* fields until connect returns.
+    _write_health_sync(r, executor, health_key)
+    last_health = time.time()
+
     try:
         asyncio.run(executor.connect_all())
     except Exception as e:
         logger.warning("IB Operator initial connect failed (will retry on demand): %s", e)
 
-    _write_health_sync(r, executor, health_key, health_ex)
+    _write_health_sync(r, executor, health_key)
     last_health = time.time()
     stop = stop_event or threading.Event()
 
@@ -145,7 +171,16 @@ def run_ib_operator_loop(
     while not should_stop():
         now = time.time()
         if now - last_health >= health_refresh:
-            _write_health_sync(r, executor, health_key, health_ex)
+            # If TWS/API was not ready at startup, initial connect_all() may have failed and the
+            # idle loop never retried — Redis would stay host_connected=0 until an RPC op runs.
+            # Retry here so Socket Services /status matches TWS once the API connects.
+            hd_try = executor.health_dict()
+            if not (hd_try.get("host") or {}).get("connected"):
+                try:
+                    asyncio.run(executor.connect_all())
+                except Exception as e:
+                    logger.debug("IB Operator health-tick connect retry: %s", e)
+            _write_health_sync(r, executor, health_key)
             last_health = now
 
         entries = []
@@ -204,7 +239,8 @@ def run_ib_operator_loop(
                 )
             write_result(r, rk, body or '{"ok":false,"error":"encode"}', ttl_sec=result_ttl)
             ack_message(r, stream, group, entry_id)
-            _write_health_sync(r, executor, health_key, health_ex)
+            executor.note_cmd_processed()
+            _write_health_sync(r, executor, health_key)
             last_health = time.time()
 
     logger.info("IB Operator stopping: disconnecting IB clients")
@@ -212,3 +248,4 @@ def run_ib_operator_loop(
         asyncio.run(executor.disconnect_all())
     except Exception as e:
         logger.warning("disconnect on shutdown: %s", e)
+    _write_shutdown_health_sync(r, executor, health_key)

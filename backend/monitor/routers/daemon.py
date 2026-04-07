@@ -140,25 +140,33 @@ async def post_monitor_connect(request: Request) -> JSONResponse:
             content={"ok": False, "error": env.get("error") or "reconnect_all failed"},
         )
     h = env.get("data") or {}
-    op_slot = h.get("operator") or {}
-    acc2 = h.get("account2")
-    op_ok = bool(op_slot.get("connected"))
-    if acc2 is None:
-        acc2_requested = False
-        acc2_ok = None
-        acc2_err = None
+    host_slot = h.get("host") if isinstance(h.get("host"), dict) else {}
+    if not host_slot and isinstance(h.get("operator"), dict):
+        host_slot = h["operator"]
+    sec = h.get("secondary")
+    if sec is None:
+        sec = h.get("account2")
+    host_ok = bool(host_slot.get("connected"))
+    if sec is None:
+        secondary_requested = False
+        secondary_ok = None
+        secondary_err = None
     else:
-        acc2_requested = True
-        acc2_ok = bool(acc2.get("connected"))
-        acc2_err = acc2.get("last_error")
-    ok = op_ok and (not acc2_requested or bool(acc2_ok))
+        secondary_requested = True
+        secondary_ok = bool(sec.get("connected")) if isinstance(sec, dict) else False
+        secondary_err = sec.get("last_error") if isinstance(sec, dict) else None
+    ok = host_ok and (not secondary_requested or bool(secondary_ok))
     status_code = 200 if ok else 500
     return JSONResponse(
         status_code=status_code,
         content={
             "ok": ok,
-            "operator": {"requested": True, "success": op_ok, "error": op_slot.get("last_error")},
-            "account2": {"requested": acc2_requested, "success": acc2_ok, "error": acc2_err},
+            "host": {"requested": True, "success": host_ok, "error": host_slot.get("last_error")},
+            "secondary": {
+                "requested": secondary_requested,
+                "success": secondary_ok,
+                "error": secondary_err,
+            },
         },
     )
 

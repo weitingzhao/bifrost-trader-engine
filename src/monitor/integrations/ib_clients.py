@@ -40,6 +40,7 @@ class BaseMonitorIbClient:
         self.last_error: Optional[str] = None
         self.last_connected_at: Optional[float] = None
         self.last_disconnected_at: Optional[float] = None
+        self.reconnects = 0
         self._ensure_loop()
 
     @property
@@ -48,6 +49,17 @@ class BaseMonitorIbClient:
 
     @property
     def connected(self) -> bool:
+        """True when IBConnector reports live API (``ib.isConnected()`` + internal flag).
+
+        Do not rely on ``_connected_state`` alone: health Redis must match ib_insync, or
+        ``host_connected`` can stay 0 while logs show ``Connected`` / ``API connection ready``.
+        """
+        conn = self._connector
+        if conn is not None:
+            try:
+                return bool(conn.is_connected)
+            except Exception:
+                return self._connected_state
         return self._connected_state
 
     def _ensure_loop(self) -> None:
@@ -130,6 +142,8 @@ class BaseMonitorIbClient:
                 raise RuntimeError(f"{self.name} failed to connect to IB (see logs for details)")
             self.client_id = int(getattr(self._connector, "client_id", self.client_id))
             self.last_error = None
+            if self.last_disconnected_at is not None:
+                self.reconnects += 1
             self.last_connected_at = time.time()
             self._connected_state = True
             logger.info(
