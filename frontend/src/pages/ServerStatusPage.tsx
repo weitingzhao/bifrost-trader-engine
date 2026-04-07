@@ -79,12 +79,14 @@ export function ServerStatusPage({
   const monitorStatus = (j?.socket?.ib_operator as any) || {}
   const monitorOperator = monitorStatus.host as { connected?: boolean; client_id?: number; last_error?: string } | undefined
   const monitorAccount2 = monitorStatus.secondary as { connected?: boolean; client_id?: number; last_error?: string } | undefined
+  const monitorOperatorHostConnected =
+    monitorStatus.connected === true || monitorOperator?.connected === true
   const monitorHasError = Boolean(monitorOperator?.last_error || monitorAccount2?.last_error)
   const hasAccount2 = monitorAccount2 !== undefined
   const allMonitorClientsConnected = hasAccount2
-    ? Boolean(monitorOperator?.connected && monitorAccount2?.connected)
-    : Boolean(monitorOperator?.connected)
-  const anyMonitorClientConnected = Boolean(monitorOperator?.connected || monitorAccount2?.connected)
+    ? Boolean(monitorOperatorHostConnected && monitorAccount2?.connected)
+    : Boolean(monitorOperatorHostConnected)
+  const anyMonitorClientConnected = Boolean(monitorOperatorHostConnected || monitorAccount2?.connected)
   const monitorLamp =
     !monitorEnabled
       ? 'red'
@@ -92,7 +94,7 @@ export function ServerStatusPage({
         ? 'yellow'
         : hasAccount2 && !allMonitorClientsConnected
           ? anyMonitorClientConnected ? 'yellow' : 'yellow'
-          : monitorOperator?.connected && (!hasAccount2 || monitorAccount2?.connected)
+          : monitorOperatorHostConnected && (!hasAccount2 || monitorAccount2?.connected)
             ? 'green'
             : 'yellow'
   const monitorSelfCheckText =

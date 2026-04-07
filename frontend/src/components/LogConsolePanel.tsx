@@ -20,6 +20,8 @@ export interface UseLogConsoleOptions {
 export interface LogConsoleController {
   lines: string[]
   status: ConsoleStatus
+  /** Set when status is error (API message or network failure). */
+  errorDetail: string | null
   heightPx: number
   consoleRef: RefObject<HTMLPreElement>
   selectAll: () => void
@@ -117,17 +119,22 @@ export function useLogConsole({
 }: UseLogConsoleOptions): LogConsoleController {
   const [lines, setLines] = useState<string[]>([])
   const [status, setStatus] = useState<ConsoleStatus>('idle')
+  const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [heightPx, setHeightPx] = useState(initialHeightPx)
   const consoleRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
     if (!enabled) {
       setStatus('idle')
+      setErrorDetail(null)
+      setLines([])
       return
     }
     let unsub: (() => void) | null = null
     let cancelled = false
     const limit = initialMaxLines
+    setLines([])
+    setErrorDetail(null)
     setStatus('connecting')
     fetchLogs(limit)
       .then((res) => {
@@ -135,26 +142,35 @@ export function useLogConsole({
         const fetchedLines = res.lines ?? []
         const trimmed = fetchedLines.length > limit ? fetchedLines.slice(-limit) : fetchedLines
         setLines(trimmed)
-        setStatus(res.error ? 'error' : 'connected')
-        if (!res.error) {
-          const nextUnsub = subscribeLogs(
-            (line) => {
-              if (cancelled) return
-              setLines((prev) => [...prev, line].slice(-limit))
-            },
-            () => {
-              if (!cancelled) setStatus('error')
-            },
-          )
-          if (cancelled) {
-            nextUnsub()
-            return
-          }
-          unsub = nextUnsub
+        if (res.error) {
+          setErrorDetail(res.error)
+          setStatus('error')
+          return
         }
+        setStatus('connected')
+        const nextUnsub = subscribeLogs(
+          (line) => {
+            if (cancelled) return
+            setLines((prev) => [...prev, line].slice(-limit))
+          },
+          () => {
+            if (!cancelled) {
+              setStatus('error')
+              setErrorDetail('Live stream disconnected (retry by switching tab or refreshing).')
+            }
+          },
+        )
+        if (cancelled) {
+          nextUnsub()
+          return
+        }
+        unsub = nextUnsub
       })
       .catch(() => {
-        if (!cancelled) setStatus('error')
+        if (!cancelled) {
+          setStatus('error')
+          setErrorDetail('Request failed (network or CORS). Check Monitor is reachable.')
+        }
       })
     return () => {
       cancelled = true
@@ -183,6 +199,7 @@ export function useLogConsole({
   const clear = async () => {
     await clearLogs()
     setLines([])
+    setErrorDetail(null)
   }
 
   const onResizeStart = (e: MouseEvent<HTMLDivElement>) => {
@@ -208,6 +225,7 @@ export function useLogConsole({
   return {
     lines,
     status,
+    errorDetail,
     heightPx,
     consoleRef,
     selectAll,
@@ -226,7 +244,7 @@ export function LogConsolePanel({
   clearTitle,
   emptyStatus = null,
 }: LogConsolePanelProps) {
-  const { lines, status, heightPx, consoleRef, selectAll, clear, onResizeStart } = controller
+  const { lines, status, errorDetail, heightPx, consoleRef, selectAll, clear, onResizeStart } = controller
 
   return (
     <div className="celery-console-wrap">
@@ -239,8 +257,19 @@ export function LogConsolePanel({
         <pre ref={consoleRef}>
           {status === 'connecting' && lines.length === 0
             ? loadingText
-            : status === 'error'
-              ? errorText
+            : status === 'error' && lines.length === 0
+              ? `${errorText}${errorDetail ? `\n\n${errorDetail}` : ''}`
+              : status === 'error' && lines.length > 0
+                ? (
+                    <>
+                      {renderConsoleLines(lines)}
+                      {'\n\n'}
+                      <span className="celery-log-line celery-log--error">
+                        {errorText}
+                        {errorDetail ? ` ${errorDetail}` : ''}
+                      </span>
+                    </>
+                  )
               : lines.length === 0
                 ? emptyText
                 : renderConsoleLines(lines)}

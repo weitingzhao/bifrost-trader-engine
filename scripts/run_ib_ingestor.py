@@ -5,8 +5,8 @@ Uses ``get_effective_ib_config`` → ``client_id_ib_ingestor`` from YAML ``ib.ho
 (legacy YAML key ``ib_market_ingest`` under ``client_id`` still accepted). Default 150 if omitted.
 
 Subscribes to Watchlist STK/OPT contracts via ib_insync, writes latest quotes to Redis ``ib:ingester:tick:*``,
-health hash ``bifrost:health:ib_ingestor`` (incl. client_id), subscriptions set, and pub channel ``ib:ingester:channel``.
-Does not write ``quote:{symbol}`` (daemon-owned).
+health hash ``bifrost:health:ws_ib_ingestor`` (incl. client_id), subscriptions set, and pub channel ``ib:ingester:channel``.
+Console log stream ``bifrost:console:ws_ib_ingestor`` (Monitor ingestor log APIs). Does not write ``quote:{symbol}`` (daemon-owned).
 
 Usage
 -----
@@ -468,7 +468,7 @@ def _redis_ping_or_exit(cfg: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="IB ingestor (Redis ib:ingester:tick:*, bifrost:health:ib_ingestor, …)",
+        description="IB ingestor (Redis ib:ingester:tick:*, bifrost:health:ws_ib_ingestor, …)",
     )
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config")
     parser.add_argument(

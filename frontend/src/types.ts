@@ -150,6 +150,8 @@ export interface SocketIbOperatorSlot {
 
 /** GET /status `socket.ib_operator` — Host + optional Secondary operator RPC connections. */
 export interface SocketIbOperator {
+  /** Same meaning as `socket.ib_ingestor.connected`: Host (primary) cmd RPC slot. */
+  connected?: boolean
   host?: SocketIbOperatorSlot
   secondary?: SocketIbOperatorSlot
   account?: SocketIbOperatorSlot

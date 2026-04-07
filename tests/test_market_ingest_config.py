@@ -11,12 +11,12 @@ def test_default_services():
     assert len(rows) == 3
     assert rows[0]["id"] == "massive_ws"
     assert rows[0]["systemd_unit"] == "bifrost-massive-ws.service"
-    assert rows[0]["redis_meta_key"] == "bifrost:health:massive_ws"
+    assert rows[0]["redis_meta_key"] == "bifrost:health:ws_massive_option"
     assert rows[1]["id"] == "ib_operator"
     assert rows[1]["systemd_unit"] == "bifrost-ib-operator.service"
-    assert rows[1]["redis_meta_key"] == "bifrost:health:ib_operator"
+    assert rows[1]["redis_meta_key"] == "bifrost:health:ws_ib_operator"
     assert rows[2]["id"] == "ib_ingestor"
-    assert rows[2]["redis_meta_key"] == "bifrost:health:ib_ingestor"
+    assert rows[2]["redis_meta_key"] == "bifrost:health:ws_ib_ingestor"
 
 
 def test_custom_services_override():
@@ -44,6 +44,62 @@ def test_service_by_id():
     assert row["id"] == "massive_ws"
 
 
+def test_yaml_legacy_redis_meta_keys_normalize_to_bifrost_health():
+    cfg = {
+        "ops": {
+            "market_ingest_services": [
+                {
+                    "id": "ib_ingestor",
+                    "label": "IB",
+                    "systemd_unit": "bifrost-ib-ingestor.service",
+                    "redis_meta_key": "ib:ingester:meta:health",
+                },
+                {
+                    "id": "ib_operator",
+                    "label": "Op",
+                    "systemd_unit": "bifrost-ib-operator.service",
+                    "redis_meta_key": "ib:operator:meta:health",
+                },
+            ]
+        }
+    }
+    rows = market_ingest_services_from_config(cfg)
+    assert len(rows) == 2
+    assert rows[0]["redis_meta_key"] == "bifrost:health:ws_ib_ingestor"
+    assert rows[1]["redis_meta_key"] == "bifrost:health:ws_ib_operator"
+
+
+def test_prior_bifrost_redis_meta_keys_normalize_to_ws_names():
+    cfg = {
+        "ops": {
+            "market_ingest_services": [
+                {
+                    "id": "massive_ws",
+                    "label": "M",
+                    "systemd_unit": "bifrost-massive-ws.service",
+                    "redis_meta_key": "bifrost:health:massive_ws",
+                },
+                {
+                    "id": "ib_ingestor",
+                    "label": "I",
+                    "systemd_unit": "bifrost-ib-ingestor.service",
+                    "redis_meta_key": "bifrost:health:ib_ingestor",
+                },
+                {
+                    "id": "ib_operator",
+                    "label": "O",
+                    "systemd_unit": "bifrost-ib-operator.service",
+                    "redis_meta_key": "bifrost:health:ib_operator",
+                },
+            ]
+        }
+    }
+    rows = market_ingest_services_from_config(cfg)
+    assert rows[0]["redis_meta_key"] == "bifrost:health:ws_massive_option"
+    assert rows[1]["redis_meta_key"] == "bifrost:health:ws_ib_ingestor"
+    assert rows[2]["redis_meta_key"] == "bifrost:health:ws_ib_operator"
+
+
 def test_legacy_ib_market_yaml_row_normalizes():
     cfg = {
         "ops": {
@@ -52,7 +108,7 @@ def test_legacy_ib_market_yaml_row_normalizes():
                     "id": "ib_market",
                     "label": "Legacy",
                     "systemd_unit": "bifrost-ib-market-ingest",
-                    "redis_meta_key": "ib:ingester:meta:health",
+                    "redis_meta_key": "bifrost:health:ib_ingestor",
                 }
             ]
         }
@@ -61,5 +117,6 @@ def test_legacy_ib_market_yaml_row_normalizes():
     assert len(rows) == 1
     assert rows[0]["id"] == "ib_ingestor"
     assert rows[0]["systemd_unit"] == "bifrost-ib-ingestor.service"
+    assert rows[0]["redis_meta_key"] == "bifrost:health:ws_ib_ingestor"
     assert market_ingest_service_by_id(cfg, "ib_market") is not None
     assert market_ingest_service_by_id(cfg, "ib_market")["id"] == "ib_ingestor"

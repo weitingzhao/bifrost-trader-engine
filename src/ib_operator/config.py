@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from src.bifrost.redis_health_keys import BIFROST_HEALTH_IB_OPERATOR
+from src.bifrost.redis_health_keys import (
+    BIFROST_HEALTH_IB_OPERATOR,
+    LEGACY_BIFROST_IB_OPERATOR,
+    LEGACY_IB_OPERATOR_META_HEALTH,
+)
 from src.core.redis_url import format_redis_url, redis_url_from_config, effective_redis_dict
 
 logger = logging.getLogger(__name__)
@@ -36,6 +40,27 @@ def effective_ib_operator_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     else:
         enabled = rurl is not None
 
+    # Health hash is always the Socket Services canonical key (never ib:operator:meta:health).
+    canonical_hk = BIFROST_HEALTH_IB_OPERATOR
+    raw_hk = raw.get("health_key")
+    hk = canonical_hk
+    if isinstance(raw_hk, str) and raw_hk.strip():
+        rs = raw_hk.strip()
+        if rs == canonical_hk:
+            pass
+        elif rs in (LEGACY_IB_OPERATOR_META_HEALTH, LEGACY_BIFROST_IB_OPERATOR):
+            logger.warning(
+                "ib_operator.health_key=%s is deprecated; health is written only to %s",
+                rs,
+                canonical_hk,
+            )
+        else:
+            logger.warning(
+                "ib_operator.health_key=%r ignored; health is written only to %s",
+                rs,
+                canonical_hk,
+            )
+
     return {
         "enabled": bool(enabled),
         "redis_url": rurl,
@@ -43,11 +68,11 @@ def effective_ib_operator_settings(config: Dict[str, Any]) -> Dict[str, Any]:
         "consumer_group": (raw.get("consumer_group") or "ib-operator").strip() or "ib-operator",
         "result_prefix": (raw.get("result_prefix") or "ib:operator:result:").strip()
         or "ib:operator:result:",
-        "health_key": (raw.get("health_key") or BIFROST_HEALTH_IB_OPERATOR).strip()
-        or BIFROST_HEALTH_IB_OPERATOR,
+        "health_key": hk,
         "result_ttl_sec": int(raw.get("result_ttl_sec") or 300),
         "request_timeout_sec": float(raw.get("request_timeout_sec") or 120),
-        "health_refresh_sec": float(raw.get("health_refresh_sec") or 15),
+        # Idle operator process only refreshes Redis on this interval (unlike ingestor, which updates on ticks).
+        "health_refresh_sec": float(raw.get("health_refresh_sec") or 3),
         "max_result_bytes": int(raw.get("max_result_bytes") or (512 * 1024)),
         "block_ms": int(raw.get("block_ms") or 5000),
     }

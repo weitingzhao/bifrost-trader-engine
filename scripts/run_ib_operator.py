@@ -16,7 +16,7 @@ Troubleshooting:
   ``port+1…`` on connection refused (``max_port_steps=5``).
 - Redis ``NOGROUP``: stream or consumer group was missing. The operator recreates the group on NOGROUP;
   ensure FastAPI and Operator use the same ``redis`` URL and DB index.
-- **Dashboard log**: Redis stream ``ib:operator:console`` (WS Connector IB Operator log panel).
+- **Dashboard log**: Redis stream ``bifrost:console:ws_ib_operator`` (Socket Services IB Operator log panel).
 """
 
 from __future__ import annotations
@@ -94,6 +94,7 @@ def main() -> None:
             log.info("IB Operator: merged with base %s", _base)
 
     op = effective_ib_operator_settings(config)
+    log.info("IB Operator Redis health hash: %s", op["health_key"])
     if not op["enabled"]:
         log.error("IB Operator disabled (set ib_operator.enabled: true and enable Redis).")
         sys.exit(1)

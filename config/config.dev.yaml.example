@@ -111,15 +111,15 @@ massive:
 #     - id: massive_ws
 #       label: "Massive Options WS ingest"
 #       systemd_unit: bifrost-massive-ws.service
-#       redis_meta_key: bifrost:health:massive_ws
+#       redis_meta_key: bifrost:health:ws_massive_option
 #     - id: ib_operator
 #       label: "IB Operator (cmd RPC)"
 #       systemd_unit: bifrost-ib-operator.service
-#       redis_meta_key: bifrost:health:ib_operator
+#       redis_meta_key: bifrost:health:ws_ib_operator
 #     - id: ib_ingestor
 #       label: "IB ingestor"
 #       systemd_unit: bifrost-ib-ingestor.service
-#       redis_meta_key: bifrost:health:ib_ingestor
+#       redis_meta_key: bifrost:health:ws_ib_ingestor
 
 # IB ingestor (scripts/run_ib_ingestor.py): Watchlist-driven; caps subscription count. Legacy top-level key ib_market_ingest still read.
 # ib_ingestor:

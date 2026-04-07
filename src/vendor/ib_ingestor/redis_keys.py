@@ -1,4 +1,7 @@
-"""Redis key names for IB ingestor (isolated from quote: / massive:)."""
+"""Redis key names for IB ingestor.
+
+Health hash is under ``bifrost:health:ws_ib_ingestor``; subscriptions/channel/ticks stay ``ib:ingester:*``.
+"""
 
 from src.bifrost.redis_health_keys import BIFROST_HEALTH_IB_INGESTOR
 

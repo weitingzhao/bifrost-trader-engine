@@ -133,19 +133,19 @@ def create_app(
     app.state._massive_log_thread: Optional[threading.Thread] = None
     app.state._massive_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # Massive WS ingest log stream (scripts/run_massive_ws.py → bifrost:massive_ws_console)
+    # Massive WS ingest log stream (scripts/run_massive_ws.py → bifrost:console:ws_massive_option)
     app.state.massive_ws_log_queues: list = []
     app.state.massive_ws_log_lock = threading.Lock()
     app.state._massive_ws_log_thread: Optional[threading.Thread] = None
     app.state._massive_ws_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB Operator log stream (scripts/run_ib_operator.py → ib:operator:console)
+    # IB Operator log stream (scripts/run_ib_operator.py → bifrost:console:ws_ib_operator)
     app.state.ib_operator_log_queues: list = []
     app.state.ib_operator_log_lock = threading.Lock()
     app.state._ib_operator_log_thread: Optional[threading.Thread] = None
     app.state._ib_operator_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # IB ingestor log stream (scripts/run_ib_ingestor.py → bifrost:ib_ingestor_console)
+    # IB ingestor log stream (scripts/run_ib_ingestor.py → bifrost:console:ws_ib_ingestor)
     app.state.ib_ingestor_log_queues: list = []
     app.state.ib_ingestor_log_lock = threading.Lock()
     app.state._ib_ingestor_log_thread: Optional[threading.Thread] = None

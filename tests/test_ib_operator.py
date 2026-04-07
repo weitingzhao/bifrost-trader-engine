@@ -79,7 +79,34 @@ def test_effective_ib_operator_settings_redis_key_defaults() -> None:
     s = effective_ib_operator_settings(cfg)
     assert s["stream"] == "ib:operator:cmd"
     assert s["result_prefix"] == "ib:operator:result:"
-    assert s["health_key"] == "bifrost:health:ib_operator"
+    assert s["health_key"] == "bifrost:health:ws_ib_operator"
+
+
+def test_effective_ib_operator_normalizes_legacy_health_key() -> None:
+    cfg = {
+        "redis": {"enabled": True},
+        "ib_operator": {"health_key": "ib:operator:meta:health"},
+    }
+    s = effective_ib_operator_settings(cfg)
+    assert s["health_key"] == "bifrost:health:ws_ib_operator"
+
+
+def test_effective_ib_operator_normalizes_prior_bifrost_health_key() -> None:
+    cfg = {
+        "redis": {"enabled": True},
+        "ib_operator": {"health_key": "bifrost:health:ib_operator"},
+    }
+    s = effective_ib_operator_settings(cfg)
+    assert s["health_key"] == "bifrost:health:ws_ib_operator"
+
+
+def test_effective_ib_operator_ignores_custom_health_key() -> None:
+    cfg = {
+        "redis": {"enabled": True},
+        "ib_operator": {"health_key": "ib:operator:meta:health:custom"},
+    }
+    s = effective_ib_operator_settings(cfg)
+    assert s["health_key"] == "bifrost:health:ws_ib_operator"
 
 
 def test_operator_health_hash_roundtrip_no_secondary() -> None:
@@ -178,6 +205,22 @@ def test_build_monitor_ib_status_no_redis() -> None:
     assert build_monitor_ib_status(cfg, {"ib_client_id_operator": 120}) is None
 
 
+def test_build_monitor_ib_status_top_level_connected_matches_host() -> None:
+    cfg = {"server": {}, "redis": {"enabled": True}}
+    ib = {"ib_client_id_operator": 101}
+    fake_health = {
+        "operator": {"connected": True, "client_id": 101, "last_error": None},
+        "operator_alive": True,
+        "account2": None,
+    }
+    with patch("src.ib_operator.client.read_operator_health", return_value=fake_health):
+        out = build_monitor_ib_status(cfg, ib)
+    assert out is not None
+    assert out["connected"] is True
+    assert out["host"]["connected"] is True
+    assert out["host"]["client_id"] == 101
+
+
 def test_parse_xreadgroup_reply_empty() -> None:
     assert parse_xreadgroup_reply(None) == []
     assert parse_xreadgroup_reply([]) == []
@@ -231,7 +274,7 @@ def test_write_health_sync_does_not_delete_hash() -> None:
     pipe = MagicMock()
     r = MagicMock()
     r.pipeline.return_value = pipe
-    _write_health_sync(r, ex, "bifrost:health:ib_operator", 60)
+    _write_health_sync(r, ex, "bifrost:health:ws_ib_operator", 60)
     pipe.delete.assert_not_called()
     pipe.hset.assert_called_once()
     pipe.expire.assert_called_once()

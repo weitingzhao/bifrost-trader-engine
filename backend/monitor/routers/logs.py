@@ -28,6 +28,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["logs"])
 
 
+def _redis_stream_line(fields: Dict[Any, Any]) -> str:
+    """Decode log line from Redis Stream fields (bytes or str, with or without decode_responses)."""
+    raw = fields.get(b"line")
+    if raw is None:
+        raw = fields.get("line")
+    if raw is None:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    return str(raw)
+
+
 def _daemon_log_reader_loop(app_ref) -> None:
     """Background thread: XREAD Redis stream bifrost:daemon_console, push each line to all SSE queues."""
     try:
@@ -42,7 +54,7 @@ def _daemon_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.daemon_log_lock:
                             queues = list(app_ref.state.daemon_log_queues)
                         loop = getattr(app_ref.state, "_daemon_log_loop", None)
@@ -71,7 +83,7 @@ def _server_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.server_log_lock:
                             queues = list(app_ref.state.server_log_queues)
                         loop = getattr(app_ref.state, "_server_log_loop", None)
@@ -100,7 +112,7 @@ def _massive_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.massive_log_lock:
                             queues = list(app_ref.state.massive_log_queues)
                         loop = getattr(app_ref.state, "_massive_log_loop", None)
@@ -116,7 +128,7 @@ def _massive_log_reader_loop(app_ref) -> None:
 
 
 def _massive_ws_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:massive_ws_console (run_massive_ws.py)."""
+    """Background thread: XREAD Redis stream bifrost:console:ws_massive_option (run_massive_ws.py)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
@@ -129,7 +141,7 @@ def _massive_ws_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.massive_ws_log_lock:
                             queues = list(app_ref.state.massive_ws_log_queues)
                         loop = getattr(app_ref.state, "_massive_ws_log_loop", None)
@@ -145,7 +157,7 @@ def _massive_ws_log_reader_loop(app_ref) -> None:
 
 
 def _ib_operator_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream ib:operator:console (run_ib_operator.py)."""
+    """Background thread: XREAD Redis stream bifrost:console:ws_ib_operator (run_ib_operator.py)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
@@ -158,7 +170,7 @@ def _ib_operator_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.ib_operator_log_lock:
                             queues = list(app_ref.state.ib_operator_log_queues)
                         loop = getattr(app_ref.state, "_ib_operator_log_loop", None)
@@ -174,7 +186,7 @@ def _ib_operator_log_reader_loop(app_ref) -> None:
 
 
 def _ib_ingestor_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:ib_ingestor_console (run_ib_ingestor.py)."""
+    """Background thread: XREAD Redis stream bifrost:console:ws_ib_ingestor (run_ib_ingestor.py)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
@@ -187,7 +199,7 @@ def _ib_ingestor_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.ib_ingestor_log_lock:
                             queues = list(app_ref.state.ib_ingestor_log_queues)
                         loop = getattr(app_ref.state, "_ib_ingestor_log_loop", None)
@@ -216,7 +228,7 @@ def _docs_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.docs_log_lock:
                             queues = list(app_ref.state.docs_log_queues)
                         loop = getattr(app_ref.state, "_docs_log_loop", None)
@@ -245,7 +257,7 @@ def _ops_log_reader_loop(app_ref) -> None:
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
-                        line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+                        line = _redis_stream_line(fields)
                         with app_ref.state.ops_log_lock:
                             queues = list(app_ref.state.ops_log_queues)
                         loop = getattr(app_ref.state, "_ops_log_loop", None)
@@ -274,7 +286,7 @@ def get_daemon_logs(
         raw = r.xrevrange(DAEMON_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
@@ -380,7 +392,7 @@ def get_server_logs(
         raw = r.xrevrange(SERVER_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
@@ -487,7 +499,7 @@ def get_massive_logs(
         raw = r.xrevrange(MASSIVE_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
@@ -576,7 +588,7 @@ async def get_massive_logs_stream(request: Request):
     )
 
 
-# --- Massive WS ingest logs (scripts/run_massive_ws.py → bifrost:massive_ws_console) ---
+# --- Massive WS ingest logs (scripts/run_massive_ws.py → bifrost:console:ws_massive_option) ---
 
 
 @router.get("/api/massive-ws/logs")
@@ -591,7 +603,7 @@ def get_massive_ws_logs(
         raw = r.xrevrange(MASSIVE_WS_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
@@ -680,7 +692,7 @@ async def get_massive_ws_logs_stream(request: Request):
     )
 
 
-# --- IB Operator logs (scripts/run_ib_operator.py → ib:operator:console) ---
+# --- IB Operator logs (scripts/run_ib_operator.py → bifrost:console:ws_ib_operator) ---
 
 
 @router.get("/api/ib-operator/logs")
@@ -695,7 +707,7 @@ def get_ib_operator_logs(
         raw = r.xrevrange(IB_OPERATOR_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
@@ -784,7 +796,7 @@ async def get_ib_operator_logs_stream(request: Request):
     )
 
 
-# --- IB ingestor logs (scripts/run_ib_ingestor.py → bifrost:ib_ingestor_console) ---
+# --- IB ingestor logs (scripts/run_ib_ingestor.py → bifrost:console:ws_ib_ingestor) ---
 
 
 @router.get("/api/ib-ingestor/logs")
@@ -799,7 +811,7 @@ def get_ib_ingestor_logs(
         raw = r.xrevrange(IB_INGESTOR_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
@@ -903,7 +915,7 @@ def get_docs_logs(
         raw = r.xrevrange(DOCS_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
@@ -1010,7 +1022,7 @@ def get_ops_logs(
         raw = r.xrevrange(OPS_LOG_STREAM_KEY, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
-            line = (fields.get(b"line") or fields.get("line") or b"").decode("utf-8", errors="replace")
+            line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:

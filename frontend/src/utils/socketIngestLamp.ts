@@ -85,7 +85,7 @@ export function ingestRedisHealthLamp(
     if (m.ws_connected === true) {
       return {
         lamp: 'green',
-        title: 'Massive WS ingest healthy (Redis bifrost:health:massive_ws, connected).',
+        title: 'Massive WS ingest healthy (Redis bifrost:health:ws_massive_option, connected).',
       }
     }
     if (m.ws_connected === null || m.ws_connected === undefined) {
@@ -94,7 +94,7 @@ export function ingestRedisHealthLamp(
         title: 'Massive WS not reported (no Redis URL or empty meta in /status).',
       }
     }
-    return { lamp: 'red', title: 'Massive WS not connected (Redis bifrost:health:massive_ws).' }
+    return { lamp: 'red', title: 'Massive WS not connected (Redis bifrost:health:ws_massive_option).' }
   }
   if (id === 'ib_ingestor') {
     const ib = status.socket?.ib_ingestor
@@ -104,10 +104,10 @@ export function ingestRedisHealthLamp(
     if (ib.connected === true) {
       return {
         lamp: 'green',
-        title: 'IB ingestor healthy (Redis bifrost:health:ib_ingestor, connected).',
+        title: 'IB ingestor healthy (Redis bifrost:health:ws_ib_ingestor, connected).',
       }
     }
-    return { lamp: 'red', title: 'IB ingestor not connected (Redis bifrost:health:ib_ingestor).' }
+    return { lamp: 'red', title: 'IB ingestor not connected (Redis bifrost:health:ws_ib_ingestor).' }
   }
   if (id === 'ib_operator') {
     const mon = status.socket?.ib_operator
@@ -117,14 +117,18 @@ export function ingestRedisHealthLamp(
         title: 'IB Operator health not in /status (socket.ib_operator missing; skip_monitor_ib or no Redis).',
       }
     }
-    const op = mon.host
-    if (op?.connected === true) {
+    // Align with ib_ingestor: prefer top-level `connected`, fall back to host slot (older Monitor).
+    const hostUp = mon.connected === true || mon.host?.connected === true
+    if (hostUp) {
       return {
         lamp: 'green',
-        title: 'IB Operator healthy (Redis bifrost:health:ib_operator, host slot).',
+        title: 'IB Operator healthy (Redis bifrost:health:ws_ib_operator, same roll-up as IB ingestor).',
       }
     }
-    return { lamp: 'red', title: 'IB Operator not connected (Redis bifrost:health:ib_operator, host slot).' }
+    return {
+      lamp: 'red',
+      title: 'IB Operator Host not connected (Redis bifrost:health:ws_ib_operator).',
+    }
   }
   return { lamp: 'gray', title: 'Unknown ingest service id for Redis health.' }
 }

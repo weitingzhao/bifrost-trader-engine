@@ -96,6 +96,7 @@ def test_assemble_status_v8_config_shape() -> None:
         active_alloc_id=None,
         active_alloc_name=None,
         monitor_ib_status={
+            "connected": True,
             "host": {"connected": True, "client_id": 100, "last_error": None},
         },
         monitor_enabled=True,
@@ -120,6 +121,7 @@ def test_assemble_status_v8_config_shape() -> None:
     assert ic["account"]["event_host"] == "U2"
     assert body["config"]["ib_flex"]["default_range_days"] == 30
     assert body["config"]["ib_flex"]["host_token"] == "t"
+    assert body["socket"]["ib_operator"]["connected"] is True
     assert body["socket"]["ib_operator"]["host"]["connected"] is True
     assert body["socket"]["ib_operator"]["host"]["client_id"] == 100
     assert body["socket"]["massive"]["configured"] is False

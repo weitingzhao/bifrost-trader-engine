@@ -204,7 +204,11 @@ function ibIngestClientIdShouldShow(
   if (sid === 'ib_ingestor') return status?.socket?.ib_ingestor?.connected === true
   if (sid === 'ib_operator') {
     const ibOp = status?.socket?.ib_operator
-    return ibOp?.host?.connected === true || ibOp?.secondary?.connected === true
+    return (
+      ibOp?.connected === true
+      || ibOp?.host?.connected === true
+      || ibOp?.secondary?.connected === true
+    )
   }
   return false
 }
@@ -716,8 +720,11 @@ export function MarketIngestOpsPage({
       const mc = ibIngestor.msg_count != null ? String(ibIngestor.msg_count) : '—'
       return `IB ${c}; last msg ${fmtAge(ibIngestor.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
     }
-    if (svc.id === 'ib_operator') {
-      return `Operator health Redis key: ${svc.redis_meta_key}`
+    if (svc.id === 'ib_operator' && status?.socket?.ib_operator) {
+      const op = status.socket.ib_operator
+      const hostUp = op.connected === true || op.host?.connected === true
+      const c = hostUp ? 'connected' : 'disconnected'
+      return `IB Operator ${c} (Redis ${svc.redis_meta_key})`
     }
     if (svc.redis_meta_key) return `Meta: ${svc.redis_meta_key}`
     return '—'
@@ -829,7 +836,7 @@ export function MarketIngestOpsPage({
                 <SettingsSidebarLampGlyph id="websocket" />
               </span>
               <span>Socket Services</span>
-              <InfoTooltip text="Roll-up of ingest units from Monitor GET /status `socket` Redis health (Massive meta, IB ingestor hash, IB Operator in socket.ib_operator host and optional secondary): green when that service reports connected in Redis, red when not, gray when unknown. Same data whether ingest runs on this host or only on another stack. Local systemd state is for Start/Stop only. Not Local Control Agent health." />
+              <InfoTooltip text="Roll-up from Monitor GET /status `socket`: Massive meta; IB ingestor uses `ib_ingestor.connected`; IB Operator uses `ib_operator.connected` (Host), same green/red rule. Gray when unknown. Local systemd is Start/Stop only; not Local Control Agent health." />
             </span>
           </h2>
           <p className="settings-page-subtitle">
@@ -1017,9 +1024,9 @@ export function MarketIngestOpsPage({
               <LogConsolePanel
                 controller={wsConsole}
                 loadingText="Connecting…"
-                errorText="Unable to load (Redis may be down or Monitor not running)."
+                errorText="Unable to load logs. Monitor reads Redis stream bifrost:console:ws_massive_option (same key as run_massive_ws.py)."
                 emptyText="No log lines yet. Start: python scripts/run_massive_ws.py"
-                infoTooltipText="Socket — Massive WebSocket ingest (bifrost:massive_ws_console)."
+                infoTooltipText="Live tail: GET /api/massive-ws/logs + SSE …/stream. Redis: bifrost:console:ws_massive_option."
                 resizeAriaLabel="Resize Massive WebSocket console height"
                 clearTitle="Clear displayed log and Redis stream"
               />
@@ -1028,9 +1035,9 @@ export function MarketIngestOpsPage({
               <LogConsolePanel
                 controller={ibOperatorConsole}
                 loadingText="Connecting…"
-                errorText="Unable to load (Redis may be down or Monitor not running)."
+                errorText="Unable to load logs. Monitor reads Redis stream bifrost:console:ws_ib_operator (same key as run_ib_operator.py)."
                 emptyText="No log lines yet. Start: python scripts/run_ib_operator.py"
-                infoTooltipText="Socket — IB Operator cmd RPC only (ib:operator:console). Separate from IB ingestor."
+                infoTooltipText="Live tail: GET /api/ib-operator/logs + SSE …/stream. Redis: bifrost:console:ws_ib_operator."
                 resizeAriaLabel="Resize IB Operator console height"
                 clearTitle="Clear displayed log and Redis stream"
               />
@@ -1039,9 +1046,9 @@ export function MarketIngestOpsPage({
               <LogConsolePanel
                 controller={ibIngestorConsole}
                 loadingText="Connecting…"
-                errorText="Unable to load (Redis may be down or Monitor not running)."
+                errorText="Unable to load logs. Monitor reads Redis stream bifrost:console:ws_ib_ingestor (same key as run_ib_ingestor.py)."
                 emptyText="No log lines yet. Start: python scripts/run_ib_ingestor.py"
-                infoTooltipText="Socket — IB ingestor only (bifrost:ib_ingestor_console). Not IB Operator."
+                infoTooltipText="Live tail: GET /api/ib-ingestor/logs + SSE …/stream. Redis: bifrost:console:ws_ib_ingestor."
                 resizeAriaLabel="Resize IB ingestor console height"
                 clearTitle="Clear displayed log and Redis stream"
               />

@@ -67,7 +67,7 @@ async def get_massive_option_stream(request: Request):
 
 @router.get("/research/massive/ws-status")
 def get_massive_ws_status(request: Request) -> Dict[str, Any]:
-    """Redis ingest health for Massive WS (``bifrost:health:massive_ws``, legacy ``massive:meta:status``)."""
+    """Redis ingest health for Massive WS (``bifrost:health:ws_massive_option``, older ``bifrost:health:massive_ws``, ``massive:meta:status``)."""
     redis_url = redis_url_from_config(getattr(request.app.state.reader, "_config", {}) or {})
     if not redis_url:
         return {"ok": False, "error": "Redis not configured", "connected": None}

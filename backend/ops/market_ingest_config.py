@@ -4,24 +4,36 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from src.bifrost.redis_health_keys import (
+    BIFROST_HEALTH_IB_INGESTOR,
+    BIFROST_HEALTH_IB_OPERATOR,
+    BIFROST_HEALTH_MASSIVE_WS,
+    LEGACY_BIFROST_IB_INGESTOR,
+    LEGACY_BIFROST_IB_OPERATOR,
+    LEGACY_BIFROST_MASSIVE_WS,
+)
+
+_LEGACY_IB_INGESTER_META_HEALTH = "ib:ingester:meta:health"
+_LEGACY_IB_OPERATOR_META_HEALTH = "ib:operator:meta:health"
+
 DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
     {
         "id": "massive_ws",
         "label": "Massive Options WS ingest",
         "systemd_unit": "bifrost-massive-ws.service",
-        "redis_meta_key": "bifrost:health:massive_ws",
+        "redis_meta_key": BIFROST_HEALTH_MASSIVE_WS,
     },
     {
         "id": "ib_operator",
         "label": "IB Operator (cmd RPC)",
         "systemd_unit": "bifrost-ib-operator.service",
-        "redis_meta_key": "bifrost:health:ib_operator",
+        "redis_meta_key": BIFROST_HEALTH_IB_OPERATOR,
     },
     {
         "id": "ib_ingestor",
         "label": "IB ingestor",
         "systemd_unit": "bifrost-ib-ingestor.service",
-        "redis_meta_key": "bifrost:health:ib_ingestor",
+        "redis_meta_key": BIFROST_HEALTH_IB_INGESTOR,
     },
 ]
 
@@ -47,6 +59,18 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
         norm_unit = unit if unit.endswith(".service") else f"{unit}.service"
         if norm_unit == "bifrost-ib-market-ingest.service":
             norm_unit = "bifrost-ib-ingestor.service"
+        if sid == "massive_ws" and meta == LEGACY_BIFROST_MASSIVE_WS:
+            meta = BIFROST_HEALTH_MASSIVE_WS
+        elif sid == "ib_ingestor" and meta in (
+            _LEGACY_IB_INGESTER_META_HEALTH,
+            LEGACY_BIFROST_IB_INGESTOR,
+        ):
+            meta = BIFROST_HEALTH_IB_INGESTOR
+        elif sid == "ib_operator" and meta in (
+            _LEGACY_IB_OPERATOR_META_HEALTH,
+            LEGACY_BIFROST_IB_OPERATOR,
+        ):
+            meta = BIFROST_HEALTH_IB_OPERATOR
         out.append({
             "id": sid,
             "label": label or sid,

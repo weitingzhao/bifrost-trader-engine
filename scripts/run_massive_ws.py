@@ -5,7 +5,8 @@ Connects to the Massive Options WS, dynamically subscribes to channels for
 Watchlist symbols, writes latest quotes to Redis, samples 1-minute bars to
 PostgreSQL (option_snapshots), and publishes update notifications.
 
-Architecture reference: docs/ARCHITECTURE.md (WebSocket ingest); health hash ``bifrost:health:massive_ws``.
+Architecture reference: docs/ARCHITECTURE.md (WebSocket ingest); health hash ``bifrost:health:ws_massive_option``;
+console log stream ``bifrost:console:ws_massive_option`` (Monitor ``/api/massive-ws/logs*``).
 
 Usage
 ─────

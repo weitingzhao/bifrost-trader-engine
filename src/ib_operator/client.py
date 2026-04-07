@@ -129,10 +129,6 @@ class IbOperatorClient:
 
 def read_operator_health(redis_url: str, health_key: str) -> Optional[Dict[str, Any]]:
     """Read operator health: Redis Hash (ingest-style string fields) or legacy JSON string value."""
-    from src.bifrost.redis_health_keys import (
-        BIFROST_HEALTH_IB_OPERATOR,
-        LEGACY_IB_OPERATOR_META_HEALTH,
-    )
 
     def _read_at_key(r: Any, key: str) -> Optional[Dict[str, Any]]:
         kt = r.type(key)
@@ -152,10 +148,7 @@ def read_operator_health(redis_url: str, health_key: str) -> Optional[Dict[str, 
     try:
         r = redis.from_url(redis_url, decode_responses=True)
         try:
-            out = _read_at_key(r, health_key)
-            if out is None and health_key == BIFROST_HEALTH_IB_OPERATOR:
-                out = _read_at_key(r, LEGACY_IB_OPERATOR_META_HEALTH)
-            return out
+            return _read_at_key(r, health_key)
         finally:
             r.close()
     except Exception:
@@ -225,4 +218,6 @@ def build_monitor_ib_status(
                 if not health
                 else ("Set Second IB host in Settings to enable" if not ib2_host else None),
             }
+    # Mirror ib_ingestor: top-level `connected` = Host slot (primary cmd RPC).
+    out["connected"] = bool(out["host"]["connected"])
     return out
