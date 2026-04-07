@@ -1,11 +1,18 @@
 """Core endpoints: root and health."""
 
+import logging
+import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
+
+logger = logging.getLogger(__name__)
+
+MONITOR_SHUTDOWN_EXIT_DELAY_SEC = 2.5
 
 router = APIRouter(tags=["core"])
 
@@ -85,3 +92,56 @@ def get_health(request: Request) -> Dict[str, Any]:
     out["research_port"] = int(request.app.state.bifrost_research_port)
     out["utilized_services"] = list(getattr(request.app.state, "bifrost_utilized_services", []) or [])
     return out
+
+
+@router.get("/api/server/auth/capabilities")
+def server_auth_capabilities(request: Request) -> Dict[str, Any]:
+    """Same shape as GET /ops/auth/capabilities (shared ops.auth tokens)."""
+    cfg = getattr(request.app.state, "bifrost_merged_config", None) or {}
+    from backend.ops.auth import AuthConfig, OpsAuth
+
+    return OpsAuth(AuthConfig.from_config(cfg)).capabilities(request)
+
+
+@router.post("/api/server/shutdown")
+def post_server_shutdown(request: Request) -> Any:
+    """Terminate the Monitor API process (``run_server.py`` / uvicorn). Requires operator role."""
+    from backend.ops.auth import AuthConfig, OpsAuth
+    from backend.ops.models.schemas import AuditEntry
+
+    cfg = getattr(request.app.state, "bifrost_merged_config", None) or {}
+    ops_auth = OpsAuth(AuthConfig.from_config(cfg))
+    ident, denied = ops_auth.require_role(request, "operator")
+    audit_store = getattr(request.app.state, "audit_store", None)
+    if denied:
+        if audit_store is not None:
+            audit_store.append(
+                AuditEntry(
+                    operator=ident.name,
+                    source_ip=request.client.host if request.client else None,
+                    action="monitor_shutdown",
+                    target="process",
+                    outcome="denied",
+                    detail=f"role={ident.role}",
+                ),
+            )
+        return denied
+    if audit_store is not None:
+        audit_store.append(
+            AuditEntry(
+                operator=ident.name,
+                source_ip=request.client.host if request.client else None,
+                action="monitor_shutdown",
+                target="process",
+                outcome="scheduled",
+                detail="process exit",
+            ),
+        )
+
+    def _exit_after_send() -> None:
+        time.sleep(MONITOR_SHUTDOWN_EXIT_DELAY_SEC)
+        logger.info("Monitor API shutdown: exiting process.")
+        os._exit(0)
+
+    threading.Thread(target=_exit_after_send, daemon=True).start()
+    return {"ok": True}

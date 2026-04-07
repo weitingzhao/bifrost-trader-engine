@@ -225,6 +225,37 @@ def config_profile_from_resolved_path(resolved_path: str) -> Optional[str]:
     return None
 
 
+def ops_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream key for Ops API application logs (api_ops console).
+
+    ``run_server_ops.py`` and Monitor ``/api/ops/logs*`` use ``bifrost:console:{dev|prod}:api_ops``
+    so Dev and Prod processes sharing one Redis do not mix lines. Non-``prod`` profiles (including
+    ``None`` for plain ``config.yaml``) map to the ``dev`` stream."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_ops"
+
+
+def docs_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream key for Docs API application logs (api_docs console).
+
+    ``run_server_docs.py`` and Monitor ``/api/docs/logs*`` use ``bifrost:console:{dev|prod}:api_docs``.
+    Non-``prod`` profiles map to the ``dev`` stream."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_docs"
+
+
+def trading_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream for Trading API console (``run_server_trading.py`` → Monitor ``/api/trading/logs*``)."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_trading"
+
+
+def portfolio_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream for Portfolio API console (``run_server_portfolio.py`` → Monitor ``/api/portfolio/logs*``)."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_portfolio"
+
+
 def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
     """Load YAML. Returns (config, resolved_path).
 

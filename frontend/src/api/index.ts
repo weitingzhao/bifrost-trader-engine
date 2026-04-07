@@ -1,4 +1,11 @@
-export { fetchStatus, fetchHealth, fetchOperations, fetchOpenOrders } from './monitor/status'
+export {
+  fetchStatus,
+  fetchHealth,
+  fetchOperations,
+  fetchOpenOrders,
+  fetchMonitorCapabilities,
+  postMonitorShutdown,
+} from './monitor/status'
 export {
   postSuspend,
   postResume,
@@ -59,6 +66,7 @@ export {
   fetchMassiveApiHealthAtOrigin,
   fetchResearchApiHealthAtOrigin,
   fetchDocsApiHealthAtOrigin,
+  fetchDocsCapabilities,
   postMassiveShutdown,
   postDocsShutdown,
   fetchMassiveStatus,
@@ -117,6 +125,12 @@ export type {
   RelativeValueResponse,
   OptionSnapshotsPgResult,
 } from './research/research'
+export {
+  fetchTradingCapabilities,
+  postTradingShutdown,
+  fetchPortfolioCapabilities,
+  postPortfolioShutdown,
+} from './account/accountSidecarControl'
 export {
   postSetHeartbeatInterval,
   postIbConfig,

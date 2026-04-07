@@ -1,6 +1,6 @@
 import { getMassiveApiBase, getDocsApiBase, getOpsApiBase, getResearchApiBase, joinServiceBase } from '../shared/apiRouting'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
-import { opsAuthHeaders } from '../ops/ops'
+import { opsAuthHeaders, opsControlFailureMessage, type OpsCapabilities } from '../ops/ops'
 
 function massiveUrl(path: string): string {
   return joinServiceBase(getMassiveApiBase(), path)
@@ -165,7 +165,7 @@ export async function fetchMassiveApiHealth(options?: { timeoutMs?: number }): P
   }
 }
 
-/** Health from GET /research/docs/health (Docs FastAPI merged OpenAPI). */
+/** Health from GET /health on the Docs FastAPI process (same payload as /research/docs/health). */
 export interface DocsApiHealthResponse {
   status: string
   service: string
@@ -181,7 +181,7 @@ export interface DocsApiHealthResponse {
 }
 
 export async function fetchDocsApiHealth(): Promise<DocsApiHealthResponse> {
-  const r = await fetch(docsUrl('/research/docs/health'))
+  const r = await fetch(docsUrl('/health'))
   if (!r.ok) throw new Error(`Docs API health: ${r.status}`)
   const j = await r.json()
   return {
@@ -194,6 +194,19 @@ export async function fetchDocsApiHealth(): Promise<DocsApiHealthResponse> {
     main_url: typeof j.main_url === 'string' ? j.main_url : '',
     massive_url: typeof j.massive_url === 'string' ? j.massive_url : '',
     research_url: typeof j.research_url === 'string' ? j.research_url : '',
+  }
+}
+
+/** Same shape as GET /ops/auth/capabilities (shared ops.auth tokens). */
+export async function fetchDocsCapabilities(): Promise<OpsCapabilities> {
+  const r = await fetch(docsUrl('/research/docs/auth/capabilities'), { headers: opsAuthHeaders() })
+  const text = await r.text()
+  try {
+    return JSON.parse(text) as OpsCapabilities
+  } catch {
+    throw new Error(
+      `Docs API returned non-JSON response (HTTP ${r.status}${text ? `, body: ${text.slice(0, 120)}` : ''}).`,
+    )
   }
 }
 
@@ -307,7 +320,7 @@ export async function fetchDocsApiHealthAtOrigin(
   origin: ApiOriginBase,
   options?: { timeoutMs?: number },
 ): Promise<DocsApiHealthResponse> {
-  const url = joinApiOrigin(origin, '/research/docs/health')
+  const url = joinApiOrigin(origin, '/health')
   const init = { credentials: 'omit' as const }
   const r =
     options?.timeoutMs != null
@@ -329,12 +342,29 @@ export async function fetchDocsApiHealthAtOrigin(
 }
 
 export async function postDocsShutdown(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(docsUrl('/research/docs/shutdown'), { method: 'POST' })
-  const j = await r.json().catch(() => ({}))
-  return {
-    ok: r.ok && j.ok !== false,
-    error: j.error || (r.ok ? undefined : r.statusText || 'Request failed'),
+  let r: Response
+  try {
+    r = await fetch(docsUrl('/research/docs/shutdown'), {
+      method: 'POST',
+      headers: opsAuthHeaders(),
+    })
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
+  let data: { ok?: boolean; error?: string } = {}
+  try {
+    const text = await r.text()
+    data = text ? (JSON.parse(text) as { ok?: boolean; error?: string }) : {}
+  } catch (e) {
+    if (!r.ok) {
+      return { ok: false, error: `Request failed (HTTP ${r.status})` }
+    }
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!r.ok) {
+    return { ok: false, error: opsControlFailureMessage(data, r) }
+  }
+  return { ok: data.ok === true, error: typeof data.error === 'string' ? data.error : undefined }
 }
 
 export async function postMassiveShutdown(): Promise<{ ok: boolean; error?: string }> {

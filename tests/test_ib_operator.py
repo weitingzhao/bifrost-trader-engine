@@ -62,6 +62,19 @@ async def test_executor_ping() -> None:
     assert "data" in out
 
 
+def test_health_dict_uses_connected_snapshot_when_present() -> None:
+    """Redis health must use loop-thread snapshot, not cross-thread ``connected`` property."""
+    primary = MagicMock()
+    primary.connected_snapshot = MagicMock(return_value=True)
+    primary.client_id = 101
+    primary.last_error = None
+    primary.reconnects = 0
+    ex = IbOperatorExecutor(primary=primary, account_secondary=None)
+    h = ex.health_dict()
+    assert h["host"]["connected"] is True
+    primary.connected_snapshot.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_executor_fetch_bars_delegates() -> None:
     primary = MagicMock()

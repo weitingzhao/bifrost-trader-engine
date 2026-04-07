@@ -84,7 +84,7 @@ function LogConsoleClearIcon() {
   )
 }
 
-function parseConsoleLogLine(line: string): { level: 'error' | 'warning' | 'info' | 'debug' | 'default'; timePart: string | null; body: string } {
+export function parseConsoleLogLine(line: string): { level: 'error' | 'warning' | 'info' | 'debug' | 'default'; timePart: string | null; body: string } {
   const timeMatch = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:,\d+)?)\s+/)
   const timePart = timeMatch ? timeMatch[1] : null
   const body = timePart ? line.slice(timePart.length) : line

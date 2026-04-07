@@ -3,21 +3,20 @@
 import asyncio
 import json
 import logging
+import re
 import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.monitor.routers.deps import (
     DAEMON_LOG_STREAM_KEY,
-    DOCS_LOG_STREAM_KEY,
     IB_OPERATOR_LOG_STREAM_KEY,
     IB_INGESTOR_LOG_STREAM_KEY,
     MASSIVE_LOG_STREAM_KEY,
     MASSIVE_WS_LOG_STREAM_KEY,
-    OPS_LOG_STREAM_KEY,
     SERVER_LOG_STREAM_KEY,
     daemon_log_redis_url,
 )
@@ -38,6 +37,53 @@ def _redis_stream_line(fields: Dict[Any, Any]) -> str:
     if isinstance(raw, bytes):
         return raw.decode("utf-8", errors="replace")
     return str(raw)
+
+
+def _trading_console_stream_keys_dual() -> List[str]:
+    """Dev + prod stream keys so Monitor and sidecars can disagree on config profile."""
+    from src.config.yaml_config import trading_api_console_stream_key
+
+    d = trading_api_console_stream_key(None)
+    p = trading_api_console_stream_key("prod")
+    return list(dict.fromkeys([d, p]))
+
+
+def _portfolio_console_stream_keys_dual() -> List[str]:
+    from src.config.yaml_config import portfolio_api_console_stream_key
+
+    d = portfolio_api_console_stream_key(None)
+    p = portfolio_api_console_stream_key("prod")
+    return list(dict.fromkeys([d, p]))
+
+
+_TIME_PREFIX_RE_STREAM = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:,\d+)?)",
+)
+
+
+def _stream_line_sort_key(line: str) -> str:
+    m = _TIME_PREFIX_RE_STREAM.match(line)
+    return m.group(1) if m else "\uffff"
+
+
+def _merged_console_tail_from_keys(r: Any, keys: List[str], tail: int) -> Tuple[List[str], Optional[str]]:
+    """Merge newest `tail` lines per key, sort by leading timestamp, return global last `tail` lines."""
+    scored: List[Tuple[str, str]] = []
+    err_parts: List[str] = []
+    for key in keys:
+        try:
+            raw = r.xrevrange(key, count=tail)
+            for _eid, fields in reversed(raw):
+                line = _redis_stream_line(fields)
+                if not line:
+                    continue
+                scored.append((_stream_line_sort_key(line), line))
+        except Exception as e:
+            err_parts.append(f"{key}: {e}")
+    scored.sort(key=lambda x: x[0])
+    merged = [ln for _, ln in scored[-tail:]]
+    err = "; ".join(err_parts) if err_parts else None
+    return merged, err
 
 
 def _daemon_log_reader_loop(app_ref) -> None:
@@ -215,14 +261,15 @@ def _ib_ingestor_log_reader_loop(app_ref) -> None:
 
 
 def _docs_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:docs_console, push each line to all SSE queues."""
+    """Background thread: XREAD Redis stream bifrost:console:{dev|prod}:api_docs, push each line to SSE queues."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
         last_id = "$"
+        stream_key = getattr(app_ref.state, "docs_log_stream_key", None) or "bifrost:console:dev:api_docs"
         while True:
             try:
-                result = r.xread(block=5000, streams={DOCS_LOG_STREAM_KEY: last_id}, count=100)
+                result = r.xread(block=5000, streams={stream_key: last_id}, count=100)
                 if not result:
                     continue
                 for _stream_name, entries in result:
@@ -244,14 +291,15 @@ def _docs_log_reader_loop(app_ref) -> None:
 
 
 def _ops_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:ops_console, push each line to all SSE queues."""
+    """Background thread: XREAD Redis stream bifrost:console:{dev|prod}:api_ops, push each line to SSE queues."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
         last_id = "$"
+        stream_key = getattr(app_ref.state, "ops_log_stream_key", None) or "bifrost:console:dev:api_ops"
         while True:
             try:
-                result = r.xread(block=5000, streams={OPS_LOG_STREAM_KEY: last_id}, count=100)
+                result = r.xread(block=5000, streams={stream_key: last_id}, count=100)
                 if not result:
                     continue
                 for _stream_name, entries in result:
@@ -270,6 +318,66 @@ def _ops_log_reader_loop(app_ref) -> None:
                 logger.debug("ops_log_reader_loop: %s", e)
     except Exception as e:
         logger.warning("ops_log_reader_loop exited: %s", e)
+
+
+def _trading_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD dev+prod Trading API console streams (sidecar vs Monitor profile mismatch safe)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        keys = _trading_console_stream_keys_dual()
+        last_ids = {k: "$" for k in keys}
+        while True:
+            try:
+                result = r.xread(block=5000, streams=last_ids, count=100)
+                if not result:
+                    continue
+                for stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_ids[stream_name] = eid
+                        line = _redis_stream_line(fields)
+                        with app_ref.state.trading_log_lock:
+                            queues = list(app_ref.state.trading_log_queues)
+                        loop = getattr(app_ref.state, "_trading_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("trading_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("trading_log_reader_loop exited: %s", e)
+
+
+def _portfolio_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD dev+prod Portfolio API console streams."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        keys = _portfolio_console_stream_keys_dual()
+        last_ids = {k: "$" for k in keys}
+        while True:
+            try:
+                result = r.xread(block=5000, streams=last_ids, count=100)
+                if not result:
+                    continue
+                for stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_ids[stream_name] = eid
+                        line = _redis_stream_line(fields)
+                        with app_ref.state.portfolio_log_lock:
+                            queues = list(app_ref.state.portfolio_log_queues)
+                        loop = getattr(app_ref.state, "_portfolio_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("portfolio_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("portfolio_log_reader_loop exited: %s", e)
 
 
 # --- Daemon logs ---
@@ -900,7 +1008,7 @@ async def get_ib_ingestor_logs_stream(request: Request):
     )
 
 
-# --- Docs API server logs (run_server_docs.py → Redis stream bifrost:docs_console) ---
+# --- Docs API server logs (run_server_docs.py → Redis stream bifrost:console:{dev|prod}:api_docs) ---
 
 
 @router.get("/api/docs/logs")
@@ -912,7 +1020,8 @@ def get_docs_logs(
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        raw = r.xrevrange(DOCS_LOG_STREAM_KEY, count=tail)
+        key = getattr(request.app.state, "docs_log_stream_key", None) or "bifrost:console:dev:api_docs"
+        raw = r.xrevrange(key, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
             line = _redis_stream_line(fields)
@@ -928,7 +1037,8 @@ def clear_docs_logs(request: Request) -> Dict[str, Any]:
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        r.delete(DOCS_LOG_STREAM_KEY)
+        key = getattr(request.app.state, "docs_log_stream_key", None) or "bifrost:console:dev:api_docs"
+        r.delete(key)
         return {"ok": True}
     except Exception as e:
         logger.warning("clear_docs_logs failed: %s", e)
@@ -946,7 +1056,8 @@ def trim_docs_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[s
             return {"ok": False, "error": "max_lines must be between 1 and 10000"}
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        r.xtrim(DOCS_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        key = getattr(request.app.state, "docs_log_stream_key", None) or "bifrost:console:dev:api_docs"
+        r.xtrim(key, maxlen=max_lines, approximate=True)
         return {"ok": True}
     except Exception as e:
         logger.warning("trim_docs_logs failed: %s", e)
@@ -1007,7 +1118,7 @@ async def get_docs_logs_stream(request: Request):
 # --- Celery logs ---
 
 
-# --- Ops API server logs (run_server_ops.py -> Redis stream bifrost:ops_console) ---
+# --- Ops API server logs (run_server_ops.py -> Redis stream bifrost:console:{dev|prod}:api_ops) ---
 
 
 @router.get("/api/ops/logs")
@@ -1019,7 +1130,8 @@ def get_ops_logs(
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        raw = r.xrevrange(OPS_LOG_STREAM_KEY, count=tail)
+        key = getattr(request.app.state, "ops_log_stream_key", None) or "bifrost:console:dev:api_ops"
+        raw = r.xrevrange(key, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
             line = _redis_stream_line(fields)
@@ -1035,7 +1147,8 @@ def clear_ops_logs(request: Request) -> Dict[str, Any]:
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        r.delete(OPS_LOG_STREAM_KEY)
+        key = getattr(request.app.state, "ops_log_stream_key", None) or "bifrost:console:dev:api_ops"
+        r.delete(key)
         return {"ok": True}
     except Exception as e:
         logger.warning("clear_ops_logs failed: %s", e)
@@ -1053,7 +1166,8 @@ def trim_ops_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[st
             return {"ok": False, "error": "max_lines must be between 1 and 10000"}
         import redis
         r = redis.from_url(daemon_log_redis_url())
-        r.xtrim(OPS_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        key = getattr(request.app.state, "ops_log_stream_key", None) or "bifrost:console:dev:api_ops"
+        r.xtrim(key, maxlen=max_lines, approximate=True)
         return {"ok": True}
     except Exception as e:
         logger.warning("trim_ops_logs failed: %s", e)
@@ -1099,6 +1213,216 @@ async def get_ops_logs_stream(request: Request):
             with app.state.ops_log_lock:
                 if queue in app.state.ops_log_queues:
                     app.state.ops_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Trading API server logs (run_server_trading.py → bifrost:console:{dev|prod}:api_trading) ---
+
+
+@router.get("/api/trading/logs")
+def get_trading_logs(
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from Trading API console Redis streams (dev + prod keys merged)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        keys = _trading_console_stream_keys_dual()
+        lines, partial_err = _merged_console_tail_from_keys(r, keys, tail)
+        out: Dict[str, Any] = {"lines": lines}
+        if partial_err:
+            out["error"] = partial_err
+        return out
+    except Exception as e:
+        logger.warning("get_trading_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/trading/logs")
+def clear_trading_logs(request: Request) -> Dict[str, Any]:
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _trading_console_stream_keys_dual():
+            r.delete(key)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_trading_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/trading/logs/trim")
+def trim_trading_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _trading_console_stream_keys_dual():
+            r.xtrim(key, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_trading_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/trading/logs/stream")
+async def get_trading_logs_stream(request: Request):
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("trading_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.trading_log_lock:
+        app.state.trading_log_queues.append(queue)
+        if app.state._trading_log_loop is None:
+            app.state._trading_log_loop = asyncio.get_running_loop()
+        if app.state._trading_log_thread is None or not app.state._trading_log_thread.is_alive():
+            app.state._trading_log_thread = threading.Thread(
+                target=_trading_log_reader_loop,
+                args=(app,),
+                name="trading-log-reader",
+                daemon=True,
+            )
+            app.state._trading_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.trading_log_lock:
+                if queue in app.state.trading_log_queues:
+                    app.state.trading_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Portfolio API server logs (run_server_portfolio.py → bifrost:console:{dev|prod}:api_portfolio) ---
+
+
+@router.get("/api/portfolio/logs")
+def get_portfolio_logs(
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from Portfolio API console Redis streams (dev + prod keys merged)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        keys = _portfolio_console_stream_keys_dual()
+        lines, partial_err = _merged_console_tail_from_keys(r, keys, tail)
+        out: Dict[str, Any] = {"lines": lines}
+        if partial_err:
+            out["error"] = partial_err
+        return out
+    except Exception as e:
+        logger.warning("get_portfolio_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/portfolio/logs")
+def clear_portfolio_logs(request: Request) -> Dict[str, Any]:
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _portfolio_console_stream_keys_dual():
+            r.delete(key)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_portfolio_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/portfolio/logs/trim")
+def trim_portfolio_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _portfolio_console_stream_keys_dual():
+            r.xtrim(key, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_portfolio_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/portfolio/logs/stream")
+async def get_portfolio_logs_stream(request: Request):
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("portfolio_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.portfolio_log_lock:
+        app.state.portfolio_log_queues.append(queue)
+        if app.state._portfolio_log_loop is None:
+            app.state._portfolio_log_loop = asyncio.get_running_loop()
+        if app.state._portfolio_log_thread is None or not app.state._portfolio_log_thread.is_alive():
+            app.state._portfolio_log_thread = threading.Thread(
+                target=_portfolio_log_reader_loop,
+                args=(app,),
+                name="portfolio-log-reader",
+                daemon=True,
+            )
+            app.state._portfolio_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.portfolio_log_lock:
+                if queue in app.state.portfolio_log_queues:
+                    app.state.portfolio_log_queues.remove(queue)
 
     return StreamingResponse(
         event_gen(),

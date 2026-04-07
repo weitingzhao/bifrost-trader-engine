@@ -56,7 +56,7 @@ async function parseJsonResponse<T>(r: Response): Promise<T> {
 }
 
 /** FastAPI may use `detail` (string or validation array); our routers use `error`. */
-function opsControlFailureMessage(data: unknown, r: Response): string {
+export function opsControlFailureMessage(data: unknown, r: Response): string {
   if (data && typeof data === 'object') {
     const o = data as Record<string, unknown>
     if (typeof o.error === 'string' && o.error.trim()) return o.error.trim()
@@ -91,6 +91,32 @@ export interface OpsCapabilities {
 export async function fetchOpsCapabilities(): Promise<OpsCapabilities> {
   const r = await fetch(`${opsBase()}/ops/auth/capabilities`, { headers: authHeaders() })
   return parseJsonResponse(r)
+}
+
+/** Terminate the Ops FastAPI process (same idea as POST /research/massive/shutdown). Requires operator role. */
+export async function postOpsShutdown(): Promise<{ ok: boolean; error?: string }> {
+  let r: Response
+  try {
+    r = await fetch(`${opsBase()}/ops/shutdown`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  let data: { ok?: boolean; error?: string } = {}
+  try {
+    data = await parseJsonResponse(r)
+  } catch (e) {
+    if (!r.ok) {
+      return { ok: false, error: `Request failed (HTTP ${r.status})` }
+    }
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!r.ok) {
+    return { ok: false, error: opsControlFailureMessage(data, r) }
+  }
+  return { ok: data.ok === true, error: typeof data.error === 'string' ? data.error : undefined }
 }
 
 export type ApiOriginBase = '' | string

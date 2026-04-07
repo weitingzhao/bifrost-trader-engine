@@ -99,9 +99,15 @@ class IbOperatorExecutor:
         return {"ok": False, "error": f"unhandled_op:{op}"}
 
     def health_dict(self) -> Dict[str, Any]:
+        def _connected_for_health(c: Any) -> bool:
+            snap = getattr(c, "connected_snapshot", None)
+            if callable(snap):
+                return jsonish_connected(snap())
+            return jsonish_connected(getattr(c, "connected", False))
+
         def _one(c: Any) -> Dict[str, Any]:
             return {
-                "connected": jsonish_connected(getattr(c, "connected", False)),
+                "connected": _connected_for_health(c),
                 "client_id": int(getattr(c, "client_id", 0)),
                 "last_error": getattr(c, "last_error", None),
                 "reconnects": int(getattr(c, "reconnects", 0)),

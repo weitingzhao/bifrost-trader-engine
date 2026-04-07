@@ -7,6 +7,7 @@ import pytest
 
 from src.app.config import (
     config_profile_from_resolved_path,
+    ops_api_console_stream_key,
     read_config,
     resolve_startup_config_path,
 )
@@ -46,6 +47,12 @@ def test_config_profile_from_resolved_path() -> None:
     assert config_profile_from_resolved_path("/x/config/config.prod.yaml") == "prod"
     assert config_profile_from_resolved_path("/x/config/config.yaml") is None
     assert config_profile_from_resolved_path("/custom/other.yaml") is None
+
+
+def test_ops_api_console_stream_key() -> None:
+    assert ops_api_console_stream_key("prod") == "bifrost:console:prod:api_ops"
+    assert ops_api_console_stream_key("dev") == "bifrost:console:dev:api_ops"
+    assert ops_api_console_stream_key(None) == "bifrost:console:dev:api_ops"
 
 
 def test_bifrost_config_env_wins(project_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

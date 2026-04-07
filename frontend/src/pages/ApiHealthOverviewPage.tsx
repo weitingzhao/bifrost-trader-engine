@@ -521,7 +521,7 @@ function buildColumn(title: string, display: string | null, probe: ProbeResult |
       rows: [
         row('Monitor', probe.server, 'GET /health failed'),
         row('Ops API', probe.ops, 'GET /ops/health failed'),
-        row('Docs API', probe.docs, 'GET /research/docs/health failed'),
+        row('Docs API', probe.docs, 'GET /health failed'),
       ],
     },
     {

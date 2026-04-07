@@ -411,3 +411,133 @@ export function subscribeOpsLogs(onLine: (line: string) => void, onError?: () =>
     es.close()
   }
 }
+
+export async function fetchTradingLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  return fetchMonitorLogTail(`/api/trading/logs?${params}`)
+}
+
+export async function clearTradingLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/trading/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimTradingLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/trading/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+function monitorLogsTailErrorMessage(r: Response, body: Record<string, unknown>): string {
+  const err = body.error
+  const detail = body.detail
+  if (typeof err === 'string' && err.trim()) return err.trim()
+  if (typeof detail === 'string' && detail.trim()) return detail.trim()
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map(item => {
+        if (item && typeof item === 'object' && 'msg' in item) {
+          return String((item as { msg?: string }).msg ?? '').trim()
+        }
+        return ''
+      })
+      .filter(Boolean)
+    if (parts.length) return parts.join('; ')
+  }
+  if (r.status === 404) {
+    return `HTTP ${r.status}: log route missing — ensure VITE_API_BASE / routing points at the Monitor API, not Trading or Portfolio.`
+  }
+  return `HTTP ${r.status}: could not load log tail from Monitor.`
+}
+
+async function fetchMonitorLogTail(pathWithQuery: string): Promise<{ lines: string[]; error?: string }> {
+  const url = joinServiceBase(apiBase(), pathWithQuery)
+  let r: Response
+  try {
+    r = await fetch(url, { credentials: 'omit' })
+  } catch (e) {
+    return { lines: [], error: e instanceof Error ? e.message : String(e) }
+  }
+  const text = await r.text()
+  let body: Record<string, unknown> = {}
+  try {
+    body = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+  } catch {
+    body = {}
+  }
+  const lines = Array.isArray(body.lines) ? (body.lines as string[]) : []
+  const payloadError = typeof body.error === 'string' ? body.error : undefined
+  if (!r.ok) {
+    return {
+      lines,
+      error: payloadError || monitorLogsTailErrorMessage(r, body),
+    }
+  }
+  return { lines, error: payloadError }
+}
+
+export function subscribeTradingLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = joinServiceBase(apiBase(), '/api/trading/logs/stream')
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+export async function fetchPortfolioLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  return fetchMonitorLogTail(`/api/portfolio/logs?${params}`)
+}
+
+export async function clearPortfolioLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/portfolio/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimPortfolioLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/portfolio/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export function subscribePortfolioLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = joinServiceBase(apiBase(), '/api/portfolio/logs/stream')
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}

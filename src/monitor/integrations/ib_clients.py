@@ -53,6 +53,9 @@ class BaseMonitorIbClient:
 
         Do not rely on ``_connected_state`` alone: health Redis must match ib_insync, or
         ``host_connected`` can stay 0 while logs show ``Connected`` / ``API connection ready``.
+
+        Call this from coroutines that run **on this client's event loop** (e.g. inside
+        ``_ensure_connected_impl``). For Redis health / other threads use ``connected_snapshot``.
         """
         conn = self._connector
         if conn is not None:
@@ -61,6 +64,36 @@ class BaseMonitorIbClient:
             except Exception:
                 return self._connected_state
         return self._connected_state
+
+    def connected_snapshot(self) -> bool:
+        """Read live API state on this client's event loop (safe from any thread).
+
+        ``run_ib_operator`` writes Redis health from its main thread; ``ib.isConnected()`` is not
+        reliable across threads, so ``host_connected`` / ``secondary_connected`` could stay 0
+        after a successful connect until this path runs on the IB loop.
+        """
+        self._ensure_loop()
+        loop = self._loop
+        if loop is None:
+            return self._connected_state
+
+        async def _read() -> bool:
+            conn = self._connector
+            if conn is None:
+                return False
+            try:
+                api = bool(conn.is_connected)
+            except Exception:
+                return self._connected_state
+            # connect() can return before ib_insync sets client._apiReady; OR avoids stuck host_connected=0.
+            # _connected_state is cleared on disconnect / failed connect (connector dropped).
+            return api or self._connected_state
+
+        try:
+            fut = asyncio.run_coroutine_threadsafe(_read(), loop)
+            return bool(fut.result(timeout=5.0))
+        except Exception:
+            return self._connected_state
 
     def _ensure_loop(self) -> None:
         if self._loop is not None and self._loop.is_running():

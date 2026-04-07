@@ -1,4 +1,5 @@
 import type { OpenOrder, OperationsResponse, StatusResponse } from '../../types'
+import { opsAuthHeaders, opsControlFailureMessage, type OpsCapabilities } from '../ops/ops'
 import { apiBase } from '../shared/constants'
 import { fetchWithTimeout } from '../shared/fetchTimeout'
 
@@ -56,4 +57,44 @@ export async function fetchOperations(limit = 20): Promise<OperationsResponse> {
   const r = await fetch(`${apiBase()}/operations?limit=${limit}`)
   if (!r.ok) throw new Error(r.statusText)
   return r.json()
+}
+
+/** Same shape as GET /ops/auth/capabilities (shared ops.auth tokens). */
+export async function fetchMonitorCapabilities(): Promise<OpsCapabilities> {
+  const r = await fetch(`${apiBase()}/api/server/auth/capabilities`, { headers: opsAuthHeaders() })
+  const text = await r.text()
+  try {
+    return JSON.parse(text) as OpsCapabilities
+  } catch {
+    throw new Error(
+      `Monitor API returned non-JSON response (HTTP ${r.status}${text ? `, body: ${text.slice(0, 120)}` : ''}).`,
+    )
+  }
+}
+
+/** Terminate the Monitor (bifrost-server) process. Requires operator role. */
+export async function postMonitorShutdown(): Promise<{ ok: boolean; error?: string }> {
+  let r: Response
+  try {
+    r = await fetch(`${apiBase()}/api/server/shutdown`, {
+      method: 'POST',
+      headers: opsAuthHeaders(),
+    })
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  let data: { ok?: boolean; error?: string } = {}
+  try {
+    const text = await r.text()
+    data = text ? (JSON.parse(text) as { ok?: boolean; error?: string }) : {}
+  } catch (e) {
+    if (!r.ok) {
+      return { ok: false, error: `Request failed (HTTP ${r.status})` }
+    }
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!r.ok) {
+    return { ok: false, error: opsControlFailureMessage(data, r) }
+  }
+  return { ok: data.ok === true, error: typeof data.error === 'string' ? data.error : undefined }
 }

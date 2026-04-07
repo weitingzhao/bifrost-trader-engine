@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -26,6 +27,8 @@ from backend.ops.models.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ops"])
+
+OPS_SHUTDOWN_EXIT_DELAY_SEC = 2.5
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -122,6 +125,24 @@ def _require_role(request: Request, minimum: str) -> Optional[JSONResponse]:
 def auth_capabilities(request: Request) -> Dict[str, Any]:
     """Return the caller's identity, role, and capabilities."""
     return _ops_auth(request).capabilities(request)
+
+
+@router.post("/ops/shutdown")
+def post_ops_shutdown(request: Request) -> Any:
+    """Terminate the Ops API process (``run_server_ops.py`` / uvicorn). Requires operator role."""
+    denied = _require_role(request, "operator")
+    if denied:
+        _audit(request, "ops_shutdown", "process", "denied", detail=f"role={_role(request)}")
+        return denied
+    _audit(request, "ops_shutdown", "process", "scheduled", detail="process exit")
+
+    def _exit_after_send() -> None:
+        time.sleep(OPS_SHUTDOWN_EXIT_DELAY_SEC)
+        logger.info("Ops API shutdown: exiting process.")
+        os._exit(0)
+
+    threading.Thread(target=_exit_after_send, daemon=True).start()
+    return {"ok": True}
 
 
 # ── Worker status ─────────────────────────────────────────────────────────────

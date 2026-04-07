@@ -12,6 +12,7 @@ import {
   fetchDocsApiHealth,
   fetchMassiveStatus,
   fetchHealth,
+  fetchHealthAtOrigin,
   type MarketHolidayRow,
   type MassiveStatusResponse,
 } from '../api'
@@ -57,9 +58,9 @@ import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
 import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
-import { DocsApiStatusPage } from './DocsApiStatusPage'
-import { MonitorApiStatusPage } from './MonitorApiStatusPage'
-import { OpsApiStatusPage } from './OpsApiStatusPage'
+import { ArchitectureApisPage } from './ArchitectureApisPage'
+import { AccountApisPage } from './AccountApisPage'
+import { portfolioServiceBase, tradingServiceBase } from './account/accountSidecarBases'
 import { DashboardPage } from './DashboardPage'
 import { CeleryControlPage } from './CeleryControlPage'
 import { MarketIngestOpsPage } from './MarketIngestOpsPage'
@@ -72,12 +73,7 @@ import { useDeferredStart } from '../hooks/useDeferredStart'
 import { fetchMarketIngestServices, fetchOpsHealth, type MarketIngestServiceRow } from '../api/ops/ops'
 import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
 
-const API_SETTINGS_DETAIL_HASHES = [
-  'settings-api-monitor',
-  'settings-api-docs',
-  'settings-api-massive',
-  'settings-api-ops',
-] as const
+const API_SETTINGS_DETAIL_HASHES = ['settings-api-architecture', 'settings-api-account', 'settings-api-massive'] as const
 
 /** Stack indicator from GET /health utilized_services (YAML). */
 function SettingsSidebarServiceEnvBadge({ stack }: { stack: 'prod' | 'dev' | null }) {
@@ -283,6 +279,8 @@ export function SettingsPage({
   const [monitorApiHealthOk, setMonitorApiHealthOk] = useState<boolean | null>(null)
   const [docsApiHealthOk, setDocsApiHealthOk] = useState<boolean | null>(null)
   const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
+  const [tradingApiHealthOk, setTradingApiHealthOk] = useState<boolean | null>(null)
+  const [portfolioApiHealthOk, setPortfolioApiHealthOk] = useState<boolean | null>(null)
   const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
   const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
   const [socketIngestLamp, setSocketIngestLamp] = useState<AggregateIngestLamp>('none')
@@ -304,21 +302,28 @@ export function SettingsPage({
   const isApiDetailSubPage =
     isApiSection && API_SETTINGS_DETAIL_HASHES.includes(currentHash as (typeof API_SETTINGS_DETAIL_HASHES)[number])
   const isApiOverviewMain = isApiSection && !isApiDetailSubPage
-  const isApiMonitorActive = isApiSection && currentHash === 'settings-api-monitor'
+  const isApiArchitectureActive = isApiSection && currentHash === 'settings-api-architecture'
+  const isApiAccountActive = isApiSection && currentHash === 'settings-api-account'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
-  const isApiDocsActive = isApiSection && currentHash === 'settings-api-docs'
-  const isApiOpsActive = isApiSection && currentHash === 'settings-api-ops'
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
   const monitorApiLamp: 'green' | 'red' | 'none' = monitorApiHealthOk === true ? 'green' : monitorApiHealthOk === false ? 'red' : 'none'
   const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
   const opsApiLamp: 'green' | 'red' | 'none' = opsApiHealthOk === true ? 'green' : opsApiHealthOk === false ? 'red' : 'none'
-  const monitorStackEnv =
-    utilizedEnvFor(utilizedServices, 'server')
-    ?? utilizedEnvFor(utilizedServices, 'main')
-    ?? utilizedEnvFor(utilizedServices, 'api')
-  const docsStackEnv = utilizedEnvFor(utilizedServices, 'docs')
+  const architectureApiLamp: 'green' | 'red' | 'none' =
+    monitorApiLamp === 'red' || docsApiLamp === 'red' || opsApiLamp === 'red'
+      ? 'red'
+      : monitorApiLamp === 'green' && docsApiLamp === 'green' && opsApiLamp === 'green'
+        ? 'green'
+        : 'none'
+  const accountApiLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
+    const a = tradingApiHealthOk
+    const b = portfolioApiHealthOk
+    if (a === null || b === null) return 'none'
+    if (a === true && b === true) return 'green'
+    if (a === false && b === false) return 'red'
+    return 'yellow'
+  })()
   const massiveStackEnv = utilizedEnvFor(utilizedServices, 'massive')
-  const opsStackEnv = utilizedEnvFor(utilizedServices, 'ops')
 
   useEffect(() => {
     if (!deferredStart) return
@@ -337,17 +342,58 @@ export function SettingsPage({
         .then(() => { if (!cancelled) setOpsApiHealthOk(true) })
         .catch(() => { if (!cancelled) setOpsApiHealthOk(false) })
       fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-        .then(h => {
+        .then((h) => {
           if (!cancelled) {
             setUtilizedServices(normalizeUtilizedServices(h.utilized_services))
             setMonitorApiHealthOk(true)
           }
+          const mh = { trading_port: h.trading_port, portfolio_port: h.portfolio_port }
+          const tb = tradingServiceBase(mh)
+          const pb = portfolioServiceBase(mh)
+          if (tb) {
+            fetchHealthAtOrigin(tb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setTradingApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setTradingApiHealthOk(false)
+              })
+          } else if (!cancelled) setTradingApiHealthOk(null)
+          if (pb) {
+            fetchHealthAtOrigin(pb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setPortfolioApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setPortfolioApiHealthOk(false)
+              })
+          } else if (!cancelled) setPortfolioApiHealthOk(null)
         })
         .catch(() => {
           if (!cancelled) {
             setUtilizedServices([])
             setMonitorApiHealthOk(false)
           }
+          const tb = tradingServiceBase(null)
+          const pb = portfolioServiceBase(null)
+          if (tb) {
+            fetchHealthAtOrigin(tb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setTradingApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setTradingApiHealthOk(false)
+              })
+          } else if (!cancelled) setTradingApiHealthOk(null)
+          if (pb) {
+            fetchHealthAtOrigin(pb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setPortfolioApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setPortfolioApiHealthOk(false)
+              })
+          } else if (!cancelled) setPortfolioApiHealthOk(null)
         })
       computeApiHealthAggregateLamp()
         .then((l) => {
@@ -431,6 +477,15 @@ export function SettingsPage({
         const next = `${window.location.pathname}${window.location.search}#settings-api`
         window.history.replaceState(null, '', next)
         h = '#settings-api'
+      }
+      if (
+        h === '#settings-api-monitor' ||
+        h === '#settings-api-docs' ||
+        h === '#settings-api-ops'
+      ) {
+        const next = `${window.location.pathname}${window.location.search}#settings-api-architecture`
+        window.history.replaceState(null, '', next)
+        h = '#settings-api-architecture'
       }
       return h
     }
@@ -648,24 +703,30 @@ export function SettingsPage({
           </div>
           <div id="settings-api-subs" className="settings-sidebar-subs" hidden={!apiExpanded}>
             <a
-              href="#settings-api-monitor"
-              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiMonitorActive ? 'active' : ''}`}
+              href="#settings-api-architecture"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiArchitectureActive ? 'active' : ''}`}
             >
-              <span className={`title-inline-lamp lamp-icon ${monitorApiLamp}`} title="Monitor API health" aria-hidden>
-                <SettingsSidebarLampGlyph id="api-monitor" />
+              <span
+                className={`title-inline-lamp lamp-icon ${architectureApiLamp}`}
+                title="Monitor, Docs, and Ops API health"
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="api-architecture" />
               </span>
-              Monitor
-              <SettingsSidebarServiceEnvBadge stack={monitorStackEnv} />
+              Architecture
             </a>
             <a
-              href="#settings-api-docs"
-              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiDocsActive ? 'active' : ''}`}
+              href="#settings-api-account"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiAccountActive ? 'active' : ''}`}
             >
-              <span className={`title-inline-lamp lamp-icon ${docsApiLamp}`} title="Docs API health" aria-hidden>
-                <SettingsSidebarLampGlyph id="api-docs" />
+              <span
+                className={`title-inline-lamp lamp-icon ${accountApiLamp === 'none' ? 'none' : accountApiLamp}`}
+                title="Trading and Portfolio API health"
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="api-account" />
               </span>
-              Docs
-              <SettingsSidebarServiceEnvBadge stack={docsStackEnv} />
+              Account
             </a>
             <a
               href="#settings-api-massive"
@@ -676,16 +737,6 @@ export function SettingsPage({
               </span>
               Massive
               <SettingsSidebarServiceEnvBadge stack={massiveStackEnv} />
-            </a>
-            <a
-              href="#settings-api-ops"
-              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiOpsActive ? 'active' : ''}`}
-            >
-              <span className={`title-inline-lamp lamp-icon ${opsApiLamp}`} title="Ops API health" aria-hidden>
-                <SettingsSidebarLampGlyph id="api-ops" />
-              </span>
-              Ops
-              <SettingsSidebarServiceEnvBadge stack={opsStackEnv} />
             </a>
           </div>
         </div>
@@ -901,14 +952,12 @@ export function SettingsPage({
       ) : isApiSection ? (
         isApiOverviewMain ? (
           <ApiHealthOverviewPage embeddedInSettings />
-        ) : isApiMonitorActive ? (
-          <MonitorApiStatusPage embeddedInSettings />
+        ) : isApiArchitectureActive ? (
+          <ArchitectureApisPage embeddedInSettings />
+        ) : isApiAccountActive ? (
+          <AccountApisPage embeddedInSettings />
         ) : isApiMassiveActive ? (
           <MassiveApiStatusPage embeddedInSettings />
-        ) : isApiDocsActive ? (
-          <DocsApiStatusPage embeddedInSettings />
-        ) : isApiOpsActive ? (
-          <OpsApiStatusPage embeddedInSettings />
         ) : (
           <ApiHealthOverviewPage embeddedInSettings />
         )

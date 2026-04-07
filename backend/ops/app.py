@@ -17,7 +17,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.app.config import config_profile_from_resolved_path, normalize_server_config
+from src.app.config import (
+    config_profile_from_resolved_path,
+    normalize_server_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -283,8 +286,6 @@ def create_ops_app(
     @app.get("/ops/health")
     async def ops_health_prefixed() -> Dict[str, Any]:
         return await _health_payload_async()
-
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @app.on_event("startup")
     async def startup_event() -> None:

@@ -23,6 +23,8 @@ export type SettingsSidebarLampGlyphId =
   | 'celery'
   | 'api'
   | 'api-massive'
+  | 'api-architecture'
+  | 'api-account'
   | 'api-monitor'
   | 'api-docs'
   | 'api-ops'
@@ -105,6 +107,24 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
       return (
         <svg {...SVG_COMMON}>
           <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      )
+    /** Architecture: Monitor + Docs + Ops stack */
+    case 'api-architecture':
+      return (
+        <svg {...SVG_COMMON}>
+          <rect x="3" y="4" width="18" height="5" rx="1" />
+          <rect x="3" y="10" width="18" height="5" rx="1" />
+          <rect x="3" y="16" width="18" height="4" rx="1" />
+        </svg>
+      )
+    /** Account: Trading + Portfolio (wallet) */
+    case 'api-account':
+      return (
+        <svg {...SVG_COMMON}>
+          <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+          <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+          <path d="M18 12a2 2 0 1 0 0 4h4v-4Z" />
         </svg>
       )
     /** API Monitor: status / control plane (display) */

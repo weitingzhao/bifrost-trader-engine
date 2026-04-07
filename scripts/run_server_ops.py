@@ -32,7 +32,6 @@ _GRAY = "\033[90m"
 _CYAN = "\033[36m"
 _YELLOW = "\033[33m"
 _RED = "\033[31m"
-_OPS_LOG_STREAM_KEY = "bifrost:ops_console"
 _OPS_LOG_STREAM_MAXLEN = 50
 
 _LEVEL_COLORS = {
@@ -91,7 +90,7 @@ def _console_log_redis_url() -> str:
     return format_redis_url(effective_redis_dict(config, default_db=0))
 
 
-def setup_logging() -> None:
+def setup_logging(*, ops_log_stream_key: str) -> None:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
         ColoredFormatter(
@@ -101,7 +100,7 @@ def setup_logging() -> None:
     )
     redis_handler = RedisStreamLogHandler(
         _console_log_redis_url(),
-        _OPS_LOG_STREAM_KEY,
+        ops_log_stream_key,
         maxlen=_OPS_LOG_STREAM_MAXLEN,
     )
     redis_handler.setFormatter(
@@ -168,12 +167,18 @@ def _free_port(port: int, wait_sec: float = 0.6) -> bool:
 
 
 def main() -> None:
-    from src.app.config import read_config, resolve_startup_config_path
+    from src.app.config import (
+        config_profile_from_resolved_path,
+        ops_api_console_stream_key,
+        read_config,
+        resolve_startup_config_path,
+    )
 
     argv_raw = sys.argv[1:]
     config_path, _ = resolve_startup_config_path(_PROJECT_ROOT, argv_raw)
     os.environ["BIFROST_CONFIG"] = config_path
-    setup_logging()
+    profile = config_profile_from_resolved_path(config_path)
+    setup_logging(ops_log_stream_key=ops_api_console_stream_key(profile))
     config, resolved_config_path = read_config(config_path)
     print(f"bifrost ops server: YAML loaded (env file): {resolved_config_path}", file=sys.stderr)
     _rp = Path(resolved_config_path)

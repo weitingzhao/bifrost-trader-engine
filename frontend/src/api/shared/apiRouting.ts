@@ -75,9 +75,58 @@ function utilizedRowsAllEnv(
   return rows.every((r) => String(r.env).toLowerCase().trim() === env)
 }
 
+type DevRole =
+  | 'server'
+  | 'massive'
+  | 'docs'
+  | 'ops'
+  | 'trading'
+  | 'strategy'
+  | 'portfolio'
+  | 'market'
+  | 'research'
+
+/**
+ * Parse host (and scheme) from VITE_DEV_API_ORIGIN or frontend_dev_path, then attach
+ * the role port from GET /health (merged YAML server.*_port). Same as split-stack dev routing.
+ */
+function devBaseFromConfiguredHost(baseCandidate: string, role: DevRole, h: HealthRoutingFields): string {
+  const sp = listenPortFromHealth(h, 'monitor_port', 'monitor_port')
+  const mp = listenPortFromHealth(h, 'massive_port', 'massive_port')
+  const dp = listenPortFromHealth(h, 'docs_port', 'docs_port')
+  const op = listenPortFromHealth(h, 'ops_port', 'ops_port')
+  const tp = listenPortFromHealth(h, 'trading_port', 'trading_port')
+  const stp = listenPortFromHealth(h, 'strategy_port', 'strategy_port')
+  const pfp = listenPortFromHealth(h, 'portfolio_port', 'portfolio_port')
+  const mkp = listenPortFromHealth(h, 'market_port', 'market_port')
+  const rp = listenPortFromHealth(h, 'research_port', 'research_port')
+  try {
+    const raw = baseCandidate.includes('://') ? baseCandidate : `http://${baseCandidate}`
+    const u = new URL(raw)
+    const scheme = (u.protocol || 'http:').replace(':', '') || 'http'
+    const host = u.hostname
+    if (!host) throw new Error('no host')
+    let port: number
+    if (role === 'massive') port = mp
+    else if (role === 'docs') port = dp
+    else if (role === 'ops') port = op
+    else if (role === 'trading') port = tp
+    else if (role === 'strategy') port = stp
+    else if (role === 'portfolio') port = pfp
+    else if (role === 'market') port = mkp
+    else if (role === 'research') port = rp
+    else port = sp
+    return `${scheme}://${host}:${port}`
+  } catch {
+    return baseCandidate.replace(/\/$/, '')
+  }
+}
+
 /**
  * Same rules as Settings → Services Overview column resolution: one origin per env column,
  * with split host:port when frontend_dev_path is set and VITE_* overrides are unset.
+ * When VITE_DEV_API_ORIGIN is set, host/scheme come from it but each role uses its
+ * listen port from GET /health (e.g. docs → server.docs_port).
  */
 function baseForEnvRole(
   env: 'dev' | 'prod',
@@ -95,43 +144,17 @@ function baseForEnvRole(
 ): string {
   const devEnv = trimEnv(import.meta.env.VITE_DEV_API_ORIGIN)
   const prodEnv = trimEnv(import.meta.env.VITE_PROD_API_ORIGIN)
-  const sp = listenPortFromHealth(h, 'monitor_port', 'monitor_port')
-  const mp = listenPortFromHealth(h, 'massive_port', 'massive_port')
-  const dp = listenPortFromHealth(h, 'docs_port', 'docs_port')
-  const op = listenPortFromHealth(h, 'ops_port', 'ops_port')
-  const tp = listenPortFromHealth(h, 'trading_port', 'trading_port')
-  const stp = listenPortFromHealth(h, 'strategy_port', 'strategy_port')
-  const pfp = listenPortFromHealth(h, 'portfolio_port', 'portfolio_port')
-  const mkp = listenPortFromHealth(h, 'market_port', 'market_port')
-  const rp = listenPortFromHealth(h, 'research_port', 'research_port')
   const cfgDev = trimEnv(h.frontend_dev_path)
   const cfgProd = trimEnv(h.frontend_prod_path)
   const pub = trimEnv(h.frontend_public_origin)
   const noYamlPaths = cfgDev == null && cfgProd == null
 
   if (env === 'dev') {
-    if (devEnv) return devEnv
+    if (devEnv) {
+      return devBaseFromConfiguredHost(devEnv, role, h)
+    }
     if (cfgDev) {
-      try {
-        const raw = cfgDev.includes('://') ? cfgDev : `http://${cfgDev}`
-        const u = new URL(raw)
-        const scheme = (u.protocol || 'http:').replace(':', '') || 'http'
-        const host = u.hostname
-        if (!host) throw new Error('no host')
-        let port: number
-        if (role === 'massive') port = mp
-        else if (role === 'docs') port = dp
-        else if (role === 'ops') port = op
-        else if (role === 'trading') port = tp
-        else if (role === 'strategy') port = stp
-        else if (role === 'portfolio') port = pfp
-        else if (role === 'market') port = mkp
-        else if (role === 'research') port = rp
-        else port = sp
-        return `${scheme}://${host}:${port}`
-      } catch {
-        return cfgDev.replace(/\/$/, '')
-      }
+      return devBaseFromConfiguredHost(cfgDev, role, h)
     }
     if (noYamlPaths && h.config_profile === 'dev') {
       return pub ?? ''

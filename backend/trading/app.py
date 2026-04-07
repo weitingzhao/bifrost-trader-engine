@@ -1,16 +1,21 @@
 """Trading domain FastAPI app — executions, performance, transactions."""
 
 import logging
+import os
 import threading
-from typing import Any, Optional
+import time
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.config import config_profile_from_resolved_path, normalize_server_config
 from src.monitor.reader import StatusReader
 
 logger = logging.getLogger(__name__)
+
+# Same delay as Docs/Ops shutdown so the HTTP response can flush before os._exit.
+SIDECAR_STOP_EXIT_DELAY_SEC = 2.5
 
 
 def create_trading_app(
@@ -53,6 +58,10 @@ def create_trading_app(
     reader._config["server"] = _cfg_holder["server"]
     app.state.bifrost_trading_port = int(_cfg_holder["server"]["trading_port"])
 
+    from backend.ops.services.audit_store import AuditStore
+
+    app.state.audit_store = AuditStore.from_config(_cfg_holder)
+
     from backend.trading.routers import executions_router
     app.include_router(executions_router)
 
@@ -65,6 +74,57 @@ def create_trading_app(
             out["config_profile"] = profile
         out["port"] = app.state.bifrost_trading_port
         return out
+
+    @app.get("/trading/auth/capabilities")
+    def trading_auth_capabilities(request: Request) -> Dict[str, Any]:
+        """Same shape as GET /ops/auth/capabilities (shared ops.auth tokens)."""
+        from backend.ops.auth import AuthConfig, OpsAuth
+
+        cfg = merged_config or reader._config
+        return OpsAuth(AuthConfig.from_config(cfg)).capabilities(request)
+
+    @app.post("/trading/shutdown")
+    def post_trading_shutdown(request: Request) -> Any:
+        """Terminate the Trading API process. Requires operator role (same tokens as Ops API)."""
+        from backend.ops.auth import AuthConfig, OpsAuth
+        from backend.ops.models.schemas import AuditEntry
+
+        cfg = merged_config or reader._config
+        ops_auth = OpsAuth(AuthConfig.from_config(cfg))
+        ident, denied = ops_auth.require_role(request, "operator")
+        audit_store = getattr(app.state, "audit_store", None)
+        if denied:
+            if audit_store is not None:
+                audit_store.append(
+                    AuditEntry(
+                        operator=ident.name,
+                        source_ip=request.client.host if request.client else None,
+                        action="trading_shutdown",
+                        target="process",
+                        outcome="denied",
+                        detail=f"role={ident.role}",
+                    ),
+                )
+            return denied
+        if audit_store is not None:
+            audit_store.append(
+                AuditEntry(
+                    operator=ident.name,
+                    source_ip=request.client.host if request.client else None,
+                    action="trading_shutdown",
+                    target="process",
+                    outcome="scheduled",
+                    detail="process exit",
+                ),
+            )
+
+        def _exit_after_send() -> None:
+            time.sleep(SIDECAR_STOP_EXIT_DELAY_SEC)
+            logger.info("Trading API shutdown: exiting process.")
+            os._exit(0)
+
+        threading.Thread(target=_exit_after_send, daemon=True).start()
+        return {"ok": True}
 
     @app.on_event("startup")
     async def startup_event() -> None:

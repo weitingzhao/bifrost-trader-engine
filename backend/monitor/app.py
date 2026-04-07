@@ -19,7 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.app.config import config_profile_from_resolved_path
+from src.app.config import (
+    config_profile_from_resolved_path,
+    docs_api_console_stream_key,
+    ops_api_console_stream_key,
+    portfolio_api_console_stream_key,
+    trading_api_console_stream_key,
+)
 from src.connector.flex_client import fetch_cash_transactions, fetch_trades
 from src.ib_operator.client import IbOperatorClient
 from src.monitor.reader import StatusReader
@@ -151,17 +157,29 @@ def create_app(
     app.state._ib_ingestor_log_thread: Optional[threading.Thread] = None
     app.state._ib_ingestor_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # Docs API console log stream (run_server_docs.py → bifrost:docs_console)
+    # Docs API console log stream (run_server_docs.py → bifrost:console:{dev|prod}:api_docs)
     app.state.docs_log_queues: list = []
     app.state.docs_log_lock = threading.Lock()
     app.state._docs_log_thread: Optional[threading.Thread] = None
     app.state._docs_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # Ops API console log stream (run_server_ops.py → bifrost:ops_console)
+    # Ops API console log stream (run_server_ops.py → bifrost:console:{dev|prod}:api_ops)
     app.state.ops_log_queues: list = []
     app.state.ops_log_lock = threading.Lock()
     app.state._ops_log_thread: Optional[threading.Thread] = None
     app.state._ops_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    # Trading API console log stream (run_server_trading.py → bifrost:console:{dev|prod}:api_trading)
+    app.state.trading_log_queues: list = []
+    app.state.trading_log_lock = threading.Lock()
+    app.state._trading_log_thread: Optional[threading.Thread] = None
+    app.state._trading_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    # Portfolio API console log stream (run_server_portfolio.py → bifrost:console:{dev|prod}:api_portfolio)
+    app.state.portfolio_log_queues: list = []
+    app.state.portfolio_log_lock = threading.Lock()
+    app.state._portfolio_log_thread: Optional[threading.Thread] = None
+    app.state._portfolio_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # IB access via Redis IB Operator only (no in-process TWS clients).
     app.state.monitor_enabled = True
@@ -177,6 +195,10 @@ def create_app(
         if resolved_config_path
         else None
     )
+    app.state.ops_log_stream_key = ops_api_console_stream_key(app.state.bifrost_config_profile)
+    app.state.docs_log_stream_key = docs_api_console_stream_key(app.state.bifrost_config_profile)
+    app.state.trading_log_stream_key = trading_api_console_stream_key(app.state.bifrost_config_profile)
+    app.state.portfolio_log_stream_key = portfolio_api_console_stream_key(app.state.bifrost_config_profile)
     _fe = (merged_config or {}).get("frontend") or {}
 
     def _fe_str(key: str) -> Optional[str]:
@@ -204,6 +226,10 @@ def create_app(
     app.state.bifrost_research_port = int(_scfg["research_port"])
 
     app.state.bifrost_utilized_services = _utilized_services_from_config(merged_config)
+    app.state.bifrost_merged_config = merged_config or {}
+    from backend.ops.services.audit_store import AuditStore
+
+    app.state.audit_store = AuditStore.from_config(merged_config or {})
 
     from backend.monitor.routers import (
         config_router,
