@@ -25,6 +25,7 @@ export type SettingsSidebarLampGlyphId =
   | 'api-massive'
   | 'api-architecture'
   | 'api-account'
+  | 'api-research'
   | 'api-monitor'
   | 'api-docs'
   | 'api-ops'
@@ -125,6 +126,16 @@ export function SettingsSidebarLampGlyph({ id }: { id: SettingsSidebarLampGlyphI
           <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
           <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
           <path d="M18 12a2 2 0 1 0 0 4h4v-4Z" />
+        </svg>
+      )
+    /** Research: three nodes (Research / Strategy / Market) */
+    case 'api-research':
+      return (
+        <svg {...SVG_COMMON}>
+          <circle cx="6" cy="6" r="2.5" />
+          <circle cx="18" cy="6" r="2.5" />
+          <circle cx="12" cy="17" r="2.5" />
+          <path d="M7.5 7.5 10.5 14.5M16.5 7.5 13.5 14.5" />
         </svg>
       )
     /** API Monitor: status / control plane (display) */

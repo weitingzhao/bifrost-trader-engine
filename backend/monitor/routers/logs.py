@@ -56,6 +56,30 @@ def _portfolio_console_stream_keys_dual() -> List[str]:
     return list(dict.fromkeys([d, p]))
 
 
+def _research_console_stream_keys_dual() -> List[str]:
+    from src.config.yaml_config import research_api_console_stream_key
+
+    d = research_api_console_stream_key(None)
+    p = research_api_console_stream_key("prod")
+    return list(dict.fromkeys([d, p]))
+
+
+def _strategy_console_stream_keys_dual() -> List[str]:
+    from src.config.yaml_config import strategy_api_console_stream_key
+
+    d = strategy_api_console_stream_key(None)
+    p = strategy_api_console_stream_key("prod")
+    return list(dict.fromkeys([d, p]))
+
+
+def _market_console_stream_keys_dual() -> List[str]:
+    from src.config.yaml_config import market_api_console_stream_key
+
+    d = market_api_console_stream_key(None)
+    p = market_api_console_stream_key("prod")
+    return list(dict.fromkeys([d, p]))
+
+
 _TIME_PREFIX_RE_STREAM = re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:,\d+)?)",
 )
@@ -378,6 +402,96 @@ def _portfolio_log_reader_loop(app_ref) -> None:
                 logger.debug("portfolio_log_reader_loop: %s", e)
     except Exception as e:
         logger.warning("portfolio_log_reader_loop exited: %s", e)
+
+
+def _research_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD dev+prod Research API console streams."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        keys = _research_console_stream_keys_dual()
+        last_ids = {k: "$" for k in keys}
+        while True:
+            try:
+                result = r.xread(block=5000, streams=last_ids, count=100)
+                if not result:
+                    continue
+                for stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_ids[stream_name] = eid
+                        line = _redis_stream_line(fields)
+                        with app_ref.state.research_log_lock:
+                            queues = list(app_ref.state.research_log_queues)
+                        loop = getattr(app_ref.state, "_research_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("research_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("research_log_reader_loop exited: %s", e)
+
+
+def _strategy_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD dev+prod Strategy API console streams."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        keys = _strategy_console_stream_keys_dual()
+        last_ids = {k: "$" for k in keys}
+        while True:
+            try:
+                result = r.xread(block=5000, streams=last_ids, count=100)
+                if not result:
+                    continue
+                for stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_ids[stream_name] = eid
+                        line = _redis_stream_line(fields)
+                        with app_ref.state.strategy_log_lock:
+                            queues = list(app_ref.state.strategy_log_queues)
+                        loop = getattr(app_ref.state, "_strategy_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("strategy_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("strategy_log_reader_loop exited: %s", e)
+
+
+def _market_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD dev+prod Market API console streams."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url(), decode_responses=True)
+        keys = _market_console_stream_keys_dual()
+        last_ids = {k: "$" for k in keys}
+        while True:
+            try:
+                result = r.xread(block=5000, streams=last_ids, count=100)
+                if not result:
+                    continue
+                for stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_ids[stream_name] = eid
+                        line = _redis_stream_line(fields)
+                        with app_ref.state.market_log_lock:
+                            queues = list(app_ref.state.market_log_queues)
+                        loop = getattr(app_ref.state, "_market_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("market_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("market_log_reader_loop exited: %s", e)
 
 
 # --- Daemon logs ---
@@ -1423,6 +1537,321 @@ async def get_portfolio_logs_stream(request: Request):
             with app.state.portfolio_log_lock:
                 if queue in app.state.portfolio_log_queues:
                     app.state.portfolio_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Research API server logs (run_server_research.py → bifrost:console:{dev|prod}:api_research) ---
+
+
+@router.get("/api/research/logs")
+def get_research_logs(
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from Research API console Redis streams (dev + prod keys merged)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        keys = _research_console_stream_keys_dual()
+        lines, partial_err = _merged_console_tail_from_keys(r, keys, tail)
+        out: Dict[str, Any] = {"lines": lines}
+        if partial_err:
+            out["error"] = partial_err
+        return out
+    except Exception as e:
+        logger.warning("get_research_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/research/logs")
+def clear_research_logs(request: Request) -> Dict[str, Any]:
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _research_console_stream_keys_dual():
+            r.delete(key)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_research_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/research/logs/trim")
+def trim_research_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _research_console_stream_keys_dual():
+            r.xtrim(key, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_research_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/research/logs/stream")
+async def get_research_logs_stream(request: Request):
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("research_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.research_log_lock:
+        app.state.research_log_queues.append(queue)
+        if app.state._research_log_loop is None:
+            app.state._research_log_loop = asyncio.get_running_loop()
+        if app.state._research_log_thread is None or not app.state._research_log_thread.is_alive():
+            app.state._research_log_thread = threading.Thread(
+                target=_research_log_reader_loop,
+                args=(app,),
+                name="research-log-reader",
+                daemon=True,
+            )
+            app.state._research_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.research_log_lock:
+                if queue in app.state.research_log_queues:
+                    app.state.research_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Strategy API server logs (run_server_strategy.py → bifrost:console:{dev|prod}:api_strategy) ---
+
+
+@router.get("/api/strategy/logs")
+def get_strategy_logs(
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from Strategy API console Redis streams (dev + prod keys merged)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        keys = _strategy_console_stream_keys_dual()
+        lines, partial_err = _merged_console_tail_from_keys(r, keys, tail)
+        out: Dict[str, Any] = {"lines": lines}
+        if partial_err:
+            out["error"] = partial_err
+        return out
+    except Exception as e:
+        logger.warning("get_strategy_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/strategy/logs")
+def clear_strategy_logs(request: Request) -> Dict[str, Any]:
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _strategy_console_stream_keys_dual():
+            r.delete(key)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_strategy_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/strategy/logs/trim")
+def trim_strategy_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _strategy_console_stream_keys_dual():
+            r.xtrim(key, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_strategy_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/strategy/logs/stream")
+async def get_strategy_logs_stream(request: Request):
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("strategy_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.strategy_log_lock:
+        app.state.strategy_log_queues.append(queue)
+        if app.state._strategy_log_loop is None:
+            app.state._strategy_log_loop = asyncio.get_running_loop()
+        if app.state._strategy_log_thread is None or not app.state._strategy_log_thread.is_alive():
+            app.state._strategy_log_thread = threading.Thread(
+                target=_strategy_log_reader_loop,
+                args=(app,),
+                name="strategy-log-reader",
+                daemon=True,
+            )
+            app.state._strategy_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.strategy_log_lock:
+                if queue in app.state.strategy_log_queues:
+                    app.state.strategy_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# --- Market API server logs (run_server_market.py → bifrost:console:{dev|prod}:api_market) ---
+
+
+@router.get("/api/market/logs")
+def get_market_logs(
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from Market API console Redis streams (dev + prod keys merged)."""
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        keys = _market_console_stream_keys_dual()
+        lines, partial_err = _merged_console_tail_from_keys(r, keys, tail)
+        out: Dict[str, Any] = {"lines": lines}
+        if partial_err:
+            out["error"] = partial_err
+        return out
+    except Exception as e:
+        logger.warning("get_market_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/market/logs")
+def clear_market_logs(request: Request) -> Dict[str, Any]:
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _market_console_stream_keys_dual():
+            r.delete(key)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_market_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/market/logs/trim")
+def trim_market_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        for key in _market_console_stream_keys_dual():
+            r.xtrim(key, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_market_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/market/logs/stream")
+async def get_market_logs_stream(request: Request):
+    try:
+        import redis
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("market_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.market_log_lock:
+        app.state.market_log_queues.append(queue)
+        if app.state._market_log_loop is None:
+            app.state._market_log_loop = asyncio.get_running_loop()
+        if app.state._market_log_thread is None or not app.state._market_log_thread.is_alive():
+            app.state._market_log_thread = threading.Thread(
+                target=_market_log_reader_loop,
+                args=(app,),
+                name="market-log-reader",
+                daemon=True,
+            )
+            app.state._market_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.market_log_lock:
+                if queue in app.state.market_log_queues:
+                    app.state.market_log_queues.remove(queue)
 
     return StreamingResponse(
         event_gen(),

@@ -60,7 +60,9 @@ import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { ArchitectureApisPage } from './ArchitectureApisPage'
 import { AccountApisPage } from './AccountApisPage'
+import { ResearchApisPage } from './ResearchApisPage'
 import { portfolioServiceBase, tradingServiceBase } from './account/accountSidecarBases'
+import { marketServiceBase, researchServiceBase, strategyServiceBase } from './research/researchApiBases'
 import { DashboardPage } from './DashboardPage'
 import { CeleryControlPage } from './CeleryControlPage'
 import { MarketIngestOpsPage } from './MarketIngestOpsPage'
@@ -73,7 +75,12 @@ import { useDeferredStart } from '../hooks/useDeferredStart'
 import { fetchMarketIngestServices, fetchOpsHealth, type MarketIngestServiceRow } from '../api/ops/ops'
 import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
 
-const API_SETTINGS_DETAIL_HASHES = ['settings-api-architecture', 'settings-api-account', 'settings-api-massive'] as const
+const API_SETTINGS_DETAIL_HASHES = [
+  'settings-api-architecture',
+  'settings-api-account',
+  'settings-api-research',
+  'settings-api-massive',
+] as const
 
 /** Stack indicator from GET /health utilized_services (YAML). */
 function SettingsSidebarServiceEnvBadge({ stack }: { stack: 'prod' | 'dev' | null }) {
@@ -281,6 +288,9 @@ export function SettingsPage({
   const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
   const [tradingApiHealthOk, setTradingApiHealthOk] = useState<boolean | null>(null)
   const [portfolioApiHealthOk, setPortfolioApiHealthOk] = useState<boolean | null>(null)
+  const [researchApiHealthOk, setResearchApiHealthOk] = useState<boolean | null>(null)
+  const [strategyApiHealthOk, setStrategyApiHealthOk] = useState<boolean | null>(null)
+  const [marketApiHealthOk, setMarketApiHealthOk] = useState<boolean | null>(null)
   const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
   const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
   const [socketIngestLamp, setSocketIngestLamp] = useState<AggregateIngestLamp>('none')
@@ -304,6 +314,7 @@ export function SettingsPage({
   const isApiOverviewMain = isApiSection && !isApiDetailSubPage
   const isApiArchitectureActive = isApiSection && currentHash === 'settings-api-architecture'
   const isApiAccountActive = isApiSection && currentHash === 'settings-api-account'
+  const isApiResearchActive = isApiSection && currentHash === 'settings-api-research'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
   const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
   const monitorApiLamp: 'green' | 'red' | 'none' = monitorApiHealthOk === true ? 'green' : monitorApiHealthOk === false ? 'red' : 'none'
@@ -321,6 +332,15 @@ export function SettingsPage({
     if (a === null || b === null) return 'none'
     if (a === true && b === true) return 'green'
     if (a === false && b === false) return 'red'
+    return 'yellow'
+  })()
+  const researchApiLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
+    const a = researchApiHealthOk
+    const b = strategyApiHealthOk
+    const c = marketApiHealthOk
+    if (a === null || b === null || c === null) return 'none'
+    if (a === true && b === true && c === true) return 'green'
+    if (a === false && b === false && c === false) return 'red'
     return 'yellow'
   })()
   const massiveStackEnv = utilizedEnvFor(utilizedServices, 'massive')
@@ -368,6 +388,41 @@ export function SettingsPage({
                 if (!cancelled) setPortfolioApiHealthOk(false)
               })
           } else if (!cancelled) setPortfolioApiHealthOk(null)
+          const mhR = {
+            research_port: h.research_port,
+            strategy_port: h.strategy_port,
+            market_port: h.market_port,
+          }
+          const rr = researchServiceBase(mhR)
+          const sr = strategyServiceBase(mhR)
+          const mr = marketServiceBase(mhR)
+          if (rr) {
+            fetchHealthAtOrigin(rr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setResearchApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setResearchApiHealthOk(false)
+              })
+          } else if (!cancelled) setResearchApiHealthOk(null)
+          if (sr) {
+            fetchHealthAtOrigin(sr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setStrategyApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setStrategyApiHealthOk(false)
+              })
+          } else if (!cancelled) setStrategyApiHealthOk(null)
+          if (mr) {
+            fetchHealthAtOrigin(mr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setMarketApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setMarketApiHealthOk(false)
+              })
+          } else if (!cancelled) setMarketApiHealthOk(null)
         })
         .catch(() => {
           if (!cancelled) {
@@ -394,6 +449,36 @@ export function SettingsPage({
                 if (!cancelled) setPortfolioApiHealthOk(false)
               })
           } else if (!cancelled) setPortfolioApiHealthOk(null)
+          const rr = researchServiceBase(null)
+          const sr = strategyServiceBase(null)
+          const mr = marketServiceBase(null)
+          if (rr) {
+            fetchHealthAtOrigin(rr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setResearchApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setResearchApiHealthOk(false)
+              })
+          } else if (!cancelled) setResearchApiHealthOk(null)
+          if (sr) {
+            fetchHealthAtOrigin(sr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setStrategyApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setStrategyApiHealthOk(false)
+              })
+          } else if (!cancelled) setStrategyApiHealthOk(null)
+          if (mr) {
+            fetchHealthAtOrigin(mr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
+              .then(() => {
+                if (!cancelled) setMarketApiHealthOk(true)
+              })
+              .catch(() => {
+                if (!cancelled) setMarketApiHealthOk(false)
+              })
+          } else if (!cancelled) setMarketApiHealthOk(null)
         })
       computeApiHealthAggregateLamp()
         .then((l) => {
@@ -729,6 +814,19 @@ export function SettingsPage({
               Account
             </a>
             <a
+              href="#settings-api-research"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isApiResearchActive ? 'active' : ''}`}
+            >
+              <span
+                className={`title-inline-lamp lamp-icon ${researchApiLamp === 'none' ? 'none' : researchApiLamp}`}
+                title="Research, Strategy, and Market API health"
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="api-research" />
+              </span>
+              Research
+            </a>
+            <a
               href="#settings-api-massive"
               className={`settings-sidebar-link settings-sidebar-link-sub ${isApiMassiveActive ? 'active' : ''}`}
             >
@@ -956,6 +1054,8 @@ export function SettingsPage({
           <ArchitectureApisPage embeddedInSettings />
         ) : isApiAccountActive ? (
           <AccountApisPage embeddedInSettings />
+        ) : isApiResearchActive ? (
+          <ResearchApisPage embeddedInSettings />
         ) : isApiMassiveActive ? (
           <MassiveApiStatusPage embeddedInSettings />
         ) : (

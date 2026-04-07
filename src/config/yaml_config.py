@@ -256,6 +256,24 @@ def portfolio_api_console_stream_key(profile: Optional[str]) -> str:
     return f"bifrost:console:{suffix}:api_portfolio"
 
 
+def research_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream for Research API console (``run_server_research.py`` → Monitor ``/api/research/logs*``)."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_research"
+
+
+def strategy_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream for Strategy API console (``run_server_strategy.py`` → Monitor ``/api/strategy/logs*``)."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_strategy"
+
+
+def market_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream for Market API console (``run_server_market.py`` → Monitor ``/api/market/logs*``)."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_market"
+
+
 def read_config(config_path: Optional[str] = None) -> tuple[dict, str]:
     """Load YAML. Returns (config, resolved_path).
 

@@ -1,6 +1,27 @@
 import { apiBase, getOpsApiBase, joinServiceBase } from '../shared/constants'
 import { getOpsToken, workerConsoleUrl } from '../ops/ops'
 
+/**
+ * Monitor log APIs always hit bifrost-server. In Vite dev, when VITE_API_BASE points at
+ * :monitor_port while the page is on :5173, cross-origin EventSource often fails; same-origin
+ * `/api/...` goes through the dev proxy to Monitor.
+ */
+function bifrostMonitorApiUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`
+  const base = apiBase().replace(/\/$/, '')
+  if (import.meta.env.DEV && typeof window !== 'undefined' && base) {
+    try {
+      const apiOrigin = new URL(base, window.location.origin).origin
+      if (apiOrigin !== window.location.origin) {
+        return p
+      }
+    } catch {
+      /* use absolute base below */
+    }
+  }
+  return joinServiceBase(base, p)
+}
+
 function opsAuthHeaders(): Record<string, string> {
   const token = getOpsToken()
   const headers: Record<string, string> = {}
@@ -456,7 +477,8 @@ function monitorLogsTailErrorMessage(r: Response, body: Record<string, unknown>)
 }
 
 async function fetchMonitorLogTail(pathWithQuery: string): Promise<{ lines: string[]; error?: string }> {
-  const url = joinServiceBase(apiBase(), pathWithQuery)
+  const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`
+  const url = bifrostMonitorApiUrl(path)
   let r: Response
   try {
     r = await fetch(url, { credentials: 'omit' })
@@ -524,6 +546,129 @@ export async function trimPortfolioLogs(maxLines: number): Promise<{ ok: boolean
 
 export function subscribePortfolioLogs(onLine: (line: string) => void, onError?: () => void): () => void {
   const url = joinServiceBase(apiBase(), '/api/portfolio/logs/stream')
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+export async function fetchResearchLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  return fetchMonitorLogTail(`/api/research/logs?${params}`)
+}
+
+export async function clearResearchLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(bifrostMonitorApiUrl('/api/research/logs'), { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimResearchLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(bifrostMonitorApiUrl('/api/research/logs/trim'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export function subscribeResearchLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = bifrostMonitorApiUrl('/api/research/logs/stream')
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+export async function fetchStrategyLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  return fetchMonitorLogTail(`/api/strategy/logs?${params}`)
+}
+
+export async function clearStrategyLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/strategy/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimStrategyLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(bifrostMonitorApiUrl('/api/strategy/logs/trim'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export function subscribeStrategyLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = bifrostMonitorApiUrl('/api/strategy/logs/stream')
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
+export async function fetchMarketLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  return fetchMonitorLogTail(`/api/market/logs?${params}`)
+}
+
+export async function clearMarketLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(bifrostMonitorApiUrl('/api/market/logs'), { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimMarketLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(bifrostMonitorApiUrl('/api/market/logs/trim'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export function subscribeMarketLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = bifrostMonitorApiUrl('/api/market/logs/stream')
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {

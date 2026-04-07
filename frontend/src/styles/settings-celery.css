@@ -1521,6 +1521,21 @@
   color: var(--color-text);
 }
 
+.architecture-log-source--research {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--color-text);
+}
+
+.architecture-log-source--strategy {
+  background: rgba(236, 72, 153, 0.18);
+  color: var(--color-text);
+}
+
+.architecture-log-source--market {
+  background: rgba(14, 165, 233, 0.2);
+  color: var(--color-text);
+}
+
 .architecture-console-status-line .architecture-console-status-messages {
   display: flex;
   flex-direction: column;

@@ -181,6 +181,24 @@ def create_app(
     app.state._portfolio_log_thread: Optional[threading.Thread] = None
     app.state._portfolio_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # Research API console log stream (run_server_research.py → bifrost:console:{dev|prod}:api_research)
+    app.state.research_log_queues: list = []
+    app.state.research_log_lock = threading.Lock()
+    app.state._research_log_thread: Optional[threading.Thread] = None
+    app.state._research_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    # Strategy API console log stream (run_server_strategy.py → bifrost:console:{dev|prod}:api_strategy)
+    app.state.strategy_log_queues: list = []
+    app.state.strategy_log_lock = threading.Lock()
+    app.state._strategy_log_thread: Optional[threading.Thread] = None
+    app.state._strategy_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    # Market API console log stream (run_server_market.py → bifrost:console:{dev|prod}:api_market)
+    app.state.market_log_queues: list = []
+    app.state.market_log_lock = threading.Lock()
+    app.state._market_log_thread: Optional[threading.Thread] = None
+    app.state._market_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
     # IB access via Redis IB Operator only (no in-process TWS clients).
     app.state.monitor_enabled = True
     app.state.ib_operator_client = None

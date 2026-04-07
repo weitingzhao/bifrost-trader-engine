@@ -2,10 +2,12 @@
 
 import asyncio
 import logging
+import os
 import threading
+import time
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.config import config_profile_from_resolved_path, normalize_server_config
@@ -13,6 +15,8 @@ from src.monitor.reader import StatusReader
 from src.core.sse.queue_utils import put_nowait_drop_oldest
 
 logger = logging.getLogger(__name__)
+
+SIDECAR_STOP_EXIT_DELAY_SEC = 2.5
 
 try:
     from src.core.realtime import (
@@ -82,6 +86,10 @@ def create_market_app(
     app.include_router(quotes_router)
     app.include_router(watchlist_router)
 
+    from backend.ops.services.audit_store import AuditStore
+
+    app.state.audit_store = AuditStore.from_config(_cfg_holder)
+
     @app.get("/health")
     def market_health() -> Any:
         import time
@@ -91,6 +99,57 @@ def create_market_app(
             out["config_profile"] = profile
         out["port"] = app.state.bifrost_market_port
         return out
+
+    @app.get("/market/auth/capabilities")
+    def market_auth_capabilities(request: Request) -> Dict[str, Any]:
+        """Same shape as GET /ops/auth/capabilities (shared ops.auth tokens)."""
+        from backend.ops.auth import AuthConfig, OpsAuth
+
+        cfg = merged_config or reader._config
+        return OpsAuth(AuthConfig.from_config(cfg)).capabilities(request)
+
+    @app.post("/market/shutdown")
+    def post_market_shutdown(request: Request) -> Any:
+        """Terminate the Market API process. Requires operator role (same tokens as Ops API)."""
+        from backend.ops.auth import AuthConfig, OpsAuth
+        from backend.ops.models.schemas import AuditEntry
+
+        cfg = merged_config or reader._config
+        ops_auth = OpsAuth(AuthConfig.from_config(cfg))
+        ident, denied = ops_auth.require_role(request, "operator")
+        audit_store = getattr(app.state, "audit_store", None)
+        if denied:
+            if audit_store is not None:
+                audit_store.append(
+                    AuditEntry(
+                        operator=ident.name,
+                        source_ip=request.client.host if request.client else None,
+                        action="market_shutdown",
+                        target="process",
+                        outcome="denied",
+                        detail=f"role={ident.role}",
+                    ),
+                )
+            return denied
+        if audit_store is not None:
+            audit_store.append(
+                AuditEntry(
+                    operator=ident.name,
+                    source_ip=request.client.host if request.client else None,
+                    action="market_shutdown",
+                    target="process",
+                    outcome="scheduled",
+                    detail="process exit",
+                ),
+            )
+
+        def _exit_after_send() -> None:
+            time.sleep(SIDECAR_STOP_EXIT_DELAY_SEC)
+            logger.info("Market API shutdown: exiting process.")
+            os._exit(0)
+
+        threading.Thread(target=_exit_after_send, daemon=True).start()
+        return {"ok": True}
 
     @app.on_event("startup")
     async def startup_event() -> None:

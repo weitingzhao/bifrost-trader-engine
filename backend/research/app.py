@@ -1,16 +1,21 @@
 """Research domain FastAPI app — option discovery (IB) and max pain reports only."""
 
 import logging
+import os
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.config import config_profile_from_resolved_path, normalize_server_config
 from src.monitor.reader import StatusReader
 
 logger = logging.getLogger(__name__)
+
+SIDECAR_STOP_EXIT_DELAY_SEC = 2.5
 
 
 def create_research_app(
@@ -60,6 +65,10 @@ def create_research_app(
     app.include_router(option_discovery_router)
     app.include_router(max_pain_router)
 
+    from backend.ops.services.audit_store import AuditStore
+
+    app.state.audit_store = AuditStore.from_config(_cfg_holder)
+
     def _health_payload() -> Dict[str, Any]:
         import time
         out: Dict[str, Any] = {"status": "ok", "service": "bifrost-research", "ts": time.time()}
@@ -74,6 +83,57 @@ def create_research_app(
     @app.get("/health")
     def research_health() -> Dict[str, Any]:
         return _health_payload()
+
+    @app.get("/auth/capabilities")
+    def research_auth_capabilities(request: Request) -> Dict[str, Any]:
+        """Same shape as GET /ops/auth/capabilities (shared ops.auth tokens)."""
+        from backend.ops.auth import AuthConfig, OpsAuth
+
+        cfg = merged_config or reader._config
+        return OpsAuth(AuthConfig.from_config(cfg)).capabilities(request)
+
+    @app.post("/shutdown")
+    def post_research_shutdown(request: Request) -> Any:
+        """Terminate the Research API process. Requires operator role (same tokens as Ops API)."""
+        from backend.ops.auth import AuthConfig, OpsAuth
+        from backend.ops.models.schemas import AuditEntry
+
+        cfg = merged_config or reader._config
+        ops_auth = OpsAuth(AuthConfig.from_config(cfg))
+        ident, denied = ops_auth.require_role(request, "operator")
+        audit_store = getattr(app.state, "audit_store", None)
+        if denied:
+            if audit_store is not None:
+                audit_store.append(
+                    AuditEntry(
+                        operator=ident.name,
+                        source_ip=request.client.host if request.client else None,
+                        action="research_shutdown",
+                        target="process",
+                        outcome="denied",
+                        detail=f"role={ident.role}",
+                    ),
+                )
+            return denied
+        if audit_store is not None:
+            audit_store.append(
+                AuditEntry(
+                    operator=ident.name,
+                    source_ip=request.client.host if request.client else None,
+                    action="research_shutdown",
+                    target="process",
+                    outcome="scheduled",
+                    detail="process exit",
+                ),
+            )
+
+        def _exit_after_send() -> None:
+            time.sleep(SIDECAR_STOP_EXIT_DELAY_SEC)
+            logger.info("Research API shutdown: exiting process.")
+            os._exit(0)
+
+        threading.Thread(target=_exit_after_send, daemon=True).start()
+        return {"ok": True}
 
     @app.on_event("startup")
     async def startup_event() -> None:
