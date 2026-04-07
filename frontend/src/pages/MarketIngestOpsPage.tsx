@@ -69,7 +69,9 @@ type IngestCategory = 'Massive' | 'IB' | 'Other'
 
 function categoryForServiceId(id: string): IngestCategory {
   if (id === 'massive_ws') return 'Massive'
-  if (id === 'ib_ingestor' || id === 'ib_market' || id === 'ib_operator') return 'IB'
+  if (id === 'ib_ingestor' || id === 'ib_market' || id === 'ib_operator' || id === 'ib_account_agent') {
+    return 'IB'
+  }
   return 'Other'
 }
 
@@ -105,6 +107,28 @@ function ibIngestClientIdSlots(
           id: Number(c),
           title:
             'Client ID from config (YAML ib.host.client_id.ingestor) for IB ingestor. Live connection not reporting an ID yet.',
+        },
+      ]
+    }
+    return []
+  }
+  if (svcId === 'ib_account_agent') {
+    const run = status?.socket?.ib_account_agent?.client_id
+    if (run != null && Number.isFinite(Number(run))) {
+      return [
+        {
+          id: Number(run),
+          title: 'Client ID used by the live IB Account Agent connection (Monitor GET /status).',
+        },
+      ]
+    }
+    const c = cfg?.port?.account_agent
+    if (c != null && Number.isFinite(Number(c))) {
+      return [
+        {
+          id: Number(c),
+          title:
+            'Client ID from config (YAML ib.host.client_id.account_agent) for IB Account Agent. Live connection not reporting an ID yet.',
         },
       ]
     }
@@ -208,6 +232,7 @@ function ibIngestClientIdShouldShow(
   if (ingestProcessRunningForIbClientId(processActive)) return true
   const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
   if (sid === 'ib_ingestor') return status?.socket?.ib_ingestor?.connected === true
+  if (sid === 'ib_account_agent') return status?.socket?.ib_account_agent?.connected === true
   if (sid === 'ib_operator') {
     const ibOp = status?.socket?.ib_operator
     return (
@@ -665,6 +690,7 @@ export function MarketIngestOpsPage({
 
   const massive = status?.socket?.massive
   const ibIngestor = status?.socket?.ib_ingestor
+  const ibAccountAgent = status?.socket?.ib_account_agent
   const disableIngestActions = localControl === 'subprocess' && marketIngestScriptControl !== true
 
   const isAuthenticated = caps?.identity.authenticated ?? false
@@ -737,6 +763,12 @@ export function MarketIngestOpsPage({
       const mc = ibIngestor.msg_count != null ? String(ibIngestor.msg_count) : '—'
       return `IB ${c}; last msg ${fmtAge(ibIngestor.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
     }
+    if (svc.id === 'ib_account_agent' && ibAccountAgent) {
+      const c = ibAccountAgent.connected ? 'connected' : 'disconnected'
+      const rc = ibAccountAgent.reconnects != null ? String(ibAccountAgent.reconnects) : '—'
+      const mc = ibAccountAgent.msg_count != null ? String(ibAccountAgent.msg_count) : '—'
+      return `Account agent ${c}; last msg ${fmtAge(ibAccountAgent.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
+    }
     if (svc.id === 'ib_operator' && status?.socket?.ib_operator) {
       const op = status.socket.ib_operator
       const hostUp =
@@ -787,7 +819,11 @@ export function MarketIngestOpsPage({
   }
 
   const openResetConfirm = (svc: MarketIngestServiceRow) => {
-    const isIb = svc.id === 'ib_operator' || svc.id === 'ib_ingestor' || svc.id === 'ib_market'
+    const isIb =
+      svc.id === 'ib_operator'
+      || svc.id === 'ib_ingestor'
+      || svc.id === 'ib_market'
+      || svc.id === 'ib_account_agent'
     const message = isIb
       ? `Reset ${svc.label}? This will restart the service and disconnect IB clients (TWS).`
       : `Reset ${svc.label}? This restarts the ingest process (same end state as Restart).`

@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 def _connector_for_read(app: Any) -> Any:
     """Prefer Listener for read-only account/position/market data so logic does not depend on Trading Client.
     Returns listener_connector if connected, else app.connector (or None if neither connected)."""
+    if getattr(app, "_use_ib_edge", False):
+        return None
     listener = getattr(app, "listener_connector", None)
     if listener and getattr(listener, "is_connected", False):
         return listener
@@ -49,6 +51,11 @@ async def refresh_accounts_data(app: Any) -> None:
     Uses Listener for read when connected so logic does not depend on Trading Client; falls back to Trading connector.
     IB managedAccounts is comma-separated; we get each account's summary and filter positions by account from one reqPositions.
     """
+    if getattr(app, "_use_ib_edge", False):
+        from src.daemon.ib_edge import refresh_accounts_from_redis_edge
+
+        await refresh_accounts_from_redis_edge(app)
+        return
     conn = _connector_for_read(app)
     if not conn or not getattr(conn, "is_connected", False):
         return
@@ -162,6 +169,11 @@ async def refresh_secondary_accounts_and_sync(app: Any) -> None:
 async def refresh_executions_only(app: Any) -> None:
     """R-A2: 仅从 IB 拉取账户执行/成交并写入 account_executions，供复盘与风控 Tab 使用。
     与 _refresh_accounts_data 解耦：复盘 Tab 的刷新只做此事，不拉账户摘要与持仓。Uses Listener for read when connected."""
+    if getattr(app, "_use_ib_edge", False):
+        from src.daemon.ib_edge import refresh_accounts_from_redis_edge
+
+        await refresh_accounts_from_redis_edge(app)
+        return
     conn = _connector_for_read(app)
     if not conn or not getattr(conn, "is_connected", False):
         return
@@ -216,6 +228,11 @@ async def refresh_executions_only(app: Any) -> None:
 
 async def refresh_positions(app: Any) -> None:
     """Fetch positions from IB and update store (raw positions + stock_shares only). No option parse. R-A1: use account_id when available. Uses Listener for read when connected."""
+    if getattr(app, "_use_ib_edge", False):
+        from src.daemon.ib_edge import refresh_accounts_from_redis_edge
+
+        await refresh_accounts_from_redis_edge(app)
+        return
     conn = _connector_for_read(app)
     if not conn or not getattr(conn, "is_connected", False):
         return

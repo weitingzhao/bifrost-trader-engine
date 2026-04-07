@@ -158,9 +158,10 @@ def _dedupe_preserve(seq: List[str]) -> List[str]:
 def _socket_segment(
     massive: Optional[Dict[str, Any]],
     ib_ingestor: Optional[Dict[str, Any]],
+    ib_account_agent: Optional[Dict[str, Any]],
     quotes_redis_reader_ok: bool,
 ) -> tuple[int, List[str]]:
-    """Socket / quotes path: Massive WS meta, IB ingestor hash, Monitor quotes Redis reader."""
+    """Socket / quotes path: Massive WS meta, IB ingestor, IB Account Agent, Monitor quotes Redis reader."""
     reasons: List[str] = []
     rank = 1
     if massive and massive.get("configured") and massive.get("ws_connected") is False:
@@ -169,6 +170,9 @@ def _socket_segment(
     if ib_ingestor is not None and ib_ingestor.get("connected") is False:
         rank = max(rank, 2)
         reasons.append("socket_ib_ingestor_disconnected")
+    if ib_account_agent is not None and ib_account_agent.get("connected") is False:
+        rank = max(rank, 2)
+        reasons.append("socket_ib_account_agent_disconnected")
     if not quotes_redis_reader_ok:
         rank = max(rank, 2)
         reasons.append("market_quotes_redis_unavailable")
@@ -197,12 +201,13 @@ def derive_health_roll_up(
     quotes_redis_reader_ok: bool,
     celery_broker_connected: bool,
     celery_workers: List[str],
+    ib_account_agent: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """System health: worst of daemon, socket/quotes, Celery, and Monitor lamps (with merged block_reasons)."""
     dr = _lamp_rank(daemon_lamp)
     mr = _lamp_rank(monitor_lamp)
     sr, socket_reasons = _socket_segment(
-        massive, ib_ingestor, quotes_redis_reader_ok
+        massive, ib_ingestor, ib_account_agent, quotes_redis_reader_ok
     )
     cr, celery_reasons = _celery_segment(
         celery_broker_connected, celery_workers

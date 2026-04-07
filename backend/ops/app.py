@@ -41,6 +41,7 @@ DEFAULT_ALLOWED_UNITS = [
     "bifrost-massive-ws",
     "bifrost-ib-operator",
     "bifrost-ib-ingestor",
+    "bifrost-ib-account-agent",
 ]
 
 

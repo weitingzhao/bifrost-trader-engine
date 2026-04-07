@@ -65,6 +65,17 @@ def _read_connector_connected(app: Any) -> bool:
 
 def event_subscribe_flags(app: Any) -> dict:
     """IB event subscription status for System page: ticker, positions, fills, commission; plus Secondary (ib2) flags."""
+    if getattr(app, "_use_ib_edge", False):
+        running = app._fsm_daemon.is_running()
+        return {
+            "event_subscribe_ticker": False,
+            "event_subscribe_positions": running,
+            "event_subscribe_fills": running,
+            "event_subscribe_commission": running,
+            "event_subscribe_positions_ib2": False,
+            "event_subscribe_fills_ib2": False,
+            "event_subscribe_commission_ib2": False,
+        }
     listener = _host_listener(app)
     connected = bool(listener and listener.is_connected)
     running = app._fsm_daemon.is_running()
@@ -150,7 +161,8 @@ async def heartbeat(app: Any) -> None:
         if cmd == "flatten":
             logger.warning("[Daemon] control (db): flatten (not implemented yet)")
         if cmd == "release_ib" and (
-            app.connector.is_connected or (_host_listener(app) and _host_listener(app).is_connected)
+            (getattr(app, "connector", None) and app.connector.is_connected)
+            or (_host_listener(app) and _host_listener(app).is_connected)
         ):
             now_t = time.time()
             interval = effective_heartbeat_interval(app)
@@ -254,7 +266,8 @@ async def heartbeat(app: Any) -> None:
         if cmd == "flatten":
             logger.warning("[Daemon] control (db): flatten (not implemented yet)")
         if cmd == "release_ib" and (
-            app.connector.is_connected or (_host_listener(app) and _host_listener(app).is_connected)
+            (getattr(app, "connector", None) and app.connector.is_connected)
+            or (_host_listener(app) and _host_listener(app).is_connected)
         ):
             now_t = time.time()
             interval = effective_heartbeat_interval(app)
@@ -334,31 +347,32 @@ async def heartbeat(app: Any) -> None:
             await app._init_ticker_subscriptions()
         suspended = apply_run_status_transition(app)
         listener = _host_listener(app)
-        if not (listener and listener.is_connected):
-            now_t = time.time()
-            interval = effective_heartbeat_interval(app)
-            next_retry_ts = now_t + interval
-            sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
-            if app._status_sink and hasattr(
-                app._status_sink, "write_daemon_heartbeat"
-            ):
-                app._status_sink.write_daemon_heartbeat(
-                    hedge_running=True,
-                    ib_connected=False,
-                    ib_client_id=None,
-                    next_retry_ts=next_retry_ts,
-                    seconds_until_retry=sec_until,
-                    redis_quotes_connected=redis_quotes_connected(app),
-                    mock_hedging=getattr(app, "mock_hedging", True),
-                    **event_subscribe_flags(app),
-                    **listener_heartbeat_kwargs(app),
+        if not getattr(app, "_use_ib_edge", False):
+            if not (listener and listener.is_connected):
+                now_t = time.time()
+                interval = effective_heartbeat_interval(app)
+                next_retry_ts = now_t + interval
+                sec_until = max(0, min(interval + 5, int(round(next_retry_ts - now_t))))
+                if app._status_sink and hasattr(
+                    app._status_sink, "write_daemon_heartbeat"
+                ):
+                    app._status_sink.write_daemon_heartbeat(
+                        hedge_running=True,
+                        ib_connected=False,
+                        ib_client_id=None,
+                        next_retry_ts=next_retry_ts,
+                        seconds_until_retry=sec_until,
+                        redis_quotes_connected=redis_quotes_connected(app),
+                        mock_hedging=getattr(app, "mock_hedging", True),
+                        **event_subscribe_flags(app),
+                        **listener_heartbeat_kwargs(app),
+                    )
+                logger.warning(
+                    "[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)",
+                    app._fsm_daemon.current.value,
                 )
-            logger.warning(
-                "[Daemon] state=%s | IB disconnected → WAITING_IB (DB updated, will retry)",
-                app._fsm_daemon.current.value,
-            )
-            app._ib_disconnected_during_run = True
-            return
+                app._ib_disconnected_during_run = True
+                return
         now_ts = time.time()
         if (
             now_ts - app._last_accounts_refresh_ts

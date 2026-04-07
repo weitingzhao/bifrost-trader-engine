@@ -107,6 +107,7 @@ massive:
 #     - bifrost-massive-ws
 #     - bifrost-ib-operator
 #     - bifrost-ib-ingestor
+#     - bifrost-ib-account-agent
 #   market_ingest_services:
 #     - id: massive_ws
 #       label: "Massive Options WS ingest"

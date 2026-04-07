@@ -50,6 +50,7 @@ import { HolidaysSection } from './settings/HolidaysSection'
 import { DataPage } from './DataPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
+import { IbEventSubscribePage } from './IbEventSubscribePage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { ArchitectureApisPage } from './ArchitectureApisPage'
 import { AccountApisPage } from './AccountApisPage'
@@ -65,6 +66,7 @@ import { useDeferredStart } from '../hooks/useDeferredStart'
 import type { SettingsApiHealthProbesState } from '../hooks/useSettingsApiHealthProbes'
 import { fetchMarketIngestServices, type MarketIngestServiceRow } from '../api/ops/ops'
 import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
+import { computeEventSubscribeLamp } from './status/ibEventSubscribeLamp'
 
 const API_SETTINGS_DETAIL_HASHES = [
   'settings-api-architecture',
@@ -234,6 +236,7 @@ export function SettingsPage({
     if (h === FEED_MASSIVE_DAILY_DATA_ID) return 'settings-coverage'
     if (h && h.startsWith('coverage-')) return 'settings-coverage'
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
+    if (h === 'settings-subscribe') return 'settings-subscribe'
     if (h === 'settings-daemon' || h === 'settings-system-daemon' || h === 'settings-system') return 'settings-daemon'
     if (h === 'settings-system-monitor' || h === 'settings-system-server') return 'settings-api'
     if (h === 'settings-celery' || h === 'settings-dashboard-celery') return 'settings-celery'
@@ -290,6 +293,11 @@ export function SettingsPage({
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
   const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon?.lamp as string) || 'red') as 'green' | 'yellow' | 'red'
+  const subscribeLamp = useMemo(
+    () => computeEventSubscribeLamp(status?.daemon?.heartbeat),
+    [status?.daemon?.heartbeat],
+  )
+  const isSubscribeSection = activeSectionId === 'settings-subscribe'
   const isDaemonSection = activeSectionId === 'settings-daemon'
   const isApiSection = activeSectionId === 'settings-api'
   const isApiDetailSubPage =
@@ -602,6 +610,19 @@ export function SettingsPage({
             </a>
           </div>
         </div>
+        <a
+          href="#settings-subscribe"
+          className={`settings-sidebar-link ${isSubscribeSection ? 'active' : ''}`}
+        >
+          <span
+            className={`title-inline-lamp lamp-icon ${subscribeLamp}`}
+            title="IB event subscriptions (ticker, positions, fills, commission)"
+            aria-hidden
+          >
+            <SettingsSidebarLampGlyph id="websocket" />
+          </span>
+          Subscribe
+        </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isAppSection ? 'active' : ''}`}>
             <a href="#settings-ws-connector" className="settings-sidebar-parent-label">
@@ -844,6 +865,8 @@ export function SettingsPage({
           onNavigateToStrategy={onNavigateToStrategy}
           embeddedInSettings
         />
+      ) : isSubscribeSection ? (
+        <IbEventSubscribePage embeddedInSettings status={status} loadStatus={loadStatus} />
       ) : isCeleryControlSection ? (
         <CeleryControlPage embeddedInSettings celeryLamp={celeryLamp} />
       ) : isWsConnectorSection ? (

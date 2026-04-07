@@ -52,6 +52,7 @@ def test_health_roll_up_celery_no_workers() -> None:
         quotes_redis_reader_ok=True,
         celery_broker_connected=True,
         celery_workers=[],
+        ib_account_agent=None,
     )
     assert hc["self_check"] == "degraded"
     assert "celery_no_workers" in hc["block_reasons"]
@@ -68,6 +69,7 @@ def test_health_roll_up_quotes_redis_down() -> None:
         quotes_redis_reader_ok=False,
         celery_broker_connected=True,
         celery_workers=["w1"],
+        ib_account_agent=None,
     )
     assert hc["self_check"] == "degraded"
     assert "market_quotes_redis_unavailable" in hc["block_reasons"]

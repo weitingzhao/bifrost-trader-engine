@@ -1,6 +1,6 @@
 # 产品需求
 
-本文档是 **Bifrost Trader Engine** 的**产品需求**唯一定义。**功能需求**（R-M*/R-C*/R-H*/R-B*/R-A* 等）不随运行环境变化；**环境与部署约束**（R-DV*）定义 Dev/Prod 隔离、共享 TWS 纪律及**可选调试拓扑**（R-DV4：多 UI 只读同一 Redis 行情），详见本文档 §7 及 [ARCHITECTURE.md](ARCHITECTURE.md) §2。
+本文档是 **Bifrost Trader Engine** 的**产品需求**唯一定义。**功能需求**（R-M*/R-C*/R-H*/R-B*/R-A*、**R-IB*** 等）不随运行环境变化；**环境与部署约束**（R-DV*）定义 Dev/Prod 隔离、共享 TWS 纪律及**可选调试拓扑**（R-DV4：多 UI 只读同一 Redis 行情），详见本文档 §7 及 [ARCHITECTURE.md](ARCHITECTURE.md) §2。
 
 能力进度与差距评估见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
@@ -34,14 +34,18 @@
 | | **R-B2** | 安全边界验证：Guard/边界参数可验证；不同参数下对冲与拦截次数及原因可复盘。 | §4.2 |
 | | **R-OS1** | 期权结构细化：每种结构类型对应明确腿模式与可选盈亏模型，便于校验、风控与监控。 | §4.4 |
 | **e. 策略应用（自动交易）** | **R-C3** | 一键平敞口：异常或红时可一键平掉本策略管理的对冲敞口；仅针对本守护程序负责的对冲仓位。依赖 R-A1 及策略边界等。 | §5 |
-| **f. 实时行情与联动** | **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅，行情以事件驱动更新。 | §6 |
-| | **R-RM2** | 事件订阅所得行情写入 Redis 缓存；唯一写入方为守护进程，监控不写 Redis 行情。 | §6 |
-| | **R-RM3** | 联动机制：守护写 Redis 后通过 Redis Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | §6 |
+| **f. 实时行情与联动** | **R-RM1** | 守护进程心跳循环 + **消费**行情与账户更新（来源为 IB Ingestor / IB Account Agent 写入的 Redis）；轮询主要用于控制通道。 | §6 |
+| | **R-RM2** | IB Ingestor 将订阅所得行情写入 Redis；IB Account Agent 将账户域事件结果写入 Redis；监控 Server 不写上述业务 Redis 键；Daemon 不写行情唯一真源键。 | §6 |
+| | **R-RM3** | Ingestor/Account Agent 写 Redis 后通过 Pub/Sub 或 Streams 通知监控；监控订阅后读 Redis 并推前端。 | §6 |
 | **g. 研究与发现** | **R-OD1** | 期权发现入口：Research 下提供 Option Discovery 子页，可选标的（来自 Watchlist STK）与到期日，为按到期询价与机会发现提供入口；主力数据源为 Massive（R-A6），IB 作交叉校验或降级路径。 | §2.7 |
 | **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离：独立 database，各进程仅连本环境库，settings 与业务数据不跨环境混用。 | §7 |
 | | **R-DV2** | 生产在 Linux 服务器部署完整运行栈（Engine、Server、Redis、Celery）；开发在本机连 Dev 库。 | §7 |
 | | **R-DV3** | IB/TWS 为共享基础设施（两台 Mac Mini）；Dev/Prod 通过不同 client_id 或 TWS 端口区分；同一 IB 账户同一时刻仅一个 Engine 下单。 | §7 |
-| | **R-DV4** | 调试拓扑下允许多套 Monitor/Market 只读同一 Redis 实时行情（单点 Engine 写入）；PG 仍隔离（R-DV1），Engine 互斥不变（R-DV3）。 | §7 |
+| | **R-DV4** | 调试拓扑下多套 Monitor/Market 只读同一 Redis 实时行情（**单点 IB Ingestor** 写入行情键；与 Daemon 是否同机无关）；PG 仍隔离（R-DV1），Engine 互斥不变（R-DV3）。 | §7 |
+| **i. IB 边缘服务与 Daemon 边界（目标架构）** | **R-IB1** | IB Ingestor 独占行情类 IB 订阅（Watchlist + 按需 `reqMktData`），行情数据写入 Redis；监控只读。 | §3.6 |
+| | **R-IB2** | IB Account Agent 独占账户域 IB 事件订阅，只更新 Redis；不写入 PostgreSQL。 | §3.6 |
+| | **R-IB3** | IB Operator 仅主动 IB 调用与 Redis Stream RPC；不承担任何 IB 订阅型服务。 | §3.6 |
+| | **R-IB4** | Daemon 不直连 IB；从 Redis 消费行情与账户态势；账户类持久化由 Daemon（或约定的同类消费者）根据 Redis 写入 PG；交易执行经 Operator RPC。 | §3.6 |
 
 **说明**：「说明章节」列指向本文档中该需求的细节描述位置。能力进度见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
 
@@ -123,34 +127,35 @@
 
 - **目标**：自动交易程序能够从 IB **获取当前账户基本信息**（如账户 ID、Balance、NetLiquidation 等）以及**当前持仓**（股票、期权等），作为自动交易对冲的**基本前置能力**。
 - **范围**：账户信息至少含账户标识、现金/权益类汇总；当前持仓至少含本策略可能涉及的标的的持仓数量与方向。数据在运行周期内可持续更新，异常或断连时行为明确（重试或降级）。
+- **目标架构（R-IB2、R-IB4）**：真源经 TWS → **IB Account Agent** → **Redis**；Daemon **不直连 IB**，根据 Redis 更新将账户/持仓相关数据写入 sink/PG，使监控与策略仍满足本条语义。
 - **与分步计划**：阶段 3（数据获取）。
 
 ### 3.1.1 双 IB 账户与统一 Portfolio（R-A4）
 
 - **目标**：系统支持 **两个 IB 账户**；主账户承担自动交易与行情，第二账户仅手动交易；两账户统一纳入 **Portfolio 管理**（持仓、执行、PnL、资金流）。
-- **Host 账户**：守护进程连接该账户所在 TWS，用于**自动对冲**、**行情订阅**与**下单**；该账户同时支持手动交易。由配置项 `host_account_id`（settings 表 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。
-- **第二账户**：**仅用于手动交易**；守护进程不对该账户自动下单或订阅行情；纳入系统目的为 **统一 Portfolio 管理**。
+- **Host 账户**：**自动对冲**通过 **IB Operator RPC**（目标架构）；**行情订阅**由 **IB Ingestor**（及账户事件由 **IB Account Agent**）连 TWS 写入 Redis；Daemon 编排策略且不直连 TWS。该账户同时支持手动交易。由配置项 `host_account_id`（settings 表 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。
+- **第二账户**：**仅用于手动交易**；Daemon 不对该账户自动下单；行情与账户数据仍可由 Ingestor/Agent 按配置覆盖；纳入系统目的为 **统一 Portfolio 管理**。
 - **统一 Portfolio 管理**：监控/复盘界面可对**两账户**统一查看与管理——持仓、账户摘要、执行/成交、资金流水、按账户拆分的 Realized/Unrealized PnL；R-A1、R-A2、R-M7 Performance 数据范围涵盖两账户，支持按账户筛选与汇总。
 - **与分步计划**：阶段 3（与 R-A1、R-A2 一并交付）。
 
 ### 3.2 标的与持仓当前市价可获取（R-M6）
 
 - **目标**：监控页须能获取并展示**交易标的**与**持仓**的**当前市价**（如标的 spot、bid/ask 或 last/mid），供评估持仓盈亏、期权虚实与风险；对自动交易程序为必备能力。
-- **范围**：至少包含本策略涉及的**标的 spot**（或等价 last/mid），在 GET /status 或 sink 当前视图中可供监控页读取；多标的/多腿时各标的当前价须可区分获取。数据由守护程序在运行中从 IB 拉取并写入 sink/status。
+- **范围**：至少包含本策略涉及的**标的 spot**（或等价 last/mid），在 GET /status 或 sink 当前视图中可供监控页读取；多标的/多腿时各标的当前价须可区分获取。**目标架构**：市价来自 **IB Ingestor** 写入的 Redis（及 sink 聚合路径）；Daemon 可据 Redis 更新 **contract_quote_live** 等，而非进程内直连 `reqMktData`。
 - **与分步计划**：阶段 3（数据获取）。
 
 ### 3.3 账户执行交易可获取（R-A2）
 
 - **目标**：能够获取**当前账户**的**执行/成交记录**（含**手动交易**与**机器交易**），用于**事后复盘**与**风险控制**；与 R-M4（本程序写入的操作记录）区分——R-A2 为账户级全部成交数据，数据来源为 IB。
-- **范围**：从 IB API 获取账户执行/成交（如 executions、fills 或报表接口）；可同步或按需拉取并写入 sink 或独立表，供独立应用查询（如 GET /executions 或 /trades）；记录至少含时间、标的、方向、数量、成交价、手续费等，可区分来源（若 IB 提供）。实现形态可为守护程序周期拉取写入、或独立脚本/服务拉取后写入同一库。
+- **范围**：从 IB API 获取账户执行/成交（如 executions、fills 或报表接口）；可同步或按需拉取并写入 sink 或独立表，供独立应用查询（如 GET /executions 或 /trades）；记录至少含时间、标的、方向、数量、成交价、手续费等，可区分来源（若 IB 提供）。**目标架构**：账户域事件经 **Account Agent → Redis**；Daemon 根据 Redis 将执行/成交写入 PG/sink（或约定消费者）；**IB Operator** 可承担按需 **`reqExecutions`** 类主动拉取，但不维持订阅流（R-IB3）。
 - **与分步计划**：阶段 3（数据获取）。
 
 ### 3.3.1 未成交订单可观测（R-A5）
 
 - **目标**：以**事件驱动**方式获取并展示当前**未成交订单**（如 Limit 挂单），使操作者能实时看到挂单列表及状态变更（提交、部分成交、全部成交、撤单）。
 - **范围**：
-  - 守护进程连接 IB 后订阅 **orderStatusEvent**、**openOrderEvent**（及可选 **execDetailsEvent** 用于成交明细），维护当前 open orders 列表；
-  - 可选连接时或按需调用 **reqAllOpenOrders()**，以包含 TWS 界面手动下的挂单；
+  - **目标架构**：**IB Account Agent** 连接 IB 并订阅 **orderStatusEvent**、**openOrderEvent**（及可选 **execDetailsEvent**），将当前 open orders 视图写入 **Redis**；可选 **reqAllOpenOrders()** 等以包含 TWS 手动挂单；**Daemon 不订阅 IB**，从 Redis 消费并写入 sink/PG 供监控查询；
+  - （迁移前实现可仍为守护进程内订阅，以代码为准）
   - 状态写入 sink（如 PG 表或现有心跳/状态通道）或经联动通道推送；监控端提供 **GET /open-orders**（或等效）查询当前挂单列表；
   - 监控页可展示挂单列表（标的、方向、数量、限价、状态、已成交/剩余等），数据以事件驱动更新为主，可辅以轮询快照。
 - **与 R-A2 区分**：R-A2 为**已成交**执行记录（复盘与风控）；R-A5 为**未成交**订单的实时可观测性。
@@ -192,6 +197,15 @@
   - **限流**：即使 Massive 标称 unlimited API 调用，Worker 仍应在请求间留退避间隔（429/5xx 指数退避），遵守供应商 ToS。
   - **前端不直连 Massive**：密钥保护与 CORS 限制，所有请求经后端代理或落库后读取。
 - **与分步计划**：纳入期权研究阶段；具体实现顺序见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+### 3.6 IB 边缘服务与 Daemon 边界（目标架构，R-IB1～R-IB4）
+
+以下描述**目标架构**下 IB 相关进程职责与 Daemon 边界；与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.11 一致。迁移中的代码路径以实现为准，能力进度见 [CAPABILITY_TRACKING.md](plans/CAPABILITY_TRACKING.md)。
+
+- **R-IB1（IB Ingestor）**：独占**行情类** IB 订阅——Watchlist 标的及按需 **`reqMktData`**（均由 Ingestor 统一管理与去重）；将订阅所得行情写入 **Redis**；**不**写入 PostgreSQL。监控与其它服务对行情业务键**只读**，不写入行情唯一真源。
+- **R-IB2（IB Account Agent）**：独占**账户域** IB 订阅与事件——持仓变化、订单状态、挂单、成交、`commissionReport`，以及为与 TWS 对齐所需的 **`reqOpenOrders` / `reqExecutions` 等补全**；仅将结果写入 **Redis**（拟议键前缀如 `ib:account:*`，以实现为准）；**不**写入 PostgreSQL。
+- **R-IB3（IB Operator）**：仅处理**主动** IB API 调用（如下单、撤单、查询类 `req*`）及 **Redis Stream 命令 RPC**；**不承担**任何长期**订阅型**服务（含不在此进程内维持 `reqMktData` 订阅流）。
+- **R-IB4（Daemon / Engine）**：**不持有** IB Client、**不直连** TWS/Gateway；从 **Redis** 读取 Ingestor 与 Account Agent 更新的行情与账户态势，供策略与风控；**账户类**数据落 **PostgreSQL** 由 Daemon（或文档允许的**同类 Redis 消费者**）根据 Redis 内容写入；**自动下单与平敞口等执行**通过 **IB Operator RPC** 完成，而非进程内 `place_order`。
 
 ---
 
@@ -245,7 +259,7 @@
 
 - **目标**：在**红**或操作者判断需紧急降敞口时，**一键平掉本策略管理的对冲敞口**（即自动对冲所用的股票持仓平至目标，如 0 或与当前期权 delta 匹配）。**仅针对本守护程序负责的对冲仓位**，不触碰账户内其他头寸（如手动交易、其他策略）。**仅针对主账户**上本策略管理的对冲敞口，不触碰第二账户。
 - **与监控的对应**：与**红**灯配套——不仅“停新单”，还能主动**卸掉已有敞口**，实现安全兜底。
-- **实现依赖**：R-A1（账户与持仓可获取）、策略边界与平仓逻辑等；安排在阶段 5。控制通道支持 `flatten`；守护进程收到后根据当前账户/持仓与目标计算平仓量并下单，将此次操作写入 sink 操作记录；独立应用提供 POST /control/flatten。
+- **实现依赖**：R-A1（账户与持仓可获取）、策略边界与平仓逻辑等；安排在阶段 5。控制通道支持 `flatten`；守护进程收到后根据当前账户/持仓与目标计算平仓量，**通过 IB Operator RPC 下单**（目标架构），将此次操作写入 sink 操作记录；独立应用提供 POST /control/flatten。
 
 ---
 
@@ -255,9 +269,9 @@
 
 | 编号 | 需求简述 | 说明 |
 |------|----------|------|
-| **R-RM1** | 守护程序双线：心跳循环 + IB 事件订阅 | 行情与持仓以 IB 事件驱动更新；轮询仅用于控制通道。 |
-| **R-RM2** | 行情写入 Redis；唯一写入方为守护进程 | 监控 Server 不向 Redis 写入市场行情；监控仅订阅联动通道并读 Redis 后推前端。 |
-| **R-RM3** | 联动机制：Redis Pub/Sub 或 Streams | 守护写 Redis 后发布通知；监控订阅，收到后读 Redis（或消息体）并推给 Web UI。 |
+| **R-RM1** | 心跳 + 消费 Redis 侧行情与账户更新 | 行情由 **IB Ingestor**、账户态势由 **IB Account Agent** 写入 Redis；Daemon 心跳与策略循环**消费**上述数据；轮询主要用于控制通道。 |
+| **R-RM2** | Ingestor 写行情 Redis；Account Agent 写账户 Redis | 监控 Server **不**写上述业务 Redis 键；Daemon **不**写行情唯一真源键。 |
+| **R-RM3** | 联动机制：Pub/Sub 或 Streams | Ingestor/Account Agent 写 Redis 后发布通知；监控订阅，收到后读 Redis（或消息体）并推给 Web UI。 |
 | **R-RM9**（可选） | 第一里程碑可为「仅建议、不实盘」 | 守护完整跑策略与风控，执行层截断，将 hedge 建议写入 daemon_auto_operations，由 Web UI 呈现。 |
 
 **何时在 UI 提供实时行情**：操作中监控、与守护行为对照、同屏决策、建议模式时需要；仅健康检查、事后复盘、只看统计时不需要。
@@ -287,8 +301,8 @@
 
 ### 7.4 共享 Redis 实时行情（调试拓扑，R-DV4）
 
-- **目标**：在**调试或并行验收**时，允许 **Dev UI 与 Prod UI 同时看到同一条 IB 实时行情推流**（R-RM2/R-RM3 的只读侧）：**单处**运行连接 TWS 的 Engine（唯一行情写入方），向 **唯一** Redis 写报价并发布 Pub/Sub；各环境的 **Market API**（可位于不同主机、不同端口）配置**相同**的 `redis.host` / `redis.port` / `redis.db`（及与 Engine 一致的 `channel`），使前端 SSE 订阅同一数据源。
-- **不替代**：**R-DV1** 仍成立——各环境 **PostgreSQL** 独立 database，`GET /status`、控制面、业务数据仍按环境分离。**R-DV3** 仍成立——共享 Redis **不**表示允许多个 Engine 对同一账户同时自动下单；调试时通常只保留**一个** Engine 进程写 Redis。
+- **目标**：在**调试或并行验收**时，允许 **Dev UI 与 Prod UI 同时看到同一条 IB 实时行情推流**（R-RM2/R-RM3 的只读侧）：**单处**运行连接 TWS 的 **IB Ingestor**（**行情键**的唯一写入方），向 **唯一** Redis 写报价并发布 Pub/Sub；各环境的 **Market API**（可位于不同主机、不同端口）配置**相同**的 `redis.host` / `redis.port` / `redis.db`（及与 Ingestor 一致的 `channel`），使前端 SSE 订阅同一数据源；与 **Daemon（Engine）是否同机运行无关**。
+- **不替代**：**R-DV1** 仍成立——各环境 **PostgreSQL** 独立 database，`GET /status`、控制面、业务数据仍按环境分离。**R-DV3** 仍成立——共享 Redis **不**表示允许多个 Engine 对同一账户同时自动下单；调试时通常只保留**一个** Ingestor（及配套的互斥纪律）向共享 Redis 写行情。
 - **运维注意**：Celery broker/result 与实时行情若共用 Redis **进程**，须用 **不同 `db` 索引** 区分（与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.7、§2.8 一致），避免队列与行情键混用。
 
 ---
@@ -317,17 +331,18 @@
 | | R-B1、R-B2 | 回测（策略 PnL 优化 + Guard 验证） |
 | | R-OS1 | 期权结构细化（腿模式 + 盈亏模型） |
 | e. 策略应用（自动交易） | R-C3 | 一键平敞口 |
-| **f. 实时行情与联动** | **R-RM1** | 守护双线（心跳+事件订阅） |
-| | **R-RM2** | 行情写 Redis，唯一写入方为守护 |
+| **f. 实时行情与联动** | **R-RM1** | 心跳 + 消费 Redis 行情与账户更新 |
+| | **R-RM2** | Ingestor/Account Agent 写 Redis；监控不写业务键 |
 | | **R-RM3** | 联动机制（Redis Pub/Sub 或 Streams） |
 | | R-RM9（可选） | 仅建议不实盘（第一里程碑） |
 | **h. 环境与部署** | **R-DV1** | Dev/Prod PostgreSQL 逻辑隔离 |
 | | **R-DV2** | Prod Linux 完整运行栈；Dev 本机 |
 | | **R-DV3** | TWS 共享 + Engine 互斥 |
-| | **R-DV4** | 调试拓扑：多 UI 共享只读同一 Redis 行情；PG 与 Engine 纪律不变 |
+| | **R-DV4** | 调试拓扑：多 UI 只读同一 Redis 行情（Ingestor 写）；PG 与 Engine 纪律不变 |
+| **i. IB 边缘服务与 Daemon 边界** | **R-IB1**～**R-IB4** | Ingestor / Account Agent / Operator / Daemon 职责，见 §3.6 |
 
 **运行环境与约束**（IB/账户、Dev/Prod 隔离、部署拓扑、监控与交易分离、单进程、守护程序与 IB 连接等）见 [ARCHITECTURE.md](ARCHITECTURE.md)「运行环境与部署约束」（§2）。
 
 ---
 
-*最后更新：2026-04-06，新增 R-DV4 共享 Redis 实时行情调试拓扑（§7.4），与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.8 对齐。*
+*最后更新：2026-04-07，新增 **R-IB1～R-IB4**（§3.6）与 IB 边缘服务拆分目标架构；修订 **R-RM***、**R-DV4** 及 R-A/R-C3 相关叙述，与 [ARCHITECTURE.md](ARCHITECTURE.md) §2.11 对齐。*

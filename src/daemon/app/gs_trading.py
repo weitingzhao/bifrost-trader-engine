@@ -59,57 +59,72 @@ class GsTrading:
                 logger.warning("PostgreSQL sink init failed: %s", e)
 
         # 1.b IB Connector: host/port/client_id from config.yaml (single source of truth).
+        # engine.use_ib_edge: no in-process IB; accounts from Redis (IB Account Agent); hedge orders via IB Operator RPC.
+        engine_cfg = config.get("engine") or {}
+        self._use_ib_edge = bool(engine_cfg.get("use_ib_edge", False))
+        self._operator_client = None
         ib_eff = get_effective_ib_config(config)
-        host = ib_eff["host"]
-        port = ib_eff["port"]
-        timeout = ib_eff["connect_timeout"]
+        if self._use_ib_edge:
+            from src.ib_operator.client import IbOperatorClient
 
-        last_ib = None
-        if hasattr(self._status_sink, "get_last_ib_client_id"):
-            last_ib = self._status_sink.get_last_ib_client_id()
-        client_id_daemon = ib_eff["client_id_daemon"]
-        client_id = (last_ib + 1) if last_ib is not None else client_id_daemon
-        if last_ib is not None:
+            self._operator_client = IbOperatorClient.from_merged_config(config)
+            self.connector = None
+            self.listener_connector = None
+            self.listener_connector_2 = None
             logger.info(
-                "IB client_id from DB last_ib_client_id=%s → using %s (avoid in-use after crash)",
-                last_ib,
-                client_id,
-            )
-        logger.info(
-            "IB connection from config: host=%s port=%s (port_type=%s)",
-            host,
-            port,
-            ib_eff["port_type"],
-        )
-        self.connector = IBConnector(
-            host=host,
-            port=port,
-            client_id=client_id,
-            connect_timeout=timeout,
-        )
-        self.listener_connector = IBConnector(
-            host=host,
-            port=port,
-            client_id=ib_eff["client_id_listener"],
-            connect_timeout=timeout,
-        )
-        # Secondary IB (Second TWS): Listener on Secondary host with its own client_id
-        ib2_host = ib_eff.get("ib2_host") or ""
-        if ib2_host:
-            self.listener_connector_2 = IBConnector(
-                host=ib2_host,
-                port=ib_eff["ib2_port"],
-                client_id=ib_eff["ib2_client_id_listener"],
-                connect_timeout=timeout,
-            )
-            logger.info(
-                "IB Listener (Secondary): host=%s port=%s client_id=%s",
-                ib2_host,
-                ib_eff["ib2_port"],
-                ib_eff["ib2_client_id_listener"],
+                "Engine IB edge mode: no in-process IBConnector; data from Redis; orders via IB Operator"
             )
         else:
-            self.listener_connector_2 = None
+            host = ib_eff["host"]
+            port = ib_eff["port"]
+            timeout = ib_eff["connect_timeout"]
+
+            last_ib = None
+            if hasattr(self._status_sink, "get_last_ib_client_id"):
+                last_ib = self._status_sink.get_last_ib_client_id()
+            client_id_daemon = ib_eff["client_id_daemon"]
+            client_id = (last_ib + 1) if last_ib is not None else client_id_daemon
+            if last_ib is not None:
+                logger.info(
+                    "IB client_id from DB last_ib_client_id=%s → using %s (avoid in-use after crash)",
+                    last_ib,
+                    client_id,
+                )
+            logger.info(
+                "IB connection from config: host=%s port=%s (port_type=%s)",
+                host,
+                port,
+                ib_eff["port_type"],
+            )
+            self.connector = IBConnector(
+                host=host,
+                port=port,
+                client_id=client_id,
+                connect_timeout=timeout,
+            )
+            self.listener_connector = IBConnector(
+                host=host,
+                port=port,
+                client_id=ib_eff["client_id_listener"],
+                connect_timeout=timeout,
+            )
+            # Secondary IB (Second TWS): Listener on Secondary host with its own client_id
+            ib2_host = ib_eff.get("ib2_host") or ""
+            if ib2_host:
+                self.listener_connector_2 = IBConnector(
+                    host=ib2_host,
+                    port=ib_eff["ib2_port"],
+                    client_id=ib_eff["ib2_client_id_listener"],
+                    connect_timeout=timeout,
+                )
+                logger.info(
+                    "IB Listener (Secondary): host=%s port=%s client_id=%s",
+                    ib2_host,
+                    ib_eff["ib2_port"],
+                    ib_eff["ib2_client_id_listener"],
+                )
+            else:
+                self.listener_connector_2 = None
 
         # Host account for hedging/market data (R-A4). Still from DB settings (not a client_id).
         self._host_account_id: Optional[str] = None

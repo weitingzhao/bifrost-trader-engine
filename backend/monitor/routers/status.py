@@ -16,7 +16,11 @@ from src.monitor.reader.ib_config_public import (
     ib_flex_public_defaults,
 )
 from src.monitor.self_check import derive_daemon_self_check, derive_health_roll_up
-from src.bifrost.redis_health_keys import hgetall_ib_ingestor_health, hgetall_massive_ws_status
+from src.bifrost.redis_health_keys import (
+    hgetall_ib_account_agent_health,
+    hgetall_ib_ingestor_health,
+    hgetall_massive_ws_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +37,7 @@ _STATUS_CELERY_INSPECT_TIMEOUT_SEC = float(
     os.environ.get("BIFROST_STATUS_CELERY_INSPECT_TIMEOUT_SEC", "2.0")
 )
 
-STATUS_SCHEMA_VERSION = 8
+STATUS_SCHEMA_VERSION = 9
 
 
 def _strategy_status_block(
@@ -95,7 +99,12 @@ def _status_error_payload() -> Dict[str, Any]:
             active_alloc_name=None,
         ),
         "market_data": {"quotes_redis_reader_ok": False},
-        "socket": {"massive": None, "ib_ingestor": None, "ib_operator": None},
+        "socket": {
+            "massive": None,
+            "ib_ingestor": None,
+            "ib_account_agent": None,
+            "ib_operator": None,
+        },
         "celery": {
             "broker_connected": False,
             "workers": [],
@@ -145,6 +154,7 @@ def _assemble_status_v3(
     celery_worker_last_updated_ts: Any,
     massive: Any,
     ib_ingestor: Any,
+    ib_account_agent: Any,
 ) -> Dict[str, Any]:
     sl = (health_status_lamp or "red").strip().lower()
     if sl == "red":
@@ -199,6 +209,7 @@ def _assemble_status_v3(
         "socket": {
             "massive": massive,
             "ib_ingestor": ib_ingestor,
+            "ib_account_agent": ib_account_agent,
             "ib_operator": monitor_ib_status,
         },
         "celery": {
@@ -404,6 +415,7 @@ def get_status(request: Request) -> Dict[str, Any]:
 
         massive = None
         ib_ingestor = None
+        ib_account_agent = None
         try:
             from src.vendor.massive.config import get_massive_settings
             from src.vendor.massive.reader import count_pending_massive_jobs
@@ -483,9 +495,47 @@ def get_status(request: Request) -> Dict[str, Any]:
                         except (TypeError, ValueError):
                             ib_ingestor_info["client_id"] = None
             ib_ingestor = ib_ingestor_info
+
+            ib_account_agent_info: Dict[str, Any] = {
+                "connected": False,
+                "last_msg_age_s": None,
+                "reconnects": None,
+                "msg_count": None,
+                "client_id": None,
+            }
+            if _rurl:
+                _ah = hgetall_ib_account_agent_health(_r)
+                if _ah:
+                    ib_account_agent_info["connected"] = bool(_ah.get("connected") == "1")
+                    _lm = _ah.get("last_msg_ts")
+                    if _lm is not None:
+                        try:
+                            ib_account_agent_info["last_msg_age_s"] = max(
+                                0.0, time.time() - float(_lm)
+                            )
+                        except (TypeError, ValueError):
+                            ib_account_agent_info["last_msg_age_s"] = None
+                    else:
+                        ib_account_agent_info["last_msg_age_s"] = None
+                    try:
+                        ib_account_agent_info["reconnects"] = int(_ah.get("reconnects") or 0)
+                    except (TypeError, ValueError):
+                        ib_account_agent_info["reconnects"] = int(_ah.get("reconnects") or 0)
+                    try:
+                        ib_account_agent_info["msg_count"] = int(_ah.get("msg_count") or 0)
+                    except (TypeError, ValueError):
+                        ib_account_agent_info["msg_count"] = 0
+                    _cid_a = _ah.get("client_id")
+                    if _cid_a is not None and str(_cid_a).strip() != "":
+                        try:
+                            ib_account_agent_info["client_id"] = int(_cid_a)
+                        except (TypeError, ValueError):
+                            ib_account_agent_info["client_id"] = None
+            ib_account_agent = ib_account_agent_info
         except Exception:
             massive = None
             ib_ingestor = None
+            ib_account_agent = None
 
         hc = derive_health_roll_up(
             daemon_lamp=daemon_lamp,
@@ -497,6 +547,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             quotes_redis_reader_ok=quotes_redis_reader_ok,
             celery_broker_connected=celery_broker_connected,
             celery_workers=celery_workers,
+            ib_account_agent=ib_account_agent,
         )
 
         payload = _assemble_status_v3(
@@ -536,6 +587,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             celery_worker_last_updated_ts=celery_worker_last_updated_ts,
             massive=massive,
             ib_ingestor=ib_ingestor,
+            ib_account_agent=ib_account_agent,
         )
         with _status_cache_lock:
             _status_cache = payload

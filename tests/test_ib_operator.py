@@ -89,6 +89,27 @@ async def test_executor_fetch_bars_delegates() -> None:
     primary.fetch_bars.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_executor_place_stock_order_delegates_to_connector() -> None:
+    trade = MagicMock()
+    trade.order = MagicMock()
+    trade.order.orderId = 42
+    connector = MagicMock()
+    connector.place_order = AsyncMock(return_value=trade)
+    primary = MagicMock()
+    primary._ensure_connected_impl = AsyncMock()
+    primary.connector = connector
+    ex = IbOperatorExecutor(primary=primary, account_secondary=None)
+    out = await ex.execute(
+        "place_stock_order",
+        {"symbol": "AAPL", "side": "BUY", "quantity": 10, "order_type": "market"},
+    )
+    assert out["ok"] is True
+    assert out["data"]["order_id"] == 42
+    primary._ensure_connected_impl.assert_awaited_once()
+    connector.place_order.assert_awaited_once()
+
+
 def test_effective_ib_operator_settings_redis_key_defaults() -> None:
     cfg = {"redis": {"enabled": True}}
     s = effective_ib_operator_settings(cfg)

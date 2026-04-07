@@ -1,6 +1,6 @@
 # 系统架构设计
 
-本文档基于 **产品需求**（[REQUIREMENTS.md](REQUIREMENTS.md)）做全盘系统架构设计，作为实现与评审的单一参考。**运行环境与部署约束**（两台 Mac Mini 独占 TWS、双 IB 账户、Prod Linux 全栈 + Dev 本机、PostgreSQL Dev/Prod 隔离、监控与交易逻辑解耦等）在本文档 §2；FSM、状态空间、配置分类等细节见文档索引，此处只做映射与总览。
+本文档基于 **产品需求**（[REQUIREMENTS.md](REQUIREMENTS.md)）做全盘系统架构设计，作为实现与评审的单一参考。**运行环境与部署约束**（两台 Mac Mini 独占 TWS、双 IB 账户、Prod Linux 全栈 + Dev 本机、PostgreSQL Dev/Prod 隔离、监控与交易逻辑解耦等）在本文档 §2；**IB Ingestor / IB Account Agent / IB Operator 与 Engine 边界**见 **§2.11**，与需求 **R-IB1～R-IB4** 对应。FSM、状态空间、配置分类等细节见文档索引，此处只做映射与总览。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 文档 | 角色 |
 |------|------|
-| **REQUIREMENTS.md** | 产品功能需求唯一定义：监控、控制、历史、回测、交易基础等（R-M*/R-C*/R-H*/R-B*/R-A*）；环境与部署约束（R-DV*）。 |
+| **REQUIREMENTS.md** | 产品功能需求唯一定义：监控、控制、历史、回测、交易基础等（R-M*/R-C*/R-H*/R-B*/R-A*、**R-IB***）；环境与部署约束（R-DV*）。 |
 | **本文档 (ARCHITECTURE.md)** | 系统级架构：**运行环境与部署约束**（§2）、三大组成部分、**HTTP 服务拆分（backend/*，§4.0）**、组件划分、数据流、部署视图、需求→组件→阶段映射。 |
 | **CAPABILITY_TRACKING.md** | 能力维度拆解与当前进度（木桶原理）。 |
 | **research/STATE_SPACE_MAPPING.md**、**FSM_LINKAGE.md**、**research/CONFIG_SAFETY_TAXONOMY.md** | 状态空间、FSM、配置安全边界等专项，此处不重复。 |
@@ -22,11 +22,11 @@
 ### 2.1 IB / TWS 与账户（RE-1）
 
 - **数据与下单**：均通过 IB API 来自 **TWS**（Trader Workstation）。
-- **TWS 主机**：**两台 Mac Mini**，各运行一套 TWS（或 IB Gateway）；分别承载 **Host 账户** 与 **Secondary 账户**（见需求 R-A4）。两台 Mac Mini 均在局域网内，供守护程序与监控端通过 IB API 连接。
+- **TWS 主机**：**两台 Mac Mini**，各运行一套 TWS（或 IB Gateway）；分别承载 **Host 账户** 与 **Secondary 账户**（见需求 R-A4）。两台 Mac Mini 均在局域网内，供 **IB 边缘服务**（Ingestor、Account Agent、Operator 等）与监控端经 IB API 连接。
 - **账户**：**两个 IB 账户**（见需求 R-A4）。
-  - **Host 账户**：数据与下单经当前 IB API 连接 TWS；承担**自动交易**（本项目 Gamma scalping）、**手动交易**及**行情/持仓数据源**。由 settings 表 `host_account_id`（列名 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。**Client ID 在 `config.yaml`（单一真源）**；`host_account_id` 等账户信息仍在 PostgreSQL settings 表。
-  - **第二账户**：**仅手动交易**；守护进程不对其下单或订阅行情。若与主账户在同一 TWS 同一登录下，由现有守护进程/监控端拉取并写入 `account` / `account_positions` 等表；若在**另一 TWS 或另一登录**下，则通过监控端或独立服务的**第二 IB 连接**拉取后写入同一库（当前计划仅文档预留，不实现第二连接）。
-- **实现方式**：TWS 允许多个 API 连接，用不同的 **client_id** 区分。守护程序使用一个 `client_id`（如 1）；手动交易使用 TWS 界面或另一 `client_id`（如 2）的客户端；监控端 Account/Market、Celery 各用不同 client_id。
+  - **Host 账户**：**目标架构（R-IB1～R-IB4，[REQUIREMENTS.md](REQUIREMENTS.md) §3.6）**：**行情类订阅**由 **IB Ingestor**（Watchlist + 按需 `reqMktData`）写 **Redis**；**账户域事件**（持仓、挂单、成交、commission 等）由 **IB Account Agent** 写 **Redis**；**自动下单**由 **IB Operator** 经主动 API 执行；**Engine（Daemon）不直连 TWS**，从 Redis 读行情与账户态势，将账户类数据**写入 PostgreSQL**，对冲指令经 **Operator RPC**。**迁移中**的实现可仍含守护进程内 `IBConnector`，以代码为准。由 settings 表 `host_account_id`（列名 `ib_host_account_id`）指定，未配置时取 TWS 返回的 managed accounts 中第一个。**各进程 `client_id` 在 `config.yaml`（单一真源）** 区分 Ingestor / Agent / Operator / 其他；`host_account_id` 等仍在 PostgreSQL settings 表。
+  - **第二账户**：**仅手动交易**；Daemon 不对其自动下单。账户与持仓纳入 Portfolio 时，由 Account Agent（及监控拉取路径）按配置覆盖；若在**另一 TWS 或另一登录**下，则通过监控端或独立服务的**第二 IB 连接**拉取后写入同一库（当前计划仅文档预留，不实现第二连接）。
+- **实现方式**：TWS 允许多个 API 连接，用不同的 **client_id** 区分。Ingestor、Account Agent、Operator、Celery、监控端 Account/Market 各用不同 `client_id`（见配置注释）。
 - **Dev/Prod 与 TWS 共享**（R-DV3）：两台 Mac Mini 上的 TWS 为 Dev 与 Prod **共享基础设施**。Dev 与 Prod 通过 **不同 `client_id` 与/或不同 TWS socket 端口** 区分连接。**同一 IB 账户同一时刻仅允许一个自动交易 Engine 对该账户下单**，避免双环境双 Engine 实盘冲突。
 
 ### 2.2 架构支柱（RE-2）
@@ -35,18 +35,18 @@
 
 | 组成部分 | 说明 |
 |----------|------|
-| **自动交易** | 以 **单进程、单线程**（单一 asyncio 事件循环）的 **守护程序** 实现；负责连接 TWS、持仓/行情、StateClassifier、FSM、Guard、下单等。 |
+| **自动交易** | 以 **单进程、单线程**（单一 asyncio 事件循环）的 **守护程序** 实现；负责 StateClassifier、FSM、Guard、编排与写状态。**目标架构**：不直连 TWS；行情/账户来自 Redis；下单经 IB Operator RPC（见 §2.11）。 |
 | **监控与控制** | 与守护程序 **物理解耦**；状态的读取、控制指令的发送由 **独立应用** 完成。 |
 | **基于回测的策略优化与安全边界验证** | 历史回放驱动同一套 StateClassifier、FSM、Guard 逻辑，**不连 TWS、不下真实单**；首要用于策略 PnL 优化，兼做 Guard 验证（见 REQUIREMENTS.md §4）。 |
 
 ### 2.3 部署与运行位置（RE-3、RE-4）
 
-受 IB 限制，**TWS（或 IB Gateway）运行在两台专用 Mac Mini 上**（分别承载 Host 与 Secondary 账户，见 §2.1），仅承担 TWS 与手动交易入口角色。操作者通过远程桌面登录 Mac Mini 进行手动交易。**守护程序**可在以下两种位置之一运行，并通过 IB API 连接 Mac Mini 上的 TWS 获取行情与下单：
+受 IB 限制，**TWS（或 IB Gateway）运行在两台专用 Mac Mini 上**（分别承载 Host 与 Secondary 账户，见 §2.1），仅承担 TWS 与手动交易入口角色。操作者通过远程桌面登录 Mac Mini 进行手动交易。**守护程序**可在以下两种位置之一运行；**目标架构**下行情与账户经 **Redis**（Ingestor / Account Agent），下单经 **IB Operator**；**迁移中**仍可为经 IB API 直连 TWS：
 
 | 方案 | TWS 所在 | 守护程序所在 | 说明 |
 |------|----------|--------------|------|
 | **A. Mac Mini 同机** | 专用 Mac Mini | **同一台 Mac Mini** | 守护程序与 TWS 同机，经本机 API 连接 TWS；部署简单，延迟最低。 |
-| **B. Linux 服务器（当前选定）** | 两台 Mac Mini（仅 TWS） | **局域网 Linux 服务器（如 192.168.10.70）** | 守护程序在 Linux 上运行，经**网络**连接 Mac Mini 上的 TWS 获取行情数据并下单；TWS 需允许来自局域网的 API 连接。**生产环境**（Prod）采用此方案。 |
+| **B. Linux 服务器（当前选定）** | 两台 Mac Mini（仅 TWS） | **局域网 Linux 服务器（如 192.168.10.70）** | 守护程序在 Linux 上运行；**目标架构**下边缘服务经**网络**连接 TWS，Engine 消费 Redis 并经 Operator 下单。**生产环境**（Prod）采用此方案。 |
 
 - **TWS 主机（Mac Mini ×2）**：仅运行 TWS（或 IB Gateway）；不强制要求本机再跑守护程序。用户通过远程桌面在 Mac Mini 上进行手动交易，与自动交易共享同一账户（不同 client_id）。
 - **守护程序主机**：可为上述 Mac Mini（方案 A），或局域网内另一台 Linux 服务器（方案 B）；仅运行 `run_engine.py` 单进程，连接 TWS、执行对冲逻辑、写状态与心跳。**当前 Prod 采用方案 B**。
@@ -59,7 +59,7 @@
 **当前选定拓扑**：Prod 在 **Linux 服务器（192.168.10.70）** 上 **同机部署** Engine、Server、Redis、Celery（进程级分离）。**可选变体**：监控机与守护程序主机物理分离（如 status server 在开发机 / 另一台笔记本），只需能连同一 PostgreSQL。
 
 - **TWS 主机（Mac Mini ×2）**：仅运行 TWS；用户远程登录该机进行手动交易。
-- **守护程序主机**：运行 `run_engine.py`，连接 Mac Mini 上的 TWS（同机或跨网），执行对冲、写状态与心跳；可为 Mac Mini（与 TWS 同机）或 Linux 服务器。
+- **守护程序主机**：运行 `run_engine.py`，执行对冲、写状态与心跳；**目标架构**下不直连 TWS；可为 Mac Mini（与 TWS 同机）或 Linux 服务器。
 - **监控服务**：与守护进程**逻辑解耦**（独立进程）；控制通道采用 **PostgreSQL 表 `daemon_control`**（见 [DATABASE.md](DATABASE.md) §2.4）。跨机与同机均只需能连**同一 PostgreSQL**。
 - **启停**：监控端 POST /control/stop → 写 DB → 守护进程轮询消费后退出；**启动**须在**守护程序主机**上执行 `run_engine.py`（SSH/systemd/手动）。
 
@@ -71,8 +71,10 @@
 
 **核心原则**：**守护程序本身的运行与否不依赖 IB 是否可连接**。IB 不可用时守护程序仍保持运行，仅“启动/执行对冲”的条件不满足；监控端显示**黄灯**（degraded），而非红/退出。
 
+**目标架构补充（R-IB4）**：Daemon **不持有** IB API 会话；**降级**可包含：Redis 中**行情/账户数据过期或不可用**、**IB Operator RPC** 不可达、或边缘服务（Ingestor / Account Agent）不健康。`WAITING_IB` 等状态在迁移后可专指「执行路径不具备」（例如无法完成 Operator 下单），或与「数据未就绪」合并为文档化的自检 **degraded** 条件——以实现为准。
+
 **要求**：
-- **运行不依赖 IB**：守护程序**不得**因“IB 连接失败”而退出。启动时若无法连接 IB，应进入 WAITING_IB 等状态，持续写心跳、轮询控制，并**按配置间隔周期重试**连接 IB。
+- **运行不依赖 IB**：守护程序**不得**因“IB 连接失败”而退出。启动时若无法连接 IB，应进入 WAITING_IB 等状态，持续写心跳、轮询控制，并**按配置间隔周期重试**连接 IB。（**目标架构**下重试对象可为 **Operator 可用性** 或 **Redis 数据新鲜度**，而非进程内 `ib.connect`。）
 - **不预先假设 IB 已运行**：不得无限阻塞；采用带超时的连接尝试。
 - **未连接时监控为黄灯**：守护进程存活但 IB 未连接时，自检结论为 **degraded**（黄灯）。
 - **连接状态可观测**：监控端须展示守护程序是否与 IB 连接及连接成功时的 **Client ID**；未连接时展示**下次计划重试时间**（如 `next_retry_ts`）。
@@ -97,7 +99,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | **Prod** | **Linux 服务器（192.168.10.70）**：Engine + Server + Redis + Celery | **Prod DB**（192.168.10.80 上独立 database） | 经 IB API 连接两台 Mac Mini 上的 TWS（Prod client_id） |
 | **Dev** | **开发机（Mac）**：Engine（可选）、Server、Redis、Celery | **Dev DB**（192.168.10.80 上独立 database） | 经 IB API 连接同一两台 Mac Mini（Dev client_id，与 Prod 互斥） |
 
-**调试 / 开发推荐拓扑（单 TWS 套接字、唯一 Redis 行情）**：当前局域网调试常采用 **一处运行持有 IB API（TCP）连接的 Engine**（单进程 `run_engine.py`），向 **唯一** Redis 写入实时行情键；**独立 IB ingestor**（`run_ib_ingestor.py`）在同一 Redis 上写入 `ib:ingester:tick:*` 并在 **`ib:ingester:channel`** 上 `PUBLISH`。**Dev 与 Prod 两套 UI** 各自后端的 **Market API** 将 `redis.host` / `redis.port` / `redis.db`（及可选 `redis.subscribe_channel`，默认 `ib:ingester:channel`）指向**同一** Redis，使两端 SSE（`GET …/quotes/stream`）订阅**同一** ingestor 发布流。守护进程仍可向 `quote:{symbol}` 写入（供轮询等路径）；**不再**使用 `daemon:quotes` 频道推送。**不改变**以下纪律：**PostgreSQL** 仍按上表各连各库（R-DV1）；**同一 IB 账户仅一处 Engine 自动下单**（R-DV3）。若 Celery broker 与实时行情共用 Redis 实例，须用 **不同 `redis.db` 索引** 区分 broker/result 与行情缓存，避免与 §2.7「队列与行情可选共用实例、不同 db」冲突。
+**调试 / 开发推荐拓扑（单 TWS 套接字、唯一 Redis 行情）**：**目标架构**下由 **IB Ingestor**（`run_ib_ingestor.py`）持有行情类 IB 连接，向 **唯一** Redis 写入 `ib:ingester:tick:*` 并在 **`ib:ingester:channel`** 上 `PUBLISH`；**IB Account Agent**（独立进程，实现与 systemd 名待定，如 `bifrost-ib-account-agent.service`）写入**另一 Redis 命名空间**（拟议 `ib:account:*`，以设计为准）。**Dev 与 Prod 两套 UI** 各自后端的 **Market API** 将 `redis.host` / `redis.port` / `redis.db`（及可选 `redis.subscribe_channel`，默认 `ib:ingester:channel`）指向**同一** Redis，使两端 SSE 订阅**同一** ingestor 发布流。Daemon **不写** `ib:ingester:tick:*` 唯一真源；仍可写入 `quote:{symbol}` 等派生键（供轮询等路径，迁移期兼容）；**不再**使用 `daemon:quotes` 频道推送。**不改变**以下纪律：**PostgreSQL** 仍按上表各连各库（R-DV1）；**同一 IB 账户仅一处 Engine 自动下单**（R-DV3）。若 Celery broker 与实时行情共用 Redis 实例，须用 **不同 `redis.db` 索引** 区分 broker/result 与行情缓存，避免与 §2.7「队列与行情可选共用实例、不同 db」冲突。
 
 **约束**：
 - 数据库**迁移（schema migration）、种子数据、备份**按环境独立执行；**禁止**将 Dev 的破坏性操作（清表、重建等）默认指向 Prod。
@@ -185,7 +187,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 #### 2.10.3 Ingest 运维（监控 / 启停 / 日志）
 
-- **Redis meta（逻辑健康）**：Massive 期权 WS 为 `bifrost:health:ws_massive_option`（Monitor 可回退 `bifrost:health:massive_ws` 与 `massive:meta:status`）；IB ingestor / IB Operator 分别为 `bifrost:health:ws_ib_ingestor`、`bifrost:health:ws_ib_operator`（可回退上一版 bifrost 名；不再使用 `ib:ingester:meta:health` / `ib:operator:meta:health` 写健康）。字段含 `connected`、`last_msg_ts` 等。订阅与 tick 等数据键仍可保留 `ib:ingester:*` / `ib:operator:cmd` 等。`GET /status` 的 `socket` 摘要供 UI 展示。
+- **Redis meta（逻辑健康）**：Massive 期权 WS 为 `bifrost:health:ws_massive_option`（Monitor 可回退 `bifrost:health:massive_ws` 与 `massive:meta:status`）；IB ingestor / IB Operator 分别为 `bifrost:health:ws_ib_ingestor`、`bifrost:health:ws_ib_operator`（可回退上一版 bifrost 名；不再使用 `ib:ingester:meta:health` / `ib:operator:meta:health` 写健康）。**IB Account Agent** 落地后可增加独立 health 键（如 `bifrost:health:ws_ib_account_agent`，以实现为准）。字段含 `connected`、`last_msg_ts` 等。订阅与 tick 等数据键：`ib:ingester:*`；账户域 **`ib:account:*`**（拟议）；Operator 仅 **`ib:operator:cmd`** 等主动命令通道，**不**维持行情订阅。`GET /status` 的 `socket` 摘要供 UI 展示。
 - **日志**：Socket Services ingest 将控制台日志写入 Redis Stream `bifrost:console:ws_massive_option`（Massive）、`bifrost:console:ws_ib_ingestor`（IB ingestor）、`bifrost:console:ws_ib_operator`（IB Operator）；Massive 对应 Monitor `GET /api/massive-ws/logs` 与 SSE `/api/massive-ws/logs/stream`。
 - **进程控制**：Ops `GET /ops/market-ingest/services`、`POST /ops/market-ingest/control`（需 **operator**，与 `POST /ops/workers/scale` 同级；Redis broker 启停等仍为 admin）；`systemd` unit 须列入 `ops.allowed_units`。示例 unit：`deploy/systemd/bifrost-massive-ws.service`。注册表默认见 `ops.market_ingest_services`（示例见 `config/config.dev.yaml.example`）。
 - **跨机**：Ops 与 ingest 不同机时，使用 `executor_mode=agent`，在 ingest 机运行 Local Control Agent；新增 unit 时同步扩展 `backend/ops/agent/protocol.py` 中的 `ALLOWED_UNIT_PATTERNS`。
@@ -228,6 +230,19 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 **CLI 验证**：`redis-cli -h … -p … SUBSCRIBE ib:ingester:channel`（会话会阻塞，仅用于排障）。短时 **`MONITOR`** 可看到 `PUBLISH` 命令，勿长期开启。
 
+### 2.11 IB Ingestor、IB Account Agent、IB Operator 与 Engine（目标职责）
+
+与 [REQUIREMENTS.md](REQUIREMENTS.md) **§3.6（R-IB1～R-IB4）** 一致，以下为 **IB 边缘服务** 与 **Engine** 的架构边界（实现迁移中允许与下文不完全一致，以代码与 CAPABILITY_TRACKING 为准）。
+
+| 进程 / 脚本 | 职责 | IB API 模式 | 写入 / 对外 |
+|-------------|------|-------------|-------------|
+| **IB Ingestor** | 独占**行情类订阅**：Watchlist STK/OPT 与按需 **`reqMktData`**（统一去重与生命周期） | 仅**订阅型**（`reqMktData` 等） | **Redis** `ib:ingester:*`；**不**写 PG |
+| **IB Account Agent**（**新增**；启动脚本与包名实现时确定） | 独占**账户域订阅**：持仓事件、订单状态、挂单、成交、`commissionReport`；及为对齐 TWS 的 **`reqOpenOrders` / `reqExecutions` 等补全** | **订阅 + 必要时的主动 `req*`**；不在此做长期 `reqMktData` | **仅 Redis**（拟议 `ib:account:*`）；**不**写 PG |
+| **IB Operator**（`run_ib_operator.py`） | **主动**调用：下单、撤单、查询类 `req*`、历史拉取等；**Redis Stream 命令 RPC** | **无长期订阅**；不承担 `reqMktData` 行情流 | RPC 结果；可选按命令写 PG（以实现为准）；**不**写 `ib:ingester:*` |
+| **Engine / Daemon**（`run_engine.py`） | 策略 FSM、风控、心跳、读控制通道；**不**持有 `IBConnector`（目标） | 无 TWS 连接 | 读 **Redis**（Ingestor + Agent）；**账户类**落 **PostgreSQL**；执行经 **Operator 客户端 RPC** |
+
+**数据流摘要**：`TWS → Ingestor → Redis（行情）`；`TWS → Account Agent → Redis（账户态势）`；`Daemon → Operator → TWS（下单等）`；`Daemon → PostgreSQL（由 Redis 驱动的账户持久化）`。
+
 ---
 
 系统由三部分组成，对应上文 §2.2，缺一不可：
@@ -235,8 +250,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │  (1) 自动交易                                                                     │
-│  守护进程：TWS ↔ 持仓/行情 → 解析腿 → StateClassifier → FSM → Guard → 下单        │
-│  单进程、单 asyncio 循环；不内置监控 UI，仅通过 sink 暴露状态、通过控制通道接受指令  │
+│  守护进程：Redis(行情+账户) → 解析腿 → StateClassifier → FSM → Guard → Operator RPC │
+│  单进程、单 asyncio 循环；目标不直连 TWS；仅通过 sink 暴露状态、通过控制通道接受指令   │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                         │
                     写入状态 snapshot    │    读取控制文件/API
@@ -256,7 +271,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 | 组成部分 | 职责 | 交付阶段 |
 |----------|------|----------|
-| **自动交易** | 连接 TWS、持仓/行情、解析 21–35 DTE 近 ATM、Greeks、状态分类、TradingFSM/HedgeFSM、hedge gate、ExecutionGuard、真实下单；写状态到 sink、轮询控制通道。 | 已实现 + 阶段 1（sink、停止） |
+| **自动交易** | **目标**：Redis 输入（行情+账户）+ Operator RPC 执行；解析 21–35 DTE 近 ATM、Greeks、状态分类、TradingFSM/HedgeFSM、hedge gate、ExecutionGuard；写状态到 sink、轮询控制通道。**迁移中**可仍为直连 TWS。 | 已实现 + 阶段 1（sink、停止）；去 IB 见 CAPABILITY_TRACKING |
 | **监控与控制** | 独立进程读 sink，提供 HTTP/CLI，发停止（及后续 pause/resume）；不修改守护程序业务逻辑。 | 阶段 2 |
 | **基于回测的策略优化与安全边界验证** | 历史回放驱动核心逻辑，不连 TWS、不 place_order；产出理论 P&L、收益曲线与决策/block reason；**首要用于策略 PnL 优化**，兼做 Guard 参数对比与验证。 | **阶段 4**（依赖阶段 1 历史表） |
 
@@ -290,7 +305,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 | 组件 | 说明 | 代码/配置 |
 |------|------|-----------|
-| **IB Connector** | 连接 TWS、持仓、标的行情、下单。 | 现有 connector 层 |
+| **IB Connector** | **目标架构**：Engine **不**持有 `IBConnector`；行情与账户来自 **Redis**（Ingestor / Account Agent）；下单通过 **IB Operator 客户端**。迁移中仍可能使用 `src/connector/ib.py`。 | `src/connector/ib.py` / Operator 客户端 |
+| **IB Account Agent**（边缘服务） | 账户域 IB 事件 → **仅 Redis**；不写 PG。 | 独立进程（待实现）；见 §2.11 |
 | **Store** | 内存：持仓、spot、last_hedge、daily_hedge_count、daily_pnl。 | 现有 store |
 | **Portfolio / 解析腿** | 按 structure（min/max DTE、ATM 带）解析期权腿，计算净 delta（Black–Scholes）。 | 现有 + gates.strategy |
 | **StateClassifier** | 将持仓/行情/greeks/执行 → 六维状态 O,D,M,L,E,S。 | gates.state（delta/market/liquidity/system） |
@@ -302,7 +318,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | **StatusSink（接口）** | write_snapshot(snapshot_dict)；由配置选择实现（SQLite/File/可选 Redis-PG）；snapshot 可含 **自检结果**（见需求 §4.1）。 | 阶段 1.1 引入 |
 | **状态自检** | 基于当前 CompositeState、guards、config 做只读评估；输出 ok/degraded/blocked 与 block_reasons；供监控控制台展示或告警。 | 与阶段 2 监控一并考虑 |
 | **控制通道** | 轮询控制文件（或后续 API）：**stop**（R-C1）、**flatten**（R-C3 一键平敞口）、可选 trading_paused（R-C2）；可选“触发自检”并写回 sink。 | 阶段 1.2/1.3（stop）；阶段 2 或 3.2（flatten、pause） |
-| **Open Orders 事件订阅** | 订阅 IB orderStatusEvent、openOrderEvent（及可选 execDetailsEvent）；维护内存 open orders 列表；写入 sink 或经联动通道推送；可选 reqAllOpenOrders 包含 TWS 手动挂单。 | connector + 事件回调 + sink/联动 |
+| **Open Orders 与账户事件** | **目标**：**Account Agent** 订阅 orderStatusEvent、openOrderEvent 等 → **Redis**；Daemon 读 Redis 并写入 sink/PG；可选 reqAllOpenOrders 在 Agent 侧。 | Agent + Redis + Daemon 持久化 |
 
 ### 4.2 状态 Sink（守护进程调用，存储由配置决定）
 
@@ -364,12 +380,12 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
                     ┌─────────────┐
                     │    TWS     │
                     └──────┬──────┘
-                           │ 持仓、行情、下单
+                           │ 目标：行情/账户经边缘服务；下单经 Operator
                            ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  守护进程 (GsTrading)                                                        │
-│  Store ← 持仓/spot  →  解析腿 → Greeks → StateClassifier → CompositeState  │
-│       → TradingFSM → hedge_gate → ExecutionGuard → (若通过) HedgeFSM → 下单  │
+│  Store ← Redis(行情+账户) → 解析腿 → Greeks → StateClassifier → CompositeState │
+│       → TradingFSM → hedge_gate → ExecutionGuard → (若通过) HedgeFSM → Operator RPC │
 │       → 每次 heartbeat / _eval_hedge 后: StatusSink.write_snapshot(...)   │
 │       → 轮询 控制文件/API → stop 或 trading_paused                          │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -398,21 +414,23 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 ### 5.1 实时行情缓存与联动（R-RM*，可选）
 
-在保留上述数据流的前提下，可增加**实时行情缓存与守护→监控联动**：
+在保留上述数据流的前提下，**目标架构**下实时行情与联动由 **IB Ingestor** 与 **IB Account Agent** 写入 Redis，**Daemon 不写**行情唯一真源键（见 [REQUIREMENTS.md](REQUIREMENTS.md) §6、§3.6）。
 
-- **守护进程**：除心跳写 PG 外，在 **IB 事件回调**中把行情写入 **Redis**（缓存），并通过 **Redis Pub/Sub 或 Streams** 发布「有更新」通知。
-- **Redis**：仅作行情**缓存**与**联动通道**；**唯一写入方为守护进程**；监控 Server **不**向 Redis 写行情。
-- **监控 Server**：订阅 Redis 联动通道；收到通知后**读 Redis**（或解析消息体），向前端推送（WebSocket/SSE 或 GET /quotes）；与守护仍**物理解耦**，仅需与守护同连 Redis。
-- **未成交订单（R-A5）**：可与行情联动共用“守护事件 → 写 Redis/发布”模式；初期亦可仅写 PG/sink + GET /open-orders。
+- **IB Ingestor**：将 **订阅所得行情** 写入 **Redis**（如 `ib:ingester:tick:*`），并在 **`ib:ingester:channel`**（或 Streams）上发布「有更新」通知；含 Watchlist 与按需 **`reqMktData`**（§2.11）。
+- **IB Account Agent**：将 **账户域事件** 结果写入 **Redis**（拟议 `ib:account:*`）；**不**写 PG。
+- **守护进程**：从 Redis **消费**行情与账户快照，写心跳与 **PostgreSQL**（账户类持久化）；**不**在进程内订阅 `reqMktData` 作为真源。
+- **Redis**：行情与账户键的**写入方**为 Ingestor / Agent；监控 Server **不**写上述业务键。
+- **监控 Server**：订阅联动通道；收到通知后**读 Redis**，向前端推送（WebSocket/SSE 或 GET /quotes）；与 Engine **物理解耦**，仅需同连 Redis。
+- **未成交订单（R-A5）**：**目标**：Account Agent 事件 → Redis → Daemon 落 PG/sink；与 R-RM* 共用 Redis 联动模式。
 
 部署时 Redis 可与 PG 同机或独立；未配置或不可用时系统退化为仅 PG + 现有 GET /status 轮询，不破坏现有行为。
 
 ### 5.2 未成交订单数据流（R-A5，事件驱动）
 
-- TWS → IB API 推送 **orderStatusEvent** / **openOrderEvent** / **execDetailsEvent** → 守护进程内 **IB Connector** 回调。
-- 回调内更新内存 open orders 列表（或等价结构），并写入 **sink**（如 PG 表 `daemon_open_orders` 或现有状态表）或经 **Redis Pub/Sub/Streams** 发布（与 R-RM* 联动一致）。
+- **目标架构**：TWS → IB API 推送 **orderStatusEvent** / **openOrderEvent** / **execDetailsEvent** → **IB Account Agent** 内回调 → 更新 **Redis** 中 open orders 视图；**Daemon** 读 Redis 并写入 **sink/PG**（如 `daemon_open_orders` 等）。
+- **迁移前**：仍可存在于守护进程内 **IB Connector** 回调路径，以实现为准。
 - 监控 Server 读 sink 或订阅联动通道，提供 **GET /open-orders**（或 GET /status 内嵌 open_orders）；前端展示挂单列表及状态变更。
-- 初期实现可仅采用「sink + GET /open-orders」；Redis 推送可在 R-RM* 落地后复用同一通道。
+- 初期实现可仅采用「sink + GET /open-orders」；Redis 推送在 R-RM* 与 Agent 落地后统一。
 
 ---
 
@@ -421,7 +439,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 ## 6. 部署视图
 
 - **TWS 主机（Mac Mini ×2）**：**两台 Mac Mini** 各运行一套 TWS（或 IB Gateway），分别承载 Host 与 Secondary 账户（RE-1，§2.1）；用户通过远程桌面登录该机进行手动交易。
-- **Prod 全栈（Linux 服务器 192.168.10.70）**：运行 Engine（`run_engine.py`）、**一个或多个 FastAPI 进程**（至少 Monitor：`run_server.py`；按需增加 `run_server_ops.py`、`run_server_trading.py` 等，见 §4.0）、Redis、Celery worker（`bars` / `massive` 等队列）；经 IB API 跨网连接两台 Mac Mini 上的 TWS。单机仅一个 Engine 进程（RE-6，§2.5）。
+- **Prod 全栈（Linux 服务器 192.168.10.70）**：运行 Engine（`run_engine.py`）、**IB Ingestor**（`run_ib_ingestor.py`）、**IB Operator**（`run_ib_operator.py`）、**IB Account Agent**（独立进程，待实现；可选 `bifrost-ib-account-agent.service`）、**一个或多个 FastAPI 进程**（至少 Monitor：`run_server.py`；按需增加 `run_server_ops.py`、`run_server_trading.py` 等，见 §4.0）、Redis、Celery worker（`bars` / `massive` 等队列）；**边缘服务**经 IB API 跨网连接两台 Mac Mini 上的 TWS。单机仅一个 Engine 进程（RE-6，§2.5）。
 - **Dev 开发机（Mac）**：运行 **Monitor 及各域 API**（按功能按需）、Redis、Celery（Engine 可选）；连接 Dev DB 与同一两台 Mac Mini（使用与 Prod 不同的 client_id）。
 - **PostgreSQL（独立主机 192.168.10.80）**：承载 **Prod DB** 与 **Dev DB**（不同 database 名，R-DV1，§2.8）；Prod 与 Dev 各连各库。
 - **监控与守护（RE-5，§2.4）**：Prod 上 Engine 与 Server 同机但**进程级分离**；可选监控机物理分离变体。
@@ -433,7 +451,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 - **TWS 主机（Mac Mini ×2）**：仅运行 TWS（或 IB Gateway）；操作者通过远程桌面登录进行手动交易。
 - **Prod 主机（Linux 服务器 192.168.10.70）**：
-  - **守护进程**（`run_engine.py`）：连接 Mac Mini 上的 TWS（Prod `client_id`），执行全部对冲逻辑（Gamma Scalping、FSM、写 status/operations）；轮询 Prod DB（`daemon_control`、`daemon_run_status`）。**运行不依赖 IB**（RE-7）：若 TWS 不可用则进入 WAITING_IB，持续写心跳（`ib_connected=false`、`next_retry_ts`）、轮询 stop/retry_ib，并按配置间隔**自动重试**连接；监控端显示**黄灯**（degraded）。收到 **stop** 则消费并退出；**suspend** / **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED。
+  - **守护进程**（`run_engine.py`）：**目标架构**下**不直连** TWS；从 **Redis** 读行情与账户数据，执行对冲逻辑（Gamma Scalping、FSM、写 status/operations）；下单经 **IB Operator**；轮询 Prod DB（`daemon_control`、`daemon_run_status`）。**运行不依赖直连 IB**（RE-7、§2.6）：若数据或 Operator 不可用则 degraded / WAITING 类状态，持续写心跳、轮询 stop/retry。收到 **stop** 则消费并退出；**suspend** / **resume** 通过 `daemon_run_status.suspended` 切换 Daemon FSM 的 RUNNING_SUSPENDED。
+  - **IB Ingestor / IB Operator / IB Account Agent**：长驻边缘服务，见 §2.11；与 Engine 同机或按运维拆分（需共享 Redis 与 PG 访问纪律）。
   - **HTTP API**（§4.0）：**Monitor**（`run_server.py`）读 Prod DB，提供 GET /status、GET /operations、POST /control/* 等；**不提供**守护进程「启动」。其余域（Ops、Trading、Research 等）按需同机另起进程。守护进程在本机执行 `run_engine.py`（systemd/手动）。
   - **Redis + Celery worker**：同机部署；`bars` / `massive` 等队列见 `scripts/run_celery.py`。
 - **Dev 开发机（Mac）**：运行 Monitor 及各域 API（+ 可选 Engine/Redis/Celery）；连接 **Dev DB**；连接 TWS 时使用与 Prod 不同的 `client_id`。Dev Engine **不得**与 Prod Engine 同时对同一 IB 账户下单（R-DV3，§2.1）。
@@ -486,8 +505,8 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | 产品需求（REQUIREMENTS.md） | 对应组件 | 交付阶段 |
 |--------------------------------|----------|----------|
 |--------------------------------|----------|----------|
-| 两个 IB 账户；Host 账户：自动+行情+手动；第二账户：仅手动，统一 Portfolio（R-A4） | 配置 host_account_id（ib_host_account_id）、IB Connector、守护进程按 Host 账户对冲、监控/Performance 按 account_id 展示 | 阶段 3 |
-| 两台 Mac Mini TWS（Host/Secondary）、多 account_id；自动/手动不同 client_id；Dev/Prod 不同 client_id | IB Connector、配置 | 已实现 |
+| 两个 IB 账户；Host 账户：自动+行情+手动；第二账户：仅手动，统一 Portfolio（R-A4） | 配置 host_account_id（ib_host_account_id）、Ingestor/Agent/Operator 分工、守护进程按 Host 账户对冲、监控/Performance 按 account_id 展示 | 阶段 3 |
+| 两台 Mac Mini TWS（Host/Secondary）、多 account_id；自动/手动不同 client_id；Dev/Prod 不同 client_id | 边缘服务 client_id、配置 | 已实现 |
 | 两台 Mac Mini 独占 TWS；守护程序可选同机或 Linux 单进程 | DaemonFSM、run_engine、部署文档（§2.3） | 已实现 |
 | 监控：不依赖控制台查看状态 | StatusSink + SQLite/文件；独立应用 GET /status | 阶段 1.1 + 阶段 2.1 |
 | 监控：状态自检（健康结论与 block 原因） | 守护进程自检结果写入 sink；监控控制台展示/告警 | 与阶段 2 一并考虑 |
@@ -504,8 +523,9 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 | 多消费者/远程存储可选 | RedisSink/PostgreSQLSink | 按需 |
 | **非实时市场数据拉取（R-A3 扩展）** | 队列（PG 表或 Redis+RQ）+ **独立 Worker 进程**；API 入队返回 job_id，GET /bars/jobs、GET /bars/jobs/{id}；串行+间隔满足 IB Pacing | 阶段 3 |
 | **Massive 期权研究数据（R-A6）** | MassiveClient REST + Celery Worker（queue `massive`）+ 可选 WS Ingest；Research 路由扩展；feature flag 控制 Trades；不占 IB client_id，不进入 ExecutionGuard | 期权研究阶段 |
-| **实时行情与联动（R-RM*）** | 守护双线（心跳+事件）；Redis 行情缓存；Redis Pub/Sub 或 Streams 联动；监控订阅并推前端 | 见 REQUIREMENTS §6 |
-| **未成交订单可观测（R-A5）** | Open Orders 事件订阅（orderStatusEvent、openOrderEvent、可选 execDetailsEvent）；维护 open orders 并写 sink 或推送；GET /open-orders；可选 reqAllOpenOrders | 阶段 3 或「实时行情与联动」步骤 |
+| **实时行情与联动（R-RM*）** | Ingestor/Agent 写 Redis；Daemon 消费；Pub/Sub 或 Streams；监控订阅并推前端 | 见 REQUIREMENTS §6、[REQUIREMENTS.md](REQUIREMENTS.md) §3.6 |
+| **IB 边缘服务与 Daemon 边界（R-IB1～R-IB4）** | §2.11；Ingestor / Account Agent / Operator / Engine 职责 | 见 REQUIREMENTS §3.6 |
+| **未成交订单可观测（R-A5）** | **目标**：Account Agent → Redis → Daemon → sink/PG；GET /open-orders | 阶段 3 或与 Agent 同步 |
 
 ---
 
@@ -570,7 +590,7 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 
 ## 9. 相关文档索引
 
-- **[产品需求](REQUIREMENTS.md)** — 产品功能需求（守护程序、监控、金融数据采集、策略编辑/回测/历史统计、策略应用）与环境部署约束（R-DV*）
+- **[产品需求](REQUIREMENTS.md)** — 产品功能需求（守护程序、监控、金融数据采集、策略编辑/回测/历史统计、策略应用）、**R-IB1～R-IB4**（§3.6）与环境部署约束（R-DV*）
 - **[运行环境与部署约束](ARCHITECTURE.md#2-运行环境与部署约束)** — 本文档 §2
 - **[能力评估与进度](plans/CAPABILITY_TRACKING.md)** — 能力维度拆解与当前进度
 - **[FSM 串联](fsm/FSM_LINKAGE.md)** — Daemon/Trading/Hedge 三 FSM 联动
@@ -578,3 +598,5 @@ Dev 与 Prod 在 **PostgreSQL 层面逻辑隔离**：同一 PostgreSQL 服务器
 - **[配置安全分类](research/CONFIG_SAFETY_TAXONOMY.md)** — gates 与安全边界
 - **[Guard 微调与影响](research/GUARD_TUNING_AND_IMPACT.md)** — 参数调整与后果
 - **§8 本文** — 安全边界配置的存储与版本管理（文件 vs 配置注册表、可追溯性、与回测结果匹配）
+
+*最后更新：2026-04-07 — 新增 §2.11（IB Ingestor / Account Agent / Operator / Engine 目标职责），修订 §2.1、§2.6、§2.8、§4.1、§5、§6.1、§7 映射与 [REQUIREMENTS.md](REQUIREMENTS.md) §3.6、R-RM*、R-DV4 对齐。*

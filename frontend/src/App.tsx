@@ -298,6 +298,7 @@ export default function App() {
     if (isMassiveOptionFeedHash(hashNorm)) return 'massive'
     if (
       h === FEED_MASSIVE_DAILY_DATA_ID ||
+      h === 'settings-subscribe' ||
       h.startsWith('settings-daemon') ||
       h.startsWith('settings-system') ||
       h.startsWith('settings-celery') ||

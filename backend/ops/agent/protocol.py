@@ -20,6 +20,7 @@ ALLOWED_UNIT_PATTERNS = [
     re.compile(r"^bifrost-ib-operator\.service$"),
     re.compile(r"^bifrost-ib-ingestor\.service$"),
     re.compile(r"^bifrost-ib-market-ingest\.service$"),
+    re.compile(r"^bifrost-ib-account-agent\.service$"),
 ]
 
 

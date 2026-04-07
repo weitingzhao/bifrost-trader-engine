@@ -51,6 +51,11 @@ bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-ib-ingestor.s
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-ib-ingestor.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-ib-ingestor.service
 
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-ib-account-agent.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-ib-account-agent.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-ib-account-agent.service
+bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active bifrost-ib-account-agent.service
+
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl start bifrost-ib-market-ingest.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop bifrost-ib-market-ingest.service
 bifrost-agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart bifrost-ib-market-ingest.service

@@ -136,6 +136,22 @@ export function ingestRedisHealthLamp(
     }
     return { lamp: 'red', title: 'IB ingestor not connected (Redis bifrost:health:ws_ib_ingestor).' }
   }
+  if (id === 'ib_account_agent') {
+    const aa = status.socket?.ib_account_agent
+    if (aa == null) {
+      return {
+        lamp: 'gray',
+        title: 'IB Account Agent block missing from /status socket (Redis health unavailable).',
+      }
+    }
+    if (ingestRedisTruthyConnected(aa.connected)) {
+      return {
+        lamp: 'green',
+        title: 'IB Account Agent healthy (Redis bifrost:health:ws_ib_account_agent, connected).',
+      }
+    }
+    return { lamp: 'red', title: 'IB Account Agent not connected (Redis bifrost:health:ws_ib_account_agent).' }
+  }
   if (id === 'ib_operator') {
     const mon = status.socket?.ib_operator
     if (mon == null) {

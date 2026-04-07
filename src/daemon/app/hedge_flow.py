@@ -193,13 +193,30 @@ async def hedge(
     log_order_status(
         order_status="sent", side=intent.side, quantity=intent.quantity
     )
-    trade = await app.connector.place_order(
-        app.symbol,
-        intent.side,
-        intent.quantity,
-        order_type=app.order_type,
-    )
-    if trade is not None:
+    trade_ok = False
+    if getattr(app, "_use_ib_edge", False) and getattr(app, "_operator_client", None):
+        op_res = await app._operator_client.request_async(
+            "place_stock_order",
+            {
+                "symbol": app.symbol,
+                "side": intent.side,
+                "quantity": intent.quantity,
+                "order_type": app.order_type,
+            },
+            caller="daemon",
+        )
+        trade_ok = bool(op_res.get("ok"))
+        if not trade_ok:
+            logger.warning("IB Operator place_stock_order failed: %s", op_res.get("error"))
+    else:
+        trade = await app.connector.place_order(
+            app.symbol,
+            intent.side,
+            intent.quantity,
+            order_type=app.order_type,
+        )
+        trade_ok = trade is not None
+    if trade_ok:
         app._fsm_hedge.on_ack_ok()
         app.guard.record_hedge_sent()
         app.store.set_last_hedge_time(now_ts)
@@ -224,7 +241,7 @@ async def hedge(
                 snapshot, spot, cs, snapshot.data_lag_ms
             )
             app._status_sink.write_snapshot(snap_dict, append_history=True)
-        logger.warning("Order failed (trade is None)")
+        logger.warning("Order failed (trade is None or Operator error)")
         app._fsm_hedge.on_ack_reject()
         app._fsm_hedge.on_try_resync()
         app._fsm_hedge.on_positions_resynced()

@@ -358,9 +358,12 @@ def _flatten_host_secondary_ib(ib: dict) -> Dict[str, Any]:
         "client_id_worker_market": int(hc.get("worker_market") or 500),
         # IB ingestor (run_ib_ingestor.py): YAML `ingestor`; legacy `ib_market_ingest` accepted.
         "client_id_ib_ingestor": int(hc.get("ingestor") or hc.get("ib_market_ingest") or 150),
+        # IB Account Agent (run_ib_account_agent.py): account-domain IB events → Redis only.
+        "client_id_account_agent": int(hc.get("account_agent") or 151),
         "ib2_client_id_listener": int(sc.get("listener") or 3),
         # Secondary IB Operator (same role as host operator); legacy YAML key `account` accepted.
         "ib2_client_id_operator": int(sc.get("operator") or sc.get("account") or 102),
+        "ib2_client_id_account_agent": int(sc.get("account_agent") or 152),
     }
 
 
@@ -374,7 +377,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
           host:
             ip: ...
             port_type: ...
-            client_id: { daemon, listener, operator, worker_market, ingestor }
+            client_id: { daemon, listener, operator, worker_market, ingestor, account_agent }
           secondary:  # optional second TWS
             ip: ...
             port_type: ...
@@ -414,6 +417,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
     cid_op = int(ib.get("client_id_operator") or 100)
     cid_w = int(ib.get("client_id_worker_market") or 500)
     cid_mi = int(ib.get("client_id_ib_ingestor") or 150)
+    cid_aa = int(ib.get("client_id_account_agent") or 151)
 
     out: Dict[str, Any] = {
         "host": host,
@@ -427,6 +431,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         "client_id_operator": cid_op,
         "client_id_worker_market": cid_w,
         "client_id_ib_ingestor": cid_mi,
+        "client_id_account_agent": cid_aa,
         # API / frontend aliases (ib_* prefix)
         "ib_host": host,
         "ib_port_type": port_type,
@@ -438,6 +443,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
         "ib_client_id_operator": cid_op,
         "ib_client_id_worker_market": cid_w,
         "ib_client_id_ib_ingestor": cid_mi,
+        "ib_client_id_account_agent": cid_aa,
     }
 
     # Second IB
@@ -448,12 +454,14 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
             ib2_pt = "tws_paper"
         ib2_cid_l = int(ib.get("ib2_client_id_listener") or 3)
         ib2_cid_op = int(ib.get("ib2_client_id_operator") or 102)
+        ib2_cid_aa = int(ib.get("ib2_client_id_account_agent") or 152)
         out.update({
             "ib2_host": ib2_host,
             "ib2_port_type": ib2_pt,
             "ib2_port": IB_PORT_MAP[ib2_pt],
             "ib2_client_id_listener": ib2_cid_l,
             "ib2_client_id_operator": ib2_cid_op,
+            "ib2_client_id_account_agent": ib2_cid_aa,
         })
     else:
         out.update({
@@ -462,6 +470,7 @@ def get_effective_ib_config(config: dict) -> Dict[str, Any]:
             "ib2_port": None,
             "ib2_client_id_listener": 3,
             "ib2_client_id_operator": 102,
+            "ib2_client_id_account_agent": 152,
         })
 
     return out

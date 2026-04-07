@@ -15,11 +15,13 @@ from typing import Any, Dict
 BIFROST_HEALTH_MASSIVE_WS = "bifrost:health:ws_massive_option"
 BIFROST_HEALTH_IB_INGESTOR = "bifrost:health:ws_ib_ingestor"
 BIFROST_HEALTH_IB_OPERATOR = "bifrost:health:ws_ib_operator"
+BIFROST_HEALTH_IB_ACCOUNT_AGENT = "bifrost:health:ws_ib_account_agent"
 
 # Previous bifrost names (read / YAML normalization fallback).
 LEGACY_BIFROST_MASSIVE_WS = "bifrost:health:massive_ws"
 LEGACY_BIFROST_IB_INGESTOR = "bifrost:health:ib_ingestor"
 LEGACY_BIFROST_IB_OPERATOR = "bifrost:health:ib_operator"
+LEGACY_BIFROST_IB_ACCOUNT_AGENT = "bifrost:health:ib_account_agent"
 
 # Older Massive key (read fallback).
 LEGACY_MASSIVE_META_STATUS = "massive:meta:status"
@@ -46,4 +48,12 @@ def hgetall_ib_ingestor_health(r: Any) -> Dict[str, str]:
     h = r.hgetall(BIFROST_HEALTH_IB_INGESTOR)
     if not h:
         h = r.hgetall(LEGACY_BIFROST_IB_INGESTOR)
+    return dict(h or {})
+
+
+def hgetall_ib_account_agent_health(r: Any) -> Dict[str, str]:
+    """IB Account Agent health hash (account-domain events → Redis only)."""
+    h = r.hgetall(BIFROST_HEALTH_IB_ACCOUNT_AGENT)
+    if not h:
+        h = r.hgetall(LEGACY_BIFROST_IB_ACCOUNT_AGENT)
     return dict(h or {})

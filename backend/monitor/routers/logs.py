@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.monitor.routers.deps import (
     DAEMON_LOG_STREAM_KEY,
+    IB_ACCOUNT_AGENT_LOG_STREAM_KEY,
     IB_OPERATOR_LOG_STREAM_KEY,
     IB_INGESTOR_LOG_STREAM_KEY,
     MASSIVE_LOG_STREAM_KEY,
@@ -1124,6 +1125,30 @@ async def get_ib_ingestor_logs_stream(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# --- IB Account Agent logs (scripts/run_ib_account_agent.py → bifrost:console:ws_ib_account_agent) ---
+
+
+@router.get("/api/ib-account-agent/logs")
+def get_ib_account_agent_logs(
+    request: Request,
+    tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
+) -> Dict[str, Any]:
+    """Return last N lines from IB Account Agent Redis stream."""
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url())
+        raw = r.xrevrange(IB_ACCOUNT_AGENT_LOG_STREAM_KEY, count=tail)
+        lines = []
+        for _eid, fields in reversed(raw):
+            line = _redis_stream_line(fields)
+            lines.append(line)
+        return {"lines": lines}
+    except Exception as e:
+        logger.warning("get_ib_account_agent_logs failed: %s", e)
+        return {"lines": [], "error": str(e)}
 
 
 # --- Docs API server logs (run_server_docs.py → Redis stream bifrost:console:{dev|prod}:api_docs) ---

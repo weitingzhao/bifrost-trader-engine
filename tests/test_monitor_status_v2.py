@@ -1,4 +1,4 @@
-"""Shape tests for GET /status JSON (schema v8)."""
+"""Shape tests for GET /status JSON (schema v9)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from backend.monitor.routers.status import (
 
 
 def _assert_config_shape(body: dict) -> None:
-    assert body["status_schema_version"] == STATUS_SCHEMA_VERSION == 8
+    assert body["status_schema_version"] == STATUS_SCHEMA_VERSION == 9
     cfg = body["config"]
     assert set(cfg.keys()) >= {"ib_client", "ib_flex"}
     assert "ib_config" not in cfg
@@ -48,7 +48,7 @@ def _assert_config_shape(body: dict) -> None:
     assert "feeds" not in body
     assert "ib_status" not in body["monitor"]
     sk = body["socket"]
-    assert set(sk.keys()) >= {"massive", "ib_ingestor", "ib_operator"}
+    assert set(sk.keys()) >= {"massive", "ib_ingestor", "ib_account_agent", "ib_operator"}
     assert "ib_status" not in sk
 
 
@@ -112,6 +112,7 @@ def test_assemble_status_v8_config_shape() -> None:
         celery_worker_last_updated_ts=None,
         massive={"configured": False},
         ib_ingestor={"connected": False},
+        ib_account_agent={"connected": False},
     )
     _assert_config_shape(body)
     ic = body["config"]["ib_client"]

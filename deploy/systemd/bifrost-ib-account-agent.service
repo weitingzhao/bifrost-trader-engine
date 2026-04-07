@@ -1,0 +1,20 @@
+# IB Account Agent — account events to Redis (see ARCHITECTURE §2.11).
+
+[Unit]
+Description=Bifrost IB Account Agent
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vision
+Group=vision
+WorkingDirectory=/home/vision/bifrost-trader-engine
+Environment=BIFROST_CONFIG=/home/vision/bifrost-trader-engine/config/config.prod.yaml
+ExecStart=/home/vision/bifrost-trader-engine/.venv/bin/python scripts/run_ib_account_agent.py --config config/config.prod.yaml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

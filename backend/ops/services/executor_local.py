@@ -31,6 +31,8 @@ def _ingest_script_log_for_unit(unit: str) -> Optional[Tuple[str, str]]:
         return ("run_massive_ws.py", "massive-ws.log")
     if "ib-operator" in stem or stem == "bifrost-ib-operator":
         return ("run_ib_operator.py", "ib-operator.log")
+    if "ib-account-agent" in stem or stem == "bifrost-ib-account-agent":
+        return ("run_ib_account_agent.py", "ib-account-agent.log")
     if "ib-ingestor" in stem or stem == "bifrost-ib-ingestor":
         return ("run_ib_ingestor.py", "ib-ingestor.log")
     if "ib-market-ingest" in stem or stem == "bifrost-ib-market-ingest":
@@ -267,7 +269,7 @@ class SubprocessLocalExecutor:
     ``pgrep`` + ``SIGTERM`` (same idea as ``run_celery.py`` duplicate kill).
 
     Market ingest units (``bifrost-massive-ws``, ``bifrost-ib-operator``,
-    ``bifrost-ib-ingestor``) start with ``scripts/run_*.py`` and the optional
+    ``bifrost-ib-ingestor``, ``bifrost-ib-account-agent``) start with ``scripts/run_*.py`` and the optional
     resolved YAML path (``--config`` or positional for gateway).
     """
 
@@ -459,6 +461,8 @@ class SubprocessLocalExecutor:
             return "ib-market-ingest"
         if "ib-operator" in u:
             return "ib-operator"
+        if "ib-account-agent" in u:
+            return "ib-account-agent"
         if "massive-ws" in u:
             return "massive-ws"
         return None

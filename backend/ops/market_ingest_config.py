@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import Dict, List
 
 from src.bifrost.redis_health_keys import (
+    BIFROST_HEALTH_IB_ACCOUNT_AGENT,
     BIFROST_HEALTH_IB_INGESTOR,
     BIFROST_HEALTH_IB_OPERATOR,
     BIFROST_HEALTH_MASSIVE_WS,
+    LEGACY_BIFROST_IB_ACCOUNT_AGENT,
     LEGACY_BIFROST_IB_INGESTOR,
     LEGACY_BIFROST_IB_OPERATOR,
     LEGACY_BIFROST_MASSIVE_WS,
@@ -34,6 +36,12 @@ DEFAULT_MARKET_INGEST_SERVICES: List[Dict[str, str]] = [
         "label": "IB ingestor",
         "systemd_unit": "bifrost-ib-ingestor.service",
         "redis_meta_key": BIFROST_HEALTH_IB_INGESTOR,
+    },
+    {
+        "id": "ib_account_agent",
+        "label": "IB Account Agent",
+        "systemd_unit": "bifrost-ib-account-agent.service",
+        "redis_meta_key": BIFROST_HEALTH_IB_ACCOUNT_AGENT,
     },
 ]
 
@@ -71,6 +79,8 @@ def market_ingest_services_from_config(config: dict) -> List[Dict[str, str]]:
             LEGACY_BIFROST_IB_OPERATOR,
         ):
             meta = BIFROST_HEALTH_IB_OPERATOR
+        elif sid == "ib_account_agent" and meta == LEGACY_BIFROST_IB_ACCOUNT_AGENT:
+            meta = BIFROST_HEALTH_IB_ACCOUNT_AGENT
         out.append({
             "id": sid,
             "label": label or sid,

@@ -137,6 +137,22 @@ def _ingest_settings(cfg: dict) -> Dict[str, Any]:
     return {}
 
 
+def _on_demand_stk_symbols(rds: Any) -> List[str]:
+    """Extra STK symbols from Redis SET ``ib:ingester:control:on_demand_stk`` (merged with watchlist)."""
+    try:
+        from src.vendor.ib_ingestor.redis_keys import IB_INGESTER_ON_DEMAND_STK
+
+        raw = rds.smembers(IB_INGESTER_ON_DEMAND_STK)
+    except Exception:
+        return []
+    out: List[str] = []
+    for x in raw or []:
+        s = str(x).strip().upper()
+        if s:
+            out.append(s)
+    return out
+
+
 def _watchlist_targets(
     cfg: dict,
     max_subscriptions: int,
@@ -351,6 +367,13 @@ class IbIngestorApp:
                     self._include_stk(),
                     self._include_opt(),
                 )
+                extra_stk = _on_demand_stk_symbols(self._rds)
+                if extra_stk:
+                    seen_syms = set(stk_syms)
+                    for s in extra_stk:
+                        if s not in seen_syms:
+                            seen_syms.add(s)
+                            stk_syms.append(s)
                 if not opt_rows and not stk_syms:
                     logger.warning(
                         "No STK/OPT rows in watchlist; retry in %ds",

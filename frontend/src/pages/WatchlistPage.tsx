@@ -639,7 +639,7 @@ export function WatchlistPage({ status }: WatchlistPageProps) {
       <section className="replay-section" aria-labelledby="watchlist-head">
         <h3 id="watchlist-head" className="page-title-with-tooltip">
           Stocks & options
-          <InfoTooltip text="Stocks in this list are subscribed by the daemon as Real-time ticker (see System → Event Subscribe). Add a symbol below to include it in monitoring. The daemon syncs this list on every heartbeat; no restart is needed when you add or remove symbols." />
+          <InfoTooltip text="Stocks in this list are subscribed by the daemon as Real-time ticker (see Settings → Subscribe → IB Event Subscribe). Add a symbol below to include it in monitoring. The daemon syncs this list on every heartbeat; no restart is needed when you add or remove symbols." />
         </h3>
         {watchlistError && (
           <div className="replay-placeholder" role="alert" style={{ color: 'var(--danger, #c00)', marginBottom: '0.5rem' }}>

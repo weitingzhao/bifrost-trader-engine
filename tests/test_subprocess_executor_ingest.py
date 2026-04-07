@@ -16,6 +16,7 @@ def test_ingest_script_log_for_unit() -> None:
     assert _ingest_script_log_for_unit("bifrost-ib-operator.service")[0] == "run_ib_operator.py"
     assert _ingest_script_log_for_unit("bifrost-ib-ingestor.service")[0] == "run_ib_ingestor.py"
     assert _ingest_script_log_for_unit("bifrost-ib-market-ingest.service")[0] == "run_ib_ingestor.py"
+    assert _ingest_script_log_for_unit("bifrost-ib-account-agent.service")[0] == "run_ib_account_agent.py"
     assert _ingest_script_log_for_unit("unknown.service") is None
 
 

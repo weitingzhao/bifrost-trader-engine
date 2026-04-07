@@ -16,6 +16,7 @@ export interface IbClientPort {
   operator_host?: number
   operator_secondary?: number
   ingestor?: number
+  account_agent?: number
   market_data_worker?: number
 }
 
@@ -235,6 +236,8 @@ export interface StatusSocketIbIngestor {
 export interface StatusSocket {
   massive?: StatusSocketMassive | null
   ib_ingestor?: StatusSocketIbIngestor | null
+  /** IB Account Agent — account-domain events to Redis (GET /status socket.ib_account_agent). */
+  ib_account_agent?: StatusSocketIbIngestor | null
   ib_operator?: SocketIbOperator | null
 }
 
@@ -251,9 +254,9 @@ export interface StatusLiveUi {
   reference_indices?: { symbol: string; label?: string }[]
 }
 
-/** GET /status nested JSON (status_schema_version 8). */
+/** GET /status nested JSON (status_schema_version 8–9). */
 export interface StatusResponse {
-  status_schema_version?: 8
+  status_schema_version?: 8 | 9
   health?: StatusHealth
   lamps?: StatusLamps
   daemon?: StatusDaemon
@@ -297,7 +300,7 @@ export interface DaemonHeartbeat {
   heartbeat_interval_sec?: number | null
   /** 守护进程是否连接 Redis 并写入行情（R-RM*） */
   redis_quotes_connected?: boolean
-  /** Daemon IB 事件订阅状态（System 页 Event Subscribe 区块） */
+  /** Daemon IB 事件订阅状态（Settings → Subscribe → IB Event Subscribe） */
   event_subscribe_ticker?: boolean
   event_subscribe_positions?: boolean
   event_subscribe_fills?: boolean

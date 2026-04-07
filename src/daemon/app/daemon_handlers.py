@@ -31,6 +31,11 @@ async def handle_idle(app: Any) -> DaemonState:
 
 async def handle_connecting(app: Any) -> DaemonState:
     """CONNECTING: try IB with client_id, client_id+1, ... (up to 10 attempts); if all fail → WAITING_IB (RE-7)."""
+    if getattr(app, "_use_ib_edge", False):
+        logger.info(
+            "[Daemon] state=CONNECTING → CONNECTED (IB edge mode; no Trading Client socket)"
+        )
+        return DaemonState.CONNECTED
     cid = getattr(app.connector, "client_id", None)
     logger.debug("[Daemon] state=CONNECTING | Trading Client connecting client_id=%s", cid)
     logger.info(
@@ -78,6 +83,19 @@ async def handle_waiting_ib(app: Any) -> DaemonState:
             logger.info("[Daemon] state=WAITING_IB | control stop → STOPPING")
             return DaemonState.STOPPING
         if cmd == "retry_ib" or time.time() >= next_retry_ts:
+            if getattr(app, "_use_ib_edge", False):
+                from src.daemon.ib_edge import ib_edge_snapshot_ready
+
+                if ib_edge_snapshot_ready(app.config):
+                    logger.info(
+                        "[Daemon] state=WAITING_IB → CONNECTED (IB edge: account snapshot in Redis)"
+                    )
+                    return DaemonState.CONNECTED
+                now_t = time.time()
+                interval = app._effective_heartbeat_interval()
+                next_retry_ts = now_t + interval
+                await asyncio.sleep(1.0)
+                continue
             # WAITING_IB: connect Listener (Host) for read-only; do not connect Trading until user Resume
             listener = getattr(app, "listener_connector", None)
             if listener is None:
@@ -141,11 +159,14 @@ async def handle_waiting_ib(app: Any) -> DaemonState:
 
 async def handle_connected(app: Any) -> DaemonState:
     """CONNECTED: fetch positions + spot, bootstrap TradingFSM (START/SYNCED). Transition to RUNNING."""
+    _conn = getattr(app, "connector", None)
+    _ib_c = bool(_conn and getattr(_conn, "is_connected", False))
+    _ib_id = getattr(_conn, "client_id", None) if _conn else None
     if app._status_sink and hasattr(app._status_sink, "write_daemon_heartbeat"):
         app._status_sink.write_daemon_heartbeat(
             hedge_running=False,
-            ib_connected=app.connector.is_connected,
-            ib_client_id=getattr(app.connector, "client_id", None),
+            ib_connected=_ib_c,
+            ib_client_id=_ib_id,
             heartbeat_interval_sec=app._effective_heartbeat_interval(),
             redis_quotes_connected=app._redis_quotes_connected(),
             mock_hedging=getattr(app, "mock_hedging", True),
@@ -179,6 +200,53 @@ async def handle_connected(app: Any) -> DaemonState:
 async def handle_running(app: Any) -> DaemonState:
     """RUNNING: Host Listener = all Host events (ticker, positions, open orders, fills).
     Secondary Listener = Secondary open orders, positions, fills, commission. Host Trading = no logic/subscriptions."""
+    if getattr(app, "_use_ib_edge", False):
+        logger.info(
+            "[Daemon] state=RUNNING | IB edge mode — no Listener; accounts from Redis (IB Account Agent)"
+        )
+        app._event_subscribe_fills_registered = False
+        app._event_subscribe_positions_ib2_registered = False
+        app._event_subscribe_fills_ib2_registered = False
+        app._event_subscribe_commission_ib2_registered = False
+        try:
+            from src.daemon.ib_edge import refresh_accounts_from_redis_edge
+
+            await refresh_accounts_from_redis_edge(app)
+        except Exception as e:
+            logger.warning("[Daemon] ib_edge initial refresh: %s", e)
+        app._apply_run_status_transition()
+        if app._status_sink:
+            app._status_sink.write_snapshot(
+                app._build_heartbeat_minimal_dict(), append_history=False
+            )
+            if hasattr(app._status_sink, "write_daemon_heartbeat"):
+                listener_kw = app._listener_heartbeat_kwargs()
+                connector = getattr(app, "connector", None)
+                _ib_conn = bool(connector and getattr(connector, "is_connected", False))
+                _ib_cid = getattr(connector, "client_id", None) if connector else None
+                app._status_sink.write_daemon_heartbeat(
+                    hedge_running=True,
+                    ib_connected=_ib_conn,
+                    ib_client_id=_ib_cid,
+                    heartbeat_interval_sec=app._effective_heartbeat_interval(),
+                    redis_quotes_connected=app._redis_quotes_connected(),
+                    mock_hedging=getattr(app, "mock_hedging", True),
+                    **app._event_subscribe_flags(),
+                    **listener_kw,
+                )
+        app._heartbeat_task = asyncio.create_task(app._heartbeat())
+        app._config_reload_task = asyncio.create_task(app._reload_config_loop())
+        app._ib_disconnected_during_run = False
+        try:
+            while app._fsm_daemon.is_running():
+                await asyncio.sleep(1.0)
+                if getattr(app, "_ib_disconnected_during_run", False):
+                    app._ib_disconnected_during_run = False
+                    return DaemonState.WAITING_IB
+        except asyncio.CancelledError:
+            pass
+        return DaemonState.STOPPING
+
     logger.info(
         "[Daemon] state=RUNNING | connecting Host Listener, then subscribing tickers and positions..."
     )
@@ -423,9 +491,10 @@ async def handle_running(app: Any) -> DaemonState:
             await asyncio.sleep(1.0)
             if getattr(app, "_ib_disconnected_during_run", False):
                 app._ib_disconnected_during_run = False
-                if app.connector.is_connected:
+                _co = getattr(app, "connector", None)
+                if _co and getattr(_co, "is_connected", False):
                     try:
-                        await app.connector.disconnect()
+                        await _co.disconnect()
                     except Exception as e:
                         logger.warning(
                             "[Daemon] release_ib: disconnect failed (continuing to WAITING_IB): %s",
@@ -506,7 +575,9 @@ async def handle_stopping(app: Any) -> DaemonState:
             app._redis_quotes_reader.close()
         except Exception as e:
             logger.debug("Redis quotes reader close: %s", e)
-    await app.connector.disconnect()
+    _co = getattr(app, "connector", None)
+    if _co:
+        await _co.disconnect()
     listener = getattr(app, "listener_connector", None)
     if listener:
         try:

@@ -199,7 +199,7 @@ export function StatusDaemonPanel({
         </div>
         <div className="daemon-group daemon-group-event">
           <div className="daemon-group-header">
-            <span className={`title-inline-lamp lamp-icon ${strategyGroupLamp}`} title="Event: green when Trading Strategy running and Event Subscribe green; red when suspended or Event Subscribe red" aria-hidden>
+            <span className={`title-inline-lamp lamp-icon ${strategyGroupLamp}`} title="Event: green when Trading Strategy running and IB Event Subscribe (Settings → Subscribe) green; red when suspended or IB Event Subscribe red" aria-hidden>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 12h-4l-3 9L9 3 6 12H2" /></svg>
             </span>
             <span className="daemon-group-title">Event</span>
