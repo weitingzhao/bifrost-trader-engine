@@ -25,8 +25,12 @@ ALLOWED_UNIT_PATTERNS = [
 
 
 def validate_unit(unit: str) -> bool:
+    """Return True if *unit* is an allowed systemd unit name (strip whitespace first)."""
+    u = (unit or "").strip()
+    if not u:
+        return False
     for pat in ALLOWED_UNIT_PATTERNS:
-        if pat.match(unit):
+        if pat.match(u):
             return True
     return False
 
@@ -53,8 +57,8 @@ class AgentRequest:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "AgentRequest":
         return cls(
-            action=str(d.get("action", "")),
-            unit=str(d.get("unit", "")),
+            action=str(d.get("action", "")).strip(),
+            unit=str(d.get("unit", "")).strip(),
             request_id=str(d.get("id", str(uuid.uuid4()))),
             timeout=int(d.get("timeout", 30)),
         )

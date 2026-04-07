@@ -30,6 +30,21 @@ LEGACY_MASSIVE_META_STATUS = "massive:meta:status"
 LEGACY_IB_OPERATOR_META_HEALTH = "ib:operator:meta:health"
 
 
+def redis_hash_field_truthy(h: Dict[str, Any], field: str = "connected") -> bool:
+    """Coerce a Redis hash field to bool (writers use ``\"1\"`` / ``\"0\"``; tolerate int/bool/whitespace)."""
+    if not h:
+        return False
+    v = h.get(field)
+    if v is None:
+        return False
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    s = str(v).strip().lower()
+    return s in ("1", "true", "yes", "on")
+
+
 def hgetall_massive_ws_status(r: Any) -> Dict[str, str]:
     """Massive WS / options ingest health hash (same field names as before)."""
     for key in (

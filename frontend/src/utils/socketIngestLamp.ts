@@ -144,13 +144,41 @@ export function ingestRedisHealthLamp(
         title: 'IB Account Agent block missing from /status socket (Redis health unavailable).',
       }
     }
-    if (ingestRedisTruthyConnected(aa.connected)) {
+    const hostUp =
+      ingestRedisTruthyConnected(aa.connected)
+      || ingestRedisTruthyConnected(aa.host?.connected)
+    const secConfigured = aa.secondary !== undefined && aa.secondary !== null
+    const secUp = ingestRedisTruthyConnected(aa.secondary?.connected)
+    const lastAge = aa.last_msg_age_s
+    const healthFresh =
+      lastAge != null
+      && typeof lastAge === 'number'
+      && Number.isFinite(lastAge)
+      && lastAge <= IB_OPERATOR_HEALTH_FRESH_MAX_S
+    if (hostUp) {
+      if (secConfigured && !secUp) {
+        return {
+          lamp: 'yellow',
+          title:
+            'IB Account Agent Host connected; Secondary not connected (Redis bifrost:health:ws_ib_account_agent).',
+        }
+      }
       return {
         lamp: 'green',
-        title: 'IB Account Agent healthy (Redis bifrost:health:ws_ib_account_agent, connected).',
+        title: 'IB Account Agent healthy (Host + Secondary if configured; Redis ws_ib_account_agent).',
       }
     }
-    return { lamp: 'red', title: 'IB Account Agent not connected (Redis bifrost:health:ws_ib_account_agent).' }
+    if (healthFresh) {
+      return {
+        lamp: 'yellow',
+        title:
+          'IB Account Agent Host not connected yet; Redis health is fresh — API may still be handshaking.',
+      }
+    }
+    return {
+      lamp: 'red',
+      title: 'IB Account Agent Host not connected (Redis bifrost:health:ws_ib_account_agent).',
+    }
   }
   if (id === 'ib_operator') {
     const mon = status.socket?.ib_operator

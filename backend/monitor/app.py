@@ -158,6 +158,12 @@ def create_app(
     app.state._ib_ingestor_log_thread: Optional[threading.Thread] = None
     app.state._ib_ingestor_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
+    # IB Account Agent log stream (scripts/run_ib_account_agent.py → bifrost:console:ws_ib_account_agent)
+    app.state.ib_account_agent_log_queues: list = []
+    app.state.ib_account_agent_log_lock = threading.Lock()
+    app.state._ib_account_agent_log_thread: Optional[threading.Thread] = None
+    app.state._ib_account_agent_log_loop: Optional[asyncio.AbstractEventLoop] = None
+
     # Docs API console log stream (run_server_docs.py → bifrost:console:{dev|prod}:api_docs)
     app.state.docs_log_queues: list = []
     app.state.docs_log_lock = threading.Lock()

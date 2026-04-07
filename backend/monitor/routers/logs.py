@@ -285,6 +285,40 @@ def _ib_ingestor_log_reader_loop(app_ref) -> None:
         logger.warning("ib_ingestor_log_reader_loop exited: %s", e)
 
 
+def _ib_account_agent_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD Redis stream bifrost:console:ws_ib_account_agent (run_ib_account_agent.py)."""
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url())
+        last_id = "$"
+        while True:
+            try:
+                result = r.xread(
+                    block=5000,
+                    streams={IB_ACCOUNT_AGENT_LOG_STREAM_KEY: last_id},
+                    count=100,
+                )
+                if not result:
+                    continue
+                for _stream_name, entries in result:
+                    for eid, fields in entries:
+                        last_id = eid
+                        line = _redis_stream_line(fields)
+                        with app_ref.state.ib_account_agent_log_lock:
+                            queues = list(app_ref.state.ib_account_agent_log_queues)
+                        loop = getattr(app_ref.state, "_ib_account_agent_log_loop", None)
+                        for q in queues:
+                            if loop and not loop.is_closed():
+                                loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
+            except redis.ConnectionError:
+                time.sleep(2)
+            except Exception as e:
+                logger.debug("ib_account_agent_log_reader_loop: %s", e)
+    except Exception as e:
+        logger.warning("ib_account_agent_log_reader_loop exited: %s", e)
+
+
 def _docs_log_reader_loop(app_ref) -> None:
     """Background thread: XREAD Redis stream bifrost:console:{dev|prod}:api_docs, push each line to SSE queues."""
     try:
@@ -1149,6 +1183,90 @@ def get_ib_account_agent_logs(
     except Exception as e:
         logger.warning("get_ib_account_agent_logs failed: %s", e)
         return {"lines": [], "error": str(e)}
+
+
+@router.delete("/api/ib-account-agent/logs")
+def clear_ib_account_agent_logs(request: Request) -> Dict[str, Any]:
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url())
+        r.delete(IB_ACCOUNT_AGENT_LOG_STREAM_KEY)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("clear_ib_account_agent_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/ib-account-agent/logs/trim")
+def trim_ib_account_agent_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    try:
+        max_lines = body.get("max_lines")
+        if max_lines is None:
+            return {"ok": False, "error": "max_lines required"}
+        max_lines = int(max_lines)
+        if max_lines < 1 or max_lines > 10000:
+            return {"ok": False, "error": "max_lines must be between 1 and 10000"}
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url())
+        r.xtrim(IB_ACCOUNT_AGENT_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        return {"ok": True}
+    except Exception as e:
+        logger.warning("trim_ib_account_agent_logs failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/api/ib-account-agent/logs/stream")
+async def get_ib_account_agent_logs_stream(request: Request):
+    try:
+        import redis
+
+        r = redis.from_url(daemon_log_redis_url())
+        r.ping()
+    except Exception as e:
+        logger.warning("ib_account_agent_logs_stream check failed: %s", e)
+        return JSONResponse(status_code=503, content={"detail": str(e)})
+
+    app = request.app
+    queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+    with app.state.ib_account_agent_log_lock:
+        app.state.ib_account_agent_log_queues.append(queue)
+        if app.state._ib_account_agent_log_loop is None:
+            app.state._ib_account_agent_log_loop = asyncio.get_running_loop()
+        if app.state._ib_account_agent_log_thread is None or not app.state._ib_account_agent_log_thread.is_alive():
+            app.state._ib_account_agent_log_thread = threading.Thread(
+                target=_ib_account_agent_log_reader_loop,
+                args=(app,),
+                name="ib-account-agent-log-reader",
+                daemon=True,
+            )
+            app.state._ib_account_agent_log_thread.start()
+
+    async def event_gen():
+        try:
+            while True:
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f"data: {json.dumps({'line': line})}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with app.state.ib_account_agent_log_lock:
+                if queue in app.state.ib_account_agent_log_queues:
+                    app.state.ib_account_agent_log_queues.remove(queue)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # --- Docs API server logs (run_server_docs.py → Redis stream bifrost:console:{dev|prod}:api_docs) ---

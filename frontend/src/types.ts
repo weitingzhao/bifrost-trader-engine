@@ -17,6 +17,8 @@ export interface IbClientPort {
   operator_secondary?: number
   ingestor?: number
   account_agent?: number
+  /** Second IB / TWS when `ib2_host` is set (YAML `ib2_client_id_account_agent`). */
+  account_agent_secondary?: number
   market_data_worker?: number
 }
 
@@ -229,6 +231,19 @@ export interface StatusSocketIbIngestor {
   client_id?: number | null
 }
 
+/** GET /status `socket.ib_account_agent` — Host + optional Secondary (same slot shape as IB Operator). */
+export interface StatusSocketIbAccountAgent {
+  /** Roll-up: Host IB API connected (Redis `host_connected` / `connected`). */
+  connected?: boolean
+  last_msg_age_s?: number | null
+  reconnects?: number | null
+  msg_count?: number | null
+  /** Same as `host.client_id` when present. */
+  client_id?: number | null
+  host?: SocketIbOperatorSlot | null
+  secondary?: SocketIbOperatorSlot | null
+}
+
 /**
  * GET /status `socket` — aligns with Settings sidebar "Socket" (ingest + IB Operator Redis health).
  * Formerly `feeds`; IB Operator health is `ib_operator` (moved from `monitor.ib_status`).
@@ -237,7 +252,7 @@ export interface StatusSocket {
   massive?: StatusSocketMassive | null
   ib_ingestor?: StatusSocketIbIngestor | null
   /** IB Account Agent — account-domain events to Redis (GET /status socket.ib_account_agent). */
-  ib_account_agent?: StatusSocketIbIngestor | null
+  ib_account_agent?: StatusSocketIbAccountAgent | null
   ib_operator?: SocketIbOperator | null
 }
 

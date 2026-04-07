@@ -29,6 +29,10 @@ export interface IbConnectionSectionProps {
   ib2ClientIdOperator: number
   /** IB ingestor client ID (Host only; YAML ib.host.client_id.ingestor). */
   clientIdIbIngestor: number
+  /** IB Account Agent — Host (YAML ib.host.client_id.account_agent). */
+  clientIdAccountAgent: number
+  /** IB Account Agent — Secondary (YAML ib.secondary.client_id.account_agent). */
+  ib2ClientIdAccountAgent: number
   clientIdWorker: number
   defaultFlexRangeDays: number
   setDefaultFlexRangeDays: (v: number) => void
@@ -62,6 +66,8 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
     clientIdOperator,
     ib2ClientIdOperator,
     clientIdIbIngestor,
+    clientIdAccountAgent,
+    ib2ClientIdAccountAgent,
     clientIdWorker,
     defaultFlexRangeDays,
     setDefaultFlexRangeDays,
@@ -266,6 +272,38 @@ export function IbConnectionSection(props: IbConnectionSectionProps) {
                     />
                   </td>
                   <td className="flex-query-cell-input">—</td>
+                </tr>
+                <tr>
+                  <td className="flex-query-cell-type">
+                    Account Agent
+                    <InfoTooltip text="Client IDs for scripts/run_ib_account_agent.py: Host uses ib.host.client_id.account_agent; Secondary uses ib.secondary.client_id.account_agent when Second IB is configured. Distinct from Operator and Ingestor." />
+                  </td>
+                  <td className="flex-query-cell-input">
+                    <input
+                      type="number"
+                      value={clientIdAccountAgent}
+                      readOnly
+                      className="flex-query-input settings-ib-readonly-field"
+                      style={{ width: '4rem' }}
+                      aria-label="IB Account Agent client ID — Host (read-only, config.yaml)"
+                      tabIndex={-1}
+                    />
+                  </td>
+                  <td className="flex-query-cell-input">
+                    {ib2Host.trim() ? (
+                      <input
+                        type="number"
+                        value={ib2ClientIdAccountAgent}
+                        readOnly
+                        className="flex-query-input settings-ib-readonly-field"
+                        style={{ width: '4rem' }}
+                        aria-label="IB Account Agent client ID — Secondary (read-only, config.yaml)"
+                        tabIndex={-1}
+                      />
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                 </tr>
                 <tr className="client-ids-group-row">
                   <td colSpan={3} className="client-ids-group-header">Celery</td>

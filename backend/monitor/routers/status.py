@@ -18,6 +18,7 @@ from src.monitor.reader.ib_config_public import (
 from src.monitor.self_check import derive_daemon_self_check, derive_health_roll_up
 from src.bifrost.redis_health_keys import (
     hgetall_ib_account_agent_health,
+    redis_hash_field_truthy,
     hgetall_ib_ingestor_health,
     hgetall_massive_ws_status,
 )
@@ -436,7 +437,7 @@ def get_status(request: Request) -> Dict[str, Any]:
                 _r = redis_mod.from_url(_rurl, decode_responses=True)
                 _mh = hgetall_massive_ws_status(_r)
                 if _mh:
-                    massive_info["ws_connected"] = bool(_mh.get("connected") == "1")
+                    massive_info["ws_connected"] = redis_hash_field_truthy(_mh, "connected")
                     _lm = _mh.get("last_msg_ts")
                     if _lm is not None:
                         try:
@@ -469,7 +470,7 @@ def get_status(request: Request) -> Dict[str, Any]:
             if _rurl:
                 _ih = hgetall_ib_ingestor_health(_r)
                 if _ih:
-                    ib_ingestor_info["connected"] = bool(_ih.get("connected") == "1")
+                    ib_ingestor_info["connected"] = redis_hash_field_truthy(_ih, "connected")
                     _lm = _ih.get("last_msg_ts")
                     if _lm is not None:
                         try:
@@ -502,11 +503,28 @@ def get_status(request: Request) -> Dict[str, Any]:
                 "reconnects": None,
                 "msg_count": None,
                 "client_id": None,
+                "host": None,
+                "secondary": None,
             }
             if _rurl:
                 _ah = hgetall_ib_account_agent_health(_r)
                 if _ah:
-                    ib_account_agent_info["connected"] = bool(_ah.get("connected") == "1")
+                    from src.app.config import get_effective_ib_config
+
+                    _ib_eff = get_effective_ib_config(reader._config)
+                    _host_cid_cfg = int(_ib_eff.get("client_id_account_agent") or 151)
+                    _host_on = redis_hash_field_truthy(
+                        _ah, "host_connected"
+                    ) or redis_hash_field_truthy(_ah, "connected")
+                    ib_account_agent_info["connected"] = _host_on
+                    _hc_raw = _ah.get("host_client_id") or _ah.get("client_id")
+                    _host_cid_live = _host_cid_cfg
+                    if _hc_raw is not None and str(_hc_raw).strip() != "":
+                        try:
+                            _host_cid_live = int(_hc_raw)
+                        except (TypeError, ValueError):
+                            pass
+                    ib_account_agent_info["client_id"] = _host_cid_live
                     _lm = _ah.get("last_msg_ts")
                     if _lm is not None:
                         try:
@@ -525,12 +543,30 @@ def get_status(request: Request) -> Dict[str, Any]:
                         ib_account_agent_info["msg_count"] = int(_ah.get("msg_count") or 0)
                     except (TypeError, ValueError):
                         ib_account_agent_info["msg_count"] = 0
-                    _cid_a = _ah.get("client_id")
-                    if _cid_a is not None and str(_cid_a).strip() != "":
-                        try:
-                            ib_account_agent_info["client_id"] = int(_cid_a)
-                        except (TypeError, ValueError):
-                            ib_account_agent_info["client_id"] = None
+                    _recon = ib_account_agent_info["reconnects"]
+                    ib_account_agent_info["host"] = {
+                        "connected": _host_on,
+                        "client_id": _host_cid_live,
+                        "last_error": None,
+                        "reconnects": _recon,
+                    }
+                    _ib2 = str(_ib_eff.get("ib2_host") or "").strip()
+                    if _ib2:
+                        _sec_cid_cfg = int(_ib_eff.get("ib2_client_id_account_agent") or 152)
+                        _sec_raw = _ah.get("secondary_client_id")
+                        _sec_cid_live = _sec_cid_cfg
+                        if _sec_raw is not None and str(_sec_raw).strip() != "":
+                            try:
+                                _sec_cid_live = int(_sec_raw)
+                            except (TypeError, ValueError):
+                                pass
+                        _sec_on = redis_hash_field_truthy(_ah, "secondary_connected")
+                        ib_account_agent_info["secondary"] = {
+                            "connected": _sec_on,
+                            "client_id": _sec_cid_live,
+                            "last_error": None,
+                            "reconnects": ib_account_agent_info["reconnects"],
+                        }
             ib_account_agent = ib_account_agent_info
         except Exception:
             massive = None

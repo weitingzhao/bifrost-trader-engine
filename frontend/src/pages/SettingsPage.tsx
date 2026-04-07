@@ -23,6 +23,8 @@ import {
   DEFAULT_PORT_TYPE,
   DEFAULT_WORKER,
   DEFAULT_IB_INGESTOR,
+  DEFAULT_IB_ACCOUNT_AGENT,
+  DEFAULT_IB_ACCOUNT_AGENT_SECONDARY,
   FLEX_QUERY_TYPES,
   getDefaultFlexRows,
   IB_CONNECTION_SUBSECTIONS,
@@ -123,6 +125,8 @@ export function SettingsPage({
   const [clientIdOperator, setClientIdOperator] = useState(DEFAULT_IB_OPERATOR)
   const [clientIdWorker, setClientIdWorker] = useState(DEFAULT_WORKER)
   const [clientIdIbIngestor, setClientIdIbIngestor] = useState(DEFAULT_IB_INGESTOR)
+  const [clientIdAccountAgent, setClientIdAccountAgent] = useState(DEFAULT_IB_ACCOUNT_AGENT)
+  const [ib2ClientIdAccountAgent, setIb2ClientIdAccountAgent] = useState(DEFAULT_IB_ACCOUNT_AGENT_SECONDARY)
   const [hostAccountId, setHostAccountId] = useState<string>('')
   const [streamHostAccountId, setStreamHostAccountId] = useState<string>('')
   const [streamSecondaryAccountId, setStreamSecondaryAccountId] = useState<string>('')
@@ -164,6 +168,8 @@ export function SettingsPage({
     if (pid?.operator_host != null) setClientIdOperator(pid.operator_host)
     if (pid?.market_data_worker != null) setClientIdWorker(pid.market_data_worker)
     if (pid?.ingestor != null) setClientIdIbIngestor(pid.ingestor)
+    if (pid?.account_agent != null) setClientIdAccountAgent(pid.account_agent)
+    if (pid?.account_agent_secondary != null) setIb2ClientIdAccountAgent(pid.account_agent_secondary)
     if (acc?.trading != null) setHostAccountId(String(acc.trading))
     if (acc?.event_host != null) setStreamHostAccountId(String(acc.event_host))
     if (acc?.event_secondary != null) setStreamSecondaryAccountId(String(acc.event_secondary))
@@ -956,6 +962,8 @@ export function SettingsPage({
               clientIdOperator={clientIdOperator}
               ib2ClientIdOperator={ib2ClientIdOperator}
               clientIdIbIngestor={clientIdIbIngestor}
+              clientIdAccountAgent={clientIdAccountAgent}
+              ib2ClientIdAccountAgent={ib2ClientIdAccountAgent}
               clientIdWorker={clientIdWorker}
               defaultFlexRangeDays={defaultFlexRangeDays}
               setDefaultFlexRangeDays={setDefaultFlexRangeDays}

@@ -347,6 +347,49 @@ export function subscribeIbIngestorLogs(onLine: (line: string) => void, onError?
   }
 }
 
+export async function fetchIbAccountAgentLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+  const params = new URLSearchParams({ tail: String(tail) })
+  const r = await fetch(`${apiBase()}/api/ib-account-agent/logs?${params}`)
+  const j = await r.json().catch(() => ({ lines: [] }))
+  return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
+}
+
+export async function clearIbAccountAgentLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-account-agent/logs`, { method: 'DELETE' })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export async function trimIbAccountAgentLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/ib-account-agent/logs/trim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_lines: maxLines }),
+  })
+  const j = await r.json().catch(() => ({}))
+  return { ok: r.ok && j.ok !== false, error: j.error }
+}
+
+export function subscribeIbAccountAgentLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${apiBase()}/api/ib-account-agent/logs/stream`
+  const es = new EventSource(url)
+  es.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data) as { line?: string }
+      if (data && typeof data.line === 'string') onLine(data.line)
+    } catch {
+      // ignore
+    }
+  }
+  es.onerror = () => {
+    onError?.()
+    es.close()
+  }
+  return () => {
+    es.close()
+  }
+}
+
 export async function fetchDocsLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
   const r = await fetch(`${apiBase()}/api/docs/logs?${params}`)

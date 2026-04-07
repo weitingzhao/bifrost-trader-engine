@@ -32,9 +32,13 @@ class IbAccountAgentRedisWriter:
         secondary_connected: Optional[bool] = None,
         secondary_client_id: Optional[int] = None,
     ) -> None:
+        # `connected` / `client_id` = Host slot (backward compat with older readers).
+        # `host_connected` / `host_client_id` explicit for Monitor /status (same idea as IB Operator).
         m: Dict[str, str] = {
             "connected": "1" if connected else "0",
+            "host_connected": "1" if connected else "0",
             "client_id": str(client_id),
+            "host_client_id": str(client_id),
             "last_msg_ts": str(last_msg_ts),
             "reconnects": str(reconnects),
             "msg_count": str(msg_count),
@@ -47,7 +51,16 @@ class IbAccountAgentRedisWriter:
         try:
             self._r.hset(IB_ACCOUNT_AGENT_META_HEALTH, mapping=m)
         except Exception as e:
-            logger.warning("account agent health hset failed: %s", e)
+            err = str(e).lower()
+            # Recover if key was created with wrong type (string/stream) — HSET would fail.
+            if "wrong kind" in err or "wrongtype" in err:
+                try:
+                    self._r.delete(IB_ACCOUNT_AGENT_META_HEALTH)
+                    self._r.hset(IB_ACCOUNT_AGENT_META_HEALTH, mapping=m)
+                except Exception as e2:
+                    logger.warning("account agent health hset after key delete failed: %s", e2)
+            else:
+                logger.warning("account agent health hset failed: %s", e)
 
     def write_snapshot(
         self,

@@ -87,6 +87,9 @@ def _redis_client(cfg: dict):
 SNAPSHOT_POLL_SEC = 2.0
 RECONNECT_BASE = 2.0
 RECONNECT_MAX = 60.0
+# After ensure_connected, ib_insync may lag before isConnected() is true on the client loop.
+_POST_CONNECT_SNAPSHOT_ATTEMPTS = 20
+_POST_CONNECT_SNAPSHOT_DELAY_SEC = 0.25
 
 
 def _merged_open_orders(hc: Any, sc: Any) -> List[Dict[str, Any]]:
@@ -213,6 +216,17 @@ class IbAccountAgentApp:
                 name="IbAccountAgentSecondary",
             )
 
+        # Seed Redis health after client_ids are known (Host + optional Secondary).
+        self._writer.update_health(
+            self._host_cid,
+            False,
+            time.time(),
+            self._reconnects,
+            self._msg_count,
+            secondary_connected=False if secondary is not None else None,
+            secondary_client_id=self._sec_cid,
+        )
+
         while not self._stop.is_set():
             try:
                 await self._run_session(primary, secondary, timeout)
@@ -234,7 +248,7 @@ class IbAccountAgentApp:
                 time.time(),
                 self._reconnects,
                 self._msg_count,
-                secondary_connected=False,
+                secondary_connected=False if secondary is not None else None,
                 secondary_client_id=self._sec_cid,
             )
             logger.info("Reconnecting in %.1fs (attempt %d)…", delay, self._reconnects)
@@ -249,7 +263,7 @@ class IbAccountAgentApp:
             time.time(),
             self._reconnects,
             self._msg_count,
-            secondary_connected=False,
+            secondary_connected=False if secondary is not None else None,
             secondary_client_id=self._sec_cid,
         )
         logger.info("IB Account Agent stopped")
@@ -262,19 +276,29 @@ class IbAccountAgentApp:
     ) -> None:
         await primary.ensure_connected()
         self._reconnects = 0
+        for _ in range(_POST_CONNECT_SNAPSHOT_ATTEMPTS):
+            if primary.connected_snapshot():
+                break
+            await asyncio.sleep(_POST_CONNECT_SNAPSHOT_DELAY_SEC)
         if secondary is not None:
             try:
                 await secondary.ensure_connected()
+                for _ in range(_POST_CONNECT_SNAPSHOT_ATTEMPTS):
+                    if secondary.connected_snapshot():
+                        break
+                    await asyncio.sleep(_POST_CONNECT_SNAPSHOT_DELAY_SEC)
             except Exception as e:
                 logger.warning("Secondary connect failed: %s", e)
 
         hc = primary.connector
         sc = secondary.connector if secondary else None
+        host_ok = bool(primary.connected_snapshot())
+        sec_ok = bool(secondary.connected_snapshot()) if secondary is not None else False
 
         def on_orders_update() -> None:
             self._bump()
 
-        if hc and getattr(hc, "is_connected", False):
+        if hc and host_ok:
             hc.subscribe_positions(lambda: self._bump())
             hc.subscribe_order_status(lambda _: on_orders_update())
             hc.subscribe_open_order(lambda _: on_orders_update())
@@ -287,7 +311,7 @@ class IbAccountAgentApp:
             except Exception as e:
                 logger.warning("reqAllOpenOrders host: %s", e)
 
-        if sc and getattr(sc, "is_connected", False):
+        if sc and sec_ok:
             try:
                 sc.subscribe_positions(lambda: self._bump())
                 sc.subscribe_order_status(lambda _: on_orders_update())
@@ -307,19 +331,20 @@ class IbAccountAgentApp:
             except Exception as e:
                 logger.warning("Secondary subscriptions: %s", e)
 
-        sec_ok = bool(sc and getattr(sc, "is_connected", False))
         self._writer.update_health(
             self._host_cid,
-            True,
+            host_ok,
             time.time(),
             self._reconnects,
             self._msg_count,
-            secondary_connected=sec_ok,
+            secondary_connected=sec_ok if secondary is not None else None,
             secondary_client_id=self._sec_cid,
         )
 
         while not self._stop.is_set():
             try:
+                host_ok = bool(primary.connected_snapshot())
+                sec_ok = bool(secondary.connected_snapshot()) if secondary is not None else False
                 oo = _merged_open_orders(hc, sc)
                 acct = await _accounts_snapshot(hc, sc)
                 fills = list(self._fill_rows)
@@ -328,17 +353,17 @@ class IbAccountAgentApp:
                     "open_orders": oo,
                     "accounts_snapshot": acct,
                     "last_execution_rows": fills,
-                    "host_connected": bool(hc and getattr(hc, "is_connected", False)),
+                    "host_connected": host_ok,
                     "secondary_connected": sec_ok,
                 }
                 self._writer.write_snapshot(payload)
                 self._writer.update_health(
                     self._host_cid,
-                    True,
+                    host_ok,
                     self._last_msg_ts or time.time(),
                     self._reconnects,
                     self._msg_count,
-                    secondary_connected=sec_ok,
+                    secondary_connected=sec_ok if secondary is not None else None,
                     secondary_client_id=self._sec_cid,
                 )
             except Exception as e:

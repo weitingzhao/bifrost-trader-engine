@@ -8,6 +8,9 @@ export const DEFAULT_IB_OPERATOR = 100
 export const DEFAULT_WORKER = 500
 /** IB ingestor client ID default (YAML ib.host.client_id.ingestor). */
 export const DEFAULT_IB_INGESTOR = 150
+/** IB Account Agent defaults (YAML ib.host / ib.secondary client_id.account_agent). */
+export const DEFAULT_IB_ACCOUNT_AGENT = 151
+export const DEFAULT_IB_ACCOUNT_AGENT_SECONDARY = 152
 export const DEFAULT_HEARTBEAT_SEC = 10
 
 /** Status / read-only view (sidebar group: Status). */

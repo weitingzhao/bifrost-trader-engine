@@ -74,8 +74,9 @@ class AgentServer:
         if req.action == "list-units":
             return await self._list_units(req)
 
+        unit_norm = (req.unit or "").strip()
         if req.action == "is-active":
-            if not validate_unit(req.unit):
+            if not validate_unit(unit_norm):
                 return AgentResponse(
                     request_id=req.request_id,
                     ok=False,
@@ -83,7 +84,7 @@ class AgentServer:
                 )
             return await self._systemctl_is_active(req)
 
-        if not validate_unit(req.unit):
+        if not validate_unit(unit_norm):
             return AgentResponse(
                 request_id=req.request_id,
                 ok=False,

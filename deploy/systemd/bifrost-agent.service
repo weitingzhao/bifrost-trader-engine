@@ -2,6 +2,8 @@
 Description=Bifrost Local Control Agent (privileged systemd executor)
 After=network.target
 Documentation=https://github.com/your-org/bifrost-trader-engine
+# After git pull: allowed units live in backend/ops/agent/protocol.py — restart this service so
+# new socket-ingest units (e.g. bifrost-ib-account-agent.service) are accepted.
 
 [Service]
 Type=simple

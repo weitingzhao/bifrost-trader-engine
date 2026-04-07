@@ -1,19 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StatusResponse } from '../types'
 import { InfoTooltip } from '../components/InfoTooltip'
-import { LogConsolePanel, useLogConsole } from '../components/LogConsolePanel'
+import { AggregatedLogConsolePanel } from '../components/AggregatedLogConsolePanel'
+import { useSocketServicesUnifiedLogConsole } from '../components/useSocketServicesUnifiedLogConsole'
+import type { UnifiedLogSourceDefinition } from '../components/unifiedLogConsoleTypes'
 import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
-import {
-  fetchMassiveWsLogs,
-  subscribeMassiveWsLogs,
-  clearMassiveWsLogs,
-  fetchIbOperatorLogs,
-  subscribeIbOperatorLogs,
-  clearIbOperatorLogs,
-  fetchIbIngestorLogs,
-  subscribeIbIngestorLogs,
-  clearIbIngestorLogs,
-} from '../api/monitor/logs'
 import {
   fetchOpsCapabilities,
   fetchOpsHealth,
@@ -113,26 +104,58 @@ function ibIngestClientIdSlots(
     return []
   }
   if (svcId === 'ib_account_agent') {
-    const run = status?.socket?.ib_account_agent?.client_id
-    if (run != null && Number.isFinite(Number(run))) {
-      return [
-        {
-          id: Number(run),
-          title: 'Client ID used by the live IB Account Agent connection (Monitor GET /status).',
-        },
-      ]
+    const aa = status?.socket?.ib_account_agent
+    const slots: IbClientIdSlot[] = []
+    const hostRun = aa?.host?.client_id ?? aa?.client_id
+    const hostCfg = cfg?.port?.account_agent
+    const hostLive =
+      ingestRedisTruthyConnected(aa?.connected) || ingestRedisTruthyConnected(aa?.host?.connected)
+    if (hostRun != null && Number.isFinite(Number(hostRun))) {
+      slots.push({
+        label: 'Host',
+        id: Number(hostRun),
+        title: hostLive
+          ? 'Client ID for IB Account Agent Host IB API (Monitor GET /status socket.ib_account_agent.host).'
+          : 'Redis reports Host client_id; green lamp requires Host API connected.',
+      })
+    } else if (hostCfg != null && Number.isFinite(Number(hostCfg))) {
+      slots.push({
+        label: 'Host',
+        id: Number(hostCfg),
+        title:
+          'Client ID from config (YAML ib.host.client_id.account_agent). Live Host slot not reporting an ID yet.',
+      })
     }
-    const c = cfg?.port?.account_agent
-    if (c != null && Number.isFinite(Number(c))) {
-      return [
-        {
-          id: Number(c),
+    const secConfigured = aa?.secondary !== undefined && aa?.secondary !== null
+    const ib2Hint = cfg?.client?.secondary_host_ip != null && String(cfg.client.secondary_host_ip).trim() !== ''
+    if (secConfigured || ib2Hint) {
+      const secRun = aa?.secondary?.client_id
+      const secCfg = cfg?.port?.account_agent_secondary
+      const secApiLive = ingestRedisTruthyConnected(aa?.secondary?.connected)
+      if (secRun != null && Number.isFinite(Number(secRun))) {
+        slots.push({
+          label: 'Sec',
+          id: Number(secRun),
+          title: secApiLive
+            ? 'Client ID for IB Account Agent Secondary IB API (socket.ib_account_agent.secondary).'
+            : 'Secondary client_id in /status while secondary_connected is false.',
+        })
+      } else if (secCfg != null && Number.isFinite(Number(secCfg))) {
+        slots.push({
+          label: 'Sec',
+          id: Number(secCfg),
+          title: 'Secondary account_agent client_id from config when exposed; else YAML ib2 client_id.account_agent.',
+        })
+      } else {
+        slots.push({
+          label: 'Sec',
+          id: null,
           title:
-            'Client ID from config (YAML ib.host.client_id.account_agent) for IB Account Agent. Live connection not reporting an ID yet.',
-        },
-      ]
+            'Configure ib.secondary (ip + client_id.account_agent) for a second TWS; then /status will show Secondary client_id.',
+        })
+      }
     }
-    return []
+    return slots
   }
   if (svcId === 'ib_operator') {
     const op = status?.socket?.ib_operator
@@ -232,7 +255,14 @@ function ibIngestClientIdShouldShow(
   if (ingestProcessRunningForIbClientId(processActive)) return true
   const sid = svcId === 'ib_market' ? 'ib_ingestor' : svcId
   if (sid === 'ib_ingestor') return status?.socket?.ib_ingestor?.connected === true
-  if (sid === 'ib_account_agent') return status?.socket?.ib_account_agent?.connected === true
+  if (sid === 'ib_account_agent') {
+    const aa = status?.socket?.ib_account_agent
+    return (
+      aa?.connected === true
+      || aa?.host?.connected === true
+      || aa?.secondary?.connected === true
+    )
+  }
   if (sid === 'ib_operator') {
     const ibOp = status?.socket?.ib_operator
     return (
@@ -331,7 +361,12 @@ function socketServicesHostColumnDisplay(opts: {
   return { title: bits.join(' '), pill }
 }
 
-type SocketLogTab = 'massive' | 'ib_operator' | 'ib_ingestor'
+const SOCKET_SERVICES_LOG_SOURCES: UnifiedLogSourceDefinition[] = [
+  { source: 'massive_ws', label: 'Massive WS' },
+  { source: 'ib_operator', label: 'IB Operator' },
+  { source: 'ib_ingestor', label: 'IB ingestor' },
+  { source: 'ib_account_agent', label: 'IB Acct Agent' },
+]
 
 const INGEST_ACTION_SVG_PROPS = {
   viewBox: '0 0 24 24',
@@ -591,49 +626,12 @@ export function MarketIngestOpsPage({
   const [tokenInput, setTokenInput] = useState('')
   const [authPanelOpen, setAuthPanelOpen] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmState>(INITIAL_CONFIRM)
-  const [logTab, setLogTab] = useState<SocketLogTab>('massive')
   const [opsHealth, setOpsHealth] = useState<Awaited<ReturnType<typeof fetchOpsHealth>> | null>(null)
 
-  const fetchLogs = useCallback((tail?: number) => fetchMassiveWsLogs(tail ?? 80), [])
-  const subscribeLogs = useCallback(
-    (onLine: (line: string) => void, onError?: () => void) => subscribeMassiveWsLogs(onLine, onError),
-    [],
-  )
-  const clearLogs = useCallback(() => clearMassiveWsLogs(), [])
-  const wsConsole = useLogConsole({
-    fetchLogs,
-    subscribeLogs,
-    clearLogs,
+  const socketServicesLogConsole = useSocketServicesUnifiedLogConsole({
     initialMaxLines: 500,
-    enabled: logTab === 'massive',
-  })
-
-  const fetchIbLogs = useCallback((tail?: number) => fetchIbIngestorLogs(tail ?? 80), [])
-  const subscribeIbLogs = useCallback(
-    (onLine: (line: string) => void, onError?: () => void) => subscribeIbIngestorLogs(onLine, onError),
-    [],
-  )
-  const clearIbLogs = useCallback(() => clearIbIngestorLogs(), [])
-  const ibIngestorConsole = useLogConsole({
-    fetchLogs: fetchIbLogs,
-    subscribeLogs: subscribeIbLogs,
-    clearLogs: clearIbLogs,
-    initialMaxLines: 500,
-    enabled: logTab === 'ib_ingestor',
-  })
-
-  const fetchIbOpLogs = useCallback((tail?: number) => fetchIbOperatorLogs(tail ?? 80), [])
-  const subscribeIbOpLogs = useCallback(
-    (onLine: (line: string) => void, onError?: () => void) => subscribeIbOperatorLogs(onLine, onError),
-    [],
-  )
-  const clearIbOpLogs = useCallback(() => clearIbOperatorLogs(), [])
-  const ibOperatorConsole = useLogConsole({
-    fetchLogs: fetchIbOpLogs,
-    subscribeLogs: subscribeIbOpLogs,
-    clearLogs: clearIbOpLogs,
-    initialMaxLines: 500,
-    enabled: logTab === 'ib_operator',
+    initialHeightPx: 280,
+    enabled: true,
   })
 
   const refresh = useCallback(async () => {
@@ -764,10 +762,18 @@ export function MarketIngestOpsPage({
       return `IB ${c}; last msg ${fmtAge(ibIngestor.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
     }
     if (svc.id === 'ib_account_agent' && ibAccountAgent) {
-      const c = ibAccountAgent.connected ? 'connected' : 'disconnected'
+      const hostUp =
+        ingestRedisTruthyConnected(ibAccountAgent.connected)
+        || ingestRedisTruthyConnected(ibAccountAgent.host?.connected)
+      const h = hostUp ? 'Host up' : 'Host down'
+      const sec = ibAccountAgent.secondary
+      const secBit =
+        sec != null
+          ? `; Sec ${ingestRedisTruthyConnected(sec.connected) ? 'up' : 'down'}`
+          : ''
       const rc = ibAccountAgent.reconnects != null ? String(ibAccountAgent.reconnects) : '—'
       const mc = ibAccountAgent.msg_count != null ? String(ibAccountAgent.msg_count) : '—'
-      return `Account agent ${c}; last msg ${fmtAge(ibAccountAgent.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
+      return `${h}${secBit}; last msg ${fmtAge(ibAccountAgent.last_msg_age_s ?? null)}; reconnects ${rc}; msgs ${mc}`
     }
     if (svc.id === 'ib_operator' && status?.socket?.ib_operator) {
       const op = status.socket.ib_operator
@@ -1028,90 +1034,20 @@ export function MarketIngestOpsPage({
         <h3 id="socket-logs-heading" className="daemon-group-title" style={{ marginBottom: 'var(--space-2)' }}>
           Logs
         </h3>
-        <div className="system-tabs-wrapper" style={{ padding: 0 }}>
-          <div className="system-tabs system-tabs-one-row" role="tablist" aria-label="Ingest log consoles">
-            <button
-              type="button"
-              role="tab"
-              id="tab-socket-log-massive"
-              aria-selected={logTab === 'massive'}
-              aria-controls="panel-socket-logs"
-              className={`system-tab ${logTab === 'massive' ? 'active' : ''}`}
-              onClick={() => setLogTab('massive')}
-            >
-              Massive WebSocket
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="tab-socket-log-ib-operator"
-              aria-selected={logTab === 'ib_operator'}
-              aria-controls="panel-socket-logs"
-              className={`system-tab ${logTab === 'ib_operator' ? 'active' : ''}`}
-              onClick={() => setLogTab('ib_operator')}
-            >
-              IB Operator
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="tab-socket-log-ib-ingestor"
-              aria-selected={logTab === 'ib_ingestor'}
-              aria-controls="panel-socket-logs"
-              className={`system-tab ${logTab === 'ib_ingestor' ? 'active' : ''}`}
-              onClick={() => setLogTab('ib_ingestor')}
-            >
-              IB ingestor
-            </button>
-          </div>
-          <div
-            id="panel-socket-logs"
-            className="system-tab-panel system-tab-content"
-            role="tabpanel"
-            aria-labelledby={
-              logTab === 'massive'
-                ? 'tab-socket-log-massive'
-                : logTab === 'ib_operator'
-                  ? 'tab-socket-log-ib-operator'
-                  : 'tab-socket-log-ib-ingestor'
-            }
-            style={{ marginTop: 0, paddingTop: 'var(--space-3)' }}
-          >
-            {logTab === 'massive' ? (
-              <LogConsolePanel
-                controller={wsConsole}
-                loadingText="Connecting…"
-                errorText="Unable to load logs. Monitor reads Redis stream bifrost:console:ws_massive_option (same key as run_massive_ws.py)."
-                emptyText="No log lines yet. Start: python scripts/run_massive_ws.py"
-                infoTooltipText="Live tail: GET /api/massive-ws/logs + SSE …/stream. Redis: bifrost:console:ws_massive_option."
-                resizeAriaLabel="Resize Massive WebSocket console height"
-                clearTitle="Clear displayed log and Redis stream"
-              />
-            ) : null}
-            {logTab === 'ib_operator' ? (
-              <LogConsolePanel
-                controller={ibOperatorConsole}
-                loadingText="Connecting…"
-                errorText="Unable to load logs. Monitor reads Redis stream bifrost:console:ws_ib_operator (same key as run_ib_operator.py)."
-                emptyText="No log lines yet. Start: python scripts/run_ib_operator.py"
-                infoTooltipText="Live tail: GET /api/ib-operator/logs + SSE …/stream. Redis: bifrost:console:ws_ib_operator."
-                resizeAriaLabel="Resize IB Operator console height"
-                clearTitle="Clear displayed log and Redis stream"
-              />
-            ) : null}
-            {logTab === 'ib_ingestor' ? (
-              <LogConsolePanel
-                controller={ibIngestorConsole}
-                loadingText="Connecting…"
-                errorText="Unable to load logs. Monitor reads Redis stream bifrost:console:ws_ib_ingestor (same key as run_ib_ingestor.py)."
-                emptyText="No log lines yet. Start: python scripts/run_ib_ingestor.py"
-                infoTooltipText="Live tail: GET /api/ib-ingestor/logs + SSE …/stream. Redis: bifrost:console:ws_ib_ingestor."
-                resizeAriaLabel="Resize IB ingestor console height"
-                clearTitle="Clear displayed log and Redis stream"
-              />
-            ) : null}
-          </div>
-        </div>
+        <p className="massive-api-doc-hint" style={{ marginBottom: 'var(--space-3)' }}>
+          Merged console output from all socket ingest processes (same pattern as Architecture → Application log).
+          Toggle sources to filter; clear removes all four Redis streams on the Monitor host.
+        </p>
+        <AggregatedLogConsolePanel
+          controller={socketServicesLogConsole}
+          sourceDefinitions={SOCKET_SERVICES_LOG_SOURCES}
+          loadingText="Connecting…"
+          errorText="Unable to load logs. Check Monitor API and Redis (streams bifrost:console:ws_*)."
+          emptyText="No log lines yet. Start the corresponding scripts (e.g. run_massive_ws.py, run_ib_account_agent.py)."
+          infoTooltipText="Live tail: GET /api/massive-ws/logs, /api/ib-operator/logs, /api/ib-ingestor/logs, /api/ib-account-agent/logs + SSE …/stream for each. Clear deletes all four Redis console streams."
+          resizeAriaLabel="Resize Socket Services log console height"
+          clearTitle="Clear displayed log and all four Redis streams"
+        />
       </section>
     </div>
   )
