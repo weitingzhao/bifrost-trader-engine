@@ -49,9 +49,9 @@ export async function fetchDaemonLogs(tail = 50): Promise<{ lines: string[]; err
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
 
-export async function fetchServerLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
+export async function fetchMonitorLogs(tail = 50): Promise<{ lines: string[]; error?: string }> {
   const params = new URLSearchParams({ tail: String(tail) })
-  const r = await fetch(`${apiBase()}/api/server/logs?${params}`)
+  const r = await fetch(`${apiBase()}/api/monitor/logs?${params}`)
   const j = await r.json().catch(() => ({ lines: [] }))
   return { lines: Array.isArray(j.lines) ? j.lines : [], error: j.error }
 }
@@ -70,8 +70,8 @@ export async function clearDaemonLogs(): Promise<{ ok: boolean; error?: string }
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
-export async function clearServerLogs(): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/server/logs`, { method: 'DELETE' })
+export async function clearMonitorLogs(): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/monitor/logs`, { method: 'DELETE' })
   const j = await r.json().catch(() => ({}))
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
@@ -101,8 +101,8 @@ export async function trimDaemonLogs(maxLines: number): Promise<{ ok: boolean; e
   return { ok: r.ok && j.ok !== false, error: j.error }
 }
 
-export async function trimServerLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
-  const r = await fetch(`${apiBase()}/api/server/logs/trim`, {
+export async function trimMonitorLogs(maxLines: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${apiBase()}/api/monitor/logs/trim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_lines: maxLines }),
@@ -155,8 +155,8 @@ export function subscribeDaemonLogs(onLine: (line: string) => void, onError?: ()
   }
 }
 
-export function subscribeServerLogs(onLine: (line: string) => void, onError?: () => void): () => void {
-  const url = `${apiBase()}/api/server/logs/stream`
+export function subscribeMonitorLogs(onLine: (line: string) => void, onError?: () => void): () => void {
+  const url = `${apiBase()}/api/monitor/logs/stream`
   const es = new EventSource(url)
   es.onmessage = (e: MessageEvent) => {
     try {

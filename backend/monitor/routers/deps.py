@@ -5,7 +5,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 DAEMON_LOG_STREAM_KEY = "bifrost:daemon_console"
-SERVER_LOG_STREAM_KEY = "bifrost:server_console"
 MASSIVE_LOG_STREAM_KEY = "bifrost:massive_console"
 MASSIVE_WS_LOG_STREAM_KEY = "bifrost:console:ws_massive_option"
 IB_OPERATOR_LOG_STREAM_KEY = "bifrost:console:ws_ib_operator"

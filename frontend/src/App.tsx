@@ -9,7 +9,6 @@ import {
   subscribeQuotes,
   fetchBarsBenchmark,
 } from './api'
-import { postStop } from './api/monitor/control'
 import { postMonitorStop } from './api/monitor/monitor'
 import { fetchOpsWorkers, fetchQueueSummary } from './api/ops/ops'
 import { celeryMetricsFromStatus } from './pages/status/celeryMetrics'
@@ -39,7 +38,11 @@ import { GatesConfigPage } from './pages/GatesConfigPage'
 import { StructureTypeConfigPage } from './pages/StructureTypeConfigPage'
 import { WatchlistPage } from './pages/WatchlistPage'
 import { MainTabIcon, SubmenuIcon, NavGroupDivider, type TabId, type TabGroup } from './components/AppNavIcons'
+import { useSettingsApiHealthProbes } from './hooks/useSettingsApiHealthProbes'
+import { useSocketIngestProbe } from './hooks/useSocketIngestProbe'
 import { FEED_MASSIVE_DAILY_DATA_ID, isMassiveOptionFeedHash } from './pages/massive/feedMassiveTabUtils'
+import { SettingsSidebarLampGlyph } from './pages/settings/settingsSidebarLampGlyphs'
+import type { SettingsSidebarLampGlyphId } from './pages/settings/settingsSidebarLampGlyphs'
 import { FEED_MASSIVE_OPTION_ID } from './pages/settings/settingsConstants'
 import logoImg from '../img/logo.png'
 import { fmtPctCompact, fmtUsdCompact } from './utils/format'
@@ -185,18 +188,79 @@ function applyAppChrome(configProfile: string | undefined | null) {
   }
 }
 
+/** Header API pills: same glyphs and lamp rules as Settings → API sidebar. */
+const HEADER_API_SHORTCUTS: {
+  hash: string
+  glyph: SettingsSidebarLampGlyphId
+  title: string
+  /** Short label for the ⋮ menu (header uses icon-only buttons). */
+  menuLabel: string
+  lampPicker: 'architecture' | 'account' | 'research' | 'massive'
+}[] = [
+  {
+    hash: '#settings-api-architecture',
+    glyph: 'api-architecture',
+    title: 'Settings → API → Architecture',
+    menuLabel: 'Architecture',
+    lampPicker: 'architecture',
+  },
+  {
+    hash: '#settings-api-account',
+    glyph: 'api-account',
+    title: 'Settings → API → Account',
+    menuLabel: 'Account',
+    lampPicker: 'account',
+  },
+  {
+    hash: '#settings-api-research',
+    glyph: 'api-research',
+    title: 'Settings → API → Research',
+    menuLabel: 'Research',
+    lampPicker: 'research',
+  },
+  {
+    hash: '#settings-api-massive',
+    glyph: 'api-massive',
+    title: 'Settings → API → Massive',
+    menuLabel: 'Massive',
+    lampPicker: 'massive',
+  },
+]
+
+function headerApiShortcutLampClass(lamp: 'green' | 'yellow' | 'red' | 'none'): string {
+  return `title-inline-lamp lamp-icon ${lamp === 'none' ? 'none' : lamp}`
+}
+
+function settingsHashKey(hash: string): string {
+  return (hash.startsWith('#') ? hash.slice(1) : hash).trim()
+}
+
+function isDaemonSettingsHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return h === 'settings-daemon' || h === 'settings-system' || h === 'settings-system-daemon'
+}
+
+function isSocketSettingsHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return (
+    h === 'settings-ws-connector' ||
+    h === 'settings-market-ingest' ||
+    h === 'settings-ib-connector' ||
+    h === 'settings-ws-agent'
+  )
+}
+
+function isCelerySettingsHash(hash: string): boolean {
+  const h = settingsHashKey(hash)
+  return h === 'settings-celery' || h === 'settings-system-celery' || h === 'settings-dashboard-celery'
+}
+
 type LampId = 'green' | 'yellow' | 'red' | 'none'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('live')
-  type LampPopoverId = 'daemon' | 'monitor' | 'celery'
-  const [lampHoverPopover, setLampHoverPopover] = useState<LampPopoverId | null>(null)
-  const lampLeaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const systemLampRef = useRef<HTMLDivElement>(null)
-  const [shutdownConfirmOpen, setShutdownConfirmOpen] = useState(false)
-  const [shutdownAllLoading, setShutdownAllLoading] = useState(false)
-  const [shutdownAllMsg, setShutdownAllMsg] = useState({ text: '', isErr: false })
   const [quickCtrlMsg, setQuickCtrlMsg] = useState({ text: '', isErr: false })
+  const [urlHash, setUrlHash] = useState(() => (typeof window !== 'undefined' ? window.location.hash : ''))
   const [portfolioView, setPortfolioView] = useState<PortfolioView>('accounts')
   const [researchView, setResearchView] = useState<'risk' | 'screener' | 'backtest' | 'options'>('risk')
   const [strategyView, setStrategyView] = useState<'structure' | 'opportunity' | 'allocations' | 'gates' | 'watchlist' | 'typeConfig' | 'instances'>('structure')
@@ -206,6 +270,8 @@ export default function App() {
   const [urlStrategyOpportunityId, setUrlStrategyOpportunityId] = useState<number | null>(null)
   const [theme, setTheme] = useState<ThemeId>(loadTheme)
   const [status, setStatus] = useState<StatusResponse | null>(null)
+  const apiHealthProbes = useSettingsApiHealthProbes(true)
+  const socketIngestProbe = useSocketIngestProbe(true, status)
   const [operations, setOperations] = useState<Operation[]>([])
   const [ibAccountIndex, setIbAccountIndex] = useState(0)
   const [accountsDisplay, setAccountsDisplay] = useState<IbAccountSnapshot[] | null>(null)
@@ -232,9 +298,13 @@ export default function App() {
     if (isMassiveOptionFeedHash(hashNorm)) return 'massive'
     if (
       h === FEED_MASSIVE_DAILY_DATA_ID ||
+      h.startsWith('settings-daemon') ||
       h.startsWith('settings-system') ||
-      h.startsWith('settings-dashboard') ||
       h.startsWith('settings-celery') ||
+      h === 'settings-ws-connector' ||
+      h === 'settings-market-ingest' ||
+      h === 'settings-ib-connector' ||
+      h === 'settings-ws-agent' ||
       h.startsWith('feed-') ||
       h.startsWith('coverage-')
     ) {
@@ -295,7 +365,7 @@ export default function App() {
     return () => window.removeEventListener('hashchange', syncFromHash)
   }, [])
 
-  /** Deep links / bookmarks: #settings-dashboard, #settings-api-ops, etc. must switch to Settings tab.
+  /** Deep links / bookmarks: #settings-celery, #settings-api-*, etc. must switch to Settings tab.
    * Without this, initial load stays on Live and SettingsPage never mounts (prod bookmarks looked "broken"). */
   useEffect(() => {
     const syncSettingsTabFromHash = () => {
@@ -328,24 +398,11 @@ export default function App() {
   }, [headerMenuOpen])
 
   useEffect(() => {
-    if (!lampHoverPopover) return
-    const onDocClick = (e: MouseEvent) => {
-      if (systemLampRef.current && !systemLampRef.current.contains(e.target as Node)) setLampHoverPopover(null)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [lampHoverPopover])
-
-  const openLampPopover = (id: LampPopoverId) => {
-    if (lampLeaveTimeoutRef.current) {
-      clearTimeout(lampLeaveTimeoutRef.current)
-      lampLeaveTimeoutRef.current = null
-    }
-    setLampHoverPopover(id)
-  }
-  const closeLampPopover = () => {
-    lampLeaveTimeoutRef.current = setTimeout(() => setLampHoverPopover(null), 120)
-  }
+    const onHash = () => setUrlHash(window.location.hash)
+    onHash()
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   useEffect(() => {
     applyTheme(theme)
@@ -528,23 +585,13 @@ export default function App() {
   }, [loadStatus])
 
   const j = status
-  // System lamp: GET /status lamps.system_lamp (server health roll-up); fallback to daemon/monitor/celery
   const dl = (j?.daemon?.lamp as 'green' | 'yellow' | 'red') || 'red'
-  const ml = (j?.monitor?.lamp as 'green' | 'yellow' | 'red') || 'red'
-  // Strategy tab lamp = Trading Strategy status (same as System → Daemon Event → Trading Strategy)
+  // Strategy tab lamp = Trading Strategy status (same as Settings → Daemon → Trading Strategy)
   const hb = j?.daemon?.heartbeat
   const strategyLamp: LampId =
     !hb || !hb.daemon_alive ? 'red' : j?.daemon?.trading?.trading_suspended === true ? 'yellow' : 'green'
   const celeryLamp: LampId =
     celeryRuntimeLampOverride ?? celeryMetricsFromStatus(status).celeryLamp
-  const cl = celeryLamp as 'green' | 'yellow' | 'red'
-  const systemLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
-    const api = j?.lamps?.system_lamp
-    if (api === 'green' || api === 'yellow' || api === 'red') return api
-    if (dl === 'red' || ml === 'red' || cl === 'red') return 'red'
-    if (dl === 'yellow' || ml === 'yellow' || cl === 'yellow') return 'yellow'
-    return dl === 'green' && ml === 'green' && cl === 'green' ? 'green' : 'none'
-  })()
   // Market Streams (header): green when quotes Redis OK and IB ingestor socket connected
   const liveLamp: LampId =
     status?.market_data?.quotes_redis_reader_ok === true &&
@@ -762,48 +809,31 @@ export default function App() {
   ]
   const isStrategyInstanceDetailMode = isDetailMode
 
-  const openSystemInSettings = () => {
+  const openDaemonInSettings = useCallback(() => {
     setActiveTab('settings')
-    window.location.hash = '#settings-system'
-  }
+    window.location.hash = '#settings-daemon'
+  }, [])
 
-  /** Open Settings → first Configuration section (Daemon App). Used by header menu "Settings". */
+  /** Open Settings → first Settings section (Daemon App / heartbeat). Used by header ⋮ menu "Settings". */
   const openSettingsToConfiguration = () => {
     setActiveTab('settings')
     window.location.hash = '#settings-heartbeat'
   }
 
-  /** Open Settings → System Status sub-page (Server / Daemon). `#settings-system-server` = management monitor (API / IB). */
-  const openSystemInSettingsToSection = (section: 'system' | 'daemon') => {
+  const openSettingsApiShortcut = useCallback((hash: string) => {
     setActiveTab('settings')
-    const hashSeg = section === 'system' ? 'server' : 'daemon'
-    window.location.hash = `#settings-system-${hashSeg}`
-  }
+    window.location.hash = hash
+  }, [])
 
-  const openDashboardCelerySection = () => {
+  const openCeleryInSettings = () => {
     setActiveTab('settings')
     window.location.hash = '#settings-celery'
   }
 
-  const doShutdownAll = async () => {
-    setShutdownConfirmOpen(false)
-    setShutdownAllLoading(true)
-    const errors: string[] = []
-    try {
-      setShutdownAllMsg({ text: 'Stopping Daemon…', isErr: false })
-      const r1 = await postStop()
-      if (!r1.ok) errors.push(`Daemon: ${r1.error ?? r1.statusText ?? 'failed'}`)
-      setShutdownAllMsg({ text: 'Stopping Server…', isErr: false })
-      const r2 = await postMonitorStop()
-      if (!r2.ok) errors.push(`Server: ${r2.error ?? r2.statusText ?? 'failed'}`)
-      setShutdownAllMsg({
-        text: errors.length === 0 ? 'All systems shut down.' : `Shut down requested; some failed: ${errors.join('; ')}`,
-        isErr: errors.length > 0,
-      })
-    } finally {
-      setShutdownAllLoading(false)
-    }
-  }
+  const openSocketInSettings = useCallback(() => {
+    setActiveTab('settings')
+    window.location.hash = '#settings-ws-connector'
+  }, [])
 
   const runQuickStop = async (
     api: () => Promise<{ ok?: boolean; error?: string }>,
@@ -842,33 +872,6 @@ export default function App() {
 
   return (
     <div className="app">
-      {shutdownConfirmOpen && (
-        <div
-          className="data-reset-modal-overlay"
-          onClick={() => setShutdownConfirmOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="shutdown-modal-title"
-        >
-          <div className="data-reset-modal" onClick={e => e.stopPropagation()}>
-            <h3 id="shutdown-modal-title">Shutdown entire system?</h3>
-            <p>
-              Daemon, then Server (management monitor) will be stopped in order. This cannot be undone.
-            </p>
-            <div className="data-reset-modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setShutdownConfirmOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="btn-shutdown-all" onClick={doShutdownAll}>
-                Shutdown
-              </button>
-            </div>
-            {shutdownAllMsg.text ? (
-              <p className={`status-page-msg ${shutdownAllMsg.isErr ? 'err' : 'ok'}`}>{shutdownAllMsg.text}</p>
-            ) : null}
-          </div>
-        </div>
-      )}
       {!isStrategyInstanceDetailMode && (
       <header className="app-header">
         <div className="app-header-left">
@@ -1048,124 +1051,98 @@ export default function App() {
           {quickCtrlMsg.text ? (
             <span className={`app-header-system-msg ${quickCtrlMsg.isErr ? 'err' : ''}`}>{quickCtrlMsg.text}</span>
           ) : null}
-          <div className="app-header-system-lamps-wrap" ref={systemLampRef}>
-            <div className="app-header-lamp-stop-group" aria-label="System status">
-              <div
-                className="app-header-lamp-stop-lamp-wrap"
-                onMouseEnter={() => openLampPopover('monitor')}
-                onMouseLeave={closeLampPopover}
-              >
-                <span
-                  className={`lamp-icon ${(status?.monitor?.lamp as LampId) ?? 'red'}`}
-                  aria-hidden
-                  title="Server"
-                >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                    <circle cx="6" cy="6" r="1" fill="currentColor" strokeWidth="0" />
-                    <circle cx="6" cy="18" r="1" fill="currentColor" strokeWidth="0" />
-                  </svg>
-                </span>
-                {lampHoverPopover === 'monitor' && (
-                  <div className="app-header-lamp-popover" role="tooltip">
+          <div className="app-header-system-lamps-wrap">
+            <div
+              className="app-header-lamp-stop-group app-header-api-shortcuts-group"
+              aria-label="API settings shortcuts and stop monitor"
+            >
+              <div className="app-header-api-shortcuts" role="toolbar" aria-label="Open Settings API pages">
+                {HEADER_API_SHORTCUTS.map(({ hash, glyph, title, lampPicker }) => {
+                  const active = activeTab === 'settings' && urlHash === hash
+                  const lamp =
+                    lampPicker === 'architecture'
+                      ? apiHealthProbes.architectureApiLamp
+                      : lampPicker === 'account'
+                        ? apiHealthProbes.accountApiLamp
+                        : lampPicker === 'research'
+                          ? apiHealthProbes.researchApiLamp
+                          : apiHealthProbes.massiveApiLamp
+                  return (
                     <button
+                      key={hash}
                       type="button"
-                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                      onClick={() => { openSystemInSettingsToSection('system'); setLampHoverPopover(null) }}
-                      title="Go to System Status → Server"
+                      className={`app-header-api-shortcut-btn${active ? ' active' : ''}`}
+                      title={title}
+                      aria-label={title}
+                      onClick={() => openSettingsApiShortcut(hash)}
                     >
-                      Server
+                      <span className={headerApiShortcutLampClass(lamp)} aria-hidden>
+                        <SettingsSidebarLampGlyph id={glyph} />
+                      </span>
                     </button>
-                  </div>
-                )}
+                  )
+                })}
               </div>
               <button
                 type="button"
                 className="app-header-lamp-switch"
-                onClick={() => runQuickStop(postMonitorStop, 'Stop System')}
-                title="Stop System"
-                aria-label="Stop System"
+                onClick={() => runQuickStop(postMonitorStop, 'Stop Monitor API')}
+                title="Stop Monitor API process"
+                aria-label="Stop Monitor API process"
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <div className="app-header-lamp-stop-group" aria-label="Daemon status">
-              <div
-                className="app-header-lamp-stop-lamp-wrap"
-                onMouseEnter={() => openLampPopover('daemon')}
-                onMouseLeave={closeLampPopover}
-              >
-                <span
-                  className={`lamp-icon ${(status?.daemon?.lamp as LampId) ?? 'red'}`}
-                  aria-hidden
-                  title="Daemon status"
+            <div
+              className="app-header-lamp-stop-group app-header-api-shortcuts-group"
+              aria-label="App runtime: Socket, Daemon, Celery"
+            >
+              <div className="app-header-api-shortcuts" role="toolbar" aria-label="Socket, Daemon, Celery shortcuts">
+                <button
+                  type="button"
+                  className={`app-header-api-shortcut-btn${activeTab === 'settings' && isSocketSettingsHash(urlHash) ? ' active' : ''}`}
+                  title={socketIngestProbe.title}
+                  aria-label="Settings → Socket"
+                  onClick={() => openSocketInSettings()}
                 >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
-                    <path d="M8 5v14l11-7L8 5z" />
-                  </svg>
-                </span>
-                {lampHoverPopover === 'daemon' && (
-                  <div className="app-header-lamp-popover" role="tooltip">
-                    <button
-                      type="button"
-                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                      onClick={() => { openSystemInSettingsToSection('daemon'); setLampHoverPopover(null) }}
-                      title="Go to System Status → Daemon"
-                    >
-                      Daemon
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                className="app-header-lamp-switch"
-                onClick={() => runQuickStop(postStop, 'Stop Daemon')}
-                title="Stop Daemon"
-                aria-label="Stop Daemon"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="app-header-lamp-stop-group" aria-label="Celery status">
-              <div
-                className="app-header-lamp-stop-lamp-wrap"
-                onMouseEnter={() => openLampPopover('celery')}
-                onMouseLeave={closeLampPopover}
-              >
-                <span
-                  className={`lamp-icon ${celeryLamp}`}
-                  title="Celery: red = broker down; yellow = broker OK but no workers or incomplete queue coverage; green = all supported queues covered by workers (see Dashboard → Celery)"
-                  aria-hidden
+                  <span
+                    className={`title-inline-lamp lamp-icon ${socketIngestProbe.lamp === 'none' ? 'none' : socketIngestProbe.lamp}`}
+                    aria-hidden
+                  >
+                    <SettingsSidebarLampGlyph id="websocket" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`app-header-api-shortcut-btn${activeTab === 'settings' && isDaemonSettingsHash(urlHash) ? ' active' : ''}`}
+                  title="Daemon process — Settings → Daemon"
+                  aria-label="Settings → Daemon"
+                  onClick={() => openDaemonInSettings()}
                 >
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
-                  </svg>
-                </span>
-                {lampHoverPopover === 'celery' && (
-                  <div className="app-header-lamp-popover" role="tooltip">
-                    <button
-                      type="button"
-                      className="app-header-lamp-popover-name app-header-lamp-popover-name-link"
-                      onClick={() => { openDashboardCelerySection(); setLampHoverPopover(null) }}
-                      title="Go to Dashboard → Celery"
-                    >
-                      Celery
-                    </button>
-                  </div>
-                )}
+                  <span className={headerApiShortcutLampClass(dl)} aria-hidden>
+                    <SettingsSidebarLampGlyph id="daemon" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`app-header-api-shortcut-btn app-header-api-shortcut-btn--celery${activeTab === 'settings' && isCelerySettingsHash(urlHash) ? ' active' : ''}`}
+                  title="Celery workers and queue pending — Settings → Celery"
+                  aria-label="Settings → Celery"
+                  onClick={() => openCeleryInSettings()}
+                >
+                  <span className={headerApiShortcutLampClass(celeryLamp)} aria-hidden>
+                    <SettingsSidebarLampGlyph id="celery" />
+                  </span>
+                  <span
+                    className="app-header-queue-value app-header-queue-value--inline"
+                    title="Queue summary Pending total (deduped: bars + massive once) — jobs waiting in queue"
+                  >
+                    {celeryQueuePendingTotal != null ? (celeryQueuePendingTotal > 99 ? '99+' : String(celeryQueuePendingTotal)) : '—'}
+                  </span>
+                </button>
               </div>
-              <span
-                className="app-header-queue-value"
-                title="Queue summary Pending total (deduped: bars + massive once) — jobs waiting in queue"
-              >
-                {celeryQueuePendingTotal != null ? (celeryQueuePendingTotal > 99 ? '99+' : String(celeryQueuePendingTotal)) : '—'}
-              </span>
             </div>
           </div>
           <button
@@ -1185,38 +1162,75 @@ export default function App() {
           </button>
           {headerMenuOpen && (
             <div className="app-header-menu" role="menu" aria-label="App menu">
-              <div
-                className={`app-header-menu-row-system ${activeTab === 'settings' && settingsViewSection === 'system' ? 'active' : ''}`}
-                role="presentation"
+              {HEADER_API_SHORTCUTS.map(({ hash, glyph, title, menuLabel, lampPicker }) => {
+                const lamp =
+                  lampPicker === 'architecture'
+                    ? apiHealthProbes.architectureApiLamp
+                    : lampPicker === 'account'
+                      ? apiHealthProbes.accountApiLamp
+                      : lampPicker === 'research'
+                        ? apiHealthProbes.researchApiLamp
+                        : apiHealthProbes.massiveApiLamp
+                return (
+                  <button
+                    key={hash}
+                    type="button"
+                    role="menuitem"
+                    className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && urlHash === hash ? 'active' : ''}`}
+                    onClick={() => { openSettingsApiShortcut(hash); setHeaderMenuOpen(false) }}
+                    title={title}
+                  >
+                    <span className={headerApiShortcutLampClass(lamp)} aria-hidden>
+                      <SettingsSidebarLampGlyph id={glyph} />
+                    </span>
+                    {menuLabel}
+                  </button>
+                )
+              })}
+              <div className="app-header-menu-label" role="presentation">App</div>
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item app-header-menu-item-massive ${activeTab === 'settings' && isSocketSettingsHash(urlHash) ? 'active' : ''}`}
+                onClick={() => { openSocketInSettings(); setHeaderMenuOpen(false) }}
+                title="Settings → Socket"
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="app-header-menu-item app-header-menu-item-system"
-                  onClick={() => { openSystemInSettings(); setHeaderMenuOpen(false) }}
+                <span
+                  className={`title-inline-lamp lamp-icon ${socketIngestProbe.lamp === 'none' ? 'none' : socketIngestProbe.lamp}`}
+                  aria-hidden
                 >
-                  <span className={`app-header-menu-system-lamp title-inline-lamp ${systemLamp}`} aria-hidden>
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                  </span>
-                  System Status
-                </button>
-                <button
-                  type="button"
-                  className="app-header-lamp-switch app-header-menu-shutdown"
-                  onClick={() => { setShutdownConfirmOpen(true); setHeaderMenuOpen(false) }}
-                  disabled={shutdownAllLoading}
-                  title="Shutdown entire system"
-                  aria-label="Shutdown entire system"
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-                    <line x1="12" y1="2" x2="12" y2="12" />
+                  <SettingsSidebarLampGlyph id="websocket" />
+                </span>
+                Socket
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item app-header-menu-item-system ${activeTab === 'settings' && isDaemonSettingsHash(urlHash) ? 'active' : ''}`}
+                onClick={() => { openDaemonInSettings(); setHeaderMenuOpen(false) }}
+                title="Settings → Daemon"
+              >
+                <span className={`app-header-menu-system-lamp title-inline-lamp ${dl}`} aria-hidden>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden>
+                    <path d="M8 5v14l11-7L8 5z" />
                   </svg>
-                </button>
-              </div>
+                </span>
+                Daemon
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={`app-header-menu-item app-header-menu-item-system ${activeTab === 'settings' && isCelerySettingsHash(urlHash) ? 'active' : ''}`}
+                onClick={() => { openCeleryInSettings(); setHeaderMenuOpen(false) }}
+                title="Settings → Celery"
+              >
+                <span className={`app-header-menu-system-lamp title-inline-lamp ${celeryLamp === 'none' ? 'none' : celeryLamp}`} aria-hidden>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+                  </svg>
+                </span>
+                Celery
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -1458,9 +1472,8 @@ export default function App() {
           loadStatus={loadStatus}
           operations={operations}
           onNavigateToStrategy={() => { setActiveTab('strategy'); setStrategyView('structure') }}
-          systemLamp={systemLamp}
-          onOpenShutdownConfirm={() => setShutdownConfirmOpen(true)}
           celeryLamp={celeryLamp}
+          apiHealthProbes={apiHealthProbes}
         />
       )}
     </div>

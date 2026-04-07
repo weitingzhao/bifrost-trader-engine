@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, RefObject } from 'react'
 import {
   clearDocsLogs,
+  clearMonitorLogs,
   clearOpsLogs,
-  clearServerLogs,
   fetchDocsLogs,
+  fetchMonitorLogs,
   fetchOpsLogs,
-  fetchServerLogs,
   subscribeDocsLogs,
+  subscribeMonitorLogs,
   subscribeOpsLogs,
-  subscribeServerLogs,
 } from '../api/monitor/logs'
 import type { UnifiedAggregatedLogConsoleController, UnifiedLogConsoleEntry } from './unifiedLogConsoleTypes'
 
@@ -117,7 +117,7 @@ export function useArchitectureUnifiedLogConsole({
       }
     }
 
-    void Promise.allSettled([fetchServerLogs(limit), fetchDocsLogs(limit), fetchOpsLogs(limit)]).then(
+    void Promise.allSettled([fetchMonitorLogs(limit), fetchDocsLogs(limit), fetchOpsLogs(limit)]).then(
       (results) => {
         if (cancelled) return
 
@@ -164,7 +164,7 @@ export function useArchitectureUnifiedLogConsole({
           setErrorDetail(tailErrors.join('. '))
         }
 
-        streamUnsubsRef.current.push(subscribeServerLogs((line) => appendLine('monitor', line), onStreamError))
+        streamUnsubsRef.current.push(subscribeMonitorLogs((line) => appendLine('monitor', line), onStreamError))
         streamUnsubsRef.current.push(subscribeDocsLogs((line) => appendLine('docs', line), onStreamError))
         streamUnsubsRef.current.push(subscribeOpsLogs((line) => appendLine('ops', line), onStreamError))
       },
@@ -199,7 +199,7 @@ export function useArchitectureUnifiedLogConsole({
 
   const clearAllStreams = useCallback(async () => {
     setClearError(null)
-    const settled = await Promise.allSettled([clearServerLogs(), clearDocsLogs(), clearOpsLogs()])
+    const settled = await Promise.allSettled([clearMonitorLogs(), clearDocsLogs(), clearOpsLogs()])
     const msgs: string[] = []
     const labels = ['Monitor', 'Docs', 'Ops'] as const
     settled.forEach((r, i) => {

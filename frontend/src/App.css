@@ -307,6 +307,60 @@ body::before {
   background: var(--color-surface);
 }
 
+.app-header-api-shortcuts {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.app-header-api-shortcut-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-main);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.app-header-api-shortcut-btn:hover {
+  background: var(--color-surface);
+}
+
+.app-header-api-shortcut-btn.active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* Celery: lamp + queue count in one pill (same outer group as Socket / Daemon) */
+.app-header-api-shortcut-btn--celery {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 5px;
+}
+
+.app-header-api-shortcuts .app-header-queue-value--inline {
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  min-width: 1rem;
+  text-align: right;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Match Settings sidebar: colored lamp + SettingsSidebarLampGlyph (stroke/fill from .title-inline-lamp) */
+.app-header-api-shortcut-btn .title-inline-lamp {
+  width: 1.125rem;
+  height: 1.125rem;
+  pointer-events: none;
+}
+
 .app-header-lamp-stop-lamp-wrap {
   position: relative;
   display: flex;
@@ -477,53 +531,7 @@ body::before {
   color: var(--color-danger);
 }
 
-/* System Status row: same padding as .app-header-menu-item so "System Status" and "Settings" text align */
-.app-header-menu-row-system {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  margin: 0;
-  border-radius: 6px;
-  min-height: 0;
-  transition: background var(--transition-fast);
-}
-
-.app-header-menu-row-system:hover .app-header-menu-item-system {
-  color: var(--color-accent);
-}
-
-.app-header-menu-row-system.active {
-  font-weight: 600;
-  background: var(--color-accent-soft);
-}
-
-.app-header-menu-row-system.active .app-header-menu-item-system {
-  color: var(--color-accent);
-}
-
-.app-header-menu-item-system {
-  flex: 1;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0;
-  border: none;
-  background: transparent;
-  font-family: var(--font-sans);
-  font-size: var(--text-body);
-  color: var(--color-text-main);
-  cursor: pointer;
-  text-align: left;
-  border-radius: 6px;
-  transition: color var(--transition-fast);
-}
-
-.app-header-menu-item-system:hover {
-  color: var(--color-accent);
-}
-
+/* Daemon row in header ⋮ menu: lamp size matches other menu icons */
 .app-header-menu-item-system .lamp {
   width: 10px;
   height: 10px;
@@ -545,6 +553,10 @@ body::before {
   height: 14px;
 }
 
+.app-header-menu-item-system:hover {
+  color: var(--color-accent);
+}
+
 /* Massive Option: same glyph + lamp colors as Settings → Feed → Massive Option */
 .app-header-menu-item-massive .app-header-menu-massive-lamp {
   width: 18px;
@@ -558,26 +570,6 @@ body::before {
 .app-header-menu-item-massive .app-header-menu-massive-lamp svg {
   width: 14px;
   height: 14px;
-}
-
-.app-header-menu-shutdown {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-}
-
-.app-header-menu-shutdown:hover:not(:disabled) {
-  background: var(--color-surface-hover);
-}
-
-.app-header-menu-shutdown:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .app-header-system-dropdown {

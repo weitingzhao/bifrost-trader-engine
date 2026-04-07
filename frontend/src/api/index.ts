@@ -238,9 +238,9 @@ export {
   fetchDaemonLogs,
   subscribeDaemonLogs,
   clearDaemonLogs,
-  fetchServerLogs,
-  subscribeServerLogs,
-  clearServerLogs,
+  fetchMonitorLogs,
+  subscribeMonitorLogs,
+  clearMonitorLogs,
   fetchMassiveLogs,
   subscribeMassiveLogs,
   clearMassiveLogs,
@@ -255,7 +255,7 @@ export {
   trimOpsLogs,
   trimCeleryLogs,
   trimDaemonLogs,
-  trimServerLogs,
+  trimMonitorLogs,
 } from './monitor/logs'
 export {
   postMonitorStop,

@@ -276,7 +276,7 @@ export function OptionCoveragePage(_props: OptionCoveragePageProps) {
         <button
           type="button"
           className="page-title-breadcrumb-link"
-          onClick={() => { window.location.hash = '#settings-system' }}
+          onClick={() => { window.location.hash = '#settings-heartbeat' }}
           aria-label="Go to Settings"
         >
           Settings

@@ -89,7 +89,7 @@ export function StatusCeleryPanel({
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
             </span>
             <span className="daemon-group-title">Celery Workers</span>
-            <InfoTooltip text="Workers that responded to inspect ping. Worker connects to IB using Settings → Celery worker_market; connection is kept so backfill can use it. Scale and consoles live under Settings → Dashboard → Celery." />
+            <InfoTooltip text="Workers that responded to inspect ping. Worker connects to IB using Settings → Celery worker_market; connection is kept so backfill can use it. Scale and consoles live under Settings → Celery." />
           </div>
           <div className="daemon-group-body">
             <p className="section-hint">

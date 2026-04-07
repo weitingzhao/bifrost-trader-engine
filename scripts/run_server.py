@@ -34,8 +34,7 @@ _GRAY = "\033[90m"
 _CYAN = "\033[36m"
 _YELLOW = "\033[33m"
 _RED = "\033[31m"
-_SERVER_LOG_STREAM_KEY = "bifrost:server_console"
-_SERVER_LOG_STREAM_MAXLEN = 50
+_MONITOR_LOG_STREAM_MAXLEN = 50
 
 _LEVEL_COLORS = {
     logging.DEBUG: _GRAY,
@@ -60,10 +59,9 @@ class ColoredFormatter(logging.Formatter):
 
 
 class RedisStreamLogHandler(logging.Handler):
-    """Push server log lines to Redis Stream for the web console.
+    """Push Monitor API log lines to Redis Stream (profile key from monitor_api_console_stream_key).
 
-    Keep only the newest small window so hidden tabs can fetch recent logs
-    later without needing frontend-triggered trim requests.
+    Keeps only a small newest window so UIs can tail without large streams.
     """
 
     def __init__(self, redis_url: str, stream_key: str, maxlen: int = 50) -> None:
@@ -100,8 +98,8 @@ def _console_log_redis_url() -> str:
     return format_redis_url(effective_redis_dict(config, default_db=0))
 
 
-def setup_logging() -> None:
-    """Configure terminal logging and Redis stream logging for Server Console."""
+def setup_logging(*, monitor_log_stream_key: str) -> None:
+    """Configure terminal logging and Redis stream logging for Monitor API console."""
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
         ColoredFormatter(
@@ -111,8 +109,8 @@ def setup_logging() -> None:
     )
     redis_handler = RedisStreamLogHandler(
         _console_log_redis_url(),
-        _SERVER_LOG_STREAM_KEY,
-        maxlen=_SERVER_LOG_STREAM_MAXLEN,
+        monitor_log_stream_key,
+        maxlen=_MONITOR_LOG_STREAM_MAXLEN,
     )
     redis_handler.setFormatter(
         logging.Formatter(
@@ -181,12 +179,19 @@ def _free_port(port: int, wait_sec: float = 0.6) -> bool:
 
 
 def main() -> None:
-    from src.app.config import get_effective_ib_config, read_config, resolve_startup_config_path
+    from src.app.config import (
+        config_profile_from_resolved_path,
+        get_effective_ib_config,
+        monitor_api_console_stream_key,
+        read_config,
+        resolve_startup_config_path,
+    )
 
     argv_raw = sys.argv[1:]
     config_path, _ = resolve_startup_config_path(_PROJECT_ROOT, argv_raw)
     os.environ["BIFROST_CONFIG"] = config_path
-    setup_logging()
+    profile = config_profile_from_resolved_path(config_path)
+    setup_logging(monitor_log_stream_key=monitor_api_console_stream_key(profile))
     config, resolved_config_path = read_config(config_path)
     print(f"bifrost status server: YAML loaded (env file): {resolved_config_path}", file=sys.stderr)
     # Same merge rule as read_config(): if config.yaml exists next to config.{dev,prod}.yaml, it was merged (env overlays base).

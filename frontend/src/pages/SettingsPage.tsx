@@ -8,16 +8,11 @@ import {
   fetchMarketHolidays,
   postMarketHoliday,
   deleteMarketHoliday,
-  fetchMassiveApiHealth,
-  fetchDocsApiHealth,
   fetchMassiveStatus,
-  fetchHealth,
-  fetchHealthAtOrigin,
   type MarketHolidayRow,
   type MassiveStatusResponse,
 } from '../api'
-import { API_HEALTH_FETCH_TIMEOUT_MS } from '../api/shared/fetchTimeout'
-import { normalizeUtilizedServices, utilizedEnvFor, type UtilizedServiceRow } from '../utils/utilizedServices'
+import { utilizedEnvFor } from '../utils/utilizedServices'
 import { InfoTooltip } from '../components/InfoTooltip'
 import {
   DEFAULT_IB_OPERATOR,
@@ -52,18 +47,13 @@ import { SettingsSidebarLampGlyph } from './settings/settingsSidebarLampGlyphs'
 import { HeartbeatSection } from './settings/HeartbeatSection'
 import { IbConnectionSection } from './settings/IbConnectionSection'
 import { HolidaysSection } from './settings/HolidaysSection'
-import { StatusPage } from './StatusPage'
 import { DataPage } from './DataPage'
 import { FeedMassiveOptionPage } from './FeedMassiveOptionPage'
 import { DaemonStatusPage } from './DaemonStatusPage'
-import { ServerStatusPage } from './ServerStatusPage'
 import { MassiveApiStatusPage } from './MassiveApiStatusPage'
 import { ArchitectureApisPage } from './ArchitectureApisPage'
 import { AccountApisPage } from './AccountApisPage'
 import { ResearchApisPage } from './ResearchApisPage'
-import { portfolioServiceBase, tradingServiceBase } from './account/accountSidecarBases'
-import { marketServiceBase, researchServiceBase, strategyServiceBase } from './research/researchApiBases'
-import { DashboardPage } from './DashboardPage'
 import { CeleryControlPage } from './CeleryControlPage'
 import { MarketIngestOpsPage } from './MarketIngestOpsPage'
 import { ApiHealthOverviewPage, computeApiHealthAggregateLamp } from './ApiHealthOverviewPage'
@@ -72,7 +62,8 @@ import { FEED_MASSIVE_DAILY_DATA_ID } from './massive/feedMassiveTabUtils'
 import { OptionCoveragePage } from './OptionCoveragePage'
 import { StockCoveragePage } from './StockCoveragePage'
 import { useDeferredStart } from '../hooks/useDeferredStart'
-import { fetchMarketIngestServices, fetchOpsHealth, type MarketIngestServiceRow } from '../api/ops/ops'
+import type { SettingsApiHealthProbesState } from '../hooks/useSettingsApiHealthProbes'
+import { fetchMarketIngestServices, type MarketIngestServiceRow } from '../api/ops/ops'
 import { aggregateIngestRedisHealthLamp, type AggregateIngestLamp } from '../utils/socketIngestLamp'
 
 const API_SETTINGS_DETAIL_HASHES = [
@@ -108,12 +99,10 @@ export interface SettingsPageProps {
   loadStatus: () => Promise<StatusResponse | null>
   operations?: Operation[]
   onNavigateToStrategy?: () => void
-  /** Aggregated System Status lamp (daemon + monitor + celery worst). */
-  systemLamp?: 'green' | 'yellow' | 'red' | 'none'
-  /** Open the global shutdown confirmation modal (lives in App.tsx). */
-  onOpenShutdownConfirm?: () => void
   /** Celery runtime lamp (same source as header / System aggregate). */
   celeryLamp?: 'green' | 'yellow' | 'red' | 'none'
+  /** API sidebar lamps + utilized services (from App `useSettingsApiHealthProbes`, same as header shortcuts). */
+  apiHealthProbes: SettingsApiHealthProbesState
 }
 
 export function SettingsPage({
@@ -121,9 +110,8 @@ export function SettingsPage({
   loadStatus,
   operations = [],
   onNavigateToStrategy,
-  systemLamp = 'none',
-  onOpenShutdownConfirm,
   celeryLamp = 'none',
+  apiHealthProbes,
 }: SettingsPageProps) {
   const [msg, setMsg] = useState({ text: '', isErr: false })
   const [ibHost, setIbHost] = useState(DEFAULT_HOST)
@@ -246,7 +234,8 @@ export function SettingsPage({
     if (h === FEED_MASSIVE_DAILY_DATA_ID) return 'settings-coverage'
     if (h && h.startsWith('coverage-')) return 'settings-coverage'
     if (h && (h.startsWith('ib-') || h === 'flex-preference' || h === 'settings-ib-connection')) return 'settings-ib-connection'
-    if (h && h.startsWith('settings-system')) return 'settings-system'
+    if (h === 'settings-daemon' || h === 'settings-system-daemon' || h === 'settings-system') return 'settings-daemon'
+    if (h === 'settings-system-monitor' || h === 'settings-system-server') return 'settings-api'
     if (h === 'settings-celery' || h === 'settings-dashboard-celery') return 'settings-celery'
     if (
       h === 'settings-market-ingest' ||
@@ -256,7 +245,6 @@ export function SettingsPage({
     ) {
       return 'settings-ws-connector'
     }
-    if (h && h.startsWith('settings-dashboard')) return 'settings-dashboard'
     if (h === 'settings-services-overview') return 'settings-api'
     if (h && h.startsWith('settings-api')) return 'settings-api'
     if (h === 'feed-celery' || h === 'settings-system-celery') return 'settings-celery'
@@ -279,19 +267,9 @@ export function SettingsPage({
       {} as Record<CapabilityGroup, boolean>,
     ),
   )
-  const [systemStatusExpanded, setSystemStatusExpanded] = useState(true)
   const [apiExpanded, setApiExpanded] = useState(true)
+  const [appExpanded, setAppExpanded] = useState(true)
   const [massiveStatus, setMassiveStatus] = useState<MassiveStatusResponse | null>(null)
-  const [massiveApiHealthOk, setMassiveApiHealthOk] = useState<boolean | null>(null)
-  const [monitorApiHealthOk, setMonitorApiHealthOk] = useState<boolean | null>(null)
-  const [docsApiHealthOk, setDocsApiHealthOk] = useState<boolean | null>(null)
-  const [opsApiHealthOk, setOpsApiHealthOk] = useState<boolean | null>(null)
-  const [tradingApiHealthOk, setTradingApiHealthOk] = useState<boolean | null>(null)
-  const [portfolioApiHealthOk, setPortfolioApiHealthOk] = useState<boolean | null>(null)
-  const [researchApiHealthOk, setResearchApiHealthOk] = useState<boolean | null>(null)
-  const [strategyApiHealthOk, setStrategyApiHealthOk] = useState<boolean | null>(null)
-  const [marketApiHealthOk, setMarketApiHealthOk] = useState<boolean | null>(null)
-  const [utilizedServices, setUtilizedServices] = useState<UtilizedServiceRow[]>([])
   const [apiAggregateLamp, setApiAggregateLamp] = useState<'green' | 'yellow' | 'red' | 'none'>('none')
   const [socketIngestLamp, setSocketIngestLamp] = useState<AggregateIngestLamp>('none')
   const [socketIngestTitle, setSocketIngestTitle] = useState(
@@ -300,14 +278,19 @@ export function SettingsPage({
   const [ingestServicesCache, setIngestServicesCache] = useState<MarketIngestServiceRow[]>([])
   const [ingestServicesFetchError, setIngestServicesFetchError] = useState<string | null>(null)
   const deferredStart = useDeferredStart(280)
+  const {
+    utilizedServices,
+    architectureApiLamp,
+    accountApiLamp,
+    researchApiLamp,
+    massiveApiLamp,
+  } = apiHealthProbes
   const currentHash = typeof window !== 'undefined' ? window.location.hash.slice(1) : ''
   const activeSubId = activeSectionId === 'settings-ib-connection' && IB_CONNECTION_SUBSECTIONS.some(s => s.id === currentHash) ? currentHash : ''
   const activeIbStockFeed = activeSectionId === 'settings-feed' && currentHash === 'feed-ib-stock'
   const isMassiveOptionFeedActive = activeSectionId === 'settings-feed' && isMassiveOptionFeedHash(currentHash)
   const daemonLamp: 'green' | 'yellow' | 'red' = ((status?.daemon?.lamp as string) || 'red') as 'green' | 'yellow' | 'red'
-  const monitorLamp: 'green' | 'yellow' | 'red' = ((status?.monitor?.lamp as string) || 'red') as 'green' | 'yellow' | 'red'
-  const isSystemServerActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-server'
-  const isSystemDaemonActive = activeSectionId === 'settings-system' && currentHash === 'settings-system-daemon'
+  const isDaemonSection = activeSectionId === 'settings-daemon'
   const isApiSection = activeSectionId === 'settings-api'
   const isApiDetailSubPage =
     isApiSection && API_SETTINGS_DETAIL_HASHES.includes(currentHash as (typeof API_SETTINGS_DETAIL_HASHES)[number])
@@ -316,33 +299,6 @@ export function SettingsPage({
   const isApiAccountActive = isApiSection && currentHash === 'settings-api-account'
   const isApiResearchActive = isApiSection && currentHash === 'settings-api-research'
   const isApiMassiveActive = isApiSection && currentHash === 'settings-api-massive'
-  const massiveApiLamp: 'green' | 'red' | 'none' = massiveApiHealthOk === true ? 'green' : massiveApiHealthOk === false ? 'red' : 'none'
-  const monitorApiLamp: 'green' | 'red' | 'none' = monitorApiHealthOk === true ? 'green' : monitorApiHealthOk === false ? 'red' : 'none'
-  const docsApiLamp: 'green' | 'red' | 'none' = docsApiHealthOk === true ? 'green' : docsApiHealthOk === false ? 'red' : 'none'
-  const opsApiLamp: 'green' | 'red' | 'none' = opsApiHealthOk === true ? 'green' : opsApiHealthOk === false ? 'red' : 'none'
-  const architectureApiLamp: 'green' | 'red' | 'none' =
-    monitorApiLamp === 'red' || docsApiLamp === 'red' || opsApiLamp === 'red'
-      ? 'red'
-      : monitorApiLamp === 'green' && docsApiLamp === 'green' && opsApiLamp === 'green'
-        ? 'green'
-        : 'none'
-  const accountApiLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
-    const a = tradingApiHealthOk
-    const b = portfolioApiHealthOk
-    if (a === null || b === null) return 'none'
-    if (a === true && b === true) return 'green'
-    if (a === false && b === false) return 'red'
-    return 'yellow'
-  })()
-  const researchApiLamp: 'green' | 'yellow' | 'red' | 'none' = (() => {
-    const a = researchApiHealthOk
-    const b = strategyApiHealthOk
-    const c = marketApiHealthOk
-    if (a === null || b === null || c === null) return 'none'
-    if (a === true && b === true && c === true) return 'green'
-    if (a === false && b === false && c === false) return 'red'
-    return 'yellow'
-  })()
   const massiveStackEnv = utilizedEnvFor(utilizedServices, 'massive')
 
   useEffect(() => {
@@ -352,134 +308,6 @@ export function SettingsPage({
       fetchMassiveStatus()
         .then(s => { if (!cancelled) setMassiveStatus(s) })
         .catch(() => { if (!cancelled) setMassiveStatus(null) })
-      fetchMassiveApiHealth()
-        .then(() => { if (!cancelled) setMassiveApiHealthOk(true) })
-        .catch(() => { if (!cancelled) setMassiveApiHealthOk(false) })
-      fetchDocsApiHealth()
-        .then(() => { if (!cancelled) setDocsApiHealthOk(true) })
-        .catch(() => { if (!cancelled) setDocsApiHealthOk(false) })
-      fetchOpsHealth()
-        .then(() => { if (!cancelled) setOpsApiHealthOk(true) })
-        .catch(() => { if (!cancelled) setOpsApiHealthOk(false) })
-      fetchHealth({ timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-        .then((h) => {
-          if (!cancelled) {
-            setUtilizedServices(normalizeUtilizedServices(h.utilized_services))
-            setMonitorApiHealthOk(true)
-          }
-          const mh = { trading_port: h.trading_port, portfolio_port: h.portfolio_port }
-          const tb = tradingServiceBase(mh)
-          const pb = portfolioServiceBase(mh)
-          if (tb) {
-            fetchHealthAtOrigin(tb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setTradingApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setTradingApiHealthOk(false)
-              })
-          } else if (!cancelled) setTradingApiHealthOk(null)
-          if (pb) {
-            fetchHealthAtOrigin(pb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setPortfolioApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setPortfolioApiHealthOk(false)
-              })
-          } else if (!cancelled) setPortfolioApiHealthOk(null)
-          const mhR = {
-            research_port: h.research_port,
-            strategy_port: h.strategy_port,
-            market_port: h.market_port,
-          }
-          const rr = researchServiceBase(mhR)
-          const sr = strategyServiceBase(mhR)
-          const mr = marketServiceBase(mhR)
-          if (rr) {
-            fetchHealthAtOrigin(rr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setResearchApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setResearchApiHealthOk(false)
-              })
-          } else if (!cancelled) setResearchApiHealthOk(null)
-          if (sr) {
-            fetchHealthAtOrigin(sr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setStrategyApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setStrategyApiHealthOk(false)
-              })
-          } else if (!cancelled) setStrategyApiHealthOk(null)
-          if (mr) {
-            fetchHealthAtOrigin(mr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setMarketApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setMarketApiHealthOk(false)
-              })
-          } else if (!cancelled) setMarketApiHealthOk(null)
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setUtilizedServices([])
-            setMonitorApiHealthOk(false)
-          }
-          const tb = tradingServiceBase(null)
-          const pb = portfolioServiceBase(null)
-          if (tb) {
-            fetchHealthAtOrigin(tb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setTradingApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setTradingApiHealthOk(false)
-              })
-          } else if (!cancelled) setTradingApiHealthOk(null)
-          if (pb) {
-            fetchHealthAtOrigin(pb, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setPortfolioApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setPortfolioApiHealthOk(false)
-              })
-          } else if (!cancelled) setPortfolioApiHealthOk(null)
-          const rr = researchServiceBase(null)
-          const sr = strategyServiceBase(null)
-          const mr = marketServiceBase(null)
-          if (rr) {
-            fetchHealthAtOrigin(rr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setResearchApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setResearchApiHealthOk(false)
-              })
-          } else if (!cancelled) setResearchApiHealthOk(null)
-          if (sr) {
-            fetchHealthAtOrigin(sr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setStrategyApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setStrategyApiHealthOk(false)
-              })
-          } else if (!cancelled) setStrategyApiHealthOk(null)
-          if (mr) {
-            fetchHealthAtOrigin(mr, { timeoutMs: API_HEALTH_FETCH_TIMEOUT_MS })
-              .then(() => {
-                if (!cancelled) setMarketApiHealthOk(true)
-              })
-              .catch(() => {
-                if (!cancelled) setMarketApiHealthOk(false)
-              })
-          } else if (!cancelled) setMarketApiHealthOk(null)
-        })
       computeApiHealthAggregateLamp()
         .then((l) => {
           if (!cancelled) setApiAggregateLamp(l)
@@ -529,6 +357,25 @@ export function SettingsPage({
     setSocketIngestTitle(socketIngestAggregate.title)
   }, [socketIngestAggregate])
 
+  const appAggregateLamp = useMemo((): 'green' | 'yellow' | 'red' | 'none' => {
+    const socketRank =
+      socketIngestLamp === 'red'
+        ? 3
+        : socketIngestLamp === 'yellow' || socketIngestLamp === 'gray'
+          ? 2
+          : socketIngestLamp === 'green'
+            ? 1
+            : 0
+    const dRank = daemonLamp === 'red' ? 3 : daemonLamp === 'yellow' ? 2 : 1
+    const cRank =
+      celeryLamp === 'red' ? 3 : celeryLamp === 'yellow' ? 2 : celeryLamp === 'green' ? 1 : 0
+    const w = Math.max(socketRank, dRank, cRank)
+    if (w === 3) return 'red'
+    if (w === 2) return 'yellow'
+    if (w === 1) return 'green'
+    return 'none'
+  }, [socketIngestLamp, daemonLamp, celeryLamp])
+
   useEffect(() => {
     const fromTab = parseFeedMassiveTabFromHash(`#${currentHash}`)
     setMassiveCapGroupExpanded(prev => {
@@ -553,7 +400,13 @@ export function SettingsPage({
   useEffect(() => {
     const normalizeHash = (): string => {
       let h = window.location.hash
-      if (h === '#feed-celery' || h === '#settings-system-celery' || h === '#settings-dashboard-celery') {
+      if (
+        h === '#feed-celery' ||
+        h === '#settings-system-celery' ||
+        h === '#settings-dashboard-celery' ||
+        h === '#settings-dashboard' ||
+        h.startsWith('#settings-dashboard-')
+      ) {
         const next = `${window.location.pathname}${window.location.search}#settings-celery`
         window.history.replaceState(null, '', next)
         h = '#settings-celery'
@@ -572,6 +425,26 @@ export function SettingsPage({
         window.history.replaceState(null, '', next)
         h = '#settings-api-architecture'
       }
+      if (h === '#settings-system-server') {
+        const next = `${window.location.pathname}${window.location.search}#settings-api-architecture`
+        window.history.replaceState(null, '', next)
+        h = '#settings-api-architecture'
+      }
+      if (h === '#settings-system-monitor') {
+        const next = `${window.location.pathname}${window.location.search}#settings-api-architecture`
+        window.history.replaceState(null, '', next)
+        h = '#settings-api-architecture'
+      }
+      if (h === '#settings-api-health' || h === '#settings-api-overview') {
+        const next = `${window.location.pathname}${window.location.search}#settings-api`
+        window.history.replaceState(null, '', next)
+        h = '#settings-api'
+      }
+      if (h === '#settings-system' || h === '#settings-system-daemon') {
+        const next = `${window.location.pathname}${window.location.search}#settings-daemon`
+        window.history.replaceState(null, '', next)
+        h = '#settings-daemon'
+      }
       return h
     }
     const syncFromHash = () => {
@@ -581,19 +454,6 @@ export function SettingsPage({
     window.addEventListener('hashchange', syncFromHash)
     syncFromHash()
     return () => window.removeEventListener('hashchange', syncFromHash)
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const h = window.location.hash
-    if (h === '#settings-system-monitor') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-system-server`)
-      setActiveSectionId('settings-system')
-    }
-    if (h === '#settings-api-health' || h === '#settings-api-overview') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#settings-api`)
-      setActiveSectionId('settings-api')
-    }
   }, [])
 
   const onAddHoliday = async () => {
@@ -657,10 +517,9 @@ export function SettingsPage({
   }
 
 
-  const isSystemSection = activeSectionId === 'settings-system'
-  const isDashboardSection = activeSectionId === 'settings-dashboard'
   const isCeleryControlSection = activeSectionId === 'settings-celery'
   const isWsConnectorSection = activeSectionId === 'settings-ws-connector'
+  const isAppSection = isWsConnectorSection || isDaemonSection || isCeleryControlSection
   const isCoverageSection = activeSectionId === 'settings-coverage'
   const isFeedSection = activeSectionId === 'settings-feed'
 
@@ -668,101 +527,6 @@ export function SettingsPage({
     <>
       <div className="settings-sidebar-group-block" role="group" aria-label="Status and feed">
         <div className="settings-sidebar-group-label">Status</div>
-        <div className="settings-sidebar-group">
-          <div className={`settings-sidebar-parent ${activeSectionId === 'settings-system' ? 'active' : ''}`}>
-            <a href="#settings-system" className="settings-sidebar-parent-label">
-              <span
-                className={`title-inline-lamp lamp-icon ${systemLamp === 'none' ? 'red' : systemLamp}`}
-                title="Aggregated health of management monitor, Daemon, and Celery (expand for sub-pages)"
-                aria-hidden
-              >
-                <SettingsSidebarLampGlyph id="system-status" />
-              </span>
-              System
-            </a>
-            <button
-              type="button"
-              className="settings-sidebar-system-shutdown"
-              onClick={() => onOpenShutdownConfirm?.()}
-              title="Shutdown entire system"
-              aria-label="Shutdown entire system"
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-                <line x1="12" y1="2" x2="12" y2="12" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`settings-sidebar-chevron ${systemStatusExpanded ? 'expanded' : ''}`}
-              onClick={() => setSystemStatusExpanded(e => !e)}
-              aria-expanded={systemStatusExpanded}
-              aria-controls="settings-system-status-subs"
-              aria-label={systemStatusExpanded ? 'Collapse System section' : 'Expand System section'}
-            >
-              ▼
-            </button>
-          </div>
-          <div id="settings-system-status-subs" className="settings-sidebar-subs" hidden={!systemStatusExpanded}>
-            <a
-              href="#settings-system-server"
-              className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemServerActive ? 'active' : ''}`}
-            >
-              <span className={`title-inline-lamp lamp-icon ${monitorLamp}`} title="Server (management / monitor)" aria-hidden>
-                <SettingsSidebarLampGlyph id="system" />
-              </span>
-              Server
-            </a>
-            <a
-              href="#settings-system-daemon"
-              className={`settings-sidebar-link settings-sidebar-link-sub ${isSystemDaemonActive ? 'active' : ''}`}
-            >
-              <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon" aria-hidden>
-                <SettingsSidebarLampGlyph id="daemon" />
-              </span>
-              Daemon
-            </a>
-          </div>
-        </div>
-        <a
-          href="#settings-dashboard"
-          className={`settings-sidebar-link ${isDashboardSection ? 'active' : ''}`}
-        >
-          <span
-            className={`title-inline-lamp lamp-icon ${opsApiLamp === 'none' ? 'none' : opsApiLamp}`}
-            title="Dashboard (Ops control plane)"
-            aria-hidden
-          >
-            <SettingsSidebarLampGlyph id="dashboard" />
-          </span>
-          Dashboard
-        </a>
-        <a
-          href="#settings-celery"
-          className={`settings-sidebar-link ${isCeleryControlSection ? 'active' : ''}`}
-        >
-          <span
-            className={`title-inline-lamp lamp-icon ${celeryLamp === 'none' ? 'none' : celeryLamp}`}
-            title="Celery workers (broker + inspect)"
-            aria-hidden
-          >
-            <SettingsSidebarLampGlyph id="celery" />
-          </span>
-          Celery
-        </a>
-        <a
-          href="#settings-ws-connector"
-          className={`settings-sidebar-link ${isWsConnectorSection ? 'active' : ''}`}
-        >
-          <span
-            className={`title-inline-lamp lamp-icon ${socketIngestLamp === 'none' ? 'none' : socketIngestLamp}`}
-            title={socketIngestTitle}
-            aria-hidden
-          >
-            <SettingsSidebarLampGlyph id="websocket" />
-          </span>
-          Socket
-        </a>
         <div className="settings-sidebar-group">
           <div className={`settings-sidebar-parent ${isApiSection ? 'active' : ''}`}>
             <a href="#settings-api" className="settings-sidebar-parent-label">
@@ -835,6 +599,67 @@ export function SettingsPage({
               </span>
               Massive
               <SettingsSidebarServiceEnvBadge stack={massiveStackEnv} />
+            </a>
+          </div>
+        </div>
+        <div className="settings-sidebar-group">
+          <div className={`settings-sidebar-parent ${isAppSection ? 'active' : ''}`}>
+            <a href="#settings-ws-connector" className="settings-sidebar-parent-label">
+              <span
+                className={`title-inline-lamp lamp-icon ${appAggregateLamp === 'none' ? 'none' : appAggregateLamp}`}
+                title="Worst of Socket ingest, Daemon, and Celery runtime lamps"
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="system" />
+              </span>
+              App
+            </a>
+            <button
+              type="button"
+              className={`settings-sidebar-chevron ${appExpanded ? 'expanded' : ''}`}
+              onClick={() => setAppExpanded(e => !e)}
+              aria-expanded={appExpanded}
+              aria-controls="settings-app-subs"
+              aria-label={appExpanded ? 'Collapse App section' : 'Expand App section'}
+            >
+              ▼
+            </button>
+          </div>
+          <div id="settings-app-subs" className="settings-sidebar-subs" hidden={!appExpanded}>
+            <a
+              href="#settings-ws-connector"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isWsConnectorSection ? 'active' : ''}`}
+            >
+              <span
+                className={`title-inline-lamp lamp-icon ${socketIngestLamp === 'none' ? 'none' : socketIngestLamp}`}
+                title={socketIngestTitle}
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="websocket" />
+              </span>
+              Socket
+            </a>
+            <a
+              href="#settings-daemon"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isDaemonSection ? 'active' : ''}`}
+            >
+              <span className={`title-inline-lamp lamp-icon ${daemonLamp}`} title="Daemon process" aria-hidden>
+                <SettingsSidebarLampGlyph id="daemon" />
+              </span>
+              Daemon
+            </a>
+            <a
+              href="#settings-celery"
+              className={`settings-sidebar-link settings-sidebar-link-sub ${isCeleryControlSection ? 'active' : ''}`}
+            >
+              <span
+                className={`title-inline-lamp lamp-icon ${celeryLamp === 'none' ? 'none' : celeryLamp}`}
+                title="Celery workers (broker + inspect)"
+                aria-hidden
+              >
+                <SettingsSidebarLampGlyph id="celery" />
+              </span>
+              Celery
             </a>
           </div>
         </div>
@@ -957,8 +782,8 @@ export function SettingsPage({
           </div>
         </div>
       </div>
-      <div className="settings-sidebar-group-block" role="group" aria-label="Configuration">
-        <div className="settings-sidebar-group-label">Configuration</div>
+      <div className="settings-sidebar-group-block" role="group" aria-label="Settings">
+        <div className="settings-sidebar-group-label">Settings</div>
         {CONFIG_SECTIONS.map(({ id, label, icon }) => {
           if (id !== 'settings-ib-connection') {
             return (
@@ -1011,38 +836,14 @@ export function SettingsPage({
 
   return (
     <SettingsShell sidebar={sidebarContent}>
-      {isSystemSection ? (
-        isSystemDaemonActive ? (
-          <DaemonStatusPage
-            status={status}
-            loadStatus={loadStatus}
-            operations={operations}
-            onNavigateToStrategy={onNavigateToStrategy}
-            embeddedInSettings
-            breadcrumbLabel="Daemon"
-          />
-        ) : isSystemServerActive ? (
-          <ServerStatusPage
-            status={status}
-            loadStatus={loadStatus}
-            embeddedInSettings
-          />
-        ) : (
-          <StatusPage
-            status={status}
-            operations={operations}
-            loadStatus={loadStatus}
-            onNavigateToStrategy={onNavigateToStrategy}
-            showSectionTabs={false}
-            showAllSystemSections={true}
-            showSystemSection={true}
-            showConsoleSection={true}
-            showConsoleTabs={true}
-            consoleCardTitle="Console"
-          />
-        )
-      ) : isDashboardSection ? (
-        <DashboardPage status={status} loadStatus={loadStatus} embeddedInSettings />
+      {isDaemonSection ? (
+        <DaemonStatusPage
+          status={status}
+          loadStatus={loadStatus}
+          operations={operations}
+          onNavigateToStrategy={onNavigateToStrategy}
+          embeddedInSettings
+        />
       ) : isCeleryControlSection ? (
         <CeleryControlPage embeddedInSettings celeryLamp={celeryLamp} />
       ) : isWsConnectorSection ? (
@@ -1079,7 +880,7 @@ export function SettingsPage({
           <DataPage
             status={status}
             embeddedInSettings
-            onBreadcrumbParent={() => { window.location.hash = '#settings-system' }}
+            onBreadcrumbParent={() => { window.location.hash = '#settings-heartbeat' }}
             breadcrumbParentLabel="Settings"
             onGoToScreener={() => { window.location.hash = '#feed-ib-stock' }}
             breadcrumbLabel="IB Stock"

@@ -11,12 +11,9 @@ export const DEFAULT_IB_INGESTOR = 150
 export const DEFAULT_HEARTBEAT_SEC = 10
 
 /** Status / read-only view (sidebar group: Status). */
-export const STATUS_SECTIONS = [
-  { id: 'settings-system', label: 'System', icon: 'system' as const },
-  { id: 'settings-dashboard', label: 'Dashboard', icon: 'dashboard' as const },
-] as const
+export const STATUS_SECTIONS = [{ id: 'settings-daemon', label: 'Daemon', icon: 'system' as const }] as const
 
-/** Editable app config (sidebar group: Configuration). */
+/** Editable app config (sidebar group: Settings). */
 export const CONFIG_SECTIONS = [
   { id: 'settings-heartbeat', label: 'Daemon App', icon: 'heartbeat' as const },
   { id: 'settings-ib-connection', label: 'IB Configure', icon: 'plug' as const },
@@ -34,7 +31,7 @@ export const FEED_MASSIVE_OPTION_ID = 'feed-massive-option' as const
 
 export const FEED_SUBSECTIONS = [{ id: 'feed-ib-stock', label: 'IB Stock', icon: 'feed-ib' as const }] as const
 
-/** All sections in sidebar order (Status first, then Configuration). Used for hash fallback etc. */
+/** All sections in sidebar order (Status first, then Settings). Used for hash fallback etc. */
 export const SETTINGS_SECTIONS = [...STATUS_SECTIONS, ...CONFIG_SECTIONS] as const
 
 /** Sub-anchors for IB Configure: table groups + Flex Preference (under IB Preference section). */

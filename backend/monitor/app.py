@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from src.app.config import (
     config_profile_from_resolved_path,
     docs_api_console_stream_key,
+    monitor_api_console_stream_key,
     ops_api_console_stream_key,
     portfolio_api_console_stream_key,
     trading_api_console_stream_key,
@@ -127,11 +128,11 @@ def create_app(
     app.state._daemon_log_thread: Optional[threading.Thread] = None
     app.state._daemon_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
-    # Server console log stream (Redis Stream): reader thread + per-connection queues
-    app.state.server_log_queues: list = []
-    app.state.server_log_lock = threading.Lock()
-    app.state._server_log_thread: Optional[threading.Thread] = None
-    app.state._server_log_loop: Optional[asyncio.AbstractEventLoop] = None
+    # Monitor API console log stream (run_server.py → bifrost:console:{dev|prod}:api_monitor)
+    app.state.monitor_log_queues: list = []
+    app.state.monitor_log_lock = threading.Lock()
+    app.state._monitor_log_thread: Optional[threading.Thread] = None
+    app.state._monitor_log_loop: Optional[asyncio.AbstractEventLoop] = None
 
     # Massive API console log stream (run_server_massive.py → bifrost:massive_console)
     app.state.massive_log_queues: list = []
@@ -214,6 +215,7 @@ def create_app(
         else None
     )
     app.state.ops_log_stream_key = ops_api_console_stream_key(app.state.bifrost_config_profile)
+    app.state.monitor_log_stream_key = monitor_api_console_stream_key(app.state.bifrost_config_profile)
     app.state.docs_log_stream_key = docs_api_console_stream_key(app.state.bifrost_config_profile)
     app.state.trading_log_stream_key = trading_api_console_stream_key(app.state.bifrost_config_profile)
     app.state.portfolio_log_stream_key = portfolio_api_console_stream_key(app.state.bifrost_config_profile)

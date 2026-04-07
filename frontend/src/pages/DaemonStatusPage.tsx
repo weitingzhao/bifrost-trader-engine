@@ -31,7 +31,6 @@ export interface DaemonStatusPageProps {
   operations?: Operation[]
   onNavigateToStrategy?: () => void
   embeddedInSettings?: boolean
-  breadcrumbLabel?: string
 }
 
 export function DaemonStatusPage({
@@ -40,7 +39,6 @@ export function DaemonStatusPage({
   operations = [],
   onNavigateToStrategy,
   embeddedInSettings,
-  breadcrumbLabel = 'Daemon',
 }: DaemonStatusPageProps) {
   const [ctrlMsg, setCtrlMsg] = useState({ text: '', isErr: false })
   const [hedgeCtrlMsg, setHedgeCtrlMsg] = useState({ text: '', isErr: false })
@@ -217,18 +215,6 @@ export function DaemonStatusPage({
 
   return (
     <div className={`settings-page-card ${embeddedInSettings ? 'daemon-status-page daemon-status-page--embedded' : 'daemon-status-page'}`}>
-      <div className="settings-page-header">
-        <div className="settings-page-title-group">
-          <h2 className="settings-page-title">
-            {breadcrumbLabel}
-            <InfoTooltip text="Daemon process status, IB connections, trading strategy, event subscriptions, and daemon log console." />
-          </h2>
-          <p className="settings-page-subtitle">
-            Heartbeat, IB connections, trading strategy, event subscriptions, and daemon console.
-          </p>
-        </div>
-      </div>
-
       <div className="daemon-groups settings-page-groups">
         <section className="replay-section" aria-labelledby="daemon-panel-head">
           <StatusDaemonPanel

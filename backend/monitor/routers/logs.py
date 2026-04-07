@@ -1,4 +1,4 @@
-"""Log endpoints: daemon, server, and Celery console logs (fetch, clear, trim, stream)."""
+"""Log endpoints: daemon, Monitor API, Massive, sidecars, and Celery console logs (fetch, clear, trim, stream)."""
 
 import asyncio
 import json
@@ -17,7 +17,6 @@ from backend.monitor.routers.deps import (
     IB_INGESTOR_LOG_STREAM_KEY,
     MASSIVE_LOG_STREAM_KEY,
     MASSIVE_WS_LOG_STREAM_KEY,
-    SERVER_LOG_STREAM_KEY,
     daemon_log_redis_url,
 )
 from src.core.sse.queue_utils import put_nowait_drop_oldest
@@ -139,33 +138,34 @@ def _daemon_log_reader_loop(app_ref) -> None:
         logger.warning("daemon_log_reader_loop exited: %s", e)
 
 
-def _server_log_reader_loop(app_ref) -> None:
-    """Background thread: XREAD Redis stream bifrost:server_console, push each line to all SSE queues."""
+def _monitor_log_reader_loop(app_ref) -> None:
+    """Background thread: XREAD Redis stream bifrost:console:{dev|prod}:api_monitor, push each line to SSE queues."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
         last_id = "$"
+        stream_key = getattr(app_ref.state, "monitor_log_stream_key", None) or "bifrost:console:dev:api_monitor"
         while True:
             try:
-                result = r.xread(block=5000, streams={SERVER_LOG_STREAM_KEY: last_id}, count=100)
+                result = r.xread(block=5000, streams={stream_key: last_id}, count=100)
                 if not result:
                     continue
                 for _stream_name, entries in result:
                     for eid, fields in entries:
                         last_id = eid
                         line = _redis_stream_line(fields)
-                        with app_ref.state.server_log_lock:
-                            queues = list(app_ref.state.server_log_queues)
-                        loop = getattr(app_ref.state, "_server_log_loop", None)
+                        with app_ref.state.monitor_log_lock:
+                            queues = list(app_ref.state.monitor_log_queues)
+                        loop = getattr(app_ref.state, "_monitor_log_loop", None)
                         for q in queues:
                             if loop and not loop.is_closed():
                                 loop.call_soon_threadsafe(put_nowait_drop_oldest, q, line)
             except redis.ConnectionError:
                 time.sleep(2)
             except Exception as e:
-                logger.debug("server_log_reader_loop: %s", e)
+                logger.debug("monitor_log_reader_loop: %s", e)
     except Exception as e:
-        logger.warning("server_log_reader_loop exited: %s", e)
+        logger.warning("monitor_log_reader_loop exited: %s", e)
 
 
 def _massive_log_reader_loop(app_ref) -> None:
@@ -600,44 +600,47 @@ async def get_daemon_logs_stream(request: Request):
     )
 
 
-# --- Server logs ---
+# --- Monitor API server logs (run_server.py → Redis stream bifrost:console:{dev|prod}:api_monitor) ---
 
-@router.get("/api/server/logs")
-def get_server_logs(
+
+@router.get("/api/monitor/logs")
+def get_monitor_logs(
     request: Request,
     tail: int = Query(1000, ge=1, le=5000, description="Number of latest lines (oldest-first in response)"),
 ) -> Dict[str, Any]:
-    """Return last N lines from server console Redis stream (for initial display in System → Server Console)."""
+    """Return last N lines from Monitor API console Redis stream."""
     try:
         import redis
+        key = getattr(request.app.state, "monitor_log_stream_key", None) or "bifrost:console:dev:api_monitor"
         r = redis.from_url(daemon_log_redis_url())
-        raw = r.xrevrange(SERVER_LOG_STREAM_KEY, count=tail)
+        raw = r.xrevrange(key, count=tail)
         lines = []
         for _eid, fields in reversed(raw):
             line = _redis_stream_line(fields)
             lines.append(line)
         return {"lines": lines}
     except Exception as e:
-        logger.warning("get_server_logs failed: %s", e)
+        logger.warning("get_monitor_logs failed: %s", e)
         return {"lines": [], "error": str(e)}
 
 
-@router.delete("/api/server/logs")
-def clear_server_logs(request: Request) -> Dict[str, Any]:
-    """Delete the server console Redis stream so next fetch is empty. UI Clear button uses this."""
+@router.delete("/api/monitor/logs")
+def clear_monitor_logs(request: Request) -> Dict[str, Any]:
+    """Delete the Monitor API console Redis stream so next fetch is empty."""
     try:
         import redis
+        key = getattr(request.app.state, "monitor_log_stream_key", None) or "bifrost:console:dev:api_monitor"
         r = redis.from_url(daemon_log_redis_url())
-        r.delete(SERVER_LOG_STREAM_KEY)
+        r.delete(key)
         return {"ok": True}
     except Exception as e:
-        logger.warning("clear_server_logs failed: %s", e)
+        logger.warning("clear_monitor_logs failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
-@router.post("/api/server/logs/trim")
-def trim_server_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """Trim server console Redis stream to at most max_lines (keep newest)."""
+@router.post("/api/monitor/logs/trim")
+def trim_monitor_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Trim Monitor API console Redis stream to at most max_lines (keep newest)."""
     try:
         max_lines = body.get("max_lines")
         if max_lines is None:
@@ -646,39 +649,40 @@ def trim_server_logs(request: Request, body: Dict[str, Any] = Body(...)) -> Dict
         if max_lines < 1 or max_lines > 10000:
             return {"ok": False, "error": "max_lines must be between 1 and 10000"}
         import redis
+        key = getattr(request.app.state, "monitor_log_stream_key", None) or "bifrost:console:dev:api_monitor"
         r = redis.from_url(daemon_log_redis_url())
-        r.xtrim(SERVER_LOG_STREAM_KEY, maxlen=max_lines, approximate=True)
+        r.xtrim(key, maxlen=max_lines, approximate=True)
         return {"ok": True}
     except Exception as e:
-        logger.warning("trim_server_logs failed: %s", e)
+        logger.warning("trim_monitor_logs failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 
-@router.get("/api/server/logs/stream")
-async def get_server_logs_stream(request: Request):
-    """SSE: stream new server console lines in real time (Redis XREAD)."""
+@router.get("/api/monitor/logs/stream")
+async def get_monitor_logs_stream(request: Request):
+    """SSE: stream new Monitor API console lines in real time (Redis XREAD)."""
     try:
         import redis
         r = redis.from_url(daemon_log_redis_url())
         r.ping()
     except Exception as e:
-        logger.warning("server_logs_stream check failed: %s", e)
+        logger.warning("monitor_logs_stream check failed: %s", e)
         return JSONResponse(status_code=503, content={"detail": str(e)})
 
     app = request.app
     queue: asyncio.Queue = asyncio.Queue(maxsize=512)
-    with app.state.server_log_lock:
-        app.state.server_log_queues.append(queue)
-        if app.state._server_log_loop is None:
-            app.state._server_log_loop = asyncio.get_running_loop()
-        if app.state._server_log_thread is None or not app.state._server_log_thread.is_alive():
-            app.state._server_log_thread = threading.Thread(
-                target=_server_log_reader_loop,
+    with app.state.monitor_log_lock:
+        app.state.monitor_log_queues.append(queue)
+        if app.state._monitor_log_loop is None:
+            app.state._monitor_log_loop = asyncio.get_running_loop()
+        if app.state._monitor_log_thread is None or not app.state._monitor_log_thread.is_alive():
+            app.state._monitor_log_thread = threading.Thread(
+                target=_monitor_log_reader_loop,
                 args=(app,),
-                name="server-log-reader",
+                name="monitor-log-reader",
                 daemon=True,
             )
-            app.state._server_log_thread.start()
+            app.state._monitor_log_thread.start()
 
     async def event_gen():
         try:
@@ -691,9 +695,9 @@ async def get_server_logs_stream(request: Request):
         except asyncio.CancelledError:
             pass
         finally:
-            with app.state.server_log_lock:
-                if queue in app.state.server_log_queues:
-                    app.state.server_log_queues.remove(queue)
+            with app.state.monitor_log_lock:
+                if queue in app.state.monitor_log_queues:
+                    app.state.monitor_log_queues.remove(queue)
 
     return StreamingResponse(
         event_gen(),

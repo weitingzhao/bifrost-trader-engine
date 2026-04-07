@@ -7,6 +7,7 @@ import pytest
 
 from src.app.config import (
     config_profile_from_resolved_path,
+    monitor_api_console_stream_key,
     ops_api_console_stream_key,
     read_config,
     resolve_startup_config_path,
@@ -53,6 +54,12 @@ def test_ops_api_console_stream_key() -> None:
     assert ops_api_console_stream_key("prod") == "bifrost:console:prod:api_ops"
     assert ops_api_console_stream_key("dev") == "bifrost:console:dev:api_ops"
     assert ops_api_console_stream_key(None) == "bifrost:console:dev:api_ops"
+
+
+def test_monitor_api_console_stream_key() -> None:
+    assert monitor_api_console_stream_key("prod") == "bifrost:console:prod:api_monitor"
+    assert monitor_api_console_stream_key("dev") == "bifrost:console:dev:api_monitor"
+    assert monitor_api_console_stream_key(None) == "bifrost:console:dev:api_monitor"
 
 
 def test_bifrost_config_env_wins(project_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

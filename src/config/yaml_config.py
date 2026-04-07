@@ -244,6 +244,16 @@ def docs_api_console_stream_key(profile: Optional[str]) -> str:
     return f"bifrost:console:{suffix}:api_docs"
 
 
+def monitor_api_console_stream_key(profile: Optional[str]) -> str:
+    """Redis Stream key for Monitor API application logs (api_monitor console).
+
+    ``run_server.py`` and Monitor ``/api/monitor/logs*`` use ``bifrost:console:{dev|prod}:api_monitor``
+    so Dev and Prod processes sharing one Redis do not mix lines. Non-``prod`` profiles (including
+    ``None`` for plain ``config.yaml``) map to the ``dev`` stream."""
+    suffix = "prod" if profile == "prod" else "dev"
+    return f"bifrost:console:{suffix}:api_monitor"
+
+
 def trading_api_console_stream_key(profile: Optional[str]) -> str:
     """Redis Stream for Trading API console (``run_server_trading.py`` → Monitor ``/api/trading/logs*``)."""
     suffix = "prod" if profile == "prod" else "dev"

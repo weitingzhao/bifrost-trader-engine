@@ -787,7 +787,7 @@ export function ArchitectureApisPage({ embeddedInSettings }: ArchitectureApisPag
         <section className="replay-section" aria-labelledby="arch-console-head">
           <h3 id="arch-console-head" className="page-title-with-tooltip architecture-section-title">
             Application log
-            <InfoTooltip text="Merged Redis stream logs from Monitor (bifrost:server_console), Ops (bifrost:console:{profile}:api_ops), and Docs (bifrost:console:{profile}:api_docs). Use Source toggles to include or exclude each API (multi-select, all on by default). Clear removes all three streams." />
+            <InfoTooltip text="Merged Redis stream logs from Monitor (bifrost:console:{profile}:api_monitor), Ops (bifrost:console:{profile}:api_ops), and Docs (bifrost:console:{profile}:api_docs). Use Source toggles to include or exclude each API (multi-select, all on by default). Clear removes all three streams." />
           </h3>
           <AggregatedLogConsolePanel
             controller={logConsole}

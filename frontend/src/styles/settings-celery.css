@@ -78,39 +78,7 @@
   display: block;
 }
 
-.settings-sidebar-system-shutdown {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 2.25rem;
-  align-self: stretch;
-  margin-bottom: 2px;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.settings-sidebar-system-shutdown:hover:not(:disabled) {
-  color: var(--color-text-main);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.settings-sidebar-system-shutdown:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.settings-sidebar-system-shutdown:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-/* Flat split between System Status and Feed (same link style, no nested subs). */
+/* Flat split between Status group and Feed (same link style, no nested subs). */
 .settings-sidebar-inline-split {
   height: 0;
   margin: var(--space-3) 0 var(--space-2);
